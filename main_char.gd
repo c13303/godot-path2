@@ -10,6 +10,7 @@ var current_waypoint: int = 0
 
 func _ready() -> void:
 	add_to_group("main_chars")
+	z_index = int(global_position.y)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -27,6 +28,7 @@ func _physics_process(_delta: float) -> void:
 	if path.is_empty() or current_waypoint >= path.size():
 		velocity = Vector2.ZERO
 		move_and_slide()
+		z_index = int(global_position.y)
 		return
 	var pos_center: Vector2 = global_position + Vector2(0, offset_y)
 	var target: Vector2 = path[current_waypoint]
@@ -36,8 +38,10 @@ func _physics_process(_delta: float) -> void:
 			path.clear()
 			velocity = Vector2.ZERO
 			move_and_slide()
+			z_index = int(global_position.y)
 			return
 		target = path[current_waypoint]
 	var direction: Vector2 = (target - pos_center).normalized()
 	velocity = direction * speed
 	move_and_slide()
+	z_index = int(global_position.y)

@@ -93,3 +93,29 @@ func _find_nearest_walkable_cell(origin: Vector2i) -> Vector2i:
 
 func _cell_to_id(cell: Vector2i) -> int:
 	return cell.y * GRID_SIZE + cell.x
+	
+func find_free_spawn_cell(origin: Vector2i, occupied_cells: Array[Vector2i]) -> Vector2i:
+	var best: Vector2i = origin
+	var best_dist: float = INF
+	var checked: Array[Vector2i] = []
+	var max_radius: int = 10
+
+	for radius in range(max_radius):
+		for x in range(-radius, radius + 1):
+			for y in range(-radius, radius + 1):
+				var c: Vector2i = origin + Vector2i(x, y)
+				if checked.has(c):
+					continue
+				checked.append(c)
+				if not walkable_cells.has(c):
+					continue
+				if occupied_cells.has(c):
+					continue
+				var dist: float = origin.distance_to(c)
+				if dist < best_dist:
+					best_dist = dist
+					best = c
+		if best_dist < INF:
+			return best
+
+	return best
