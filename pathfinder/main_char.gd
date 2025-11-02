@@ -20,46 +20,31 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var start: Vector2 = global_position + Vector2(0, offset_y)
 		var goal: Vector2 = get_global_mouse_position()
-		var path_mgr = path_manager
-		var pf = path_mgr.pathfinder
+		var pf = path_manager.pathfinder
 		var floor_layer = pf.floor_layer
 
 		var current_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(start))
 
 		if has_reserved:
-			for i in range(path_manager.destinations.size() - 1, -1, -1):
-				var d: Vector2 = path_manager.destinations[i]
-				if floor_layer.local_to_map(floor_layer.to_local(d)) == reserved_cell:
-					path_manager.destinations.remove_at(i)
-					break
+			path_manager.destinations.erase(reserved_cell)
 		else:
-			for i in range(path_manager.destinations.size() - 1, -1, -1):
-				var d2: Vector2 = path_manager.destinations[i]
-				if floor_layer.local_to_map(floor_layer.to_local(d2)) == current_cell:
-					path_manager.destinations.remove_at(i)
-					break
+			path_manager.destinations.erase(current_cell)
 
 		var goal_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(goal))
-		var occupied_cells: Array[Vector2i] = []
-		for v in path_mgr.destinations:
-			occupied_cells.append(floor_layer.local_to_map(floor_layer.to_local(v)))
+		var occupied_cells: Array[Vector2i] = path_manager.destinations.duplicate()
 
 		if goal_cell in occupied_cells:
 			var free_cell: Vector2i = pf.find_free_spawn_cell(goal_cell, occupied_cells)
-			goal = Utils.get_tile_pos_from_cell(floor_layer, free_cell)
 			goal_cell = free_cell
 
-		for j in range(path_manager.destinations.size() - 1, -1, -1):
-			var dj: Vector2 = path_manager.destinations[j]
-			if floor_layer.local_to_map(floor_layer.to_local(dj)) == goal_cell:
-				path_manager.destinations.remove_at(j)
-				break
+		path_manager.destinations.erase(goal_cell)
+		path_manager.destinations.append(goal_cell)
 
-		path_manager.destinations.append(goal)
 		reserved_cell = goal_cell
 		has_reserved = true
 
-		path_manager.call("request_path", start, goal, func(p): _on_path_ready(p))
+		var goal_pos: Vector2 = Utils.get_tile_pos_from_cell(floor_layer, goal_cell)
+		path_manager.call("request_path", start, goal_pos, func(p): _on_path_ready(p))
 
 func _on_path_ready(p: PackedVector2Array) -> void:
 	path = p

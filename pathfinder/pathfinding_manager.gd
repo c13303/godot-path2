@@ -1,7 +1,8 @@
 extends Node
 
 @export var pathfinder: Pathfinding
-var destinations: Array[Vector2] = []
+var destinations: Array[Vector2i] = []
+var occupied: Dictionary = {} 
 
 func _ready() -> void:
 	if pathfinder != null:
