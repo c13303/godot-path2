@@ -7,7 +7,8 @@ extends CharacterBody2D
 
 var path: PackedVector2Array = PackedVector2Array()
 var current_waypoint: int = 0
-
+var reserved_cell: Vector2i
+var has_reserved: bool = false
 
 func _ready() -> void:
 	add_to_group("main_chars")
@@ -23,6 +24,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		var pf = path_mgr.pathfinder
 		var floor_layer = pf.floor_layer
 
+		var current_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(start))
+
+		if has_reserved:
+			for i in range(path_manager.destinations.size() - 1, -1, -1):
+				var d: Vector2 = path_manager.destinations[i]
+				if floor_layer.local_to_map(floor_layer.to_local(d)) == reserved_cell:
+					path_manager.destinations.remove_at(i)
+					break
+		else:
+			for i in range(path_manager.destinations.size() - 1, -1, -1):
+				var d2: Vector2 = path_manager.destinations[i]
+				if floor_layer.local_to_map(floor_layer.to_local(d2)) == current_cell:
+					path_manager.destinations.remove_at(i)
+					break
+
 		var goal_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(goal))
 		var occupied_cells: Array[Vector2i] = []
 		for v in path_mgr.destinations:
@@ -31,9 +47,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		if goal_cell in occupied_cells:
 			var free_cell: Vector2i = pf.find_free_spawn_cell(goal_cell, occupied_cells)
 			goal = Utils.get_tile_pos_from_cell(floor_layer, free_cell)
-			path_mgr.destinations.append(goal)
-		else:
-			path_mgr.destinations.append(goal)
+			goal_cell = free_cell
+
+		for j in range(path_manager.destinations.size() - 1, -1, -1):
+			var dj: Vector2 = path_manager.destinations[j]
+			if floor_layer.local_to_map(floor_layer.to_local(dj)) == goal_cell:
+				path_manager.destinations.remove_at(j)
+				break
+
+		path_manager.destinations.append(goal)
+		reserved_cell = goal_cell
+		has_reserved = true
 
 		path_manager.call("request_path", start, goal, func(p): _on_path_ready(p))
 
