@@ -5,6 +5,9 @@ extends Node2D
 @onready var marker: Node2D = preload("res://elements/green_circle.tscn").instantiate()
 var MainCharScene: PackedScene = preload("res://personnage/main_char.tscn")
 
+var destinations: Array[Vector2] = []
+
+
 func _ready() -> void:
 	add_child(marker)
 	marker.visible = false
@@ -14,7 +17,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
 		marker.global_position = cell_center
-		marker.visible = true
+		marker.visible = true		
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
 		spawn_mainchar(cell_center)

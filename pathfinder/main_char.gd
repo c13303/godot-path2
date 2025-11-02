@@ -8,6 +8,7 @@ extends CharacterBody2D
 var path: PackedVector2Array = PackedVector2Array()
 var current_waypoint: int = 0
 
+
 func _ready() -> void:
 	add_to_group("main_chars")
 	z_index = int(global_position.y)
@@ -18,6 +19,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var start: Vector2 = global_position + Vector2(0, offset_y)
 		var goal: Vector2 = get_global_mouse_position()
+		var path_mgr = path_manager
+		var pf = path_mgr.pathfinder
+		var floor_layer = pf.floor_layer
+
+		var goal_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(goal))
+		var occupied_cells: Array[Vector2i] = []
+		for v in path_mgr.destinations:
+			occupied_cells.append(floor_layer.local_to_map(floor_layer.to_local(v)))
+
+		if goal_cell in occupied_cells:
+			var free_cell: Vector2i = pf.find_free_spawn_cell(goal_cell, occupied_cells)
+			goal = Utils.get_tile_pos_from_cell(floor_layer, free_cell)
+			path_mgr.destinations.append(goal)
+		else:
+			path_mgr.destinations.append(goal)
+
 		path_manager.call("request_path", start, goal, func(p): _on_path_ready(p))
 
 func _on_path_ready(p: PackedVector2Array) -> void:
