@@ -3,7 +3,7 @@
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://rgl6j04u8ao4" path="res://pathfinder/pathfinding_manager.gd" id="3_k8xte"]
 [ext_resource type="Script" uid="uid://dlcnviqb4fdvk" path="res://pathfinder/pathfinding.gd" id="3_lb3hw"]
-[ext_resource type="Script" uid="uid://blu34juaio38n" path="res://controls/click_cercle.gd" id="4_e5a4u"]
+[ext_resource type="Script" uid="uid://blu34juaio38n" path="res://elements/click_cercle.gd" id="4_e5a4u"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1249,9 +1249,8 @@ floor_layer = NodePath("../MonTilemap/floor")
 wall_layer = NodePath("../MonTilemap/wallz")
 allow_diagonals = true
 
-[node name="PathfindingManager" type="Node2D" parent="." node_paths=PackedStringArray("pathfinder")]
+[node name="PathfindingManager" type="Node2D" parent="."]
 script = ExtResource("3_k8xte")
-pathfinder = NodePath("../Pathfinding")
 
-[node name="Controls" type="Node2D" parent="."]
+[node name="ClickCercle" type="Node2D" parent="."]
 script = ExtResource("4_e5a4u")
