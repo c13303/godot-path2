@@ -224,8 +224,9 @@ func _physics_process(delta: float) -> void:
 	if reserved_by_other:
 		var winner_id: int = int(path_manager.future_reservations[next_cell])
 		if winner_id != get_instance_id():
-			for neighbor in get_tree().get_nodes_in_group("main_chars"):
-				if neighbor == self:
+			for n in neighbors:
+				var neighbor: CharacterBody2D = n as CharacterBody2D
+				if neighbor == null or neighbor == self:
 					continue
 				if neighbor.get_instance_id() == winner_id:
 					if neighbor.priority_weight >= priority_weight:
@@ -233,6 +234,7 @@ func _physics_process(delta: float) -> void:
 					break
 	elif not can_move:
 		velocity *= 0.5
+
 	# --- fin cession selon priorité ---
 
 
@@ -243,9 +245,10 @@ func _physics_process(delta: float) -> void:
 
 	# --- résolution déterministe de conflits multiples ---
 	var current_cell: Vector2i = path_manager.pathfinder.world_to_cell(global_position)
-	var contenders: Array = []
-	for neighbor in get_tree().get_nodes_in_group("main_chars"):
-		if neighbor == self:
+	var contenders: Array[CharacterBody2D] = []
+	for n in neighbors:
+		var neighbor: CharacterBody2D = n as CharacterBody2D
+		if neighbor == null or neighbor == self:
 			continue
 		var n_cell: Vector2i = path_manager.pathfinder.world_to_cell(neighbor.global_position)
 		if n_cell == current_cell:
