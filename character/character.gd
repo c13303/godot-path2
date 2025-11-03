@@ -5,6 +5,7 @@ extends CharacterBody2D
 @export var max_force: float = 600.0
 @export var arrival_threshold: float = 10.0
 @export var steering_smooth: float = 0.25  # 0–1, plus haut = plus réactif
+@export var priority_weight: float = 1.0
 
 var path: PackedVector2Array = PackedVector2Array()
 var current_waypoint: int = 0
@@ -21,7 +22,8 @@ var acceleration: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
 	add_to_group("main_chars")
-
+	# Poids de priorité par défaut basé sur instance_id pour unicité
+	priority_weight = float(get_instance_id() % 1000) / 1000.0
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -91,45 +93,59 @@ func _physics_process(delta: float) -> void:
 		target_pos = path[current_waypoint]
 
 	# ---- logique vectorielle amortie ----
-	
-		# --- perception locale ---
-	var avoidance_force: Vector2 = Vector2.ZERO
-	var perception_radius: float = 32.0
 
-	# Détection des agents voisins
+	# --- séparation continue amortie ---
+	var separation_force: Vector2 = Vector2.ZERO
+	var separation_radius: float = 24.0
+
 	for neighbor in get_tree().get_nodes_in_group("main_chars"):
 		if neighbor == self:
 			continue
-		var offset: Vector2 = neighbor.global_position - pos
+		var offset: Vector2 = global_position - neighbor.global_position
 		var dist: float = offset.length()
-		if dist < 0.001 or dist > perception_radius:
+		if dist > 0.001 and dist < separation_radius:
+			var strength: float = (separation_radius - dist) / separation_radius
+			separation_force += offset.normalized() * strength
+
+	if separation_force != Vector2.ZERO:
+		separation_force = separation_force.normalized() * max_force * 0.3
+		# amortissement pour éviter le jitter
+		separation_force = separation_force.lerp(Vector2.ZERO, 0.7)
+	# --- fin séparation continue amortie ---
+
+	
+	# --- perception anticipée (pré-flux) ---
+	var avoidance_force: Vector2 = Vector2.ZERO
+	var perception_radius: float = 48.0
+	var prediction_time: float = 0.5
+
+	for neighbor in get_tree().get_nodes_in_group("main_chars"):
+		if neighbor == self:
 			continue
-		var repulse: Vector2 = -offset.normalized() * ((perception_radius - dist) / perception_radius)
-		avoidance_force += repulse
+		var offset: Vector2 = neighbor.global_position - global_position
+		var dist: float = offset.length()
+		if dist <= 0.001 or dist > perception_radius:
+			continue
 
-	# Détection basique des murs via le pathfinder
-	var pf = path_manager.pathfinder
-	var cell: Vector2i = pf.world_to_cell(pos)
-	var dirs: Array[Vector2i] = [
-		Vector2i(1, 0), Vector2i(-1, 0),
-		Vector2i(0, 1), Vector2i(0, -1)
-	]
-	for d in dirs:
-		var c: Vector2i = cell + d
-		if not pf.walkable_cells.has(c):
-			var wall_pos: Vector2 = Utils.get_tile_pos_from_cell(pf.floor_layer, c)
-			var dir: Vector2 = wall_pos - pos
-			var dist: float = dir.length()
-			if dist < perception_radius:
-				avoidance_force -= dir.normalized() * ((perception_radius - dist) / perception_radius)
+		# position future prédite
+		var predicted_pos: Vector2 = neighbor.global_position + neighbor.velocity * prediction_time
+		var future_offset: Vector2 = predicted_pos - (global_position + velocity * prediction_time)
+		var future_dist: float = future_offset.length()
+		if future_dist < perception_radius:
+			var repulse: Vector2 = -future_offset.normalized() * ((perception_radius - future_dist) / perception_radius)
+			avoidance_force += repulse
 
+	# amortissement de la force
 	if avoidance_force != Vector2.ZERO:
-		avoidance_force = avoidance_force.normalized() * max_force * 0.5
-	# --- fin perception locale ---
+		avoidance_force = avoidance_force.normalized() * max_force * 0.6
+	# --- fin perception anticipée ---
+
 
 	
 	
 	var desired: Vector2 = (target_pos - pos).normalized() * max_speed
+	desired += separation_force
+
 
 	# --- correctif perception locale ---
 	var goal_dist: float = pos.distance_to(target_pos)
@@ -152,7 +168,61 @@ func _physics_process(delta: float) -> void:
 	# simplification : recentrer un peu sur la direction cible
 	velocity = velocity.lerp(desired, 0.5)
 
+	
+	# --- pré-réservation dynamique ---
+	var next_pos: Vector2 = global_position + velocity * delta
+	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(next_pos)
+
+	# --- cession selon priorité ---
+	var can_move: bool = path_manager.try_reserve_future(next_cell, self)
+	var reserved_by_other: bool = path_manager.is_future_reserved_by_other(next_cell, self)
+
+	if reserved_by_other:
+		var winner_id: int = int(path_manager.future_reservations[next_cell])
+		if winner_id != get_instance_id():
+			for neighbor in get_tree().get_nodes_in_group("main_chars"):
+				if neighbor == self:
+					continue
+				if neighbor.get_instance_id() == winner_id:
+					if neighbor.priority_weight >= priority_weight:
+						velocity *= 0.2
+					break
+	elif not can_move:
+		velocity *= 0.5
+	# --- fin cession selon priorité ---
+
+
+	if not can_move or path_manager.is_future_reserved_by_other(next_cell, self):
+		velocity *= 0.5
+	# --- fin pré-réservation dynamique ---
+
+
+	# --- résolution déterministe de conflits multiples ---
+	var current_cell: Vector2i = path_manager.pathfinder.world_to_cell(global_position)
+	var contenders: Array = []
+	for neighbor in get_tree().get_nodes_in_group("main_chars"):
+		if neighbor == self:
+			continue
+		var n_cell: Vector2i = path_manager.pathfinder.world_to_cell(neighbor.global_position)
+		if n_cell == current_cell:
+			contenders.append(neighbor)
+
+	if contenders.size() > 1:
+		contenders.append(self)
+		contenders.sort_custom(func(a, b): return a.priority_weight > b.priority_weight)
+		var top: CharacterBody2D = contenders[0]
+		if top != self:
+			var rank: int = contenders.find(self)
+			var factor: float = clamp(1.0 - float(rank) / contenders.size(), 0.1, 1.0)
+			velocity *= factor
+	# --- fin résolution déterministe ---
+
+
 	move_and_slide()
+	
+	path_manager.release_future(next_cell, self)
+
+	
 	z_index = int(global_position.y)
 	# -------------------------------------
 
