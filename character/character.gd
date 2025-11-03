@@ -1,7 +1,6 @@
 extends CharacterBody2D
 
 @export var path_manager: Node
-@export var offset_y: float = 12.0
 @export var speed: float = 8.0 # px/s
 @export var arrival_threshold: float = 10.0
 @export var decal_delay_ms: float = 100.0
@@ -114,7 +113,7 @@ func _process_path(delta: float) -> void:
 		current_waypoint += 1
 
 		if current_waypoint >= path.size():
-			var final_cell: Vector2i = path_manager.pathfinder.world_to_cell(pos)
+			var final_cell: Vector2i = path_manager.pathfinder.world_to_cell(global_position)
 			path_manager.occupy_cell(final_cell, self)
 			last_cell = final_cell
 			has_last_cell = true
@@ -134,7 +133,7 @@ func _process_path(delta: float) -> void:
 	# Calculer la prochaine position AVEC move_and_slide
 	velocity = dir * speed
 	
-
+	move_and_slide()
 	
 	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(global_position + velocity * delta)
 
@@ -152,13 +151,13 @@ func _process_path(delta: float) -> void:
 	last_cell = next_cell
 	has_last_cell = true
 
-	move_and_slide()
+	
 
 	z_index = int(global_position.y)
 
 
 func _try_decal() -> void:
-	var pos: Vector2 = global_position + Vector2(0, offset_y)
+	var pos: Vector2 = global_position
 	var free = path_manager.find_nearest_free_cell(pos, 1, current_dir, self)
 
 	if free != null and typeof(free) == TYPE_VECTOR2:
