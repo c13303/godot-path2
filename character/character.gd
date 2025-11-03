@@ -21,6 +21,7 @@ var stuck_timer: float = 0.0
 
 
 
+
 func _ready() -> void:
 	add_to_group("main_chars")
 	SpatialGrid.register(self)

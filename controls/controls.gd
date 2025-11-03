@@ -31,7 +31,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		marker.visible = true		
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
-		for i in range(20):
+		for i in range(50):
 			spawn_mainchar(cell_center)
 
 func spawn_mainchar(pos: Vector2) -> void:
