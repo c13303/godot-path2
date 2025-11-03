@@ -18,10 +18,10 @@ func _start_interval() -> void:
 	get_tree().create_timer(1.0).timeout.connect(_on_once)
 	
 func _on_once() -> void:
-	var occup_count = path_manager.count_occupied_cells()
-	var agents = path_manager.count_total_agents()	
-	var total: int = get_tree().get_nodes_in_group("main_chars").size()
-	print("Personnages actifs:", total, " | Occupied:", occup_count, " | Agents:", agents)
+
+
+	#var total: int = get_tree().get_nodes_in_group("main_chars").size()
+
 	_start_interval() # relance le timer
 
 func _unhandled_input(event: InputEvent) -> void:
