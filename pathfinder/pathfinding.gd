@@ -94,32 +94,49 @@ func _find_nearest_walkable_cell(origin: Vector2i) -> Vector2i:
 func _cell_to_id(cell: Vector2i) -> int:
 	return cell.y * GRID_SIZE + cell.x
 	
-func find_free_spawn_cell(origin: Vector2i, occupied_cells: Array[Vector2i]) -> Vector2i:
-	var best: Vector2i = origin
-	var best_dist: float = INF
-	var checked: Array[Vector2i] = []
-	var max_radius: int = 10
+func find_free_spawn_cell(goal_cell: Vector2i, occupied_cells: Array[Vector2i], max_radius: int = 6) -> Vector2i:
+	# Si la case est libre et walkable, on la garde
+	if walkable_cells.has(goal_cell) and not occupied_cells.has(goal_cell):
+		return goal_cell
 
-	for radius in range(max_radius):
-		for x in range(-radius, radius + 1):
-			for y in range(-radius, radius + 1):
-				var c: Vector2i = origin + Vector2i(x, y)
-				if checked.has(c):
-					continue
-				checked.append(c)
-				if not walkable_cells.has(c):
-					continue
-				if occupied_cells.has(c):
-					continue
-				var dist: float = origin.distance_to(c)
-				if dist < best_dist:
-					best_dist = dist
-					best = c
-		if best_dist < INF:
-			return best
+	var center: Vector2i = goal_cell
 
-	return best
+	# Recherche en anneaux croissants (8 directions)
+	for r in range(1, max_radius + 1):
+		var candidates: Array[Vector2i] = []
+
+		# Bord supérieur et inférieur
+		for dx in range(-r, r + 1):
+			candidates.append(Vector2i(center.x + dx, center.y - r))
+			candidates.append(Vector2i(center.x + dx, center.y + r))
+
+		# Bord gauche et droit
+		for dy in range(-r + 1, r):
+			candidates.append(Vector2i(center.x - r, center.y + dy))
+			candidates.append(Vector2i(center.x + r, center.y + dy))
+
+		# Filtre : walkable, non réservée
+		candidates = candidates.filter(func(c: Vector2i) -> bool:
+			return walkable_cells.has(c) and not occupied_cells.has(c))
+
+		if candidates.is_empty():
+			continue
+
+		# Tri par distance puis angle pour stabilité
+		candidates.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			var da: float = (Vector2(a) - Vector2(center)).length()
+			var db: float = (Vector2(b) - Vector2(center)).length()
+			if da == db:
+				var aa: float = atan2(float(a.y - center.y), float(a.x - center.x))
+				var ab: float = atan2(float(b.y - center.y), float(b.x - center.x))
+				return aa < ab
+			return da < db)
+
+		return candidates[0]
+
+	return goal_cell
 
 func world_to_cell(world_pos: Vector2) -> Vector2i:
 	var local_pos: Vector2 = floor_layer.to_local(world_pos)
 	return floor_layer.local_to_map(local_pos)
+	
