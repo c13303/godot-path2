@@ -18,8 +18,8 @@ func _start_interval() -> void:
 	get_tree().create_timer(1.0).timeout.connect(_on_once)
 	
 func _on_once() -> void:
-
-
+	#custom code 
+	print("spacegrid",SpatialGrid.buckets.size())
 	#var total: int = get_tree().get_nodes_in_group("main_chars").size()
 
 	_start_interval() # relance le timer
@@ -31,7 +31,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		marker.visible = true		
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
-		spawn_mainchar(cell_center) 
+		for i in range(20):
+			spawn_mainchar(cell_center)
 
 func spawn_mainchar(pos: Vector2) -> void:
 	var pathfinder: Pathfinding = path_manager.get("pathfinder")
@@ -51,6 +52,7 @@ func spawn_mainchar(pos: Vector2) -> void:
 	c.global_position = free_pos
 	c.set("path_manager", path_manager)
 	c.add_to_group("main_chars")
+	print(get_tree().get_nodes_in_group("main_chars").size())
 
 	
 	
