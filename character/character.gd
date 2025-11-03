@@ -86,12 +86,13 @@ func _physics_process(delta: float) -> void:
 	var pos: Vector2 = global_position + Vector2(0, offset_y)
 	var target_pos: Vector2 = path[current_waypoint]
 
+	# Waypoint atteint
 	if pos.distance_to(target_pos) <= arrival_threshold:
 		current_waypoint += 1
 		if current_waypoint >= path.size():
 			path.clear()
 			if has_last_cell:
-				path_manager.free_cell(last_cell)
+				path_manager.free_cell(last_cell, self)
 				has_last_cell = false
 			velocity = Vector2.ZERO
 			move_and_slide()
@@ -101,17 +102,24 @@ func _physics_process(delta: float) -> void:
 
 	var dir: Vector2 = (target_pos - pos).normalized()
 	var tile_size: Vector2 = path_manager.pathfinder.floor_layer.tile_set.tile_size
-
 	var next_pos: Vector2 = pos + dir * speed * delta
 	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(next_pos)
 
-	# Ralentissement selon la densité locale
-	var density: float = path_manager.get_density(next_cell)
-	var move_speed: float = clamp(speed / (1.0 + density * 0.8), speed * 0.3, speed)
+	# Feu rouge : s'arrêter seulement si la cellule suivante est occupée par un autre agent
+	if path_manager.is_cell_occupied(next_cell, self):
+		velocity = Vector2.ZERO
+		move_and_slide()
+		z_index = int(global_position.y)
+		return
 
+	# Mise à jour des cellules
+	if has_last_cell and last_cell != next_cell:
+		path_manager.free_cell(last_cell, self)
+	path_manager.occupy_cell(next_cell, self)
 	last_cell = next_cell
 	has_last_cell = true
-	velocity = dir * move_speed
 
+	# Avance normale
+	velocity = dir * speed
 	move_and_slide()
 	z_index = int(global_position.y)

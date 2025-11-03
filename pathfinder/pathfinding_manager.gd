@@ -2,7 +2,8 @@ extends Node
 
 @export var pathfinder: Pathfinding
 var destinations: Array[Vector2i] = []
-var occupied: Dictionary = {} # cell -> int
+var occupied: Dictionary = {} # cell -> Array[Node]
+
 
 func _ready() -> void:
 	if pathfinder != null:
@@ -22,31 +23,32 @@ func count_people():
 	var person_count: int = get_tree().get_nodes_in_group("main_chars").size()
 	print("Path calculé (", person_count, " personnages actifs)")
 
-func occupy_cell(pos: Vector2i) -> void:
-	occupied[pos] = occupied.get(pos, 0) + 1
+func occupy_cell(pos: Vector2i, agent: Node) -> void:
+	if not occupied.has(pos):
+		occupied[pos] = []
+	var list: Array = occupied[pos]
+	if agent not in list:
+		list.append(agent)
 
-func free_cell(pos: Vector2i) -> void:
+func free_cell(pos: Vector2i, agent: Node) -> void:
 	if not occupied.has(pos):
 		return
-	var value = occupied[pos]
-	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
-		value = 1
-	value -= 1
-	if value > 0:
-		occupied[pos] = value
-	else:
+	var list: Array = occupied[pos]
+	list.erase(agent)
+	if list.is_empty():
 		occupied.erase(pos)
 
+func is_cell_occupied(pos: Vector2i, ignore: Node = null) -> bool:
+	if not occupied.has(pos):
+		return false
+	var list: Array = occupied[pos]
+	return list.any(func(a): return a != ignore)
 
 func get_density(pos: Vector2i) -> float:
-	var value = occupied.get(pos)
-	if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
-		return float(value)
-	return 0.0
+	if not occupied.has(pos):
+		return 0.0
+	return float(occupied[pos].size())
 
-
-func is_cell_occupied(pos: Vector2i) -> bool:
-	return occupied.has(pos)
 	
 func should_yield(a: Node, b: Node) -> bool:
 	var a_goal = a.path[a.current_waypoint] if a.current_waypoint < a.path.size() else a.global_position
