@@ -18,13 +18,20 @@ var z_inited: bool = false
 var acceleration: Vector2 = Vector2.ZERO
 var stuck_timer: float = 0.0
 
-
+var arrival_threshold_sq: float
+var separation_radius_sq: float
+var perception_radius_sq: float
+var frame_counter: int = 0
 
 
 
 func _ready() -> void:
 	add_to_group("main_chars")
 	SpatialGrid.register(self)
+	arrival_threshold_sq = arrival_threshold * arrival_threshold
+	separation_radius_sq = 24.0 * 24.0
+	perception_radius_sq = 48.0 * 48.0
+
 	# Poids de priorité par défaut basé sur instance_id pour unicité
 	priority_weight = float(get_instance_id() % 1000) / 1000.0
 
@@ -74,11 +81,18 @@ func _on_path_ready(p: PackedVector2Array) -> void:
 	is_requesting_path = false
 
 
+
+
 func _physics_process(delta: float) -> void:
 	
 	# Cadence de mise à jour de la grille (toutes les 2 frames)
 	if Engine.get_frames_drawn() % 2 == 0:
 		SpatialGrid.update(self)
+
+	frame_counter += 1
+	if frame_counter % 10 == 0:
+		var local_density: int = path_manager.get_local_density(self)
+		# print(local_density)  # facultatif pour observation
 
 	
 	if not z_inited:
@@ -115,8 +129,8 @@ func _physics_process(delta: float) -> void:
 	var pos: Vector2 = global_position
 	var target_pos: Vector2 = path[current_waypoint]
 
-	var dist_to_target: float = pos.distance_to(target_pos)
-	if dist_to_target <= arrival_threshold or (dist_to_target < arrival_threshold * 2.0 and velocity.length() < 3.0):
+	var dist_to_target_sq: float = pos.distance_squared_to(target_pos)
+	if dist_to_target_sq <= arrival_threshold_sq or (dist_to_target_sq < arrival_threshold_sq * 4.0 and velocity.length() < 3.0):
 		current_waypoint += 1
 		if current_waypoint >= path.size():
 			_end_of_movement(true)
@@ -141,9 +155,9 @@ func _physics_process(delta: float) -> void:
 		if neighbor == null or neighbor == self:
 			continue
 		var offset: Vector2 = global_position - neighbor.global_position
-		var dist: float = offset.length()
-		if dist > 0.001 and dist < separation_radius:
-			var strength: float = (separation_radius - dist) / separation_radius
+		var dist_sq: float = offset.length_squared()
+		if dist_sq > 0.001 and dist_sq < separation_radius_sq:
+			var strength: float = (separation_radius - sqrt(dist_sq)) / separation_radius
 			separation_force += offset.normalized() * strength
 
 
@@ -165,15 +179,15 @@ func _physics_process(delta: float) -> void:
 		if neighbor == null or neighbor == self:
 			continue
 		var offset: Vector2 = neighbor.global_position - global_position
-		var dist: float = offset.length()
-		if dist <= 0.001 or dist > perception_radius:
+		var dist_sq: float = offset.length_squared()
+		if dist_sq <= 0.001 or dist_sq > perception_radius_sq:
 			continue
 
 		var predicted_pos: Vector2 = neighbor.global_position + neighbor.velocity * prediction_time
 		var future_offset: Vector2 = predicted_pos - (global_position + velocity * prediction_time)
-		var future_dist: float = future_offset.length()
-		if future_dist < perception_radius:
-			var repulse: Vector2 = -future_offset.normalized() * ((perception_radius - future_dist) / perception_radius)
+		var future_dist_sq: float = future_offset.length_squared()
+		if future_dist_sq < perception_radius_sq:
+			var repulse: Vector2 = -future_offset.normalized() * ((perception_radius - sqrt(future_dist_sq)) / perception_radius)
 			avoidance_force += repulse
 
 

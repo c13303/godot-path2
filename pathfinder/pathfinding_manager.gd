@@ -44,3 +44,10 @@ func is_future_reserved_by_other(cell: Vector2i, agent: Node) -> bool:
 	if not future_reservations.has(cell):
 		return false
 	return int(future_reservations[cell]) != id
+	
+func get_local_density(agent: Node, cell_radius: int = 1) -> int:
+	var pos: Vector2 = agent.global_position
+	var cell_size: float = SpatialGrid.cell_size
+	var range_cells: int = cell_radius
+	var neighbors: Array = SpatialGrid.neighbors_at(pos, range_cells)
+	return neighbors.size()
