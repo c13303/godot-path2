@@ -31,7 +31,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		marker.visible = true		
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
-		spawn_mainchar(cell_center)
+		spawn_mainchar(cell_center) 
 
 func spawn_mainchar(pos: Vector2) -> void:
 	var pathfinder: Pathfinding = path_manager.get("pathfinder")
