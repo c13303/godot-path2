@@ -75,7 +75,10 @@ func _on_path_ready(p: PackedVector2Array) -> void:
 
 func _physics_process(delta: float) -> void:
 	
-	SpatialGrid.update(self)
+	# Cadence de mise à jour de la grille (toutes les 2 frames)
+	if Engine.get_frames_drawn() % 2 == 0:
+		SpatialGrid.update(self)
+
 	
 	if not z_inited:
 		z_index = int(global_position.y)
