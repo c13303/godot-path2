@@ -2,172 +2,172 @@ extends CharacterBody2D
 
 @export var path_manager: Node
 @export var offset_y: float = 12.0
-@export var speed: float = 140.0
+@export var speed: float = 8.0 # px/s
 @export var arrival_threshold: float = 10.0
+@export var decal_delay_ms: float = 100.0
 
 var path: PackedVector2Array = PackedVector2Array()
 var current_waypoint: int = 0
-var has_reserved: bool = false  #pour destinations
+var is_requesting_path: bool = false
+var has_reserved: bool = false
 var has_last_cell: bool = false
 var reserved_cell: Vector2i = Vector2i.ZERO
 var last_cell: Vector2i = Vector2i.ZERO
 var myGoal: Vector2
 var myDecalGoal: Vector2 = Vector2.ZERO
-var isDecaling: bool = false
-var delaiDecaling = 0
-var current_dir: Vector2 = Vector2.ZERO
+var current_dir: Vector2i = Vector2i.ZERO
+var is_waiting_decal: bool = false
+var is_decaltarget: bool = false
+var decal_timer: float = 0.0
+var distance_to_accept_goal_while_decaling = 2 #en tiles
 
 
 func _ready() -> void:
 	add_to_group("main_chars")
 	z_index = int(global_position.y)
 
+
 func _unhandled_input(event: InputEvent) -> void:
-	# Détection du clic gauche de la souris
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		# Détermine la position de destination selon la souris
 		myGoal = get_global_mouse_position()
 		_calcule_chemin(myGoal)
 
-		
-func _calcule_chemin(goal: Vector2): # CALCULE LE CHEMIN DE SA POSITION SUR LA MAP ASTAR UNIQUEMENT + position libre d'agent la plus proche
-	#ne va pas éviter les agents en mouvement
-	 
-	# Détermine la position de départ (centrée sur le personnage)
-		var start: Vector2 = global_position + Vector2(0, offset_y)
-		
-		if(!goal):
-			print("ERROR NO GOAL")
-			return
-		
 
-		# Récupère le pathfinder et le calque du sol
-		var pf = path_manager.pathfinder
-		var floor_layer = pf.floor_layer
+func _calcule_chemin(goal: Vector2) -> void:
+	var start: Vector2 = global_position
 
-		# Convertit la position actuelle en coordonnées de cellule
-		var current_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(start))
+	if goal == Vector2.ZERO:
+		return
 
-		# Libère la cellule précédemment réservée, selon l’état du drapeau
-		if has_reserved:
-			path_manager.destinations.erase(reserved_cell)
-		else:
-			path_manager.destinations.erase(current_cell)
+	var pf = path_manager.pathfinder
+	var floor_layer = pf.floor_layer
+	var goal_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(goal))
+	var current_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(start))
 
-		# Convertit la position cible en coordonnées de cellule
-		var goal_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(goal))
+	if has_reserved:
+		path_manager.destinations.erase(reserved_cell)
+	else:
+		path_manager.destinations.erase(current_cell)
 
-		# Copie des cellules actuellement occupées
-		var occupied_cells: Array[Vector2i] = path_manager.destinations.duplicate()
+	var occupied_cells: Array[Vector2i] = path_manager.destinations.duplicate()
+	if goal_cell in occupied_cells:
+		var free_cell: Vector2i = pf.find_free_spawn_cell(goal_cell, occupied_cells)
+		goal_cell = free_cell
 
-		# Si la cellule visée est déjà occupée, cherche une cellule libre proche
-		if goal_cell in occupied_cells:
-			var free_cell: Vector2i = pf.find_free_spawn_cell(goal_cell, occupied_cells)
-			goal_cell = free_cell
+	path_manager.destinations.erase(goal_cell)
+	path_manager.destinations.append(goal_cell)
+	reserved_cell = goal_cell
+	has_reserved = true
 
-		# Met à jour la liste des cellules réservées
-		path_manager.destinations.erase(goal_cell)
-		path_manager.destinations.append(goal_cell)
+	var goal_pos: Vector2 = Utils.get_tile_pos_from_cell(floor_layer, goal_cell)
+	is_requesting_path = true
+	path_manager.call("request_path", start, goal_pos, func(p): _on_path_ready(p))
 
-		# Enregistre la cellule de destination et marque la réservation active
-		reserved_cell = goal_cell
-		has_reserved = true
-
-		# Convertit la cellule de destination en position du monde
-		var goal_pos: Vector2 = Utils.get_tile_pos_from_cell(floor_layer, goal_cell)
-
-		# Envoie une requête de calcul de chemin au pathfinder
-		path_manager.call("request_path", start, goal_pos, func(p): _on_path_ready(p))
 
 func _on_path_ready(p: PackedVector2Array) -> void:
 	path = p
 	current_waypoint = 0
-	
-func _end_of_movement(clearPath : bool = false):
-	if(clearPath):
+	is_requesting_path = false
+
+
+func _end_of_movement(clear_path: bool = false) -> void:
+	if clear_path:
 		path.clear()
 	velocity = Vector2.ZERO
-	move_and_slide()
 	z_index = int(global_position.y)
-	
-func _trig_decal():
-	var pos: Vector2 = global_position + Vector2(0, offset_y)
-	var free = path_manager.find_nearest_free_cell(pos,1,current_dir)
-	if free != null:
-		_calcule_chemin(free)			
-		isDecaling = true
-		return true
-	else:
-		return false
+
 
 func _physics_process(delta: float) -> void:
-	
-	if isDecaling:
-		if delaiDecaling > 0:
-			return
-		else:
-			delaiDecaling -= delta * 1000.0
-			if delaiDecaling <= 0:
-				_trig_decal()
-			return
-	
-	if path.is_empty():
-		_end_of_movement(true);
+	# Attente de calcul de chemin
+	if is_requesting_path:
 		return
 	
-	if current_waypoint >= path.size():
-		_end_of_movement(true);
-		return;
+	# phase 1 — attente avant de tenter un décalage
+	if is_waiting_decal:
+		decal_timer -= delta * 1000.0
+		if decal_timer <= 0.0:
+			_try_decal()
+		return
 
-	var pos: Vector2 = global_position + Vector2(0, offset_y)
+	# phase 2 — déplacement vers case de décalage
+	if is_decaltarget:
+		_process_path(delta)
+		return
+
+	# phase 3 — déplacement normal
+	_process_path(delta)
+
+
+func _process_path(delta: float) -> void:
+	if path.is_empty():
+		_end_of_movement(true)
+		return
+
+	if current_waypoint >= path.size():
+		_end_of_movement(true)
+		return
+
+	var pos: Vector2 = global_position
 	var target_pos: Vector2 = path[current_waypoint]
 
-	# Waypoint atteint
 	if pos.distance_to(target_pos) <= arrival_threshold:
 		current_waypoint += 1
-		# dernier waypoint atteint
-		if current_waypoint >= path.size():			
-			# Marque la cellule finale comme occupée (agent statique)
+
+		if current_waypoint >= path.size():
 			var final_cell: Vector2i = path_manager.pathfinder.world_to_cell(pos)
 			path_manager.occupy_cell(final_cell, self)
 			last_cell = final_cell
 			has_last_cell = true
-			_end_of_movement(true)			
-			
-			#goal temporaire de decal
-			if isDecaling == true:
-				isDecaling = false
+			_end_of_movement(true)
+
+			if is_decaltarget:
+				is_decaltarget = false
 				_calcule_chemin(myGoal)
 			return
+
 		target_pos = path[current_waypoint]
 
 	var dir: Vector2 = (target_pos - pos).normalized()
 	if dir.length() > 0.01:
 		current_dir = Vector2i(sign(dir.x), sign(dir.y))
-	
-	
-	
-	var tile_size: Vector2 = path_manager.pathfinder.floor_layer.tile_set.tile_size
-	var next_pos: Vector2 = pos + dir * speed * delta
-	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(next_pos)
 
-	# Feu rouge : s'arrêter seulement si la cellule suivante est occupée par un autre agent
-	if path_manager.is_cell_occupied(next_cell, self):
-		#trouver une case libre (!= occupied) condition : maximum 1 tile de distance du perso, préférence la plus proche de cell suivante		
+	# Calculer la prochaine position AVEC move_and_slide
+	velocity = dir * speed
 	
-		delaiDecaling = 10		
+
+	
+	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(global_position + velocity * delta)
+
+	if path_manager.is_cell_occupied(next_cell, self):
+		# bloque → on lance un délai de décalage
+		is_waiting_decal = true
+		decal_timer = decal_delay_ms
 		_end_of_movement(false)
-			
 		return
 
-	# Mise à jour des cellules
 	if has_last_cell and last_cell != next_cell:
 		path_manager.free_cell(last_cell, self)
+
 	path_manager.occupy_cell(next_cell, self)
 	last_cell = next_cell
 	has_last_cell = true
 
-	# Avance normale
-	velocity = dir * speed
 	move_and_slide()
+
 	z_index = int(global_position.y)
+
+
+func _try_decal() -> void:
+	var pos: Vector2 = global_position + Vector2(0, offset_y)
+	var free = path_manager.find_nearest_free_cell(pos, 1, current_dir, self)
+
+	if free != null and typeof(free) == TYPE_VECTOR2:
+		# print("Décalage vers", free)
+		is_waiting_decal = false
+		is_decaltarget = true
+		myDecalGoal = free
+		_calcule_chemin(free)
+	else:
+		# print("Aucune case libre trouvée :", pos)
+		is_waiting_decal = true
+		decal_timer = decal_delay_ms

@@ -80,9 +80,9 @@ func count_total_agents() -> int:
 		total += list.size()
 	return total
 
-func find_nearest_free_cell(origin: Vector2, radius: int = 1, preferred_dir: Vector2i = Vector2i.ZERO):
+func find_nearest_free_cell(origin: Vector2, radius: int = 1, preferred_dir: Vector2i = Vector2i.ZERO, ignore_agent: Node = null):
 	var floor_layer = pathfinder.floor_layer
-	var cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(origin))
+	var cell: Vector2i = pathfinder.world_to_cell(origin)
 	var best_cell: Vector2i = cell
 	var best_score := INF
 	var found := false
@@ -92,19 +92,17 @@ func find_nearest_free_cell(origin: Vector2, radius: int = 1, preferred_dir: Vec
 			var candidate := cell + Vector2i(x, y)
 			if candidate == cell:
 				continue
-			if not occupied.has(candidate) and candidate not in destinations:
+			if candidate not in pathfinder.walkable_cells:
+				continue
+			if not is_cell_occupied(candidate, ignore_agent) and candidate not in destinations:
 				var offset := candidate - cell
 				var dist := float(offset.length())
 
-				# pondération selon l'alignement avec la direction actuelle
 				var align := 0.0
 				if preferred_dir != Vector2i.ZERO:
 					align = Vector2(offset).normalized().dot(Vector2(preferred_dir).normalized())
-					# dot → 1 = parfaitement aligné / 0 = perpendiculaire / -1 = opposé
 
-				# score = distance - bonus d'alignement
 				var score := dist - align * 0.5
-
 				if score < best_score:
 					best_score = score
 					best_cell = candidate
@@ -113,5 +111,3 @@ func find_nearest_free_cell(origin: Vector2, radius: int = 1, preferred_dir: Vec
 	if found:
 		return Utils.get_tile_pos_from_cell(floor_layer, best_cell)
 	return null
-
- 
