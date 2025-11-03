@@ -58,16 +58,24 @@ func should_yield(a: Node, b: Node) -> bool:
 	
 func try_move(agent: Node, from_cell: Vector2i, to_cell: Vector2i) -> bool:
 	if not occupied.has(to_cell):
-		occupied[to_cell] = agent
-		if from_cell != null:
-			occupied.erase(from_cell)
+		occupied[to_cell] = [agent]
+		if from_cell != to_cell and from_cell != Vector2i.ZERO:
+			free_cell(from_cell, agent)
 		return true
 
-	var other = occupied[to_cell]
-	if should_yield(agent, other):
-		return false
+	# Si la cellule contient déjà l’agent, c’est bon
+	if agent in occupied[to_cell]:
+		return true
 
-	occupied[to_cell] = agent
-	if from_cell != null:
-		occupied.erase(from_cell)
-	return true
+	# Si déjà prise par un autre, refuser
+	return false
+
+
+func count_occupied_cells() -> int:
+	return occupied.size()
+	
+func count_total_agents() -> int:
+	var total := 0
+	for list in occupied.values():
+		total += list.size()
+	return total

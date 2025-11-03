@@ -12,6 +12,17 @@ func _ready() -> void:
 	add_child(marker)
 	marker.visible = false
 	marker.z_index = 1
+	_start_interval()
+
+func _start_interval() -> void:
+	get_tree().create_timer(1.0).timeout.connect(_on_once)
+	
+func _on_once() -> void:
+	var occup_count = path_manager.count_occupied_cells()
+	var agents = path_manager.count_total_agents()	
+	var total: int = get_tree().get_nodes_in_group("main_chars").size()
+	print("Personnages actifs:", total, " | Occupied:", occup_count, " | Agents:", agents)
+	_start_interval() # relance le timer
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -41,5 +52,5 @@ func spawn_mainchar(pos: Vector2) -> void:
 	c.set("path_manager", path_manager)
 	c.add_to_group("main_chars")
 
-	var total: int = get_tree().get_nodes_in_group("main_chars").size()
-	print("Personnages actifs :", total)
+	
+	

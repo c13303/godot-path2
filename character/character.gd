@@ -74,10 +74,7 @@ func _on_path_ready(p: PackedVector2Array) -> void:
 	current_waypoint = 0
 
 func _physics_process(delta: float) -> void:
-	if path.is_empty() or current_waypoint >= path.size():
-		if has_last_cell:
-			path_manager.free_cell(last_cell)
-			has_last_cell = false
+	if path.is_empty() or current_waypoint >= path.size():		
 		velocity = Vector2.ZERO
 		move_and_slide()
 		z_index = int(global_position.y)
@@ -89,11 +86,15 @@ func _physics_process(delta: float) -> void:
 	# Waypoint atteint
 	if pos.distance_to(target_pos) <= arrival_threshold:
 		current_waypoint += 1
+		# dernier waypoint atteint
 		if current_waypoint >= path.size():
 			path.clear()
-			if has_last_cell:
-				path_manager.free_cell(last_cell, self)
-				has_last_cell = false
+			# Marque la cellule finale comme occupée (agent statique)
+			var final_cell: Vector2i = path_manager.pathfinder.world_to_cell(pos)
+			path_manager.occupy_cell(final_cell, self)
+			last_cell = final_cell
+			has_last_cell = true
+			
 			velocity = Vector2.ZERO
 			move_and_slide()
 			z_index = int(global_position.y)
