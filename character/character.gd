@@ -7,8 +7,11 @@ extends CharacterBody2D
 
 var path: PackedVector2Array = PackedVector2Array()
 var current_waypoint: int = 0
-var reserved_cell: Vector2i
-var has_reserved: bool = false
+var has_reserved: bool = false  #pour destinations
+var has_last_cell: bool = false
+var reserved_cell: Vector2i = Vector2i.ZERO
+var last_cell: Vector2i = Vector2i.ZERO
+
 
 func _ready() -> void:
 	add_to_group("main_chars")
@@ -70,44 +73,45 @@ func _on_path_ready(p: PackedVector2Array) -> void:
 	path = p
 	current_waypoint = 0
 
-func _physics_process(_delta: float) -> void:
-	# Si aucun chemin n’est défini ou que tous les points ont été atteints, le mouvement s’arrête
+func _physics_process(delta: float) -> void:
 	if path.is_empty() or current_waypoint >= path.size():
+		if has_last_cell:
+			path_manager.free_cell(last_cell)
+			has_last_cell = false
 		velocity = Vector2.ZERO
 		move_and_slide()
 		z_index = int(global_position.y)
 		return
 
-	# Position centrale du personnage, ajustée verticalement pour un meilleur alignement visuel
-	var pos_center: Vector2 = global_position + Vector2(0, offset_y)
+	var pos: Vector2 = global_position + Vector2(0, offset_y)
+	var target_pos: Vector2 = path[current_waypoint]
 
-	# Cible actuelle correspondant au point du chemin à atteindre
-	var target: Vector2 = path[current_waypoint]
-
-	# Vérifie si la position actuelle est suffisamment proche du point cible
-	if pos_center.distance_to(target) <= arrival_threshold:
-		# Passe au point suivant du chemin
+	if pos.distance_to(target_pos) <= arrival_threshold:
 		current_waypoint += 1
-
-		# Si tous les points sont atteints, le mouvement s’arrête
 		if current_waypoint >= path.size():
 			path.clear()
+			if has_last_cell:
+				path_manager.free_cell(last_cell)
+				has_last_cell = false
 			velocity = Vector2.ZERO
 			move_and_slide()
 			z_index = int(global_position.y)
 			return
+		target_pos = path[current_waypoint]
 
-		# Sinon, met à jour la nouvelle cible
-		target = path[current_waypoint]
+	var dir: Vector2 = (target_pos - pos).normalized()
+	var tile_size: Vector2 = path_manager.pathfinder.floor_layer.tile_set.tile_size
 
-	# Calcule la direction normalisée vers la cible
-	var direction: Vector2 = (target - pos_center).normalized()
+	var next_pos: Vector2 = pos + dir * speed * delta
+	var next_cell: Vector2i = path_manager.pathfinder.world_to_cell(next_pos)
 
-	# Applique la vitesse dans la direction calculée
-	velocity = direction * speed
+	# Ralentissement selon la densité locale
+	var density: float = path_manager.get_density(next_cell)
+	var move_speed: float = clamp(speed / (1.0 + density * 0.8), speed * 0.3, speed)
 
-	# Déplace le personnage selon la vélocité et gère les collisions
+	last_cell = next_cell
+	has_last_cell = true
+	velocity = dir * move_speed
+
 	move_and_slide()
-
-	# Met à jour la profondeur d’affichage en fonction de la position verticale
 	z_index = int(global_position.y)

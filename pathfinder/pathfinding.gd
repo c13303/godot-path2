@@ -119,3 +119,7 @@ func find_free_spawn_cell(origin: Vector2i, occupied_cells: Array[Vector2i]) -> 
 			return best
 
 	return best
+
+func world_to_cell(world_pos: Vector2) -> Vector2i:
+	var local_pos: Vector2 = floor_layer.to_local(world_pos)
+	return floor_layer.local_to_map(local_pos)

@@ -3,7 +3,7 @@ extends Node2D
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"
 @onready var path_manager: Node = $"../PathfindingManager"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
-var MainCharScene: PackedScene = preload("res://personnage/main_char.tscn")
+var MainCharScene: PackedScene = preload("res://character/character.tscn")
 
 var destinations: Array[Vector2] = []
 

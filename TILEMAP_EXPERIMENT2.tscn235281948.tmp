@@ -3,7 +3,7 @@
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://rgl6j04u8ao4" path="res://pathfinder/pathfinding_manager.gd" id="3_k8xte"]
 [ext_resource type="Script" uid="uid://dlcnviqb4fdvk" path="res://pathfinder/pathfinding.gd" id="3_lb3hw"]
-[ext_resource type="Script" uid="uid://blu34juaio38n" path="res://controls/controls.gd" id="4_e5a4u"]
+[ext_resource type="Script" uid="uid://blu34juaio38n" path="res://controls/click_cercle.gd" id="4_e5a4u"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
