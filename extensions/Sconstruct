@@ -1,27 +1,47 @@
 import os, glob
-from SCons.Script import Environment, Dir
+from SCons.Script import Environment, Dir, ARGUMENTS
+
+def norm(p): return p.replace("\\", "/")
 
 root = Dir('.').abspath
 godot_cpp_path = os.path.abspath(os.path.join(root, "../../godot-cpp"))
 godot_cpp_bin  = os.path.join(godot_cpp_path, "bin")
 
-env = Environment(tools=["default", "msvc"])
+target = ARGUMENTS.get("target", "template_debug")
+use_mingw = ARGUMENTS.get("use_mingw", "yes")
+
+if use_mingw == "yes":
+    env = Environment(
+        tools=["mingw"],
+        CXX="/mingw64/bin/g++",
+        CC="/mingw64/bin/gcc"
+    )
+else:
+    env = Environment(tools=["default", "msvc"])
+
+if use_mingw == "yes":
+    env.Append(CXXFLAGS=["-std=c++17"])
+else:
+    env.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
+
+
 
 env.Append(CPPPATH=[
-    os.path.join(godot_cpp_path, "include"),
-    os.path.join(godot_cpp_path, "gen", "include"),
-    os.path.join(godot_cpp_path, "gdextension"),
+    norm(os.path.join(godot_cpp_path, "include")),
+    norm(os.path.join(godot_cpp_path, "gen", "include")),
+    norm(os.path.join(godot_cpp_path, "gdextension")),
 ])
+env.Append(LIBPATH=[norm(godot_cpp_bin)])
 
-env.Append(LIBPATH=[godot_cpp_bin])
-env.Append(LIBS=["libgodot-cpp.windows.template_release.x86_64"])
+if target == "template_debug":
+    env.Append(LIBS=["godot-cpp.windows.template_debug.x86_64"])
+else:
+    env.Append(LIBS=["godot-cpp.windows.template_release.x86_64"])
 
-env.Append(CXXFLAGS=["/std:c++17"])
 env.Append(CPPDEFINES=["NOMINMAX"])
 
 sources = glob.glob("flowfield/*.cpp")
-
-target_dir = os.path.join(root, "flowfield", "bin")
+target_dir = norm(os.path.join(root, "flowfield", "bin"))
 os.makedirs(target_dir, exist_ok=True)
 
 env.SharedLibrary(
