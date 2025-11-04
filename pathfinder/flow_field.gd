@@ -11,11 +11,12 @@ var tile_size: Vector2i = Vector2i(32, 32)
 var _walkable: Array[Vector2i] = []
 var _walkable_set: Dictionary = {}
 
-var _dirs_front: Dictionary = {}
-var _dist_front: Dictionary = {}
+var _dirs_front: Array[Vector2] = []
+var _dirs_back: Array[Vector2] = []
 
-var _dirs_back: Dictionary = {}
-var _dist_back: Dictionary = {}
+var _used_rect_front: Rect2i = Rect2i()
+var _used_rect_back: Rect2i = Rect2i()
+
 
 var _goal_cell: Vector2i = Vector2i.ZERO
 var _version: int = 0
@@ -24,6 +25,9 @@ var _thread: Thread
 var _computing: bool = false
 var _pending_goal: Vector2i = Vector2i.ZERO
 var _has_pending: bool = false
+
+var _tmp_neighbors: Array[Vector2i] = []
+
 
 func _ready() -> void:
 	_capture_tile_size()
@@ -46,33 +50,32 @@ func _build_walkable_snapshot() -> void:
 		return
 
 	var floors: Array[Vector2i] = floor_layer.get_used_cells()
-	var walls: Array[Vector2i] = []
-	if wall_layer != null:
-		walls = wall_layer.get_used_cells()
+	var wall_set: Dictionary = {}
 
-	var expanded_walls: Array[Vector2i] = walls.duplicate()
-	for w: Vector2i in walls:
-		for dx in range(-1, 2):
-			for dy in range(-1, 2):
-				var n: Vector2i = w + Vector2i(dx, dy)
-				if not expanded_walls.has(n):
-					expanded_walls.append(n)
-	walls = expanded_walls
+	if wall_layer != null:
+		var walls: Array[Vector2i] = wall_layer.get_used_cells()
+		for w: Vector2i in walls:
+			wall_set[w] = true
+			for dx: int in range(-1, 2):
+				for dy: int in range(-1, 2):
+					var n: Vector2i = Vector2i(w.x + dx, w.y + dy)
+					wall_set[n] = true
 
 	for c: Vector2i in floors:
-		if not walls.has(c):
+		if not wall_set.has(c):
 			_walkable.append(c)
 			_walkable_set[c] = true
 
+static var ORTHO: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+static var DIAG: Array[Vector2i] = [Vector2i(1, 1), Vector2i(-1, 1), Vector2i(1, -1), Vector2i(-1, -1)]
+
 func _neighbors(cell: Vector2i, diag_ok: bool) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	const ORTHO: Array[Vector2i] = [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]
+	_tmp_neighbors.clear()
 	for d: Vector2i in ORTHO:
 		var n: Vector2i = cell + d
 		if _walkable_set.has(n):
-			out.append(n)
+			_tmp_neighbors.append(n)
 	if diag_ok:
-		const DIAG: Array[Vector2i] = [Vector2i(1,1), Vector2i(-1,1), Vector2i(1,-1), Vector2i(-1,-1)]
 		for d: Vector2i in DIAG:
 			var n2: Vector2i = cell + d
 			if not _walkable_set.has(n2):
@@ -80,8 +83,8 @@ func _neighbors(cell: Vector2i, diag_ok: bool) -> Array[Vector2i]:
 			var side1: Vector2i = cell + Vector2i(d.x, 0)
 			var side2: Vector2i = cell + Vector2i(0, d.y)
 			if _walkable_set.has(side1) and _walkable_set.has(side2):
-				out.append(n2)
-	return out
+				_tmp_neighbors.append(n2)
+	return _tmp_neighbors
 
 
 func _cell_center_world(cell: Vector2i) -> Vector2:
@@ -103,6 +106,7 @@ func cell_to_world(cell: Vector2i) -> Vector2:
 
 func is_ready() -> bool:
 	return not _computing and _dirs_front.size() > 0
+
 
 func current_goal_cell() -> Vector2i:
 	return _goal_cell
@@ -127,8 +131,9 @@ func _start_thread(goal_cell: Vector2i) -> void:
 	_join_thread_if_any()
 	_computing = true
 	_goal_cell = goal_cell
-	_dirs_back.clear()
-	_dist_back.clear()
+	_dirs_back = []
+	_used_rect_back = Rect2i()
+
 	_thread = Thread.new()
 	var payload: Dictionary = {
 		"goal": goal_cell,
@@ -137,67 +142,117 @@ func _start_thread(goal_cell: Vector2i) -> void:
 		"tile_size": tile_size
 	}
 	_thread.start(Callable(self, "_thread_compute").bind(payload))
+	
+func _cost_step(a: Vector2i, b: Vector2i) -> int:
+	var diag: bool = (a.x != b.x) and (a.y != b.y)
+	return 141 if diag else 100
 
-#
+
+func _make_dist_array(rect: Rect2i) -> Array[int]:
+	var size: int = rect.size.x * rect.size.y
+	var arr: Array[int] = []
+	arr.resize(size)
+	for i: int in range(size):
+		arr[i] = 1_000_000_000
+	return arr
+
+func _cell_index(c: Vector2i, used: Rect2i) -> int:
+	return (c.y - used.position.y) * used.size.x + (c.x - used.position.x)
+
+func _in_bounds(c: Vector2i, used: Rect2i) -> bool:
+	return c.x >= used.position.x and c.y >= used.position.y and c.x < used.position.x + used.size.x and c.y < used.position.y + used.size.y
+
+func _get_dist(c: Vector2i, used: Rect2i, dist_arr: Array[int]) -> int:
+	if not _in_bounds(c, used):
+		return 1_000_000_000
+	return dist_arr[_cell_index(c, used)]
+
+func _set_dist(c: Vector2i, v: int, used: Rect2i, dist_arr: Array[int]) -> void:
+	if _in_bounds(c, used):
+		dist_arr[_cell_index(c, used)] = v
+
 func _thread_compute(payload: Dictionary) -> void:
 	var goal: Vector2i = payload["goal"]
 	var walkable: Array[Vector2i] = payload["walkable"]
 	var diag: bool = payload["diag"]
 
-	var dist: Dictionary = {}
-	var dirs: Dictionary = {}
-	var inf: float = 1e12
+	const INF: int = 1_000_000_000
 
-	for c: Vector2i in walkable:
-		dist[c] = inf
+	var used: Rect2i = floor_layer.get_used_rect()
+	var w: int = used.size.x
+	var h: int = used.size.y
+	var size: int = w * h
+
+	var dist_arr: Array[int] = []
+	dist_arr.resize(size)
+	for i: int in range(size):
+		dist_arr[i] = INF
+
+	var dir_arr: Array[Vector2] = []
+	dir_arr.resize(size)
+	for j: int in range(size):
+		dir_arr[j] = Vector2.ZERO
+
 	if not _walkable_set.has(goal):
 		if walkable.is_empty():
-			call_deferred("_thread_done", dirs, dist)
+			call_deferred("_thread_done_arr", dir_arr, used)
 			return
 		goal = _find_nearest_walkable(goal, walkable)
-	dist[goal] = 0.0
 
-	var heap: Array = []
-	_heap_push(heap, [0.0, goal])
+	_set_dist(goal, 0, used, dist_arr)
+
+	var queue: Array[Vector2i] = []
+	queue.append(goal)
 
 	var t0: int = Time.get_ticks_msec()
-	var idx: int = 0
 
-	while not heap.is_empty():
-		var pair: Array = _heap_pop(heap)
-		var current: Vector2i = pair[1]
-		var base_cost: float = pair[0]
+	while not queue.is_empty():
+		var u: Vector2i = queue.pop_front()
+		var du: int = _get_dist(u, used, dist_arr)
 
-		for n: Vector2i in _neighbors(current, diag):
-			var step: float = 1.0 + (0.3 if _is_near_wall(n) else 0.0)
-			if diag and n.x != current.x and n.y != current.y:
-				step = 1.41421356237
-			var nc: float = base_cost + step
-			if nc + 1e-6 < float(dist[n]):
-				dist[n] = nc
-				_heap_push(heap, [nc, n])
-
-		idx += 1
-		if (idx & 255) == 0:
-			OS.delay_msec(0)
+		for v: Vector2i in _neighbors(u, diag):
+			if du + 1 < _get_dist(v, used, dist_arr):
+				_set_dist(v, du + 1, used, dist_arr)
+				queue.append(v)
 
 	for c: Vector2i in walkable:
-		var best_n: Vector2i = c
-		var best_v: float = float(dist.get(c, inf))
+		var best: Vector2i = c
+		var bestv: int = _get_dist(c, used, dist_arr)
 		for n: Vector2i in _neighbors(c, diag):
-			var dv: float = float(dist.get(n, inf))
-			if dv < best_v:
-				best_v = dv
-				best_n = n
-		if best_n == c or best_v >= inf * 0.5:
-			dirs[c] = Vector2.ZERO
-		else:
-			var a: Vector2 = Vector2(c.x * tile_size.x + 0.5 * tile_size.x, c.y * tile_size.y + 0.5 * tile_size.y)
-			var b: Vector2 = Vector2(best_n.x * tile_size.x + 0.5 * tile_size.x, best_n.y * tile_size.y + 0.5 * tile_size.y)
-			dirs[c] = (b - a).normalized()
+			var dv: int = _get_dist(n, used, dist_arr)
+			if dv < bestv:
+				bestv = dv
+				best = n
+		var out_vec: Vector2 = Vector2.ZERO
+		if best != c and bestv < INF / 2:
+			var dx: float = float(best.x - c.x)
+			var dy: float = float(best.y - c.y)
+			var len2: float = dx * dx + dy * dy
+			if len2 > 0.0:
+				var inv_len: float = 1.0 / sqrt(len2)
+				out_vec = Vector2(dx * inv_len, dy * inv_len)
+		dir_arr[_cell_index(c, used)] = out_vec
 
 	print("Flow build time:", Time.get_ticks_msec() - t0, "ms for", walkable.size(), "cells")
-	call_deferred("_thread_done", dirs, dist)
+	call_deferred("_thread_done_arr", dir_arr, used)
+
+
+func _thread_done_arr(dirs_arr: Array[Vector2], used: Rect2i) -> void:
+	_dirs_back = dirs_arr
+	_used_rect_back = used
+	_swap_buffers()
+	_computing = false
+	_version += 1
+	if _has_pending:
+		_has_pending = false
+		_start_thread(_pending_goal)
+
+func _swap_buffers() -> void:
+	_dirs_front = _dirs_back
+	_used_rect_front = _used_rect_back
+	_dirs_back = []
+	_used_rect_back = Rect2i()
+
 
 # --- utilitaires heap internes (typés explicitement) ---
 func _heap_push(heap: Array, pair: Array) -> void:
@@ -237,31 +292,21 @@ func _heap_pop(heap: Array) -> Array:
 
 
 func _is_near_wall(c: Vector2i) -> bool:
-	for dx in range(-1, 2):
-		for dy in range(-1, 2):
-			var n: Vector2i = c + Vector2i(dx, dy)
+	for dx: int in range(-1, 2):
+		for dy: int in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var n: Vector2i = Vector2i(c.x + dx, c.y + dy)
 			if not _walkable_set.has(n):
 				return true
 	return false
 
 
-func _thread_done(dirs: Dictionary, dist: Dictionary) -> void:
-	_dirs_back = dirs
-	_dist_back = dist
-	_swap_buffers()
-	_computing = false
-	_version += 1
-	# print("Flow built. dirs:", _dirs_front.size(), "walkable:", _walkable.size(), "goal:", _goal_cell)
-	if _has_pending:
-		_has_pending = false
-		_start_thread(_pending_goal)
 
 
-func _swap_buffers() -> void:
-	_dirs_front = _dirs_back
-	_dist_front = _dist_back
-	_dirs_back = {}
-	_dist_back = {}
+
+
+
 
 func _find_nearest_walkable(origin: Vector2i, walkable: Array[Vector2i]) -> Vector2i:
 	var best: Vector2i = origin
@@ -274,18 +319,19 @@ func _find_nearest_walkable(origin: Vector2i, walkable: Array[Vector2i]) -> Vect
 	return best
 
 func sample_dir_cell(cell: Vector2i) -> Vector2:
-	if _dirs_front.has(cell):
-		return _dirs_front[cell]
+	if _in_bounds(cell, _used_rect_front) and _dirs_front.size() > 0:
+		return _dirs_front[_cell_index(cell, _used_rect_front)]
 	return Vector2.ZERO
 
+
 func sample_dir_world(world_pos: Vector2) -> Vector2:
-	if _dirs_front.is_empty():
+	if _dirs_front.size() == 0:
 		return Vector2.ZERO
 	var c: Vector2i = world_to_cell(world_pos)
 	return sample_dir_cell(c)
 
 func sample_dir_world_bilinear(world_pos: Vector2) -> Vector2:
-	if _dirs_front.is_empty():
+	if _dirs_front.size() == 0:
 		return Vector2.ZERO
 	var local: Vector2 = floor_layer.to_local(world_pos)
 	var fx: float = local.x / float(tile_size.x)
@@ -324,32 +370,33 @@ func _join_thread_if_any() -> void:
 @export var debug_color_dir: Color = Color(0, 1, 0)
 @export var debug_color_cell: Color = Color(1, 1, 1)
 
+var _debug_counter: int = 0
+
 func _process(_delta: float) -> void:
-	if debug_draw and (Engine.get_frames_drawn() % 8 == 0):
+	if not debug_draw:
+		return
+	_debug_counter += 1
+	if _debug_counter >= 30:
+		_debug_counter = 0
 		queue_redraw()
 
 
-
 func _draw() -> void:
-	if not debug_draw or _dirs_front.is_empty():
+	if not debug_draw or _dirs_front.size() == 0:
 		return
 
 	var cell_size: Vector2 = Vector2(tile_size)
 	var skip: int = max(1, debug_stride)
-	var i: int = 0
+	var i: int = 4
 
-	for cell in _dirs_front.keys():
+	for cell in _walkable:
 		i += 1
 		if (i % skip) != 0:
 			continue
-		if not _walkable.has(cell):
-			continue
-
-		var dir: Vector2 = _dirs_front[cell]
+		var dir: Vector2 = sample_dir_cell(cell)
 		if dir == Vector2.ZERO:
 			continue
 
-		# ancrage exact: map_to_local (layer) -> to_global (layer) -> to_local (flow)
 		var layer_local: Vector2 = floor_layer.map_to_local(cell)
 		var world_center: Vector2 = floor_layer.to_global(layer_local)
 		var p0: Vector2 = to_local(world_center)
