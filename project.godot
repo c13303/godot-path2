@@ -18,7 +18,6 @@ config/icon="res://icon.svg"
 [autoload]
 
 Utils="*res://global/utils.gd"
-SpatialGrid="*res://global/spatial_grid.gd"
 
 [display]
 

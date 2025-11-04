@@ -1,53 +1,50 @@
 extends Node
+class_name PathManager
 
-@export var pathfinder: Pathfinding
-var destinations: Array[Vector2i] = []
-var future_reservations: Dictionary = {}
+@export var flow: FlowField
+@export var flow_enabled: bool = true
 
+var _last_goal_cell: Vector2i = Vector2i.MIN
+var _last_request_frame: int = -1
+var _last_request_ms: int = 0
+var _last_version: int = -1
+
+var last_rebuild_ms: float = 0.0
 
 func _ready() -> void:
-	if pathfinder != null:
-		pathfinder.build()
-	else:
-		push_error("Pathfinder non assigné")
+	set_process(true)
+	if flow != null:
+		_last_version = flow.flow_version()
 
-func request_path(start: Vector2, goal: Vector2, callback: Callable) -> void:
-	if pathfinder == null:
-		push_warning("Pathfinder non initialisé")
+func _process(_delta: float) -> void:
+	if flow == null:
 		return
-	var path: PackedVector2Array = pathfinder.find_path(start, goal)
-	callback.call(path)
+	var v: int = flow.flow_version()
+	if v != _last_version:
+		_last_version = v
+		if _last_request_ms > 0:
+			last_rebuild_ms = float(Time.get_ticks_msec() - _last_request_ms)
 
-func count_people() -> void:
-	var person_count: int = get_tree().get_nodes_in_group("main_chars").size()
-	print("Path calculé (", person_count, " personnages actifs)")
-
-
-func try_reserve_future(cell: Vector2i, agent: Node) -> bool:
-	var id: int = agent.get_instance_id()
-	if not future_reservations.has(cell):
-		future_reservations[cell] = id
-		return true
-	var current_id: int = int(future_reservations[cell])
-	if id < current_id:
-		future_reservations[cell] = id
-		return true
-	return current_id == id
-
-func release_future(cell: Vector2i, agent: Node) -> void:
-	var id: int = agent.get_instance_id()
-	if future_reservations.has(cell) and int(future_reservations[cell]) == id:
-		future_reservations.erase(cell)
-
-func is_future_reserved_by_other(cell: Vector2i, agent: Node) -> bool:
-	var id: int = agent.get_instance_id()
-	if not future_reservations.has(cell):
+func is_ready() -> bool:
+	if flow == null:
 		return false
-	return int(future_reservations[cell]) != id
-	
-func get_local_density(agent: Node, cell_radius: int = 1) -> int:
-	var pos: Vector2 = agent.global_position
-	var cell_size: float = SpatialGrid.cell_size
-	var range_cells: int = cell_radius
-	var neighbors: Array = SpatialGrid.neighbors_at(pos, range_cells)
-	return neighbors.size()
+	return flow.is_ready()
+
+func set_goal(goal_world: Vector2) -> void:
+	if flow == null or not flow_enabled:
+		return
+	var cell: Vector2i = flow.world_to_cell(goal_world)
+	var frame_now: int = Engine.get_frames_drawn()
+	if _last_goal_cell == cell and _last_request_frame == frame_now:
+		return
+	_last_goal_cell = cell
+	_last_request_frame = frame_now
+	_last_request_ms = Time.get_ticks_msec()
+	flow.rebuild_async(goal_world)
+
+func sample_dir(world_pos: Vector2) -> Vector2:
+	if not flow_enabled or flow == null:
+		return Vector2.ZERO
+	if not flow.is_ready():
+		return Vector2.ZERO
+	return flow.sample_dir_world_bilinear(world_pos)
