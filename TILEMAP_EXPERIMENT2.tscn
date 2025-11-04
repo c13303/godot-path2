@@ -3,7 +3,7 @@
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://rgl6j04u8ao4" path="res://pathfinder/pathfinding_manager.gd" id="3_k8xte"]
 [ext_resource type="Script" uid="uid://blu34juaio38n" path="res://controls/controls.gd" id="4_e5a4u"]
-[ext_resource type="Script" uid="uid://dqbesb3j4x5xx" path="res://pathfinder/flow_field.gd" id="4_k8xte"]
+[ext_resource type="Script" uid="uid://ewi22bskypqx" path="res://pathfinder/test_extension.gd" id="4_k8xte"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1243,16 +1243,13 @@ tile_set = SubResource("TileSet_8wl7c")
 position = Vector2(379, 268)
 zoom = Vector2(2, 2)
 
-[node name="FlowField" type="Node2D" parent="." node_paths=PackedStringArray("floor_layer", "wall_layer")]
-z_index = 999
-script = ExtResource("4_k8xte")
-floor_layer = NodePath("../MonTilemap/floor")
-wall_layer = NodePath("../MonTilemap/wallz")
-
-[node name="PathfindingManager" type="Node2D" parent="." node_paths=PackedStringArray("flow")]
+[node name="PathfindingManager" type="Node2D" parent="."]
 script = ExtResource("3_k8xte")
-flow = NodePath("../FlowField")
 
 [node name="Controls" type="Node2D" parent="." node_paths=PackedStringArray("camera")]
 script = ExtResource("4_e5a4u")
 camera = NodePath("../Camera2D")
+speed = null
+
+[node name="test" type="Node2D" parent="."]
+script = ExtResource("4_k8xte")
