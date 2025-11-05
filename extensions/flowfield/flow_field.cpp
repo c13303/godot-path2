@@ -59,10 +59,11 @@ void FlowField::_bind_methods()
     ClassDB::bind_method(D_METHOD("cost_step", "a", "b"), &FlowField::cost_step);
     ClassDB::bind_method(D_METHOD("cell_index", "c", "used"), &FlowField::cell_index);
     ClassDB::bind_method(D_METHOD("in_bounds", "c", "used"), &FlowField::in_bounds);
-
     ClassDB::bind_method(D_METHOD("make_dist_array", "rect"), &FlowField::make_dist_array);
     ClassDB::bind_method(D_METHOD("get_dist", "c", "used", "dist_arr"), &FlowField::get_dist);
     ClassDB::bind_method(D_METHOD("set_dist", "c", "v", "used", "dist_arr"), &FlowField::set_dist);
+    /*     ClassDB::bind_method(D_METHOD("test_print_threads"), &FlowField::test_print_threads);
+     */
 }
 
 FlowField::FlowField()
@@ -73,7 +74,15 @@ FlowField::FlowField()
 FlowField::~FlowField() {}
 
 void FlowField::_ready() {}
-void FlowField::_exit_tree() { _join_thread_if_any(); }
+void FlowField::_exit_tree()
+{
+    _join_thread_if_any();
+    if (_thread)
+    {
+        memdelete(_thread);
+        _thread = nullptr;
+    }
+}
 
 void FlowField::_process(double)
 {
@@ -389,3 +398,19 @@ void FlowField::_join_thread_if_any()
 Vector2 FlowField::sample_dir_cell(Vector2i) const { return Vector2(); }
 Vector2 FlowField::sample_dir_world(Vector2) const { return Vector2(); }
 Vector2 FlowField::sample_dir_world_bilinear(Vector2) const { return Vector2(); }
+
+/* void FlowField::test_print_threads() {
+    // Test 1 : print depuis le thread principal
+    UtilityFunctions::print("FlowField: print depuis thread principal OK");
+
+    // Test 2 : print depuis un thread secondaire
+    Thread *t = memnew(Thread);
+    Callable task = callable_mp(this, &FlowField::_test_thread_func);
+    t->start(task);
+    t->wait_to_finish();
+    memdelete(t);
+}
+
+void FlowField::_test_thread_func() {
+    UtilityFunctions::print("FlowField: print depuis thread secondaire");
+} */

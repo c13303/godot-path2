@@ -80,6 +80,7 @@ namespace godot
         Array make_dist_array(Rect2i rect) const;
         int32_t get_dist(Vector2i c, Rect2i used, const Array &dist_arr) const;
         Array set_dist(Vector2i c, int32_t v, Rect2i used, Array dist_arr);
+        /*         void test_print_threads(); */
 
     private:
         void _capture_tile_size();
@@ -95,6 +96,7 @@ namespace godot
         bool _is_near_wall(Vector2i c) const;
         Vector2i _find_nearest_walkable(Vector2i origin, const Array &walkable) const;
         void _join_thread_if_any();
+        void _test_thread_func();
 
     private:
         TileMapLayer *floor_layer = nullptr;
