@@ -74,21 +74,16 @@ FlowField::FlowField()
 FlowField::~FlowField() {}
 
 void FlowField::_ready() {}
-void FlowField::_exit_tree()
-{
-    _join_thread_if_any();
-    if (_thread)
-    {
-        memdelete(_thread);
-        _thread = nullptr;
-    }
-}
 
 void FlowField::_process(double)
 {
     std::lock_guard<std::mutex> lock(_log_mutex);
-    while (!_log_queue.empty())
+    int flushed = 0;
+    while (!_log_queue.empty() && flushed < 8) {
+        UtilityFunctions::print(_log_queue.front());
         _log_queue.pop();
+        flushed++;
+    }
 
     if (_has_pending && !_computing)
     {
@@ -96,6 +91,7 @@ void FlowField::_process(double)
         _start_thread(_pending_goal);
     }
 }
+
 
 void FlowField::_draw() {}
 
@@ -179,6 +175,8 @@ void FlowField::_build_walkable_snapshot()
 
 Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
 {
+
+
     Array result;
     for (const Vector2i &d : ORTHO)
     {
@@ -242,26 +240,29 @@ void FlowField::rebuild_async(Vector2 goal_world)
 
 void FlowField::_start_thread(Vector2i goal_cell)
 {
-    if (_thread)
-        _join_thread_if_any();
+    _join_thread_if_any();
 
     if (!floor_layer)
         return;
 
-    Rect2i used;
-    used.position = floor_layer->get_used_rect().position;
-    used.size = floor_layer->get_used_rect().size;
+    Rect2i used = floor_layer->get_used_rect();
 
     Dictionary payload;
     payload["goal_cell"] = goal_cell;
     payload["used_rect"] = used;
     payload["walkable"] = _walkable;
 
+    {
+        std::lock_guard<std::mutex> lock(_log_mutex);
+        _log_queue.push("FlowField: std::thread start");
+    }
+
     _computing = true;
-    _thread = memnew(Thread);
-    Callable task = callable_mp(this, &FlowField::_thread_compute).bind(payload);
-    _thread->start(task);
+    _std_thread = std::thread([this, payload]()
+                              { _thread_compute(payload); });
 }
+
+
 
 int32_t FlowField::cost_step(Vector2i a, Vector2i b) const
 {
@@ -314,11 +315,22 @@ Array FlowField::set_dist(Vector2i c, int32_t v, Rect2i used, Array dist_arr)
 
 void FlowField::_thread_compute(Dictionary payload)
 {
+    UtilityFunctions::print("THREAD STARTED!"); // ← Ajoute ça en PREMIER
+
     _computing = true;
     _version++;
 
+    {
+        std::lock_guard<std::mutex> lock(_log_mutex);
+        _log_queue.push("FlowField: thread compute start");
+    }
+
     if (!payload.has("goal_cell") || !payload.has("used_rect") || !payload.has("walkable"))
     {
+        {
+            std::lock_guard<std::mutex> lock(_log_mutex);
+            _log_queue.push("FlowField: thread error invalid payload");
+        }
         _computing = false;
         return;
     }
@@ -338,9 +350,17 @@ void FlowField::_thread_compute(Dictionary payload)
     Array queue;
     queue.append(goal_cell);
     int64_t count = 0;
+    int64_t safety = 0;
 
     while (queue.size() > 0)
     {
+        if (safety++ > 1000000)
+        {
+            std::lock_guard<std::mutex> lock(_log_mutex);
+            _log_queue.push("FlowField: thread aborted (safety break)");
+            break;
+        }
+
         Vector2i c = queue.pop_front();
         int32_t d = get_dist(c, used, dist_arr);
         Array nbs = _neighbors(c, allow_diagonals);
@@ -359,11 +379,25 @@ void FlowField::_thread_compute(Dictionary payload)
                 queue.append(n);
             }
         }
+
+        if (count % 10000 == 0)
+        {
+            std::lock_guard<std::mutex> lock(_log_mutex);
+            _log_queue.push("FlowField: progress " + String::num_int64(count));
+        }
+
         count++;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(_log_mutex);
+        _log_queue.push("FlowField: compute done, cells=" + String::num_int64(count));
     }
 
     _thread_done_arr(dirs_arr, used);
     _computing = false;
+
+    UtilityFunctions::print("THREAD FINISHED!");
 }
 
 void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
@@ -372,6 +406,11 @@ void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
     _used_rect_back = used;
     _swap_buffers();
     _computing = false;
+
+    {
+        std::lock_guard<std::mutex> lock(_log_mutex);
+        _log_queue.push("FlowField: thread done");
+    }
 }
 
 void FlowField::_swap_buffers()
@@ -387,12 +426,8 @@ Vector2i FlowField::_find_nearest_walkable(Vector2i origin, const Array &) const
 
 void FlowField::_join_thread_if_any()
 {
-    if (_thread)
-    {
-        _thread->wait_to_finish();
-        memdelete(_thread);
-        _thread = nullptr;
-    }
+    if (_std_thread.joinable())
+        _std_thread.join();
 }
 
 Vector2 FlowField::sample_dir_cell(Vector2i) const { return Vector2(); }
@@ -414,3 +449,8 @@ Vector2 FlowField::sample_dir_world_bilinear(Vector2) const { return Vector2(); 
 void FlowField::_test_thread_func() {
     UtilityFunctions::print("FlowField: print depuis thread secondaire");
 } */
+
+void FlowField::_exit_tree()
+{
+    _join_thread_if_any();
+}

@@ -3,7 +3,7 @@
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://rgl6j04u8ao4" path="res://pathfinder/pathfinding_manager.gd" id="3_k8xte"]
 [ext_resource type="Script" uid="uid://blu34juaio38n" path="res://controls/controls.gd" id="4_e5a4u"]
-[ext_resource type="Script" uid="uid://blx40afdu57sv" path="res://pathfinder/FlowFieldTest.gd" id="5_c2thg"]
+[ext_resource type="Script" uid="uid://blx40afdu57sv" path="res://pathfinder/FlowFieldTest.gd" id="4_k8xte"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1250,5 +1250,7 @@ script = ExtResource("3_k8xte")
 script = ExtResource("4_e5a4u")
 camera = NodePath("../Camera2D")
 
-[node name="FlowField" type="Node2D" parent="."]
-script = ExtResource("5_c2thg")
+[node name="FlowField" type="FlowField" parent="."]
+
+[node name="Tester" type="Node" parent="."]
+script = ExtResource("4_k8xte")

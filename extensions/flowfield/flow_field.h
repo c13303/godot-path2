@@ -3,7 +3,7 @@
 
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
-#include <godot_cpp/classes/thread.hpp>
+
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
@@ -12,6 +12,8 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <queue>
 #include <mutex>
+#include <thread>
+
 
 namespace godot
 {
@@ -118,7 +120,6 @@ namespace godot
         Vector2i _goal_cell = Vector2i(0, 0);
         int32_t _version = 0;
 
-        Thread *_thread = nullptr;
         bool _computing = false;
         Vector2i _pending_goal = Vector2i(0, 0);
         bool _has_pending = false;
@@ -134,8 +135,10 @@ namespace godot
         static const Vector2i ORTHO[4];
         static const Vector2i DIAG[4];
 
-        std::queue<String> _log_queue;
-        std::mutex _log_mutex;
+        mutable std::queue<String> _log_queue;
+        mutable std::mutex _log_mutex;    
+        std::thread _std_thread;
+
     };
 }
 
