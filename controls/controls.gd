@@ -7,6 +7,8 @@ extends Node2D
 @export var camera: Camera2D
 @export var speed: float = 400.0
 
+var lastFPS: float = 0
+
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
 
 # -----------------------------------------------------
@@ -29,7 +31,10 @@ func _start_interval() -> void:
 
 func _on_once() -> void:
 	#debug every 1s
-	print("FPS:", Engine.get_frames_per_second())
+	var curFPS = Engine.get_frames_per_second()
+	if  curFPS != lastFPS:
+		print("FPS:", curFPS)
+		lastFPS = curFPS
 	_start_interval()
 
 # -----------------------------------------------------
