@@ -10,10 +10,11 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <queue>
+#include <mutex>
 
 namespace godot
 {
-
     class FlowField : public Node2D
     {
         GDCLASS(FlowField, Node2D);
@@ -72,6 +73,13 @@ namespace godot
         Array neighbors(Vector2i cell, bool diag_ok);
         Vector2i get_tile_size() const;
 
+        int32_t cost_step(Vector2i a, Vector2i b) const;
+        int32_t cell_index(Vector2i c, Rect2i used) const;
+        bool in_bounds(Vector2i c, Rect2i used) const;
+
+        Array make_dist_array(Rect2i rect) const;
+        int32_t get_dist(Vector2i c, Rect2i used, const Array &dist_arr) const;
+        Array set_dist(Vector2i c, int32_t v, Rect2i used, Array dist_arr);
 
     private:
         void _capture_tile_size();
@@ -79,12 +87,6 @@ namespace godot
         Array _neighbors(Vector2i cell, bool diag_ok) const;
 
         void _start_thread(Vector2i goal_cell);
-        int32_t _cost_step(Vector2i a, Vector2i b) const;
-        Array _make_dist_array(Rect2i rect) const;
-        int32_t _cell_index(Vector2i c, Rect2i used) const;
-        bool _in_bounds(Vector2i c, Rect2i used) const;
-        int32_t _get_dist(Vector2i c, Rect2i used, const Array &dist_arr) const;
-        void _set_dist(Vector2i c, int32_t v, Rect2i used, Array &dist_arr);
         void _thread_compute(Dictionary payload);
         void _thread_done_arr(const Array &dirs_arr, Rect2i used);
         void _swap_buffers();
@@ -129,8 +131,10 @@ namespace godot
 
         static const Vector2i ORTHO[4];
         static const Vector2i DIAG[4];
-    };
 
-} // namespace godot
+        std::queue<String> _log_queue;
+        std::mutex _log_mutex;
+    };
+}
 
 #endif
