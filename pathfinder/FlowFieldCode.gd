@@ -26,12 +26,14 @@ func _ready():
 	ff.store_wall_native()
 	ff.build_walkable_snapshot()
 
-func _on_mouse_goal(world_pos: Vector2):
+func _on_mouse_goal(world_pos: Vector2) -> void:
 	if ff == null:
 		return
 
-	# aucun rechargement de mur ici, juste rebuild
-	var offset = Vector2(-ff.get_tile_size().x * 0.5, -ff.get_tile_size().y * 0.5)
-	var adjusted_goal = world_pos + offset
-	# print("Rebuild FlowField at:", adjusted_goal)
-	ff.rebuild_async(adjusted_goal)
+	var test_cell: Vector2i = ff.world_to_cell(world_pos)
+	var cell_world_center: Vector2 = ff.cell_to_world(test_cell)
+	print("DEBUG GOAL click_world:", world_pos,
+		  "→ test_cell:", test_cell,
+		  "→ cell_center:", cell_world_center)
+
+	ff.rebuild_async(world_pos)

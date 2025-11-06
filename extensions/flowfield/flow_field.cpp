@@ -239,10 +239,16 @@ Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
 
 Vector2i FlowField::world_to_cell(Vector2 world_pos) const
 {
+    UtilityFunctions::print("DEBUG CPP world_to_cell call, world_pos=", world_pos);
+
     if (!floor_layer)
         return Vector2i();
-    Vector2 local = floor_layer->to_local(world_pos);
-    return floor_layer->local_to_map(local);
+
+    Vector2 local = floor_layer->get_global_transform().affine_inverse().xform(world_pos);
+    Vector2i cell = floor_layer->local_to_map(local);
+
+    UtilityFunctions::print("DEBUG CPP result cell=", cell);
+    return cell;
 }
 
 Vector2 FlowField::cell_to_world(Vector2i cell) const
@@ -279,18 +285,21 @@ void FlowField::_start_thread(Vector2i goal_cell)
     if (!floor_layer)
         return;
 
+    // Correction : mémoriser le goal courant
+    _goal_cell = goal_cell;
+
     Rect2i used = floor_layer->get_used_rect();
 
     Dictionary payload;
     payload["goal_cell"] = goal_cell;
     payload["used_rect"] = used;
-    payload["walkable"] = _walkable;              // ← Ajout
-    payload["walkable_set"] = _walkable_set;      // ← Ajout
-    payload["allow_diagonals"] = allow_diagonals; // ← Optionnel
+    payload["walkable"] = _walkable;
+    payload["walkable_set"] = _walkable_set;
+    payload["allow_diagonals"] = allow_diagonals;
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        /* _log_queue.push("FlowField: std::thread start"); */
+        UtilityFunctions::print("DEBUG FF _start_thread: goal_cell set to", goal_cell);
     }
 
     _computing = true;
@@ -356,7 +365,7 @@ void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        /* _log_queue.push("FlowField: thread done"); */ 
+        /* _log_queue.push("FlowField: thread done"); */
     }
 
     _needs_redraw = debug_draw;

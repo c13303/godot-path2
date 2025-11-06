@@ -11,7 +11,7 @@ extends Node2D
 
 var lastFPS: float = 0
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
-var spawngrappe: int = 1
+var spawngrappe: int = 50
 # -----------------------------------------------------
 # INITIALISATION
 # -----------------------------------------------------
