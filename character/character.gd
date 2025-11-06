@@ -21,36 +21,46 @@ func _ready() -> void:
 	_sample_phase = int(get_instance_id() % max(1, flow_sample_stride))
 
 func _physics_process(_delta: float) -> void:
-	var flow_ref: FlowField = get_meta("flow_ref")
-	if flow_ref == null or not flow_ref.is_ready():
-		velocity = Vector2.ZERO
-		move_and_slide()
-		z_index = int(global_position.y)
+	if steering_system == null:
 		return
 
-	var tile_size: Vector2i = flow_ref.get_tile_size()
-	var offset: Vector2 = Vector2(-tile_size.x * 0.5, -tile_size.y * 0.5)
-	var sample_pos: Vector2 = global_position + offset
-
-	var flow_dir: Vector2 = Vector2.ZERO
-	if use_bilinear:
-		flow_dir = flow_ref.sample_dir_world_bilinear(sample_pos)
-	else:
-		flow_dir = flow_ref.sample_dir_world(sample_pos)
-
-	if steering_system != null:
-		var neighbors: Array = get_tree().get_nodes_in_group("main_chars")
-		var steering_dir: Vector2 = steering_system.compute(self, neighbors, flow_dir)
-		flow_dir = steering_dir
-
-	if flow_dir == Vector2.ZERO:
+	var flow: FlowField = get_meta("flow_ref")
+	if flow == null or not flow.is_ready():
 		velocity = Vector2.ZERO
-	else:
-		velocity = flow_dir.normalized() * max_speed
+		move_and_slide()
+		return
 
+	var flow_dir: Vector2 = steering_system.compute(self, get_tree().get_nodes_in_group("main_chars"), flow.sample_dir_world_bilinear(global_position))
+
+	# Prédiction du prochain déplacement
+	var step_distance: float = max_speed * _delta
+	var next_pos: Vector2 = global_position + flow_dir.normalized() * step_distance
+	var next_cell: Vector2i = flow.world_to_cell(next_pos)
+	var dir_next: Vector2 = flow.sample_dir_cell(next_cell)
+
+	# Blocage strict avant toute pénétration dans un mur
+	if dir_next == Vector2.ZERO:
+		# Recherche tangentielle automatique pour contournement
+		var perp: Vector2 = Vector2(-flow_dir.y, flow_dir.x)
+		var test1: Vector2 = flow.world_to_cell(global_position + perp * step_distance)
+		var test2: Vector2 = flow.world_to_cell(global_position - perp * step_distance)
+		var dir1: Vector2 = flow.sample_dir_cell(test1)
+		var dir2: Vector2 = flow.sample_dir_cell(test2)
+
+		# Choisir la tangente valide si disponible
+		if dir1 != Vector2.ZERO:
+			flow_dir = perp
+		elif dir2 != Vector2.ZERO:
+			flow_dir = -perp
+		else:
+			velocity = Vector2.ZERO
+			move_and_slide()
+			return
+
+	# Appliquer la direction corrigée
+	velocity = flow_dir.normalized() * max_speed
 	move_and_slide()
 	z_index = int(global_position.y)
-
 
 ## Version avec smooth steering (optionnelle pour plus de contrôle)
 func _physics_process_smooth(delta: float) -> void:

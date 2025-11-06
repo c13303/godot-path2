@@ -112,6 +112,7 @@ func _spawn_mainchar(pos: Vector2) -> void:
 	var c: FlowAgent = MainCharScene.instantiate()
 	get_parent().add_child(c)
 	c.global_position = free_pos
+	c.z_index = int(free_pos.y)   # ← Z-index selon la position verticale
 	c.add_to_group("main_chars")
 	c.set_meta("flow_ref", flow)
 
