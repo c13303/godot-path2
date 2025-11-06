@@ -65,6 +65,10 @@ void FlowField::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_dist", "c", "v", "used", "dist_arr"), &FlowField::set_dist);
     ClassDB::bind_method(D_METHOD("store_floor_native"), &FlowField::store_floor_native);
     ClassDB::bind_method(D_METHOD("store_wall_native"), &FlowField::store_wall_native);
+
+    ClassDB::bind_method(D_METHOD("sample_dir_cell", "cell"), &FlowField::sample_dir_cell);
+    ClassDB::bind_method(D_METHOD("sample_dir_world", "world_pos"), &FlowField::sample_dir_world);
+    ClassDB::bind_method(D_METHOD("sample_dir_world_bilinear", "world_pos"), &FlowField::sample_dir_world_bilinear);
 }
 
 FlowField::FlowField()
@@ -193,7 +197,7 @@ void FlowField::_build_walkable_snapshot()
 
     // S'assurer qu'on a au moins un wall_set valide (peut être vide)
     int wall_count = (int)_wall_cells.size();
-    UtilityFunctions::print("FlowField: building snapshot from native data (walls:", wall_count, ")");
+    /* UtilityFunctions::print("FlowField: building snapshot from native data (walls:", wall_count, ")"); */
 
     for (const godot::Vector2i &c : _floor_cells)
     {
@@ -204,7 +208,7 @@ void FlowField::_build_walkable_snapshot()
         }
     }
 
-    UtilityFunctions::print("FlowField: walkable snapshot built, cells:", _walkable.size());
+    /* UtilityFunctions::print("FlowField: walkable snapshot built, cells:", _walkable.size()); */
 }
 
 Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
@@ -280,13 +284,13 @@ void FlowField::_start_thread(Vector2i goal_cell)
     Dictionary payload;
     payload["goal_cell"] = goal_cell;
     payload["used_rect"] = used;
-    payload["walkable"] = _walkable;           // ← Ajout
-    payload["walkable_set"] = _walkable_set;   // ← Ajout
+    payload["walkable"] = _walkable;              // ← Ajout
+    payload["walkable_set"] = _walkable_set;      // ← Ajout
     payload["allow_diagonals"] = allow_diagonals; // ← Optionnel
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        _log_queue.push("FlowField: std::thread start");
+        /* _log_queue.push("FlowField: std::thread start"); */
     }
 
     _computing = true;
@@ -399,7 +403,7 @@ void FlowField::_thread_compute(Dictionary payload)
 {
     using namespace std::chrono;
     auto t0 = high_resolution_clock::now();
-    UtilityFunctions::print("THREAD STARTED!");
+    /* UtilityFunctions::print("THREAD STARTED!"); */
 
     _computing = true;
     _version++;
@@ -572,7 +576,7 @@ void FlowField::_thread_compute(Dictionary payload)
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        _log_queue.push("FlowField: compute done, cells=" + String::num_int64(count));
+        /* _log_queue.push("FlowField: compute done, cells=" + String::num_int64(count)); */
     }
 
     _thread_done_arr(dirs_arr, used);
@@ -665,7 +669,7 @@ void FlowField::store_floor_native()
 
     _used_rect_floor = floor_layer->get_used_rect();
 
-    UtilityFunctions::print("FlowField: stored floor native, cells:", (int)_floor_cells.size());
+    /* UtilityFunctions::print("FlowField: stored floor native, cells:", (int)_floor_cells.size()); */
 }
 
 void FlowField::store_wall_native()
@@ -696,5 +700,5 @@ void FlowField::store_wall_native()
 
     _used_rect_wall = wall_layer->get_used_rect();
 
-    UtilityFunctions::print("FlowField: stored wall native, cells:", (int)_wall_cells.size());
+   /*  UtilityFunctions::print("FlowField: stored wall native, cells:", (int)_wall_cells.size()); */
 }

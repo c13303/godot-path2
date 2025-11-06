@@ -1,3 +1,5 @@
+#characters.gd
+
 extends CharacterBody2D
 class_name FlowAgent
 
@@ -18,38 +20,25 @@ func _ready() -> void:
 	_sample_phase = int(get_instance_id() % max(1, flow_sample_stride))
 
 func _physics_process(_delta: float) -> void:
-	if path_manager == null or not path_manager.flow_enabled:
+	var flow_ref: FlowField = get_meta("flow_ref")
+	if flow_ref == null or not flow_ref.is_ready():
 		velocity = Vector2.ZERO
 		move_and_slide()
+		z_index = int(global_position.y)
 		return
-	
-	if not path_manager.is_ready():
-		velocity = Vector2.ZERO
-		move_and_slide()
-		return
-	
-	# Échantillonnage du flow field
-	var flow_dir: Vector2 = Vector2.ZERO
-	
+
+	var dir: Vector2 = Vector2.ZERO
 	if use_bilinear:
-		# Interpolation bilinéaire pour un mouvement plus fluide
-		flow_dir = path_manager.sample_dir(global_position)
+		dir = flow_ref.sample_dir_world_bilinear(global_position)
 	else:
-		# Échantillonnage simple (plus rapide)
-		flow_dir = path_manager.sample_dir_simple(global_position)
-	
-	# Si pas de direction valide → stoppe
-	if flow_dir == Vector2.ZERO:
+		dir = flow_ref.sample_dir_world(global_position)
+
+	if dir == Vector2.ZERO:
 		velocity = Vector2.ZERO
-		move_and_slide()
-		return
-	
-	# Direction et vitesse imposées directement
-	velocity = flow_dir.normalized() * max_speed
-	
+	else:
+		velocity = dir.normalized() * max_speed
+
 	move_and_slide()
-	
-	# Tri par profondeur
 	z_index = int(global_position.y)
 
 ## Version avec smooth steering (optionnelle pour plus de contrôle)

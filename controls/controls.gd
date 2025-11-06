@@ -1,14 +1,15 @@
+#controls.gd
 extends Node2D
 
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"
-@onready var path_manager: PathManager = $"../PathfindingManager"
+@onready var wallz: TileMapLayer = $"../MonTilemap/wallz"
+@onready var flow: FlowField = $"../FlowField"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
 
 var lastFPS: float = 0
-
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
 
 # -----------------------------------------------------
@@ -19,7 +20,6 @@ func _ready() -> void:
 	add_child(marker)
 	marker.visible = false
 	marker.z_index = 1
-	#print("Flow system ready.")
 	_start_interval()
 
 # -----------------------------------------------------
@@ -30,9 +30,8 @@ func _start_interval() -> void:
 	get_tree().create_timer(1.0).timeout.connect(_on_once)
 
 func _on_once() -> void:
-	#debug every 1s
 	var curFPS = Engine.get_frames_per_second()
-	if  curFPS != lastFPS:
+	if curFPS != lastFPS:
 		print("FPS:", curFPS)
 		lastFPS = curFPS
 	_start_interval()
@@ -56,13 +55,13 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_click_set_goal() -> void:
 	var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
 	marker.global_position = cell_center + Vector2(-8, -8)
-
 	marker.visible = true
-	if path_manager != null:
-		path_manager.set_goal(cell_center)
-	emit_signal("mouse_goal_set", cell_center)
-
 	
+	# TEMPORAIRE - pour tester :
+	# if flow != null:
+	#     flow.rebuild_async(cell_center)
+	
+	emit_signal("mouse_goal_set", cell_center)
 
 func _on_key_spawn_chars() -> void:
 	var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
@@ -72,47 +71,58 @@ func _on_key_spawn_chars() -> void:
 # -----------------------------------------------------
 # FONCTION UTILITAIRE : TROUVER UNE CELLULE LIBRE
 # -----------------------------------------------------
+
 func _find_free_cell_near(flow: FlowField, start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
-	var walkable: Array[Vector2i] = flow._walkable
-	if not occupied.has(start_cell) and walkable.has(start_cell):
+	if not occupied.has(start_cell) and _is_walkable(start_cell):
 		return start_cell
 
 	for r in range(1, max_radius + 1):
 		for dx in range(-r, r + 1):
 			for dy in range(-r, r + 1):
 				var c: Vector2i = start_cell + Vector2i(dx, dy)
-				if not walkable.has(c) or occupied.has(c):
+				if occupied.has(c):
 					continue
-				return c
+				if _is_walkable(c):
+					return c
 	return start_cell
+	
+func _is_walkable(cell: Vector2i) -> bool:
+	# Walkable si un tile existe dans floor et aucun tile dans wall
+	var has_floor := floorz.get_cell_tile_data(cell) != null
+	var has_wall := wallz != null and wallz.get_cell_tile_data(cell) != null
+	return has_floor and not has_wall
 
 
 # -----------------------------------------------------
 # SPAWN D'UN AGENT
 # -----------------------------------------------------
+
 func _spawn_mainchar(pos: Vector2) -> void:
-	if path_manager == null or path_manager.flow == null:
-		return
+	var flow_ref: FlowField = flow
+	var target_cell: Vector2i = flow_ref.world_to_cell(pos)
 
-	var flow: FlowField = path_manager.flow
-	var target_cell: Vector2i = flow.world_to_cell(pos)
-
-	# --- sélection d'une cellule libre ---
 	var occupied: Array[Vector2i] = []
 	for node in get_tree().get_nodes_in_group("main_chars"):
-		var oc: Vector2i = flow.world_to_cell(node.global_position)
+		var oc: Vector2i = flow_ref.world_to_cell(node.global_position)
 		occupied.append(oc)
 
-	var free_cell: Vector2i = _find_free_cell_near(flow, target_cell, occupied)
-	var free_pos: Vector2 = flow.cell_to_world(free_cell)
+	var free_cell: Vector2i = _find_free_cell_near(flow_ref, target_cell, occupied)
+	var free_pos: Vector2 = flow_ref.cell_to_world(free_cell)
 
-	# --- instanciation ---
-	var c: CharacterBody2D = MainCharScene.instantiate()
+	var c: FlowAgent = MainCharScene.instantiate()
 	get_parent().add_child(c)
 	c.global_position = free_pos
-	c.path_manager = path_manager
 	c.add_to_group("main_chars")
-	
+
+	# Lien direct avec le flowfield C++
+	c.set_meta("flow_ref", flow)
+
+
+
+# -----------------------------------------------------
+# CAMERA
+# -----------------------------------------------------
+
 func _process(delta: float) -> void:
 	if camera == null:
 		return

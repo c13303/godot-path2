@@ -1,3 +1,4 @@
+#flowFieldCode.gd
 extends Node
 
 @onready var ff: FlowField = $"../FlowField"
@@ -32,5 +33,5 @@ func _on_mouse_goal(world_pos: Vector2):
 	# aucun rechargement de mur ici, juste rebuild
 	var offset = Vector2(-ff.get_tile_size().x * 0.5, -ff.get_tile_size().y * 0.5)
 	var adjusted_goal = world_pos + offset
-	print("Rebuild FlowField at:", adjusted_goal)
+	# print("Rebuild FlowField at:", adjusted_goal)
 	ff.rebuild_async(adjusted_goal)

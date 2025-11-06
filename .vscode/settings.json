@@ -50,6 +50,21 @@
         "ios": "cpp",
         "list": "cpp",
         "xhash": "cpp",
-        "xiosbase": "cpp"
+        "xiosbase": "cpp",
+        "format": "cpp",
+        "charconv": "cpp",
+        "cmath": "cpp",
+        "iomanip": "cpp",
+        "istream": "cpp",
+        "locale": "cpp",
+        "sstream": "cpp",
+        "streambuf": "cpp",
+        "string": "cpp",
+        "unordered_set": "cpp",
+        "xlocbuf": "cpp",
+        "xlocmes": "cpp",
+        "xlocmon": "cpp",
+        "xlocnum": "cpp",
+        "xloctime": "cpp"
     }
 }
