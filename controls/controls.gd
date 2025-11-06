@@ -55,10 +55,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_click_set_goal() -> void:
 	var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
-	marker.global_position = cell_center
+	marker.global_position = cell_center + Vector2(-8, -8)
+
 	marker.visible = true
 	if path_manager != null:
 		path_manager.set_goal(cell_center)
+	emit_signal("mouse_goal_set", cell_center)
+
 	
 
 func _on_key_spawn_chars() -> void:
@@ -124,3 +127,5 @@ func _process(delta: float) -> void:
 		input.y -= 1.0
 	if input != Vector2.ZERO:
 		camera.position += input.normalized() * speed * delta
+
+signal mouse_goal_set(world_pos: Vector2)

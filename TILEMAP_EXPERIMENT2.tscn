@@ -1251,6 +1251,7 @@ script = ExtResource("4_e5a4u")
 camera = NodePath("../Camera2D")
 
 [node name="FlowField" type="FlowField" parent="."]
+z_index = 999
 
 [node name="Tester" type="Node" parent="."]
 script = ExtResource("4_k8xte")

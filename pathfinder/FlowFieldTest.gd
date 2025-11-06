@@ -1,30 +1,32 @@
 extends Node
 
 @onready var ff: FlowField = $"../FlowField"
-@onready var floor: TileMapLayer = $"../MonTilemap/floor"
-@onready var walls: TileMapLayer = $"../MonTilemap/wallz"
+@onready var floor_layer: TileMapLayer = $"../MonTilemap/floor"
+@onready var wall_layer: TileMapLayer = $"../MonTilemap/wallz"
+@onready var controls_node: Node2D = $"../Controls"
 
 func _ready():
-	ff.set_floor_layer(floor)
-	ff.set_wall_layer(walls)
+	if ff == null:
+		push_warning("FlowField_tester: FlowField node not found.")
+		return
 
+	ff.set_floor_layer(floor_layer)
+	ff.set_wall_layer(wall_layer)
 	ff.capture_tile_size()
+	ff.allow_diagonals = true
+
+	if controls_node:
+		controls_node.connect("mouse_goal_set", Callable(self, "_on_mouse_goal"))
+	else:
+		push_warning("FlowField_tester: controls node not found.")
+
+func _on_mouse_goal(world_pos: Vector2):
+	if ff == null:
+		return
+
 	ff.build_walkable_snapshot()
 
-	var used := floor.get_used_rect()
-	var center_cell := used.position + used.size / 2
-	var goal_world := floor.get_global_position() + Vector2(
-		center_cell.x * ff.get_tile_size().x + ff.get_tile_size().x * 0.5,
-		center_cell.y * ff.get_tile_size().y + ff.get_tile_size().y * 0.5
-	)
-
-	ff.debug_draw = false
-	ff.rebuild_async(goal_world)
-	print("FlowField: rebuild_async lancé")
-
-	await get_tree().create_timer(1.0).timeout
-	print("is_ready:", ff.is_ready())
-	print("flow_version:", ff.flow_version()) 
-
-	await get_tree().create_timer(2.0).timeout
-	get_tree().quit()
+	var offset = Vector2(-ff.get_tile_size().x * 0.5, -ff.get_tile_size().y * 0.5)
+	var adjusted_goal = world_pos + offset
+	print("Rebuild FlowField at:", adjusted_goal)
+	ff.rebuild_async(adjusted_goal)

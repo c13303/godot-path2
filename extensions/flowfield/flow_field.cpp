@@ -2,6 +2,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <climits>
+#include <chrono>
 
 using namespace godot;
 
@@ -78,11 +79,19 @@ void FlowField::_ready() {}
 void FlowField::_process(double)
 {
     std::lock_guard<std::mutex> lock(_log_mutex);
+
     int flushed = 0;
-    while (!_log_queue.empty() && flushed < 8) {
+    while (!_log_queue.empty() && flushed < 8)
+    {
         UtilityFunctions::print(_log_queue.front());
         _log_queue.pop();
         flushed++;
+    }
+
+    if (_needs_redraw)
+    {
+        _needs_redraw = false;
+        queue_redraw();
     }
 
     if (_has_pending && !_computing)
@@ -92,8 +101,41 @@ void FlowField::_process(double)
     }
 }
 
+void FlowField::_draw()
+{
+    if (!debug_draw || _dirs_front.is_empty())
+        return;
 
-void FlowField::_draw() {}
+    Vector2 cell_size = Vector2(tile_size);
+    int skip = Math::max(1, debug_stride);
+    int count = 0;
+
+    for (int i = 0; i < _walkable.size(); i++)
+    {
+        if (i % skip != 0)
+            continue;
+
+        Vector2i cell = _walkable[i];
+        if (!_walkable_set.has(cell))
+            continue;
+        if (!in_bounds(cell, _used_rect_front))
+            continue;
+
+        Vector2 dir = sample_dir_cell(cell);
+        if (dir == Vector2())
+            continue;
+
+        Vector2 world_center = cell_to_world(cell);
+        Vector2 local_center = to_local(world_center);
+        Vector2 p1 = local_center + dir * cell_size * debug_scale;
+
+        draw_line(local_center, p1, debug_color_dir, 1.0);
+        if (debug_stride >= 4)
+            draw_circle(local_center, 1.0, debug_color_cell);
+
+        count++;
+    }
+}
 
 void FlowField::set_floor_layer(TileMapLayer *p) { floor_layer = p; }
 TileMapLayer *FlowField::get_floor_layer() const { return floor_layer; }
@@ -147,20 +189,36 @@ void FlowField::_build_walkable_snapshot()
         return;
 
     Array floors = floor_layer->get_used_cells();
-    Dictionary wall_set;
-
+    Array walls;
     if (wall_layer)
+        walls = wall_layer->get_used_cells();
+
+    UtilityFunctions::print("=== FLOWFIELD SNAPSHOT ===");
+    UtilityFunctions::print("Floors count:", floors.size());
+    UtilityFunctions::print("Walls count:", walls.size());
+
+    if (walls.size() > 0)
     {
-        Array walls = wall_layer->get_used_cells();
+        Vector2i min_w(INT_MAX, INT_MAX);
+        Vector2i max_w(INT_MIN, INT_MIN);
         for (int i = 0; i < walls.size(); i++)
         {
             Vector2i w = walls[i];
-            wall_set[w] = true;
-            for (int dx = -1; dx <= 1; dx++)
-                for (int dy = -1; dy <= 1; dy++)
-                    wall_set[Vector2i(w.x + dx, w.y + dy)] = true;
+            if (w.x < min_w.x) min_w.x = w.x;
+            if (w.y < min_w.y) min_w.y = w.y;
+            if (w.x > max_w.x) max_w.x = w.x;
+            if (w.y > max_w.y) max_w.y = w.y;
         }
+        UtilityFunctions::print("Walls bounding box: from", min_w, "to", max_w);
     }
+    else
+    {
+        UtilityFunctions::print("No walls detected!");
+    }
+
+    Dictionary wall_set;
+    for (int i = 0; i < walls.size(); i++)
+        wall_set[walls[i]] = true;
 
     for (int i = 0; i < floors.size(); i++)
     {
@@ -171,11 +229,13 @@ void FlowField::_build_walkable_snapshot()
             _walkable_set[c] = true;
         }
     }
+
+    UtilityFunctions::print("Walkable cells count:", _walkable.size());
+    UtilityFunctions::print("==========================");
 }
 
 Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
 {
-
 
     Array result;
     for (const Vector2i &d : ORTHO)
@@ -204,19 +264,16 @@ Vector2i FlowField::world_to_cell(Vector2 world_pos) const
 {
     if (!floor_layer)
         return Vector2i();
-    Vector2 layer_origin = floor_layer->get_global_position();
-    Vector2 local = world_pos - layer_origin;
-    int x = (int)Math::floor(local.x / (double)tile_size.x);
-    int y = (int)Math::floor(local.y / (double)tile_size.y);
-    return Vector2i(x, y);
+    Vector2 local = floor_layer->to_local(world_pos);
+    return floor_layer->local_to_map(local);
 }
 
 Vector2 FlowField::cell_to_world(Vector2i cell) const
 {
     if (!floor_layer)
         return Vector2();
-    Vector2 layer_origin = floor_layer->get_global_position();
-    return layer_origin + Vector2(cell.x * tile_size.x + tile_size.x * 0.5, cell.y * tile_size.y + tile_size.y * 0.5);
+    Vector2 local_center = floor_layer->map_to_local(cell);
+    return floor_layer->to_global(local_center);
 }
 
 void FlowField::rebuild_async(Vector2 goal_world)
@@ -261,8 +318,6 @@ void FlowField::_start_thread(Vector2i goal_cell)
     _std_thread = std::thread([this, payload]()
                               { _thread_compute(payload); });
 }
-
-
 
 int32_t FlowField::cost_step(Vector2i a, Vector2i b) const
 {
@@ -313,17 +368,66 @@ Array FlowField::set_dist(Vector2i c, int32_t v, Rect2i used, Array dist_arr)
     return dist_arr;
 }
 
-void FlowField::_thread_compute(Dictionary payload)
+void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
 {
-    UtilityFunctions::print("THREAD STARTED!"); // ← Ajoute ça en PREMIER
-
-    _computing = true;
-    _version++;
+    _dirs_back = dirs_arr;
+    _used_rect_back = used;
+    _swap_buffers();
+    _computing = false;
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        _log_queue.push("FlowField: thread compute start");
+        _log_queue.push("FlowField: thread done");
     }
+
+    _needs_redraw = debug_draw;
+}
+
+void FlowField::_swap_buffers()
+{
+    _dirs_front = _dirs_back;
+    _used_rect_front = _used_rect_back;
+}
+
+void FlowField::_heap_push(Array &, const Array &) {}
+Array FlowField::_heap_pop(Array &heap) { return heap; }
+bool FlowField::_is_near_wall(Vector2i) const { return false; }
+
+Vector2i FlowField::_find_nearest_walkable(Vector2i origin, const Array &walkable) const
+{
+    if (walkable.is_empty())
+        return origin;
+    Vector2i best = origin;
+    double best_d2 = 1e18;
+    for (int i = 0; i < walkable.size(); i++)
+    {
+        Vector2i c = walkable[i];
+        double dx = double(c.x - origin.x);
+        double dy = double(c.y - origin.y);
+        double d2 = dx * dx + dy * dy;
+        if (d2 < best_d2)
+        {
+            best_d2 = d2;
+            best = c;
+        }
+    }
+    return best;
+}
+
+void FlowField::_join_thread_if_any()
+{
+    if (_std_thread.joinable())
+        _std_thread.join();
+}
+
+void FlowField::_thread_compute(Dictionary payload)
+{
+    using namespace std::chrono;
+    auto t0 = high_resolution_clock::now();
+    UtilityFunctions::print("THREAD STARTED!");
+
+    _computing = true;
+    _version++;
 
     if (!payload.has("goal_cell") || !payload.has("used_rect") || !payload.has("walkable"))
     {
@@ -339,31 +443,63 @@ void FlowField::_thread_compute(Dictionary payload)
     Rect2i used = payload["used_rect"];
     Array walkable = payload["walkable"];
 
-    Array dist_arr = make_dist_array(used);
-    Array dirs_arr;
+    // Set de lookup O(1) des cellules marchables (respect des murs)
+    Dictionary walkable_set;
+    for (int i = 0; i < walkable.size(); i++)
+        walkable_set[walkable[i]] = true;
+
+    // Tableaux
+    Array dist_arr = make_dist_array(used); // int32
+    Array dirs_arr;                         // Vector2
     dirs_arr.resize(dist_arr.size());
 
-    int64_t idx_goal = cell_index(goal_cell, used);
-    if (idx_goal >= 0 && idx_goal < dist_arr.size())
-        dist_arr[idx_goal] = 0;
+    // Goal valide
+    if (!walkable_set.has(goal_cell))
+        goal_cell = _find_nearest_walkable(goal_cell, walkable);
 
-    Array queue;
-    queue.append(goal_cell);
-    int64_t count = 0;
-    int64_t safety = 0;
+#include <queue>
 
-    while (queue.size() > 0)
+    struct FFNode
     {
-        if (safety++ > 1000000)
-        {
-            std::lock_guard<std::mutex> lock(_log_mutex);
-            _log_queue.push("FlowField: thread aborted (safety break)");
-            break;
-        }
+        Vector2i c;
+        int32_t d;
+        bool operator<(const FFNode &o) const { return d > o.d; }
+    };
 
-        Vector2i c = queue.pop_front();
-        int32_t d = get_dist(c, used, dist_arr);
-        Array nbs = _neighbors(c, allow_diagonals);
+    dist_arr = set_dist(goal_cell, 0, used, dist_arr);
+    std::priority_queue<FFNode> open;
+    open.push(FFNode{goal_cell, 0});
+
+    int64_t count = 0;
+    while (!open.empty())
+    {
+        FFNode cur = open.top();
+        open.pop();
+
+        int32_t dcur = get_dist(cur.c, used, dist_arr);
+        if (cur.d != dcur)
+            continue;
+
+        Array nbs;
+        for (int k = 0; k < 4; k++)
+        {
+            Vector2i n = cur.c + ORTHO[k];
+            if (walkable_set.has(n))
+                nbs.append(n);
+        }
+        if (allow_diagonals)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                Vector2i n = cur.c + DIAG[k];
+                if (!walkable_set.has(n))
+                    continue;
+                Vector2i side1(cur.c.x + DIAG[k].x, cur.c.y);
+                Vector2i side2(cur.c.x, cur.c.y + DIAG[k].y);
+                if (walkable_set.has(side1) && walkable_set.has(side2))
+                    nbs.append(n);
+            }
+        }
 
         for (int i = 0; i < nbs.size(); i++)
         {
@@ -371,22 +507,84 @@ void FlowField::_thread_compute(Dictionary payload)
             if (!in_bounds(n, used))
                 continue;
 
-            int32_t nd = d + cost_step(c, n);
+            int32_t nd = dcur + cost_step(cur.c, n);
             int32_t old = get_dist(n, used, dist_arr);
             if (nd < old)
             {
                 dist_arr = set_dist(n, nd, used, dist_arr);
-                queue.append(n);
+                open.push(FFNode{n, nd});
+            }
+        }
+        count++;
+    }
+
+    // Champ de directions: pour chaque cellule marchable, pointe vers le voisin de plus faible distance
+    for (int i = 0; i < walkable.size(); i++)
+    {
+        Vector2i c = walkable[i];
+        if (!in_bounds(c, used))
+            continue;
+
+        int32_t dc = get_dist(c, used, dist_arr);
+        if (dc == INT_MAX)
+        {
+            // hors composante atteignable
+            int64_t idx = (int64_t)cell_index(c, used);
+            if (idx >= 0 && idx < dirs_arr.size())
+                dirs_arr[idx] = Vector2();
+            continue;
+        }
+
+        int32_t best_d = dc;
+        Vector2i best = c;
+
+        // Même contrainte murs / diagonales
+        // Ortho
+        for (int k = 0; k < 4; k++)
+        {
+            Vector2i n = c + ORTHO[k];
+            if (!walkable_set.has(n))
+                continue;
+            int32_t dn = get_dist(n, used, dist_arr);
+            if (dn < best_d)
+            {
+                best_d = dn;
+                best = n;
+            }
+        }
+        // Diag
+        if (allow_diagonals)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                Vector2i n = c + DIAG[k];
+                if (!walkable_set.has(n))
+                    continue;
+                Vector2i side1(c.x + DIAG[k].x, c.y);
+                Vector2i side2(c.x, c.y + DIAG[k].y);
+                if (!(walkable_set.has(side1) && walkable_set.has(side2)))
+                    continue;
+                int32_t dn = get_dist(n, used, dist_arr);
+                if (dn < best_d)
+                {
+                    best_d = dn;
+                    best = n;
+                }
             }
         }
 
-        if (count % 10000 == 0)
+        Vector2 out = Vector2();
+        if (best != c && best_d < dc)
         {
-            std::lock_guard<std::mutex> lock(_log_mutex);
-            _log_queue.push("FlowField: progress " + String::num_int64(count));
+            Vector2 delta = Vector2((float)(best.x - c.x), (float)(best.y - c.y));
+            float len2 = delta.x * delta.x + delta.y * delta.y;
+            if (len2 > 0.0f)
+                out = delta / Math::sqrt(len2);
         }
 
-        count++;
+        int64_t idx = (int64_t)cell_index(c, used);
+        if (idx >= 0 && idx < dirs_arr.size())
+            dirs_arr[idx] = out;
     }
 
     {
@@ -397,58 +595,59 @@ void FlowField::_thread_compute(Dictionary payload)
     _thread_done_arr(dirs_arr, used);
     _computing = false;
 
-    UtilityFunctions::print("THREAD FINISHED!");
+    auto t1 = high_resolution_clock::now();
+    double ms = duration_cast<milliseconds>(t1 - t0).count();
+    UtilityFunctions::print("THREAD FINISHED! build time (ms):", ms);
 }
 
-void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
+Vector2 FlowField::sample_dir_cell(Vector2i cell) const
 {
-    _dirs_back = dirs_arr;
-    _used_rect_back = used;
-    _swap_buffers();
-    _computing = false;
-
-    {
-        std::lock_guard<std::mutex> lock(_log_mutex);
-        _log_queue.push("FlowField: thread done");
-    }
+    if (!in_bounds(cell, _used_rect_front))
+        return Vector2();
+    int64_t idx = (int64_t)cell_index(cell, _used_rect_front);
+    if (idx < 0 || idx >= _dirs_front.size())
+        return Vector2();
+    Variant v = _dirs_front[idx];
+    if (v.get_type() != Variant::VECTOR2)
+        return Vector2();
+    return (Vector2)v;
 }
 
-void FlowField::_swap_buffers()
+Vector2 FlowField::sample_dir_world(Vector2 world_pos) const
 {
-    _dirs_front = _dirs_back;
-    _used_rect_front = _used_rect_back;
+    if (_dirs_front.is_empty())
+        return Vector2();
+    Vector2i c = world_to_cell(world_pos);
+    return sample_dir_cell(c);
 }
 
-void FlowField::_heap_push(Array &, const Array &) {}
-Array FlowField::_heap_pop(Array &heap) { return heap; }
-bool FlowField::_is_near_wall(Vector2i) const { return false; }
-Vector2i FlowField::_find_nearest_walkable(Vector2i origin, const Array &) const { return origin; }
-
-void FlowField::_join_thread_if_any()
+Vector2 FlowField::sample_dir_world_bilinear(Vector2 world_pos) const
 {
-    if (_std_thread.joinable())
-        _std_thread.join();
+    if (_dirs_front.is_empty() || !floor_layer)
+        return Vector2();
+
+    Vector2 local = floor_layer->to_local(world_pos);
+    float fx = local.x / (float)tile_size.x;
+    float fy = local.y / (float)tile_size.y;
+
+    int x0 = (int)Math::floor(fx), y0 = (int)Math::floor(fy);
+    int x1 = x0 + 1, y1 = y0 + 1;
+
+    Vector2 c00 = sample_dir_cell(Vector2i(x0, y0));
+    Vector2 c10 = sample_dir_cell(Vector2i(x1, y0));
+    Vector2 c01 = sample_dir_cell(Vector2i(x0, y1));
+    Vector2 c11 = sample_dir_cell(Vector2i(x1, y1));
+
+    float tx = fx - (float)x0;
+    float ty = fy - (float)y0;
+
+    Vector2 a = c00.lerp(c10, tx);
+    Vector2 b = c01.lerp(c11, tx);
+    Vector2 v = a.lerp(b, ty);
+
+    float len2 = v.x * v.x + v.y * v.y;
+    return (len2 > 1e-6f) ? (v / Math::sqrt(len2)) : Vector2();
 }
-
-Vector2 FlowField::sample_dir_cell(Vector2i) const { return Vector2(); }
-Vector2 FlowField::sample_dir_world(Vector2) const { return Vector2(); }
-Vector2 FlowField::sample_dir_world_bilinear(Vector2) const { return Vector2(); }
-
-/* void FlowField::test_print_threads() {
-    // Test 1 : print depuis le thread principal
-    UtilityFunctions::print("FlowField: print depuis thread principal OK");
-
-    // Test 2 : print depuis un thread secondaire
-    Thread *t = memnew(Thread);
-    Callable task = callable_mp(this, &FlowField::_test_thread_func);
-    t->start(task);
-    t->wait_to_finish();
-    memdelete(t);
-}
-
-void FlowField::_test_thread_func() {
-    UtilityFunctions::print("FlowField: print depuis thread secondaire");
-} */
 
 void FlowField::_exit_tree()
 {

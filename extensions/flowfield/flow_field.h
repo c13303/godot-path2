@@ -15,6 +15,7 @@
 #include <thread>
 
 
+
 namespace godot
 {
     class FlowField : public Node2D
@@ -138,6 +139,8 @@ namespace godot
         mutable std::queue<String> _log_queue;
         mutable std::mutex _log_mutex;    
         std::thread _std_thread;
+        bool _needs_redraw = false;
+
 
     };
 }
