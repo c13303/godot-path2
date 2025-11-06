@@ -356,7 +356,7 @@ void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        /* _log_queue.push("FlowField: thread done"); */
+        /* _log_queue.push("FlowField: thread done"); */ 
     }
 
     _needs_redraw = debug_draw;
