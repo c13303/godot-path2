@@ -13,8 +13,16 @@
 #include <queue>
 #include <mutex>
 #include <thread>
+#include <vector>
+#include <unordered_set>
 
-
+struct Vector2iHash
+{
+    size_t operator()(const godot::Vector2i &v) const noexcept
+    {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(v.x)) << 32) ^ static_cast<uint32_t>(v.y);
+    }
+};
 
 namespace godot
 {
@@ -100,6 +108,8 @@ namespace godot
         Vector2i _find_nearest_walkable(Vector2i origin, const Array &walkable) const;
         void _join_thread_if_any();
         void _test_thread_func();
+        void store_floor_native();
+        void store_wall_native();
 
     private:
         TileMapLayer *floor_layer = nullptr;
@@ -137,11 +147,17 @@ namespace godot
         static const Vector2i DIAG[4];
 
         mutable std::queue<String> _log_queue;
-        mutable std::mutex _log_mutex;    
+        mutable std::mutex _log_mutex;
         std::thread _std_thread;
         bool _needs_redraw = false;
+        
+        std::vector<godot::Vector2i> _floor_cells;
+        std::unordered_set<godot::Vector2i, Vector2iHash> _floor_set;
+        godot::Rect2i _used_rect_floor;
 
-
+        std::vector<godot::Vector2i> _wall_cells;
+        std::unordered_set<godot::Vector2i, Vector2iHash> _wall_set;
+        godot::Rect2i _used_rect_wall;
     };
 }
 

@@ -63,8 +63,8 @@ void FlowField::_bind_methods()
     ClassDB::bind_method(D_METHOD("make_dist_array", "rect"), &FlowField::make_dist_array);
     ClassDB::bind_method(D_METHOD("get_dist", "c", "used", "dist_arr"), &FlowField::get_dist);
     ClassDB::bind_method(D_METHOD("set_dist", "c", "v", "used", "dist_arr"), &FlowField::set_dist);
-    /*     ClassDB::bind_method(D_METHOD("test_print_threads"), &FlowField::test_print_threads);
-     */
+    ClassDB::bind_method(D_METHOD("store_floor_native"), &FlowField::store_floor_native);
+    ClassDB::bind_method(D_METHOD("store_wall_native"), &FlowField::store_wall_native);
 }
 
 FlowField::FlowField()
@@ -185,53 +185,26 @@ void FlowField::_build_walkable_snapshot()
     _walkable.clear();
     _walkable_set.clear();
 
-    if (!floor_layer)
+    if (_floor_cells.empty())
+    {
+        UtilityFunctions::print("FlowField: no native floor data, call store_floor_native() first");
         return;
-
-    Array floors = floor_layer->get_used_cells();
-    Array walls;
-    if (wall_layer)
-        walls = wall_layer->get_used_cells();
-
-    UtilityFunctions::print("=== FLOWFIELD SNAPSHOT ===");
-    UtilityFunctions::print("Floors count:", floors.size());
-    UtilityFunctions::print("Walls count:", walls.size());
-
-    if (walls.size() > 0)
-    {
-        Vector2i min_w(INT_MAX, INT_MAX);
-        Vector2i max_w(INT_MIN, INT_MIN);
-        for (int i = 0; i < walls.size(); i++)
-        {
-            Vector2i w = walls[i];
-            if (w.x < min_w.x) min_w.x = w.x;
-            if (w.y < min_w.y) min_w.y = w.y;
-            if (w.x > max_w.x) max_w.x = w.x;
-            if (w.y > max_w.y) max_w.y = w.y;
-        }
-        UtilityFunctions::print("Walls bounding box: from", min_w, "to", max_w);
-    }
-    else
-    {
-        UtilityFunctions::print("No walls detected!");
     }
 
-    Dictionary wall_set;
-    for (int i = 0; i < walls.size(); i++)
-        wall_set[walls[i]] = true;
+    // S'assurer qu'on a au moins un wall_set valide (peut être vide)
+    int wall_count = (int)_wall_cells.size();
+    UtilityFunctions::print("FlowField: building snapshot from native data (walls:", wall_count, ")");
 
-    for (int i = 0; i < floors.size(); i++)
+    for (const godot::Vector2i &c : _floor_cells)
     {
-        Vector2i c = floors[i];
-        if (!wall_set.has(c))
+        if (_wall_set.find(c) == _wall_set.end())
         {
             _walkable.append(c);
             _walkable_set[c] = true;
         }
     }
 
-    UtilityFunctions::print("Walkable cells count:", _walkable.size());
-    UtilityFunctions::print("==========================");
+    UtilityFunctions::print("FlowField: walkable snapshot built, cells:", _walkable.size());
 }
 
 Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
@@ -652,4 +625,66 @@ Vector2 FlowField::sample_dir_world_bilinear(Vector2 world_pos) const
 void FlowField::_exit_tree()
 {
     _join_thread_if_any();
+}
+
+void FlowField::store_floor_native()
+{
+    _floor_cells.clear();
+    _floor_set.clear();
+
+    if (!floor_layer)
+    {
+        UtilityFunctions::print("FlowField: floor_layer is NULL");
+        return;
+    }
+
+    Array floors = floor_layer->get_used_cells();
+    if (floors.is_empty())
+    {
+        UtilityFunctions::print("FlowField: floor_layer empty");
+        return;
+    }
+
+    _floor_cells.reserve(floors.size());
+    for (int i = 0; i < floors.size(); i++)
+    {
+        godot::Vector2i c = floors[i];
+        _floor_cells.push_back(c);
+        _floor_set.insert(c);
+    }
+
+    _used_rect_floor = floor_layer->get_used_rect();
+
+    UtilityFunctions::print("FlowField: stored floor native, cells:", (int)_floor_cells.size());
+}
+
+void FlowField::store_wall_native()
+{
+    _wall_cells.clear();
+    _wall_set.clear();
+
+    if (!wall_layer)
+    {
+        UtilityFunctions::print("FlowField: wall_layer is NULL");
+        return;
+    }
+
+    Array walls = wall_layer->get_used_cells();
+    if (walls.is_empty())
+    {
+        UtilityFunctions::print("FlowField: wall_layer empty");
+        return;
+    }
+
+    _wall_cells.reserve(walls.size());
+    for (int i = 0; i < walls.size(); i++)
+    {
+        godot::Vector2i c = walls[i];
+        _wall_cells.push_back(c);
+        _wall_set.insert(c);
+    }
+
+    _used_rect_wall = wall_layer->get_used_rect();
+
+    UtilityFunctions::print("FlowField: stored wall native, cells:", (int)_wall_cells.size());
 }

@@ -20,12 +20,16 @@ func _ready():
 	else:
 		push_warning("FlowField_tester: controls node not found.")
 
+	# chargement initial
+	ff.store_floor_native()
+	ff.store_wall_native()
+	ff.build_walkable_snapshot()
+
 func _on_mouse_goal(world_pos: Vector2):
 	if ff == null:
 		return
 
-	ff.build_walkable_snapshot()
-
+	# aucun rechargement de mur ici, juste rebuild
 	var offset = Vector2(-ff.get_tile_size().x * 0.5, -ff.get_tile_size().y * 0.5)
 	var adjusted_goal = world_pos + offset
 	print("Rebuild FlowField at:", adjusted_goal)

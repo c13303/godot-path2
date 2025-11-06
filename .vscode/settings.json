@@ -45,6 +45,11 @@
         "xlocinfo": "cpp",
         "xmemory": "cpp",
         "xtr1common": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "forward_list": "cpp",
+        "ios": "cpp",
+        "list": "cpp",
+        "xhash": "cpp",
+        "xiosbase": "cpp"
     }
 }
