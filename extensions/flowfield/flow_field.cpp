@@ -356,7 +356,7 @@ void FlowField::_thread_done_arr(const Array &dirs_arr, Rect2i used)
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        _log_queue.push("FlowField: thread done");
+        /* _log_queue.push("FlowField: thread done"); */
     }
 
     _needs_redraw = debug_draw;
@@ -584,7 +584,8 @@ void FlowField::_thread_compute(Dictionary payload)
 
     auto t1 = high_resolution_clock::now();
     double ms = duration_cast<milliseconds>(t1 - t0).count();
-    UtilityFunctions::print("THREAD FINISHED! build time (ms):", ms);
+    if (ms > 15)
+        UtilityFunctions::print("Alert build time (ms):", ms);
 }
 
 Vector2 FlowField::sample_dir_cell(Vector2i cell) const
@@ -700,5 +701,5 @@ void FlowField::store_wall_native()
 
     _used_rect_wall = wall_layer->get_used_rect();
 
-   /*  UtilityFunctions::print("FlowField: stored wall native, cells:", (int)_wall_cells.size()); */
+    /*  UtilityFunctions::print("FlowField: stored wall native, cells:", (int)_wall_cells.size()); */
 }

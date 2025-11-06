@@ -27,11 +27,15 @@ func _physics_process(_delta: float) -> void:
 		z_index = int(global_position.y)
 		return
 
+	var tile_size: Vector2i = flow_ref.get_tile_size()
+	var offset: Vector2 = Vector2(-tile_size.x * 0.5, -tile_size.y * 0.5)
+	var sample_pos: Vector2 = global_position + offset
+
 	var dir: Vector2 = Vector2.ZERO
 	if use_bilinear:
-		dir = flow_ref.sample_dir_world_bilinear(global_position)
+		dir = flow_ref.sample_dir_world_bilinear(sample_pos)
 	else:
-		dir = flow_ref.sample_dir_world(global_position)
+		dir = flow_ref.sample_dir_world(sample_pos)
 
 	if dir == Vector2.ZERO:
 		velocity = Vector2.ZERO
@@ -40,6 +44,7 @@ func _physics_process(_delta: float) -> void:
 
 	move_and_slide()
 	z_index = int(global_position.y)
+
 
 ## Version avec smooth steering (optionnelle pour plus de contrôle)
 func _physics_process_smooth(delta: float) -> void:
