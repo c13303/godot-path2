@@ -280,7 +280,9 @@ void FlowField::_start_thread(Vector2i goal_cell)
     Dictionary payload;
     payload["goal_cell"] = goal_cell;
     payload["used_rect"] = used;
-    payload["walkable"] = _walkable;
+    payload["walkable"] = _walkable;           // ← Ajout
+    payload["walkable_set"] = _walkable_set;   // ← Ajout
+    payload["allow_diagonals"] = allow_diagonals; // ← Optionnel
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
@@ -402,36 +404,34 @@ void FlowField::_thread_compute(Dictionary payload)
     _computing = true;
     _version++;
 
-    if (!payload.has("goal_cell") || !payload.has("used_rect") || !payload.has("walkable"))
+    // Validation payload
+    if (!payload.has("goal_cell") || !payload.has("used_rect"))
     {
-        {
-            std::lock_guard<std::mutex> lock(_log_mutex);
-            _log_queue.push("FlowField: thread error invalid payload");
-        }
+        std::lock_guard<std::mutex> lock(_log_mutex);
+        _log_queue.push("FlowField: thread error invalid payload");
         _computing = false;
         return;
     }
 
     Vector2i goal_cell = payload["goal_cell"];
     Rect2i used = payload["used_rect"];
-    Array walkable = payload["walkable"];
 
-    // Set de lookup O(1) des cellules marchables (respect des murs)
-    Dictionary walkable_set;
-    for (int i = 0; i < walkable.size(); i++)
-        walkable_set[walkable[i]] = true;
+    // Récupération des données pré-construites
+    Array walkable = payload["walkable"];
+    Dictionary walkable_set = payload["walkable_set"];
 
     // Tableaux
-    Array dist_arr = make_dist_array(used); // int32
-    Array dirs_arr;                         // Vector2
+    Array dist_arr = make_dist_array(used);
+    Array dirs_arr;
     dirs_arr.resize(dist_arr.size());
+    for (int64_t i = 0; i < dirs_arr.size(); i++)
+        dirs_arr[i] = Vector2();
 
     // Goal valide
     if (!walkable_set.has(goal_cell))
         goal_cell = _find_nearest_walkable(goal_cell, walkable);
 
-#include <queue>
-
+    // ✅ DÉCLARATION DE FFNode ICI
     struct FFNode
     {
         Vector2i c;
@@ -439,11 +439,18 @@ void FlowField::_thread_compute(Dictionary payload)
         bool operator<(const FFNode &o) const { return d > o.d; }
     };
 
+    // ✅ DÉCLARATION DES VARIABLES
     dist_arr = set_dist(goal_cell, 0, used, dist_arr);
     std::priority_queue<FFNode> open;
     open.push(FFNode{goal_cell, 0});
 
     int64_t count = 0;
+
+    // Buffer réutilisable pour voisins (optionnel mais recommandé)
+    static thread_local std::vector<Vector2i> nbs_buffer;
+    nbs_buffer.reserve(8);
+
+    // ✅ BOUCLE DIJKSTRA
     while (!open.empty())
     {
         FFNode cur = open.top();
@@ -453,13 +460,17 @@ void FlowField::_thread_compute(Dictionary payload)
         if (cur.d != dcur)
             continue;
 
-        Array nbs;
+        nbs_buffer.clear();
+
+        // Ortho
         for (int k = 0; k < 4; k++)
         {
             Vector2i n = cur.c + ORTHO[k];
             if (walkable_set.has(n))
-                nbs.append(n);
+                nbs_buffer.push_back(n);
         }
+
+        // Diag
         if (allow_diagonals)
         {
             for (int k = 0; k < 4; k++)
@@ -470,13 +481,13 @@ void FlowField::_thread_compute(Dictionary payload)
                 Vector2i side1(cur.c.x + DIAG[k].x, cur.c.y);
                 Vector2i side2(cur.c.x, cur.c.y + DIAG[k].y);
                 if (walkable_set.has(side1) && walkable_set.has(side2))
-                    nbs.append(n);
+                    nbs_buffer.push_back(n);
             }
         }
 
-        for (int i = 0; i < nbs.size(); i++)
+        // Traiter voisins
+        for (const Vector2i &n : nbs_buffer)
         {
-            Vector2i n = nbs[i];
             if (!in_bounds(n, used))
                 continue;
 
@@ -491,7 +502,7 @@ void FlowField::_thread_compute(Dictionary payload)
         count++;
     }
 
-    // Champ de directions: pour chaque cellule marchable, pointe vers le voisin de plus faible distance
+    // Champ de directions (reste identique)
     for (int i = 0; i < walkable.size(); i++)
     {
         Vector2i c = walkable[i];
@@ -501,7 +512,6 @@ void FlowField::_thread_compute(Dictionary payload)
         int32_t dc = get_dist(c, used, dist_arr);
         if (dc == INT_MAX)
         {
-            // hors composante atteignable
             int64_t idx = (int64_t)cell_index(c, used);
             if (idx >= 0 && idx < dirs_arr.size())
                 dirs_arr[idx] = Vector2();
@@ -511,7 +521,6 @@ void FlowField::_thread_compute(Dictionary payload)
         int32_t best_d = dc;
         Vector2i best = c;
 
-        // Même contrainte murs / diagonales
         // Ortho
         for (int k = 0; k < 4; k++)
         {
@@ -525,6 +534,7 @@ void FlowField::_thread_compute(Dictionary payload)
                 best = n;
             }
         }
+
         // Diag
         if (allow_diagonals)
         {
