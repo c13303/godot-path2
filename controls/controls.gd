@@ -11,7 +11,7 @@ extends Node2D
 
 var lastFPS: float = 0
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
-
+var spawngrappe: int = 100
 # -----------------------------------------------------
 # INITIALISATION
 # -----------------------------------------------------
@@ -65,7 +65,7 @@ func _on_click_set_goal() -> void:
 
 func _on_key_spawn_chars() -> void:
 	var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
-	for i in range(50):
+	for i in range(spawngrappe):
 		_spawn_mainchar(cell_center)
 
 # -----------------------------------------------------
@@ -113,11 +113,15 @@ func _spawn_mainchar(pos: Vector2) -> void:
 	get_parent().add_child(c)
 	c.global_position = free_pos
 	c.add_to_group("main_chars")
-
-	# Lien direct avec le flowfield C++
 	c.set_meta("flow_ref", flow)
 
-
+	if has_node("../SteeringSystem"):
+		c.steering_system = get_node("../SteeringSystem")
+		# Enregistre immédiatement l’agent dans la grille
+		if c.steering_system.grid != null:
+			c.steering_system.grid.register(c)
+	else:
+		print("Steering System Not Found")
 
 # -----------------------------------------------------
 # CAMERA

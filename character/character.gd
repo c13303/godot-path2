@@ -5,6 +5,7 @@ class_name FlowAgent
 
 ## Agent optimisé pour le plugin FlowField C++
 ## Compatible avec l'ancien système via PathManager
+@export var steering_system: SteeringSystem
 
 @export var path_manager: PathManager
 @export var max_speed: float = 100.0
@@ -31,16 +32,21 @@ func _physics_process(_delta: float) -> void:
 	var offset: Vector2 = Vector2(-tile_size.x * 0.5, -tile_size.y * 0.5)
 	var sample_pos: Vector2 = global_position + offset
 
-	var dir: Vector2 = Vector2.ZERO
+	var flow_dir: Vector2 = Vector2.ZERO
 	if use_bilinear:
-		dir = flow_ref.sample_dir_world_bilinear(sample_pos)
+		flow_dir = flow_ref.sample_dir_world_bilinear(sample_pos)
 	else:
-		dir = flow_ref.sample_dir_world(sample_pos)
+		flow_dir = flow_ref.sample_dir_world(sample_pos)
 
-	if dir == Vector2.ZERO:
+	if steering_system != null:
+		var neighbors: Array = get_tree().get_nodes_in_group("main_chars")
+		var steering_dir: Vector2 = steering_system.compute(self, neighbors, flow_dir)
+		flow_dir = steering_dir
+
+	if flow_dir == Vector2.ZERO:
 		velocity = Vector2.ZERO
 	else:
-		velocity = dir.normalized() * max_speed
+		velocity = flow_dir.normalized() * max_speed
 
 	move_and_slide()
 	z_index = int(global_position.y)
