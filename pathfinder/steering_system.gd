@@ -5,7 +5,7 @@ class_name SteeringSystem
 ## Fournit une interface unique, indépendante du FlowField ou de A*
 
 @export var neighbor_radius: float = 16.0
-@export var weight_separation: float = 1
+@export var weight_separation: float = 2
 @export var weight_alignment: float = 0.6
 @export var weight_cohesion: float = 0.4
 @onready var grid: SpatialGrid = SpatialGrid.new()
@@ -96,7 +96,7 @@ func get_neighbors(agent: Node2D, all_agents: Array) -> Array:
 	grid.update(agent)
 	var raw: Array = grid.neighbors_at(agent.global_position, 1)
 	
-	const MAX_CONSIDERED: int = 16
+	const MAX_CONSIDERED: int = 8
 	var candidates: Array = []
 	var agent_pos: Vector2 = agent.global_position
 	
