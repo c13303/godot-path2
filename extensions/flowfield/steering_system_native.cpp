@@ -19,6 +19,31 @@ void SteeringSystemNative::_bind_methods()
 SteeringSystemNative::SteeringSystemNative() {}
 SteeringSystemNative::~SteeringSystemNative() {}
 
+// --- Paramètres globaux de tuning ---
+namespace
+{
+	const double FLOW_WEIGHT = 1.0;			  // influence du flowfield
+	const double SEPARATION_WEIGHT = 1;		  // poids de la séparation entre agents
+	const double WALL_REPULSION_WEIGHT = 0.6; // intensité de la répulsion murale douce
+
+	const double NEIGHBOR_RADIUS_SOFT = 20.0; // rayon max de détection des voisins (pixels)
+	const double NEIGHBOR_RADIUS_HARD = 16.0; // rayon min à basse vitesse (densité accrue)
+
+	const double SLOW_RADIUS_FACTOR = 2.0;		// distance de ralentissement avant but (× taille tuile)
+	const double ARRIVAL_EPS_FACTOR = 0.15;		// tolérance de distance pour considérer un agent arrivé
+	const double STOP_PROPAGATION_FACTOR = 0.9; // distance d’influence d’un agent arrêté (× tuile)
+
+	const double SLIDE_DECAY_PER_STEP = 0.85; // amorti du slide à chaque micro-pas
+	const double SLIDE_PROBE_DISTANCE = 0.6;  // distance latérale testée pour le slide (× tuile)
+	const bool DIAGONAL_PROBE_ENABLE = true;  // active la recherche diagonale lors du contournement
+
+	const double JITTER_AMPLITUDE = 0.5;	 // intensité du léger bruit directionnel
+	const double JITTER_COOLDOWN = 0.25;	 // délai minimal entre deux perturbations (s)
+	const bool JITTER_ONLY_NEAR_WALL = true; // n’applique le jitter que proche d’un mur
+
+	const double MAX_MICRO_STEP_TILE = 0.4; // taille max d’un micro-pas (× taille tuile)
+}
+
 void SteeringSystemNative::register_agent(Node2D *agent, int32_t group_id, double max_speed)
 {
 	if (!agent)
@@ -77,11 +102,12 @@ void SteeringSystemNative::set_grid(SpatialGridNative *g)
 	grid = g;
 }
 
-Vector2 SteeringSystemNative::compute_separation(Node2D *agent, double neighbor_radius)
+Vector2 SteeringSystemNative::compute_separation(Node2D *agent, double /* neighbor_radius */)
 {
 	if (!grid || !agent)
 		return Vector2();
 
+	const double neighbor_radius = NEIGHBOR_RADIUS_SOFT;
 	Vector2 pos = agent->get_global_position();
 	TypedArray<Node2D> neighbors = grid->get_neighbors(pos, 2);
 
@@ -195,6 +221,38 @@ void SteeringSystemNative::update_all_agents(double delta)
 
 		// --- Lecture de direction ---
 		Vector2 flow_dir = ff->sample_dir_world(a.position);
+
+		// --- Répulsion mur douce ---
+		Vector2 wall_repulse;
+		if (ff)
+		{
+			auto *floor_layer = ff->get_floor_layer();
+			auto *wall_layer = ff->get_wall_layer();
+			const double tile_px = (double)ff->get_tile_size().x;
+			const double probe_dist = tile_px * 0.5;
+
+			// Quatre directions cardinales
+			const Vector2 probes[4] = {
+				Vector2(probe_dist, 0),
+				Vector2(-probe_dist, 0),
+				Vector2(0, probe_dist),
+				Vector2(0, -probe_dist)};
+
+			for (const auto &p : probes)
+			{
+				Vector2 probe_pos = a.position + p;
+				Vector2i cell = ff->world_to_cell(probe_pos);
+				bool has_wall = wall_layer && wall_layer->get_cell_tile_data(cell) != nullptr;
+				if (has_wall)
+				{
+					double falloff = 1.0 - (p.length() / (tile_px * 0.8));
+					wall_repulse -= p.normalized() * Math::clamp(falloff, 0.0, 1.0);
+				}
+			}
+			if (wall_repulse != Vector2())
+				wall_repulse = wall_repulse.normalized() * WALL_REPULSION_WEIGHT;
+		}
+
 		if (flow_dir == Vector2())
 		{
 			Vector2i cur = ff->world_to_cell(a.position);
@@ -220,9 +278,16 @@ void SteeringSystemNative::update_all_agents(double delta)
 			flow_dir = alt_dir;
 		}
 
+		// --- Rayon de séparation adaptatif selon la vitesse ---
+		double speed = a.velocity.length();
+		double t = Math::clamp(speed / a.max_speed, 0.0, 1.0);
+		double adaptive_radius = Math::lerp(NEIGHBOR_RADIUS_HARD, NEIGHBOR_RADIUS_SOFT, t);
+
 		// --- Steering lissé et fluide ---
-		Vector2 sep = compute_separation(a.node, 32.0) * 1.2;
-		Vector2 target_dir = (flow_dir * 1.0 + sep * 0.8).normalized();
+		Vector2 sep = compute_separation(a.node, adaptive_radius) * SEPARATION_WEIGHT;
+		Vector2 combined = (flow_dir * FLOW_WEIGHT + sep + wall_repulse).normalized();
+		Vector2 target_dir = combined;
+
 		a.velocity = a.velocity.lerp(target_dir * a.max_speed, 0.25);
 
 		// Freinage progressif à l'approche du but
@@ -319,25 +384,47 @@ void SteeringSystemNative::update_all_agents(double delta)
 				if (ok_x && !ok_y)
 				{
 					a.position = trial_x;
-					// amorti léger pour éviter l’oscillation
-					a.velocity *= 0.85f;
+					a.velocity *= SLIDE_DECAY_PER_STEP; // amorti du slide
 					continue;
 				}
 				if (ok_y && !ok_x)
 				{
 					a.position = trial_y;
-					a.velocity *= 0.85f;
+					a.velocity *= SLIDE_DECAY_PER_STEP;
 					continue;
 				}
 				if (ok_x && ok_y)
 				{
-					// les deux axes sont possibles : choisir le plus long composant
 					if (Math::abs(step.x) >= Math::abs(step.y))
 						a.position = trial_x;
 					else
 						a.position = trial_y;
-					a.velocity *= 0.85f;
+					a.velocity *= SLIDE_DECAY_PER_STEP;
 					continue;
+				}
+
+				// Option diagonale : test supplémentaire si activé
+				if (DIAGONAL_PROBE_ENABLE)
+				{
+					const Vector2 diagonals[4] = {
+						Vector2(step.x, step.y),
+						Vector2(step.x, -step.y),
+						Vector2(-step.x, step.y),
+						Vector2(-step.x, -step.y)};
+
+					for (const auto &d : diagonals)
+					{
+						Vector2 trial_diag = a.position + d;
+						Vector2i cell_diag = ff->world_to_cell(trial_diag);
+						bool ok_diag = floor_layer && floor_layer->get_cell_tile_data(cell_diag) != nullptr &&
+									   !(wall_layer && wall_layer->get_cell_tile_data(cell_diag) != nullptr);
+						if (ok_diag)
+						{
+							a.position = trial_diag;
+							a.velocity *= SLIDE_DECAY_PER_STEP * 0.9; // amorti plus fort sur diagonale
+							break;
+						}
+					}
 				}
 
 				// Aucune issue sur ce micro-pas : on stoppe le mouvement restant
