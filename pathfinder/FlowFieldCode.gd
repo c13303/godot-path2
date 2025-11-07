@@ -32,8 +32,6 @@ func _on_mouse_goal(world_pos: Vector2) -> void:
 
 	var test_cell: Vector2i = ff.world_to_cell(world_pos)
 	var cell_world_center: Vector2 = ff.cell_to_world(test_cell)
-	print("DEBUG GOAL click_world:", world_pos,
-		  "→ test_cell:", test_cell,
-		  "→ cell_center:", cell_world_center)
+
 
 	ff.rebuild_async(world_pos)

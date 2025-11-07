@@ -239,7 +239,7 @@ Array FlowField::_neighbors(Vector2i cell, bool diag_ok) const
 
 Vector2i FlowField::world_to_cell(Vector2 world_pos) const
 {
-    UtilityFunctions::print("DEBUG CPP world_to_cell call, world_pos=", world_pos);
+    /* UtilityFunctions::print("DEBUG CPP world_to_cell call, world_pos=", world_pos); */
 
     if (!floor_layer)
         return Vector2i();
@@ -247,7 +247,7 @@ Vector2i FlowField::world_to_cell(Vector2 world_pos) const
     Vector2 local = floor_layer->get_global_transform().affine_inverse().xform(world_pos);
     Vector2i cell = floor_layer->local_to_map(local);
 
-    UtilityFunctions::print("DEBUG CPP result cell=", cell);
+    /* UtilityFunctions::print("DEBUG CPP result cell=", cell); */
     return cell;
 }
 
@@ -299,7 +299,7 @@ void FlowField::_start_thread(Vector2i goal_cell)
 
     {
         std::lock_guard<std::mutex> lock(_log_mutex);
-        UtilityFunctions::print("DEBUG FF _start_thread: goal_cell set to", goal_cell);
+        /* UtilityFunctions::print("DEBUG FF _start_thread: goal_cell set to", goal_cell); */
     }
 
     _computing = true;

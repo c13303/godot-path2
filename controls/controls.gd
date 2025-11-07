@@ -1,4 +1,3 @@
-#controls.gd
 extends Node2D
 
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"
@@ -8,10 +7,19 @@ extends Node2D
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
+@export var zoom_speed: float = 0.1
+@export var min_zoom: float = 0.5
+@export var max_zoom: float = 3.0
 
 var lastFPS: float = 0
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
 var spawngrappe: int = 50
+
+# --- Variables pour le drag caméra ---
+var dragging: bool = false
+var drag_start_pos: Vector2
+var camera_start_pos: Vector2
+
 # -----------------------------------------------------
 # INITIALISATION
 # -----------------------------------------------------
@@ -30,7 +38,7 @@ func _start_interval() -> void:
 	get_tree().create_timer(1.0).timeout.connect(_on_once)
 
 func _on_once() -> void:
-	var curFPS = Engine.get_frames_per_second()
+	var curFPS: float = Engine.get_frames_per_second()
 	if curFPS != lastFPS:
 		print("FPS:", curFPS)
 		lastFPS = curFPS
@@ -41,8 +49,28 @@ func _on_once() -> void:
 # -----------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_on_click_set_goal()
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			_on_click_set_goal()
+
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			if camera != null:
+				camera.zoom = Vector2(clamp(camera.zoom.x - zoom_speed, min_zoom, max_zoom),
+									  clamp(camera.zoom.y - zoom_speed, min_zoom, max_zoom))
+
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			if camera != null:
+				camera.zoom = Vector2(clamp(camera.zoom.x + zoom_speed, min_zoom, max_zoom),
+									  clamp(camera.zoom.y + zoom_speed, min_zoom, max_zoom))
+
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			if event.pressed:
+				dragging = true
+				drag_start_pos = get_viewport().get_mouse_position()
+				camera_start_pos = camera.position
+			else:
+				dragging = false
+
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		_on_key_spawn_chars()
 		var nb_chars: int = get_tree().get_nodes_in_group("main_chars").size()
@@ -56,11 +84,6 @@ func _on_click_set_goal() -> void:
 	var cell_center: Vector2 = Utils.get_tile_pos_from_mouse(floorz)
 	marker.global_position = cell_center + Vector2(-8, -8)
 	marker.visible = true
-	
-	# TEMPORAIRE - pour tester :
-	# if flow != null:
-	#     flow.rebuild_async(cell_center)
-	
 	emit_signal("mouse_goal_set", cell_center)
 
 func _on_key_spawn_chars() -> void:
@@ -75,7 +98,6 @@ func _on_key_spawn_chars() -> void:
 func _find_free_cell_near(flow: FlowField, start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if not occupied.has(start_cell) and _is_walkable(start_cell):
 		return start_cell
-
 	for r in range(1, max_radius + 1):
 		for dx in range(-r, r + 1):
 			for dy in range(-r, r + 1):
@@ -85,13 +107,11 @@ func _find_free_cell_near(flow: FlowField, start_cell: Vector2i, occupied: Array
 				if _is_walkable(c):
 					return c
 	return start_cell
-	
-func _is_walkable(cell: Vector2i) -> bool:
-	# Walkable si un tile existe dans floor et aucun tile dans wall
-	var has_floor := floorz.get_cell_tile_data(cell) != null
-	var has_wall := wallz != null and wallz.get_cell_tile_data(cell) != null
-	return has_floor and not has_wall
 
+func _is_walkable(cell: Vector2i) -> bool:
+	var has_floor: bool = floorz.get_cell_tile_data(cell) != null
+	var has_wall: bool = wallz != null and wallz.get_cell_tile_data(cell) != null
+	return has_floor and not has_wall
 
 # -----------------------------------------------------
 # SPAWN D'UN AGENT
@@ -100,25 +120,20 @@ func _is_walkable(cell: Vector2i) -> bool:
 func _spawn_mainchar(pos: Vector2) -> void:
 	var flow_ref: FlowField = flow
 	var target_cell: Vector2i = flow_ref.world_to_cell(pos)
-
 	var occupied: Array[Vector2i] = []
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		var oc: Vector2i = flow_ref.world_to_cell(node.global_position)
 		occupied.append(oc)
-
 	var free_cell: Vector2i = _find_free_cell_near(flow_ref, target_cell, occupied)
 	var free_pos: Vector2 = flow_ref.cell_to_world(free_cell)
-
 	var c: FlowAgent = MainCharScene.instantiate()
 	get_parent().add_child(c)
 	c.global_position = free_pos
-	c.z_index = int(free_pos.y)   # ← Z-index selon la position verticale
+	c.z_index = int(free_pos.y)
 	c.add_to_group("main_chars")
 	c.set_meta("flow_ref", flow)
-
 	if has_node("../SteeringSystem"):
 		c.steering_system = get_node("../SteeringSystem")
-		# Enregistre immédiatement l’agent dans la grille
 		if c.steering_system.grid != null:
 			c.steering_system.grid.register(c)
 	else:
@@ -131,6 +146,7 @@ func _spawn_mainchar(pos: Vector2) -> void:
 func _process(delta: float) -> void:
 	if camera == null:
 		return
+
 	var input: Vector2 = Vector2.ZERO
 	if Input.is_action_pressed("ui_right"):
 		input.x += 1.0
@@ -142,5 +158,11 @@ func _process(delta: float) -> void:
 		input.y -= 1.0
 	if input != Vector2.ZERO:
 		camera.position += input.normalized() * speed * delta
+
+	# Drag à la souris
+	if dragging and camera != null:
+		var mouse_pos: Vector2 = get_viewport().get_mouse_position()
+		var offset: Vector2 = (drag_start_pos - mouse_pos) * camera.zoom
+		camera.position = camera_start_pos + offset
 
 signal mouse_goal_set(world_pos: Vector2)

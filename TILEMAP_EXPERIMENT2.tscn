@@ -1242,7 +1242,7 @@ tile_map_data = PackedByteArray("AAAOAAoAAAAKAAAAAAAOAAsAAAAKAAEAAAAOAAwAAAAKAAI
 tile_set = SubResource("TileSet_8wl7c")
 
 [node name="Camera2D" type="Camera2D" parent="."]
-position = Vector2(379, 268)
+position = Vector2(500, 500)
 zoom = Vector2(2, 2)
 
 [node name="PathfindingManager" type="Node2D" parent="."]

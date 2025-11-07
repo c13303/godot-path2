@@ -1,3 +1,5 @@
+#steering_system.gd
+
 extends Node
 class_name SteeringSystem
 

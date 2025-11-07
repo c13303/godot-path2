@@ -1,3 +1,5 @@
+#spatial_grid.gd
+
 extends Node
 class_name SpatialGrid
 

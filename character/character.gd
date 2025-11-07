@@ -23,47 +23,81 @@ var _sample_phase: int = 0
 
 func _ready() -> void:
 	_sample_phase = int(get_instance_id() % max(1, flow_sample_stride))
+	if not has_meta("last_flow_version"):
+		set_meta("last_flow_version", -1)
+	if not has_meta("cooldown_until_ms"):
+		set_meta("cooldown_until_ms", 0)
+
+func _check_goal_state(flow: FlowField, current_cell: Vector2i, goal_cell: Vector2i, goal_pos: Vector2, tile_size: Vector2i) -> bool:
+	var dist_to_goal: float = global_position.distance_to(goal_pos)
+	var arrive_epsilon: float = float(tile_size.x) * 0.15
+	return current_cell == goal_cell or dist_to_goal <= arrive_epsilon
+
+
+func _is_blocked_near_wall(flow: FlowField, current_cell: Vector2i, goal_pos: Vector2) -> bool:
+	var reachable: bool = false
+	for d: Vector2i in [Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1)]:
+		var c: Vector2i = current_cell + d
+		var dir_c: Vector2 = flow.sample_dir_cell(c)
+		if dir_c != Vector2.ZERO:
+			var c_world: Vector2 = flow.cell_to_world(c)
+			if c_world.distance_to(goal_pos) < global_position.distance_to(goal_pos):
+				reachable = true
+				break
+	return not reachable
+
+
+
+ 
 func _physics_process(_delta: float) -> void:
 	if steering_system == null:
 		return
 
-	var flow: FlowField = get_meta("flow_ref")
+	var flow: FlowField = get_meta("flow_ref") as FlowField
 	if flow == null or not flow.is_ready():
-		velocity = Vector2.ZERO
-		move_and_slide()
 		return
 
-	if arrived:
-		velocity = Vector2.ZERO
-		move_and_slide()
-		return
+	var cur_version: int = flow.flow_version()
+	var last_version: int = (get_meta("last_flow_version") as int) if has_meta("last_flow_version") else -1
+	if cur_version != last_version:
+		set_meta("last_flow_version", cur_version)
+		arrived = false
+		set_meta("cooldown_until_ms", Time.get_ticks_msec() + 200)
+
+	var now_ms: int = Time.get_ticks_msec()
+	var in_cooldown: bool = now_ms < ((get_meta("cooldown_until_ms") as int) if has_meta("cooldown_until_ms") else 0)
 
 	var goal_cell: Vector2i = flow.current_goal_cell()
+	var current_cell: Vector2i = flow.world_to_cell(global_position)
 	var goal_pos: Vector2 = flow.cell_to_world(goal_cell)
 	var tile_size: Vector2i = flow.get_tile_size()
+
+	# Gestion de l’état arrived
+	if arrived:
+		if current_cell != goal_cell:
+			arrived = false
+		else:
+			var dir_check: Vector2 = flow.sample_dir_world_bilinear(global_position)
+			if dir_check == Vector2.ZERO:
+				arrived = false
+			else:
+				velocity = Vector2.ZERO
+				return
+
+	# Détermination de l’arrivée
 	var dist_to_goal: float = global_position.distance_to(goal_pos)
-	var arrive_epsilon: float = float(tile_size.x) * 0.25
-
-	# Test position actuelle dans le repère du flow
-	var world_pos: Vector2 = global_position
-	var local_pos: Vector2 = flow.floor_layer.to_local(world_pos)
-	var current_cell: Vector2i = flow.world_to_cell(global_position)
-
-	print("DEBUG: world:", world_pos, " local:", local_pos, " current_cell:", current_cell, " goal_cell:", goal_cell, " dist:", dist_to_goal)
-
-	if dist_to_goal <= arrive_epsilon:
-		print("TEST: condition distance atteinte → dist:", dist_to_goal, " epsilon:", arrive_epsilon)
-	if current_cell == goal_cell:
-		print("TEST: condition current_cell == goal_cell atteinte")
-
+	var arrive_epsilon: float = float(tile_size.x) * 0.15
 	if current_cell == goal_cell or dist_to_goal <= arrive_epsilon:
-		print(">>> ARRIVED EVENT TRIGGERED <<<")
 		arrived = true
 		velocity = Vector2.ZERO
-		move_and_slide()
 		return
 
+	# Échantillonnage du flow field
 	var flow_vec: Vector2 = flow.sample_dir_world_bilinear(global_position)
+	if flow_vec == Vector2.ZERO:
+		_handle_flow_zero(flow, tile_size)
+		return
+
 	var flow_dir: Vector2 = steering_system.compute(self, get_tree().get_nodes_in_group("main_chars"), flow_vec)
 
 	var step_distance: float = max_speed * _delta
@@ -87,11 +121,53 @@ func _physics_process(_delta: float) -> void:
 			move_and_slide()
 			return
 
+	# Propagation du statut arrived
+	if not in_cooldown and _check_propagation(flow, goal_pos, tile_size):
+		arrived = true
+		velocity = Vector2.ZERO
+		move_and_slide()
+		return
+
 	velocity = (flow_dir.normalized() if flow_dir != Vector2.ZERO else Vector2.ZERO) * max_speed
 	move_and_slide()
 	z_index = int(global_position.y)
 
 
+func _handle_flow_zero(flow: FlowField, tile_size: Vector2i) -> void:
+	if arrived:
+		velocity = Vector2.ZERO
+		return
+
+	var cur_cell: Vector2i = flow.world_to_cell(global_position)
+	var fixed: bool = false
+
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n_cell: Vector2i = cur_cell + d
+		var dir_n: Vector2 = flow.sample_dir_cell(n_cell)
+		if dir_n != Vector2.ZERO:
+			global_position = flow.cell_to_world(n_cell)
+			fixed = true
+			break
+
+	if not fixed:
+		var random_offset: Vector2 = Vector2(randf_range(-0.5, 0.5), randf_range(-0.5, 0.5)) * float(tile_size.x)
+		global_position += random_offset
+
+	velocity = Vector2.ZERO
+
+
+func _check_propagation(flow: FlowField, goal_pos: Vector2, tile_size: Vector2i) -> bool:
+	var neighbors: Array = steering_system.grid.neighbors_at(global_position, 2)
+	var stop_distance: float = float(tile_size.x) * 0.9
+
+	for n in neighbors:
+		if n == self:
+			continue
+		if n is FlowAgent:
+			var neighbor: FlowAgent = n
+			if neighbor.arrived and global_position.distance_to(neighbor.global_position) <= stop_distance:
+				return true
+	return false
 
 ## Version avec smooth steering (optionnelle pour plus de contrôle)
 func _physics_process_smooth(delta: float) -> void:
