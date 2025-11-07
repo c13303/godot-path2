@@ -589,7 +589,7 @@ void FlowField::_thread_compute(Dictionary payload)
     }
 
     // --- Zone neutre autour du goal pour amortir le flux ---
-    int radius_neutral = 3; // rayon en tuiles autour du goal
+    int radius_neutral = 0; // rayon en tuiles autour du goal
     for (int dx = -radius_neutral; dx <= radius_neutral; dx++)
     {
         for (int dy = -radius_neutral; dy <= radius_neutral; dy++)
