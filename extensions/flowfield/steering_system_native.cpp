@@ -267,7 +267,8 @@ void SteeringSystemNative::update_all_agents(double delta)
 
 		// --- Steering et vitesse ---
 		Vector2 sep = compute_separation(a.node, 20.0);
-		Vector2 combined = (flow_dir + sep + wall_repulse).normalized();
+		Vector2 combined = (flow_dir * FLOW_WEIGHT + sep * SEPARATION_WEIGHT + wall_repulse * WALL_REPULSION_WEIGHT).normalized();
+
 		a.velocity = a.velocity.lerp(combined * a.max_speed, 0.25);
 
 		// Ralentissement à l'approche du but
@@ -369,5 +370,4 @@ void SteeringSystemNative::update_all_agents(double delta)
 	for (auto &a : agents)
 		if (a.arrived)
 			arrived_count++;
-	
 }
