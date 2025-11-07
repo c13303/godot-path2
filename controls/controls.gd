@@ -1,3 +1,5 @@
+#controls.gd
+
 extends Node2D
 
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"

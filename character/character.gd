@@ -48,7 +48,6 @@ func _is_blocked_near_wall(flow: FlowField, current_cell: Vector2i, goal_pos: Ve
 
 
 
- 
 func _physics_process(_delta: float) -> void:
 	if steering_system == null:
 		return
@@ -64,6 +63,14 @@ func _physics_process(_delta: float) -> void:
 		arrived = false
 		set_meta("cooldown_until_ms", Time.get_ticks_msec() + 200)
 
+	# Agents arrivés : maintien minimal pour la grille et la reprise
+	if arrived and cur_version == last_version:
+		if steering_system.grid != null:
+			steering_system.grid.update(self)
+		velocity = Vector2.ZERO
+		move_and_slide()
+		return
+
 	var now_ms: int = Time.get_ticks_msec()
 	var in_cooldown: bool = now_ms < ((get_meta("cooldown_until_ms") as int) if has_meta("cooldown_until_ms") else 0)
 
@@ -72,37 +79,25 @@ func _physics_process(_delta: float) -> void:
 	var goal_pos: Vector2 = flow.cell_to_world(goal_cell)
 	var tile_size: Vector2i = flow.get_tile_size()
 
-	# Gestion de l’état arrived
-	if arrived:
-		if current_cell != goal_cell:
-			arrived = false
-		else:
-			var dir_check: Vector2 = flow.sample_dir_world_bilinear(global_position)
-			if dir_check == Vector2.ZERO:
-				arrived = false
-			else:
-				velocity = Vector2.ZERO
-				return
-
-	# Détermination de l’arrivée
+	# Vérifie si arrivé
 	var dist_to_goal: float = global_position.distance_to(goal_pos)
 	var arrive_epsilon: float = float(tile_size.x) * 0.15
 	if current_cell == goal_cell or dist_to_goal <= arrive_epsilon:
 		arrived = true
 		velocity = Vector2.ZERO
+		if steering_system.grid != null:
+			steering_system.grid.update(self)
+		move_and_slide()
 		return
 
-	# Échantillonnage du flow field
 	var flow_vec: Vector2 = flow.sample_dir_world_bilinear(global_position)
 	if flow_vec == Vector2.ZERO:
 		_handle_flow_zero(flow, tile_size)
 		return
 
 	var flow_dir: Vector2 = steering_system.compute(self, get_tree().get_nodes_in_group("main_chars"), flow_vec)
-
 	var step_distance: float = max_speed * _delta
-	var step_dir: Vector2 = (flow_dir.normalized() if flow_dir != Vector2.ZERO else Vector2.ZERO)
-	var next_pos: Vector2 = global_position + step_dir * step_distance
+	var next_pos: Vector2 = global_position + flow_dir.normalized() * step_distance
 	var next_cell: Vector2i = flow.world_to_cell(next_pos)
 	var dir_next: Vector2 = flow.sample_dir_cell(next_cell)
 
@@ -121,16 +116,20 @@ func _physics_process(_delta: float) -> void:
 			move_and_slide()
 			return
 
-	# Propagation du statut arrived
 	if not in_cooldown and _check_propagation(flow, goal_pos, tile_size):
 		arrived = true
 		velocity = Vector2.ZERO
+		if steering_system.grid != null:
+			steering_system.grid.update(self)
 		move_and_slide()
 		return
 
 	velocity = (flow_dir.normalized() if flow_dir != Vector2.ZERO else Vector2.ZERO) * max_speed
 	move_and_slide()
 	z_index = int(global_position.y)
+
+	if steering_system.grid != null:
+		steering_system.grid.update(self)
 
 
 func _handle_flow_zero(flow: FlowField, tile_size: Vector2i) -> void:
