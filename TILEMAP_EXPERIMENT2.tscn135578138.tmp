@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=4 uid="uid://dm7myvnaoy1xc"]
+[gd_scene load_steps=23 format=4 uid="uid://dm7myvnaoy1xc"]
 
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://rgl6j04u8ao4" path="res://pathfinder/pathfinding_manager.gd" id="3_k8xte"]
@@ -7,7 +7,6 @@
 [ext_resource type="Script" uid="uid://bjwer8rfcon34" path="res://pathfinder/steering_system.gd" id="5_c2thg"]
 [ext_resource type="Script" uid="uid://bv0xi1stqygpm" path="res://pathfinder/spatial_grid.gd" id="6_lb3hw"]
 [ext_resource type="Script" uid="uid://w3x1txaxcddl" path="res://pathfinder/test_native_implementation.gd" id="7_e5a4u"]
-[ext_resource type="Script" uid="uid://cywopr43oa2lr" path="res://pathfinder/SteeringSystemNative.gd" id="8_gf3ha"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1272,4 +1271,3 @@ script = ExtResource("7_e5a4u")
 [node name="SpatialGridNative" type="SpatialGridNative" parent="."]
 
 [node name="SteeringSystemNative" type="SteeringSystemNative" parent="."]
-script = ExtResource("8_gf3ha")

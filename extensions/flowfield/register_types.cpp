@@ -1,6 +1,8 @@
 #include "register_types.h"
 #include "flow_field.h"
 #include "steering_system_native.h"
+#include "spatial_grid_native.h"
+
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -16,6 +18,8 @@ void initialize_flowfield_module(ModuleInitializationLevel p_level) {
     // Enregistrement des classes natives
     ClassDB::register_class<FlowField>();
     ClassDB::register_class<SteeringSystemNative>();
+    ClassDB::register_class<SpatialGridNative>();
+
 }
 
 void uninitialize_flowfield_module(ModuleInitializationLevel p_level) {

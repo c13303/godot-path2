@@ -10,11 +10,12 @@
 #include <unordered_map>
 
 #include "flow_field.h"
+#include "spatial_grid_native.h"
 
 namespace godot {
 
 struct AgentData {
-	Node2D* node = nullptr;
+	Node2D *node = nullptr;
 	Vector2 position;
 	Vector2 velocity;
 	double max_speed = 100.0;
@@ -32,16 +33,26 @@ public:
 	SteeringSystemNative();
 	~SteeringSystemNative();
 
-	void register_agent(Node2D* agent, int32_t group_id, double max_speed);
-	void unregister_agent(Node2D* agent);
-	void set_flowfield_for_group(int32_t group_id, FlowField* ff);
+	void register_agent(Node2D *agent, int32_t group_id, double max_speed);
+	void unregister_agent(Node2D *agent);
+	void set_flowfield_for_group(int32_t group_id, FlowField *ff);
 	void update_all_agents(double delta);
+
+	// Gestion de la grille spatiale
+	void set_grid(SpatialGridNative *g);
+	SpatialGridNative *get_grid() const { return grid; }
+
+	// Calcul de steering (séparation locale)
+	Vector2 compute_separation(Node2D *agent, double neighbor_radius);
 
 private:
 	std::vector<AgentData> agents;
-	std::unordered_map<Node2D*, int32_t> agent_indices;
-	std::unordered_map<int32_t, FlowField*> flowfields;
+	std::unordered_map<Node2D *, int32_t> agent_indices;
+	std::unordered_map<int32_t, FlowField *> flowfields;
 	bool dirty = false;
+	SpatialGridNative *grid = nullptr;
+	bool check_propagation(AgentData &a, FlowField *ff);
+
 };
 
 }
