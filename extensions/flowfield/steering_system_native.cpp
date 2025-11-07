@@ -266,7 +266,24 @@ void SteeringSystemNative::update_all_agents(double delta)
 			wall_repulse = wall_repulse.normalized() * 0.6;
 
 		// --- Steering et vitesse ---
-		Vector2 sep = compute_separation(a.node, 20.0);
+		double local_density = 0.0;
+		if (grid)
+		{
+			TypedArray<Node2D> nearby = grid->get_neighbors(a.position, 2);
+			for (int i = 0; i < nearby.size(); i++)
+			{
+				Node2D *n = Object::cast_to<Node2D>(nearby[i]);
+				if (n && n != a.node)
+				{
+					double d = a.position.distance_to(n->get_global_position());
+					if (d < NEIGHBOR_RADIUS_SOFT)
+						local_density += 1.0;
+				}
+			}
+		}
+		double density_factor = Math::clamp(local_density / 6.0, 0.0, 1.0);
+		Vector2 sep = compute_separation(a.node, 20.0) * (1.0 + density_factor * 2.0);
+
 		Vector2 combined = (flow_dir * FLOW_WEIGHT + sep * SEPARATION_WEIGHT + wall_repulse * WALL_REPULSION_WEIGHT).normalized();
 
 		a.velocity = a.velocity.lerp(combined * a.max_speed, 0.25);
