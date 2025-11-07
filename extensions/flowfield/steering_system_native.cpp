@@ -196,33 +196,50 @@ void SteeringSystemNative::update_all_agents(double delta)
 			continue;
 		}
 
-		// --- Critère 3 : Proche du goal ET immobile longtemps ---
-		const double ARRIVAL_RADIUS = tile_px * 8.0;
-		const int IMMOBILE_FRAMES_NEAR_GOAL = 30;
-		const double MIN_MOVEMENT_THRESHOLD = tile_px * 0.03;
+		// --- Critère 3 : arrêt par stagnation ---
+		// Ce bloc ne sert pas uniquement à détecter la fin de parcours proche du but,
+		// mais aussi à stopper un agent bloqué par congestion (ralentissement collectif).
+		// Un agent qui bouge trop peu pendant plusieurs frames consécutives est considéré comme "arrivé".
+
+		const double ARRIVAL_RADIUS = tile_px * 8.0;		  // zone d'intérêt autour du but
+		const int IMMOBILE_FRAMES_THRESHOLD = 30;			  // nombre de frames d'immobilité avant arrêt
+		const double MIN_MOVEMENT_THRESHOLD = tile_px * 0.03; // mouvement minimal détectable
+		const double DENSITY_STOP_RADIUS = tile_px * 10.0;	  // rayon de congestion accepté même loin du but
 
 		bool is_near_goal = dist < ARRIVAL_RADIUS;
 
-		if (is_near_goal)
+		// On déclenche aussi la vérification d'immobilité si l'agent est dans une zone dense
+		bool is_in_congestion = false;
+		if (grid)
 		{
-			if (!a.node->has_meta("_immobile_near_goal"))
-				a.node->set_meta("_immobile_near_goal", 0);
+			TypedArray<Node2D> nearby = grid->get_neighbors(a.position, 2);
+			if (nearby.size() > 6) // seuil arbitraire : trop d'agents autour
+				is_in_congestion = true;
+		}
+
+		// Ne pas limiter la détection d'arrêt aux seuls agents proches du but
+		if (is_near_goal || is_in_congestion)
+		{
+			if (!a.node->has_meta("_immobile_counter"))
+				a.node->set_meta("_immobile_counter", 0);
 			if (!a.node->has_meta("_last_pos"))
 				a.node->set_meta("_last_pos", a.position);
 
-			int immobile_frames = (int)a.node->get_meta("_immobile_near_goal");
+			int immobile_frames = (int)a.node->get_meta("_immobile_counter");
 			Vector2 last_pos = (Vector2)a.node->get_meta("_last_pos");
 			double distance_moved = a.position.distance_to(last_pos);
 			a.node->set_meta("_last_pos", a.position);
 
+			// Si l'agent bouge moins que le seuil, incrémente le compteur d'immobilité
 			if (distance_moved < MIN_MOVEMENT_THRESHOLD)
 				immobile_frames++;
 			else
 				immobile_frames = 0;
 
-			a.node->set_meta("_immobile_near_goal", immobile_frames);
+			a.node->set_meta("_immobile_counter", immobile_frames);
 
-			if (immobile_frames >= IMMOBILE_FRAMES_NEAR_GOAL)
+			// Si l'immobilité persiste suffisamment longtemps → arrêt
+			if (immobile_frames >= IMMOBILE_FRAMES_THRESHOLD)
 			{
 				a.arrived = true;
 				a.velocity = Vector2();
@@ -236,9 +253,9 @@ void SteeringSystemNative::update_all_agents(double delta)
 		}
 		else
 		{
-			// Loin du goal → reset le compteur
-			if (a.node->has_meta("_immobile_near_goal"))
-				a.node->set_meta("_immobile_near_goal", 0);
+			// Hors zone de ralentissement → reset
+			if (a.node->has_meta("_immobile_counter"))
+				a.node->set_meta("_immobile_counter", 0);
 		}
 
 		// --- Répulsion murs douce ---
