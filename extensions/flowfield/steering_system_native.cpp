@@ -233,43 +233,122 @@ void SteeringSystemNative::update_all_agents(double delta)
 			a.velocity *= factor;
 		}
 
-		// ✅ APPLICATION DU MOUVEMENT (LIGNE CRITIQUE)
-		a.position += a.velocity * delta;
-
-		// --- Correction anti-mur post-mouvement ---
+		// --- Prévention douce contre les murs (avant mouvement) ---
 		if (ff)
 		{
-			Vector2i check_cell = ff->world_to_cell(a.position);
+			Vector2 next_pos = a.position + a.velocity.normalized() * ff->get_tile_size().x * 0.5;
+			Vector2i next_cell = ff->world_to_cell(next_pos);
+
 			auto *floor_layer = ff->get_floor_layer();
 			auto *wall_layer = ff->get_wall_layer();
 
-			bool has_floor = floor_layer && floor_layer->get_cell_tile_data(check_cell) != nullptr;
-			bool has_wall = wall_layer && wall_layer->get_cell_tile_data(check_cell) != nullptr;
+			bool has_floor = floor_layer && floor_layer->get_cell_tile_data(next_cell) != nullptr;
+			bool has_wall = wall_layer && wall_layer->get_cell_tile_data(next_cell) != nullptr;
 
 			if (!has_floor || has_wall)
 			{
-				// Reculer et chercher un espace valide
-				a.position -= a.velocity * delta;
-				
-				const Vector2i dirs[4] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-				bool moved = false;
-				for (auto &d : dirs)
-				{
-					Vector2i c2 = check_cell + d;
-					bool f_ok = floor_layer && floor_layer->get_cell_tile_data(c2) != nullptr;
-					bool w_ok = !(wall_layer && wall_layer->get_cell_tile_data(c2) != nullptr);
-					if (f_ok && w_ok)
-					{
-						a.position = ff->cell_to_world(c2);
-						moved = true;
-						break;
-					}
-				}
-				if (!moved)
-				{
-					a.velocity = Vector2();
-				}
+				// Lissage : ralentit et glisse tangentiellement
+				Vector2 normal = Vector2(-a.velocity.y, a.velocity.x).normalized();
+
+				// Test du côté gauche et droit pour choisir la direction la plus libre
+				Vector2i left_cell = ff->world_to_cell(a.position + normal * ff->get_tile_size().x * 0.6);
+				Vector2i right_cell = ff->world_to_cell(a.position - normal * ff->get_tile_size().x * 0.6);
+
+				bool left_free = floor_layer && floor_layer->get_cell_tile_data(left_cell) != nullptr &&
+								 (!wall_layer || wall_layer->get_cell_tile_data(left_cell) == nullptr);
+				bool right_free = floor_layer && floor_layer->get_cell_tile_data(right_cell) != nullptr &&
+								  (!wall_layer || wall_layer->get_cell_tile_data(right_cell) == nullptr);
+
+				if (left_free && !right_free)
+					a.velocity = (a.velocity + normal * 0.3).normalized() * a.velocity.length() * 0.7;
+				else if (right_free && !left_free)
+					a.velocity = (a.velocity - normal * 0.3).normalized() * a.velocity.length() * 0.7;
+				else
+					a.velocity *= 0.6; // amorti si les deux côtés sont bouchés
 			}
+		}
+
+		// --- Détection murale anticipée (pré-mouvement) ---
+
+		// --- Avancement conservatif + slide contre les murs ---
+		if (ff)
+		{
+			auto *floor_layer = ff->get_floor_layer();
+			auto *wall_layer = ff->get_wall_layer();
+
+			const double tile_px = (double)ff->get_tile_size().x;
+			Vector2 total_move = a.velocity * (float)delta;
+
+			// Taille max d’un micro-pas (<= 0.4 tuile) pour ne jamais "sauter" une cellule
+			const double max_step = tile_px * 0.4;
+			double remain = (double)total_move.length();
+			int steps = (int)Math::ceil(remain / max_step);
+			if (steps < 1)
+				steps = 1;
+
+			Vector2 step = (steps > 0) ? (total_move / (float)steps) : Vector2();
+
+			for (int s = 0; s < steps; s++)
+			{
+				Vector2 trial = a.position + step;
+				Vector2i cell = ff->world_to_cell(trial);
+
+				bool has_floor = floor_layer && floor_layer->get_cell_tile_data(cell) != nullptr;
+				bool has_wall = wall_layer && wall_layer->get_cell_tile_data(cell) != nullptr;
+
+				if (has_floor && !has_wall)
+				{
+					// Avance validée
+					a.position = trial;
+					continue;
+				}
+
+				// Cellule bloquée : tentative de slide par axes
+				// 1) Test axe X seul
+				Vector2 trial_x = a.position + Vector2(step.x, 0.0f);
+				Vector2i cell_x = ff->world_to_cell(trial_x);
+				bool ok_x = floor_layer && floor_layer->get_cell_tile_data(cell_x) != nullptr &&
+							!(wall_layer && wall_layer->get_cell_tile_data(cell_x) != nullptr);
+
+				// 2) Test axe Y seul
+				Vector2 trial_y = a.position + Vector2(0.0f, step.y);
+				Vector2i cell_y = ff->world_to_cell(trial_y);
+				bool ok_y = floor_layer && floor_layer->get_cell_tile_data(cell_y) != nullptr &&
+							!(wall_layer && wall_layer->get_cell_tile_data(cell_y) != nullptr);
+
+				if (ok_x && !ok_y)
+				{
+					a.position = trial_x;
+					// amorti léger pour éviter l’oscillation
+					a.velocity *= 0.85f;
+					continue;
+				}
+				if (ok_y && !ok_x)
+				{
+					a.position = trial_y;
+					a.velocity *= 0.85f;
+					continue;
+				}
+				if (ok_x && ok_y)
+				{
+					// les deux axes sont possibles : choisir le plus long composant
+					if (Math::abs(step.x) >= Math::abs(step.y))
+						a.position = trial_x;
+					else
+						a.position = trial_y;
+					a.velocity *= 0.85f;
+					continue;
+				}
+
+				// Aucune issue sur ce micro-pas : on stoppe le mouvement restant
+				a.velocity = Vector2();
+				break;
+			}
+		}
+		else
+		{
+			// Pas de FF : fallback mouvement brut
+			a.position += a.velocity * delta;
 		}
 
 		// --- Mise à jour Godot ---
