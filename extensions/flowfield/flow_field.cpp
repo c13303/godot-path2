@@ -588,6 +588,22 @@ void FlowField::_thread_compute(Dictionary payload)
         /* _log_queue.push("FlowField: compute done, cells=" + String::num_int64(count)); */
     }
 
+    // --- Zone neutre autour du goal pour amortir le flux ---
+    int radius_neutral = 3; // rayon en tuiles autour du goal
+    for (int dx = -radius_neutral; dx <= radius_neutral; dx++)
+    {
+        for (int dy = -radius_neutral; dy <= radius_neutral; dy++)
+        {
+            Vector2i n = goal_cell + Vector2i(dx, dy);
+            if (!in_bounds(n, used))
+                continue;
+            int64_t idx = (int64_t)cell_index(n, used);
+            if (idx < 0 || idx >= dirs_arr.size())
+                continue;
+            dirs_arr[idx] = Vector2(); // direction nulle
+        }
+    }
+
     _thread_done_arr(dirs_arr, used);
     _computing = false;
 

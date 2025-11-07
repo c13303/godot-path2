@@ -12,48 +12,57 @@
 #include "flow_field.h"
 #include "spatial_grid_native.h"
 
-namespace godot {
+namespace godot
+{
 
-struct AgentData {
-	Node2D *node = nullptr;
-	Vector2 position;
-	Vector2 velocity;
-	double max_speed = 100.0;
-	int32_t group_id = 0;
-	bool arrived = false;
-};
+	struct AgentData
+	{
+		Node2D *node = nullptr;
+		Vector2 position;
+		Vector2 velocity;
+		double max_speed = 100.0;
+		int32_t group_id = 0;
+		bool arrived = false;
 
-class SteeringSystemNative : public Node {
-	GDCLASS(SteeringSystemNative, Node)
+		// Nouveaux champs pour détection d'oscillation
+		double time_in_area = 0.0;		   // Temps passé dans la zone actuelle
+		Vector2 last_progress_pos;		   // Dernière position de vraie progression
+		int direction_changes = 0;		   // Compteur de changements de direction
+		Vector2 last_velocity_dir;		   // Dernière direction normalisée
+		double last_direction_check = 0.0; // Timestamp du dernier check
+	};
 
-protected:
-	static void _bind_methods();
+	class SteeringSystemNative : public Node
+	{
+		GDCLASS(SteeringSystemNative, Node)
 
-public:
-	SteeringSystemNative();
-	~SteeringSystemNative();
+	protected:
+		static void _bind_methods();
 
-	void register_agent(Node2D *agent, int32_t group_id, double max_speed);
-	void unregister_agent(Node2D *agent);
-	void set_flowfield_for_group(int32_t group_id, FlowField *ff);
-	void update_all_agents(double delta);
+	public:
+		SteeringSystemNative();
+		~SteeringSystemNative();
 
-	// Gestion de la grille spatiale
-	void set_grid(SpatialGridNative *g);
-	SpatialGridNative *get_grid() const { return grid; }
+		void register_agent(Node2D *agent, int32_t group_id, double max_speed);
+		void unregister_agent(Node2D *agent);
+		void set_flowfield_for_group(int32_t group_id, FlowField *ff);
+		void update_all_agents(double delta);
 
-	// Calcul de steering (séparation locale)
-	Vector2 compute_separation(Node2D *agent, double neighbor_radius);
+		// Gestion de la grille spatiale
+		void set_grid(SpatialGridNative *g);
+		SpatialGridNative *get_grid() const { return grid; }
 
-private:
-	std::vector<AgentData> agents;
-	std::unordered_map<Node2D *, int32_t> agent_indices;
-	std::unordered_map<int32_t, FlowField *> flowfields;
-	bool dirty = false;
-	SpatialGridNative *grid = nullptr;
-	bool check_propagation(AgentData &a, FlowField *ff);
+		// Calcul de steering (séparation locale)
+		Vector2 compute_separation(Node2D *agent, double neighbor_radius);
 
-};
+	private:
+		std::vector<AgentData> agents;
+		std::unordered_map<Node2D *, int32_t> agent_indices;
+		std::unordered_map<int32_t, FlowField *> flowfields;
+		bool dirty = false;
+		SpatialGridNative *grid = nullptr;
+		bool check_propagation(AgentData &a, FlowField *ff);
+	};
 
 }
 

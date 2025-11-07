@@ -138,111 +138,78 @@ Vector2 SteeringSystemNative::compute_separation(Node2D *agent, double /* neighb
 	return sep.normalized();
 }
 
-bool SteeringSystemNative::check_propagation(AgentData &a, FlowField *ff)
-{
-	if (!grid || !ff || !a.node)
-		return false;
-
-	TypedArray<Node2D> nearby = grid->get_neighbors(a.position, 2);
-	double stop_dist = ff->get_tile_size().x * 0.9;
-
-	for (int i = 0; i < nearby.size(); i++)
-	{
-		Node2D *n = Object::cast_to<Node2D>(nearby[i]);
-		if (!n || n == a.node)
-			continue;
-
-		int32_t idx = agent_indices.count(n) ? agent_indices[n] : -1;
-		if (idx < 0)
-			continue;
-
-		AgentData &other = agents[idx];
-		if (other.arrived && a.position.distance_to(other.position) <= stop_dist)
-			return true;
-	}
-
-	return false;
-}
+/* propa*/
 
 void SteeringSystemNative::update_all_agents(double delta)
 {
 	if (agents.empty())
 		return;
 
-	// --- Étape 1 : lecture des données Godot (snapshot) ---
+	// Snapshot depuis la scène
 	for (auto &a : agents)
 	{
 		if (!a.node)
 			continue;
 		a.position = a.node->get_global_position();
 		Variant v = a.node->get("velocity");
-		if (v.get_type() == Variant::VECTOR2)
-			a.velocity = (Vector2)v;
-		else
-			a.velocity = Vector2();
+		a.velocity = (v.get_type() == Variant::VECTOR2) ? (Vector2)v : Vector2();
 	}
 
-	// --- Étape 2 : boucle de mise à jour du mouvement ---
 	for (auto &a : agents)
 	{
-		if (a.arrived)
+		if (!a.node || a.arrived)
 			continue;
 
 		FlowField *ff = flowfields.count(a.group_id) ? flowfields[a.group_id] : nullptr;
 		if (!ff || !ff->is_ready())
 			continue;
 
-		Vector2 goal_pos = ff->cell_to_world(ff->current_goal_cell());
-		Vector2i goal_cell = ff->current_goal_cell();
-		Vector2i cur_cell = ff->world_to_cell(a.position);
+		const Vector2 goal_pos = ff->cell_to_world(ff->current_goal_cell());
+		const Vector2i goal_cell = ff->current_goal_cell();
+		const Vector2i cur_cell = ff->world_to_cell(a.position);
 
-		// --- Arrivée : check distance + epsilon ---
-		double arrive_eps = ff->get_tile_size().x * 0.15;
-		double dist = a.position.distance_to(goal_pos);
-		if (cur_cell == goal_cell || dist <= arrive_eps)
+		// Arrivée stricte uniquement si DANS la cell goal (pas de snap)
+		if (cur_cell == goal_cell)
 		{
 			a.arrived = true;
 			a.velocity = Vector2();
-			a.node->set("velocity", Vector2());
-			a.node->set_global_position(ff->cell_to_world(goal_cell));
+			a.node->set("velocity", a.velocity);
+			// pas de repositionnement forcé
 			if (grid)
 				grid->update_agent(a.node);
 			continue;
 		}
 
-		// --- Propagation d'arrêt ---
-		if (check_propagation(a, ff))
-		{
-			a.arrived = true;
-			a.velocity = Vector2();
-			a.node->set("velocity", a.velocity);
-			continue;
-		}
-
-		// --- Lecture de direction ---
+		// 1) Lecture du flow
 		Vector2 flow_dir = ff->sample_dir_world(a.position);
+		if (flow_dir != Vector2())
+			flow_dir = flow_dir.normalized();
 
-		// --- Répulsion mur douce ---
+		// 2) Séparation locale (existante)
+		double speed = a.velocity.length();
+		double t = Math::clamp(speed / a.max_speed, 0.0, 1.0);
+		const double NEIGHBOR_RADIUS_SOFT = 20.0;
+		const double NEIGHBOR_RADIUS_HARD = 16.0;
+		double adaptive_radius = Math::lerp(NEIGHBOR_RADIUS_HARD, NEIGHBOR_RADIUS_SOFT, t);
+		const double SEPARATION_WEIGHT = 1.0;
+		Vector2 sep = compute_separation(a.node, adaptive_radius) * SEPARATION_WEIGHT;
+
+		// 3) Répulsion mur douce (existante)
 		Vector2 wall_repulse;
-		if (ff)
 		{
 			auto *floor_layer = ff->get_floor_layer();
 			auto *wall_layer = ff->get_wall_layer();
 			const double tile_px = (double)ff->get_tile_size().x;
 			const double probe_dist = tile_px * 0.5;
-
-			// Quatre directions cardinales
 			const Vector2 probes[4] = {
-				Vector2(probe_dist, 0),
-				Vector2(-probe_dist, 0),
-				Vector2(0, probe_dist),
-				Vector2(0, -probe_dist)};
-
+				Vector2((float)probe_dist, 0.0f),
+				Vector2((float)-probe_dist, 0.0f),
+				Vector2(0.0f, (float)probe_dist),
+				Vector2(0.0f, (float)-probe_dist)};
 			for (const auto &p : probes)
 			{
-				Vector2 probe_pos = a.position + p;
-				Vector2i cell = ff->world_to_cell(probe_pos);
-				bool has_wall = wall_layer && wall_layer->get_cell_tile_data(cell) != nullptr;
+				Vector2i c = ff->world_to_cell(a.position + p);
+				bool has_wall = wall_layer && wall_layer->get_cell_tile_data(c) != nullptr;
 				if (has_wall)
 				{
 					double falloff = 1.0 - (p.length() / (tile_px * 0.8));
@@ -250,133 +217,81 @@ void SteeringSystemNative::update_all_agents(double delta)
 				}
 			}
 			if (wall_repulse != Vector2())
-				wall_repulse = wall_repulse.normalized() * WALL_REPULSION_WEIGHT;
+				wall_repulse = wall_repulse.normalized() * 0.6;
 		}
 
-		if (flow_dir == Vector2())
+		// 4) Combinaison directionnelle
+		const double FLOW_WEIGHT = 1.0;
+		Vector2 combined = flow_dir * FLOW_WEIGHT + sep + wall_repulse;
+		if (combined != Vector2())
+			combined = combined.normalized();
+
+		// 5) Dissipation simple (friction numérique)
+		a.velocity *= 0.98;
+
+		// 6) Facteur de densité locale → réduit la vitesse-cible sans forcer l’arrêt
+		double density_factor = 0.0; // 0..0.5
+		int ncount = 0;
+		if (grid)
 		{
-			Vector2i cur = ff->world_to_cell(a.position);
-			Vector2 alt_dir;
-			const Vector2i offsets[4] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
-			for (auto &d : offsets)
+			TypedArray<Node2D> near = grid->get_neighbors(a.position, 1); // 3x3 cellules
+			ncount = (int)near.size();
+			if (ncount > 6)
 			{
-				Vector2i c = cur + d;
-				Vector2 v = ff->sample_dir_cell(c);
-				if (v != Vector2())
-				{
-					alt_dir = v;
-					break;
-				}
+				double x = Math::clamp((double)(ncount - 6) / 14.0, 0.0, 1.0);
+				density_factor = 0.05 + 0.45 * x;
 			}
-			if (alt_dir == Vector2())
-			{
-				Vector2 jitter = Vector2(
-					UtilityFunctions::randf_range(-0.5, 0.5),
-					UtilityFunctions::randf_range(-0.5, 0.5));
-				alt_dir = jitter.normalized();
-			}
-			flow_dir = alt_dir;
 		}
 
-		// --- Rayon de séparation adaptatif selon la vitesse ---
-		double speed = a.velocity.length();
-		double t = Math::clamp(speed / a.max_speed, 0.0, 1.0);
-		double adaptive_radius = Math::lerp(NEIGHBOR_RADIUS_HARD, NEIGHBOR_RADIUS_SOFT, t);
+		// 7) Vitesse cible modulée par densité
+		double target_speed = a.max_speed * (1.0 - density_factor);
+		target_speed = Math::clamp(target_speed, a.max_speed * 0.20, a.max_speed);
+		Vector2 target_vel = combined * (float)target_speed;
 
-		// --- Steering lissé et fluide ---
-		Vector2 sep = compute_separation(a.node, adaptive_radius) * SEPARATION_WEIGHT;
-		Vector2 combined = (flow_dir * FLOW_WEIGHT + sep + wall_repulse).normalized();
-		Vector2 target_dir = combined;
+		// 8) Lissage vers la cible
+		a.velocity = a.velocity.lerp(target_vel, 0.25);
 
-		a.velocity = a.velocity.lerp(target_dir * a.max_speed, 0.25);
-
-		// Freinage progressif à l'approche du but
+		// 9) Ralentissement progressif à l’approche du but (rayon ~2 tiles)
+		double dist_goal = a.position.distance_to(goal_pos);
 		double slow_radius = ff->get_tile_size().x * 2.0;
-		if (dist < slow_radius)
+		if (dist_goal < slow_radius)
 		{
-			double factor = Math::clamp(dist / slow_radius, 0.1, 1.0);
-			a.velocity *= factor;
+			double f = Math::clamp(dist_goal / slow_radius, 0.15, 1.0);
+			a.velocity *= f;
 		}
 
-		// --- Prévention douce contre les murs (avant mouvement) ---
-		if (ff)
-		{
-			Vector2 next_pos = a.position + a.velocity.normalized() * ff->get_tile_size().x * 0.5;
-			Vector2i next_cell = ff->world_to_cell(next_pos);
-
-			auto *floor_layer = ff->get_floor_layer();
-			auto *wall_layer = ff->get_wall_layer();
-
-			bool has_floor = floor_layer && floor_layer->get_cell_tile_data(next_cell) != nullptr;
-			bool has_wall = wall_layer && wall_layer->get_cell_tile_data(next_cell) != nullptr;
-
-			if (!has_floor || has_wall)
-			{
-				// Lissage : ralentit et glisse tangentiellement
-				Vector2 normal = Vector2(-a.velocity.y, a.velocity.x).normalized();
-
-				// Test du côté gauche et droit pour choisir la direction la plus libre
-				Vector2i left_cell = ff->world_to_cell(a.position + normal * ff->get_tile_size().x * 0.6);
-				Vector2i right_cell = ff->world_to_cell(a.position - normal * ff->get_tile_size().x * 0.6);
-
-				bool left_free = floor_layer && floor_layer->get_cell_tile_data(left_cell) != nullptr &&
-								 (!wall_layer || wall_layer->get_cell_tile_data(left_cell) == nullptr);
-				bool right_free = floor_layer && floor_layer->get_cell_tile_data(right_cell) != nullptr &&
-								  (!wall_layer || wall_layer->get_cell_tile_data(right_cell) == nullptr);
-
-				if (left_free && !right_free)
-					a.velocity = (a.velocity + normal * 0.3).normalized() * a.velocity.length() * 0.7;
-				else if (right_free && !left_free)
-					a.velocity = (a.velocity - normal * 0.3).normalized() * a.velocity.length() * 0.7;
-				else
-					a.velocity *= 0.6; // amorti si les deux côtés sont bouchés
-			}
-		}
-
-		// --- Détection murale anticipée (pré-mouvement) ---
-
-		// --- Avancement conservatif + slide contre les murs ---
-		if (ff)
+		// 10) Avancement conservatif + “slide” léger (prévention mur)
 		{
 			auto *floor_layer = ff->get_floor_layer();
 			auto *wall_layer = ff->get_wall_layer();
-
 			const double tile_px = (double)ff->get_tile_size().x;
 			Vector2 total_move = a.velocity * (float)delta;
-
-			// Taille max d’un micro-pas (<= 0.4 tuile) pour ne jamais "sauter" une cellule
 			const double max_step = tile_px * 0.4;
 			double remain = (double)total_move.length();
 			int steps = (int)Math::ceil(remain / max_step);
 			if (steps < 1)
 				steps = 1;
-
 			Vector2 step = (steps > 0) ? (total_move / (float)steps) : Vector2();
 
 			for (int s = 0; s < steps; s++)
 			{
 				Vector2 trial = a.position + step;
 				Vector2i cell = ff->world_to_cell(trial);
-
 				bool has_floor = floor_layer && floor_layer->get_cell_tile_data(cell) != nullptr;
 				bool has_wall = wall_layer && wall_layer->get_cell_tile_data(cell) != nullptr;
-
 				if (has_floor && !has_wall)
 				{
-					// Avance validée
 					a.position = trial;
 					continue;
 				}
 
-				// Cellule bloquée : tentative de slide par axes
-				// 1) Test axe X seul
-				Vector2 trial_x = a.position + Vector2(step.x, 0.0f);
+				// axes séparés
+				Vector2 trial_x = a.position + Vector2(step.x, 0);
 				Vector2i cell_x = ff->world_to_cell(trial_x);
 				bool ok_x = floor_layer && floor_layer->get_cell_tile_data(cell_x) != nullptr &&
 							!(wall_layer && wall_layer->get_cell_tile_data(cell_x) != nullptr);
 
-				// 2) Test axe Y seul
-				Vector2 trial_y = a.position + Vector2(0.0f, step.y);
+				Vector2 trial_y = a.position + Vector2(0, step.y);
 				Vector2i cell_y = ff->world_to_cell(trial_y);
 				bool ok_y = floor_layer && floor_layer->get_cell_tile_data(cell_y) != nullptr &&
 							!(wall_layer && wall_layer->get_cell_tile_data(cell_y) != nullptr);
@@ -384,13 +299,13 @@ void SteeringSystemNative::update_all_agents(double delta)
 				if (ok_x && !ok_y)
 				{
 					a.position = trial_x;
-					a.velocity *= SLIDE_DECAY_PER_STEP; // amorti du slide
+					a.velocity *= 0.85;
 					continue;
 				}
 				if (ok_y && !ok_x)
 				{
 					a.position = trial_y;
-					a.velocity *= SLIDE_DECAY_PER_STEP;
+					a.velocity *= 0.85;
 					continue;
 				}
 				if (ok_x && ok_y)
@@ -399,56 +314,60 @@ void SteeringSystemNative::update_all_agents(double delta)
 						a.position = trial_x;
 					else
 						a.position = trial_y;
-					a.velocity *= SLIDE_DECAY_PER_STEP;
+					a.velocity *= 0.85;
 					continue;
 				}
 
-				// Option diagonale : test supplémentaire si activé
-				if (DIAGONAL_PROBE_ENABLE)
-				{
-					const Vector2 diagonals[4] = {
-						Vector2(step.x, step.y),
-						Vector2(step.x, -step.y),
-						Vector2(-step.x, step.y),
-						Vector2(-step.x, -step.y)};
-
-					for (const auto &d : diagonals)
-					{
-						Vector2 trial_diag = a.position + d;
-						Vector2i cell_diag = ff->world_to_cell(trial_diag);
-						bool ok_diag = floor_layer && floor_layer->get_cell_tile_data(cell_diag) != nullptr &&
-									   !(wall_layer && wall_layer->get_cell_tile_data(cell_diag) != nullptr);
-						if (ok_diag)
-						{
-							a.position = trial_diag;
-							a.velocity *= SLIDE_DECAY_PER_STEP * 0.9; // amorti plus fort sur diagonale
-							break;
-						}
-					}
-				}
-
-				// Aucune issue sur ce micro-pas : on stoppe le mouvement restant
+				// bloqué sur ce micro-pas
 				a.velocity = Vector2();
 				break;
 			}
 		}
-		else
+
+
+		// 11) Critère d’“arrivé” doux : vitesse faible soutenue + densité
 		{
-			// Pas de FF : fallback mouvement brut
-			a.position += a.velocity * delta;
+			const double V_EPS = a.max_speed * 0.25; // 25% de la Vmax
+			const int FRAMES_REQ = 6;				 // persistance minimale
+			int slow_frames = 0;
+			Variant sv = a.node->get("_slow_frames");
+			if (sv.get_type() == Variant::INT)
+				slow_frames = (int)sv;
+
+			if (a.velocity.length() < V_EPS && ncount >= 4)
+				slow_frames++;
+			else
+				slow_frames = 0;
+
+			if (slow_frames >= FRAMES_REQ)
+			{
+				a.arrived = true;
+				a.velocity = Vector2();
+				a.node->set("velocity", a.velocity);
+
+				// Désactivation du node pour économiser et figer le comportement
+				a.node->set_process(false);
+				a.node->set_physics_process(false);
+
+				if (grid)
+					grid->unregister_agent(a.node);
+
+				slow_frames = 0;
+			}
+
+			a.node->set("_slow_frames", slow_frames);
 		}
 
-		// --- Mise à jour Godot ---
+		// Application scène
 		a.node->set_global_position(a.position);
 		a.node->set("velocity", a.velocity);
 		a.node->set("z_index", int(a.position.y));
 
-		// --- Mise à jour grille spatiale ---
 		if (grid)
 			grid->update_agent(a.node);
 	}
 
-	// --- Étape 3 : reset des arrivés si flowfield changé ---
+	// Reset des arrivés si version du flow change
 	for (auto &[gid, ff] : flowfields)
 	{
 		if (!ff)
@@ -457,7 +376,6 @@ void SteeringSystemNative::update_all_agents(double delta)
 		static std::unordered_map<int, int> last_version;
 		if (!last_version.count(gid))
 			last_version[gid] = current_version;
-
 		if (current_version != last_version[gid])
 		{
 			for (auto &a : agents)
@@ -466,4 +384,12 @@ void SteeringSystemNative::update_all_agents(double delta)
 			last_version[gid] = current_version;
 		}
 	}
+
+	// Compteur
+	int arrived_count = 0;
+	for (auto &a : agents)
+		if (a.arrived)
+			arrived_count++;
+	if ((int)UtilityFunctions::randf_range(0, 100) < 2)
+		UtilityFunctions::print("Agents arrived:", arrived_count, "/", (int)agents.size());
 }
