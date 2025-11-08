@@ -564,7 +564,7 @@ void SteeringSystemNative::_check_flowfield_updates()
 			}
 
 			last_version[gid] = current_version;
-			UtilityFunctions::print("Flowfield update detected → agents of group", gid, "fully reset.");
+			/* UtilityFunctions::print("Flowfield update detected → agents of group", gid, "fully reset."); */
 		}
 	}
 }
