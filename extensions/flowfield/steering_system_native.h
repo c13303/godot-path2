@@ -18,17 +18,17 @@ namespace godot
 	struct AgentData
 	{
 		Node2D *node = nullptr;
+		int32_t group_id = 0;
+		double max_speed = 0.0;
 		Vector2 position;
 		Vector2 velocity;
-		double max_speed = 100.0;
-		int32_t group_id = 0;
 		bool arrived = false;
 
-		double time_in_area = 0.0;
-		Vector2 last_progress_pos;
-		int direction_changes = 0;
-		Vector2 last_velocity_dir;
-		double last_direction_check = 0.0;
+		// --- Ajouts pour suivi du progrès ---
+		double progress_sum = 0.0;		 // cumul du progrès signé
+		double progress_timer = 0.0;	 // temps accumulé depuis dernière vérif
+		bool parked = false;			 // état "en pause"
+		std::deque<Vector2> pos_history; // historique des positions (fenêtre glissante)
 	};
 
 	class SteeringSystemNative : public Node
