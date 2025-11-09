@@ -368,7 +368,7 @@ bool SteeringSystemNative::_check_direct_arrival(AgentData &a, FlowField &ff)
 }
 
 // ============================================================================
-// Calcule le rayon de zone d’arrivée du groupe (en pixels)
+// Calcule le rayon de zone d’arrivée, définit à quelle distance du but un agent peut être considéré comme étant arrivé.
 // ============================================================================
 
 double SteeringSystemNative::_compute_goal_radius_px(int group_size, double tile_px, double wall_factor)
