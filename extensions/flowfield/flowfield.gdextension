@@ -1,6 +1,6 @@
 [configuration]
 entry_symbol = "flowfield_library_init"
-compatibility_minimum = "4.3"
+compatibility_minimum = "4.5"
 
 [libraries]
 windows.debug.x86_64 = "res://extensions/flowfield/bin/flowfield.dll"

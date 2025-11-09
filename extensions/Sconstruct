@@ -24,8 +24,6 @@ if use_mingw == "yes":
 else:
     env.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
 
-
-
 env.Append(CPPPATH=[
     norm(os.path.join(godot_cpp_path, "include")),
     norm(os.path.join(godot_cpp_path, "gen", "include")),
@@ -40,7 +38,14 @@ else:
 
 env.Append(CPPDEFINES=["NOMINMAX"])
 
-sources = glob.glob("flowfield/*.cpp")
+# Recherche récursive dans flowfield/
+sources = [
+    s for s in glob.glob("flowfield/**/*.cpp", recursive=True)
+    if "legacy" not in s and "test_" not in os.path.basename(s)
+]
+sources.append("register_types.cpp")
+
+
 target_dir = norm(os.path.join(root, "flowfield", "bin"))
 os.makedirs(target_dir, exist_ok=True)
 
