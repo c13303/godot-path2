@@ -1239,3 +1239,9 @@ tile_set = SubResource("TileSet_8wl7c")
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(500, 500)
 zoom = Vector2(2, 2)
+
+[node name="SteeringSystemNative" type="SteeringSystemNative" parent="."]
+
+[node name="FlowField" type="FlowFieldNative" parent="."]
+
+[node name="SpatialGrid" type="SpatialGridNative" parent="."]

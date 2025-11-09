@@ -13,37 +13,57 @@ void SteeringSystemNative::_bind_methods() {
 SteeringSystemNative::SteeringSystemNative() {}
 SteeringSystemNative::~SteeringSystemNative() {}
 
-void SteeringSystemNative::set_flowfield(Object* obj) {
-    // en attente de FlowFieldNative
-    flowfield = nullptr;
+void SteeringSystemNative::_ready() {
+    Node *parent = get_parent();
+    if (!parent) {
+        UtilityFunctions::print("SteeringSystemNative: no parent");
+        return;
+    }
+
+    flowfield = Object::cast_to<Node2D>(parent->get_node_or_null("FlowField"));
+    grid = Object::cast_to<Node2D>(parent->get_node_or_null("SpatialGrid"));
+
+    if (flowfield && grid)
+        UtilityFunctions::print("SteeringSystemNative: linked FlowField + Grid");
+    else
+        UtilityFunctions::print("SteeringSystemNative: waiting for flowfield/grid...");
 }
 
-void SteeringSystemNative::set_grid(Object* obj) {
-    // en attente de SpatialGridNative
-    grid = nullptr;
+void SteeringSystemNative::set_flowfield(Object *obj) {
+    flowfield = Object::cast_to<Node2D>(obj);
 }
 
+void SteeringSystemNative::set_grid(Object *obj) {
+    grid = Object::cast_to<Node2D>(obj);
+}
 
-void SteeringSystemNative::register_agent(Node2D* node, double max_speed) {
-    if (!node) return;
-    Vector2 gp = node->get_global_position();
-    ffcore::Vec2 pos(gp.x, gp.y); // conversion explicite
-    int id = system.register_agent(pos, max_speed);
+void SteeringSystemNative::register_agent(Node2D *node, double max_speed) {
+    if (!node)
+        return;
+    int id = system.register_agent(ffcore::Vec2(node->get_global_position().x, node->get_global_position().y), max_speed);
     agent_map[node] = id;
 }
 
-
-void SteeringSystemNative::unregister_agent(Node2D* node) {
-    if (!node || !agent_map.count(node)) return;
-    system.unregister_agent(agent_map[node]);
-    agent_map.erase(node);
+void SteeringSystemNative::unregister_agent(Node2D *node) {
+    if (!node)
+        return;
+    auto it = agent_map.find(node);
+    if (it == agent_map.end())
+        return;
+    system.unregister_agent(it->second);
+    agent_map.erase(it);
 }
 
 void SteeringSystemNative::_process(double delta) {
+    if (!flowfield || !grid)
+        return;
+
     system.update_all(delta);
-    for (auto& [node, id] : agent_map) {
-        const ffcore::AgentData* a = system.get_agent(id);
-        if (!a) continue;
+
+    for (auto &[node, id] : agent_map) {
+        const ffcore::AgentData *a = system.get_agent(id);
+        if (!a)
+            continue;
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 }
