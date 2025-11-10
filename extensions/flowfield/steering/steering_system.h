@@ -13,16 +13,17 @@ struct AgentData {
     Vec2 velocity;
     double max_speed = 60.0;
     bool active = true;
+    FlowField* flow = nullptr;
 };
 
 class SteeringSystem {
 public:
     SteeringSystem();
 
-    int register_agent(const Vec2& pos, double max_speed);
+    int register_agent(const Vec2& pos, double max_speed, FlowField* flow);
     void unregister_agent(int id);
 
-    void set_flowfield(FlowField* f);
+    void set_default_flowfield(FlowField* f);
     void set_grid(SpatialGrid* g);
 
     void update_all(double delta);
@@ -34,7 +35,7 @@ private:
     std::unordered_map<int, int> id_to_index;
     int next_id = 1;
 
-    FlowField* flowfield = nullptr;
+    FlowField* default_flow = nullptr;
     SpatialGrid* grid = nullptr;
 };
 

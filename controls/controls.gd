@@ -12,6 +12,7 @@ extends Node2D
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 3.0
 
+var current_flow: Node = null
 var dragging: bool = false
 var drag_start_pos: Vector2
 var camera_start_pos: Vector2
@@ -69,15 +70,23 @@ func _on_click_set_goal() -> void:
 	if floorz == null:
 		print("Erreur : le TileMapLayer 'floor' est introuvable.")
 		return
+
 	var mouse_pos: Vector2 = get_global_mouse_position()
 	var local_pos: Vector2 = floorz.to_local(mouse_pos)
 	var cell: Vector2i = floorz.local_to_map(local_pos)
+
+	# centre exact de la cellule cliquée
 	var cell_center: Vector2 = floorz.to_global(floorz.map_to_local(cell))
-	marker.global_position = cell_center + Vector2(-8, -8)
+
+	# affiche le marqueur au centre
+	marker.global_position = cell_center
 	marker.visible = true
+
 	emit_signal("mouse_goal_set", cell_center)
+
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(cell_center)
+		current_flow = flow
 	else:
 		print("FlowField non trouvé ou inactif.")
 
@@ -102,8 +111,10 @@ func _spawn_mainchar(pos: Vector2) -> void:
 	agent.global_position = free_pos
 	agent.z_index = int(free_pos.y)
 	agent.add_to_group("main_chars")
+
 	if steering and steering.has_method("register_agent"):
-		steering.register_agent(agent, 60.0)
+		var flow_ref = current_flow if current_flow != null else null
+		steering.register_agent(agent, 60.0, flow_ref)
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if not occupied.has(start_cell) and _is_walkable(start_cell):

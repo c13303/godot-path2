@@ -3,7 +3,6 @@
 #include "spatial_grid_native.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 
-
 using namespace godot;
 
 void SteeringSystemNative::_bind_methods()
@@ -38,7 +37,7 @@ void SteeringSystemNative::_ready()
         auto *grid_native = Object::cast_to<SpatialGridNative>(grid);
         if (ff_native && grid_native)
         {
-            system.set_flowfield(ff_native->get_field());
+            system.set_default_flowfield(ff_native->get_field());
             system.set_grid(grid_native->get_grid());
             UtilityFunctions::print("SteeringSystemNative: native system connected.");
         }
@@ -67,7 +66,11 @@ void SteeringSystemNative::register_agent(Node2D *node, double max_speed)
 {
     if (!node)
         return;
-    int id = system.register_agent(ffcore::Vec2(node->get_global_position().x, node->get_global_position().y), max_speed);
+    int id = system.register_agent(
+        ffcore::Vec2(node->get_global_position().x, node->get_global_position().y),
+        max_speed,
+        nullptr // ou un FlowField* spécifique si tu veux lier un flow particulier
+    );
     agent_map[node] = id;
 }
 

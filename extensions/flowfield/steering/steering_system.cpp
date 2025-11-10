@@ -1,15 +1,17 @@
 #include "steering_system.h"
+#include <algorithm>
 
 using namespace ffcore;
 
 SteeringSystem::SteeringSystem() {}
 
-int SteeringSystem::register_agent(const Vec2 &pos, double max_speed)
+int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField* flow)
 {
     AgentData a;
     a.id = next_id++;
     a.position = pos;
     a.max_speed = max_speed;
+    a.flow = flow ? flow : default_flow;
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
 
@@ -38,7 +40,7 @@ void SteeringSystem::unregister_agent(int id)
     id_to_index.erase(it);
 }
 
-void SteeringSystem::set_flowfield(FlowField *f) { flowfield = f; }
+void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; }
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }
 
 const AgentData *SteeringSystem::get_agent(int id) const
@@ -51,13 +53,11 @@ const AgentData *SteeringSystem::get_agent(int id) const
 
 void SteeringSystem::update_all(double delta)
 {
-    if (!flowfield || !flowfield->is_ready() || !grid)
+    if (!grid)
         return;
 
-    const double NEIGHBOR_RADIUS = 2.0;
-    const double SEPARATION_WEIGHT = 0.5;
     const double FLOW_WEIGHT = 1.0;
-    const double SLOW_RADIUS = 2.5; // rayon de ralentissement (en cellules)
+    const double SLOW_RADIUS = 2.5;
     const double ARRIVAL_EPS = 0.15;
 
     for (auto &a : agents)
@@ -65,53 +65,44 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
-        Vec2 flow_dir = flowfield->sample_dir_world(a.position);
+        FlowField* ff = a.flow ? a.flow : default_flow;
+        if (!ff || !ff->is_ready())
+            continue;
+
+        Vec2 flow_dir = ff->sample_dir_world(a.position);
         if (flow_dir.is_zero())
             continue;
 
-        // Force de séparation
-        Vec2 sep(0, 0);
-        auto neighbors = grid->query_neighbors(a.position, NEIGHBOR_RADIUS);
-        int count = 0;
-        for (int nid : neighbors)
+        Vec2 goal_pos = ff->has_goal() ? ff->goal_center_world() : a.position;
+        Vec2i cur_cell = ff->world_to_cell(a.position);
+        Vec2i goal_cell = ff->has_goal() ? ff->get_goal_cell() : cur_cell;
+
+        if (cur_cell == goal_cell)
         {
-            if (nid == a.id)
-                continue;
-            const AgentData *other = get_agent(nid);
-            if (!other)
-                continue;
-            Vec2 diff = a.position - other->position;
-            double dist = diff.length();
-            if (dist > 1e-6 && dist < NEIGHBOR_RADIUS)
+            Vec2 to_center = goal_pos - a.position;
+            double d = to_center.length();
+            if (d < ARRIVAL_EPS)
             {
-                double falloff = 1.0 - (dist / NEIGHBOR_RADIUS);
-                sep += diff.normalized() * falloff;
-                count++;
+                a.velocity = Vec2(0, 0);
+                a.active = false;
+                continue;
             }
+            Vec2 center_dir = to_center.normalized();
+            double slow_factor = std::max(d / SLOW_RADIUS, 0.2);
+            a.velocity = center_dir * a.max_speed * slow_factor;
         }
-        if (count > 0)
-            sep = sep * (1.0 / count);
-
-        // Direction combinée
-        Vec2 desired_dir = (flow_dir * FLOW_WEIGHT + sep * SEPARATION_WEIGHT).normalized();
-        if (desired_dir.is_zero())
-            continue;
-
-        // Ralentissement à l'approche du but
-        Vec2i goal_cell = flowfield->world_to_cell(flowfield->cell_to_world(flowfield->world_to_cell(Vec2(2, 2))));
-        Vec2 goal_pos = flowfield->cell_to_world(goal_cell);
-        double dist_to_goal = a.position.distance_to(goal_pos);
-        double slow_factor = 1.0;
-
-        if (dist_to_goal < SLOW_RADIUS)
+        else
         {
-            slow_factor = dist_to_goal / SLOW_RADIUS;
-            slow_factor = std::max(slow_factor, 0.2);
+            double dist_to_goal = (a.position - goal_pos).length();
+            double slow_factor = 1.0;
+            if (dist_to_goal < SLOW_RADIUS)
+                slow_factor = std::max(dist_to_goal / SLOW_RADIUS, 0.2);
+            Vec2 desired_dir = (flow_dir * FLOW_WEIGHT).normalized();
+            if (desired_dir.is_zero())
+                continue;
+            a.velocity = desired_dir * a.max_speed * slow_factor;
         }
-        if (dist_to_goal < ARRIVAL_EPS)
-            a.active = false;
 
-        a.velocity = desired_dir * a.max_speed * slow_factor;
         Vec2 old_pos = a.position;
         a.position += a.velocity * delta;
         grid->update(a.id, old_pos, a.position);

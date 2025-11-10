@@ -34,9 +34,13 @@ public:
         return dirs[y * w + x];
     }
 
-    // origine en indices de cellule (ex: used.position)
     void set_cell_origin(const Vec2i &c) { cell_origin = c; }
     const Vec2i &get_cell_origin() const { return cell_origin; }
+
+    void set_goal_cell(const Vec2i &c) { goal_cell = c; }
+    Vec2i get_goal_cell() const { return goal_cell; }
+    bool has_goal() const { return goal_cell.x >= 0 && goal_cell.y >= 0; }
+    Vec2 goal_center_world() const { return cell_to_world(goal_cell); }
 
 private:
     int w = 0;
@@ -46,6 +50,8 @@ private:
 
     Vec2i cell_origin = Vec2i(0, 0);
     std::vector<Vec2> dirs;
+
+    Vec2i goal_cell = Vec2i(-1, -1);
 };
 
 } // namespace ffcore

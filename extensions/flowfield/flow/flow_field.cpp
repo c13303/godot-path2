@@ -53,6 +53,7 @@ void FlowField::clear()
 {
     std::fill(dirs.begin(), dirs.end(), Vec2());
     ready = false;
+    goal_cell = Vec2i(-1, -1);
 }
 
 void FlowField::set_dir(int x, int y, const Vec2 &dir)
@@ -83,7 +84,7 @@ namespace
 
 using namespace ffcore;
 
-void FlowField::compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkables, bool allow_diagonals)
+void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &walkables, bool allow_diagonals)
 {
     if (w == 0 || h == 0 || walkables.empty())
         return;
@@ -105,10 +106,11 @@ void FlowField::compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkab
     std::vector<int32_t> dist(w * h, INT_MAX);
     std::priority_queue<FFNode> open;
 
-    if (walkable_set.count(index(goal_cell)))
+    if (goal_cell_in.x >= 0 && goal_cell_in.y >= 0 && goal_cell_in.x < w && goal_cell_in.y < h && walkable_set.count(index(goal_cell_in)))
     {
-        dist[index(goal_cell)] = 0;
-        open.push({goal_cell, 0});
+        dist[index(goal_cell_in)] = 0;
+        open.push({goal_cell_in, 0});
+        goal_cell = goal_cell_in;
     }
     else
         return;
@@ -174,9 +176,12 @@ void FlowField::compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkab
             int best_d = dist[ci];
             Vec2i best = c;
 
-            for (auto &d : ORTHO)
+            const Vec2i* nbrs = ORTHO;
+            int nbrs_count = 4;
+
+            for (int i = 0; i < nbrs_count; ++i)
             {
-                Vec2i n(c.x + d.x, c.y + d.y);
+                Vec2i n(c.x + nbrs[i].x, c.y + nbrs[i].y);
                 if (n.x < 0 || n.y < 0 || n.x >= w || n.y >= h)
                     continue;
                 int ni = index(n);
@@ -207,7 +212,6 @@ void FlowField::compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkab
                 }
             }
 
-            // cas non atteignable ou pas de voisin meilleur
             if (dist[ci] == INT_MAX || (best.x == c.x && best.y == c.y))
             {
                 dirs[ci] = Vec2();

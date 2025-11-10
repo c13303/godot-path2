@@ -37,6 +37,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("sample_dir_world", "world_pos"), &FlowFieldNative::sample_dir_world);
+    ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node)
@@ -82,8 +83,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     }
 
     Vector2 goal_local = floor_layer->to_local(goal_world);
-    Vector2i goal_cell = floor_layer->local_to_map(goal_local);
-    if (!walkable_set.count(goal_cell))
+    Vector2i goal_cell_tm = floor_layer->local_to_map(goal_local);
+    if (!walkable_set.count(goal_cell_tm))
         return;
 
     const Vector2i dirs8[8] = {
@@ -144,8 +145,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     for (const Vector2i &c : walkable_set)
         costs[c] = std::numeric_limits<double>::infinity();
 
-    costs[goal_cell] = 0.0;
-    pq.push({0.0, goal_cell});
+    costs[goal_cell_tm] = 0.0;
+    pq.push({0.0, goal_cell_tm});
 
     while (!pq.empty())
     {
@@ -235,7 +236,19 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
         }
     }
 
+    ffcore::Vec2i goal_cell_local(goal_cell_tm.x - used.position.x, goal_cell_tm.y - used.position.y);
+    field.set_goal_cell(goal_cell_local);
+
     queue_redraw();
+
+    ffcore::Vec2i test_cell(10, 5);
+    ffcore::Vec2 world_pos = field.cell_to_world(test_cell);
+    ffcore::Vec2i back_cell = field.world_to_cell(world_pos);
+
+    UtilityFunctions::print(
+        "cell_to_world/world_to_cell test => input:", test_cell.x, ",", test_cell.y,
+        "  world:", world_pos.x, ",", world_pos.y,
+        "  back:", back_cell.x, ",", back_cell.y);
 }
 
 double FlowFieldNative::move_cost_for_dir(int dir_index)
@@ -282,8 +295,6 @@ void FlowFieldNative::_draw()
                 continue;
 
             Vector2i cell = used.position + Vector2i(x, y);
-
-            // position du centre exact de la cellule
             Vector2 local_center = floor_layer->map_to_local(cell);
             Vector2 world_center = floor_layer->to_global(local_center);
             Vector2 draw_center = to_local(world_center);
@@ -291,7 +302,6 @@ void FlowFieldNative::_draw()
             Vector2 dir(dir_v.x, dir_v.y);
             dir = dir.normalized();
 
-            // longueur proportionnelle à la taille de cellule
             float len = cell_size.x * debug_scale * 0.5f;
 
             Vector2 p1 = draw_center + dir * len;

@@ -43,6 +43,7 @@ public:
     godot::Vector2 sample_dir_world(Vector2 world_pos) const;
 
     ffcore::FlowField *get_field() { return &field; }
+    Vector2 get_goal_world() const { return goal_world; }
 };
 
 } // namespace godot
