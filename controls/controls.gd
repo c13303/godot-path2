@@ -2,8 +2,8 @@ extends Node2D
 
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"
 @onready var wallz: TileMapLayer = $"../MonTilemap/wallz"
-
 @onready var flow: Node = $"../FlowFieldNative"
+@onready var steering: Node = $"../SteeringSystemNative"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 
 @export var camera: Camera2D
@@ -47,51 +47,39 @@ func _unhandled_input(event: InputEvent) -> void:
 				camera_start_pos = camera.position
 			else:
 				dragging = false
-
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		_on_key_spawn_chars()
 
 func _process(delta: float) -> void:
 	if camera == null:
 		return
-
 	var input := Vector2.ZERO
 	if Input.is_action_pressed("ui_right"): input.x += 1.0
 	if Input.is_action_pressed("ui_left"):  input.x -= 1.0
 	if Input.is_action_pressed("ui_down"):  input.y += 1.0
 	if Input.is_action_pressed("ui_up"):    input.y -= 1.0
-
 	if input != Vector2.ZERO:
 		camera.position += input.normalized() * speed * delta
-
 	if dragging and camera:
 		var mouse_pos := get_viewport().get_mouse_position()
 		var offset := (drag_start_pos - mouse_pos) * camera.zoom
 		camera.position = camera_start_pos + offset
-		
+
 func _on_click_set_goal() -> void:
 	if floorz == null:
 		print("Erreur : le TileMapLayer 'floor' est introuvable.")
 		return
-
 	var mouse_pos: Vector2 = get_global_mouse_position()
 	var local_pos: Vector2 = floorz.to_local(mouse_pos)
 	var cell: Vector2i = floorz.local_to_map(local_pos)
-
-	# Position du centre de la cellule
 	var cell_center: Vector2 = floorz.to_global(floorz.map_to_local(cell))
-
-	# Décalage identique au legacy (-8, -8 pour centrer le marker sur la tuile)
 	marker.global_position = cell_center + Vector2(-8, -8)
 	marker.visible = true
-
 	emit_signal("mouse_goal_set", cell_center)
-
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(cell_center)
 	else:
 		print("FlowField non trouvé ou inactif.")
-
 
 func _on_key_spawn_chars() -> void:
 	var mouse_pos: Vector2 = get_global_mouse_position()
@@ -102,22 +90,20 @@ func _spawn_mainchar(pos: Vector2) -> void:
 	if floorz == null:
 		print("Erreur : floorz introuvable.")
 		return
-
 	var target_cell: Vector2i = floorz.local_to_map(floorz.to_local(pos))
 	var occupied: Array[Vector2i] = []
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		var c: Vector2i = floorz.local_to_map(floorz.to_local(node.global_position))
 		occupied.append(c)
-
 	var free_cell: Vector2i = _find_free_cell_near(target_cell, occupied)
 	var free_pos: Vector2 = floorz.to_global(floorz.map_to_local(free_cell))
-
 	var agent: Node2D = MainCharScene.instantiate()
 	get_parent().add_child(agent)
 	agent.global_position = free_pos
 	agent.z_index = int(free_pos.y)
 	agent.add_to_group("main_chars")
-	#print("Spawned agent at free cell", free_cell)
+	if steering and steering.has_method("register_agent"):
+		steering.register_agent(agent, 60.0)
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if not occupied.has(start_cell) and _is_walkable(start_cell):

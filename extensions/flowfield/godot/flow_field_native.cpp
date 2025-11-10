@@ -39,7 +39,6 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("sample_dir_world", "world_pos"), &FlowFieldNative::sample_dir_world);
 }
 
-
 void FlowFieldNative::set_floor_layer(Object *node)
 {
     floor_layer = Object::cast_to<TileMapLayer>(node);
@@ -55,28 +54,17 @@ Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 
 void FlowFieldNative::rebuild_async(Vector2 goal)
 {
-    Node *parent = get_parent();
-    if (!parent)
-        return;
-
-    Node *floor_node = parent->get_node_or_null("MonTilemap/floor");
-    Node *wall_node = parent->get_node_or_null("MonTilemap/wallz");
-    if (!floor_node || !wall_node)
-        return;
-
-    floor_layer = Object::cast_to<TileMapLayer>(floor_node);
-    wall_layer = Object::cast_to<TileMapLayer>(wall_node);
     if (!floor_layer || !wall_layer)
         return;
 
     goal_world = goal;
-
     Rect2i used = floor_layer->get_used_rect();
     if (used.size.x <= 0 || used.size.y <= 0)
         return;
 
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
+    field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
@@ -120,6 +108,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             }
         }
     }
+
     while (!q.empty())
     {
         Vector2i cur = q.front();
@@ -146,9 +135,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             return std::numeric_limits<double>::infinity();
         double k = 2.5;
         double p = k / (double(d) + 0.5);
-        if (p < 0.2)
-            p = 0.2;
-        return p;
+        return std::max(p, 0.2);
     };
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
@@ -156,6 +143,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
 
     for (const Vector2i &c : walkable_set)
         costs[c] = std::numeric_limits<double>::infinity();
+
     costs[goal_cell] = 0.0;
     pq.push({0.0, goal_cell});
 
@@ -257,32 +245,20 @@ double FlowFieldNative::move_cost_for_dir(int dir_index)
 
 godot::Vector2 FlowFieldNative::sample_dir_world(Vector2 world_pos) const
 {
-    if (!floor_layer || field.width() == 0 || field.height() == 0) {
-        UtilityFunctions::print("sample_dir_world: field not initialized");
+    if (!floor_layer || field.width() == 0 || field.height() == 0)
         return Vector2(0, 0);
-    }
 
     Vector2 local = floor_layer->to_local(world_pos);
     Vector2i cell = floor_layer->local_to_map(local);
     Rect2i used = floor_layer->get_used_rect();
     Vector2i rel = cell - used.position;
 
-    UtilityFunctions::print("sample_dir_world: cell=", cell, " rel=", rel,
-                            " field=", field.width(), "x", field.height(),
-                            " used.pos=", used.position);
-
-    if (rel.x < 0 || rel.y < 0 || rel.x >= field.width() || rel.y >= field.height()) {
-        UtilityFunctions::print("sample_dir_world: outside field bounds");
+    if (rel.x < 0 || rel.y < 0 || rel.x >= field.width() || rel.y >= field.height())
         return Vector2(0, 0);
-    }
 
     ffcore::Vec2 d = field.dir(rel.x, rel.y);
-    UtilityFunctions::print("sample_dir_world: dir=", d.x, ",", d.y);
     return Vector2(d.x, d.y);
 }
-
-
-
 
 void FlowFieldNative::_draw()
 {
@@ -306,16 +282,23 @@ void FlowFieldNative::_draw()
                 continue;
 
             Vector2i cell = used.position + Vector2i(x, y);
+
+            // position du centre exact de la cellule
             Vector2 local_center = floor_layer->map_to_local(cell);
             Vector2 world_center = floor_layer->to_global(local_center);
-            Vector2 local_draw = to_local(world_center);
+            Vector2 draw_center = to_local(world_center);
 
             Vector2 dir(dir_v.x, dir_v.y);
-            Vector2 p1 = local_draw + dir * cell_size * debug_scale;
+            dir = dir.normalized();
 
-            draw_line(local_draw, p1, debug_color_dir, 1.0);
+            // longueur proportionnelle à la taille de cellule
+            float len = cell_size.x * debug_scale * 0.5f;
+
+            Vector2 p1 = draw_center + dir * len;
+
+            draw_line(draw_center, p1, debug_color_dir, 1.0);
             if (debug_stride >= 4)
-                draw_circle(local_draw, 1.0, debug_color_cell);
+                draw_circle(draw_center, 1.0, debug_color_cell);
 
             count++;
         }

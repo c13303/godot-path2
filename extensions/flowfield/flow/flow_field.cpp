@@ -1,6 +1,6 @@
 #include "flow_field.h"
 #include <algorithm>
-
+#include <cmath>
 using namespace ffcore;
 
 FlowField::FlowField(int width, int height, double tile_size)
@@ -37,14 +37,16 @@ Vec2 FlowField::sample_dir_world(const Vec2 &world_pos) const
     return sample_dir_cell(cell.x, cell.y);
 }
 
-Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const
-{
-    return Vec2i((int)(world_pos.x / tile), (int)(world_pos.y / tile));
+Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const {
+    int gx = static_cast<int>(std::floor(world_pos.x / tile));
+    int gy = static_cast<int>(std::floor(world_pos.y / tile));
+    return Vec2i(gx - cell_origin.x, gy - cell_origin.y);
 }
 
-Vec2 FlowField::cell_to_world(const Vec2i &cell) const
-{
-    return Vec2((cell.x + 0.5) * tile, (cell.y + 0.5) * tile);
+Vec2 FlowField::cell_to_world(const Vec2i &cell) const {
+    int gx = cell_origin.x + cell.x;
+    int gy = cell_origin.y + cell.y;
+    return Vec2((gx + 0.5) * tile, (gy + 0.5) * tile);
 }
 
 void FlowField::clear()
