@@ -226,9 +226,9 @@ void SteeringSystem::update_all(double delta)
 
     const double GOAL_OCCUPY_RADIUS = TILE_SIZE * 0.40;
     const double GOAL_BLOCK_RADIUS = TILE_SIZE * 0.60;
-    const double GOAL_COOLDOWN_SEC = 0.75;
-    const double GOAL_RING_RADIUS = TILE_SIZE * 0.51;
-    const double STOP_RING_RADIUS = TILE_SIZE * 0.85;
+    const double GOAL_COOLDOWN_SEC = 999999999999999;
+    const double GOAL_RING_RADIUS = TILE_SIZE * 1;
+    const double STOP_RING_RADIUS = TILE_SIZE * 1;
 
     for (auto &a : agents)
     {
