@@ -83,70 +83,28 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     }
 
     Vector2 goal_local = floor_layer->to_local(goal_world);
-    Vector2i goal_cell_tm = floor_layer->local_to_map(goal_local);
-    if (!walkable_set.count(goal_cell_tm))
+    Vector2i goal_cell = floor_layer->local_to_map(goal_local);
+    Vector2 goal_center_world = floor_layer->to_global(floor_layer->map_to_local(goal_cell));
+    goal_world = goal_center_world;
+
+    UtilityFunctions::print("[GOAL TEST] click=", goal.x, ",", goal.y,
+                            " | cell=", goal_cell.x, ",", goal_cell.y,
+                            " | center=", goal_center_world.x, ",", goal_center_world.y);
+
+    if (!walkable_set.count(goal_cell))
         return;
 
     const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    std::unordered_map<Vector2i, int, Vector2iHash> cheb_dist;
-    const int INF_INT = 1e9;
-    for (const Vector2i &c : walkable_set)
-        cheb_dist[c] = INF_INT;
-
-    std::queue<Vector2i> q;
-    for (const Vector2i &w : wall_set)
-    {
-        for (int i = 0; i < 8; i++)
-        {
-            Vector2i n = w + dirs8[i];
-            auto it = cheb_dist.find(n);
-            if (it != cheb_dist.end() && it->second > 1)
-            {
-                it->second = 1;
-                q.push(n);
-            }
-        }
-    }
-
-    while (!q.empty())
-    {
-        Vector2i cur = q.front();
-        q.pop();
-        int cd = cheb_dist[cur];
-        for (int i = 0; i < 8; i++)
-        {
-            Vector2i n = cur + dirs8[i];
-            auto it = cheb_dist.find(n);
-            if (it == cheb_dist.end())
-                continue;
-            int nd = cd + 1;
-            if (nd < it->second)
-            {
-                it->second = nd;
-                q.push(n);
-            }
-        }
-    }
-
-    auto penalty = [&](int d) -> double
-    {
-        if (d <= 0)
-            return std::numeric_limits<double>::infinity();
-        double k = 2.5;
-        double p = k / (double(d) + 0.5);
-        return std::max(p, 0.2);
-    };
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+        {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    std::priority_queue<DijkstraNode, std::vector<DijkstraNode>, std::greater<DijkstraNode>> pq;
-
     for (const Vector2i &c : walkable_set)
         costs[c] = std::numeric_limits<double>::infinity();
 
-    costs[goal_cell_tm] = 0.0;
-    pq.push({0.0, goal_cell_tm});
+    std::priority_queue<DijkstraNode, std::vector<DijkstraNode>, std::greater<DijkstraNode>> pq;
+    costs[goal_cell] = 0.0;
+    pq.push({0.0, goal_cell});
 
     while (!pq.empty())
     {
@@ -161,23 +119,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             if (!walkable_set.count(nb))
                 continue;
 
-            if (i >= 4)
-            {
-                Vector2i ax(dirs8[i].x, 0), ay(0, dirs8[i].y);
-                if (!walkable_set.count(cur.cell + ax) || !walkable_set.count(cur.cell + ay))
-                    continue;
-            }
-
-            int d_nb = INF_INT;
-            auto itd = cheb_dist.find(nb);
-            if (itd != cheb_dist.end())
-                d_nb = itd->second;
-
-            double pen = penalty(d_nb);
-            if (!std::isfinite(pen))
-                continue;
-
-            double new_cost = cur.cost + move_cost_for_dir(i) + pen;
+            double new_cost = cur.cost + move_cost_for_dir(i);
             if (new_cost < costs[nb])
             {
                 costs[nb] = new_cost;
@@ -186,8 +128,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
         }
     }
 
-    auto cost_at = [&](const Vector2i &p) -> double
-    {
+    auto cost_at = [&](const Vector2i &p) -> double {
         auto it = costs.find(p);
         return (it == costs.end()) ? std::numeric_limits<double>::infinity() : it->second;
     };
@@ -200,55 +141,26 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             double cc = cost_at(c);
             if (!walkable_set.count(c) || !std::isfinite(cc))
             {
-                field.set_dir(x, y, {0.0f, 0.0f});
+                field.set_dir(x, y, {0.0, 0.0});
                 continue;
             }
 
-            double gx = 0.0, gy = 0.0;
-            int valid = 0;
-
-            auto add = [&](const Vector2i &off, double wx, double wy)
-            {
-                double cv = cost_at(c + off);
-                if (!std::isfinite(cv))
-                    return;
-                gx += (cv - cc) * wx;
-                gy += (cv - cc) * wy;
-                valid++;
-            };
-
-            add(Vector2i(1, 0), 1.0, 0.0);
-            add(Vector2i(-1, 0), -1.0, 0.0);
-            add(Vector2i(0, 1), 0.0, 1.0);
-            add(Vector2i(0, -1), 0.0, -1.0);
-
-            if (valid > 0)
-            {
-                Vector2 g(-static_cast<float>(gx), -static_cast<float>(gy));
-                if (g.length() > 1e-6f)
-                    g = g.normalized();
-                field.set_dir(x, y, {g.x, g.y});
-            }
-            else
-            {
-                field.set_dir(x, y, {0.0f, 0.0f});
-            }
+            double gx = cost_at(c + Vector2i(1, 0)) - cc;
+            double gy = cost_at(c + Vector2i(0, 1)) - cc;
+            ffcore::Vec2 dir(-gx, -gy);
+            if (dir.length() > 1e-6)
+                dir = dir.normalized();
+            field.set_dir(x, y, dir);
         }
     }
 
-    ffcore::Vec2i goal_cell_local(goal_cell_tm.x - used.position.x, goal_cell_tm.y - used.position.y);
-    field.set_goal_cell(goal_cell_local);
+    ffcore::Vec2i rel_goal(goal_cell.x - used.position.x, goal_cell.y - used.position.y);
+    ffcore::Vec2 dir_goal = field.dir(rel_goal.x, rel_goal.y);
+    UtilityFunctions::print("[DIR TEST] goal_cell=", goal_cell.x, ",", goal_cell.y,
+                            " | dir=", dir_goal.x, ",", dir_goal.y);
 
+    field.set_goal_cell(rel_goal);
     queue_redraw();
-
-    ffcore::Vec2i test_cell(10, 5);
-    ffcore::Vec2 world_pos = field.cell_to_world(test_cell);
-    ffcore::Vec2i back_cell = field.world_to_cell(world_pos);
-
-    UtilityFunctions::print(
-        "cell_to_world/world_to_cell test => input:", test_cell.x, ",", test_cell.y,
-        "  world:", world_pos.x, ",", world_pos.y,
-        "  back:", back_cell.x, ",", back_cell.y);
 }
 
 double FlowFieldNative::move_cost_for_dir(int dir_index)
@@ -279,11 +191,9 @@ void FlowFieldNative::_draw()
         return;
 
     set_z_index(999);
-
     Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
     int skip = Math::max(1, debug_stride);
     int count = 0;
-
     Rect2i used = floor_layer->get_used_rect();
 
     for (int y = 0; y < field.height(); y += skip)
@@ -305,7 +215,6 @@ void FlowFieldNative::_draw()
             float len = cell_size.x * debug_scale * 0.5f;
 
             Vector2 p1 = draw_center + dir * len;
-
             draw_line(draw_center, p1, debug_color_dir, 1.0);
             if (debug_stride >= 4)
                 draw_circle(draw_center, 1.0, debug_color_cell);

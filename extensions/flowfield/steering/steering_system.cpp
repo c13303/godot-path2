@@ -1,11 +1,12 @@
 #include "steering_system.h"
 #include <algorithm>
+#include <cstdio>
 
 using namespace ffcore;
 
 SteeringSystem::SteeringSystem() {}
 
-int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField* flow)
+int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow)
 {
     AgentData a;
     a.id = next_id++;
@@ -65,7 +66,7 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
-        FlowField* ff = a.flow ? a.flow : default_flow;
+        FlowField *ff = a.flow ? a.flow : default_flow;
         if (!ff || !ff->is_ready())
             continue;
 
@@ -76,6 +77,21 @@ void SteeringSystem::update_all(double delta)
         Vec2 goal_pos = ff->has_goal() ? ff->goal_center_world() : a.position;
         Vec2i cur_cell = ff->world_to_cell(a.position);
         Vec2i goal_cell = ff->has_goal() ? ff->get_goal_cell() : cur_cell;
+
+        // === Bloc de test pour l’hypothèse 1 ===
+        double dist = (a.position - goal_pos).length();
+        if (dist < ff->tile_size() * 1.5)
+        {
+            std::printf(
+                "[TEST] id=%d  pos=(%.2f,%.2f)  flow=(%.3f,%.3f)  cell=(%d,%d)  goal=(%d,%d)  dist=%.3f\n",
+                a.id, a.position.x, a.position.y,
+                flow_dir.x, flow_dir.y,
+                cur_cell.x, cur_cell.y,
+                goal_cell.x, goal_cell.y,
+                dist
+            );
+        }
+        // ===============================
 
         if (cur_cell == goal_cell)
         {
