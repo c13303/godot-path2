@@ -142,6 +142,52 @@ void SteeringSystem::update_all(double delta)
 
         Vec2 old_pos = a.position;
         a.position += a.velocity * delta;
+
+        Vec2i cell = ff->world_to_cell(a.position);
+
+        soft_wall_correction(a, ff, delta);
+
         grid->update(a.id, old_pos, a.position);
     }
+}
+
+void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double delta)
+{
+    Vec2i cell = ff->world_to_cell(a.position);
+    if (ff->is_cell_navigable(cell))
+        return;
+
+    Vec2i best_cell = cell;
+    double best_dist = 1e9;
+
+    for (int dx = -1; dx <= 1; ++dx)
+    {
+        for (int dy = -1; dy <= 1; ++dy)
+        {
+            Vec2i n = {cell.x + dx, cell.y + dy};
+            if (!ff->is_cell_navigable(n))
+                continue;
+            double d = (ff->cell_to_world(n) - a.position).length();
+            if (d < best_dist)
+            {
+                best_dist = d;
+                best_cell = n;
+            }
+        }
+    }
+
+    if (best_cell == cell)
+        return;
+
+    Vec2 wall_center = ff->cell_to_world(cell);
+    Vec2 free_center = ff->cell_to_world(best_cell);
+    Vec2 dir = (free_center - wall_center).normalized();
+
+    Vec2 target_pos = free_center - dir * (ff->tile_size() * 0.5 - 0.05);
+    double blend = std::clamp(delta * 10.0, 0.0, 1.0);
+    a.position = a.position.lerp(target_pos, blend);
+
+    double toward_wall = a.velocity.dot(dir);
+    if (toward_wall > 0.0)
+        a.velocity -= dir * toward_wall;
 }

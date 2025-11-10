@@ -3,9 +3,11 @@
 #include <cmath>
 #include "../core/types.h"
 
-namespace ffcore {
+namespace ffcore
+{
 
-class FlowField {
+class FlowField
+{
 public:
     FlowField() = default;
     FlowField(int width, int height, double tile_size);
@@ -13,13 +15,13 @@ public:
     void resize(int width, int height);
     void set_tile_size(double size);
 
-    Vec2  sample_dir_cell(int x, int y) const;
-    Vec2  sample_dir_world(const Vec2 &world_pos) const;
+    Vec2 sample_dir_cell(int x, int y) const;
+    Vec2 sample_dir_world(const Vec2 &world_pos) const;
 
     Vec2i world_to_cell(const Vec2 &world_pos) const;
-    Vec2  cell_to_world(const Vec2i &cell) const;
+    Vec2 cell_to_world(const Vec2i &cell) const;
 
-    bool  is_ready() const { return ready; }
+    bool is_ready() const { return ready; }
     double tile_size() const { return tile; }
 
     void clear();
@@ -27,10 +29,12 @@ public:
 
     void compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkables, bool allow_diagonals);
 
-    int  width() const { return w; }
-    int  height() const { return h; }
-    Vec2 dir(int x, int y) const {
-        if (x < 0 || y < 0 || x >= w || y >= h) return Vec2();
+    int width() const { return w; }
+    int height() const { return h; }
+    Vec2 dir(int x, int y) const
+    {
+        if (x < 0 || y < 0 || x >= w || y >= h)
+            return Vec2();
         return dirs[y * w + x];
     }
 
@@ -41,6 +45,8 @@ public:
     Vec2i get_goal_cell() const { return goal_cell; }
     bool has_goal() const { return goal_cell.x >= 0 && goal_cell.y >= 0; }
     Vec2 goal_center_world() const { return cell_to_world(goal_cell); }
+
+    bool is_cell_navigable(const Vec2i &cell) const;
 
 private:
     int w = 0;

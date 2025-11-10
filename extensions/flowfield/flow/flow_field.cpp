@@ -1,6 +1,9 @@
 #include "flow_field.h"
 #include <algorithm>
 #include <cmath>
+#include <queue>
+#include <unordered_set>
+
 using namespace ffcore;
 
 FlowField::FlowField(int width, int height, double tile_size)
@@ -37,13 +40,15 @@ Vec2 FlowField::sample_dir_world(const Vec2 &world_pos) const
     return sample_dir_cell(cell.x, cell.y);
 }
 
-Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const {
+Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const
+{
     int gx = static_cast<int>(std::floor(world_pos.x / tile));
     int gy = static_cast<int>(std::floor(world_pos.y / tile));
     return Vec2i(gx - cell_origin.x, gy - cell_origin.y);
 }
 
-Vec2 FlowField::cell_to_world(const Vec2i &cell) const {
+Vec2 FlowField::cell_to_world(const Vec2i &cell) const
+{
     int gx = cell_origin.x + cell.x;
     int gy = cell_origin.y + cell.y;
     return Vec2((gx + 0.5) * tile, (gy + 0.5) * tile);
@@ -64,9 +69,6 @@ void FlowField::set_dir(int x, int y, const Vec2 &dir)
     ready = true;
 }
 
-#include <queue>
-#include <unordered_set>
-
 namespace
 {
     struct FFNode
@@ -75,14 +77,13 @@ namespace
         int32_t d;
         bool operator<(const FFNode &o) const { return d > o.d; }
     };
+
     inline int step_cost(const ffcore::Vec2i &a, const ffcore::Vec2i &b)
     {
         bool diag = (a.x != b.x) && (a.y != b.y);
         return diag ? 141 : 100;
     }
 }
-
-using namespace ffcore;
 
 void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &walkables, bool allow_diagonals)
 {
@@ -94,8 +95,7 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
 
     std::unordered_set<int> walkable_set;
     walkable_set.reserve(walkables.size());
-    auto index = [&](const Vec2i &c)
-    { return c.y * w + c.x; };
+    auto index = [&](const Vec2i &c) { return c.y * w + c.x; };
 
     for (auto &c : walkables)
     {
@@ -176,7 +176,7 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
             int best_d = dist[ci];
             Vec2i best = c;
 
-            const Vec2i* nbrs = ORTHO;
+            const Vec2i *nbrs = ORTHO;
             int nbrs_count = 4;
 
             for (int i = 0; i < nbrs_count; ++i)
@@ -225,4 +225,13 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
     }
 
     ready = true;
+}
+
+bool FlowField::is_cell_navigable(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return false;
+    int idx = cell.y * w + cell.x;
+    const Vec2 &d = dirs[idx];
+    return !(std::abs(d.x) < 1e-6 && std::abs(d.y) < 1e-6);
 }
