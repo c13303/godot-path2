@@ -1,6 +1,7 @@
 #include "steering_system.h"
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 
 using namespace ffcore;
 
@@ -52,9 +53,6 @@ const AgentData *SteeringSystem::get_agent(int id) const
     return &agents[it->second];
 }
 
-
-
-
 void SteeringSystem::update_all(double delta)
 {
     if (!grid)
@@ -64,8 +62,11 @@ void SteeringSystem::update_all(double delta)
     const double SLOW_RADIUS = 2.5;
     const double ARRIVAL_EPS = 0.15;
     const double DAMP_RADIUS = ARRIVAL_EPS * 2.0;
-    const double CENTER_PULL = 0.25; // force de recentrage vers le centre de cellule
+    const double CENTER_PULL = 0.25;
     const double TILE_SIZE = 16.0;
+    const double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
+    const double WALL_REPEL_STRENGTH = 0.9;
+    const double WALL_SLIDE_BLEND = 0.7;
 
     for (auto &a : agents)
     {
@@ -86,73 +87,61 @@ void SteeringSystem::update_all(double delta)
         Vec2 offset_center = cell_center - a.position;
         double offset_dist = offset_center.length();
 
-        // recentrage doux (évite de rester sur les bords)
         Vec2 center_correction = offset_center.normalized() * std::min(offset_dist / TILE_SIZE, 1.0) * CENTER_PULL;
 
         Vec2i goal_cell = ff->has_goal() ? ff->get_goal_cell() : cur_cell;
 
-        if (cur_cell == goal_cell)
+        // --- WALL AVOIDANCE ---
+        Vec2 wall_repel(0, 0);
+        for (int dx = -1; dx <= 1; ++dx)
         {
-            Vec2 to_center = goal_pos - a.position;
-            double d = to_center.length();
-
-            if (d < ARRIVAL_EPS)
+            for (int dy = -1; dy <= 1; ++dy)
             {
-                a.velocity = Vec2(0, 0);
-                a.active = false;
-                grid->update(a.id, a.position, a.position);
-                continue;
+                if (dx == 0 && dy == 0)
+                    continue;
+
+                Vec2i neighbor;
+                neighbor.x = cur_cell.x + dx;
+                neighbor.y = cur_cell.y + dy;
+
+                Vec2 n_center = ff->cell_to_world(neighbor);
+                Vec2 n_dir = ff->sample_dir_world(n_center);
+
+                if (n_dir.is_zero())
+                {
+                    Vec2 away = (a.position - n_center);
+                    double dist = away.length();
+                    if (dist < WALL_AVOID_RADIUS && dist > 1e-3)
+                    {
+                        double force = (1.0 - (dist / WALL_AVOID_RADIUS)) * WALL_REPEL_STRENGTH;
+                        wall_repel += away.normalized() * force;
+                    }
+                }
             }
-
-            Vec2 center_dir = to_center.normalized();
-            double slow_factor = std::max(d / SLOW_RADIUS, 0.2);
-            if (d < DAMP_RADIUS)
-                slow_factor *= (d / DAMP_RADIUS);
-
-            a.velocity = (center_dir + center_correction).normalized() * a.max_speed * slow_factor;
         }
-        else
+
+        Vec2 desired_dir = (flow_dir * FLOW_WEIGHT + center_correction + wall_repel).normalized();
+
+        if (!wall_repel.is_zero())
         {
-            double dist_to_goal = (a.position - goal_pos).length();
-            double slow_factor = 1.0;
-            if (dist_to_goal < SLOW_RADIUS)
-                slow_factor = std::max(dist_to_goal / SLOW_RADIUS, 0.2);
+            Vec2 tangent1(-wall_repel.y, wall_repel.x);
+            Vec2 tangent2(wall_repel.y, -wall_repel.x);
 
-            Vec2 desired_dir = (flow_dir * FLOW_WEIGHT + center_correction).normalized();
-            if (desired_dir.is_zero())
-                continue;
+            // Choisir celle qui est le plus alignée avec flow_dir
+            double dot1 = tangent1.dot(flow_dir);
+            double dot2 = tangent2.dot(flow_dir);
+            Vec2 tangent = (dot1 > dot2) ? tangent1 : tangent2;
 
-            a.velocity = desired_dir * a.max_speed * slow_factor;
+            desired_dir = (desired_dir * (1.0 - WALL_SLIDE_BLEND) + tangent.normalized() * WALL_SLIDE_BLEND).normalized();
         }
+
+        double dist_to_goal = (a.position - goal_pos).length();
+        double slow_factor = (dist_to_goal < SLOW_RADIUS) ? std::max(dist_to_goal / SLOW_RADIUS, 0.2) : 1.0;
+
+        a.velocity = desired_dir * a.max_speed * slow_factor;
 
         Vec2 old_pos = a.position;
         a.position += a.velocity * delta;
         grid->update(a.id, old_pos, a.position);
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
