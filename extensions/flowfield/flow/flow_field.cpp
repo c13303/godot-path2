@@ -235,3 +235,37 @@ bool FlowField::is_cell_navigable(const Vec2i &cell) const
     const Vec2 &d = dirs[idx];
     return !(std::abs(d.x) < 1e-6 && std::abs(d.y) < 1e-6);
 }
+
+Vec2i FlowField::find_nearest_navigable(Vec2i start) const
+{
+    if (is_cell_navigable(start))
+        return start;
+
+    Vec2i best = start;
+    double best_d2 = 1e18;
+
+    // Définir une recherche locale en spirale (borne à 20 cellules de rayon)
+    const int MAX_RADIUS = 20;
+    for (int r = 1; r <= MAX_RADIUS; ++r)
+    {
+        for (int dx = -r; dx <= r; ++dx)
+        {
+            for (int dy = -r; dy <= r; ++dy)
+            {
+                Vec2i c = {start.x + dx, start.y + dy};
+                if (!is_cell_navigable(c))
+                    continue;
+                double d2 = double(dx * dx + dy * dy);
+                if (d2 < best_d2)
+                {
+                    best_d2 = d2;
+                    best = c;
+                }
+            }
+        }
+        if (best_d2 < 1e18)
+            break;
+    }
+
+    return best;
+}

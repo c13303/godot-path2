@@ -41,6 +41,7 @@ namespace ffcore
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
+        Vec2 compute_separation_force(const AgentData &agent, double dist_to_goal, bool in_goal_tile);
     };
 
 } // namespace ffcore
