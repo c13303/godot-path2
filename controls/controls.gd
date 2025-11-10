@@ -114,7 +114,7 @@ func _spawn_mainchar(pos: Vector2) -> void:
 
 	if steering and steering.has_method("register_agent"):
 		var flow_ref = current_flow if current_flow != null else null
-		steering.register_agent(agent, 60.0, flow_ref)
+		steering.register_agent(agent, 120.0, flow_ref)
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if not occupied.has(start_cell) and _is_walkable(start_cell):
