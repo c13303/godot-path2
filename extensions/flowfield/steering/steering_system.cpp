@@ -221,7 +221,6 @@ void SteeringSystem::update_all(double delta)
     const double TILE_SIZE = 16.0;
     const double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
     const double WALL_REPEL_STRENGTH = 0.7;
-    const double WALL_SLIDE_BLEND = 0.7;
     const double DIRECT_STEER_RADIUS = TILE_SIZE * 2.5;
     const double MIN_SPEED_FRACTION = 0.25;
 
@@ -229,6 +228,7 @@ void SteeringSystem::update_all(double delta)
     const double GOAL_BLOCK_RADIUS = TILE_SIZE * 0.60;
     const double GOAL_COOLDOWN_SEC = 0.75;
     const double GOAL_RING_RADIUS = TILE_SIZE * 0.51;
+    const double STOP_RING_RADIUS = TILE_SIZE * 0.85;
 
     for (auto &a : agents)
     {
@@ -250,7 +250,7 @@ void SteeringSystem::update_all(double delta)
         if (!ff->is_cell_navigable(cur_cell))
             a.position = ff->cell_to_world(cur_cell);
         cur_cell = ff->world_to_cell(a.position);
-        
+
         Vec2 cell_center = ff->cell_to_world(cur_cell);
         Vec2i goal_cell = ff->has_goal() ? ff->get_goal_cell() : cur_cell;
         bool in_goal_tile = (cur_cell.x == goal_cell.x && cur_cell.y == goal_cell.y);
@@ -323,13 +323,6 @@ void SteeringSystem::update_all(double delta)
 
         Vec2 flowfield_dir = safe_normalize(flow_dir * FLOW_WEIGHT + center_correction + wall_repel + separation_force);
 
-        if (dist_to_goal < TILE_SIZE * 2.0)
-        {
-            Vec2 to_goal_center = safe_normalize(goal_pos - a.position);
-            double pull = std::pow(1.0 - (dist_to_goal / (TILE_SIZE * 2.0)), 1.25);
-            flowfield_dir = safe_normalize(flowfield_dir * (1.0 - pull) + to_goal_center * pull);
-        }
-
         Vec2 desired_dir;
         bool block_goal_now = false;
         double my_cd = g_goal_cooldown[a.id];
@@ -337,11 +330,9 @@ void SteeringSystem::update_all(double delta)
         if ((goal_has_occupant && goal_occupant_id != a.id) || my_cd > 0.0)
         {
             block_goal_now = true;
-
             Vec2 from_goal = a.position - goal_center;
             if (from_goal.is_zero())
                 from_goal = hashed_unit_dir(a.id);
-
             Vec2 tangent(-from_goal.y, from_goal.x);
             tangent = safe_normalize(tangent);
             Vec2 keep_out = safe_normalize(from_goal) * 0.8 + tangent * 0.6 + separation_force * 0.8;
@@ -357,6 +348,20 @@ void SteeringSystem::update_all(double delta)
                 desired_dir = (flowfield_dir.is_zero() ? hashed_unit_dir(a.id) : flowfield_dir);
         }
 
+        if (ff->has_goal() && dist_to_goal < STOP_RING_RADIUS)
+        {
+            Vec2 n = safe_normalize(goal_center - a.position);
+            double inward = desired_dir.dot(n);
+            if (inward > 0.0)
+            {
+                desired_dir = safe_normalize(desired_dir - n * inward);
+                if (desired_dir.is_zero())
+                {
+                    desired_dir = Vec2(-n.y, n.x);
+                }
+            }
+        }
+
         double slow_factor = 1.0;
         if (dist_to_goal < SLOW_RADIUS)
         {
@@ -364,8 +369,15 @@ void SteeringSystem::update_all(double delta)
             slow_factor = std::pow(slow_factor, 1.2);
             slow_factor = std::max(slow_factor, MIN_SPEED_FRACTION);
         }
+        if (dist_to_goal < STOP_RING_RADIUS)
+        {
+            slow_factor *= std::max((dist_to_goal - GOAL_OCCUPY_RADIUS) / (STOP_RING_RADIUS - GOAL_OCCUPY_RADIUS), 0.0);
+        }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
+        if (dist_to_goal <= GOAL_OCCUPY_RADIUS)
+            target_velocity = Vec2(0, 0);
+
         a.velocity = a.velocity.lerp(target_velocity, 0.25);
 
         double vmax = a.max_speed;
@@ -387,6 +399,18 @@ void SteeringSystem::update_all(double delta)
                 v = v * (GOAL_RING_RADIUS / r);
                 proposed = goal_center + v;
                 g_goal_cooldown[a.id] = std::max(g_goal_cooldown[a.id], GOAL_COOLDOWN_SEC);
+            }
+        }
+
+        if (ff->has_goal())
+        {
+            Vec2 v = proposed - goal_center;
+            double r = v.length();
+            if (r < GOAL_RING_RADIUS)
+            {
+                if (r < 1e-4)
+                    v = hashed_unit_dir(a.id), r = 1.0;
+                proposed = goal_center + v * (GOAL_RING_RADIUS / r);
             }
         }
 
