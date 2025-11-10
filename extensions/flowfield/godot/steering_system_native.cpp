@@ -20,8 +20,8 @@ void SteeringSystemNative::_ready() {
         return;
     }
 
-    flowfield = Object::cast_to<Node2D>(parent->get_node_or_null("FlowField"));
-    grid = Object::cast_to<Node2D>(parent->get_node_or_null("SpatialGrid"));
+    flowfield = Object::cast_to<Node2D>(parent->get_node_or_null("FlowFieldNative"));
+    grid = Object::cast_to<Node2D>(parent->get_node_or_null("SpatialGridNative"));
 
     if (flowfield && grid)
         UtilityFunctions::print("SteeringSystemNative: linked FlowField + Grid");

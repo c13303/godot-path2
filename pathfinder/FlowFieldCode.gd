@@ -1,0 +1,42 @@
+extends Node
+
+@onready var ff: FlowFieldNative = get_parent()
+@onready var floor_layer: TileMapLayer = $"../MonTilemap/floor"
+@onready var wall_layer: TileMapLayer = $"../MonTilemap/wallz"
+@onready var controls_node: Node2D = $"../Controls"
+
+func _ready() -> void:
+	print(">>> FlowFieldCode.gd _ready() triggered <<<")
+
+	await get_tree().process_frame
+
+	print("FlowFieldCode: _ready() called")
+
+	if ff == null:
+		print("FlowFieldCode: FlowFieldNative node not found.")
+		return
+
+	print("FlowFieldCode: assigning layers...")
+	ff.set_floor_layer(floor_layer)
+	ff.set_wall_layer(wall_layer)
+
+	print("floor_layer:", floor_layer)
+	print("wall_layer:", wall_layer)
+
+
+
+	if controls_node:
+		controls_node.connect("mouse_goal_set", Callable(self, "_on_mouse_goal"))
+	else:
+		push_warning("FlowFieldCode: Controls node not found.")
+
+
+
+	print("FlowFieldCode: initialization complete")
+
+
+func _on_mouse_goal(world_pos: Vector2) -> void:
+	if ff == null:
+		push_warning("FlowFieldCode: FlowFieldNative not ready.")
+		return
+	ff.rebuild_async(world_pos)

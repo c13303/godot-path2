@@ -1,6 +1,8 @@
-[gd_scene load_steps=17 format=4 uid="uid://dm7myvnaoy1xc"]
+[gd_scene load_steps=19 format=4 uid="uid://dm7myvnaoy1xc"]
 
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
+[ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://pathfinder/FlowFieldCode.gd" id="2_2rfbb"]
+[ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://controls/controls.gd" id="2_ii2xt"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1242,6 +1244,14 @@ zoom = Vector2(2, 2)
 
 [node name="SteeringSystemNative" type="SteeringSystemNative" parent="."]
 
-[node name="FlowField" type="FlowFieldNative" parent="."]
+[node name="FlowFieldNative" type="FlowFieldNative" parent="."]
+z_index = 999
 
-[node name="SpatialGrid" type="SpatialGridNative" parent="."]
+[node name="FlowFieldCode" type="Node2D" parent="FlowFieldNative"]
+script = ExtResource("2_2rfbb")
+
+[node name="SpatialGridNative" type="SpatialGridNative" parent="."]
+
+[node name="Controls" type="Node2D" parent="." node_paths=PackedStringArray("camera")]
+script = ExtResource("2_ii2xt")
+camera = NodePath("../Camera2D")
