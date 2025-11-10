@@ -91,8 +91,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
         return;
 
     const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1},
-        {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     for (const Vector2i &c : walkable_set)
@@ -182,6 +181,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
         field.set_dir(rel_goal.x, rel_goal.y, ffcore::Vec2(0.0, 0.0));
 
     field.set_goal_cell(rel_goal);
+
     queue_redraw();
 }
 
@@ -227,17 +227,21 @@ void FlowFieldNative::_draw()
     if (!debug_draw || !floor_layer)
         return;
 
+    set_z_index(999);
     Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
+    Rect2i used = floor_layer->get_used_rect();
     int skip = Math::max(1, debug_stride);
     int count = 0;
-    Rect2i used = floor_layer->get_used_rect();
 
+
+
+    // === DESSIN ===
     for (int y = 0; y < field.height(); y += skip)
     {
         for (int x = 0; x < field.width(); x += skip)
         {
             ffcore::Vec2 dir_v = field.dir(x, y);
-            if (dir_v.x == 0 && dir_v.y == 0)
+            if (dir_v.x == 0.0f && dir_v.y == 0.0f)
                 continue;
 
             Vector2i cell = used.position + Vector2i(x, y);
@@ -246,8 +250,11 @@ void FlowFieldNative::_draw()
             Vector2 draw_center = to_local(world_center);
 
             Vector2 dir(dir_v.x, dir_v.y);
+            dir = dir.normalized();
+
             float len = cell_size.x * debug_scale * 0.5f;
             draw_line(draw_center, draw_center + dir * len, debug_color_dir, 1.0);
+
             count++;
         }
     }

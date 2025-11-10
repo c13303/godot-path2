@@ -52,6 +52,9 @@ const AgentData *SteeringSystem::get_agent(int id) const
     return &agents[it->second];
 }
 
+
+
+
 void SteeringSystem::update_all(double delta)
 {
     if (!grid)
@@ -61,6 +64,8 @@ void SteeringSystem::update_all(double delta)
     const double SLOW_RADIUS = 2.5;
     const double ARRIVAL_EPS = 0.15;
     const double DAMP_RADIUS = ARRIVAL_EPS * 2.0;
+    const double CENTER_PULL = 0.25; // force de recentrage vers le centre de cellule
+    const double TILE_SIZE = 16.0;
 
     for (auto &a : agents)
     {
@@ -72,18 +77,18 @@ void SteeringSystem::update_all(double delta)
             continue;
 
         Vec2 flow_dir = ff->sample_dir_world(a.position);
-
-        // Cas sans direction: on stoppe net pour éviter de "coller" au mur
         if (flow_dir.is_zero())
-        {
-            Vec2 old_pos = a.position;
-            a.velocity = Vec2(0, 0);
-            grid->update(a.id, old_pos, a.position);
             continue;
-        }
 
         Vec2 goal_pos = ff->has_goal() ? ff->goal_center_world() : a.position;
         Vec2i cur_cell = ff->world_to_cell(a.position);
+        Vec2 cell_center = ff->cell_to_world(cur_cell);
+        Vec2 offset_center = cell_center - a.position;
+        double offset_dist = offset_center.length();
+
+        // recentrage doux (évite de rester sur les bords)
+        Vec2 center_correction = offset_center.normalized() * std::min(offset_dist / TILE_SIZE, 1.0) * CENTER_PULL;
+
         Vec2i goal_cell = ff->has_goal() ? ff->get_goal_cell() : cur_cell;
 
         if (cur_cell == goal_cell)
@@ -93,10 +98,9 @@ void SteeringSystem::update_all(double delta)
 
             if (d < ARRIVAL_EPS)
             {
-                Vec2 old_pos = a.position;
                 a.velocity = Vec2(0, 0);
                 a.active = false;
-                grid->update(a.id, old_pos, a.position);
+                grid->update(a.id, a.position, a.position);
                 continue;
             }
 
@@ -105,7 +109,7 @@ void SteeringSystem::update_all(double delta)
             if (d < DAMP_RADIUS)
                 slow_factor *= (d / DAMP_RADIUS);
 
-            a.velocity = center_dir * a.max_speed * slow_factor;
+            a.velocity = (center_dir + center_correction).normalized() * a.max_speed * slow_factor;
         }
         else
         {
@@ -114,14 +118,9 @@ void SteeringSystem::update_all(double delta)
             if (dist_to_goal < SLOW_RADIUS)
                 slow_factor = std::max(dist_to_goal / SLOW_RADIUS, 0.2);
 
-            Vec2 desired_dir = (flow_dir * FLOW_WEIGHT).normalized();
+            Vec2 desired_dir = (flow_dir * FLOW_WEIGHT + center_correction).normalized();
             if (desired_dir.is_zero())
-            {
-                Vec2 old_pos = a.position;
-                a.velocity = Vec2(0, 0);
-                grid->update(a.id, old_pos, a.position);
                 continue;
-            }
 
             a.velocity = desired_dir * a.max_speed * slow_factor;
         }
@@ -131,3 +130,29 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos, a.position);
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
