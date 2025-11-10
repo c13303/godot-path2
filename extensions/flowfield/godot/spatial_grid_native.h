@@ -5,16 +5,18 @@
 #include <godot_cpp/core/class_db.hpp>
 #include "../grid/spatial_grid.h"
 
-namespace godot {
+namespace godot
+{
 
-class SpatialGridNative : public Node2D {
-    GDCLASS(SpatialGridNative, Node2D);
+    class SpatialGridNative : public Node2D
+    {
+        GDCLASS(SpatialGridNative, Node2D);
+        ffcore::SpatialGrid grid;
 
-public:
-    ffcore::SpatialGrid grid;
-
-    static void _bind_methods() {}
-};
+    public:
+        ffcore::SpatialGrid *get_grid() { return &grid; }
+        static void _bind_methods() {}
+    };
 
 }
 

@@ -8,7 +8,6 @@
 
 namespace godot
 {
-
     class FlowFieldNative : public Node2D
     {
         GDCLASS(FlowFieldNative, Node2D);
@@ -16,7 +15,6 @@ namespace godot
     private:
         ffcore::FlowField field;
         Vector2 goal_world;
-
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
         bool debug_draw = true;
@@ -40,8 +38,11 @@ namespace godot
 
         void rebuild_async(Vector2 goal);
         void _draw() override;
-    };
+        static double move_cost_for_dir(int dir_index);
+        godot::Vector2 sample_dir_world(Vector2 world_pos) const;
 
+        ffcore::FlowField *get_field() { return &field; }
+    };
 }
 
 #endif
