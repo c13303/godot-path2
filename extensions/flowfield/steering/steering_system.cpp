@@ -225,8 +225,6 @@ void SteeringSystem::smooth_stop(int id, double rate)
     }
 }
 
-
-
 void SteeringSystem::update_all(double delta)
 {
     if (!grid)
@@ -257,22 +255,22 @@ void SteeringSystem::update_all(double delta)
         Vec2 separation = compute_separation_force(a, dist_to_target, false);
         Vec2 wall_repel(0, 0);
         for (int dx = -1; dx <= 1; ++dx)
-        for (int dy = -1; dy <= 1; ++dy)
-        {
-            if (dx == 0 && dy == 0)
-                continue;
-            Vec2i ncell{cur_cell.x + dx, cur_cell.y + dy};
-            if (!ff->is_cell_navigable(ncell))
+            for (int dy = -1; dy <= 1; ++dy)
             {
-                Vec2 away = a.position - ff->cell_to_world(ncell);
-                double d = away.length();
-                if (d < WALL_AVOID_RADIUS && d > 1e-3)
+                if (dx == 0 && dy == 0)
+                    continue;
+                Vec2i ncell{cur_cell.x + dx, cur_cell.y + dy};
+                if (!ff->is_cell_navigable(ncell))
                 {
-                    double k = (1.0 - d / WALL_AVOID_RADIUS) * WALL_REPEL_STRENGTH;
-                    wall_repel = wall_repel + away * (k / d);
+                    Vec2 away = a.position - ff->cell_to_world(ncell);
+                    double d = away.length();
+                    if (d < WALL_AVOID_RADIUS && d > 1e-3)
+                    {
+                        double k = (1.0 - d / WALL_AVOID_RADIUS) * WALL_REPEL_STRENGTH;
+                        wall_repel = wall_repel + away * (k / d);
+                    }
                 }
             }
-        }
 
         // Recentrage doux sur la cellule
         const Vec2 cell_center = ff->cell_to_world(cur_cell);
@@ -288,26 +286,41 @@ void SteeringSystem::update_all(double delta)
 
         // Gestion des trois zones de ralentissement
         double slow_factor = 1.0;
-        if (dist_to_target < TARGET_SLOW_RADIUS)
+
+
+        if (dist_to_target < TARGET_SLOW_RADIUS)  /// zone outer : premier slowdown
         {
-            printf("[Agent %d] entre dans TARGET_SLOW_RADIUS (%.2f < %.2f)\n",
-                   a.id, dist_to_target, TARGET_SLOW_RADIUS);
+            /* printf("[Agent %d] entre dans TARGET_SLOW_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_SLOW_RADIUS); */
             slow_factor = dist_to_target / TARGET_SLOW_RADIUS;
             slow_factor = std::pow(slow_factor, 1.2);
             slow_factor = std::max(slow_factor, MIN_SPEED_FRACTION);
         }
-        if (dist_to_target < TARGET_APPROACH_RADIUS)
+
+
+
+        if (dist_to_target < TARGET_APPROACH_RADIUS) /// zone proche : slow down radical arrêt, ou pénétration si 1er
         {
-            printf("[Agent %d] entre dans TARGET_APPROACH_RADIUS (%.2f < %.2f)\n",
-                   a.id, dist_to_target, TARGET_APPROACH_RADIUS);
-            const double t = (dist_to_target - TARGET_OCCUPY_RADIUS) /
-                             (TARGET_APPROACH_RADIUS - TARGET_OCCUPY_RADIUS);
-            slow_factor *= std::max(t, 0.0);
+            /* printf("[Agent %d] entre dans TARGET_APPROACH_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_APPROACH_RADIUS); */
+
+            if (!ff->target_triggered)
+            {
+                ff->target_triggered = true;
+                ff->arrived_count = 1;
+                a.has_arrived = true;
+                printf("[Agent %d] premier à atteindre TARGET_APPROACH_RADIUS\n", a.id);
+            }
+            else
+            {
+                const double t = (dist_to_target - TARGET_OCCUPY_RADIUS) / (TARGET_APPROACH_RADIUS - TARGET_OCCUPY_RADIUS);
+                slow_factor *= std::max(t, 0.0);
+            }
         }
-        if (dist_to_target <= TARGET_OCCUPY_RADIUS)
+
+
+
+        if (dist_to_target <= TARGET_OCCUPY_RADIUS) /// zone pénétration target
         {
-            printf("[Agent %d] entre dans TARGET_OCCUPY_RADIUS (%.2f < %.2f)\n",
-                   a.id, dist_to_target, TARGET_OCCUPY_RADIUS);
+            printf("[Agent %d] entre dans TARGET_OCCUPY_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_OCCUPY_RADIUS);
             if (!a.has_arrived)
             {
                 a.has_arrived = true;
@@ -336,27 +349,3 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos, a.position);
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
