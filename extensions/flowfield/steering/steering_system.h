@@ -10,7 +10,7 @@ namespace ffcore
     // Constantes de réglage pour la navigation
     constexpr double FLOW_WEIGHT = 1.0;
 
-    constexpr double CENTER_PULL = 0.25;
+    constexpr double CENTER_PULL = 0.1;
     constexpr double TILE_SIZE = 16.0;
     constexpr double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
     constexpr double WALL_REPEL_STRENGTH = 0.7;
