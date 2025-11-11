@@ -11,7 +11,7 @@ class_name FlowAgent
 
 var arrived: bool = false
 var arrived_reported: bool = false
-var prev_dist_to_goal: float = INF
+var prev_dist_to_target: float = INF
 var _sample_phase: int = 0
 
 func _ready() -> void:

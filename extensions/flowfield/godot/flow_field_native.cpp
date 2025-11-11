@@ -1,4 +1,6 @@
 #include "flow_field_native.h"
+#include "../steering/steering_system.h" // Inclusion du header de la classe SteeringSystem
+
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -83,9 +85,9 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     Vector2 goal_center_world = floor_layer->to_global(floor_layer->map_to_local(goal_cell));
     goal_world = goal_center_world;
 
-    UtilityFunctions::print("[GOAL TEST] click=", goal.x, ",", goal.y,
+    /* UtilityFunctions::print("[GOAL TEST] click=", goal.x, ",", goal.y,
                             " | cell=", goal_cell.x, ",", goal_cell.y,
-                            " | center=", goal_center_world.x, ",", goal_center_world.y);
+                            " | center=", goal_center_world.x, ",", goal_center_world.y); */
 
     if (!walkable_set.count(goal_cell))
         return;
@@ -233,8 +235,6 @@ void FlowFieldNative::_draw()
     int skip = Math::max(1, debug_stride);
     int count = 0;
 
-
-
     // === DESSIN ===
     for (int y = 0; y < field.height(); y += skip)
     {
@@ -259,5 +259,22 @@ void FlowFieldNative::_draw()
         }
     }
 
-    UtilityFunctions::print("FlowFieldNative: debug draw vectors =", count);
+    // debug visualisation des cercles de zone d'arrivée
+    if (field.has_goal())
+    {
+        ffcore::Vec2i goal = field.get_goal_cell();
+        Vector2 goal_center = to_local(
+            floor_layer->to_global(
+                floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
+
+        const int segments = 128;     // cercle bien lisse
+        const float thickness = 1.0f; // trait légèrement plus visible
+
+        draw_arc(goal_center, ffcore::TARGET_SLOW_RADIUS, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);       // vert vif
+        draw_arc(goal_center, ffcore::TARGET_APPROACH_RADIUS, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness); // orange
+
+        draw_arc(goal_center, ffcore::TARGET_OCCUPY_RADIUS, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness); // rouge
+    }
+
+    /* UtilityFunctions::print("FlowFieldNative: debug draw vectors =", count); */
 }

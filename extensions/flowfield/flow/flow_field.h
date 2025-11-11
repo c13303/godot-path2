@@ -48,12 +48,14 @@ namespace ffcore
 
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
+        int arrived_count = 0;
 
     private:
         int w = 0;
         int h = 0;
         double tile = 1.0;
         bool ready = false;
+        bool target_triggered = false;
 
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;

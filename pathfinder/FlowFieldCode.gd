@@ -15,12 +15,12 @@ func _ready() -> void:
 		print("FlowFieldCode: FlowFieldNative node not found.")
 		return
 
-	print("FlowFieldCode: assigning layers...")
+	#print("FlowFieldCode: assigning layers...")
 	ff.set_floor_layer(floor_layer)
 	ff.set_wall_layer(wall_layer)
 
-	print("floor_layer:", floor_layer)
-	print("wall_layer:", wall_layer)
+	#print("floor_layer:", floor_layer)
+	#print("wall_layer:", wall_layer)
 
 	# Définir un goal temporaire au centre de la carte
 	var goal_pos = Vector2(0, 0)
@@ -30,10 +30,10 @@ func _ready() -> void:
 	await get_tree().process_frame  # laisse le temps au C++ de calculer
 
 	var d = ff.sample_dir_world(global_position)
-	print("Direction lue après rebuild:", d)
+	#print("Direction lue après rebuild:", d)
 
 
-	print("FlowFieldCode: initialization complete")
+	print("FlowFieldCode: initialization complete--------------------------------")
 
 
 func _on_mouse_goal(world_pos: Vector2) -> void:

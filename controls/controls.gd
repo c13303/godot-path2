@@ -17,7 +17,7 @@ var dragging: bool = false
 var drag_start_pos: Vector2
 var camera_start_pos: Vector2
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
-var spawngrappe: int = 50
+var spawngrappe: int = 1
 
 signal mouse_goal_set(world_pos: Vector2)
 
@@ -80,7 +80,7 @@ func _on_click_set_goal() -> void:
 
 	# affiche le marqueur au centre
 	marker.global_position = cell_center
-	marker.visible = true
+	marker.visible = false
 
 	emit_signal("mouse_goal_set", cell_center)
 
