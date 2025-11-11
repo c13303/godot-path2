@@ -210,18 +210,21 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent, double, bo
     return separation_force;
 }
 
-void SteeringSystem::smooth_stop(int id, double rate)
+void SteeringSystem::smooth_stop(int id)
 {
+    printf("SmoothCall");
+
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
 
     AgentData &a = agents[it->second];
-    a.velocity = a.velocity.lerp(Vec2(0, 0), rate);
-    if (safe_len(a.velocity) < 0.01)
+    a.velocity = a.velocity.lerp(Vec2(0, 0), 0.1); // 0.1–0.15 = ~demi-tile d’amorti selon vitesse
+    if (safe_len(a.velocity) < 0.02)
     {
         a.velocity = Vec2(0, 0);
         a.active = false;
+        printf("[Agent %d] smooth stoped ;)");
     }
 }
 
@@ -284,21 +287,18 @@ void SteeringSystem::update_all(double delta)
         if (desired_dir.is_zero())
             desired_dir = hashed_unit_dir(a.id);
 
-        // Gestion des trois zones de ralentissement
+        // Gestion des trois zones de ralentissement avec un SLOW FACTOR
         double slow_factor = 1.0;
 
-
-        if (dist_to_target < TARGET_SLOW_RADIUS)  /// zone outer : premier slowdown
+        /* 1/3 outer ring : RALENTI */
+        if (!a.has_arrived && dist_to_target < TARGET_SLOW_RADIUS)
         {
             /* printf("[Agent %d] entre dans TARGET_SLOW_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_SLOW_RADIUS); */
-            slow_factor = dist_to_target / TARGET_SLOW_RADIUS;
-            slow_factor = std::pow(slow_factor, 1.2);
-            slow_factor = std::max(slow_factor, MIN_SPEED_FRACTION);
+            slow_factor = std::clamp(dist_to_target / TARGET_SLOW_RADIUS, MIN_SPEED_FRACTION, 1.0);
         }
 
-
-
-        if (dist_to_target < TARGET_APPROACH_RADIUS) /// zone proche : slow down radical arrêt, ou pénétration si 1er
+        /* 2/3 middle ring: FILTRE LE PREMIER OU BIEN STOP */
+        if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
         {
             /* printf("[Agent %d] entre dans TARGET_APPROACH_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_APPROACH_RADIUS); */
 
@@ -306,29 +306,22 @@ void SteeringSystem::update_all(double delta)
             {
                 ff->target_triggered = true;
                 ff->arrived_count = 1;
-                a.has_arrived = true;
+                a.is_first = true;
                 printf("[Agent %d] premier à atteindre TARGET_APPROACH_RADIUS\n", a.id);
             }
             else
             {
-                const double t = (dist_to_target - TARGET_OCCUPY_RADIUS) / (TARGET_APPROACH_RADIUS - TARGET_OCCUPY_RADIUS);
-                slow_factor *= std::max(t, 0.0);
+                smooth_stop(a.id);
+                ff->arrived_count++;
             }
+            a.has_arrived = true;
         }
 
-
-
-        if (dist_to_target <= TARGET_OCCUPY_RADIUS) /// zone pénétration target
+        /* JUST THE 1ST MAN*/
+        if (a.is_first && dist_to_target <= TARGET_OCCUPY_RADIUS) /// zone pénétration target
         {
-            printf("[Agent %d] entre dans TARGET_OCCUPY_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_OCCUPY_RADIUS);
-            if (!a.has_arrived)
-            {
-                a.has_arrived = true;
-                ff->arrived_count++;
-                printf("[Agent %d] arrived, [FlowField %p] arrived_count = %d\n",
-                       a.id, (void *)ff, ff->arrived_count);
-                smooth_stop(a.id);
-            }
+            printf("[Agent %d] FINAL adoubé parce que premier (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_OCCUPY_RADIUS);
+            smooth_stop(a.id);
         }
 
         // Application de la vitesse et intégration du mouvement

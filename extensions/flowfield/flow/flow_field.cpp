@@ -227,14 +227,19 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
     ready = true;
 }
 
-bool FlowField::is_cell_navigable(const Vec2i &cell) const
-{
+bool FlowField::is_cell_navigable(const Vec2i &cell) const {
     if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
         return false;
+
+    // Si la cellule est le but et que le champ est prêt, on la considère toujours navigable
+    if (cell == goal_cell && ready)
+        return true;
+
     int idx = cell.y * w + cell.x;
     const Vec2 &d = dirs[idx];
     return !(std::abs(d.x) < 1e-6 && std::abs(d.y) < 1e-6);
 }
+
 
 Vec2i FlowField::find_nearest_navigable(Vec2i start) const
 {

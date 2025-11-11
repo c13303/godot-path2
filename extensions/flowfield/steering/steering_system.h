@@ -29,7 +29,8 @@ namespace ffcore
         double max_speed = 60.0;
         bool active = true;
         FlowField *flow = nullptr;
-        bool has_arrived = false;
+        bool has_arrived = false; /// arrived au final target
+        bool is_first = false; // est le 1er, droit de penetration de la target cell
     };
 
     class SteeringSystem
@@ -47,7 +48,7 @@ namespace ffcore
 
         const AgentData *get_agent(int id) const;
         void soft_wall_correction(AgentData &a, FlowField *ff, double delta);
-        void smooth_stop(int id, double rate = 0.25);
+        void smooth_stop(int id);
 
     private:
         std::vector<AgentData> agents;
