@@ -85,7 +85,6 @@ namespace
     }
 }
 
-
 void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &walkables, bool allow_diagonals)
 {
     if (w == 0 || h == 0 || walkables.empty())
@@ -103,27 +102,7 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
         if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h)
             walkable_set.insert(index(c));
 
-    // --- ÉROSION DES BORDS DU DOMAINE ---
-    const int erosion_radius = 3; // nombre de tuiles de marge
-    std::unordered_set<int> eroded;
-    for (auto &c : walkables)
-    {
-        for (int dx = -erosion_radius; dx <= erosion_radius; ++dx)
-            for (int dy = -erosion_radius; dy <= erosion_radius; ++dy)
-            {
-                Vec2i n{c.x + dx, c.y + dy};
-                if (n.x < 0 || n.y < 0 || n.x >= w || n.y >= h)
-                    continue;
-                if (!walkable_set.count(index(n)))
-                {
-                    eroded.insert(index(c));
-                    dx = dy = erosion_radius + 1; // arrêt anticipé pour ce c
-                }
-            }
-    }
-    for (int idx : eroded)
-        walkable_set.erase(idx);
-    // --------------------------------------
+    
 
     std::vector<int32_t> dist(w * h, INT_MAX);
     std::priority_queue<FFNode> open;
