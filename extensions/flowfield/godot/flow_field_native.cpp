@@ -1,24 +1,13 @@
 #include "flow_field_native.h"
-#include "../steering/steering_system.h" // Inclusion du header de la classe SteeringSystem
-
+#include "../steering/steering_system.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <queue>
-#include <unordered_map>
-#include <unordered_set>
 #include <limits>
 #include <cmath>
 
 using namespace godot;
-
-struct Vector2iHash
-{
-    size_t operator()(const Vector2i &v) const noexcept
-    {
-        return (size_t(v.x) * 73856093u) ^ (size_t(v.y) * 19349663u);
-    }
-};
 
 struct DijkstraNode
 {
@@ -38,33 +27,23 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
 }
 
-void FlowFieldNative::set_floor_layer(Object *node)
-{
-    floor_layer = Object::cast_to<TileMapLayer>(node);
-}
-
-void FlowFieldNative::set_wall_layer(Object *node)
-{
-    wall_layer = Object::cast_to<TileMapLayer>(node);
-}
-
+void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
+void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_to<TileMapLayer>(node); }
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 
-void FlowFieldNative::rebuild_async(Vector2 goal)
+bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell)
 {
     if (!floor_layer || !wall_layer)
-        return;
-
-    /* godot::UtilityFunctions::print("Rebuild FlowField!"); */
+        return false;
 
     if (ffcore::SteeringSystem *sys = ffcore::get_global_steering_system())
         sys->reactivate_agents_for_field(&field);
 
     goal_world = goal;
-    Rect2i used = floor_layer->get_used_rect();
+    used = floor_layer->get_used_rect();
     if (used.size.x <= 0 || used.size.y <= 0)
-        return;
+        return false;
 
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
@@ -72,8 +51,19 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     field.target_triggered = false;
     field.arrived_count = 0;
 
-    std::unordered_set<Vector2i, Vector2iHash> wall_set;
-    std::unordered_set<Vector2i, Vector2iHash> walkable_set;
+    Vector2 goal_local = floor_layer->to_local(goal_world);
+    goal_cell = floor_layer->local_to_map(goal_local);
+    Vector2 goal_center_world = floor_layer->to_global(floor_layer->map_to_local(goal_cell));
+    goal_world = goal_center_world;
+
+    return true;
+}
+
+void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                 std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
+{
+    wall_set.clear();
+    walkable_set.clear();
 
     Array walls = wall_layer->get_used_cells();
     for (int i = 0; i < walls.size(); i++)
@@ -87,24 +77,23 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             walkable_set.insert(c);
     }
 
-    Vector2 goal_local = floor_layer->to_local(goal_world);
-    Vector2i goal_cell = floor_layer->local_to_map(goal_local);
-    Vector2 goal_center_world = floor_layer->to_global(floor_layer->map_to_local(goal_cell));
-    goal_world = goal_center_world;
+    // --- ÉROSION ---
+    /*     apply_wall_erosion(walkable_set, wall_set, 1); */
+}
 
-    /* UtilityFunctions::print("[GOAL TEST] click=", goal.x, ",", goal.y,
-                            " | cell=", goal_cell.x, ",", goal_cell.y,
-                            " | center=", goal_center_world.x, ",", goal_center_world.y); */
+void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+                                    const Vector2i &goal_cell,
+                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs)
+{
+    costs.clear();
+    for (const Vector2i &c : walkable_set)
+        costs[c] = std::numeric_limits<double>::infinity();
 
     if (!walkable_set.count(goal_cell))
         return;
 
     const Vector2i dirs8[8] = {
         {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    for (const Vector2i &c : walkable_set)
-        costs[c] = std::numeric_limits<double>::infinity();
 
     std::priority_queue<DijkstraNode, std::vector<DijkstraNode>, std::greater<DijkstraNode>> pq;
     costs[goal_cell] = 0.0;
@@ -132,12 +121,22 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             }
         }
     }
+}
 
+void FlowFieldNative::compute_directions(
+    const Rect2i &used,
+    const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+    const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+    const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
+{
     auto cost_at = [&](const Vector2i &p) -> double
     {
         auto it = costs.find(p);
         return (it == costs.end()) ? std::numeric_limits<double>::infinity() : it->second;
     };
+
+    const Vector2i dirs8[8] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
 
     for (int y = 0; y < field.height(); ++y)
     {
@@ -151,10 +150,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
                 continue;
             }
 
-            double gx = 0.0;
-            double gy = 0.0;
-            double weights = 0.0;
-
+            double gx = 0.0, gy = 0.0, weights = 0.0;
             for (const Vector2i &d : dirs8)
             {
                 Vector2i n = c + d;
@@ -162,8 +158,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
                 if (!std::isfinite(nc))
                     continue;
 
-                double dx = static_cast<double>(d.x);
-                double dy = static_cast<double>(d.y);
+                double dx = (double)d.x;
+                double dy = (double)d.y;
                 double w = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.7071 : 1.0;
 
                 gx += (nc - cc) * dx * w;
@@ -178,20 +174,106 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
             }
 
             ffcore::Vec2 dir(-gx, -gy);
-            if (dir.length() > 1e-6)
-                dir = dir.normalized();
+            if (dir.length() <= 1e-6)
+            {
+                field.set_dir(x, y, {0.0, 0.0});
+                continue;
+            }
+
+            dir = dir.normalized();
+
+            // --- Correction directionnelle vis-à-vis du mur ---
+            Vector2 wall_normal(0, 0);
+            for (const Vector2i &d : dirs8)
+            {
+                Vector2i n = c + d;
+                if (wall_set.count(n))
+                    wall_normal += Vector2(-d.x, -d.y);
+            }
+
+            if (wall_normal.length_squared() > 1e-6)
+            {
+                wall_normal = wall_normal.normalized();
+                Vector2 d2(dir.x, dir.y);
+
+                // Si la direction pointe vers le mur → projection tangentielle
+                if (d2.dot(wall_normal) < 0.0)
+                {
+                    // Deux tangentes possibles : gauche et droite
+                    Vector2 tangent1(-wall_normal.y, wall_normal.x);
+                    Vector2 tangent2(wall_normal.y, -wall_normal.x);
+
+                    // Choisir celle qui est la plus alignée avec la direction d'origine
+                    dir = (d2.dot(tangent1) > d2.dot(tangent2))
+                              ? ffcore::Vec2(tangent1.x, tangent1.y)
+                              : ffcore::Vec2(tangent2.x, tangent2.y);
+                }
+            }
+
             field.set_dir(x, y, dir);
         }
     }
+}
 
+void FlowFieldNative::apply_wall_erosion(std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                         int radius)
+{
+    if (radius <= 0 || wall_set.empty() || walkable_set.empty())
+        return;
+
+    std::unordered_set<Vector2i, Vector2iHash> eroded;
+
+    for (const Vector2i &c : walkable_set)
+    {
+        bool near_wall = false;
+        for (int dx = -radius; dx <= radius && !near_wall; ++dx)
+            for (int dy = -radius; dy <= radius && !near_wall; ++dy)
+            {
+                Vector2i n = c + Vector2i(dx, dy);
+                if (wall_set.count(n))
+                    near_wall = true;
+            }
+
+        if (near_wall)
+            eroded.insert(c);
+    }
+
+    for (const Vector2i &c : eroded)
+        walkable_set.erase(c);
+}
+
+void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_cell)
+{
     ffcore::Vec2i rel_goal(goal_cell.x - used.position.x, goal_cell.y - used.position.y);
     if (rel_goal.x >= 0 && rel_goal.y >= 0 &&
         rel_goal.x < field.width() && rel_goal.y < field.height())
         field.set_dir(rel_goal.x, rel_goal.y, ffcore::Vec2(0.0, 0.0));
 
     field.set_goal_cell(rel_goal);
-
     queue_redraw();
+}
+
+void FlowFieldNative::rebuild_async(Vector2 goal)
+{
+    Rect2i used;
+    Vector2i goal_cell;
+
+    if (!prepare_layers(goal, used, goal_cell))
+        return;
+
+    std::unordered_set<Vector2i, Vector2iHash> wall_set;
+    std::unordered_set<Vector2i, Vector2iHash> walkable_set;
+    build_sets(wall_set, walkable_set);
+
+    if (!walkable_set.count(goal_cell))
+        return;
+
+    std::unordered_map<Vector2i, double, Vector2iHash> costs;
+    compute_costs(walkable_set, goal_cell, costs);
+    compute_directions(used, walkable_set, costs, wall_set);
+
+    finalize_field(used, goal_cell);
 }
 
 Vector2 FlowFieldNative::sample_dir_world(Vector2 world_pos) const
@@ -240,9 +322,7 @@ void FlowFieldNative::_draw()
     Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
     Rect2i used = floor_layer->get_used_rect();
     int skip = Math::max(1, debug_stride);
-    int count = 0;
 
-    // === DESSIN ===
     for (int y = 0; y < field.height(); y += skip)
     {
         for (int x = 0; x < field.width(); x += skip)
@@ -261,12 +341,9 @@ void FlowFieldNative::_draw()
 
             float len = cell_size.x * debug_scale * 0.5f;
             draw_line(draw_center, draw_center + dir * len, debug_color_dir, 1.0);
-
-            count++;
         }
     }
 
-    // debug visualisation des cercles de zone d'arrivée
     if (field.has_goal())
     {
         ffcore::Vec2i goal = field.get_goal_cell();
@@ -274,14 +351,11 @@ void FlowFieldNative::_draw()
             floor_layer->to_global(
                 floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
 
-        const int segments = 128;     // cercle bien lisse
-        const float thickness = 1.0f; // trait légèrement plus visible
+        const int segments = 128;
+        const float thickness = 1.0f;
 
-        draw_arc(goal_center, ffcore::TARGET_SLOW_RADIUS, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);       // vert vif
-        draw_arc(goal_center, ffcore::TARGET_APPROACH_RADIUS, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness); // orange
-
-        draw_arc(goal_center, ffcore::TARGET_OCCUPY_RADIUS, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness); // rouge
+        draw_arc(goal_center, ffcore::TARGET_SLOW_RADIUS, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
+        draw_arc(goal_center, ffcore::TARGET_APPROACH_RADIUS, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
+        draw_arc(goal_center, ffcore::TARGET_OCCUPY_RADIUS, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
     }
-
-    /* UtilityFunctions::print("FlowFieldNative: debug draw vectors =", count); */
 }
