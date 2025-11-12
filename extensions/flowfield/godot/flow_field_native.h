@@ -41,10 +41,7 @@ namespace godot
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
                            std::unordered_map<Vector2i, double, Vector2iHash> &costs);
-        void compute_directions(const Rect2i &used,
-                                const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                                const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
+        void compute_directions(const Rect2i &used, const std::unordered_set<Vector2i, Vector2iHash> &walkable_set, const std::unordered_map<Vector2i, double, Vector2iHash> &costs, const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
 
@@ -70,7 +67,9 @@ namespace godot
         ffcore::FlowField *get_field() { return &field; }
         Vector2 get_goal_world() const { return goal_world; }
 
-        void apply_wall_erosion(std::unordered_set<Vector2i, Vector2iHash> &walkable_set, const std::unordered_set<Vector2i, Vector2iHash> &wall_set, int radius);
+        void adjust_wall_tangents(const Rect2i &used,
+                                  const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                  int radius = 1);
     };
 
 } // namespace godot

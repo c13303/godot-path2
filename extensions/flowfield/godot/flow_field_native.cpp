@@ -15,6 +15,10 @@ struct DijkstraNode
     Vector2i cell;
     bool operator>(const DijkstraNode &other) const { return cost > other.cost; }
 };
+static inline double clamp01(double v)
+{
+    return (v < 0.0) ? 0.0 : (v > 1.0 ? 1.0 : v);
+}
 
 void FlowFieldNative::_bind_methods()
 {
@@ -76,9 +80,6 @@ void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &wal
         if (!wall_set.count(c))
             walkable_set.insert(c);
     }
-
-    // --- ÉROSION ---
-    /*     apply_wall_erosion(walkable_set, wall_set, 1); */
 }
 
 void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
@@ -123,11 +124,10 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
     }
 }
 
-void FlowFieldNative::compute_directions(
-    const Rect2i &used,
-    const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-    const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-    const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
+void FlowFieldNative::compute_directions(const Rect2i &used,
+                                         const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+                                         const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
 {
     auto cost_at = [&](const Vector2i &p) -> double
     {
@@ -151,6 +151,7 @@ void FlowFieldNative::compute_directions(
             }
 
             double gx = 0.0, gy = 0.0, weights = 0.0;
+
             for (const Vector2i &d : dirs8)
             {
                 Vector2i n = c + d;
@@ -182,65 +183,65 @@ void FlowFieldNative::compute_directions(
 
             dir = dir.normalized();
 
-            // --- Correction directionnelle vis-à-vis du mur ---
-            Vector2 wall_normal(0, 0);
-            for (const Vector2i &d : dirs8)
-            {
-                Vector2i n = c + d;
-                if (wall_set.count(n))
-                    wall_normal += Vector2(-d.x, -d.y);
-            }
-
-            if (wall_normal.length_squared() > 1e-6)
-            {
-                wall_normal = wall_normal.normalized();
-                Vector2 d2(dir.x, dir.y);
-
-                // Si la direction pointe vers le mur → projection tangentielle
-                if (d2.dot(wall_normal) < 0.0)
-                {
-                    // Deux tangentes possibles : gauche et droite
-                    Vector2 tangent1(-wall_normal.y, wall_normal.x);
-                    Vector2 tangent2(wall_normal.y, -wall_normal.x);
-
-                    // Choisir celle qui est la plus alignée avec la direction d'origine
-                    dir = (d2.dot(tangent1) > d2.dot(tangent2))
-                              ? ffcore::Vec2(tangent1.x, tangent1.y)
-                              : ffcore::Vec2(tangent2.x, tangent2.y);
-                }
-            }
-
             field.set_dir(x, y, dir);
         }
     }
 }
 
-void FlowFieldNative::apply_wall_erosion(std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
-                                         int radius)
+void FlowFieldNative::adjust_wall_tangents(const Rect2i &used,
+                                           const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                           int radius)
 {
-    if (radius <= 0 || wall_set.empty() || walkable_set.empty())
-        return;
+    const Vector2i dirs8[8] = {
+        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
 
-    std::unordered_set<Vector2i, Vector2iHash> eroded;
-
-    for (const Vector2i &c : walkable_set)
+    for (int y = 0; y < field.height(); ++y)
     {
-        bool near_wall = false;
-        for (int dx = -radius; dx <= radius && !near_wall; ++dx)
-            for (int dy = -radius; dy <= radius && !near_wall; ++dy)
+        for (int x = 0; x < field.width(); ++x)
+        {
+            Vector2i c = used.position + Vector2i(x, y);
+
+            double min_dist2 = 1e9;
+            Vector2 wall_normal(0, 0);
+
+            // Cherche le mur le plus proche
+            for (int dy = -radius; dy <= radius; ++dy)
+                for (int dx = -radius; dx <= radius; ++dx)
+                {
+                    Vector2i n = c + Vector2i(dx, dy);
+                    if (wall_set.count(n))
+                    {
+                        double d2 = double(dx * dx + dy * dy);
+                        if (d2 < min_dist2)
+                        {
+                            min_dist2 = d2;
+                            wall_normal = Vector2(-dx, -dy);
+                        }
+                    }
+                }
+
+            if (wall_normal.length_squared() < 1e-6)
+                continue;
+
+            wall_normal = wall_normal.normalized();
+
+            ffcore::Vec2 dir = field.dir(x, y);
+            if (dir.x == 0.0 && dir.y == 0.0)
+                continue;
+
+            Vector2 d2(dir.x, dir.y);
+            if (d2.dot(wall_normal) < 0.0)
             {
-                Vector2i n = c + Vector2i(dx, dy);
-                if (wall_set.count(n))
-                    near_wall = true;
+                // Projette tangentiellement dans le bon sens
+                Vector2 tangent(-wall_normal.y, wall_normal.x);
+                if (tangent.dot(d2) < 0.0)
+                    tangent = -tangent;
+
+                dir = ffcore::Vec2(tangent.x, tangent.y);
+                field.set_dir(x, y, dir);
             }
-
-        if (near_wall)
-            eroded.insert(c);
+        }
     }
-
-    for (const Vector2i &c : eroded)
-        walkable_set.erase(c);
 }
 
 void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_cell)
@@ -272,6 +273,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
+    adjust_wall_tangents(used, wall_set, 2);
 
     finalize_field(used, goal_cell);
 }
