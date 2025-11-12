@@ -139,8 +139,7 @@ void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double de
     if (toward_wall > 0.0)
         a.velocity = a.velocity - dir * toward_wall;
 }
-
-Vec2 SteeringSystem::compute_separation_force(const AgentData &agent) // Force de séparation entre agents
+Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
 {
     if (!grid)
         return Vec2(0, 0);
@@ -163,8 +162,6 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent) // Force d
         if (it == id_to_index.end())
             continue;
         const AgentData &neighbor = agents[it->second];
-        if (!neighbor.active)
-            continue;
 
         Vec2 diff = agent.position - neighbor.position;
         double dist_sq = diff.length_squared();
@@ -185,13 +182,16 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent) // Force d
     {
         auto it = id_to_index.find(candidates[i].id);
         const AgentData &neighbor = agents[it->second];
+
         Vec2 diff = agent.position - neighbor.position;
         double dist = diff.length();
         if (dist < 0.001)
             dist = 0.001;
-        double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
 
-        separation_force = separation_force + (diff * (1.0 / dist)) * falloff;
+        double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
+        double weight = neighbor.active ? 1.0 : 2.0;
+
+        separation_force = separation_force + (diff * (1.0 / dist)) * falloff * weight;
         count++;
     }
 
@@ -203,7 +203,6 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent) // Force d
 
     return separation_force;
 }
-
 void SteeringSystem::smooth_stop(int id)
 {
 
