@@ -8,6 +8,11 @@ using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
 static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
 
+/* declaration generale du system pour partage */
+static SteeringSystem *g_steering = nullptr;
+SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
+SteeringSystem::SteeringSystem() { g_steering = this; }
+
 static inline Vec2 safe_normalize(const Vec2 &v) // Normalise un vecteur, évite la division par zéro
 {
     double l = v.length();
@@ -31,7 +36,7 @@ static inline Vec2 hashed_unit_dir(int id) // Génère une direction pseudo-alé
 
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
 
-SteeringSystem::SteeringSystem() {} // Constructeur vide
+
 
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
@@ -67,6 +72,18 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     agents.pop_back();
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
+}
+
+void SteeringSystem::reactivate_agents_for_field(FlowField *field)
+{
+    for (auto &a : agents)
+    {
+        if (a.flow != field)
+            continue;
+        a.active = true;
+        a.has_arrived = false;
+        a.is_first = false;
+    }
 }
 
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut

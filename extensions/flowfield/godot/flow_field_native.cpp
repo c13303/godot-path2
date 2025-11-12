@@ -58,6 +58,9 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
 
     godot::UtilityFunctions::print("Rebuild FlowField!");
 
+    if (ffcore::SteeringSystem *sys = ffcore::get_global_steering_system())
+        sys->reactivate_agents_for_field(&field);
+
     goal_world = goal;
     Rect2i used = floor_layer->get_used_rect();
     if (used.size.x <= 0 || used.size.y <= 0)

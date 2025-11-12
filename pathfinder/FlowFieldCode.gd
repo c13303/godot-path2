@@ -22,9 +22,7 @@ func _ready() -> void:
 	#print("floor_layer:", floor_layer)
 	#print("wall_layer:", wall_layer)
 
-	# Définir un goal temporaire au centre de la carte
-	var goal_pos = Vector2(0, 0)
-	ff.rebuild_async(goal_pos)
+
 
 	await get_tree().process_frame
 	await get_tree().process_frame  # laisse le temps au C++ de calculer

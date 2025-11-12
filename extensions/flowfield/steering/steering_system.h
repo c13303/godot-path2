@@ -55,6 +55,7 @@ namespace ffcore
         const AgentData *get_agent(int id) const;
         void soft_wall_correction(AgentData &a, FlowField *ff, double delta);
         void smooth_stop(int id);
+        void reactivate_agents_for_field(FlowField *field);
 
     private:
         std::vector<AgentData> agents;
@@ -65,5 +66,7 @@ namespace ffcore
         SpatialGrid *grid = nullptr;
         Vec2 compute_separation_force(const AgentData &agent);
     };
+
+    SteeringSystem *get_global_steering_system();
 
 } // namespace ffcore
