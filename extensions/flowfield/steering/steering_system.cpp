@@ -36,8 +36,6 @@ static inline Vec2 hashed_unit_dir(int id) // Génère une direction pseudo-alé
 
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
 
-
-
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
     AgentData a;
@@ -259,7 +257,7 @@ void SteeringSystem::update_all(double delta)
             a.position = ff->cell_to_world(cur_cell);
         cur_cell = ff->world_to_cell(a.position);
 
-        Vec2 wall_repel(0, 0);
+        Vec2 wall_repel(0, 0); ///// WALL REPEL
         for (int dx = -1; dx <= 1; ++dx)
             for (int dy = -1; dy <= 1; ++dy)
             {
@@ -272,11 +270,17 @@ void SteeringSystem::update_all(double delta)
                     double d = away.length();
                     if (d < WALL_AVOID_RADIUS && d > 1e-3)
                     {
-                        double k = (1.0 - d / WALL_AVOID_RADIUS) * WALL_REPEL_STRENGTH;
-                        wall_repel = wall_repel + away * (k / d);
+                        // poids décroissant (lissage classique)
+                        double falloff = std::pow(1.0 - d / WALL_AVOID_RADIUS, 2.0);
+                        // somme pondérée des directions normalisées
+                        wall_repel = wall_repel + safe_normalize(away) * falloff;
                     }
                 }
             }
+
+        // normalisation finale pour éviter les annulations excessives
+        if (!wall_repel.is_zero())
+            wall_repel = safe_normalize(wall_repel) * WALL_REPEL_STRENGTH;
 
         Vec2 separation = compute_separation_force(a);
         Vec2 flow_dir = safe_normalize(ff->sample_dir_world(a.position));
@@ -309,8 +313,14 @@ void SteeringSystem::update_all(double delta)
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
         Vec2i prop_cell = ff->world_to_cell(proposed);
+
+        // sécurité absolue : clamp à la zone navigable
         if (!ff->is_cell_navigable(prop_cell))
-            proposed = project_to_navigable(ff, a.position, proposed);
+        {
+            Vec2i safe = ff->find_nearest_navigable(prop_cell);
+            proposed = ff->cell_to_world(safe);
+            a.velocity = Vec2(0, 0); // arrêt immédiat
+        }
 
         a.position = proposed;
         soft_wall_correction(a, ff, delta);
