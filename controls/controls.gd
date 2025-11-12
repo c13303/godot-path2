@@ -17,7 +17,7 @@ var dragging: bool = false
 var drag_start_pos: Vector2
 var camera_start_pos: Vector2
 var MainCharScene: PackedScene = preload("res://character/character.tscn")
-var spawngrappe: int = 1
+var spawngrappe: int = 50
 
 signal mouse_goal_set(world_pos: Vector2)
 
@@ -50,6 +50,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_A:
 		_on_key_spawn_chars()
+	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Z:
+		_on_key_spawn_chars_massive()
 
 func _process(delta: float) -> void:
 	if camera == null:
@@ -91,6 +93,10 @@ func _on_click_set_goal() -> void:
 		print("FlowField non trouvé ou inactif.")
 
 func _on_key_spawn_chars() -> void:
+	var mouse_pos: Vector2 = get_global_mouse_position()
+	_spawn_mainchar(mouse_pos)
+
+func _on_key_spawn_chars_massive() -> void:
 	var mouse_pos: Vector2 = get_global_mouse_position()
 	for i in range(spawngrappe):
 		_spawn_mainchar(mouse_pos)

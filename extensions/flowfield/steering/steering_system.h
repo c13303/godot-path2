@@ -8,18 +8,24 @@
 namespace ffcore
 {
     // Constantes de réglage pour la navigation
-    constexpr double FLOW_WEIGHT = 1.0;
-
-    constexpr double CENTER_PULL = 0.1;
+    constexpr double FLOW_WEIGHT = 1.0; // poids direction globale
+    constexpr double CENTER_PULL = 1.0; // stabilisation douce
     constexpr double TILE_SIZE = 16.0;
+
     constexpr double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
-    constexpr double WALL_REPEL_STRENGTH = 0.7;
+    constexpr double WALL_REPEL_STRENGTH = 8.4; // 12 × 0.7  → force dominante (murs infranchissables)
+
     constexpr double DIRECT_STEER_RADIUS = TILE_SIZE * 2.5;
     constexpr double MIN_SPEED_FRACTION = 0.25;
     constexpr double CELLGOAL_COOLDOWN_SEC = 1;
-    constexpr double TARGET_SLOW_RADIUS = TILE_SIZE * 2.5; // 40.0 si TILE_SIZE = 16
+
+    constexpr double TARGET_SLOW_RADIUS = TILE_SIZE * 2.5;
     constexpr double TARGET_APPROACH_RADIUS = TILE_SIZE * 1.0;
     constexpr double TARGET_OCCUPY_RADIUS = TILE_SIZE * 0.4;
+
+    constexpr double SEPARATION_RADIUS = 20.0;
+    constexpr double SEPARATION_STRENGTH = 400.0; // 8 × 50 → forte répulsion inter-agent
+    constexpr int MAX_NEIGHBORS = 16;
 
     struct AgentData
     {
@@ -30,7 +36,7 @@ namespace ffcore
         bool active = true;
         FlowField *flow = nullptr;
         bool has_arrived = false; /// arrived au final target
-        bool is_first = false; // est le 1er, droit de penetration de la target cell
+        bool is_first = false;    // est le 1er, droit de penetration de la target cell
     };
 
     class SteeringSystem
@@ -57,7 +63,7 @@ namespace ffcore
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
-        Vec2 compute_separation_force(const AgentData &agent, double dist_to_target, bool in_goal_tile);
+        Vec2 compute_separation_force(const AgentData &agent);
     };
 
 } // namespace ffcore

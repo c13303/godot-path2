@@ -140,14 +140,7 @@ void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double de
         a.velocity = a.velocity - dir * toward_wall;
 }
 
-namespace
-{
-    const double SEPARATION_RADIUS = 24.0;  // Rayon d’évitement
-    const double SEPARATION_STRENGTH = 2.0; // Intensité de répulsion
-    const int MAX_NEIGHBORS = 8;            // Nombre max de voisins pris en compte
-}
-
-Vec2 SteeringSystem::compute_separation_force(const AgentData &agent, double, bool) // Force de séparation entre agents
+Vec2 SteeringSystem::compute_separation_force(const AgentData &agent) // Force de séparation entre agents
 {
     if (!grid)
         return Vec2(0, 0);
@@ -196,7 +189,8 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent, double, bo
         double dist = diff.length();
         if (dist < 0.001)
             dist = 0.001;
-        double falloff = 1.0 - std::min(dist / SEPARATION_RADIUS, 1.0);
+        double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
+
         separation_force = separation_force + (diff * (1.0 / dist)) * falloff;
         count++;
     }
@@ -212,22 +206,21 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent, double, bo
 
 void SteeringSystem::smooth_stop(int id)
 {
-    printf("SmoothCall");
 
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
 
     AgentData &a = agents[it->second];
-    a.velocity = a.velocity.lerp(Vec2(0, 0), 0.1); // 0.1–0.15 = ~demi-tile d’amorti selon vitesse
-    if (safe_len(a.velocity) < 0.02)
-    {
-        a.velocity = Vec2(0, 0);
-        a.active = false;
-        printf("[Agent %d] smooth stoped ;)");
-    }
-}
 
+    if (!a.active)
+        return;
+
+    a.velocity = Vec2(0, 0);
+
+    /// TODO actual smooth instead of violent
+
+}
 void SteeringSystem::update_all(double delta)
 {
     if (!grid)
@@ -238,14 +231,12 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
-        // Gestion du cooldown et récupération du flowfield
         if (auto it = g_goal_cooldown.find(a.id); it != g_goal_cooldown.end() && it->second > 0.0)
             it->second = std::max(0.0, it->second - delta);
         FlowField *ff = a.flow ? a.flow : default_flow;
         if (!ff || !ff->is_ready())
             continue;
 
-        // Distances et coordonnées de référence
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
         Vec2i cur_cell = ff->world_to_cell(a.position);
@@ -253,9 +244,7 @@ void SteeringSystem::update_all(double delta)
             a.position = ff->cell_to_world(cur_cell);
         cur_cell = ff->world_to_cell(a.position);
 
-        // Direction principale et forces secondaires
-        Vec2 flow_dir = safe_normalize(ff->sample_dir_world(a.position));
-        Vec2 separation = compute_separation_force(a, dist_to_target, false);
+        // --- 1. MURS : priorité absolue
         Vec2 wall_repel(0, 0);
         for (int dx = -1; dx <= 1; ++dx)
             for (int dy = -1; dy <= 1; ++dy)
@@ -275,33 +264,34 @@ void SteeringSystem::update_all(double delta)
                 }
             }
 
-        // Recentrage doux sur la cellule
+        // --- 2. RÉPULSION INTER-AGENT : priorité secondaire
+        Vec2 separation = compute_separation_force(a);
+
+        // --- 3. FLOW FIELD : direction générale
+        Vec2 flow_dir = safe_normalize(ff->sample_dir_world(a.position));
+
+        // --- 4. RECENTRAGE : correctif doux
         const Vec2 cell_center = ff->cell_to_world(cur_cell);
         Vec2 offset_center = cell_center - a.position;
         double offset_dist = offset_center.length();
         Vec2 center_correction = safe_normalize(offset_center) *
                                  std::min(offset_dist / TILE_SIZE, 1.0) * CENTER_PULL;
 
-        // Direction résultante
-        Vec2 desired_dir = safe_normalize(flow_dir + center_correction + separation + wall_repel);
+        // --- COMBINAISON selon priorité
+        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir + center_correction);
+
         if (desired_dir.is_zero())
             desired_dir = hashed_unit_dir(a.id);
 
-        // Gestion des trois zones de ralentissement avec un SLOW FACTOR
         double slow_factor = 1.0;
 
-        /* 1/3 outer ring : RALENTI */
+        // --- Outer ring : ralentissement mais répulsion intacte
         if (!a.has_arrived && dist_to_target < TARGET_SLOW_RADIUS)
-        {
-            /* printf("[Agent %d] entre dans TARGET_SLOW_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_SLOW_RADIUS); */
             slow_factor = std::clamp(dist_to_target / TARGET_SLOW_RADIUS, MIN_SPEED_FRACTION, 1.0);
-        }
 
-        /* 2/3 middle ring: FILTRE LE PREMIER OU BIEN STOP */
+        // --- Middle ring : filtrage
         if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
         {
-            /* printf("[Agent %d] entre dans TARGET_APPROACH_RADIUS (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_APPROACH_RADIUS); */
-
             if (!ff->target_triggered)
             {
                 ff->target_triggered = true;
@@ -312,28 +302,31 @@ void SteeringSystem::update_all(double delta)
             else
             {
                 smooth_stop(a.id);
+                a.active = false;
                 ff->arrived_count++;
             }
             a.has_arrived = true;
         }
 
-        /* JUST THE 1ST MAN*/
-        if (a.is_first && dist_to_target <= TARGET_OCCUPY_RADIUS) /// zone pénétration target
+        // --- Inner ring : seul le premier
+        if (a.is_first && dist_to_target <= TARGET_OCCUPY_RADIUS)
         {
-            printf("[Agent %d] FINAL adoubé parce que premier (%.2f < %.2f)\n", a.id, dist_to_target, TARGET_OCCUPY_RADIUS);
             smooth_stop(a.id);
+            a.active = false;
+            continue;
         }
 
-        // Application de la vitesse et intégration du mouvement
+        // --- Application /// TODO RAJOUTER UN LERP POUR FLUIDITE
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        a.velocity = a.velocity.lerp(target_velocity, 0.25);
+        a.velocity = target_velocity;
+
         const double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
+
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
 
-        // Correction de navigation et mise à jour spatiale
         Vec2i prop_cell = ff->world_to_cell(proposed);
         if (!ff->is_cell_navigable(prop_cell))
             proposed = project_to_navigable(ff, a.position, proposed);

@@ -56,6 +56,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     if (!floor_layer || !wall_layer)
         return;
 
+    godot::UtilityFunctions::print("Rebuild FlowField!");
+
     goal_world = goal;
     Rect2i used = floor_layer->get_used_rect();
     if (used.size.x <= 0 || used.size.y <= 0)
@@ -64,6 +66,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
+    field.target_triggered = false;
+    field.arrived_count = 0;
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;

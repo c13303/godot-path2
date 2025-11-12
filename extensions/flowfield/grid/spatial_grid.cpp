@@ -57,5 +57,7 @@ std::vector<int> SpatialGrid::query_neighbors(const Vec2& pos, double radius) co
                 result.push_back(id);
         }
     }
+
+    
     return result;
 }
