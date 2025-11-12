@@ -219,8 +219,8 @@ void SteeringSystem::smooth_stop(int id)
     a.velocity = Vec2(0, 0);
 
     /// TODO actual smooth instead of violent
-
 }
+
 void SteeringSystem::update_all(double delta)
 {
     if (!grid)
@@ -231,20 +231,18 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
-        if (auto it = g_goal_cooldown.find(a.id); it != g_goal_cooldown.end() && it->second > 0.0)
-            it->second = std::max(0.0, it->second - delta);
         FlowField *ff = a.flow ? a.flow : default_flow;
         if (!ff || !ff->is_ready())
             continue;
 
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
+
         Vec2i cur_cell = ff->world_to_cell(a.position);
         if (!ff->is_cell_navigable(cur_cell))
             a.position = ff->cell_to_world(cur_cell);
         cur_cell = ff->world_to_cell(a.position);
 
-        // --- 1. MURS : priorité absolue
         Vec2 wall_repel(0, 0);
         for (int dx = -1; dx <= 1; ++dx)
             for (int dy = -1; dy <= 1; ++dy)
@@ -264,61 +262,29 @@ void SteeringSystem::update_all(double delta)
                 }
             }
 
-        // --- 2. RÉPULSION INTER-AGENT : priorité secondaire
         Vec2 separation = compute_separation_force(a);
-
-        // --- 3. FLOW FIELD : direction générale
         Vec2 flow_dir = safe_normalize(ff->sample_dir_world(a.position));
-
-        // --- 4. RECENTRAGE : correctif doux
-        const Vec2 cell_center = ff->cell_to_world(cur_cell);
-        Vec2 offset_center = cell_center - a.position;
-        double offset_dist = offset_center.length();
-        Vec2 center_correction = safe_normalize(offset_center) *
-                                 std::min(offset_dist / TILE_SIZE, 1.0) * CENTER_PULL;
-
-        // --- COMBINAISON selon priorité
-        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir + center_correction);
+        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
         if (desired_dir.is_zero())
             desired_dir = hashed_unit_dir(a.id);
 
         double slow_factor = 1.0;
-
-        // --- Outer ring : ralentissement mais répulsion intacte
-        if (!a.has_arrived && dist_to_target < TARGET_SLOW_RADIUS)
+        if (dist_to_target < TARGET_SLOW_RADIUS)
             slow_factor = std::clamp(dist_to_target / TARGET_SLOW_RADIUS, MIN_SPEED_FRACTION, 1.0);
 
-        // --- Middle ring : filtrage
         if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
-        {
-            if (!ff->target_triggered)
-            {
-                ff->target_triggered = true;
-                ff->arrived_count = 1;
-                a.is_first = true;
-                printf("[Agent %d] premier à atteindre TARGET_APPROACH_RADIUS\n", a.id);
-            }
-            else
-            {
-                smooth_stop(a.id);
-                a.active = false;
-                ff->arrived_count++;
-            }
             a.has_arrived = true;
-        }
 
-        // --- Inner ring : seul le premier
-        if (a.is_first && dist_to_target <= TARGET_OCCUPY_RADIUS)
+        if (a.has_arrived && dist_to_target < TARGET_OCCUPY_RADIUS)
         {
             smooth_stop(a.id);
             a.active = false;
             continue;
         }
 
-        // --- Application /// TODO RAJOUTER UN LERP POUR FLUIDITE
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        a.velocity = target_velocity;
+        a.velocity = a.velocity.lerp(target_velocity, 0.15);
 
         const double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
@@ -326,10 +292,10 @@ void SteeringSystem::update_all(double delta)
 
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
-
         Vec2i prop_cell = ff->world_to_cell(proposed);
         if (!ff->is_cell_navigable(prop_cell))
             proposed = project_to_navigable(ff, a.position, proposed);
+
         a.position = proposed;
         soft_wall_correction(a, ff, delta);
         grid->update(a.id, old_pos, a.position);

@@ -18,3 +18,6 @@ func _ready() -> void:
 	if use_native_steering:
 		set_physics_process(false)
 		return
+
+func _process(_delta: float) -> void:
+	z_index = int(position.y)
