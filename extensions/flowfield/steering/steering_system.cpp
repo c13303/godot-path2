@@ -116,44 +116,38 @@ static Vec2 project_to_navigable(FlowField *ff, const Vec2 &from, const Vec2 &to
     return lo;
 }
 
-void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double delta) // Corrige la position d’un agent s’il est dans un mur
+void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double delta)
 {
     Vec2i cell = ff->world_to_cell(a.position);
     if (ff->is_cell_navigable(cell))
         return;
 
-    Vec2i best_cell = cell;
-    double best_dist = 1e12;
-
-    for (int dx = -1; dx <= 1; ++dx)
-        for (int dy = -1; dy <= 1; ++dy)
-        {
-            Vec2i n = {cell.x + dx, cell.y + dy};
-            if (!ff->is_cell_navigable(n))
-                continue;
-            double d = (ff->cell_to_world(n) - a.position).length();
-            if (d < best_dist)
-            {
-                best_dist = d;
-                best_cell = n;
-            }
-        }
-
-    if (best_cell == cell)
-        return;
-
+    Vec2i best_cell = ff->find_nearest_navigable(cell);
     Vec2 wall_center = ff->cell_to_world(cell);
     Vec2 free_center = ff->cell_to_world(best_cell);
     Vec2 dir = safe_normalize(free_center - wall_center);
 
+    // Correction douce
     Vec2 target_pos = free_center - dir * (ff->tile_size() * 0.5 - 0.05);
     double blend = std::clamp(delta * 4.0, 0.0, 0.25);
     a.position = a.position.lerp(target_pos, blend);
 
+    // Annule la composante de vitesse vers le mur
     double toward_wall = a.velocity.dot(dir);
     if (toward_wall > 0.0)
-        a.velocity = a.velocity - dir * toward_wall;
+        a.velocity -= dir * toward_wall;
+
+    // Hard clamp intégré : sécurité absolue
+    Vec2i check = ff->world_to_cell(a.position);
+    if (!ff->is_cell_navigable(check))
+    {
+        Vec2i safe = ff->find_nearest_navigable(check);
+        a.position = ff->cell_to_world(safe);
+        a.velocity = Vec2(0, 0);
+    }
 }
+
+
 Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
 {
     if (!grid)
@@ -257,7 +251,8 @@ void SteeringSystem::update_all(double delta)
             a.position = ff->cell_to_world(cur_cell);
         cur_cell = ff->world_to_cell(a.position);
 
-        Vec2 wall_repel(0, 0); ///// WALL REPEL
+        // --- WALL REPULSION ---
+        Vec2 wall_repel(0, 0);
         for (int dx = -1; dx <= 1; ++dx)
             for (int dy = -1; dy <= 1; ++dy)
             {
@@ -270,15 +265,12 @@ void SteeringSystem::update_all(double delta)
                     double d = away.length();
                     if (d < WALL_AVOID_RADIUS && d > 1e-3)
                     {
-                        // poids décroissant (lissage classique)
                         double falloff = std::pow(1.0 - d / WALL_AVOID_RADIUS, 2.0);
-                        // somme pondérée des directions normalisées
                         wall_repel = wall_repel + safe_normalize(away) * falloff;
                     }
                 }
             }
 
-        // normalisation finale pour éviter les annulations excessives
         if (!wall_repel.is_zero())
             wall_repel = safe_normalize(wall_repel) * WALL_REPEL_STRENGTH;
 
@@ -314,13 +306,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 proposed = a.position + a.velocity * delta;
         Vec2i prop_cell = ff->world_to_cell(proposed);
 
-        // sécurité absolue : clamp à la zone navigable
-        if (!ff->is_cell_navigable(prop_cell))
-        {
-            Vec2i safe = ff->find_nearest_navigable(prop_cell);
-            proposed = ff->cell_to_world(safe);
-            a.velocity = Vec2(0, 0); // arrêt immédiat
-        }
+
 
         a.position = proposed;
         soft_wall_correction(a, ff, delta);

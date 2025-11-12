@@ -85,6 +85,7 @@ namespace
     }
 }
 
+
 void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &walkables, bool allow_diagonals)
 {
     if (w == 0 || h == 0 || walkables.empty())
@@ -95,25 +96,46 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
 
     std::unordered_set<int> walkable_set;
     walkable_set.reserve(walkables.size());
-    auto index = [&](const Vec2i &c) { return c.y * w + c.x; };
+    auto index = [&](const Vec2i &c)
+    { return c.y * w + c.x; };
 
     for (auto &c : walkables)
-    {
         if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h)
             walkable_set.insert(index(c));
+
+    // --- ÉROSION DES BORDS DU DOMAINE ---
+    const int erosion_radius = 3; // nombre de tuiles de marge
+    std::unordered_set<int> eroded;
+    for (auto &c : walkables)
+    {
+        for (int dx = -erosion_radius; dx <= erosion_radius; ++dx)
+            for (int dy = -erosion_radius; dy <= erosion_radius; ++dy)
+            {
+                Vec2i n{c.x + dx, c.y + dy};
+                if (n.x < 0 || n.y < 0 || n.x >= w || n.y >= h)
+                    continue;
+                if (!walkable_set.count(index(n)))
+                {
+                    eroded.insert(index(c));
+                    dx = dy = erosion_radius + 1; // arrêt anticipé pour ce c
+                }
+            }
     }
+    for (int idx : eroded)
+        walkable_set.erase(idx);
+    // --------------------------------------
 
     std::vector<int32_t> dist(w * h, INT_MAX);
     std::priority_queue<FFNode> open;
 
-    if (goal_cell_in.x >= 0 && goal_cell_in.y >= 0 && goal_cell_in.x < w && goal_cell_in.y < h && walkable_set.count(index(goal_cell_in)))
-    {
-        dist[index(goal_cell_in)] = 0;
-        open.push({goal_cell_in, 0});
-        goal_cell = goal_cell_in;
-    }
-    else
+    if (goal_cell_in.x < 0 || goal_cell_in.y < 0 || goal_cell_in.x >= w || goal_cell_in.y >= h)
         return;
+    if (!walkable_set.count(index(goal_cell_in)))
+        return;
+
+    dist[index(goal_cell_in)] = 0;
+    open.push({goal_cell_in, 0});
+    goal_cell = goal_cell_in;
 
     while (!open.empty())
     {
@@ -227,7 +249,8 @@ void FlowField::compute(const Vec2i &goal_cell_in, const std::vector<Vec2i> &wal
     ready = true;
 }
 
-bool FlowField::is_cell_navigable(const Vec2i &cell) const {
+bool FlowField::is_cell_navigable(const Vec2i &cell) const
+{
     if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
         return false;
 
@@ -239,7 +262,6 @@ bool FlowField::is_cell_navigable(const Vec2i &cell) const {
     const Vec2 &d = dirs[idx];
     return !(std::abs(d.x) < 1e-6 && std::abs(d.y) < 1e-6);
 }
-
 
 Vec2i FlowField::find_nearest_navigable(Vec2i start) const
 {

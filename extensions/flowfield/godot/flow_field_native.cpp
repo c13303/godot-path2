@@ -56,7 +56,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     if (!floor_layer || !wall_layer)
         return;
 
-    godot::UtilityFunctions::print("Rebuild FlowField!");
+    /* godot::UtilityFunctions::print("Rebuild FlowField!"); */
 
     if (ffcore::SteeringSystem *sys = ffcore::get_global_steering_system())
         sys->reactivate_agents_for_field(&field);
