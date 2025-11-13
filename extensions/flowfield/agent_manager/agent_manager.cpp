@@ -6,7 +6,6 @@
 #include "../core/types.h"
 #include "../core/nav_services.h"
 
-
 namespace ffcore
 {
     static AgentManager *g_agent_manager = nullptr;
@@ -41,23 +40,6 @@ namespace ffcore
         }
         return INVALID_GROUP;
     }
-
-    GroupID AgentManager::create_group_with_flow(const ffcore::Vec2 &goal_world_pos)
-    {
-/*         GroupID gid = create_group();
-        if (gid == INVALID_GROUP)
-            return INVALID_GROUP;
-
-        FlowFieldID fid = flowfields()->create_field(goal_world_pos);
-        if (fid == INVALID_FLOWFIELD)
-            return INVALID_GROUP;
-
-        groups[gid].flow_id = fid;
-
-        return gid; */
-    }
-
-
 
     int AgentManager::add_agent_to_group(const Vec2 &pos, GroupID group)
     {
@@ -110,11 +92,27 @@ namespace ffcore
         return &agents[it->second];
     }
 
-    void AgentManager::set_group_flow(GroupID group, FlowFieldID flow)
+    FlowFieldID AgentManager::create_flow_for_group(GroupID group, const Vec2 &goal_world_pos)
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
-            return;
-        groups[group].flow_id = flow;
+            return INVALID_FLOWFIELD;
+
+        FlowFieldID fid = flowfields()->create_field(FLOW_WIDTH, FLOW_HEIGHT, FLOW_TILE_SIZE);
+        if (fid == INVALID_FLOWFIELD)
+            return INVALID_FLOWFIELD;
+
+        FlowField *ff = flowfields()->get(fid);
+        if (!ff)
+            return INVALID_FLOWFIELD;
+
+        Vec2i cell = ff->world_to_cell(goal_world_pos);
+        ff->set_goal_cell(cell);
+
+        // Ici il faudra ajouter ff->compute(...)
+        // dès que tu auras ton compute local
+
+        groups[group].flow_id = fid;
+        return fid;
     }
 
     FlowFieldID AgentManager::get_group_flow(GroupID group) const

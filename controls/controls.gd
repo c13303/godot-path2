@@ -172,7 +172,7 @@ func _on_click_set_goal() -> void:
 		current_flow = flow
 
 	var id = flow.get_flow_id()
-	agent_manager.set_group_flow(current_group, id)
+	agent_manager.create_flow_for_group(current_group, center)
 
 
 func _on_key_spawn_chars() -> void:

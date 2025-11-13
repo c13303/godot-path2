@@ -1,6 +1,4 @@
-#ifndef FFCORE_FLOW_FIELD_MANAGER_H
-#define FFCORE_FLOW_FIELD_MANAGER_H
-
+#pragma once
 #include "../core/types.h"
 #include "flow_field.h"
 #include "../core/nav_config.h"
@@ -12,13 +10,14 @@ namespace ffcore
 	{
 	public:
 		FlowFieldManager();
+
 		FlowFieldID register_existing(FlowField *f);
 		FlowField *get(FlowFieldID id) const;
 		void remove(FlowFieldID id);
+
+		FlowFieldID create_field(int width, int height, double tile_size);
 
 	private:
 		std::vector<FlowField *> fields;
 	};
 }
-
-#endif

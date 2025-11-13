@@ -30,9 +30,8 @@ namespace ffcore
         AgentEntry *get(int id);
         const AgentEntry *get(int id) const;
 
-        void set_group_flow(GroupID group, FlowFieldID flow);
+        FlowFieldID create_flow_for_group(GroupID group, const Vec2 &goal_world_pos);
         FlowFieldID get_group_flow(GroupID group) const;
-        GroupID create_group_with_flow(const ffcore::Vec2 &goal_world_pos);
 
     private:
         std::vector<AgentEntry> agents;

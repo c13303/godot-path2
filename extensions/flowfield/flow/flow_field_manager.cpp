@@ -27,7 +27,6 @@ namespace ffcore
 	{
 		if (id <= 0 || id >= MAX_FLOWFIELDS)
 			return nullptr;
-
 		return fields[id];
 	}
 
@@ -35,7 +34,12 @@ namespace ffcore
 	{
 		if (id <= 0 || id >= MAX_FLOWFIELDS)
 			return;
-
 		fields[id] = nullptr;
+	}
+
+	FlowFieldID FlowFieldManager::create_field(int width, int height, double tile_size)
+	{
+		FlowField *f = new FlowField(width, height, tile_size);
+		return register_existing(f);
 	}
 }
