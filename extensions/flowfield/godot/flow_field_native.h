@@ -29,7 +29,7 @@ namespace godot
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
 
-        bool debug_draw = true;
+        bool debug_draw = false;
         double debug_scale = 1;
         int32_t debug_stride = 1;
         Color debug_color_dir = Color(0, 1, 0);
