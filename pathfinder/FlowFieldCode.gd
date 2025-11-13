@@ -5,6 +5,8 @@ extends Node2D
 @onready var wall_layer: TileMapLayer = $"../../MonTilemap/wallz"
 
 func _ready() -> void:
+	
+	
 	print(">>> FlowFieldCode.gd _ready() triggered <<<")
 
 	await get_tree().process_frame
