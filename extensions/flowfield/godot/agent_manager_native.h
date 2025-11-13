@@ -2,33 +2,29 @@
 #define AGENT_MANAGER_NATIVE_H
 
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include "../steering/agent_manager.h"
 
-namespace godot
-{
+namespace godot {
 
-    class AgentManagerNative : public Node
-    {
-        GDCLASS(AgentManagerNative, Node)
+class AgentManagerNative : public Node {
+    GDCLASS(AgentManagerNative, Node);
 
-    public:
-        static void _bind_methods();
+private:
+    ffcore::AgentManager manager;
 
-        AgentManagerNative();
-        ~AgentManagerNative() override;
+public:
+    static void _bind_methods();
 
-        int create_group();
-        void set_group_flow(int group, int flow_id);
-        void assign_agent(Node2D *agent, int group);
+    AgentManagerNative();
+    ~AgentManagerNative() override;
 
-        ffcore::AgentManager *get_manager() { return &manager; }
+    int create_group();
+    void set_group_flow(int group, int flow_id);
+    int get_group_flow(int group) const;
+    ffcore::AgentManager *get_internal();
+};
 
-    private:
-        ffcore::AgentManager manager;
-    };
-
-}
+} // namespace godot
 
 #endif

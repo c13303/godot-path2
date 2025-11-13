@@ -2,6 +2,7 @@
 #include "flowfield/godot/flow_field_native.h"
 #include "flowfield/godot/spatial_grid_native.h"
 #include "flowfield/godot/steering_system_native.h"
+#include "flowfield/godot/agent_manager_native.h"     // <-- AJOUT
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -17,6 +18,7 @@ void initialize_flowfield_module(ModuleInitializationLevel p_level) {
     ClassDB::register_class<FlowFieldNative>();
     ClassDB::register_class<SpatialGridNative>();
     ClassDB::register_class<SteeringSystemNative>();
+    ClassDB::register_class<AgentManagerNative>();      // <-- AJOUT
 }
 
 void uninitialize_flowfield_module(ModuleInitializationLevel p_level) {

@@ -36,6 +36,7 @@ public:
     void register_agent(Node2D *node, double max_speed);
     void unregister_agent(Node2D *node);
     void set_agent_group(Node2D *node, int group);
+    
 
 };
 

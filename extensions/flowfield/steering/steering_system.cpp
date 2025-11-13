@@ -12,7 +12,6 @@
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
-
 static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
 
 /* declaration generale du system pour partage */
@@ -110,13 +109,13 @@ FlowFieldID SteeringSystem::get_agent_flow(int id) const
     return agents[it->second].flow_id;
 }
 
-void SteeringSystem::set_agent_group(int id, GroupID group) {
+void SteeringSystem::set_agent_group(int id, GroupID group)
+{
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
     agents[it->second].group = group;
 }
-
 
 const AgentData *SteeringSystem::get_agent(int id) const // Retourne un agent par id
 {
