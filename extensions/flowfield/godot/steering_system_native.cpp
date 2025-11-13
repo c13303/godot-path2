@@ -2,6 +2,8 @@
 #include "flow_field_native.h"
 #include "spatial_grid_native.h"
 #include <godot_cpp/variant/utility_functions.hpp>
+#include "../steering/agent_manager.h"
+
 
 using namespace godot;
 
@@ -39,6 +41,7 @@ void SteeringSystemNative::_ready()
         {
             system.set_default_flowfield(ff_native->get_field());
             system.set_grid(grid_native->get_grid());
+            system.set_agent_manager(ffcore::get_global_agent_manager());
             UtilityFunctions::print("SteeringSystemNative: native system connected.");
         }
         else

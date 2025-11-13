@@ -4,16 +4,18 @@
 #include "../core/types.h"
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
+#include "../core/nav_types.h"
 
 namespace ffcore
 {
-    // Constantes de réglage pour la navigation
-    constexpr double FLOW_WEIGHT = 1.0; // poids direction globale
-    constexpr double CENTER_PULL = 1.0; // stabilisation douce
+    class AgentManager;   // Forward-declaration propre
+
+    constexpr double FLOW_WEIGHT = 1.0;
+    constexpr double CENTER_PULL = 1.0;
     constexpr double TILE_SIZE = 16.0;
 
     constexpr double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
-    constexpr double WALL_REPEL_STRENGTH = 8.4; // 12 × 0.7  → force dominante (murs infranchissables)
+    constexpr double WALL_REPEL_STRENGTH = 8.4;
 
     constexpr double DIRECT_STEER_RADIUS = TILE_SIZE * 2.5;
     constexpr double MIN_SPEED_FRACTION = 0.25;
@@ -24,7 +26,7 @@ namespace ffcore
     constexpr double TARGET_OCCUPY_RADIUS = TILE_SIZE * 0.4;
 
     constexpr double SEPARATION_RADIUS = 16.0;
-    constexpr double SEPARATION_STRENGTH = 400.0; // 8 × 50 → forte répulsion inter-agent
+    constexpr double SEPARATION_STRENGTH = 400.0;
     constexpr int MAX_NEIGHBORS = 16;
 
     struct AgentData
@@ -34,9 +36,13 @@ namespace ffcore
         Vec2 velocity;
         double max_speed = 60.0;
         bool active = true;
-        FlowField *flow = nullptr;
-        bool has_arrived = false; /// arrived au final target
-        bool is_first = false;    // est le 1er, droit de penetration de la target cell
+
+        FlowField* flow = nullptr;
+        FlowFieldID flow_id = INVALID_FLOWFIELD;
+
+        bool has_arrived = false;
+        bool is_first = false;
+        GroupID group = INVALID_GROUP;
     };
 
     class SteeringSystem
@@ -44,30 +50,38 @@ namespace ffcore
     public:
         SteeringSystem();
 
-        int register_agent(const Vec2 &pos, double max_speed, FlowField *flow);
+        int register_agent(const Vec2& pos, double max_speed, FlowField* flow);
         void unregister_agent(int id);
 
-        void set_default_flowfield(FlowField *f);
-        void set_grid(SpatialGrid *g);
+        void set_grid(SpatialGrid* g);
+        void set_default_flowfield(FlowField* f);
 
-        void update_all(double delta);
+        void set_agent_flow(int id, FlowFieldID flow);
+        FlowFieldID get_agent_flow(int id) const;
 
-        const AgentData *get_agent(int id) const;
-        void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
+        void set_agent_manager(AgentManager* m) { agent_manager = m; }
+
+        const AgentData* get_agent(int id) const;
+        void reactivate_agents_for_field(FlowField* field);
+
         void smooth_stop(int id);
-        void reactivate_agents_for_field(FlowField *field);
+        void update_all(double delta);
 
     private:
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
 
-        FlowField *default_flow = nullptr;
-        SpatialGrid *grid = nullptr;
-        Vec2 force_voisine(const AgentData &agent);
-        Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
+        FlowField* default_flow = nullptr;
+        SpatialGrid* grid = nullptr;
+
+        AgentManager* agent_manager = nullptr;
+
+        Vec2 force_voisine(const AgentData& agent);
+        Vec2 wall_repulsion_force(const AgentData& a, FlowField* ff);
+        void ultimate_wall_correction(AgentData& a, FlowField* ff, double delta);
     };
 
-    SteeringSystem *get_global_steering_system();
+    SteeringSystem* get_global_steering_system();
 
 } // namespace ffcore

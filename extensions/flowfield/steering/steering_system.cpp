@@ -5,7 +5,11 @@
 #include <unordered_map>     // Pour le stockage rapide des cooldowns par id
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "../core/nav_services.h"
+#include "agent_manager.h"
+
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
+class AgentManager;
 
 static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
 
@@ -88,6 +92,22 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }                    // Définit la grille spatiale
 
+void SteeringSystem::set_agent_flow(int id, FlowFieldID flow)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].flow_id = flow;
+}
+
+FlowFieldID SteeringSystem::get_agent_flow(int id) const
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return INVALID_FLOWFIELD;
+    return agents[it->second].flow_id;
+}
+
 const AgentData *SteeringSystem::get_agent(int id) const // Retourne un agent par id
 {
     auto it = id_to_index.find(id);
@@ -128,12 +148,10 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
     Vec2 free_center = ff->cell_to_world(best_cell);
     Vec2 dir = safe_normalize(free_center - wall_center);
 
-
-
     // Hard clamp intégré : sécurité absolue
     Vec2i check = ff->world_to_cell(a.position);
 
-/*     godot::UtilityFunctions::print("Hard Bounce Triggered"); */
+    /*     godot::UtilityFunctions::print("Hard Bounce Triggered"); */
 
     Vec2i safe = ff->find_nearest_navigable(check);
     Vec2 safe_center = ff->cell_to_world(safe);
@@ -290,6 +308,17 @@ void SteeringSystem::update_all(double delta)
     {
         if (!a.active)
             continue;
+
+        if (agent_manager)
+        {
+            AgentGroup *g = agent_manager->get_group(a.group);
+            if (g && g->flow_id != INVALID_FLOWFIELD)
+            {
+                FlowField *gf = flowfields()->get(g->flow_id);
+                if (gf)
+                    a.flow = gf;
+            }
+        }
 
         FlowField *ff = a.flow ? a.flow : default_flow;
         if (!ff || !ff->is_ready())
