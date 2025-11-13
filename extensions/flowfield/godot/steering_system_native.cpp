@@ -2,7 +2,7 @@
 #include "flow_field_native.h"
 #include "spatial_grid_native.h"
 #include <godot_cpp/variant/utility_functions.hpp>
-#include "../steering/agent_manager.h"
+#include "../agent_manager/agent_manager.h"
 
 using namespace godot;
 

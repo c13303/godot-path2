@@ -1,8 +1,8 @@
 #ifndef FFCORE_FLOW_FIELD_MANAGER_H
 #define FFCORE_FLOW_FIELD_MANAGER_H
 
+#include "../core/types.h"
 #include "flow_field.h"
-#include "../core/nav_types.h"
 #include "../core/nav_config.h"
 #include <vector>
 

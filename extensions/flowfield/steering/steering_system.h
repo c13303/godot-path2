@@ -2,7 +2,6 @@
 #include <unordered_map>
 #include <vector>
 #include "../core/types.h"
-#include "../core/nav_types.h"
 
 namespace ffcore
 {

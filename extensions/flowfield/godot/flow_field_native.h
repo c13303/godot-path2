@@ -5,7 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include "../flow/flow_field.h"
-#include "../core/nav_types.h"
+#include "../core/types.h"
 
 #include <unordered_set>
 #include <unordered_map>

@@ -1,6 +1,11 @@
 #include "agent_manager.h"
 #include "../core/nav_config.h"
 #include <godot_cpp/variant/utility_functions.hpp>
+#include "../flow/flow_field_manager.h"
+#include "../flow/flow_field.h"
+#include "../core/types.h"
+#include "../core/nav_services.h"
+
 
 namespace ffcore
 {
@@ -37,14 +42,24 @@ namespace ffcore
         return INVALID_GROUP;
     }
 
-    AgentGroup *AgentManager::get_group(GroupID id)
+    GroupID AgentManager::create_group_with_flow(const ffcore::Vec2 &goal_world_pos)
     {
-        if (id == INVALID_GROUP || id >= MAX_GROUPS)
-            return nullptr;
-        return &groups[id];
+/*         GroupID gid = create_group();
+        if (gid == INVALID_GROUP)
+            return INVALID_GROUP;
+
+        FlowFieldID fid = flowfields()->create_field(goal_world_pos);
+        if (fid == INVALID_FLOWFIELD)
+            return INVALID_GROUP;
+
+        groups[gid].flow_id = fid;
+
+        return gid; */
     }
 
-    int AgentManager::create_agent(const Vec2 &pos, GroupID group)
+
+
+    int AgentManager::add_agent_to_group(const Vec2 &pos, GroupID group)
     {
         int id = next_id++;
 
@@ -56,6 +71,7 @@ namespace ffcore
         id_to_index[id] = agents.size();
         agents.push_back(e);
 
+        godot::UtilityFunctions::print("Agent ", id, " assigned to group ", group);
         return id;
     }
 

@@ -1,10 +1,12 @@
 #ifndef AGENT_MANAGER_NATIVE_H
 #define AGENT_MANAGER_NATIVE_H
 
+#include "../core/types.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include "../steering/agent_manager.h"
+#include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/node2d.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 namespace godot
 {
@@ -25,8 +27,8 @@ namespace godot
         void set_group_flow(int group, int flow_id);
         int get_group_flow(int group) const;
         ffcore::AgentManager *get_internal();
-        void register_agent_raw(Node2D *agent);
         void assign_agent(Node2D *agent, int group);
+        ffcore::GroupID create_group_with_flow(const Vector2 &goal_world_pos);
     };
 }
 

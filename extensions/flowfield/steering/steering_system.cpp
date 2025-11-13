@@ -6,7 +6,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "../core/nav_services.h"
-#include "agent_manager.h"
+#include "../agent_manager/agent_manager.h"
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
 
