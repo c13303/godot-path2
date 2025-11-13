@@ -33,7 +33,7 @@ Vec2 FlowField::sample_dir_cell(int x, int y) const
     return dirs[y * w + x];
 }
 
-Vec2 FlowField::sample_dir_world(const Vec2 &world_pos) const
+Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 {
     if (!ready)
         return Vec2();

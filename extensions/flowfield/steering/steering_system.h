@@ -23,7 +23,7 @@ namespace ffcore
     constexpr double TARGET_APPROACH_RADIUS = TILE_SIZE * 1.0;
     constexpr double TARGET_OCCUPY_RADIUS = TILE_SIZE * 0.4;
 
-    constexpr double SEPARATION_RADIUS = 20.0;
+    constexpr double SEPARATION_RADIUS = 16.0;
     constexpr double SEPARATION_STRENGTH = 400.0; // 8 × 50 → forte répulsion inter-agent
     constexpr int MAX_NEIGHBORS = 16;
 
@@ -53,7 +53,7 @@ namespace ffcore
         void update_all(double delta);
 
         const AgentData *get_agent(int id) const;
-        void soft_wall_correction(AgentData &a, FlowField *ff, double delta);
+        void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
         void smooth_stop(int id);
         void reactivate_agents_for_field(FlowField *field);
 
@@ -64,7 +64,8 @@ namespace ffcore
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
-        Vec2 compute_separation_force(const AgentData &agent);
+        Vec2 force_voisine(const AgentData &agent);
+        Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
     };
 
     SteeringSystem *get_global_steering_system();

@@ -3,6 +3,7 @@
 #include <cstdio>            // Pour les fonctions de debug (printf, etc.)
 #include <cmath>             // Pour les fonctions trigonométriques
 #include <unordered_map>     // Pour le stockage rapide des cooldowns par id
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
@@ -116,7 +117,7 @@ static Vec2 project_to_navigable(FlowField *ff, const Vec2 &from, const Vec2 &to
     return lo;
 }
 
-void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double delta)
+void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, double delta)
 {
     Vec2i cell = ff->world_to_cell(a.position);
     if (ff->is_cell_navigable(cell))
@@ -129,7 +130,8 @@ void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double de
 
     // Correction douce
     Vec2 target_pos = free_center - dir * (ff->tile_size() * 0.5 - 0.05);
-    double blend = std::clamp(delta * 4.0, 0.0, 0.25);
+    double force_de_correction_douce = 10;
+    double blend = std::clamp(delta * 4.0, 0.0, force_de_correction_douce);
     a.position = a.position.lerp(target_pos, blend);
 
     // Annule la composante de vitesse vers le mur
@@ -141,14 +143,54 @@ void SteeringSystem::soft_wall_correction(AgentData &a, FlowField *ff, double de
     Vec2i check = ff->world_to_cell(a.position);
     if (!ff->is_cell_navigable(check))
     {
+        godot::UtilityFunctions::print("Hard Bounce Triggered");
+
         Vec2i safe = ff->find_nearest_navigable(check);
-        a.position = ff->cell_to_world(safe);
-        a.velocity = Vec2(0, 0);
+        Vec2 safe_center = ff->cell_to_world(safe);
+
+        Vec2 wall_normal = safe_normalize(a.position - safe_center);
+        Vec2 tangent(-wall_normal.y, wall_normal.x);
+
+        double softness = 0.45; // adoucissement visuel
+        Vec2 target = safe_center + tangent * (ff->tile_size() * 0.25);
+
+        a.position = a.position.lerp(target, softness); // glissement doux
+        a.velocity = Vec2(0, 0);                        // correction radicale
+    }
+
+    else
+    {
+        godot::UtilityFunctions::print("Soft Bounce Triggered");
     }
 }
+// steering_system.cpp
+Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
+{
+    Vec2i cur = ff->world_to_cell(a.position);
+    Vec2 r(0, 0);
+    for (int dx = -1; dx <= 1; ++dx)
+        for (int dy = -1; dy <= 1; ++dy)
+        {
+            if (dx == 0 && dy == 0)
+                continue;
+            Vec2i n{cur.x + dx, cur.y + dy};
+            if (!ff->is_cell_navigable(n))
+            {
+                Vec2 d = a.position - ff->cell_to_world(n);
+                double L = d.length();
+                if (L < WALL_AVOID_RADIUS && L > 1e-3)
+                {
+                    double f = std::pow(1.0 - L / WALL_AVOID_RADIUS, 2.0);
+                    r = r + safe_normalize(d) * f;
+                }
+            }
+        }
+    if (r.is_zero())
+        return r;
+    return safe_normalize(r) * WALL_REPEL_STRENGTH;
+}
 
-
-Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
+Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 {
     if (!grid)
         return Vec2(0, 0);
@@ -170,10 +212,11 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
         auto it = id_to_index.find(neighbor_id);
         if (it == id_to_index.end())
             continue;
-        const AgentData &neighbor = agents[it->second];
 
-        Vec2 diff = agent.position - neighbor.position;
+        const AgentData &n = agents[it->second];
+        Vec2 diff = agent.position - n.position;
         double dist_sq = diff.length_squared();
+
         if (dist_sq <= SEPARATION_RADIUS * SEPARATION_RADIUS)
             candidates.push_back({neighbor_id, dist_sq});
     }
@@ -182,7 +225,7 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
               [](const NeighborDist &a, const NeighborDist &b)
               { return a.dist_sq < b.dist_sq; });
 
-    int limit = std::min(static_cast<int>(candidates.size()), MAX_NEIGHBORS);
+    int limit = std::min((int)candidates.size(), MAX_NEIGHBORS);
 
     Vec2 separation_force(0, 0);
     int count = 0;
@@ -190,17 +233,17 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
     for (int i = 0; i < limit; ++i)
     {
         auto it = id_to_index.find(candidates[i].id);
-        const AgentData &neighbor = agents[it->second];
+        const AgentData &n = agents[it->second];
 
-        Vec2 diff = agent.position - neighbor.position;
+        Vec2 diff = agent.position - n.position;
         double dist = diff.length();
         if (dist < 0.001)
             dist = 0.001;
 
         double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
-        double weight = neighbor.active ? 1.0 : 2.0;
+        double weight = n.active ? 1.0 : 2.0;
 
-        separation_force = separation_force + (diff * (1.0 / dist)) * falloff * weight;
+        separation_force += (diff * (1.0 / dist)) * falloff * weight;
         count++;
     }
 
@@ -210,8 +253,33 @@ Vec2 SteeringSystem::compute_separation_force(const AgentData &agent)
     if (!separation_force.is_zero())
         separation_force = safe_normalize(separation_force) * SEPARATION_STRENGTH;
 
+    FlowField *ff = agent.flow ? agent.flow : default_flow;
+    if (!ff || !ff->is_ready())
+        return separation_force;
+
+    Vec2 raw_force = separation_force;
+
+    double probe_dist = std::min(SEPARATION_RADIUS, ff->tile_size() * 0.5);
+    Vec2 sep_dir = safe_normalize(separation_force);
+    Vec2 probe_pos = agent.position + sep_dir * probe_dist;
+    Vec2i probe_cell = ff->world_to_cell(probe_pos);
+
+    if (!ff->is_cell_navigable(probe_cell))
+    {
+        Vec2 wall_center = ff->cell_to_world(probe_cell);
+        Vec2 wall_dir = safe_normalize(wall_center - agent.position);
+
+        double dot = separation_force.dot(wall_dir);
+        if (dot > 0.0)
+            separation_force -= wall_dir * dot;
+
+        if (!separation_force.is_zero())
+            separation_force = safe_normalize(separation_force) * SEPARATION_STRENGTH;
+    }
+
     return separation_force;
 }
+
 void SteeringSystem::smooth_stop(int id)
 {
 
@@ -246,42 +314,17 @@ void SteeringSystem::update_all(double delta)
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
 
-        Vec2i cur_cell = ff->world_to_cell(a.position);
-        if (!ff->is_cell_navigable(cur_cell))
-            a.position = ff->cell_to_world(cur_cell);
-        cur_cell = ff->world_to_cell(a.position);
+        Vec2 wall_repel = wall_repulsion_force(a, ff);
 
-        // --- WALL REPULSION ---
-        Vec2 wall_repel(0, 0);
-        for (int dx = -1; dx <= 1; ++dx)
-            for (int dy = -1; dy <= 1; ++dy)
-            {
-                if (dx == 0 && dy == 0)
-                    continue;
-                Vec2i ncell{cur_cell.x + dx, cur_cell.y + dy};
-                if (!ff->is_cell_navigable(ncell))
-                {
-                    Vec2 away = a.position - ff->cell_to_world(ncell);
-                    double d = away.length();
-                    if (d < WALL_AVOID_RADIUS && d > 1e-3)
-                    {
-                        double falloff = std::pow(1.0 - d / WALL_AVOID_RADIUS, 2.0);
-                        wall_repel = wall_repel + safe_normalize(away) * falloff;
-                    }
-                }
-            }
-
-        if (!wall_repel.is_zero())
-            wall_repel = safe_normalize(wall_repel) * WALL_REPEL_STRENGTH;
-
-        Vec2 separation = compute_separation_force(a);
-        Vec2 flow_dir = safe_normalize(ff->sample_dir_world(a.position));
+        Vec2 separation = force_voisine(a);
+        Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
         if (desired_dir.is_zero())
             desired_dir = hashed_unit_dir(a.id);
 
         double slow_factor = 1.0;
+
         if (dist_to_target < TARGET_SLOW_RADIUS)
             slow_factor = std::clamp(dist_to_target / TARGET_SLOW_RADIUS, MIN_SPEED_FRACTION, 1.0);
 
@@ -306,10 +349,8 @@ void SteeringSystem::update_all(double delta)
         Vec2 proposed = a.position + a.velocity * delta;
         Vec2i prop_cell = ff->world_to_cell(proposed);
 
-
-
         a.position = proposed;
-        soft_wall_correction(a, ff, delta);
+        ultimate_wall_correction(a, ff, delta); /// empeche definitivement d'entrer dans un mur
         grid->update(a.id, old_pos, a.position);
     }
 }

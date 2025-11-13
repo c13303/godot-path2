@@ -16,7 +16,7 @@ namespace ffcore
         void set_tile_size(double size);
 
         Vec2 sample_dir_cell(int x, int y) const;
-        Vec2 sample_dir_world(const Vec2 &world_pos) const;
+        Vec2 compute_flow_dir(const Vec2 &world_pos) const;
 
         Vec2i world_to_cell(const Vec2 &world_pos) const;
         Vec2 cell_to_world(const Vec2i &cell) const;

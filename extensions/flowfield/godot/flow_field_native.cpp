@@ -27,7 +27,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_wall_layer", "node"), &FlowFieldNative::set_wall_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
-    ClassDB::bind_method(D_METHOD("sample_dir_world", "world_pos"), &FlowFieldNative::sample_dir_world);
+    ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
     ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
 }
 
@@ -183,6 +183,14 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
 
             dir = dir.normalized();
 
+            // QUANTIFICATION 45°
+            double angle = std::atan2(dir.y, dir.x);
+            double step = 3.141592653589793 / 4.0;
+            angle = std::round(angle / step) * step;
+
+            dir.x = std::cos(angle);
+            dir.y = std::sin(angle);
+
             field.set_dir(x, y, dir);
         }
     }
@@ -274,11 +282,10 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
     adjust_wall_tangents(used, wall_set, 2);
-
     finalize_field(used, goal_cell);
 }
 
-Vector2 FlowFieldNative::sample_dir_world(Vector2 world_pos) const
+Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
 {
     if (!floor_layer || field.width() == 0 || field.height() == 0)
         return Vector2(0, 0);
