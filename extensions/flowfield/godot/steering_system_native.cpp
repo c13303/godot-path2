@@ -12,7 +12,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("unregister_agent", "agent"), &SteeringSystemNative::unregister_agent);
     ClassDB::bind_method(D_METHOD("set_flowfield", "flowfield"), &SteeringSystemNative::set_flowfield);
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
-    ClassDB::bind_method(D_METHOD("set_agent_group", "agent", "group"), &SteeringSystemNative::set_agent_group);
+    ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -60,15 +60,6 @@ void SteeringSystemNative::set_flowfield(Object *obj)
     flowfield = Object::cast_to<Node2D>(obj);
 }
 
-void SteeringSystemNative::set_agent_group(Node2D *node, int group) {
-    if (!node)
-        return;
-    auto it = agent_map.find(node);
-    if (it == agent_map.end())
-        return;
-    int id = it->second;
-    system.set_agent_group(id, group);
-}
 
 
 void SteeringSystemNative::set_grid(Object *obj)
@@ -113,4 +104,12 @@ void SteeringSystemNative::_process(double delta)
             continue;
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
+}
+
+int SteeringSystemNative::get_agent_id(Node2D *node)
+{
+    auto it = agent_map.find(node);
+    if (it == agent_map.end())
+        return -1;
+    return it->second;
 }

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+#include "../core/nav_services.h"
 #include <queue>
 #include <limits>
 #include <cmath>
@@ -30,6 +31,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
     ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
+    ClassDB::bind_method(D_METHOD("get_flow_id"), &FlowFieldNative::get_flow_id);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
@@ -242,7 +244,6 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
                 gy /= weights;
             }
 
-
             //// COMPUTING DU MEILLEUR PASSAGE GOULOT COULOIR GRACE A DISTANCE_FIELD
             ffcore::Vec2 dir(-gx, -gy);
             if (dir.length() <= 1e-6)
@@ -272,7 +273,6 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
 
             dir = (dir + grad_df * k).normalized();
             //// END OF PASSAGE GOULOT
-
 
             // QUANTIFICATION : divider (8 = 45°, 16 = 22.5°)
             double q = 360 / 16;
@@ -373,6 +373,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     compute_directions(used, walkable_set, costs, wall_set);
     adjust_wall_tangents(used, wall_set, 2);
     finalize_field(used, goal_cell);
+    flow_id = ffcore::flowfields()->register_existing(&field);
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const

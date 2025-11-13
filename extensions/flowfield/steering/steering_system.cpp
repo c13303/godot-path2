@@ -318,16 +318,8 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
-        if (agent_manager)
-        {
-            AgentGroup *g = agent_manager->get_group(a.group);
-            if (g && g->flow_id != INVALID_FLOWFIELD)
-            {
-                FlowField *gf = flowfields()->get(g->flow_id);
-                if (gf)
-                    a.flow = gf;
-            }
-        }
+
+
 
         FlowField *ff = a.flow ? a.flow : default_flow;
         if (!ff || !ff->is_ready())

@@ -7,38 +7,38 @@
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
 
-namespace godot {
+namespace godot
+{
 
-class SteeringSystemNative : public Node2D {
-    GDCLASS(SteeringSystemNative, Node2D);
+    class SteeringSystemNative : public Node2D
+    {
+        GDCLASS(SteeringSystemNative, Node2D);
 
-private:
-    ffcore::SteeringSystem system;
-    Node2D *flowfield = nullptr;
-    Node2D *grid = nullptr;
-    Node2D *agent_manager_node = nullptr;
+    private:
+        ffcore::SteeringSystem system;
+        Node2D *flowfield = nullptr;
+        Node2D *grid = nullptr;
+        Node2D *agent_manager_node = nullptr;
 
-    std::unordered_map<Node2D *, int> agent_map;
+        std::unordered_map<Node2D *, int> agent_map;
 
-public:
-    static void _bind_methods();
+    public:
+        static void _bind_methods();
 
-    SteeringSystemNative();
-    ~SteeringSystemNative() override;
+        SteeringSystemNative();
+        ~SteeringSystemNative() override;
 
-    void _ready() override;
-    void _process(double delta) override;
+        void _ready() override;
+        void _process(double delta) override;
 
-    void set_flowfield(Object *obj);
-    void set_grid(Object *obj);
-    void set_agent_manager(Object *obj);
+        void set_flowfield(Object *obj);
+        void set_grid(Object *obj);
+        void set_agent_manager(Object *obj);
 
-    void register_agent(Node2D *node, double max_speed);
-    void unregister_agent(Node2D *node);
-    void set_agent_group(Node2D *node, int group);
-    
-
-};
+        void register_agent(Node2D *node, double max_speed);
+        void unregister_agent(Node2D *node);
+        int get_agent_id(Node2D *node);
+    };
 
 } // namespace godot
 

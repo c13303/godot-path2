@@ -1,5 +1,6 @@
 #include "agent_manager.h"
 #include "../core/nav_config.h"
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace ffcore
 {

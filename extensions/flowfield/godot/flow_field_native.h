@@ -5,6 +5,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include "../flow/flow_field.h"
+#include "../core/nav_types.h"
+
 #include <unordered_set>
 #include <unordered_map>
 
@@ -48,6 +50,7 @@ namespace godot
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         std::vector<float> distance_field;
+        ffcore::FlowFieldID flow_id = ffcore::INVALID_FLOWFIELD;
 
     protected:
         static void _bind_methods();
@@ -75,6 +78,7 @@ namespace godot
                                   const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                   int radius = 1);
         void compute_distance_field_global();
+        ffcore::FlowFieldID get_flow_id() const { return flow_id; }
     };
 
 } // namespace godot

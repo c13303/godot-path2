@@ -2,34 +2,40 @@
 
 namespace ffcore
 {
-    FlowFieldManager::FlowFieldManager()
-    {
-        fields.resize(MAX_FLOWFIELDS, nullptr);
-    }
+	FlowFieldManager::FlowFieldManager()
+	{
+		fields.resize(MAX_FLOWFIELDS, nullptr);
+	}
 
-    FlowFieldID FlowFieldManager::create()
-    {
-        for (FlowFieldID i = 1; i < fields.size(); i++)
-        {
-            if (fields[i] == nullptr)
-            {
-                fields[i] = new FlowField();
-                return i;
-            }
-        }
-        return INVALID_FLOWFIELD;
-    }
+	FlowFieldID FlowFieldManager::register_existing(FlowField *f)
+	{
+		if (!f)
+			return INVALID_FLOWFIELD;
 
-    FlowField* FlowFieldManager::get(FlowFieldID id)
-    {
-        if (id == INVALID_FLOWFIELD || id >= fields.size()) return nullptr;
-        return fields[id];
-    }
+		for (FlowFieldID i = 1; i < MAX_FLOWFIELDS; i++)
+		{
+			if (fields[i] == nullptr)
+			{
+				fields[i] = f;
+				return i;
+			}
+		}
+		return INVALID_FLOWFIELD;
+	}
 
-    void FlowFieldManager::remove(FlowFieldID id)
-    {
-        if (id == INVALID_FLOWFIELD || id >= fields.size()) return;
-        delete fields[id];
-        fields[id] = nullptr;
-    }
+	FlowField *FlowFieldManager::get(FlowFieldID id) const
+	{
+		if (id <= 0 || id >= MAX_FLOWFIELDS)
+			return nullptr;
+
+		return fields[id];
+	}
+
+	void FlowFieldManager::remove(FlowFieldID id)
+	{
+		if (id <= 0 || id >= MAX_FLOWFIELDS)
+			return;
+
+		fields[id] = nullptr;
+	}
 }
