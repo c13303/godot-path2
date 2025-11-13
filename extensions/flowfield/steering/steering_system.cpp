@@ -133,7 +133,7 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
     // Hard clamp intégré : sécurité absolue
     Vec2i check = ff->world_to_cell(a.position);
 
-    godot::UtilityFunctions::print("Hard Bounce Triggered");
+/*     godot::UtilityFunctions::print("Hard Bounce Triggered"); */
 
     Vec2i safe = ff->find_nearest_navigable(check);
     Vec2 safe_center = ff->cell_to_world(safe);
