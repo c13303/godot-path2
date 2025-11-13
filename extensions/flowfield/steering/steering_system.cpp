@@ -128,40 +128,24 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
     Vec2 free_center = ff->cell_to_world(best_cell);
     Vec2 dir = safe_normalize(free_center - wall_center);
 
-    // Correction douce
-    Vec2 target_pos = free_center - dir * (ff->tile_size() * 0.5 - 0.05);
-    double force_de_correction_douce = 10;
-    double blend = std::clamp(delta * 4.0, 0.0, force_de_correction_douce);
-    a.position = a.position.lerp(target_pos, blend);
 
-    // Annule la composante de vitesse vers le mur
-    double toward_wall = a.velocity.dot(dir);
-    if (toward_wall > 0.0)
-        a.velocity -= dir * toward_wall;
 
     // Hard clamp intégré : sécurité absolue
     Vec2i check = ff->world_to_cell(a.position);
-    if (!ff->is_cell_navigable(check))
-    {
-        godot::UtilityFunctions::print("Hard Bounce Triggered");
 
-        Vec2i safe = ff->find_nearest_navigable(check);
-        Vec2 safe_center = ff->cell_to_world(safe);
+    godot::UtilityFunctions::print("Hard Bounce Triggered");
 
-        Vec2 wall_normal = safe_normalize(a.position - safe_center);
-        Vec2 tangent(-wall_normal.y, wall_normal.x);
+    Vec2i safe = ff->find_nearest_navigable(check);
+    Vec2 safe_center = ff->cell_to_world(safe);
 
-        double softness = 0.2; // adoucissement visuel, le plus bas = plus doux / lerpé
-        Vec2 target = safe_center + tangent * (ff->tile_size() * 0.05);
+    Vec2 wall_normal = safe_normalize(a.position - wall_center);
+    Vec2 tangent(-wall_normal.y, wall_normal.x);
 
-        a.position = a.position.lerp(target, softness); // glissement doux
-        a.velocity = Vec2(0, 0);                        // correction radicale
-    }
+    double softness = 0.2;
+    Vec2 target = safe_center + tangent * (ff->tile_size() * 0.05);
 
-    else
-    {
-        godot::UtilityFunctions::print("Soft Bounce Triggered");
-    }
+    a.position = a.position.lerp(target, softness);
+    a.velocity = Vec2(0, 0);
 }
 // steering_system.cpp
 Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
