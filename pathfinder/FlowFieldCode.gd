@@ -25,8 +25,8 @@ func _ready() -> void:
 
 
 	await get_tree().process_frame
-	await get_tree().process_frame  # laisse le temps au C++ de calculer
 
+	ff.compute_distance_field_global()
 	var d = ff.compute_flow_dir(global_position)
 	#print("Direction lue après rebuild:", d)
 

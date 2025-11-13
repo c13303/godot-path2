@@ -29,6 +29,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
     ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
+    ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
@@ -124,6 +125,73 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
     }
 }
 
+/// DISTANCE FIELD = la distance de chaque case de chaque mur. On trouve avec ça la case la plus "centrale" d'un couloir pour trouver son centre. = Très utile pour une foule.
+void FlowFieldNative::compute_distance_field_global()
+{
+    if (!floor_layer || !wall_layer)
+        return;
+
+    Rect2i used = floor_layer->get_used_rect();
+    if (used.size.x <= 0 || used.size.y <= 0)
+        return;
+
+    field.resize(used.size.x, used.size.y);
+    field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
+    field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
+
+    std::unordered_set<Vector2i, Vector2iHash> wall_set;
+    std::unordered_set<Vector2i, Vector2iHash> walkable_set;
+
+    build_sets(wall_set, walkable_set);
+
+    compute_distance_field(used, wall_set);
+}
+
+void FlowFieldNative::compute_distance_field(const Rect2i &used,
+                                             const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
+{
+    distance_field.clear();
+    distance_field.resize(field.width() * field.height(), 0.0f);
+
+    const int w = field.width();
+    const int h = field.height();
+
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            Vector2i c = used.position + Vector2i(x, y);
+            distance_field[y * w + x] = wall_set.count(c) ? 0.0f : 1e9f;
+        }
+
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            float d = distance_field[y * w + x];
+            if (d == 0.0f)
+                continue;
+            if (x > 0)
+                d = Math::min(d, distance_field[y * w + (x - 1)] + 1.0f);
+            if (y > 0)
+                d = Math::min(d, distance_field[(y - 1) * w + x] + 1.0f);
+            if (x > 0 && y > 0)
+                d = Math::min(d, distance_field[(y - 1) * w + (x - 1)] + 1.4142f);
+            distance_field[y * w + x] = d;
+        }
+
+    for (int y = h - 1; y >= 0; --y)
+        for (int x = w - 1; x >= 0; --x)
+        {
+            float d = distance_field[y * w + x];
+            if (x + 1 < w)
+                d = Math::min(d, distance_field[y * w + (x + 1)] + 1.0f);
+            if (y + 1 < h)
+                d = Math::min(d, distance_field[(y + 1) * w + x] + 1.0f);
+            if (x + 1 < w && y + 1 < h)
+                d = Math::min(d, distance_field[(y + 1) * w + (x + 1)] + 1.4142f);
+            distance_field[y * w + x] = d;
+        }
+}
+
 void FlowFieldNative::compute_directions(const Rect2i &used,
                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                          const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
@@ -174,23 +242,45 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
                 gy /= weights;
             }
 
+
+            //// COMPUTING DU MEILLEUR PASSAGE GOULOT COULOIR GRACE A DISTANCE_FIELD
             ffcore::Vec2 dir(-gx, -gy);
             if (dir.length() <= 1e-6)
             {
                 field.set_dir(x, y, {0.0, 0.0});
                 continue;
             }
-
             dir = dir.normalized();
 
-            // QUANTIFICATION 45°
-            double angle = std::atan2(dir.y, dir.x);
-            double step = 3.141592653589793 / 4.0;
-            angle = std::round(angle / step) * step;
+            float dfc = distance_field[y * field.width() + x];
 
+            auto df_at = [&](int px, int py)
+            {
+                if (px < 0 || py < 0 || px >= field.width() || py >= field.height())
+                    return dfc;
+                return distance_field[py * field.width() + px];
+            };
+
+            float gx_df = df_at(x + 1, y) - df_at(x - 1, y);
+            float gy_df = df_at(x, y + 1) - df_at(x, y - 1);
+
+            ffcore::Vec2 grad_df(gx_df, gy_df);
+            if (grad_df.length() > 1e-6)
+                grad_df = grad_df.normalized();
+
+            float k = 0.5f;
+
+            dir = (dir + grad_df * k).normalized();
+            //// END OF PASSAGE GOULOT
+
+
+            // QUANTIFICATION : divider (8 = 45°, 16 = 22.5°)
+            double q = 360 / 16;
+            double angle = std::atan2(dir.y, dir.x);
+            double step = 2.0 * 3.141592653589793 / q;
+            angle = std::round(angle / step) * step;
             dir.x = std::cos(angle);
             dir.y = std::sin(angle);
-
             field.set_dir(x, y, dir);
         }
     }

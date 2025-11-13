@@ -44,6 +44,10 @@ namespace godot
         void compute_directions(const Rect2i &used, const std::unordered_set<Vector2i, Vector2iHash> &walkable_set, const std::unordered_map<Vector2i, double, Vector2iHash> &costs, const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
+        void compute_distance_field(const Rect2i &used,
+                                    const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
+
+        std::vector<float> distance_field;
 
     protected:
         static void _bind_methods();
@@ -70,6 +74,7 @@ namespace godot
         void adjust_wall_tangents(const Rect2i &used,
                                   const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                   int radius = 1);
+        void compute_distance_field_global();
     };
 
 } // namespace godot

@@ -323,7 +323,7 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        double smoothing = 0.02;
+        double smoothing = 0.04;
         a.velocity = a.velocity.lerp(target_velocity, smoothing);
 
         const double vlen = safe_len(a.velocity);
