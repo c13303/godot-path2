@@ -7,9 +7,11 @@
 
 #include "../core/nav_services.h"
 #include "agent_manager.h"
+#include "../flow/flow_field.h"
+#include "../grid/spatial_grid.h"
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
-class AgentManager;
+
 
 static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
 
@@ -107,6 +109,14 @@ FlowFieldID SteeringSystem::get_agent_flow(int id) const
         return INVALID_FLOWFIELD;
     return agents[it->second].flow_id;
 }
+
+void SteeringSystem::set_agent_group(int id, GroupID group) {
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].group = group;
+}
+
 
 const AgentData *SteeringSystem::get_agent(int id) const // Retourne un agent par id
 {

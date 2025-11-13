@@ -2,13 +2,14 @@
 #include <unordered_map>
 #include <vector>
 #include "../core/types.h"
-#include "../flow/flow_field.h"
-#include "../grid/spatial_grid.h"
 #include "../core/nav_types.h"
 
 namespace ffcore
 {
-    class AgentManager;   // Forward-declaration propre
+    class FlowField;
+    class SpatialGrid;
+    class AgentManager;
+
 
     constexpr double FLOW_WEIGHT = 1.0;
     constexpr double CENTER_PULL = 1.0;
@@ -66,6 +67,8 @@ namespace ffcore
 
         void smooth_stop(int id);
         void update_all(double delta);
+        void set_agent_group(int id, GroupID group);
+
 
     private:
         std::vector<AgentData> agents;

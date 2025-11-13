@@ -16,6 +16,8 @@ private:
     ffcore::SteeringSystem system;
     Node2D *flowfield = nullptr;
     Node2D *grid = nullptr;
+    Node2D *agent_manager_node = nullptr;
+
     std::unordered_map<Node2D *, int> agent_map;
 
 public:
@@ -29,8 +31,12 @@ public:
 
     void set_flowfield(Object *obj);
     void set_grid(Object *obj);
+    void set_agent_manager(Object *obj);
+
     void register_agent(Node2D *node, double max_speed);
     void unregister_agent(Node2D *node);
+    void set_agent_group(Node2D *node, int group);
+
 };
 
 } // namespace godot
