@@ -151,8 +151,8 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
         Vec2 wall_normal = safe_normalize(a.position - safe_center);
         Vec2 tangent(-wall_normal.y, wall_normal.x);
 
-        double softness = 0.45; // adoucissement visuel
-        Vec2 target = safe_center + tangent * (ff->tile_size() * 0.25);
+        double softness = 0.2; // adoucissement visuel, le plus bas = plus doux / lerpé
+        Vec2 target = safe_center + tangent * (ff->tile_size() * 0.05);
 
         a.position = a.position.lerp(target, softness); // glissement doux
         a.velocity = Vec2(0, 0);                        // correction radicale
@@ -339,7 +339,8 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        a.velocity = a.velocity.lerp(target_velocity, 0.15);
+        double smoothing = 0.02;
+        a.velocity = a.velocity.lerp(target_velocity, smoothing);
 
         const double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
