@@ -7,6 +7,7 @@
 #include "../agent_manager/agent_manager.h"
 #include <cstdlib>
 #include "../godot/steering_system_native.h"
+#include <godot_cpp/classes/engine.hpp>
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node2d.hpp>
@@ -26,6 +27,8 @@ void AgentManagerNative::_bind_methods()
 }
 void AgentManagerNative::_ready()
 {
+    if (Engine::get_singleton()->is_editor_hint())
+        return;
     core_mgr = ffcore::get_global_agent_manager();
     steering = ffcore::get_global_steering_system();
 

@@ -3,6 +3,7 @@
 #include "spatial_grid_native.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../agent_manager/agent_manager.h"
+#include <godot_cpp/classes/engine.hpp>
 
 using namespace godot;
 
@@ -20,6 +21,9 @@ SteeringSystemNative::~SteeringSystemNative() {}
 
 void SteeringSystemNative::_ready()
 {
+    if (Engine::get_singleton()->is_editor_hint())
+        return;
+
     Node *parent = get_parent();
     if (!parent)
     {
@@ -29,6 +33,8 @@ void SteeringSystemNative::_ready()
 
     flowfield = Object::cast_to<Node2D>(parent->get_node_or_null("FlowFieldNative"));
     grid = Object::cast_to<Node2D>(parent->get_node_or_null("SpatialGridNative"));
+
+
 
     if (flowfield && grid)
     {

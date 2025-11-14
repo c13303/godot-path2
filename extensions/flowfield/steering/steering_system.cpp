@@ -20,11 +20,7 @@ static SteeringSystem *g_steering = nullptr;
 SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
 SteeringSystem::SteeringSystem()
 {
-    if (g_steering)
-    {
-        godot::UtilityFunctions::print("Erreur : SteeringSystem déjà créé");
-        std::abort();
-    }
+
     g_steering = this;
 }
 
