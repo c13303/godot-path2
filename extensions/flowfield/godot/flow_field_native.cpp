@@ -377,7 +377,8 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     compute_directions(used, walkable_set, costs, wall_set);
     adjust_wall_tangents(used, wall_set, 2);
     finalize_field(used, goal_cell);
-    flow_id = ffcore::flowfields()->register_existing(&field);
+    flow_id = ffcore::flowfields()->register_copy(field);
+
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const

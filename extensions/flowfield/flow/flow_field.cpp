@@ -54,7 +54,6 @@ Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 
     Vec2 dir = sample_dir_cell(cell.x, cell.y);
 
-  
     return dir;
 }
 
@@ -149,4 +148,15 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
     }
 
     return best;
+}
+
+void FlowField::copy_from(const FlowField &src)
+{
+    w = src.w;
+    h = src.h;
+    tile = src.tile;
+    cell_origin = src.cell_origin;
+    goal_cell = src.goal_cell;
+    ready = src.ready;
+    dirs = src.dirs;
 }

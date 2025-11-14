@@ -16,6 +16,7 @@ namespace ffcore
 		void remove(FlowFieldID id);
 
 		FlowFieldID create_field(int width, int height, double tile_size);
+		FlowFieldID register_copy(const FlowField &src);
 
 	private:
 		std::vector<FlowField *> fields;

@@ -50,6 +50,7 @@ namespace ffcore
         Vec2i find_nearest_navigable(Vec2i start) const;
         int arrived_count = 0;
         bool target_triggered = false;
+        void copy_from(const FlowField &src);
 
     private:
         int w = 0;

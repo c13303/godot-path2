@@ -34,12 +34,20 @@ namespace ffcore
 	{
 		if (id <= 0 || id >= MAX_FLOWFIELDS)
 			return;
+		delete fields[id];
 		fields[id] = nullptr;
 	}
 
 	FlowFieldID FlowFieldManager::create_field(int width, int height, double tile_size)
 	{
 		FlowField *f = new FlowField(width, height, tile_size);
+		return register_existing(f);
+	}
+
+	FlowFieldID FlowFieldManager::register_copy(const FlowField &src)
+	{
+		FlowField *f = new FlowField(src.width(), src.height(), src.tile_size());
+		f->copy_from(src);
 		return register_existing(f);
 	}
 }
