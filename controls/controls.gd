@@ -172,7 +172,7 @@ func _on_click_set_goal() -> void:
 		current_flow = flow
 
 	var id = flow.get_flow_id()
-	agent_manager.create_flow_for_group(current_group, center)
+	var fid: int = flow.assign_flow_to_group(current_group, center)
 
 
 func _on_key_spawn_chars() -> void:
@@ -203,18 +203,18 @@ func _spawn_mainchar(pos: Vector2) -> void:
 
 	if steering and steering.has_method("register_agent"):
 		steering.register_agent(agent, 150.0)
+	agent_manager.spawn_agent(agent, -1)
+
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if start_cell not in occupied and _is_walkable(start_cell):
 		return start_cell
-
 	for r in range(1, max_radius + 1):
 		for dx in range(-r, r + 1):
 			for dy in range(-r, r + 1):
 				var c := start_cell + Vector2i(dx, dy)
 				if c not in occupied and _is_walkable(c):
 					return c
-
 	return start_cell
 
 func _is_walkable(cell: Vector2i) -> bool:

@@ -1,5 +1,7 @@
+#include "../core/types.h"
 #include "flow_field_native.h"
 #include "../steering/steering_system.h"
+#include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -32,6 +34,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_goal_world"), &FlowFieldNative::get_goal_world);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
     ClassDB::bind_method(D_METHOD("get_flow_id"), &FlowFieldNative::get_flow_id);
+    ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal"), &FlowFieldNative::assign_flow_to_group);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
@@ -458,4 +461,20 @@ void FlowFieldNative::_draw()
         draw_arc(goal_center, ffcore::TARGET_APPROACH_RADIUS, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
         draw_arc(goal_center, ffcore::TARGET_OCCUPY_RADIUS, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
     }
+}
+
+ffcore::FlowFieldID FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
+{
+    rebuild_async(goal);
+
+    ffcore::FlowFieldID fid = get_flow_id();
+    if (fid == ffcore::INVALID_FLOWFIELD)
+        return ffcore::INVALID_FLOWFIELD;
+
+    if (ffcore::AgentManager *mgr = ffcore::get_global_agent_manager())
+        mgr->set_group_flow(group_id, fid);
+
+    godot::UtilityFunctions::print("FF assigné au groupe ", group_id, " id=", fid);
+
+    return fid;
 }

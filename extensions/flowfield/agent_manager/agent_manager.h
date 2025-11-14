@@ -6,15 +6,13 @@
 
 namespace ffcore
 {
-    struct AgentGroup
-    {
+    struct AgentGroup {
         GroupID id = INVALID_GROUP;
         bool active = false;
         FlowFieldID flow_id = INVALID_FLOWFIELD;
     };
 
-    struct AgentEntry
-    {
+    struct AgentEntry {
         int id = -1;
         GroupID group = INVALID_GROUP;
         Vec2 position;
@@ -29,17 +27,15 @@ namespace ffcore
         void remove_agent(int id);
         AgentEntry *get(int id);
         const AgentEntry *get(int id) const;
-
-        FlowFieldID create_flow_for_group(GroupID group, const Vec2 &goal_world_pos);
         FlowFieldID get_group_flow(GroupID group) const;
+        void set_group_flow(GroupID group, FlowFieldID fid);
 
     private:
         std::vector<AgentEntry> agents;
-        std::unordered_map<int, int> id_to_index;
+        std::unordered_map<int,int> id_to_index;
         int next_id = 1;
         AgentGroup groups[MAX_GROUPS];
     };
 
     AgentManager *get_global_agent_manager();
-
 }

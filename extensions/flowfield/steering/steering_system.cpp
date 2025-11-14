@@ -4,11 +4,11 @@
 #include <cmath>             // Pour les fonctions trigonométriques
 #include <unordered_map>     // Pour le stockage rapide des cooldowns par id
 #include <godot_cpp/variant/utility_functions.hpp>
-
 #include "../core/nav_services.h"
 #include "../agent_manager/agent_manager.h"
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
+#include "../agent_manager/agent_manager.h"
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
@@ -115,6 +115,25 @@ void SteeringSystem::set_agent_group(int id, GroupID group)
     if (it == id_to_index.end())
         return;
     agents[it->second].group = group;
+}
+
+int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow)
+{
+    AgentData a;
+    a.id = fixed_id;
+    a.position = pos;
+    a.max_speed = max_speed;
+    a.flow = flow ? flow : default_flow;
+
+    agents.push_back(a);
+    id_to_index[a.id] = (int)agents.size() - 1;
+
+    if (grid)
+        grid->insert(a.id, pos);
+
+    g_goal_cooldown[a.id] = 0.0;
+
+    return a.id;
 }
 
 const AgentData *SteeringSystem::get_agent(int id) const // Retourne un agent par id
@@ -318,12 +337,43 @@ void SteeringSystem::update_all(double delta)
         if (!a.active)
             continue;
 
+        FlowField *ff = nullptr;
 
+        ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+        ffcore::GroupID g = ffcore::INVALID_GROUP;
+        godot::UtilityFunctions::print("global_agent_manager ptr = ", (uint64_t)ffcore::get_global_agent_manager());
 
+        if (mgr)
+        {
+            if (ffcore::AgentEntry *entry = mgr->get(a.id))
+            {
+                g = entry->group;
+                godot::UtilityFunctions::print("Agent ", a.id, " → group=", g);
+            }
+            else
+            {
+                godot::UtilityFunctions::print("Agent ", a.id, " introuvable dans AgentManager");
+            }
+        }
 
-        FlowField *ff = a.flow ? a.flow : default_flow;
+        if (g != ffcore::INVALID_GROUP)
+        {
+            ffcore::FlowFieldID fid = mgr->get_group_flow(g);
+            godot::UtilityFunctions::print("Agent ", a.id, " utilise flow_id=", fid);
+            ff = ffcore::flowfields()->get(fid);
+        }
+
+        if (!ff)
+        {
+            godot::UtilityFunctions::print("Agent ", a.id, " utilise default_flow");
+            ff = default_flow;
+        }
+
         if (!ff || !ff->is_ready())
+        {
+            godot::UtilityFunctions::print("Agent ", a.id, " flow non prêt, skip");
             continue;
+        }
 
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();

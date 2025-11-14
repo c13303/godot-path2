@@ -6,7 +6,11 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+
+#include <unordered_map>
+
 #include "../agent_manager/agent_manager.h"
+#include "../steering/steering_system.h"
 
 namespace godot
 {
@@ -15,7 +19,18 @@ namespace godot
         GDCLASS(AgentManagerNative, Node);
 
     private:
-        ffcore::AgentManager manager;
+        ffcore::AgentManager *core_mgr = nullptr;
+        ffcore::SteeringSystem *steering = nullptr;
+
+        double default_speed = 150.0;
+
+        struct LinkEntry
+        {
+            int steering_id;
+            int nav_id;
+        };
+
+        std::unordered_map<Node2D *, LinkEntry> link_table;
 
     public:
         static void _bind_methods();
@@ -25,9 +40,12 @@ namespace godot
 
         int create_group();
         int get_group_flow(int group) const;
+
         ffcore::AgentManager *get_internal();
+
         void assign_agent(Node2D *agent, int group);
-        ffcore::FlowFieldID create_flow_for_group(int group, const Vector2 &goal_world_pos);
+        int spawn_agent(Node2D *node, int group_id);
+        void _ready() override;
     };
 }
 

@@ -1,6 +1,7 @@
 #ifndef FLOW_FIELD_NATIVE_H
 #define FLOW_FIELD_NATIVE_H
 
+#include "../core/types.h"
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
@@ -79,6 +80,7 @@ namespace godot
                                   int radius = 1);
         void compute_distance_field_global();
         ffcore::FlowFieldID get_flow_id() const { return flow_id; }
+        ffcore::FlowFieldID assign_flow_to_group(int group_id, Vector2 goal);
     };
 
 } // namespace godot

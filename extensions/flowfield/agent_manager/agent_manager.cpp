@@ -2,13 +2,14 @@
 #include "../core/nav_config.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../flow/flow_field_manager.h"
-#include "../flow/flow_field.h"
+#include "../godot/flow_field_native.h"
 #include "../core/types.h"
 #include "../core/nav_services.h"
 
 namespace ffcore
 {
     static AgentManager *g_agent_manager = nullptr;
+    static AgentManager GLOBAL_INSTANCE;
 
     AgentManager::AgentManager()
     {
@@ -92,29 +93,6 @@ namespace ffcore
         return &agents[it->second];
     }
 
-    FlowFieldID AgentManager::create_flow_for_group(GroupID group, const Vec2 &goal_world_pos)
-    {
-        if (group == INVALID_GROUP || group >= MAX_GROUPS)
-            return INVALID_FLOWFIELD;
-
-        FlowFieldID fid = flowfields()->create_field(FLOW_WIDTH, FLOW_HEIGHT, FLOW_TILE_SIZE);
-        if (fid == INVALID_FLOWFIELD)
-            return INVALID_FLOWFIELD;
-
-        FlowField *ff = flowfields()->get(fid);
-        if (!ff)
-            return INVALID_FLOWFIELD;
-
-        Vec2i cell = ff->world_to_cell(goal_world_pos);
-        ff->set_goal_cell(cell);
-
-        // Ici il faudra ajouter ff->compute(...)
-        // dès que tu auras ton compute local
-
-        groups[group].flow_id = fid;
-        return fid;
-    }
-
     FlowFieldID AgentManager::get_group_flow(GroupID group) const
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
@@ -122,4 +100,10 @@ namespace ffcore
         return groups[group].flow_id;
     }
 
+    void AgentManager::set_group_flow(GroupID group, FlowFieldID fid)
+    {
+        if (group == INVALID_GROUP || group >= MAX_GROUPS)
+            return;
+        groups[group].flow_id = fid;
+    }
 }
