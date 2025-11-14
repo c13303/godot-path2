@@ -18,7 +18,15 @@ static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 :
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
 SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
-SteeringSystem::SteeringSystem() { g_steering = this; }
+SteeringSystem::SteeringSystem()
+{
+    if (g_steering)
+    {
+        godot::UtilityFunctions::print("Erreur : SteeringSystem déjà créé");
+        std::abort();
+    }
+    g_steering = this;
+}
 
 static inline Vec2 safe_normalize(const Vec2 &v) // Normalise un vecteur, évite la division par zéro
 {
@@ -142,7 +150,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
         grid->insert(a.id, pos);
 
     g_goal_cooldown[a.id] = 0.0;
-    godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system");
+    /* godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system"); */
     return a.id;
 }
 
@@ -348,7 +356,6 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     }
     agents[it->second].flow = ff;
     agents[it->second].active = true;
-    godot::UtilityFunctions::print("Agent ", id, " flow mis à jour : ", (uint64_t)ff);
 }
 void SteeringSystem::update_all(double delta)
 {
@@ -381,26 +388,14 @@ void SteeringSystem::update_all(double delta)
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
 
-        // ✅ DEBUG 1 : Position et goal
-        godot::UtilityFunctions::print(
-            "Agent ", a.id,
-            " pos=(", a.position.x, ",", a.position.y, ")",
-            " goal=(", goal_pos.x, ",", goal_pos.y, ")",
-            " dist=", dist_to_target);
+     
 
         Vec2 wall_repel = wall_repulsion_force(a, ff);
         Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
-        // ✅ DEBUG 2 : Forces
-        godot::UtilityFunctions::print(
-            "  flow_dir=(", flow_dir.x, ",", flow_dir.y, ")",
-            " desired_dir=(", desired_dir.x, ",", desired_dir.y, ")");
-
-        if (desired_dir.is_zero())
-            desired_dir = hashed_unit_dir(a.id);
-
+       
         double slow_factor = 1.0;
 
         if (dist_to_target < TARGET_SLOW_RADIUS)
@@ -413,7 +408,7 @@ void SteeringSystem::update_all(double delta)
         {
             smooth_stop(a.id);
             a.active = false;
-            godot::UtilityFunctions::print("Agent ", a.id, " arrived, stopped");
+           /*  godot::UtilityFunctions::print("Agent ", a.id, " arrived, stopped"); */
             continue;
         }
 
@@ -425,11 +420,7 @@ void SteeringSystem::update_all(double delta)
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
 
-        // ✅ DEBUG 3 : Vélocité
-        godot::UtilityFunctions::print(
-            "  max_speed=", a.max_speed,
-            " slow_factor=", slow_factor,
-            " velocity=(", a.velocity.x, ",", a.velocity.y, ")");
+      
 
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
@@ -437,17 +428,11 @@ void SteeringSystem::update_all(double delta)
 
         a.position = proposed;
 
-        // ✅ DEBUG 4 : Mouvement
-        godot::UtilityFunctions::print(
-            "  old_pos=(", old_pos.x, ",", old_pos.y, ")",
-            " new_pos=(", a.position.x, ",", a.position.y, ")",
-            " delta=", delta);
+     
 
         ultimate_wall_correction(a, ff, delta);
 
-        // ✅ DEBUG 5 : Après correction
-        godot::UtilityFunctions::print(
-            "  after_wall_correction=(", a.position.x, ",", a.position.y, ")");
+     
 
         grid->update(a.id, old_pos, a.position);
     }

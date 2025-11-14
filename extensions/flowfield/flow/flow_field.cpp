@@ -54,12 +54,7 @@ Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 
     Vec2 dir = sample_dir_cell(cell.x, cell.y);
 
-    // ✅ DEBUG critique
-    godot::UtilityFunctions::print(
-        "compute_flow_dir: world=(", world_pos.x, ",", world_pos.y, ")",
-        " cell=(", cell.x, ",", cell.y, ")",
-        " dir=(", dir.x, ",", dir.y, ")");
-
+  
     return dir;
 }
 

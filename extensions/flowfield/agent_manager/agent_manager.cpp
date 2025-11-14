@@ -150,7 +150,7 @@ namespace ffcore
             }
         }
 
-        godot::UtilityFunctions::print("Groupe ", group, " : ", count, " agents mis à jour avec flow ", fid);
+       
     }
 
 }
