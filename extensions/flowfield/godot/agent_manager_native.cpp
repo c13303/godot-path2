@@ -82,7 +82,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 {
     /*  godot::UtilityFunctions::print("spawn_agent()"); */
 
-    if (group_id <= 0)
+    if (group_id < 0)
     {
         godot::UtilityFunctions::printerr("spawn_agent : group_id invalide");
         std::abort();
@@ -100,7 +100,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     int nav_id = next_id++;
     core_mgr->create_agent_entry(nav_id, pos, group_id);
-    core_mgr->add_agent_to_group(nav_id, group_id);
+
 
     if (core_mgr->get(nav_id) == nullptr)
     {

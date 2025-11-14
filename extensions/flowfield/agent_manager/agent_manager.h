@@ -11,6 +11,7 @@ namespace ffcore
         GroupID id = INVALID_GROUP;
         bool active = false;
         FlowFieldID flow_id = INVALID_FLOWFIELD;
+        bool has_order = false;
     };
 
     struct AgentEntry
@@ -32,6 +33,9 @@ namespace ffcore
         FlowFieldID get_group_flow(GroupID group) const;
         void set_group_flow(GroupID group, FlowFieldID fid);
         void create_agent_entry(int agent_id, const Vec2 &pos, GroupID group);
+        static const GroupID GROUP_IDLE = 0;
+        void dissolve_group(GroupID group);
+
 
     private:
         std::vector<AgentEntry> agents;

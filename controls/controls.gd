@@ -203,7 +203,7 @@ func _spawn_mainchar(pos: Vector2) -> void:
 	agent.z_index = int(free_pos.y)
 	agent.add_to_group("main_chars") #juste pour le count
 
-	var nav_id = agent_manager.spawn_agent(agent, current_group)
+	var nav_id = agent_manager.spawn_agent(agent, 0) #0 = idle group
 	agent.nav_id = nav_id  # ✅ STOCKER L'ID
 
 

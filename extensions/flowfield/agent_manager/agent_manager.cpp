@@ -22,7 +22,13 @@ namespace ffcore
             groups[i].id = i;
             groups[i].active = false;
             groups[i].flow_id = INVALID_FLOWFIELD;
+            groups[i].has_order = false;
         }
+
+        groups[GROUP_IDLE].id = GROUP_IDLE;
+        groups[GROUP_IDLE].active = true; // ← empêche create_group() de l’utiliser
+        groups[GROUP_IDLE].flow_id = INVALID_FLOWFIELD;
+        groups[GROUP_IDLE].has_order = false;
     }
 
     AgentManager *get_global_agent_manager()
@@ -49,6 +55,8 @@ namespace ffcore
             {
                 groups[i].active = true;
                 groups[i].flow_id = INVALID_FLOWFIELD;
+                groups[i].has_order = false;
+
                 return i;
             }
         }
@@ -115,12 +123,12 @@ namespace ffcore
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
         {
             godot::UtilityFunctions::print("Set GRoup FLow INVALID GROUP sa mere");
-
             std::abort();
             return;
         }
 
         groups[group].flow_id = fid;
+        groups[group].has_order = true;
 
         // ✅ Synchroniser avec le SteeringSystem
         FlowField *ff = ffcore::flowfields()->get(fid);
@@ -149,8 +157,20 @@ namespace ffcore
                 count++;
             }
         }
+    }
 
-       
+    void AgentManager::dissolve_group(GroupID group)
+    {
+        if (group == GROUP_IDLE || group == INVALID_GROUP)
+            return;
+
+        for (auto &a : agents)
+            if (a.group == group)
+                a.group = GROUP_IDLE;
+
+        groups[group].active = false;
+        groups[group].has_order = false;
+        groups[group].flow_id = INVALID_FLOWFIELD;
     }
 
 }
