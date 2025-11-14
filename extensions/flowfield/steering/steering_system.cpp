@@ -9,6 +9,7 @@
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
 #include "../agent_manager/agent_manager.h"
+#include <cstdlib>
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
@@ -123,7 +124,16 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     a.id = fixed_id;
     a.position = pos;
     a.max_speed = max_speed;
-    a.flow = flow ? flow : default_flow;
+    a.flow = flow;
+    a.active = flow != nullptr; // ✅ Inactif si pas de flow
+
+    if (auto *entry = ffcore::get_global_agent_manager()->get(fixed_id))
+        a.group = entry->group;
+    else
+    {
+        godot::UtilityFunctions::print("CRITICAL: Agent ", fixed_id, " inexistant dans AgentManager");
+        std::abort();
+    }
 
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
@@ -132,7 +142,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
         grid->insert(a.id, pos);
 
     g_goal_cooldown[a.id] = 0.0;
-
+    godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system");
     return a.id;
 }
 
@@ -327,8 +337,23 @@ void SteeringSystem::smooth_stop(int id)
     /// TODO actual smooth instead of violent
 }
 
+void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+    {
+        godot::UtilityFunctions::print("❌ Agent ", id, " introuvable dans SteeringSystem");
+        std::abort();
+        return;
+    }
+    agents[it->second].flow = ff;
+    agents[it->second].active = true;
+    godot::UtilityFunctions::print("Agent ", id, " flow mis à jour : ", (uint64_t)ff);
+}
 void SteeringSystem::update_all(double delta)
 {
+    if (agents.empty())
+        return;
     if (!grid)
         return;
 
@@ -336,53 +361,42 @@ void SteeringSystem::update_all(double delta)
     {
         if (!a.active)
             continue;
+        if (!a.flow)
+            continue;
 
-        FlowField *ff = nullptr;
-
-        ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
-        ffcore::GroupID g = ffcore::INVALID_GROUP;
-        godot::UtilityFunctions::print("global_agent_manager ptr = ", (uint64_t)ffcore::get_global_agent_manager());
-
-        if (mgr)
-        {
-            if (ffcore::AgentEntry *entry = mgr->get(a.id))
-            {
-                g = entry->group;
-                godot::UtilityFunctions::print("Agent ", a.id, " → group=", g);
-            }
-            else
-            {
-                godot::UtilityFunctions::print("Agent ", a.id, " introuvable dans AgentManager");
-            }
-        }
-
-        if (g != ffcore::INVALID_GROUP)
-        {
-            ffcore::FlowFieldID fid = mgr->get_group_flow(g);
-            godot::UtilityFunctions::print("Agent ", a.id, " utilise flow_id=", fid);
-            ff = ffcore::flowfields()->get(fid);
-        }
+        FlowField *ff = a.flow;
 
         if (!ff)
         {
-            godot::UtilityFunctions::print("Agent ", a.id, " utilise default_flow");
-            ff = default_flow;
+            godot::UtilityFunctions::print("Agent ", a.id, " n'a pas de flow assigné, SKIP");
+            continue;
         }
 
-        if (!ff || !ff->is_ready())
+        if (!ff->is_ready())
         {
-            godot::UtilityFunctions::print("Agent ", a.id, " flow non prêt, skip");
+            godot::UtilityFunctions::print("Agent ", a.id, " flow non prêt, SKIP");
             continue;
         }
 
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
 
-        Vec2 wall_repel = wall_repulsion_force(a, ff);
+        // ✅ DEBUG 1 : Position et goal
+        godot::UtilityFunctions::print(
+            "Agent ", a.id,
+            " pos=(", a.position.x, ",", a.position.y, ")",
+            " goal=(", goal_pos.x, ",", goal_pos.y, ")",
+            " dist=", dist_to_target);
 
+        Vec2 wall_repel = wall_repulsion_force(a, ff);
         Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
+
+        // ✅ DEBUG 2 : Forces
+        godot::UtilityFunctions::print(
+            "  flow_dir=(", flow_dir.x, ",", flow_dir.y, ")",
+            " desired_dir=(", desired_dir.x, ",", desired_dir.y, ")");
 
         if (desired_dir.is_zero())
             desired_dir = hashed_unit_dir(a.id);
@@ -399,6 +413,7 @@ void SteeringSystem::update_all(double delta)
         {
             smooth_stop(a.id);
             a.active = false;
+            godot::UtilityFunctions::print("Agent ", a.id, " arrived, stopped");
             continue;
         }
 
@@ -410,12 +425,30 @@ void SteeringSystem::update_all(double delta)
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
 
+        // ✅ DEBUG 3 : Vélocité
+        godot::UtilityFunctions::print(
+            "  max_speed=", a.max_speed,
+            " slow_factor=", slow_factor,
+            " velocity=(", a.velocity.x, ",", a.velocity.y, ")");
+
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
         Vec2i prop_cell = ff->world_to_cell(proposed);
 
         a.position = proposed;
-        ultimate_wall_correction(a, ff, delta); /// empeche definitivement d'entrer dans un mur
+
+        // ✅ DEBUG 4 : Mouvement
+        godot::UtilityFunctions::print(
+            "  old_pos=(", old_pos.x, ",", old_pos.y, ")",
+            " new_pos=(", a.position.x, ",", a.position.y, ")",
+            " delta=", delta);
+
+        ultimate_wall_correction(a, ff, delta);
+
+        // ✅ DEBUG 5 : Après correction
+        godot::UtilityFunctions::print(
+            "  after_wall_correction=(", a.position.x, ",", a.position.y, ")");
+
         grid->update(a.id, old_pos, a.position);
     }
 }

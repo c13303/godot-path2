@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include "../core/types.h"
 #include "../grid/spatial_grid.h"
 #include <unordered_map>
@@ -70,6 +69,7 @@ namespace ffcore
         void update_all(double delta);
         void set_agent_group(int id, GroupID group);
         int register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow);
+        void set_agent_flow_ptr(int id, FlowField *ff);
 
     private:
         std::vector<AgentData> agents;

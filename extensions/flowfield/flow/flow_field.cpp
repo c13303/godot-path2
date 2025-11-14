@@ -36,9 +36,31 @@ Vec2 FlowField::sample_dir_cell(int x, int y) const
 Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 {
     if (!ready)
+    {
+        godot::UtilityFunctions::print("compute_flow_dir: FlowField NOT READY");
         return Vec2();
+    }
+
     Vec2i cell = world_to_cell(world_pos);
-    return sample_dir_cell(cell.x, cell.y);
+
+    // ✅ Vérifier que la cellule est valide
+    if (cell.x < 0 || cell.x >= w || cell.y < 0 || cell.y >= h)
+    {
+        godot::UtilityFunctions::print(
+            "compute_flow_dir: cell OUT OF BOUNDS (", cell.x, ",", cell.y, ")",
+            " size=(", width, ",", height, ")");
+        return Vec2();
+    }
+
+    Vec2 dir = sample_dir_cell(cell.x, cell.y);
+
+    // ✅ DEBUG critique
+    godot::UtilityFunctions::print(
+        "compute_flow_dir: world=(", world_pos.x, ",", world_pos.y, ")",
+        " cell=(", cell.x, ",", cell.y, ")",
+        " dir=(", dir.x, ",", dir.y, ")");
+
+    return dir;
 }
 
 Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const

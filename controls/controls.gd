@@ -169,10 +169,11 @@ func _on_click_set_goal() -> void:
 
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(center)
+		var fid :int= flow.assign_flow_to_group(current_group, center)
 		current_flow = flow
+	else:
+		print("ERRUR NO FLOW")
 
-	var id = flow.get_flow_id()
-	var fid: int = flow.assign_flow_to_group(current_group, center)
 
 
 func _on_key_spawn_chars() -> void:
@@ -185,25 +186,26 @@ func _on_key_spawn_chars_massive(grappe: int) -> void:
 		_spawn_mainchar(mouse_pos)
 
 func _spawn_mainchar(pos: Vector2) -> void:
-	var target_cell: Vector2i = floorz.local_to_map(floorz.to_local(pos))
-	var occupied: Array[Vector2i] = []
+	if current_group < 1:
+		current_group = agent_manager.create_group() #1. Create Group ID
 
+	var target_cell := floorz.local_to_map(floorz.to_local(pos))
+	var occupied: Array[Vector2i] = []
 	for node in get_tree().get_nodes_in_group("main_chars"):
-		var c: Vector2i = floorz.local_to_map(floorz.to_local(node.global_position))
-		occupied.append(c)
+		occupied.append(floorz.local_to_map(floorz.to_local(node.global_position)))
 
 	var free_cell := _find_free_cell_near(target_cell, occupied)
-	var free_pos: Vector2 = floorz.to_global(floorz.map_to_local(free_cell))
+	var free_pos := floorz.to_global(floorz.map_to_local(free_cell))
 
-	var agent: Node2D = preload("res://character/character.tscn").instantiate()
+	var agent := preload("res://character/character.tscn").instantiate()
 	get_parent().add_child(agent)
 	agent.global_position = free_pos
 	agent.z_index = int(free_pos.y)
-	agent.add_to_group("main_chars")
+	agent.add_to_group("main_chars") #juste pour le count
 
-	if steering and steering.has_method("register_agent"):
-		steering.register_agent(agent, 150.0)
-	agent_manager.spawn_agent(agent, -1)
+	var nav_id = agent_manager.spawn_agent(agent, current_group)
+	agent.nav_id = nav_id  # ✅ STOCKER L'ID
+
 
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:

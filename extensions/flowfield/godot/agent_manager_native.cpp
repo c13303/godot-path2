@@ -12,9 +12,10 @@ using namespace godot;
 void AgentManagerNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("create_group"), &AgentManagerNative::create_group);
+    ClassDB::bind_method(D_METHOD("spawn_agent", "node", "group_id"), &AgentManagerNative::spawn_agent);
+
     ClassDB::bind_method(D_METHOD("get_group_flow", "group"), &AgentManagerNative::get_group_flow);
     ClassDB::bind_method(D_METHOD("assign_agent", "agent", "group"), &AgentManagerNative::assign_agent);
-    ClassDB::bind_method(D_METHOD("spawn_agent", "node", "group_id"), &AgentManagerNative::spawn_agent);
 }
 
 void AgentManagerNative::_ready()
@@ -27,8 +28,12 @@ void AgentManagerNative::_ready()
         " steering=", (uint64_t)steering);
 }
 
-AgentManagerNative::AgentManagerNative() {}
+
 AgentManagerNative::~AgentManagerNative() {}
+
+AgentManagerNative::AgentManagerNative() : next_id(1)
+{
+}
 
 int AgentManagerNative::create_group()
 {
@@ -53,13 +58,19 @@ void AgentManagerNative::assign_agent(Node2D *agent, int group)
     Vector2 p = agent->get_global_position();
     ffcore::Vec2 pos(p.x, p.y);
 
-    core_mgr->add_agent_to_group(pos, group);
+    int64_t nav_id = agent->get("nav_id").operator int64_t();
+    core_mgr->add_agent_to_group(nav_id, group);
 }
 
 int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 {
-    godot::UtilityFunctions::print("spawn_agent GDSCRIPT APPELÉ");
-    godot::UtilityFunctions::print("core_mgr ptr = ", (uint64_t)core_mgr);
+    /*  godot::UtilityFunctions::print("spawn_agent()"); */
+
+    if (group_id <= 0)
+    {
+        godot::UtilityFunctions::printerr("spawn_agent : group_id invalide");
+        std::abort();
+    }
 
     if (!core_mgr || !steering)
     {
@@ -69,20 +80,25 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         std::abort();
     }
 
-    ffcore::Vec2 pos(node->get_global_position().x,
-                     node->get_global_position().y);
+    ffcore::Vec2 pos(node->get_global_position().x, node->get_global_position().y);
 
-    int nav_id = core_mgr->add_agent_to_group(pos, group_id);
+    int nav_id = next_id++;
+    core_mgr->create_agent_entry(nav_id, pos, group_id);
+    core_mgr->add_agent_to_group(nav_id, group_id);
 
-    int steering_id = steering->register_agent_with_id(
-        nav_id, pos, default_speed, nullptr);
+    if (core_mgr->get(nav_id) == nullptr)
+    {
+        godot::UtilityFunctions::print("CRITICAL: AgentManager n’a pas enregistré l’agent ", nav_id);
+        std::abort();
+    }
 
-    link_table[node] = {steering_id, nav_id};
+    double max_speed = 200.0; // Ou récupérer depuis le node
+    steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
 
-    godot::UtilityFunctions::print(
-        "Agent créé : ID=", nav_id,
-        " steering=", steering_id,
-        " group=", group_id);
+    /*     godot::UtilityFunctions::print(
+            "Agent créé : ID=", nav_id,
+            " steering=", steering_id,
+            " group=", group_id); */
 
     return nav_id;
 }

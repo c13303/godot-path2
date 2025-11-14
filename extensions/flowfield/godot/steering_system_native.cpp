@@ -8,8 +8,7 @@ using namespace godot;
 
 void SteeringSystemNative::_bind_methods()
 {
-    ClassDB::bind_method(D_METHOD("register_agent", "agent", "max_speed"), &SteeringSystemNative::register_agent);
-    ClassDB::bind_method(D_METHOD("unregister_agent", "agent"), &SteeringSystemNative::unregister_agent);
+
     ClassDB::bind_method(D_METHOD("set_flowfield", "flowfield"), &SteeringSystemNative::set_flowfield);
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
@@ -67,28 +66,7 @@ void SteeringSystemNative::set_grid(Object *obj)
     grid = Object::cast_to<Node2D>(obj);
 }
 
-void SteeringSystemNative::register_agent(Node2D *node, double max_speed)
-{
-    if (!node)
-        return;
-    int id = system.register_agent(
-        ffcore::Vec2(node->get_global_position().x, node->get_global_position().y),
-        max_speed,
-        nullptr // ou un FlowField* spécifique si tu veux lier un flow particulier
-    );
-    agent_map[node] = id;
-}
 
-void SteeringSystemNative::unregister_agent(Node2D *node)
-{
-    if (!node)
-        return;
-    auto it = agent_map.find(node);
-    if (it == agent_map.end())
-        return;
-    system.unregister_agent(it->second);
-    agent_map.erase(it);
-}
 
 void SteeringSystemNative::_process(double delta)
 {

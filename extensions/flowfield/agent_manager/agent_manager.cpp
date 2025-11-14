@@ -2,9 +2,11 @@
 #include "../core/nav_config.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../flow/flow_field_manager.h"
+#include "../steering/steering_system.h"
 #include "../godot/flow_field_native.h"
 #include "../core/types.h"
 #include "../core/nav_services.h"
+#include <cstdlib>
 
 namespace ffcore
 {
@@ -28,6 +30,17 @@ namespace ffcore
         return g_agent_manager;
     }
 
+    void AgentManager::create_agent_entry(int agent_id, const Vec2 &pos, GroupID group)
+    {
+        AgentEntry e;
+        e.id = agent_id;
+        e.group = group;
+        e.position = pos;
+
+        id_to_index[agent_id] = agents.size();
+        agents.push_back(e);
+    }
+
     GroupID AgentManager::create_group()
     {
         for (GroupID i = 1; i < MAX_GROUPS; i++)
@@ -42,20 +55,17 @@ namespace ffcore
         return INVALID_GROUP;
     }
 
-    int AgentManager::add_agent_to_group(const Vec2 &pos, GroupID group)
+    // Dans agent_manager.cpp
+    void AgentManager::add_agent_to_group(int agent_id, GroupID group)
     {
-        int id = next_id++;
+        auto it = id_to_index.find(agent_id);
+        if (it == id_to_index.end())
+        {
+            godot::UtilityFunctions::print("❌ Agent ", agent_id, " introuvable");
+            return;
+        }
 
-        AgentEntry e;
-        e.id = id;
-        e.group = group;
-        e.position = pos;
-
-        id_to_index[id] = agents.size();
-        agents.push_back(e);
-
-        godot::UtilityFunctions::print("Agent ", id, " assigned to group ", group);
-        return id;
+        agents[it->second].group = group;
     }
 
     void AgentManager::remove_agent(int id)
@@ -103,7 +113,44 @@ namespace ffcore
     void AgentManager::set_group_flow(GroupID group, FlowFieldID fid)
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
+        {
+            godot::UtilityFunctions::print("Set GRoup FLow INVALID GROUP sa mere");
+
+            std::abort();
             return;
+        }
+
         groups[group].flow_id = fid;
+
+        // ✅ Synchroniser avec le SteeringSystem
+        FlowField *ff = ffcore::flowfields()->get(fid);
+        if (!ff)
+        {
+            godot::UtilityFunctions::print("ERREUR: FlowField ", fid, " introuvable pour groupe ", group);
+            std::abort();
+            return;
+        }
+
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        if (!steering)
+        {
+            godot::UtilityFunctions::print("ERREUR: SteeringSystem non disponible");
+            std::abort();
+            return;
+        }
+
+        // Mettre à jour tous les agents de ce groupe
+        int count = 0;
+        for (const auto &agent : agents)
+        {
+            if (agent.group == group)
+            {
+                steering->set_agent_flow_ptr(agent.id, ff);
+                count++;
+            }
+        }
+
+        godot::UtilityFunctions::print("Groupe ", group, " : ", count, " agents mis à jour avec flow ", fid);
     }
+
 }

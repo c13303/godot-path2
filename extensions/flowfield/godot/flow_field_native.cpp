@@ -9,6 +9,7 @@
 #include <queue>
 #include <limits>
 #include <cmath>
+#include <cstdlib>
 
 using namespace godot;
 
@@ -469,12 +470,21 @@ ffcore::FlowFieldID FlowFieldNative::assign_flow_to_group(int group_id, Vector2 
 
     ffcore::FlowFieldID fid = get_flow_id();
     if (fid == ffcore::INVALID_FLOWFIELD)
-        return ffcore::INVALID_FLOWFIELD;
+    {
+        /*  return ffcore::INVALID_FLOWFIELD; */
+        godot::UtilityFunctions::printerr("ASSIGN FLOW : INVALID_FLOWFIELD");
+        std::abort();
+    }
 
     if (ffcore::AgentManager *mgr = ffcore::get_global_agent_manager())
         mgr->set_group_flow(group_id, fid);
+    else
+    {
+        godot::UtilityFunctions::printerr("ASSIGN FLOW : INVALID MANAGER");
+        std::abort();
+    }
 
-    godot::UtilityFunctions::print("FF assigné au groupe ", group_id, " id=", fid);
+    /*     godot::UtilityFunctions::print("FF assigné au groupe ", group_id, " id=", fid); */
 
     return fid;
 }

@@ -35,8 +35,7 @@ namespace godot
         void set_grid(Object *obj);
         void set_agent_manager(Object *obj);
 
-        void register_agent(Node2D *node, double max_speed);
-        void unregister_agent(Node2D *node);
+
         int get_agent_id(Node2D *node);
     };
 

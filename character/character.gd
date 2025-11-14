@@ -13,6 +13,8 @@ var arrived: bool = false
 var arrived_reported: bool = false
 var prev_dist_to_target: float = INF
 var _sample_phase: int = 0
+var nav_id: int = -1  # ID dans le FF/Steering
+
 
 func _ready() -> void:
 	if use_native_steering:

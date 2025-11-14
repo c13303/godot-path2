@@ -21,6 +21,7 @@ namespace godot
     private:
         ffcore::AgentManager *core_mgr = nullptr;
         ffcore::SteeringSystem *steering = nullptr;
+        int next_id = 1;
 
         double default_speed = 150.0;
 
