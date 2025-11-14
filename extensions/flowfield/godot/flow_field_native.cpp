@@ -10,6 +10,7 @@
 #include <limits>
 #include <cmath>
 #include <cstdlib>
+#include <chrono>
 
 using namespace godot;
 
@@ -359,6 +360,12 @@ void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_ce
 
 void FlowFieldNative::rebuild_async(Vector2 goal)
 {
+    const bool debug = false;
+    std::chrono::high_resolution_clock::time_point start;
+
+    if (debug)
+        start = std::chrono::high_resolution_clock::now();
+        
     Rect2i used;
     Vector2i goal_cell;
 
@@ -375,10 +382,16 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
-    adjust_wall_tangents(used, wall_set, 2);
+    // adjust_wall_tangents(used, wall_set, 2); // 9 ms - Almost no effect
     finalize_field(used, goal_cell);
     flow_id = ffcore::flowfields()->register_copy(field);
 
+    if (debug)
+    {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        godot::UtilityFunctions::print("Duration (ms): ", String::num_uint64(duration));
+    }
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
@@ -473,12 +486,15 @@ ffcore::FlowFieldID FlowFieldNative::assign_flow_to_group(int group_id, Vector2 
     if (fid == ffcore::INVALID_FLOWFIELD)
     {
         /*  return ffcore::INVALID_FLOWFIELD; */
-        godot::UtilityFunctions::printerr("ASSIGN FLOW : INVALID_FLOWFIELD");
+        godot::UtilityFunctions::print("ASSIGN FLOW : INVALID_FLOWFIELD");
         std::abort();
     }
 
     if (ffcore::AgentManager *mgr = ffcore::get_global_agent_manager())
+    {
         mgr->set_group_flow(group_id, fid);
+    }
+
     else
     {
         godot::UtilityFunctions::printerr("ASSIGN FLOW : INVALID MANAGER");

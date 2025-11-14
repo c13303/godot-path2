@@ -168,6 +168,8 @@ namespace ffcore
             if (a.group == group)
                 a.group = GROUP_IDLE;
 
+        /* godot::UtilityFunctions::print("Dissolution groupe ", group); */
+
         groups[group].active = false;
         groups[group].has_order = false;
         groups[group].flow_id = INVALID_FLOWFIELD;
