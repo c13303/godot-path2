@@ -39,7 +39,6 @@ namespace ffcore
         bool active = true;
 
         FlowField *flow = nullptr;
-        FlowFieldID flow_id = INVALID_FLOWFIELD;
 
         bool has_arrived = false;
         bool is_first = false;
@@ -57,8 +56,7 @@ namespace ffcore
         void set_grid(SpatialGrid *g);
         void set_default_flowfield(FlowField *f);
 
-        void set_agent_flow(int id, FlowFieldID flow);
-        FlowFieldID get_agent_flow(int id) const;
+
 
         void set_agent_manager(AgentManager *m) { agent_manager = m; }
 

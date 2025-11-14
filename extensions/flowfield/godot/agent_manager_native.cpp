@@ -11,10 +11,7 @@
 #include <godot_cpp/classes/engine.hpp>
 
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/object.hpp>
-#include <godot_cpp/variant/vector2.hpp>
-#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -22,18 +19,18 @@ void AgentManagerNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("create_group"), &AgentManagerNative::create_group);
     ClassDB::bind_method(D_METHOD("spawn_agent", "node", "group_id"), &AgentManagerNative::spawn_agent);
-
     ClassDB::bind_method(D_METHOD("get_group_flow", "group"), &AgentManagerNative::get_group_flow);
     ClassDB::bind_method(D_METHOD("assign_agent", "agent", "group"), &AgentManagerNative::assign_agent);
-
     ClassDB::bind_method(D_METHOD("set_current_selected_group", "group_id"), &AgentManagerNative::set_current_selected_group);
     ClassDB::bind_method(D_METHOD("cleanup_groups"), &AgentManagerNative::cleanup_groups);
     ClassDB::bind_method(D_METHOD("mark_group_has_order", "group_id"), &AgentManagerNative::mark_group_has_order);
 }
+
 void AgentManagerNative::_ready()
 {
     if (Engine::get_singleton()->is_editor_hint())
         return;
+
     core_mgr = ffcore::get_global_agent_manager();
     steering = ffcore::get_global_steering_system();
 
@@ -45,16 +42,12 @@ void AgentManagerNative::_ready()
     }
 
     if (!steering_native)
-    {
         UtilityFunctions::print("⚠️ AgentManagerNative: SteeringSystemNative introuvable");
-    }
 }
 
 AgentManagerNative::~AgentManagerNative() {}
 
-AgentManagerNative::AgentManagerNative() : next_id(1)
-{
-}
+AgentManagerNative::AgentManagerNative() : next_id(1) {}
 
 int AgentManagerNative::create_group()
 {
@@ -63,7 +56,10 @@ int AgentManagerNative::create_group()
 
 int AgentManagerNative::get_group_flow(int group) const
 {
-    return core_mgr ? core_mgr->get_group_flow(group) : -1;
+    if (!core_mgr)
+        return -1;
+    ffcore::FlowField *ff = core_mgr->get_group_flow(group);
+    return ff ? 1 : -1; // ou retourner un FlowFieldID si tu en as un
 }
 
 ffcore::AgentManager *AgentManagerNative::get_internal()
@@ -85,19 +81,15 @@ void AgentManagerNative::assign_agent(Node2D *agent, int group)
 
 int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 {
-    /*  godot::UtilityFunctions::print("spawn_agent()"); */
-
     if (group_id < 0)
     {
-        godot::UtilityFunctions::printerr("spawn_agent : group_id invalide");
+        UtilityFunctions::printerr("spawn_agent : group_id invalide");
         std::abort();
     }
 
     if (!core_mgr || !steering)
     {
-        godot::UtilityFunctions::printerr(
-            "AgentManagerNative.spawn_agent : core_mgr ou steering non initialisé. Arrêt immédiat.");
-
+        UtilityFunctions::printerr("spawn_agent : core_mgr ou steering absent");
         std::abort();
     }
 
@@ -108,23 +100,15 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     if (core_mgr->get(nav_id) == nullptr)
     {
-        godot::UtilityFunctions::print("CRITICAL: AgentManager n’a pas enregistré l’agent ", nav_id);
+        UtilityFunctions::print("CRITICAL: AgentManager n’a pas enregistré l’agent ", nav_id);
         std::abort();
     }
 
-    double max_speed = 200.0; // Ou récupérer depuis le node
+    double max_speed = 200.0;
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
 
-    if (auto *steering_native = get_node<SteeringSystemNative>(
-            NodePath("/root/Node2D/SteeringSystemNative")))
-    {
-        steering_native->register_node_mapping(node, nav_id);
-    }
-
-    /*     godot::UtilityFunctions::print(
-            "Agent créé : ID=", nav_id,
-            " steering=", steering_id,
-            " group=", group_id); */
+    if (auto *sn = get_node<SteeringSystemNative>(NodePath("/root/Node2D/SteeringSystemNative")))
+        sn->register_node_mapping(node, nav_id);
 
     return nav_id;
 }

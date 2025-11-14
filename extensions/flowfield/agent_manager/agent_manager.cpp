@@ -21,13 +21,13 @@ namespace ffcore
         {
             groups[i].id = i;
             groups[i].active = false;
-            groups[i].flow_id = INVALID_FLOWFIELD;
+            groups[i].flow = nullptr;
             groups[i].has_order = false;
         }
 
         groups[GROUP_IDLE].id = GROUP_IDLE;
         groups[GROUP_IDLE].active = true; // ← empêche create_group() de l’utiliser
-        groups[GROUP_IDLE].flow_id = INVALID_FLOWFIELD;
+        groups[GROUP_IDLE].flow = nullptr;
         groups[GROUP_IDLE].has_order = false;
     }
 
@@ -54,7 +54,7 @@ namespace ffcore
             if (!groups[i].active)
             {
                 groups[i].active = true;
-                groups[i].flow_id = INVALID_FLOWFIELD;
+                groups[i].flow = nullptr;
                 groups[i].has_order = false;
 
                 return i;
@@ -111,32 +111,29 @@ namespace ffcore
         return &agents[it->second];
     }
 
-    FlowFieldID AgentManager::get_group_flow(GroupID group) const
+    FlowField *AgentManager::get_group_flow(GroupID group) const
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
-            return INVALID_FLOWFIELD;
-        return groups[group].flow_id;
+            return nullptr;
+        return groups[group].flow;
     }
 
-    void AgentManager::set_group_flow(GroupID group, FlowFieldID fid)
+    void AgentManager::set_group_flow(GroupID group, FlowField *flow)
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
         {
-            godot::UtilityFunctions::print("Set GRoup FLow INVALID GROUP sa mere");
+            godot::UtilityFunctions::print("Set Group Flow INVALID GROUP");
             std::abort();
-            return;
         }
 
-        groups[group].flow_id = fid;
+        groups[group].flow = flow;
         groups[group].has_order = true;
 
-        // ✅ Synchroniser avec le SteeringSystem
-        FlowField *ff = ffcore::flowfields()->get(fid);
+        FlowField *ff = flow;
         if (!ff)
         {
-            godot::UtilityFunctions::print("ERREUR: FlowField ", fid, " introuvable pour groupe ", group);
+            godot::UtilityFunctions::print("ERREUR: FlowField null pour groupe ", group);
             std::abort();
-            return;
         }
 
         SteeringSystem *steering = ffcore::get_global_steering_system();
@@ -144,19 +141,11 @@ namespace ffcore
         {
             godot::UtilityFunctions::print("ERREUR: SteeringSystem non disponible");
             std::abort();
-            return;
         }
 
-        // Mettre à jour tous les agents de ce groupe
-        int count = 0;
         for (const auto &agent : agents)
-        {
             if (agent.group == group)
-            {
                 steering->set_agent_flow_ptr(agent.id, ff);
-                count++;
-            }
-        }
     }
 
     void AgentManager::dissolve_group(GroupID group)
@@ -172,7 +161,7 @@ namespace ffcore
 
         groups[group].active = false;
         groups[group].has_order = false;
-        groups[group].flow_id = INVALID_FLOWFIELD;
+        groups[group].flow = nullptr;
     }
 
     static GroupID current_selected_group = GROUP_IDLE;

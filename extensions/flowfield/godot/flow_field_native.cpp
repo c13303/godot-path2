@@ -365,7 +365,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
 
     if (debug)
         start = std::chrono::high_resolution_clock::now();
-        
+
     Rect2i used;
     Vector2i goal_cell;
 
@@ -492,7 +492,8 @@ ffcore::FlowFieldID FlowFieldNative::assign_flow_to_group(int group_id, Vector2 
 
     if (ffcore::AgentManager *mgr = ffcore::get_global_agent_manager())
     {
-        mgr->set_group_flow(group_id, fid);
+        ffcore::FlowField *ff = ffcore::flowfields()->get(fid);
+        mgr->set_group_flow(group_id, ff);
     }
 
     else

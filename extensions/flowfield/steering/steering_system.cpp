@@ -98,21 +98,6 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }                    // Définit la grille spatiale
 
-void SteeringSystem::set_agent_flow(int id, FlowFieldID flow)
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return;
-    agents[it->second].flow_id = flow;
-}
-
-FlowFieldID SteeringSystem::get_agent_flow(int id) const
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return INVALID_FLOWFIELD;
-    return agents[it->second].flow_id;
-}
 
 void SteeringSystem::set_agent_group(int id, GroupID group)
 {

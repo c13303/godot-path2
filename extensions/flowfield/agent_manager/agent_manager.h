@@ -3,14 +3,17 @@
 #include <unordered_map>
 #include "../core/types.h"
 #include "../core/nav_config.h"
-
+namespace ffcore
+{
+    class FlowField;
+}
 namespace ffcore
 {
     struct AgentGroup
     {
         GroupID id = INVALID_GROUP;
         bool active = false;
-        FlowFieldID flow_id = INVALID_FLOWFIELD;
+        FlowField *flow = nullptr;
         bool has_order = false;
     };
 
@@ -30,8 +33,8 @@ namespace ffcore
         void remove_agent(int id);
         AgentEntry *get(int id);
         const AgentEntry *get(int id) const;
-        FlowFieldID get_group_flow(GroupID group) const;
-        void set_group_flow(GroupID group, FlowFieldID fid);
+        FlowField *get_group_flow(GroupID group) const;
+        void set_group_flow(GroupID group, FlowField *flow);
         void create_agent_entry(int agent_id, const Vec2 &pos, GroupID group);
         static const GroupID GROUP_IDLE = 0;
         void dissolve_group(GroupID group);
@@ -41,7 +44,6 @@ namespace ffcore
         bool all_agents_inactive(GroupID g) const;
         void mark_group_finished(GroupID g);
         void mark_group_has_order(GroupID g);
-
 
     private:
         std::vector<AgentEntry> agents;
