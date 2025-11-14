@@ -11,6 +11,7 @@
 
 #include "../agent_manager/agent_manager.h"
 #include "../steering/steering_system.h"
+#include "../godot/steering_system_native.h"
 
 namespace godot
 {
@@ -21,6 +22,9 @@ namespace godot
     private:
         ffcore::AgentManager *core_mgr = nullptr;
         ffcore::SteeringSystem *steering = nullptr;
+        SteeringSystemNative* steering_native = nullptr; 
+
+
         int next_id = 1;
 
         double default_speed = 150.0;

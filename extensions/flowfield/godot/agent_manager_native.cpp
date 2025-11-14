@@ -6,6 +6,13 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../agent_manager/agent_manager.h"
 #include <cstdlib>
+#include "../godot/steering_system_native.h"
+
+#include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/node2d.hpp>
+#include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -17,17 +24,23 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_group_flow", "group"), &AgentManagerNative::get_group_flow);
     ClassDB::bind_method(D_METHOD("assign_agent", "agent", "group"), &AgentManagerNative::assign_agent);
 }
-
 void AgentManagerNative::_ready()
 {
     core_mgr = ffcore::get_global_agent_manager();
     steering = ffcore::get_global_steering_system();
 
-    godot::UtilityFunctions::print(
-        "AgentManagerNative READY: core_mgr=", (uint64_t)core_mgr,
-        " steering=", (uint64_t)steering);
-}
+    Node *parent = get_parent();
+    if (parent)
+    {
+        steering_native = Object::cast_to<SteeringSystemNative>(
+            parent->get_node_or_null("SteeringSystemNative"));
+    }
 
+    if (!steering_native)
+    {
+        UtilityFunctions::print("⚠️ AgentManagerNative: SteeringSystemNative introuvable");
+    }
+}
 
 AgentManagerNative::~AgentManagerNative() {}
 
@@ -94,6 +107,12 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     double max_speed = 200.0; // Ou récupérer depuis le node
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
+
+    if (auto *steering_native = get_node<SteeringSystemNative>(
+            NodePath("/root/Node2D/SteeringSystemNative")))
+    {
+        steering_native->register_node_mapping(node, nav_id);
+    }
 
     /*     godot::UtilityFunctions::print(
             "Agent créé : ID=", nav_id,

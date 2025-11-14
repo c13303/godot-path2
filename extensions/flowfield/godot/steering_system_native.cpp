@@ -12,6 +12,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_flowfield", "flowfield"), &SteeringSystemNative::set_flowfield);
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
+    ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -31,11 +32,9 @@ void SteeringSystemNative::_ready()
 
     if (flowfield && grid)
     {
-        UtilityFunctions::print("SteeringSystemNative: linked FlowField + Grid");
-
-        // Connexion native
         auto *ff_native = Object::cast_to<FlowFieldNative>(flowfield);
         auto *grid_native = Object::cast_to<SpatialGridNative>(grid);
+
         if (ff_native && grid_native)
         {
             system.set_default_flowfield(ff_native->get_field());
@@ -43,14 +42,6 @@ void SteeringSystemNative::_ready()
             system.set_agent_manager(ffcore::get_global_agent_manager());
             UtilityFunctions::print("SteeringSystemNative: native system connected.");
         }
-        else
-        {
-            UtilityFunctions::print("SteeringSystemNative: cast failed, check node types.");
-        }
-    }
-    else
-    {
-        UtilityFunctions::print("SteeringSystemNative: waiting for flowfield/grid...");
     }
 }
 
@@ -59,14 +50,15 @@ void SteeringSystemNative::set_flowfield(Object *obj)
     flowfield = Object::cast_to<Node2D>(obj);
 }
 
-
+void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
+{
+    agent_map[node] = agent_id;
+}
 
 void SteeringSystemNative::set_grid(Object *obj)
 {
     grid = Object::cast_to<Node2D>(obj);
 }
-
-
 
 void SteeringSystemNative::_process(double delta)
 {

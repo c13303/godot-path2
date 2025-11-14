@@ -34,7 +34,7 @@ namespace godot
         void set_flowfield(Object *obj);
         void set_grid(Object *obj);
         void set_agent_manager(Object *obj);
-
+        void register_node_mapping(Node2D *node, int agent_id);
 
         int get_agent_id(Node2D *node);
     };
