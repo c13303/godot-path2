@@ -175,6 +175,40 @@ namespace ffcore
 
     static GroupID current_selected_group = GROUP_IDLE;
 
+    bool AgentManager::is_group_active(GroupID g) const
+    {
+        if (g == GROUP_IDLE || g >= MAX_GROUPS)
+            return false;
+        return groups[g].active;
+    }
 
+    bool AgentManager::all_agents_inactive(GroupID g) const
+    {
+        if (g == GROUP_IDLE || g >= MAX_GROUPS)
+            return true;
+
+        for (const auto &a : agents)
+        {
+            if (a.group == g)
+                return false;
+        }
+        return true;
+    }
+
+    void AgentManager::mark_group_finished(GroupID g)
+    {
+        if (g == GROUP_IDLE || g >= MAX_GROUPS)
+            return;
+
+        groups[g].has_order = false;
+    }
+
+    void AgentManager::mark_group_has_order(GroupID g)
+    {
+        if (g == GROUP_IDLE || g >= MAX_GROUPS)
+            return;
+
+        groups[g].has_order = true;
+    }
 
 }

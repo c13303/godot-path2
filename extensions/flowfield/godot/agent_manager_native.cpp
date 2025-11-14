@@ -28,6 +28,7 @@ void AgentManagerNative::_bind_methods()
 
     ClassDB::bind_method(D_METHOD("set_current_selected_group", "group_id"), &AgentManagerNative::set_current_selected_group);
     ClassDB::bind_method(D_METHOD("cleanup_groups"), &AgentManagerNative::cleanup_groups);
+    ClassDB::bind_method(D_METHOD("mark_group_has_order", "group_id"), &AgentManagerNative::mark_group_has_order);
 }
 void AgentManagerNative::_ready()
 {
@@ -138,19 +139,28 @@ void AgentManagerNative::cleanup_groups()
     if (!core_mgr)
         return;
 
-    ffcore::AgentGroup *groups = core_mgr->get_groups();
-
     for (ffcore::GroupID g = 1; g < ffcore::MAX_GROUPS; g++)
     {
-
         if (g == current_selected_group)
             continue;
 
-        ffcore::AgentGroup &grp = groups[g];
+        if (!core_mgr->is_group_active(g))
+            continue;
 
-        if (grp.active && !grp.has_order)
+        if (core_mgr->all_agents_inactive(g))
         {
             core_mgr->dissolve_group(g);
+            continue;
         }
+
+        core_mgr->mark_group_finished(g);
     }
+}
+
+void AgentManagerNative::mark_group_has_order(ffcore::GroupID group)
+{
+    if (!core_mgr)
+        return;
+
+    core_mgr->mark_group_has_order(group);
 }

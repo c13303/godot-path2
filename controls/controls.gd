@@ -125,6 +125,8 @@ func _process_selection(rect: Rect2) -> void:
 	if rect.size.x < 3 and rect.size.y < 3:
 		return
 
+	agent_manager.cleanup_groups()
+
 	current_group = agent_manager.create_group()
 	selected_units.clear()
 
@@ -136,6 +138,10 @@ func _process_selection(rect: Rect2) -> void:
 			if rect.has_point(screen_pos):
 				_select_unit(node)
 				agent_manager.assign_agent(node, current_group)
+
+	agent_manager.set_current_selected_group(current_group)
+
+
 
 
 
@@ -159,6 +165,8 @@ func _on_click_set_goal() -> void:
 	if current_group < 0:
 		return
 
+	agent_manager.mark_group_has_order(current_group)
+
 	var mouse_pos := get_global_mouse_position()
 	var local_pos := floorz.to_local(mouse_pos)
 	var cell := floorz.local_to_map(local_pos)
@@ -169,11 +177,10 @@ func _on_click_set_goal() -> void:
 
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(center)
-		var fid :int= flow.assign_flow_to_group(current_group, center)
+		var fid: int = flow.assign_flow_to_group(current_group, center)
 		current_flow = flow
 	else:
 		print("ERRUR NO FLOW")
-
 
 
 func _on_key_spawn_chars() -> void:

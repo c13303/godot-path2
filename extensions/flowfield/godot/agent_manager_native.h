@@ -55,6 +55,8 @@ namespace godot
         void _ready() override;
         void set_current_selected_group(ffcore::GroupID group);
         void cleanup_groups();
+        void mark_group_has_order(ffcore::GroupID group);
+
     };
 }
 

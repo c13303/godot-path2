@@ -37,6 +37,11 @@ namespace ffcore
         void dissolve_group(GroupID group);
         ffcore::AgentGroup *get_groups() { return groups; }
         const ffcore::AgentGroup *get_groups() const { return groups; }
+        bool is_group_active(GroupID g) const;
+        bool all_agents_inactive(GroupID g) const;
+        void mark_group_finished(GroupID g);
+        void mark_group_has_order(GroupID g);
+
 
     private:
         std::vector<AgentEntry> agents;

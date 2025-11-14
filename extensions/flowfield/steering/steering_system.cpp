@@ -384,14 +384,11 @@ void SteeringSystem::update_all(double delta)
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
 
-     
-
         Vec2 wall_repel = wall_repulsion_force(a, ff);
         Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
-       
         double slow_factor = 1.0;
 
         if (dist_to_target < TARGET_SLOW_RADIUS)
@@ -404,7 +401,18 @@ void SteeringSystem::update_all(double delta)
         {
             smooth_stop(a.id);
             a.active = false;
-           /*  godot::UtilityFunctions::print("Agent ", a.id, " arrived, stopped"); */
+
+            auto *mgr = ffcore::get_global_agent_manager();
+            if (mgr)
+            {
+                if (auto *entry = mgr->get(a.id))
+                {
+                    ffcore::GroupID g = entry->group;
+                    if (mgr->is_group_active(g) && mgr->all_agents_inactive(g))
+                        mgr->mark_group_finished(g);
+                }
+            }
+
             continue;
         }
 
@@ -416,19 +424,13 @@ void SteeringSystem::update_all(double delta)
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
 
-      
-
         const Vec2 old_pos = a.position;
         Vec2 proposed = a.position + a.velocity * delta;
         Vec2i prop_cell = ff->world_to_cell(proposed);
 
         a.position = proposed;
 
-     
-
         ultimate_wall_correction(a, ff, delta);
-
-     
 
         grid->update(a.id, old_pos, a.position);
     }
