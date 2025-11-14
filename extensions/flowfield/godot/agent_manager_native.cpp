@@ -1,5 +1,6 @@
 #include "agent_manager_native.h"
 #include "../core/types.h"
+#include "../core/nav_config.h"
 #include "../flow/flow_field.h"
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -24,6 +25,9 @@ void AgentManagerNative::_bind_methods()
 
     ClassDB::bind_method(D_METHOD("get_group_flow", "group"), &AgentManagerNative::get_group_flow);
     ClassDB::bind_method(D_METHOD("assign_agent", "agent", "group"), &AgentManagerNative::assign_agent);
+
+    ClassDB::bind_method(D_METHOD("set_current_selected_group", "group_id"), &AgentManagerNative::set_current_selected_group);
+    ClassDB::bind_method(D_METHOD("cleanup_groups"), &AgentManagerNative::cleanup_groups);
 }
 void AgentManagerNative::_ready()
 {
@@ -101,7 +105,6 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
     int nav_id = next_id++;
     core_mgr->create_agent_entry(nav_id, pos, group_id);
 
-
     if (core_mgr->get(nav_id) == nullptr)
     {
         godot::UtilityFunctions::print("CRITICAL: AgentManager n’a pas enregistré l’agent ", nav_id);
@@ -123,4 +126,31 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
             " group=", group_id); */
 
     return nav_id;
+}
+
+void AgentManagerNative::set_current_selected_group(ffcore::GroupID group)
+{
+    current_selected_group = group;
+}
+
+void AgentManagerNative::cleanup_groups()
+{
+    if (!core_mgr)
+        return;
+
+    ffcore::AgentGroup *groups = core_mgr->get_groups();
+
+    for (ffcore::GroupID g = 1; g < ffcore::MAX_GROUPS; g++)
+    {
+
+        if (g == current_selected_group)
+            continue;
+
+        ffcore::AgentGroup &grp = groups[g];
+
+        if (grp.active && !grp.has_order)
+        {
+            core_mgr->dissolve_group(g);
+        }
+    }
 }

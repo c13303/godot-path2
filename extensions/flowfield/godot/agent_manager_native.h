@@ -1,6 +1,8 @@
 #ifndef AGENT_MANAGER_NATIVE_H
 #define AGENT_MANAGER_NATIVE_H
 
+#include "../core/nav_config.h"
+
 #include "../core/types.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -22,8 +24,7 @@ namespace godot
     private:
         ffcore::AgentManager *core_mgr = nullptr;
         ffcore::SteeringSystem *steering = nullptr;
-        SteeringSystemNative* steering_native = nullptr; 
-
+        SteeringSystemNative *steering_native = nullptr;
 
         int next_id = 1;
 
@@ -36,6 +37,7 @@ namespace godot
         };
 
         std::unordered_map<Node2D *, LinkEntry> link_table;
+        ffcore::GroupID current_selected_group = ffcore::GROUP_IDLE;
 
     public:
         static void _bind_methods();
@@ -51,6 +53,8 @@ namespace godot
         void assign_agent(Node2D *agent, int group);
         int spawn_agent(Node2D *node, int group_id);
         void _ready() override;
+        void set_current_selected_group(ffcore::GroupID group);
+        void cleanup_groups();
     };
 }
 

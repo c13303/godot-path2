@@ -173,4 +173,8 @@ namespace ffcore
         groups[group].flow_id = INVALID_FLOWFIELD;
     }
 
+    static GroupID current_selected_group = GROUP_IDLE;
+
+
+
 }

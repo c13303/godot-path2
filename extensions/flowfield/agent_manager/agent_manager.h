@@ -35,7 +35,8 @@ namespace ffcore
         void create_agent_entry(int agent_id, const Vec2 &pos, GroupID group);
         static const GroupID GROUP_IDLE = 0;
         void dissolve_group(GroupID group);
-
+        ffcore::AgentGroup *get_groups() { return groups; }
+        const ffcore::AgentGroup *get_groups() const { return groups; }
 
     private:
         std::vector<AgentEntry> agents;
