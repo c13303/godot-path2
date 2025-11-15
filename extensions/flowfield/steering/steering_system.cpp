@@ -351,44 +351,45 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
 }
+
 void SteeringSystem::update_all(double delta)
 {
-    if (agents.empty())
-        return;
-    if (!grid)
-        return;
+    if (agents.empty()) return;
+    if (!grid) return;
 
     for (auto &a : agents)
     {
-        if (!a.active)
+        Vec2 wall_repel(0,0);
+        if (a.flow)
+            wall_repel = wall_repulsion_force(a, a.flow);
+
+        Vec2 separation = force_voisine(a);
+
+        if (!a.active || !a.flow)
+        {
+            Vec2 local_dir = safe_normalize(wall_repel + separation);
+            if (!local_dir.is_zero())
+            {
+                Vec2 target_vel = local_dir * a.max_speed * MIN_SPEED_FRACTION;
+                a.velocity = a.velocity.lerp(target_vel, LERP_GENERAL);
+
+                Vec2 old_pos = a.position;
+                a.position = a.position + a.velocity * delta;
+                if (grid) grid->update(a.id, old_pos, a.position);
+            }
             continue;
-        if (!a.flow)
-            continue;
+        }
 
         FlowField *ff = a.flow;
-
-        if (!ff)
-        {
-            godot::UtilityFunctions::print("Agent ", a.id, " n'a pas de flow assigné, SKIP");
-            continue;
-        }
-
-        if (!ff->is_ready())
-        {
-            godot::UtilityFunctions::print("Agent ", a.id, " flow non prêt, SKIP");
-            continue;
-        }
+        if (!ff || !ff->is_ready()) continue;
 
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
 
-        Vec2 wall_repel = wall_repulsion_force(a, ff);
-        Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
         double slow_factor = 1.0;
-
         if (dist_to_target < TARGET_SLOW_RADIUS)
         {
             double t = dist_to_target / TARGET_SLOW_RADIUS;
@@ -403,45 +404,36 @@ void SteeringSystem::update_all(double delta)
             smooth_stop(a.id);
             a.is_first = true;
 
-            ff->refcount--; // ← étape 4 : décrément du FlowField
+            ff->refcount--;
             ff->arrived_count++;
             ff->first_is_arrived = true;
 
-            a.flow = nullptr; // l'agent ne suit plus aucun FF
+            a.flow = nullptr;
             ffcore::cleanup_flow_if_unused(ff);
 
             a.active = false;
 
-            auto *mgr = ffcore::get_global_agent_manager();
-            if (mgr)
-            {
+            if (auto *mgr = ffcore::get_global_agent_manager())
                 if (auto *entry = mgr->get(a.id))
-                {
-                    ffcore::GroupID g = entry->group;
-                    if (mgr->is_group_active(g) && mgr->all_agents_inactive(g))
-                        mgr->mark_group_finished(g);
-                }
-            }
+                    if (mgr->is_group_active(entry->group) && mgr->all_agents_inactive(entry->group))
+                        mgr->mark_group_finished(entry->group);
 
             continue;
         }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        double smoothing = LERP_GENERAL;
-        a.velocity = a.velocity.lerp(target_velocity, smoothing);
+        a.velocity = a.velocity.lerp(target_velocity, LERP_GENERAL);
 
         const double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
 
-        const Vec2 old_pos = a.position;
-        Vec2 proposed = a.position + a.velocity * delta;
-        Vec2i prop_cell = ff->world_to_cell(proposed);
-
-        a.position = proposed;
+        Vec2 old_pos = a.position;
+        a.position = a.position + a.velocity * delta;
 
         ultimate_wall_correction(a, ff, delta);
 
         grid->update(a.id, old_pos, a.position);
     }
 }
+
