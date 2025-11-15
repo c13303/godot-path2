@@ -385,7 +385,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 wall_repel = wall_repulsion_force(a, ff);
         Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
-        Vec2 desired_dir = (wall_repel + separation + flow_dir);
+        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
         double slow_factor = 1.0;
 
@@ -398,17 +398,17 @@ void SteeringSystem::update_all(double delta)
         if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
             a.has_arrived = true;
 
-        if (a.has_arrived && dist_to_target < TARGET_OCCUPY_RADIUS)
+        if (!ff->first_is_arrived && a.has_arrived && dist_to_target < TARGET_OCCUPY_RADIUS)
         {
             smooth_stop(a.id);
+            a.is_first = true;
 
-            if (a.flow)
-            {
-                a.flow->refcount--; // ← étape 4 : décrément du FlowField
-                FlowField *old = a.flow;
-                a.flow = nullptr; // l'agent ne suit plus aucun FF
-                ffcore::cleanup_flow_if_unused(old);
-            }
+            ff->refcount--; // ← étape 4 : décrément du FlowField
+            ff->arrived_count++;
+            ff->first_is_arrived = true;
+
+            a.flow = nullptr; // l'agent ne suit plus aucun FF
+            ffcore::cleanup_flow_if_unused(ff);
 
             a.active = false;
 

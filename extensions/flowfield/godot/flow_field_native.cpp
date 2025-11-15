@@ -58,7 +58,7 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
-    field.target_triggered = false;
+    field.first_is_arrived = false;
     field.arrived_count = 0;
 
     Vector2 goal_local = floor_layer->to_local(goal_world);

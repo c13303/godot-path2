@@ -27,7 +27,7 @@ namespace ffcore
     constexpr double TARGET_OCCUPY_RADIUS = TILE_SIZE * 0.4;
 
     constexpr double SEPARATION_RADIUS = 18.0;
-    constexpr double SEPARATION_STRENGTH = 4.0;
+    constexpr double SEPARATION_STRENGTH = 400.0;
     constexpr int MAX_NEIGHBORS = 16;
 
     constexpr double LERP_GENERAL = 0.02;

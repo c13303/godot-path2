@@ -49,7 +49,7 @@ namespace ffcore
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
         int arrived_count = 0;
-        bool target_triggered = false;
+        bool first_is_arrived = false;
         void copy_from(const FlowField &src);
 
         int refcount = 0; /// nbre d'agent dedans pour delete a la fin
