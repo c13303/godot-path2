@@ -1,4 +1,6 @@
 #include "flow_field_manager.h"
+#include "../core/nav_services.h"
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace ffcore
 {
@@ -41,13 +43,34 @@ namespace ffcore
 	FlowFieldID FlowFieldManager::create_field(int width, int height, double tile_size)
 	{
 		FlowField *f = new FlowField(width, height, tile_size);
-		return register_existing(f);
+		FlowFieldID fid = register_existing(f);
+		f->id = fid; // ← étape 2 : assignation
+
+		return fid;
 	}
 
 	FlowFieldID FlowFieldManager::register_copy(const FlowField &src)
 	{
 		FlowField *f = new FlowField(src.width(), src.height(), src.tile_size());
 		f->copy_from(src);
-		return register_existing(f);
+		FlowFieldID fid = register_existing(f);
+		f->id = fid;
+		return fid;
+	}
+
+	void cleanup_flow_if_unused(FlowField *ff)
+	{
+		if (!ff)
+			return;
+
+		if (ff->refcount <= 0 && ff->id != INVALID_FLOWFIELD)
+		{
+			auto *fm = flowfields();
+			if (fm)
+			{
+				fm->remove(ff->id);
+				/* godot::UtilityFunctions::print("FF DELTED"); */
+			}
+		}
 	}
 }

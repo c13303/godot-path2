@@ -6,19 +6,22 @@
 
 namespace ffcore
 {
-	class FlowFieldManager
-	{
-	public:
-		FlowFieldManager();
+    class FlowFieldManager
+    {
+    public:
+        FlowFieldManager();
 
-		FlowFieldID register_existing(FlowField *f);
-		FlowField *get(FlowFieldID id) const;
-		void remove(FlowFieldID id);
+        FlowFieldID register_existing(FlowField *f);
+        FlowField *get(FlowFieldID id) const;
+        void remove(FlowFieldID id);
 
-		FlowFieldID create_field(int width, int height, double tile_size);
-		FlowFieldID register_copy(const FlowField &src);
+        FlowFieldID create_field(int width, int height, double tile_size);
+        FlowFieldID register_copy(const FlowField &src);
 
-	private:
-		std::vector<FlowField *> fields;
-	};
+    private:
+        std::vector<FlowField *> fields;
+    };
+
+    void cleanup_flow_if_unused(FlowField *ff);
+
 }

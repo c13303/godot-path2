@@ -63,7 +63,6 @@ namespace ffcore
         return INVALID_GROUP;
     }
 
-    // Dans agent_manager.cpp
     void AgentManager::add_agent_to_group(int agent_id, GroupID group)
     {
         auto it = id_to_index.find(agent_id);
@@ -73,7 +72,17 @@ namespace ffcore
             return;
         }
 
+        // Mise à jour du groupe
         agents[it->second].group = group;
+
+        // Réaffectation du FlowField si le groupe a déjà un flow actif
+        FlowField *ff = groups[group].flow;
+
+        if (ff)
+        {
+            ffcore::SteeringSystem *steering = ffcore::get_global_steering_system();
+            steering->set_agent_flow_ptr(agent_id, ff);
+        }
     }
 
     void AgentManager::remove_agent(int id)
@@ -110,8 +119,6 @@ namespace ffcore
             return nullptr;
         return &agents[it->second];
     }
-
-
 
     void AgentManager::set_group_flow(GroupID group, FlowField *flow)
     {
@@ -196,5 +203,7 @@ namespace ffcore
 
         groups[g].has_order = true;
     }
+
+
 
 }

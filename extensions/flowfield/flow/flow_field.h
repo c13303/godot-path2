@@ -52,6 +52,9 @@ namespace ffcore
         bool target_triggered = false;
         void copy_from(const FlowField &src);
 
+        int refcount = 0; /// nbre d'agent dedans pour delete a la fin
+        FlowFieldID id = INVALID_FLOWFIELD;
+
     private:
         int w = 0;
         int h = 0;

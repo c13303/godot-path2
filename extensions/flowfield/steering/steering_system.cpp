@@ -8,7 +8,7 @@
 #include "../agent_manager/agent_manager.h"
 #include "../flow/flow_field.h"
 #include "../grid/spatial_grid.h"
-#include "../agent_manager/agent_manager.h"
+#include "../flow/flow_field_manager.h"
 #include <cstdlib>
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
@@ -97,7 +97,6 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }                    // Définit la grille spatiale
-
 
 void SteeringSystem::set_agent_group(int id, GroupID group)
 {
@@ -335,8 +334,22 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
         std::abort();
         return;
     }
-    agents[it->second].flow = ff;
-    agents[it->second].active = true;
+    AgentData &a = agents[it->second];
+
+    FlowField *old = a.flow;
+
+    if (old)
+    {
+        old->refcount--;
+        ffcore::cleanup_flow_if_unused(old);
+    }
+
+    a.flow = ff;
+
+    if (ff)
+        ff->refcount++; // incrément nouveau FF
+
+    a.active = (ff != nullptr);
 }
 void SteeringSystem::update_all(double delta)
 {
@@ -385,6 +398,15 @@ void SteeringSystem::update_all(double delta)
         if (a.has_arrived && dist_to_target < TARGET_OCCUPY_RADIUS)
         {
             smooth_stop(a.id);
+
+            if (a.flow)
+            {
+                a.flow->refcount--; // ← étape 4 : décrément du FlowField
+                FlowField *old = a.flow;
+                a.flow = nullptr; // l'agent ne suit plus aucun FF
+                ffcore::cleanup_flow_if_unused(old);
+            }
+
             a.active = false;
 
             auto *mgr = ffcore::get_global_agent_manager();
