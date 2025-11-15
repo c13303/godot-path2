@@ -47,7 +47,6 @@ func _ready() -> void:
 		canvas.add_child(selection_rect)
 
 func _input(event: InputEvent) -> void:
-
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_A:
 			_on_key_spawn_chars()
@@ -69,7 +68,6 @@ func _input(event: InputEvent) -> void:
 				selecting = false
 				selection_rect.visible = false
 				_clear_preview()
-
 				var mouse_end := get_viewport().get_mouse_position()
 				var rect_pos := Vector2(min(selection_start.x, mouse_end.x), min(selection_start.y, mouse_end.y))
 				var rect_size := Vector2(abs(mouse_end.x - selection_start.x), abs(mouse_end.y - selection_start.y))
@@ -79,16 +77,10 @@ func _input(event: InputEvent) -> void:
 			_on_click_set_goal()
 
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			camera.zoom = Vector2(
-				clamp(camera.zoom.x + zoom_speed, min_zoom, max_zoom),
-				clamp(camera.zoom.y + zoom_speed, min_zoom, max_zoom)
-			)
+			_zoom_towards_mouse(zoom_speed)
 
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			camera.zoom = Vector2(
-				clamp(camera.zoom.x - zoom_speed, min_zoom, max_zoom),
-				clamp(camera.zoom.y - zoom_speed, min_zoom, max_zoom)
-			)
+			_zoom_towards_mouse(-zoom_speed)
 
 func _process(delta: float) -> void:
 	if selecting:
@@ -97,11 +89,46 @@ func _process(delta: float) -> void:
 		selection_rect.size = Vector2(abs(mouse_pos.x - selection_start.x), abs(mouse_pos.y - selection_start.y))
 		_preview_selection(selection_rect.get_rect())
 
+	var mov := Vector2.ZERO
+	if Input.is_key_pressed(KEY_UP):
+		mov.y -= 1
+	if Input.is_key_pressed(KEY_DOWN):
+		mov.y += 1
+	if Input.is_key_pressed(KEY_LEFT):
+		mov.x -= 1
+	if Input.is_key_pressed(KEY_RIGHT):
+		mov.x += 1
+	if mov != Vector2.ZERO:
+		camera.position += mov.normalized() * speed * delta
+
+func _zoom_towards_mouse(amount: float) -> void:
+	var mouse_screen: Vector2 = get_viewport().get_mouse_position()
+
+	var xform_before: Transform2D = get_viewport().get_canvas_transform()
+	var world_before: Vector2 = xform_before.affine_inverse() * mouse_screen
+
+	var old_zoom: Vector2 = camera.zoom
+	var new_zoom: Vector2 = Vector2(
+		clamp(old_zoom.x + amount, min_zoom, max_zoom),
+		clamp(old_zoom.y + amount, min_zoom, max_zoom)
+	)
+	camera.zoom = new_zoom
+
+	var xform_after: Transform2D = get_viewport().get_canvas_transform()
+	var world_after: Vector2 = xform_after.affine_inverse() * mouse_screen
+
+	camera.position += world_before - world_after
+
+
+
+
+
+
+
+
 func _preview_selection(rect: Rect2) -> void:
 	_clear_preview()
-
 	var xform = get_viewport().get_canvas_transform()
-
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		if node is Node2D:
 			var screen_pos: Vector2 = xform * node.global_position
@@ -111,7 +138,6 @@ func _preview_selection(rect: Rect2) -> void:
 				else:
 					node.modulate = Color(1.2, 1.2, 1.2, 1)
 				preview_units.append(node)
-
 
 func _clear_preview() -> void:
 	for unit in preview_units:
@@ -126,12 +152,10 @@ func _process_selection(rect: Rect2) -> void:
 		return
 
 	agent_manager.cleanup_groups()
-
 	current_group = agent_manager.create_group()
 	selected_units.clear()
 
 	var xform = get_viewport().get_canvas_transform()
-
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		if node is Node2D:
 			var screen_pos: Vector2 = xform * node.global_position
@@ -140,10 +164,6 @@ func _process_selection(rect: Rect2) -> void:
 				agent_manager.assign_agent(node, current_group)
 
 	agent_manager.set_current_selected_group(current_group)
-
-
-
-
 
 func _select_unit(unit: Node2D) -> void:
 	if unit not in selected_units:
@@ -164,24 +184,17 @@ func _clear_selection() -> void:
 func _on_click_set_goal() -> void:
 	if current_group < 0:
 		return
-
 	agent_manager.mark_group_has_order(current_group)
-
 	var mouse_pos := get_global_mouse_position()
 	var local_pos := floorz.to_local(mouse_pos)
 	var cell := floorz.local_to_map(local_pos)
 	var center := floorz.to_global(floorz.map_to_local(cell))
-
 	marker.global_position = center
 	marker.visible = false
-
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(center)
 		flow.assign_flow_to_group(current_group, center)
 		current_flow = flow
-	else:
-		print("ERRUR NO FLOW")
-
 
 func _on_key_spawn_chars() -> void:
 	var mouse_pos := get_global_mouse_position()
@@ -194,26 +207,20 @@ func _on_key_spawn_chars_massive(grappe: int) -> void:
 
 func _spawn_mainchar(pos: Vector2) -> void:
 	if current_group < 1:
-		current_group = agent_manager.create_group() #1. Create Group ID
-
+		current_group = agent_manager.create_group()
 	var target_cell := floorz.local_to_map(floorz.to_local(pos))
 	var occupied: Array[Vector2i] = []
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		occupied.append(floorz.local_to_map(floorz.to_local(node.global_position)))
-
 	var free_cell := _find_free_cell_near(target_cell, occupied)
 	var free_pos := floorz.to_global(floorz.map_to_local(free_cell))
-
 	var agent := preload("res://character/character.tscn").instantiate()
 	get_parent().add_child(agent)
 	agent.global_position = free_pos
 	agent.z_index = int(free_pos.y)
-	agent.add_to_group("main_chars") #juste pour le count
-
-	var nav_id = agent_manager.spawn_agent(agent, 0) #0 = idle group
-	agent.nav_id = nav_id  # ✅ STOCKER L'ID
-
-
+	agent.add_to_group("main_chars")
+	var nav_id = agent_manager.spawn_agent(agent, 0)
+	agent.nav_id = nav_id
 
 func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_radius: int = 6) -> Vector2i:
 	if start_cell not in occupied and _is_walkable(start_cell):
