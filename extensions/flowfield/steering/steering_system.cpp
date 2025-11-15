@@ -385,7 +385,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 wall_repel = wall_repulsion_force(a, ff);
         Vec2 separation = force_voisine(a);
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
-        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
+        Vec2 desired_dir = (wall_repel + separation + flow_dir);
 
         double slow_factor = 1.0;
 
@@ -424,7 +424,7 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        double smoothing = 0.04;
+        double smoothing = LERP_GENERAL;
         a.velocity = a.velocity.lerp(target_velocity, smoothing);
 
         const double vlen = safe_len(a.velocity);
