@@ -390,7 +390,10 @@ void SteeringSystem::update_all(double delta)
         double slow_factor = 1.0;
 
         if (dist_to_target < TARGET_SLOW_RADIUS)
-            slow_factor = std::clamp(dist_to_target / TARGET_SLOW_RADIUS, MIN_SPEED_FRACTION, 1.0);
+        {
+            double t = dist_to_target / TARGET_SLOW_RADIUS;
+            slow_factor = std::clamp(t * t, MIN_SPEED_FRACTION, 1.0);
+        }
 
         if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
             a.has_arrived = true;

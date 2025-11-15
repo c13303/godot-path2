@@ -15,19 +15,19 @@ namespace ffcore
     constexpr double CENTER_PULL = 1.0;
     constexpr double TILE_SIZE = 16.0;
 
-    constexpr double WALL_AVOID_RADIUS = TILE_SIZE * 1.5;
+    constexpr double WALL_AVOID_RADIUS = TILE_SIZE * 1.2;
     constexpr double WALL_REPEL_STRENGTH = 8.4;
 
     constexpr double DIRECT_STEER_RADIUS = TILE_SIZE * 2.5;
     constexpr double MIN_SPEED_FRACTION = 0.25;
     constexpr double CELLGOAL_COOLDOWN_SEC = 1;
 
-    constexpr double TARGET_SLOW_RADIUS = TILE_SIZE * 2.5;
+    constexpr double TARGET_SLOW_RADIUS = TILE_SIZE * 3;
     constexpr double TARGET_APPROACH_RADIUS = TILE_SIZE * 1.0;
     constexpr double TARGET_OCCUPY_RADIUS = TILE_SIZE * 0.4;
 
     constexpr double SEPARATION_RADIUS = 18.0;
-    constexpr double SEPARATION_STRENGTH = 3.0;
+    constexpr double SEPARATION_STRENGTH = 4.0;
     constexpr int MAX_NEIGHBORS = 16;
 
     constexpr double LERP_GENERAL = 0.02;
@@ -57,8 +57,6 @@ namespace ffcore
 
         void set_grid(SpatialGrid *g);
         void set_default_flowfield(FlowField *f);
-
-
 
         void set_agent_manager(AgentManager *m) { agent_manager = m; }
 

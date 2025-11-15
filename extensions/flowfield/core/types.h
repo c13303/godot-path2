@@ -9,6 +9,7 @@ namespace ffcore
 
     constexpr FlowFieldID INVALID_FLOWFIELD = 0;
     constexpr GroupID INVALID_GROUP = 0;
+    
 
     struct Vec2
     {

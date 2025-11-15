@@ -90,7 +90,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         std::abort();
     }
 
-    double max_speed = 200.0;
+    double max_speed = 150.0;
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
 
     if (auto *sn = get_node<SteeringSystemNative>(NodePath("/root/Node2D/SteeringSystemNative")))
