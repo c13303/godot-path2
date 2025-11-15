@@ -177,7 +177,7 @@ func _on_click_set_goal() -> void:
 
 	if flow and flow.has_method("rebuild_async"):
 		flow.rebuild_async(center)
-		var fid: int = flow.assign_flow_to_group(current_group, center)
+		flow.assign_flow_to_group(current_group, center)
 		current_flow = flow
 	else:
 		print("ERRUR NO FLOW")

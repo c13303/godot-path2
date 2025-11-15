@@ -34,6 +34,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
+    ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
@@ -486,5 +487,8 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     if (!mgr)
         return;
 
-    mgr->set_group_flow(group_id, &field);
+    auto *fm = ffcore::flowfields();
+    ffcore::FlowFieldID fid = fm->register_copy(field);
+    ffcore::FlowField *new_flow = fm->get(fid);
+    mgr->set_group_flow(group_id, new_flow);
 }
