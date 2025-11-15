@@ -233,20 +233,22 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     std::vector<NeighborDist> candidates;
     candidates.reserve(neighbor_ids.size());
 
-    for (int neighbor_id : neighbor_ids)
+    for (int nid : neighbor_ids)
     {
-        if (neighbor_id == agent.id)
+        if (nid == agent.id)
             continue;
-        auto it = id_to_index.find(neighbor_id);
+
+        auto it = id_to_index.find(nid);
         if (it == id_to_index.end())
             continue;
 
         const AgentData &n = agents[it->second];
+
         Vec2 diff = agent.position - n.position;
         double dist_sq = diff.length_squared();
 
         if (dist_sq <= SEPARATION_RADIUS * SEPARATION_RADIUS)
-            candidates.push_back({neighbor_id, dist_sq});
+            candidates.push_back({nid, dist_sq});
     }
 
     std::sort(candidates.begin(), candidates.end(),
@@ -257,6 +259,8 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
     Vec2 separation_force(0, 0);
     int count = 0;
+
+    bool self_has_flow = (agent.flow != nullptr);
 
     for (int i = 0; i < limit; ++i)
     {
@@ -269,9 +273,16 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
             dist = 0.001;
 
         double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
-        double weight = n.active ? 1.0 : 2.0;
 
-        separation_force += (diff * (1.0 / dist)) * falloff * weight;
+        bool other_has_flow = (n.flow != nullptr);
+
+        double weight = 1.0;
+        if (self_has_flow && !other_has_flow)
+            weight *= 2.0;
+        if (!self_has_flow && other_has_flow)
+            weight *= 0.5;
+
+        separation_force = separation_force + (diff * (1.0 / dist)) * falloff * weight;
         count++;
     }
 
@@ -280,30 +291,6 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
     if (!separation_force.is_zero())
         separation_force = safe_normalize(separation_force) * SEPARATION_STRENGTH;
-
-    FlowField *ff = agent.flow ? agent.flow : default_flow;
-    if (!ff || !ff->is_ready())
-        return separation_force;
-
-    Vec2 raw_force = separation_force;
-
-    double probe_dist = std::min(SEPARATION_RADIUS, ff->tile_size() * 0.5);
-    Vec2 sep_dir = safe_normalize(separation_force);
-    Vec2 probe_pos = agent.position + sep_dir * probe_dist;
-    Vec2i probe_cell = ff->world_to_cell(probe_pos);
-
-    if (!ff->is_cell_navigable(probe_cell))
-    {
-        Vec2 wall_center = ff->cell_to_world(probe_cell);
-        Vec2 wall_dir = safe_normalize(wall_center - agent.position);
-
-        double dot = separation_force.dot(wall_dir);
-        if (dot > 0.0)
-            separation_force -= wall_dir * dot;
-
-        if (!separation_force.is_zero())
-            separation_force = safe_normalize(separation_force) * SEPARATION_STRENGTH;
-    }
 
     return separation_force;
 }
@@ -351,23 +338,27 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
 }
-
 void SteeringSystem::update_all(double delta)
 {
-    if (agents.empty()) return;
-    if (!grid) return;
+    if (agents.empty())
+        return;
+    if (!grid)
+        return;
 
     for (auto &a : agents)
     {
-        Vec2 wall_repel(0,0);
-        if (a.flow)
-            wall_repel = wall_repulsion_force(a, a.flow);
+        FlowField *nav = a.flow ? a.flow : default_flow;
+
+        Vec2 wall_repel(0, 0);
+        if (nav)
+            wall_repel = wall_repulsion_force(a, nav);
 
         Vec2 separation = force_voisine(a);
 
         if (!a.active || !a.flow)
         {
             Vec2 local_dir = safe_normalize(wall_repel + separation);
+
             if (!local_dir.is_zero())
             {
                 Vec2 target_vel = local_dir * a.max_speed * MIN_SPEED_FRACTION;
@@ -375,13 +366,19 @@ void SteeringSystem::update_all(double delta)
 
                 Vec2 old_pos = a.position;
                 a.position = a.position + a.velocity * delta;
-                if (grid) grid->update(a.id, old_pos, a.position);
+
+                if (nav)
+                    ultimate_wall_correction(a, nav, delta);
+
+                if (grid)
+                    grid->update(a.id, old_pos, a.position);
             }
             continue;
         }
 
         FlowField *ff = a.flow;
-        if (!ff || !ff->is_ready()) continue;
+        if (!ff || !ff->is_ready())
+            continue;
 
         const Vec2 goal_pos = ff->goal_center_world();
         const double dist_to_target = (a.position - goal_pos).length();
@@ -415,7 +412,8 @@ void SteeringSystem::update_all(double delta)
 
             if (auto *mgr = ffcore::get_global_agent_manager())
                 if (auto *entry = mgr->get(a.id))
-                    if (mgr->is_group_active(entry->group) && mgr->all_agents_inactive(entry->group))
+                    if (mgr->is_group_active(entry->group) &&
+                        mgr->all_agents_inactive(entry->group))
                         mgr->mark_group_finished(entry->group);
 
             continue;
@@ -424,7 +422,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
         a.velocity = a.velocity.lerp(target_velocity, LERP_GENERAL);
 
-        const double vlen = safe_len(a.velocity);
+        double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
             a.velocity = a.velocity * (a.max_speed / vlen);
 
