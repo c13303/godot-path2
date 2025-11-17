@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <chrono>
+#include "../core/global_config.h"
 
 using namespace godot;
 
@@ -465,6 +466,7 @@ void FlowFieldNative::_draw()
 
     if (field.has_goal())
     {
+        const auto &cfg = ffcore::globalconfig();
         ffcore::Vec2i goal = field.get_goal_cell();
         Vector2 goal_center = to_local(
             floor_layer->to_global(
@@ -473,9 +475,9 @@ void FlowFieldNative::_draw()
         const int segments = 128;
         const float thickness = 1.0f;
 
-        draw_arc(goal_center, ffcore::TARGET_SLOW_RADIUS, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
-        draw_arc(goal_center, ffcore::TARGET_APPROACH_RADIUS, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
-        draw_arc(goal_center, ffcore::TARGET_OCCUPY_RADIUS, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_slow_radius, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_approach_radius, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_occupy_radius, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
     }
 }
 

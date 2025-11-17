@@ -1265,3 +1265,7 @@ offset_bottom = 23.0
 script = ExtResource("4_k8xte")
 
 [node name="AgentManagerNative" type="AgentManagerNative" parent="."]
+
+[node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
+separation_radius = 60.0
+separation_strength = 800.0

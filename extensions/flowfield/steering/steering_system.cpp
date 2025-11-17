@@ -194,6 +194,7 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
 // steering_system.cpp
 Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
 {
+    const auto &cfg = globalconfig();
     Vec2i cur = ff->world_to_cell(a.position);
     Vec2 r(0, 0);
     for (int dx = -1; dx <= 1; ++dx)
@@ -206,24 +207,25 @@ Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
             {
                 Vec2 d = a.position - ff->cell_to_world(n);
                 double L = d.length();
-                if (L < WALL_AVOID_RADIUS && L > 1e-3)
+                if (L < cfg.wall_avoid_radius && L > 1e-3)
                 {
-                    double f = std::pow(1.0 - L / WALL_AVOID_RADIUS, 2.0);
+                    double f = std::pow(1.0 - L / cfg.wall_avoid_radius, 2.0);
                     r = r + safe_normalize(d) * f;
                 }
             }
         }
     if (r.is_zero())
         return r;
-    return safe_normalize(r) * WALL_REPEL_STRENGTH;
+    return safe_normalize(r) * cfg.wall_repel_strength;
 }
 
 Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 {
+    const auto &cfg = globalconfig();
     if (!grid)
         return Vec2(0, 0);
 
-    std::vector<int> neighbor_ids = grid->query_neighbors(agent.position, SEPARATION_RADIUS);
+    std::vector<int> neighbor_ids = grid->query_neighbors(agent.position, cfg.separation_radius);
 
     struct NeighborDist
     {
@@ -247,7 +249,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         Vec2 diff = agent.position - n.position;
         double dist_sq = diff.length_squared();
 
-        if (dist_sq <= SEPARATION_RADIUS * SEPARATION_RADIUS)
+        if (dist_sq <= cfg.separation_radius * cfg.separation_radius)
             candidates.push_back({nid, dist_sq});
     }
 
@@ -255,7 +257,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
               [](const NeighborDist &a, const NeighborDist &b)
               { return a.dist_sq < b.dist_sq; });
 
-    int limit = std::min((int)candidates.size(), MAX_NEIGHBORS);
+    int limit = std::min((int)candidates.size(), cfg.max_neighbors);
 
     Vec2 separation_force(0, 0);
     int count = 0;
@@ -272,7 +274,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         if (dist < 0.001)
             dist = 0.001;
 
-        double falloff = std::pow(std::max(0.0, 1.0 - dist / SEPARATION_RADIUS), 2.0);
+        double falloff = std::pow(std::max(0.0, 1.0 - dist / cfg.separation_radius), 2.0);
 
         bool other_has_flow = (n.flow != nullptr);
 
@@ -290,7 +292,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         separation_force = separation_force * (1.0 / (double)count);
 
     if (!separation_force.is_zero())
-        separation_force = safe_normalize(separation_force) * SEPARATION_STRENGTH;
+        separation_force = safe_normalize(separation_force) * cfg.separation_strength;
 
     return separation_force;
 }
@@ -345,6 +347,8 @@ void SteeringSystem::update_all(double delta)
     if (!grid)
         return;
 
+    const auto &cfg = globalconfig();
+
     for (auto &a : agents)
     {
         FlowField *nav = a.flow ? a.flow : default_flow;
@@ -361,8 +365,8 @@ void SteeringSystem::update_all(double delta)
 
             if (!local_dir.is_zero())
             {
-                Vec2 target_vel = local_dir * a.max_speed * MIN_SPEED_FRACTION;
-                a.velocity = a.velocity.lerp(target_vel, LERP_GENERAL);
+                Vec2 target_vel = local_dir * a.max_speed * cfg.min_speed_fraction;
+                a.velocity = a.velocity.lerp(target_vel, cfg.lerp_general);
 
                 Vec2 old_pos = a.position;
                 a.position = a.position + a.velocity * delta;
@@ -387,16 +391,16 @@ void SteeringSystem::update_all(double delta)
         Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
 
         double slow_factor = 1.0;
-        if (dist_to_target < TARGET_SLOW_RADIUS)
+        if (dist_to_target < cfg.target_slow_radius)
         {
-            double t = dist_to_target / TARGET_SLOW_RADIUS;
-            slow_factor = std::clamp(t * t, MIN_SPEED_FRACTION, 1.0);
+            double t = dist_to_target / cfg.target_slow_radius;
+            slow_factor = std::clamp(t * t, cfg.min_speed_fraction, 1.0);
         }
 
-        if (!a.has_arrived && dist_to_target < TARGET_APPROACH_RADIUS)
+        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius)
             a.has_arrived = true;
 
-        if (!ff->first_is_arrived && a.has_arrived && dist_to_target < TARGET_OCCUPY_RADIUS)
+        if (!ff->first_is_arrived && a.has_arrived && dist_to_target < cfg.target_occupy_radius)
         {
             smooth_stop(a.id);
             a.is_first = true;
@@ -420,7 +424,7 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 target_velocity = desired_dir * a.max_speed * slow_factor;
-        a.velocity = a.velocity.lerp(target_velocity, LERP_GENERAL);
+        a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
 
         double vlen = safe_len(a.velocity);
         if (vlen > a.max_speed)
@@ -434,4 +438,3 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos, a.position);
     }
 }
-

@@ -1,0 +1,133 @@
+#include "global_config_native.h"
+#include <algorithm>
+
+using namespace godot;
+
+namespace
+{
+    ffcore::GlobalConfig &cfg() { return ffcore::globalconfig(); }
+}
+
+void GlobalConfigNative::_bind_methods()
+{
+    ClassDB::bind_method(D_METHOD("get_flow_weight"), &GlobalConfigNative::get_flow_weight);
+    ClassDB::bind_method(D_METHOD("set_flow_weight", "value"), &GlobalConfigNative::set_flow_weight);
+
+    ClassDB::bind_method(D_METHOD("get_center_pull"), &GlobalConfigNative::get_center_pull);
+    ClassDB::bind_method(D_METHOD("set_center_pull", "value"), &GlobalConfigNative::set_center_pull);
+
+    ClassDB::bind_method(D_METHOD("get_tile_size"), &GlobalConfigNative::get_tile_size);
+    ClassDB::bind_method(D_METHOD("set_tile_size", "value"), &GlobalConfigNative::set_tile_size);
+
+    ClassDB::bind_method(D_METHOD("get_wall_avoid_radius"), &GlobalConfigNative::get_wall_avoid_radius);
+    ClassDB::bind_method(D_METHOD("set_wall_avoid_radius", "value"), &GlobalConfigNative::set_wall_avoid_radius);
+
+    ClassDB::bind_method(D_METHOD("get_wall_repel_strength"), &GlobalConfigNative::get_wall_repel_strength);
+    ClassDB::bind_method(D_METHOD("set_wall_repel_strength", "value"), &GlobalConfigNative::set_wall_repel_strength);
+
+    ClassDB::bind_method(D_METHOD("get_direct_steer_radius"), &GlobalConfigNative::get_direct_steer_radius);
+    ClassDB::bind_method(D_METHOD("set_direct_steer_radius", "value"), &GlobalConfigNative::set_direct_steer_radius);
+
+    ClassDB::bind_method(D_METHOD("get_min_speed_fraction"), &GlobalConfigNative::get_min_speed_fraction);
+    ClassDB::bind_method(D_METHOD("set_min_speed_fraction", "value"), &GlobalConfigNative::set_min_speed_fraction);
+
+    ClassDB::bind_method(D_METHOD("get_cellgoal_cooldown_sec"), &GlobalConfigNative::get_cellgoal_cooldown_sec);
+    ClassDB::bind_method(D_METHOD("set_cellgoal_cooldown_sec", "value"), &GlobalConfigNative::set_cellgoal_cooldown_sec);
+
+    ClassDB::bind_method(D_METHOD("get_target_slow_radius"), &GlobalConfigNative::get_target_slow_radius);
+    ClassDB::bind_method(D_METHOD("set_target_slow_radius", "value"), &GlobalConfigNative::set_target_slow_radius);
+
+    ClassDB::bind_method(D_METHOD("get_target_approach_radius"), &GlobalConfigNative::get_target_approach_radius);
+    ClassDB::bind_method(D_METHOD("set_target_approach_radius", "value"), &GlobalConfigNative::set_target_approach_radius);
+
+    ClassDB::bind_method(D_METHOD("get_target_occupy_radius"), &GlobalConfigNative::get_target_occupy_radius);
+    ClassDB::bind_method(D_METHOD("set_target_occupy_radius", "value"), &GlobalConfigNative::set_target_occupy_radius);
+
+    ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
+    ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
+
+    ClassDB::bind_method(D_METHOD("get_separation_strength"), &GlobalConfigNative::get_separation_strength);
+    ClassDB::bind_method(D_METHOD("set_separation_strength", "value"), &GlobalConfigNative::set_separation_strength);
+
+    ClassDB::bind_method(D_METHOD("get_max_neighbors"), &GlobalConfigNative::get_max_neighbors);
+    ClassDB::bind_method(D_METHOD("set_max_neighbors", "value"), &GlobalConfigNative::set_max_neighbors);
+
+    ClassDB::bind_method(D_METHOD("get_lerp_general"), &GlobalConfigNative::get_lerp_general);
+    ClassDB::bind_method(D_METHOD("set_lerp_general", "value"), &GlobalConfigNative::set_lerp_general);
+
+    ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
+
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_weight"), "set_flow_weight", "get_flow_weight");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "center_pull"), "set_center_pull", "get_center_pull");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tile_size"), "set_tile_size", "get_tile_size");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_avoid_radius"), "set_wall_avoid_radius", "get_wall_avoid_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_repel_strength"), "set_wall_repel_strength", "get_wall_repel_strength");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_slow_radius"), "set_target_slow_radius", "get_target_slow_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_approach_radius"), "set_target_approach_radius", "get_target_approach_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_occupy_radius"), "set_target_occupy_radius", "get_target_occupy_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
+}
+
+double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
+void GlobalConfigNative::set_flow_weight(double v) { cfg().flow_weight = v; }
+
+double GlobalConfigNative::get_center_pull() const { return cfg().center_pull; }
+void GlobalConfigNative::set_center_pull(double v) { cfg().center_pull = v; }
+
+double GlobalConfigNative::get_tile_size() const { return cfg().tile_size; }
+void GlobalConfigNative::set_tile_size(double v)
+{
+    if (v > 0.0)
+    {
+        cfg().tile_size = v;
+        cfg().recompute_from_tile();
+    }
+}
+
+double GlobalConfigNative::get_wall_avoid_radius() const { return cfg().wall_avoid_radius; }
+void GlobalConfigNative::set_wall_avoid_radius(double v) { cfg().wall_avoid_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_wall_repel_strength() const { return cfg().wall_repel_strength; }
+void GlobalConfigNative::set_wall_repel_strength(double v) { cfg().wall_repel_strength = std::max(0.0, v); }
+
+double GlobalConfigNative::get_direct_steer_radius() const { return cfg().direct_steer_radius; }
+void GlobalConfigNative::set_direct_steer_radius(double v) { cfg().direct_steer_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_min_speed_fraction() const { return cfg().min_speed_fraction; }
+void GlobalConfigNative::set_min_speed_fraction(double v) { cfg().min_speed_fraction = std::clamp(v, 0.0, 1.0); }
+
+double GlobalConfigNative::get_cellgoal_cooldown_sec() const { return cfg().cellgoal_cooldown_sec; }
+void GlobalConfigNative::set_cellgoal_cooldown_sec(double v) { cfg().cellgoal_cooldown_sec = std::max(0.0, v); }
+
+double GlobalConfigNative::get_target_slow_radius() const { return cfg().target_slow_radius; }
+void GlobalConfigNative::set_target_slow_radius(double v) { cfg().target_slow_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_target_approach_radius() const { return cfg().target_approach_radius; }
+void GlobalConfigNative::set_target_approach_radius(double v) { cfg().target_approach_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_target_occupy_radius() const { return cfg().target_occupy_radius; }
+void GlobalConfigNative::set_target_occupy_radius(double v) { cfg().target_occupy_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
+void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_separation_strength() const { return cfg().separation_strength; }
+void GlobalConfigNative::set_separation_strength(double v) { cfg().separation_strength = std::max(0.0, v); }
+
+int GlobalConfigNative::get_max_neighbors() const { return cfg().max_neighbors; }
+void GlobalConfigNative::set_max_neighbors(int v) { cfg().max_neighbors = std::max(0, v); }
+
+double GlobalConfigNative::get_lerp_general() const { return cfg().lerp_general; }
+void GlobalConfigNative::set_lerp_general(double v) { cfg().lerp_general = std::clamp(v, 0.0, 1.0); }
+
+void GlobalConfigNative::reset_defaults()
+{
+    ffcore::reset_globalconfig();
+}
+
