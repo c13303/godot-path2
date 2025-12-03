@@ -15,6 +15,9 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity"), &SteeringSystemNative::apply_explosion);
+    ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
+        PropertyInfo(Variant::INT, "agent_id"),
+        PropertyInfo(Variant::BOOL, "propelled")));
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -66,6 +69,16 @@ void SteeringSystemNative::apply_explosion(const Vector2 &position, double radiu
     system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity);
 }
 
+void SteeringSystemNative::maybe_emit_propelled_state(int agent_id, bool propelled)
+{
+    auto it = agent_propelled_states.find(agent_id);
+    bool last = (it != agent_propelled_states.end()) ? it->second : false;
+    if (last == propelled)
+        return;
+    agent_propelled_states[agent_id] = propelled;
+    emit_signal("agent_propelled_state_changed", agent_id, propelled);
+}
+
 void SteeringSystemNative::_process(double delta)
 {
     if (!flowfield || !grid)
@@ -78,6 +91,7 @@ void SteeringSystemNative::_process(double delta)
         const ffcore::AgentData *a = system.get_agent(id);
         if (!a)
             continue;
+        maybe_emit_propelled_state(id, a->is_propelled);
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 }

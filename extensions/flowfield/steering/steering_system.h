@@ -28,6 +28,7 @@ namespace ffcore
         Vec2 smash_force{};
         bool is_propelled = false;
         double propelled_timer = 0.0;
+        bool smash_just_reset = false;
     };
 
     class SteeringSystem
