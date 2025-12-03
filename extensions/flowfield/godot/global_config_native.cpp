@@ -55,6 +55,24 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_lerp_general"), &GlobalConfigNative::get_lerp_general);
     ClassDB::bind_method(D_METHOD("set_lerp_general", "value"), &GlobalConfigNative::set_lerp_general);
 
+    ClassDB::bind_method(D_METHOD("get_friction_factor"), &GlobalConfigNative::get_friction_factor);
+    ClassDB::bind_method(D_METHOD("set_friction_factor", "value"), &GlobalConfigNative::set_friction_factor);
+
+    ClassDB::bind_method(D_METHOD("get_smash_threshold"), &GlobalConfigNative::get_smash_threshold);
+    ClassDB::bind_method(D_METHOD("set_smash_threshold", "value"), &GlobalConfigNative::set_smash_threshold);
+
+    ClassDB::bind_method(D_METHOD("get_propagation_factor"), &GlobalConfigNative::get_propagation_factor);
+    ClassDB::bind_method(D_METHOD("set_propagation_factor", "value"), &GlobalConfigNative::set_propagation_factor);
+
+    ClassDB::bind_method(D_METHOD("get_smash_min_cutoff"), &GlobalConfigNative::get_smash_min_cutoff);
+    ClassDB::bind_method(D_METHOD("set_smash_min_cutoff", "value"), &GlobalConfigNative::set_smash_min_cutoff);
+
+    ClassDB::bind_method(D_METHOD("get_propagation_threshold"), &GlobalConfigNative::get_propagation_threshold);
+    ClassDB::bind_method(D_METHOD("set_propagation_threshold", "value"), &GlobalConfigNative::set_propagation_threshold);
+
+    ClassDB::bind_method(D_METHOD("get_smash_cap"), &GlobalConfigNative::get_smash_cap);
+    ClassDB::bind_method(D_METHOD("set_smash_cap", "value"), &GlobalConfigNative::set_smash_cap);
+
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_weight"), "set_flow_weight", "get_flow_weight");
@@ -72,6 +90,12 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "friction_factor"), "set_friction_factor", "get_friction_factor");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_threshold"), "set_smash_threshold", "get_smash_threshold");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "propagation_factor"), "set_propagation_factor", "get_propagation_factor");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_min_cutoff"), "set_smash_min_cutoff", "get_smash_min_cutoff");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "propagation_threshold"), "set_propagation_threshold", "get_propagation_threshold");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_cap"), "set_smash_cap", "get_smash_cap");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -126,8 +150,25 @@ void GlobalConfigNative::set_max_neighbors(int v) { cfg().max_neighbors = std::m
 double GlobalConfigNative::get_lerp_general() const { return cfg().lerp_general; }
 void GlobalConfigNative::set_lerp_general(double v) { cfg().lerp_general = std::clamp(v, 0.0, 1.0); }
 
+double GlobalConfigNative::get_friction_factor() const { return cfg().friction_factor; }
+void GlobalConfigNative::set_friction_factor(double v) { cfg().friction_factor = std::clamp(v, 0.0, 1.0); }
+
+double GlobalConfigNative::get_smash_threshold() const { return cfg().smash_threshold; }
+void GlobalConfigNative::set_smash_threshold(double v) { cfg().smash_threshold = std::max(0.0, v); }
+
+double GlobalConfigNative::get_propagation_factor() const { return cfg().propagation_factor; }
+void GlobalConfigNative::set_propagation_factor(double v) { cfg().propagation_factor = std::clamp(v, 0.0, 1.0); }
+
+double GlobalConfigNative::get_smash_min_cutoff() const { return cfg().smash_min_cutoff; }
+void GlobalConfigNative::set_smash_min_cutoff(double v) { cfg().smash_min_cutoff = std::max(0.0, v); }
+
+double GlobalConfigNative::get_propagation_threshold() const { return cfg().propagation_threshold; }
+void GlobalConfigNative::set_propagation_threshold(double v) { cfg().propagation_threshold = std::max(0.0, v); }
+
+double GlobalConfigNative::get_smash_cap() const { return cfg().smash_cap; }
+void GlobalConfigNative::set_smash_cap(double v) { cfg().smash_cap = std::max(0.0, v); }
+
 void GlobalConfigNative::reset_defaults()
 {
     ffcore::reset_globalconfig();
 }
-

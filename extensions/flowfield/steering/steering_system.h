@@ -25,6 +25,7 @@ namespace ffcore
         bool has_arrived = false;
         bool is_first = false;
         GroupID group = INVALID_GROUP;
+        Vec2 smash_force{};
     };
 
     class SteeringSystem
