@@ -44,7 +44,7 @@ namespace godot
         void register_node_mapping(Node2D *node, int agent_id);
 
         int get_agent_id(Node2D *node);
-        void apply_explosion(const Vector2 &position, double radius, double intensity);
+        void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
     };
 
 }

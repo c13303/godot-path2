@@ -29,8 +29,10 @@ namespace ffcore
         bool is_propelled = false;
         double propelled_timer = 0.0;
         bool smash_just_reset = false;
+        double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global
         Vec2 pending_smash{};
         double smash_delay = 0.0;
+        double pending_smash_friction = -1.0;
         bool smash_pending = false;
     };
 
@@ -55,7 +57,7 @@ namespace ffcore
         void set_agent_group(int id, GroupID group);
         int register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow);
         void set_agent_flow_ptr(int id, FlowField *ff);
-        void apply_explosion(const Vec2 &pos, double radius, double intensity);
+        void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
 
     private:
         std::vector<AgentData> agents;

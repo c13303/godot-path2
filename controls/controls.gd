@@ -11,6 +11,7 @@ const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
 @export var explosion_radius: float = 90
 @export var explosion_intensity: float = 400
+@export var explosion_friction: float = 0.91 # perte de vitesse par seconde appliquée à cette explosion
 @export var explosion_debug_duration: float = 1.0 #visuel
 
 @export var camera: Camera2D
@@ -249,7 +250,7 @@ func _on_key_trig_bomb() -> void:
 	var mouse_pos := get_global_mouse_position()
 	print("bomb!", mouse_pos, "intensity",explosion_intensity)
 	if steering and steering.has_method("apply_explosion"):
-		steering.apply_explosion(mouse_pos, explosion_radius, explosion_intensity)
+		steering.apply_explosion(mouse_pos, explosion_radius, explosion_intensity, explosion_friction)
 	_spawn_explosion_effect(mouse_pos)
 
 func _spawn_explosion_effect(position: Vector2) -> void:

@@ -14,7 +14,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
-    ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity"), &SteeringSystemNative::apply_explosion);
+    ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
         PropertyInfo(Variant::INT, "agent_id"),
         PropertyInfo(Variant::BOOL, "propelled")));
@@ -64,9 +64,9 @@ void SteeringSystemNative::set_grid(Object *obj)
     grid = Object::cast_to<Node2D>(obj);
 }
 
-void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity)
+void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
 {
-    system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity);
+    system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss);
 }
 
 void SteeringSystemNative::maybe_emit_propelled_state(int agent_id, bool propelled)

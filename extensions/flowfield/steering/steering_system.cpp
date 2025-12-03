@@ -193,6 +193,8 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
 
     a.position = a.position.lerp(target, softness);
     a.velocity = Vec2(0, 0);
+    a.smash_force = Vec2(0, 0);
+    a.smash_friction = -1.0;
 }
 // steering_system.cpp
 Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
@@ -344,7 +346,7 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.active = (ff != nullptr);
 }
 
-void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity)
+void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
 {
     if (radius <= 0.0 || !grid)
         return;
@@ -380,6 +382,7 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         double wave_speed = std::max(1.0, cfg.shockwave_speed);
         agent.smash_delay = dist / wave_speed;
         agent.pending_smash = smash;
+        agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
         agent.smash_pending = true;
         agent.smash_force = Vec2(0, 0);
         agent.smash_just_reset = false;
@@ -408,7 +411,6 @@ void SteeringSystem::update_all(double delta)
 
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
-    double vel_damp = std::pow(1.0 - loss_per_sec, delta);
 
     for (auto &a : agents)
     {
@@ -419,6 +421,8 @@ void SteeringSystem::update_all(double delta)
             {
                 a.smash_force = a.pending_smash;
                 a.pending_smash = Vec2(0, 0);
+                a.smash_friction = a.pending_smash_friction;
+                a.pending_smash_friction = -1.0;
                 a.smash_pending = false;
                 a.smash_just_reset = true;
             }
@@ -440,6 +444,8 @@ void SteeringSystem::update_all(double delta)
         }
         else if (a.is_propelled)
         {
+            double loss = (a.smash_friction >= 0.0) ? std::clamp(a.smash_friction, 0.0, 1.0) : loss_per_sec;
+            double vel_damp = std::pow(1.0 - loss, delta);
             a.velocity = a.velocity * vel_damp; // dissipation sur la vitesse
             a.propelled_timer -= delta;
 
@@ -449,6 +455,7 @@ void SteeringSystem::update_all(double delta)
                 a.is_propelled = false;
                 a.propelled_timer = 0.0;
                 a.smash_force = Vec2(0, 0);
+                a.smash_friction = -1.0;
                 a.velocity = Vec2(0, 0);
             }
         }
