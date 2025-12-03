@@ -29,6 +29,9 @@ namespace ffcore
         bool is_propelled = false;
         double propelled_timer = 0.0;
         bool smash_just_reset = false;
+        Vec2 pending_smash{};
+        double smash_delay = 0.0;
+        bool smash_pending = false;
     };
 
     class SteeringSystem

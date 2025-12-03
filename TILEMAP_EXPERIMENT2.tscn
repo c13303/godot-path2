@@ -1255,7 +1255,6 @@ script = ExtResource("2_2rfbb")
 
 [node name="Controls" type="Node2D" parent="." node_paths=PackedStringArray("camera")]
 script = ExtResource("2_ii2xt")
-explosion_intensity = 2000.0
 camera = NodePath("../Camera2D")
 
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
@@ -1268,3 +1267,4 @@ script = ExtResource("4_k8xte")
 [node name="AgentManagerNative" type="AgentManagerNative" parent="."]
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
+friction_factor = 0.91

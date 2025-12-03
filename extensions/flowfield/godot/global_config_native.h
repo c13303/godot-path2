@@ -76,6 +76,9 @@ namespace godot
         double get_smash_cap() const;
         void set_smash_cap(double v);
 
+        double get_shockwave_speed() const;
+        void set_shockwave_speed(double v);
+
         void reset_defaults();
     };
 

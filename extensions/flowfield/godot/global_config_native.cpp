@@ -66,6 +66,8 @@ void GlobalConfigNative::_bind_methods()
 
     ClassDB::bind_method(D_METHOD("get_smash_cap"), &GlobalConfigNative::get_smash_cap);
     ClassDB::bind_method(D_METHOD("set_smash_cap", "value"), &GlobalConfigNative::set_smash_cap);
+    ClassDB::bind_method(D_METHOD("get_shockwave_speed"), &GlobalConfigNative::get_shockwave_speed);
+    ClassDB::bind_method(D_METHOD("set_shockwave_speed", "value"), &GlobalConfigNative::set_shockwave_speed);
 
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
@@ -88,6 +90,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_threshold"), "set_smash_threshold", "get_smash_threshold");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_min_cutoff"), "set_smash_min_cutoff", "get_smash_min_cutoff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_cap"), "set_smash_cap", "get_smash_cap");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_speed"), "set_shockwave_speed", "get_shockwave_speed");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -153,6 +156,9 @@ void GlobalConfigNative::set_smash_min_cutoff(double v) { cfg().smash_min_cutoff
 
 double GlobalConfigNative::get_smash_cap() const { return cfg().smash_cap; }
 void GlobalConfigNative::set_smash_cap(double v) { cfg().smash_cap = std::max(0.0, v); }
+
+double GlobalConfigNative::get_shockwave_speed() const { return cfg().shockwave_speed; }
+void GlobalConfigNative::set_shockwave_speed(double v) { cfg().shockwave_speed = std::max(0.0, v); }
 
 void GlobalConfigNative::reset_defaults()
 {

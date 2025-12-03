@@ -25,11 +25,12 @@ namespace ffcore
 
         double lerp_general = 0.02;
 
-        double friction_factor = 0.95;
+        double friction_factor = 0.91;
         double smash_threshold = 5.0;
         double smash_min_cutoff = 0.20;
         double smash_cap = 500.0;
         double propelled_duration = 8.0;
+        double shockwave_speed = 600.0; // vitesse de propagation de l'onde (units/s)
 
         void recompute_from_tile();
     };

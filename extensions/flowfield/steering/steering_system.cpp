@@ -371,15 +371,22 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         double attenuation = std::max(0.0, 1.0 - dist / radius);
         attenuation = attenuation * attenuation;
 
-        agent.smash_force = dir * (intensity * attenuation);
+        Vec2 smash = dir * (intensity * attenuation);
 
-        double len = safe_len(agent.smash_force);
+        double len = safe_len(smash);
         if (len > cfg.smash_cap)
-            agent.smash_force = agent.smash_force * (cfg.smash_cap / len);
+            smash = smash * (cfg.smash_cap / len);
 
-        agent.is_propelled = true;
-        agent.propelled_timer = cfg.propelled_duration;
-        agent.smash_just_reset = true;
+        double wave_speed = std::max(1.0, cfg.shockwave_speed);
+        agent.smash_delay = dist / wave_speed;
+        agent.pending_smash = smash;
+        agent.smash_pending = true;
+        agent.smash_force = Vec2(0, 0);
+        agent.smash_just_reset = false;
+
+        agent.is_propelled = false;
+        agent.propelled_timer = 0.0;
+
         if (!agent.active)
         {
             agent.active = true;
@@ -402,6 +409,21 @@ void SteeringSystem::update_all(double delta)
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
     double vel_damp = std::pow(1.0 - loss_per_sec, delta);
+
+    for (auto &a : agents)
+    {
+        if (a.smash_pending)
+        {
+            a.smash_delay -= delta;
+            if (a.smash_delay <= 0.0)
+            {
+                a.smash_force = a.pending_smash;
+                a.pending_smash = Vec2(0, 0);
+                a.smash_pending = false;
+                a.smash_just_reset = true;
+            }
+        }
+    }
 
     for (auto &a : agents)
     {
