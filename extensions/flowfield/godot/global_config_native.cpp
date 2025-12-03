@@ -70,6 +70,10 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_shockwave_speed", "value"), &GlobalConfigNative::set_shockwave_speed);
     ClassDB::bind_method(D_METHOD("get_explosion_falloff"), &GlobalConfigNative::get_explosion_falloff);
     ClassDB::bind_method(D_METHOD("set_explosion_falloff", "value"), &GlobalConfigNative::set_explosion_falloff);
+    ClassDB::bind_method(D_METHOD("get_shockwave_stop_ratio"), &GlobalConfigNative::get_shockwave_stop_ratio);
+    ClassDB::bind_method(D_METHOD("set_shockwave_stop_ratio", "value"), &GlobalConfigNative::set_shockwave_stop_ratio);
+    ClassDB::bind_method(D_METHOD("get_shockwave_stop_duration_ms"), &GlobalConfigNative::get_shockwave_stop_duration_ms);
+    ClassDB::bind_method(D_METHOD("set_shockwave_stop_duration_ms", "value"), &GlobalConfigNative::set_shockwave_stop_duration_ms);
 
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
@@ -94,6 +98,8 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_cap"), "set_smash_cap", "get_smash_cap");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_speed"), "set_shockwave_speed", "get_shockwave_speed");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -165,6 +171,12 @@ void GlobalConfigNative::set_shockwave_speed(double v) { cfg().shockwave_speed =
 
 double GlobalConfigNative::get_explosion_falloff() const { return cfg().explosion_falloff; }
 void GlobalConfigNative::set_explosion_falloff(double v) { cfg().explosion_falloff = std::max(0.0, v); }
+
+double GlobalConfigNative::get_shockwave_stop_ratio() const { return cfg().shockwave_stop_ratio; }
+void GlobalConfigNative::set_shockwave_stop_ratio(double v) { cfg().shockwave_stop_ratio = std::max(0.0, v); }
+
+double GlobalConfigNative::get_shockwave_stop_duration_ms() const { return cfg().shockwave_stop_duration_ms; }
+void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockwave_stop_duration_ms = std::max(0.0, v); }
 
 void GlobalConfigNative::reset_defaults()
 {

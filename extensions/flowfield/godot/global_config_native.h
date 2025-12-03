@@ -82,6 +82,12 @@ namespace godot
         double get_explosion_falloff() const;
         void set_explosion_falloff(double v);
 
+        double get_shockwave_stop_ratio() const;
+        void set_shockwave_stop_ratio(double v);
+
+        double get_shockwave_stop_duration_ms() const;
+        void set_shockwave_stop_duration_ms(double v);
+
         void reset_defaults();
     };
 

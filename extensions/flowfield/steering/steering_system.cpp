@@ -356,6 +356,11 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
     if (neighbors.empty())
         return;
 
+    double stop_radius = radius * std::max(0.0, cfg.shockwave_stop_ratio);
+    double stop_time_ms = std::max(0.0, cfg.shockwave_stop_duration_ms);
+    if (stop_radius > 0.0 && stop_time_ms > 0.0)
+        shockwaves.push_back({pos, stop_radius, stop_time_ms});
+
     for (int nid : neighbors)
     {
         auto it = id_to_index.find(nid);
@@ -411,6 +416,14 @@ void SteeringSystem::update_all(double delta)
 
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
+
+    // Mettre à jour les shockwaves persistantes
+    for (auto &w : shockwaves)
+        w.time_left_ms -= delta * 1000.0;
+    shockwaves.erase(std::remove_if(shockwaves.begin(), shockwaves.end(),
+                                    [](const Shockwave &w)
+                                    { return w.time_left_ms <= 0.0; }),
+                     shockwaves.end());
 
     for (auto &a : agents)
     {
@@ -474,6 +487,18 @@ void SteeringSystem::update_all(double delta)
             wall_repel = wall_repulsion_force(a, nav);
 
         Vec2 separation = force_voisine(a);
+        bool in_shockwave = false;
+        if (!a.is_propelled)
+        {
+            for (const auto &w : shockwaves)
+            {
+                if (w.time_left_ms > 0.0 && (a.position - w.pos).length() <= w.radius)
+                {
+                    in_shockwave = true;
+                    break;
+                }
+            }
+        }
 
         if (!a.active || !a.flow)
         {
@@ -505,7 +530,7 @@ void SteeringSystem::update_all(double delta)
         if (!ff || !ff->is_ready())
             continue;
 
-        Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
+        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
 
         Vec2 goal_pos = ff->goal_center_world();
         double dist_to_target = (a.position - goal_pos).length();
