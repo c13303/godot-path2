@@ -9,7 +9,7 @@ extends Node2D
 @onready var ui_layer: CanvasLayer = $"../CanvasLayer"
 const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
-@export var explosion_radius: float = 96.0
+@export var explosion_radius: float = 200.0
 @export var explosion_intensity: float = 1.0
 @export var explosion_debug_duration: float = 1.0
 

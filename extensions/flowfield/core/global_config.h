@@ -25,10 +25,10 @@ namespace ffcore
 
         double lerp_general = 0.02;
 
-        double friction_factor = 0.5;
+        double friction_factor = 0.95;
         double smash_threshold = 5.0;
-        double smash_min_cutoff = 0.1;
-        double smash_cap = 2000.0;
+        double smash_min_cutoff = 0.20;
+        double smash_cap = 500.0;
         double propelled_duration = 8.0;
 
         void recompute_from_tile();
