@@ -10,7 +10,7 @@ extends Node2D
 const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
 @export var explosion_radius: float = 96.0
-@export var explosion_intensity: float = 420.0
+@export var explosion_intensity: float = 100.0
 @export var explosion_debug_duration: float = 1.0
 
 @export var camera: Camera2D
@@ -259,5 +259,7 @@ func _spawn_explosion_effect(position: Vector2) -> void:
 	circle.z_index = 99
 	var timer = get_tree().create_timer(explosion_debug_duration)
 	await timer.timeout
+	var scale = explosion_radius / 16
+	circle.scale = Vector2(scale, scale)
 	if circle.is_inside_tree():
 		circle.queue_free()

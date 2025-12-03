@@ -70,14 +70,8 @@ namespace godot
         double get_smash_threshold() const;
         void set_smash_threshold(double v);
 
-        double get_propagation_factor() const;
-        void set_propagation_factor(double v);
-
         double get_smash_min_cutoff() const;
         void set_smash_min_cutoff(double v);
-
-        double get_propagation_threshold() const;
-        void set_propagation_threshold(double v);
 
         double get_smash_cap() const;
         void set_smash_cap(double v);

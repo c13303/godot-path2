@@ -1268,4 +1268,5 @@ script = ExtResource("4_k8xte")
 [node name="AgentManagerNative" type="AgentManagerNative" parent="."]
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
-friction_factor = 0.0
+friction_factor = 0.1
+smash_threshold = 5.0

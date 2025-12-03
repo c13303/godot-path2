@@ -22,7 +22,6 @@ SteeringSystem::SteeringSystem()
 {
 
     g_steering = this;
-    smash_buffer.reserve(2048);
 }
 
 static inline Vec2 safe_normalize(const Vec2 &v) // Normalise un vecteur, évite la division par zéro
@@ -397,42 +396,7 @@ void SteeringSystem::update_all(double delta)
 
     const auto &cfg = globalconfig();
 
-    if (smash_buffer.size() < agents.size())
-        smash_buffer.resize(agents.size());
-    std::fill(smash_buffer.begin(), smash_buffer.begin() + agents.size(), Vec2(0, 0));
-
-    std::vector<Vec2> pre_smash(agents.size());
-    for (size_t idx = 0; idx < agents.size(); ++idx)
-        pre_smash[idx] = agents[idx].smash_force;
-
-    for (size_t src_idx = 0; src_idx < agents.size(); ++src_idx)
-    {
-        auto &source = agents[src_idx];
-        Vec2 source_force = pre_smash[src_idx];
-        double source_len = safe_len(source_force);
-        if (source_len < 0.001)
-            continue;
-
-        std::vector<int> neighbors = grid->query_neighbors(source.position, cfg.separation_radius);
-        for (int nid : neighbors)
-        {
-            if (nid == source.id)
-                continue;
-
-            auto it = id_to_index.find(nid);
-            if (it == id_to_index.end())
-                continue;
-
-            size_t target_idx = it->second;
-            Vec2 target_force = pre_smash[target_idx];
-
-            Vec2 delta = (source_force - target_force) * cfg.propagation_factor;
-            smash_buffer[target_idx] += delta;
-        }
-    }
-
-    for (size_t idx = 0; idx < agents.size(); ++idx)
-        agents[idx].smash_force = pre_smash[idx] + smash_buffer[idx];
+    double friction = std::pow(cfg.friction_factor, delta); // appliquer la friction au pas de temps
 
     for (auto &a : agents)
     {
@@ -442,7 +406,7 @@ void SteeringSystem::update_all(double delta)
         }
         else
         {
-            a.smash_force = a.smash_force * cfg.friction_factor;
+            a.smash_force = a.smash_force * friction;
         }
 
         double len = safe_len(a.smash_force);

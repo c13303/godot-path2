@@ -26,10 +26,8 @@ namespace ffcore
         double lerp_general = 0.02;
 
         double friction_factor = 0.1;
-        double smash_threshold = 10.0;
-        double propagation_factor = 0.08;
+        double smash_threshold = 5.0;
         double smash_min_cutoff = 0.1;
-        double propagation_threshold = 1.0;
         double smash_cap = 2000.0;
         double propelled_duration = 8.0;
 
