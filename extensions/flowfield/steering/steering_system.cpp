@@ -378,6 +378,14 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         agent.is_propelled = true;
         agent.propelled_timer = cfg.propelled_duration;
         agent.smash_just_reset = true;
+        if (!agent.active)
+        {
+            agent.active = true;
+            agent.has_arrived = false;
+            agent.is_first = false;
+        }
+        agent.flow = nullptr;
+        agent.group = INVALID_GROUP;
     }
 }
 void SteeringSystem::update_all(double delta)
@@ -476,21 +484,36 @@ void SteeringSystem::update_all(double delta)
 
         if (!a.active || !a.flow)
         {
-            Vec2 local_dir = safe_normalize(wall_repel + separation);
+            double smash_len = safe_len(a.smash_force);
+            Vec2 target_velocity;
 
-            if (!local_dir.is_zero())
+            if (a.is_propelled && smash_len > 0.0)
             {
-                Vec2 target_vel = local_dir * a.max_speed * cfg.min_speed_fraction;
-                a.velocity = a.velocity.lerp(target_vel, cfg.lerp_general);
-
-                Vec2 old_pos = a.position;
-                a.position = a.position + a.velocity * delta;
-
-                if (nav)
-                    ultimate_wall_correction(a, nav, delta);
-
-                grid->update(a.id, old_pos, a.position);
+                target_velocity = -a.smash_force;
             }
+            else
+            {
+                Vec2 combined = wall_repel + separation;
+                if (smash_len > 0.0)
+                    combined += a.smash_force;
+
+                Vec2 local_dir = safe_normalize(combined);
+                if (local_dir.is_zero())
+                {
+                    continue;
+                }
+                target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
+            }
+
+            a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+
+            Vec2 old_pos = a.position;
+            a.position = a.position + a.velocity * delta;
+
+            if (nav)
+                ultimate_wall_correction(a, nav, delta);
+
+            grid->update(a.id, old_pos, a.position);
             continue;
         }
 

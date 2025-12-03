@@ -23,6 +23,7 @@ namespace ffcore
         inline Vec2 operator-(const Vec2 &v) const { return {x - v.x, y - v.y}; }
         inline Vec2 operator*(double s) const { return {x * s, y * s}; }
         inline Vec2 operator/(double s) const { return {x / s, y / s}; }
+        inline Vec2 operator-() const { return {-x, -y}; }
 
         inline Vec2 &operator+=(const Vec2 &v)
         {
