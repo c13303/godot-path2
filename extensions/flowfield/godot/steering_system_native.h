@@ -3,7 +3,9 @@
 
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <unordered_map>
 
 #include "../steering/steering_system.h"
 #include "../flow/flow_field.h"
@@ -23,6 +25,9 @@ namespace godot
         Node2D *grid = nullptr;
 
         std::unordered_map<Node2D *, int> agent_map;
+        std::unordered_map<int, bool> agent_propelled_states;
+
+        void maybe_emit_propelled_state(int agent_id, bool propelled);
 
     public:
         static void _bind_methods();
