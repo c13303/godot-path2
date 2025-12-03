@@ -31,6 +31,7 @@ namespace ffcore
         double smash_min_cutoff = 0.1;
         double propagation_threshold = 1.0;
         double smash_cap = 300.0;
+        double propelled_duration = 8.0;
 
         void recompute_from_tile();
     };

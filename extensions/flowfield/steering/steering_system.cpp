@@ -374,6 +374,9 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         double len = safe_len(agent.smash_force);
         if (len > cfg.smash_cap)
             agent.smash_force = agent.smash_force * (cfg.smash_cap / len);
+
+        agent.is_propelled = true;
+        agent.propelled_timer = cfg.propelled_duration;
     }
 }
 void SteeringSystem::update_all(double delta)
@@ -441,6 +444,26 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        double len = safe_len(a.smash_force);
+        if (len > cfg.smash_threshold)
+        {
+            a.is_propelled = true;
+            a.propelled_timer = cfg.propelled_duration;
+        }
+        else if (a.is_propelled)
+        {
+            a.propelled_timer -= delta;
+            if (a.propelled_timer <= 0.0)
+            {
+                a.is_propelled = false;
+                a.propelled_timer = 0.0;
+                a.smash_force = Vec2(0, 0);
+            }
+        }
+    }
+
+    for (auto &a : agents)
+    {
         FlowField *nav = a.flow ? a.flow : default_flow;
 
         Vec2 wall_repel(0, 0);
@@ -485,7 +508,7 @@ void SteeringSystem::update_all(double delta)
             continue;
 
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
-        bool ignore_flow = smash_len > cfg.smash_threshold;
+        bool ignore_flow = a.is_propelled;
         if (!ignore_flow)
             combined = combined + flow_dir * cfg.flow_weight;
 
