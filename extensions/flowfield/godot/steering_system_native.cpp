@@ -14,6 +14,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
+    ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity"), &SteeringSystemNative::apply_explosion);
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -58,6 +59,11 @@ void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
 void SteeringSystemNative::set_grid(Object *obj)
 {
     grid = Object::cast_to<Node2D>(obj);
+}
+
+void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity)
+{
+    system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity);
 }
 
 void SteeringSystemNative::_process(double delta)

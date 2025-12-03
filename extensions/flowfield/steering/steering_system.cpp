@@ -22,6 +22,7 @@ SteeringSystem::SteeringSystem()
 {
 
     g_steering = this;
+    smash_buffer.reserve(2048);
 }
 
 static inline Vec2 safe_normalize(const Vec2 &v) // Normalise un vecteur, évite la division par zéro
@@ -340,6 +341,41 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
 }
+
+void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity)
+{
+    if (radius <= 0.0 || !grid)
+        return;
+
+    const auto &cfg = globalconfig();
+    auto neighbors = grid->query_neighbors(pos, radius);
+    if (neighbors.empty())
+        return;
+
+    for (int nid : neighbors)
+    {
+        auto it = id_to_index.find(nid);
+        if (it == id_to_index.end())
+            continue;
+
+        AgentData &agent = agents[it->second];
+
+        Vec2 diff = agent.position - pos;
+        double dist = diff.length();
+        if (dist > radius)
+            continue;
+
+        Vec2 dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
+        double attenuation = std::max(0.0, 1.0 - dist / radius);
+        attenuation = attenuation * attenuation;
+
+        agent.smash_force += dir * (intensity * attenuation);
+
+        double len = safe_len(agent.smash_force);
+        if (len > cfg.smash_cap)
+            agent.smash_force = agent.smash_force * (cfg.smash_cap / len);
+    }
+}
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -348,6 +384,60 @@ void SteeringSystem::update_all(double delta)
         return;
 
     const auto &cfg = globalconfig();
+
+    if (smash_buffer.size() < agents.size())
+        smash_buffer.resize(agents.size());
+    std::fill(smash_buffer.begin(), smash_buffer.begin() + agents.size(), Vec2(0, 0));
+
+    for (auto &a : agents)
+    {
+        a.smash_force = a.smash_force * cfg.friction_factor;
+        double len = safe_len(a.smash_force);
+        if (len < cfg.smash_min_cutoff)
+            a.smash_force = Vec2(0, 0);
+        else if (len > cfg.smash_cap)
+            a.smash_force = a.smash_force * (cfg.smash_cap / len);
+    }
+
+    for (size_t src_idx = 0; src_idx < agents.size(); ++src_idx)
+    {
+        auto &source = agents[src_idx];
+        double source_len = safe_len(source.smash_force);
+        if (source_len < cfg.propagation_threshold)
+            continue;
+
+        std::vector<int> neighbors = grid->query_neighbors(source.position, cfg.separation_radius);
+        for (int nid : neighbors)
+        {
+            if (nid == source.id)
+                continue;
+
+            auto it = id_to_index.find(nid);
+            if (it == id_to_index.end())
+                continue;
+
+            size_t target_idx = it->second;
+            const AgentData &target = agents[target_idx];
+            double target_len = safe_len(target.smash_force);
+            if (source_len <= target_len)
+                continue;
+
+            Vec2 delta = (source.smash_force - target.smash_force) * cfg.propagation_factor;
+            smash_buffer[target_idx] += delta;
+        }
+    }
+
+    for (size_t idx = 0; idx < agents.size(); ++idx)
+        agents[idx].smash_force += smash_buffer[idx];
+
+    for (auto &a : agents)
+    {
+        double len = safe_len(a.smash_force);
+        if (len < cfg.smash_min_cutoff)
+            a.smash_force = Vec2(0, 0);
+        else if (len > cfg.smash_cap)
+            a.smash_force = a.smash_force * (cfg.smash_cap / len);
+    }
 
     for (auto &a : agents)
     {
@@ -359,9 +449,20 @@ void SteeringSystem::update_all(double delta)
 
         Vec2 separation = force_voisine(a);
 
+        double smash_len = safe_len(a.smash_force);
+        Vec2 smash_contrib(0, 0);
+        if (smash_len > 0.0)
+        {
+            Vec2 smash_dir = safe_normalize(a.smash_force);
+            double smash_strength = std::min(smash_len, cfg.smash_cap);
+            smash_contrib = smash_dir * smash_strength;
+        }
+
+        Vec2 combined = wall_repel + separation + smash_contrib;
+
         if (!a.active || !a.flow)
         {
-            Vec2 local_dir = safe_normalize(wall_repel + separation);
+            Vec2 local_dir = safe_normalize(combined);
 
             if (!local_dir.is_zero())
             {
@@ -374,8 +475,7 @@ void SteeringSystem::update_all(double delta)
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
 
-                if (grid)
-                    grid->update(a.id, old_pos, a.position);
+                grid->update(a.id, old_pos, a.position);
             }
             continue;
         }
@@ -384,11 +484,15 @@ void SteeringSystem::update_all(double delta)
         if (!ff || !ff->is_ready())
             continue;
 
-        const Vec2 goal_pos = ff->goal_center_world();
-        const double dist_to_target = (a.position - goal_pos).length();
-
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position));
-        Vec2 desired_dir = safe_normalize(wall_repel + separation + flow_dir);
+        bool ignore_flow = smash_len > cfg.smash_threshold;
+        if (!ignore_flow)
+            combined = combined + flow_dir * cfg.flow_weight;
+
+        Vec2 desired_dir = safe_normalize(combined);
+
+        Vec2 goal_pos = ff->goal_center_world();
+        double dist_to_target = (a.position - goal_pos).length();
 
         double slow_factor = 1.0;
         if (dist_to_target < cfg.target_slow_radius)

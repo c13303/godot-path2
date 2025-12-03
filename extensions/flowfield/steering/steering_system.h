@@ -49,6 +49,7 @@ namespace ffcore
         void set_agent_group(int id, GroupID group);
         int register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow);
         void set_agent_flow_ptr(int id, FlowField *ff);
+        void apply_explosion(const Vec2 &pos, double radius, double intensity);
 
     private:
         std::vector<AgentData> agents;
@@ -63,6 +64,7 @@ namespace ffcore
         Vec2 force_voisine(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
+        std::vector<Vec2> smash_buffer;
     };
 
     SteeringSystem *get_global_steering_system();

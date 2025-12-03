@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 #include "../steering/steering_system.h"
 #include "../flow/flow_field.h"
@@ -38,6 +39,7 @@ namespace godot
         void register_node_mapping(Node2D *node, int agent_id);
 
         int get_agent_id(Node2D *node);
+        void apply_explosion(const Vector2 &position, double radius, double intensity);
     };
 
 }

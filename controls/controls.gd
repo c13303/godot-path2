@@ -7,6 +7,11 @@ extends Node2D
 @onready var agent_manager: Node = $"../AgentManagerNative"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 @onready var ui_layer: CanvasLayer = $"../CanvasLayer"
+const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
+
+@export var explosion_radius: float = 96.0
+@export var explosion_intensity: float = 420.0
+@export var explosion_debug_duration: float = 1.0
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
@@ -240,10 +245,19 @@ func _is_walkable(cell: Vector2i) -> bool:
 	var has_wall := wallz and wallz.get_cell_tile_data(cell) != null
 	return has_floor and not has_wall
 
-func _on_key_trig_bomb() -> void: 
+func _on_key_trig_bomb() -> void:
 	var mouse_pos := get_global_mouse_position()
-	var redcircle := preload("res://sprites/bomb/bomb.tscn").instantiate()
-	get_tree().current_scene.add_child(redcircle)
-	redcircle.global_position = mouse_pos
-	redcircle.z_index = 99
-	print("bomb!",mouse_pos)
+	print("bomb!", mouse_pos)
+	if steering and steering.has_method("apply_explosion"):
+		steering.apply_explosion(mouse_pos, explosion_radius, explosion_intensity)
+	_spawn_explosion_effect(mouse_pos)
+
+func _spawn_explosion_effect(position: Vector2) -> void:
+	var circle = EXPLOSION_DEBUG_SCENE.instantiate()
+	get_tree().current_scene.add_child(circle)
+	circle.global_position = position
+	circle.z_index = 99
+	var timer = get_tree().create_timer(explosion_debug_duration)
+	await timer.timeout
+	if circle.is_inside_tree():
+		circle.queue_free()
