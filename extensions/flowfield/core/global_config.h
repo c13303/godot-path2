@@ -25,7 +25,7 @@ namespace ffcore
 
         double lerp_general = 0.02;
 
-        double friction_factor = 0.1;
+        double friction_factor = 0.5;
         double smash_threshold = 5.0;
         double smash_min_cutoff = 0.1;
         double smash_cap = 2000.0;

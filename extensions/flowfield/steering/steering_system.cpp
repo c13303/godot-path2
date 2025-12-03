@@ -399,48 +399,40 @@ void SteeringSystem::update_all(double delta)
 
     const auto &cfg = globalconfig();
 
-    // friction_factor = taux de perte par seconde (1.0 => 100 % perdu en 1s)
+    // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
-    double friction = std::pow(1.0 - loss_per_sec, delta);
+    double vel_damp = std::pow(1.0 - loss_per_sec, delta);
 
     for (auto &a : agents)
     {
         if (a.smash_just_reset)
         {
             a.smash_just_reset = false;
-        }
-        else
-        {
-            a.smash_force = a.smash_force * friction;
-        }
-
-        double len = safe_len(a.smash_force);
-        if (len < cfg.smash_min_cutoff)
-            a.smash_force = Vec2(0, 0);
-        else if (len > cfg.smash_cap)
-            a.smash_force = a.smash_force * (cfg.smash_cap / len);
-    }
-
-    for (auto &a : agents)
-    {
-        double len = safe_len(a.smash_force);
-        if (len > cfg.smash_threshold)
-        {
-            if (!a.is_propelled)
+            if (!a.smash_force.is_zero())
             {
+                a.velocity = a.smash_force; // impulsion initiale
                 a.is_propelled = true;
                 a.propelled_timer = cfg.propelled_duration;
             }
+            a.smash_force = Vec2(0, 0);
         }
         else if (a.is_propelled)
         {
+            a.velocity = a.velocity * vel_damp; // dissipation sur la vitesse
             a.propelled_timer -= delta;
-            if (a.propelled_timer <= 0.0)
+
+            double vlen = safe_len(a.velocity);
+            if (a.propelled_timer <= 0.0 || vlen < cfg.smash_min_cutoff)
             {
                 a.is_propelled = false;
                 a.propelled_timer = 0.0;
                 a.smash_force = Vec2(0, 0);
+                a.velocity = Vec2(0, 0);
             }
+        }
+        else
+        {
+            a.smash_force = Vec2(0, 0);
         }
     }
 
@@ -456,31 +448,19 @@ void SteeringSystem::update_all(double delta)
 
         if (!a.active || !a.flow)
         {
-            double smash_len = safe_len(a.smash_force);
-            Vec2 target_velocity;
-
-            if (a.is_propelled && smash_len > 0.0)
-            {
-                target_velocity = a.smash_force;
-            }
-            else
+            if (!a.is_propelled)
             {
                 Vec2 combined = wall_repel + separation;
-                if (smash_len > 0.0)
-                    combined += a.smash_force;
 
                 Vec2 local_dir = safe_normalize(combined);
                 if (local_dir.is_zero())
                 {
                     continue;
                 }
-                target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
-            }
-
-            if (a.is_propelled && smash_len > 0.0)
-                a.velocity = target_velocity; // appliquer immédiatement la poussée d'explosion
-            else
+                Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
                 a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+            }
+            // si propulsé, on conserve la velocity existante (déjà amortie)
 
             Vec2 old_pos = a.position;
             a.position = a.position + a.velocity * delta;
@@ -509,16 +489,13 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 target_velocity;
-        double smash_len = safe_len(a.smash_force);
-        if (a.is_propelled && smash_len > 0.0)
+        if (a.is_propelled)
         {
-            target_velocity = Vec2(a.smash_force.x, a.smash_force.y);
+            target_velocity = a.velocity; // velocity déjà amortie par friction
         }
         else
         {
             Vec2 combined = wall_repel + separation;
-            if (smash_len > 0.0)
-                combined += a.smash_force;
             combined += flow_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
@@ -551,10 +528,14 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
-        if (a.is_propelled && smash_len > 0.0)
-            a.velocity = target_velocity; // priorité à la poussée sur l'inertie précédente
+        if (a.is_propelled)
+        {
+            a.velocity = target_velocity; // on conserve la vélocité propulsée (déjà amortie)
+        }
         else
+        {
             a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+        }
 
         if (!a.is_propelled)
         {
