@@ -188,6 +188,9 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
     double softness = 0.2;
     Vec2 target = safe_center + tangent * (ff->tile_size() * 0.05);
 
+    // Collision murale : annuler la poussée pour éviter de re-rentrer immédiatement
+    a.smash_force = Vec2(0, 0);
+
     a.position = a.position.lerp(target, softness);
     a.velocity = Vec2(0, 0);
 }
@@ -396,7 +399,9 @@ void SteeringSystem::update_all(double delta)
 
     const auto &cfg = globalconfig();
 
-    double friction = std::pow(cfg.friction_factor, delta); // appliquer la friction au pas de temps
+    // friction_factor = taux de perte par seconde (1.0 => 100 % perdu en 1s)
+    double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
+    double friction = std::pow(1.0 - loss_per_sec, delta);
 
     for (auto &a : agents)
     {
@@ -421,8 +426,11 @@ void SteeringSystem::update_all(double delta)
         double len = safe_len(a.smash_force);
         if (len > cfg.smash_threshold)
         {
-            a.is_propelled = true;
-            a.propelled_timer = cfg.propelled_duration;
+            if (!a.is_propelled)
+            {
+                a.is_propelled = true;
+                a.propelled_timer = cfg.propelled_duration;
+            }
         }
         else if (a.is_propelled)
         {
