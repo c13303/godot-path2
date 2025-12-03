@@ -1267,3 +1267,4 @@ script = ExtResource("4_k8xte")
 [node name="AgentManagerNative" type="AgentManagerNative" parent="."]
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
+explosion_falloff = 0.1

@@ -68,6 +68,8 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_smash_cap", "value"), &GlobalConfigNative::set_smash_cap);
     ClassDB::bind_method(D_METHOD("get_shockwave_speed"), &GlobalConfigNative::get_shockwave_speed);
     ClassDB::bind_method(D_METHOD("set_shockwave_speed", "value"), &GlobalConfigNative::set_shockwave_speed);
+    ClassDB::bind_method(D_METHOD("get_explosion_falloff"), &GlobalConfigNative::get_explosion_falloff);
+    ClassDB::bind_method(D_METHOD("set_explosion_falloff", "value"), &GlobalConfigNative::set_explosion_falloff);
 
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
@@ -91,6 +93,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_min_cutoff"), "set_smash_min_cutoff", "get_smash_min_cutoff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smash_cap"), "set_smash_cap", "get_smash_cap");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_speed"), "set_shockwave_speed", "get_shockwave_speed");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -159,6 +162,9 @@ void GlobalConfigNative::set_smash_cap(double v) { cfg().smash_cap = std::max(0.
 
 double GlobalConfigNative::get_shockwave_speed() const { return cfg().shockwave_speed; }
 void GlobalConfigNative::set_shockwave_speed(double v) { cfg().shockwave_speed = std::max(0.0, v); }
+
+double GlobalConfigNative::get_explosion_falloff() const { return cfg().explosion_falloff; }
+void GlobalConfigNative::set_explosion_falloff(double v) { cfg().explosion_falloff = std::max(0.0, v); }
 
 void GlobalConfigNative::reset_defaults()
 {

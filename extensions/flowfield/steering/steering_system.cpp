@@ -370,8 +370,8 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
             continue;
 
         Vec2 dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
-        double attenuation = std::max(0.0, 1.0 - dist / radius);
-        attenuation = attenuation * attenuation;
+        double base = std::max(0.0, 1.0 - dist / radius);
+        double attenuation = std::pow(base, std::max(0.0, cfg.explosion_falloff));
 
         Vec2 smash = dir * (intensity * attenuation);
 

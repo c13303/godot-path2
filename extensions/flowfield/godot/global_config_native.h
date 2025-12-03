@@ -79,6 +79,9 @@ namespace godot
         double get_shockwave_speed() const;
         void set_shockwave_speed(double v);
 
+        double get_explosion_falloff() const;
+        void set_explosion_falloff(double v);
+
         void reset_defaults();
     };
 
