@@ -24,7 +24,7 @@ var selection_rect: ColorRect
 var selected_units: Array[Node2D] = []
 var preview_units: Array[Node2D] = []
 
-signal mouse_goal_set(world_pos: Vector2)
+#signal mouse_goal_set(world_pos: Vector2)
 
 func _ready() -> void:
 	add_child(marker)
@@ -54,7 +54,9 @@ func _input(event: InputEvent) -> void:
 			_on_key_spawn_chars_massive(10)
 		elif event.keycode == KEY_E:
 			_on_key_spawn_chars_massive(50)
-
+		elif event.keycode == KEY_B:
+			_on_key_trig_bomb()
+			
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -214,7 +216,7 @@ func _spawn_mainchar(pos: Vector2) -> void:
 		occupied.append(floorz.local_to_map(floorz.to_local(node.global_position)))
 	var free_cell := _find_free_cell_near(target_cell, occupied)
 	var free_pos := floorz.to_global(floorz.map_to_local(free_cell))
-	var agent := preload("res://character/character.tscn").instantiate()
+	var agent := preload("res://sprites/character/character.tscn").instantiate()
 	get_parent().add_child(agent)
 	agent.global_position = free_pos
 	agent.z_index = int(free_pos.y)
@@ -237,3 +239,11 @@ func _is_walkable(cell: Vector2i) -> bool:
 	var has_floor := floorz.get_cell_tile_data(cell) != null
 	var has_wall := wallz and wallz.get_cell_tile_data(cell) != null
 	return has_floor and not has_wall
+
+func _on_key_trig_bomb() -> void: 
+	var mouse_pos := get_global_mouse_position()
+	var redcircle := preload("res://sprites/bomb/bomb.tscn").instantiate()
+	get_tree().current_scene.add_child(redcircle)
+	redcircle.global_position = mouse_pos
+	redcircle.z_index = 99
+	print("bomb!",mouse_pos)
