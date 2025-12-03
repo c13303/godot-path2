@@ -489,7 +489,7 @@ void SteeringSystem::update_all(double delta)
 
             if (a.is_propelled && smash_len > 0.0)
             {
-                target_velocity = -a.smash_force;
+                target_velocity = a.smash_force;
             }
             else
             {
@@ -505,7 +505,10 @@ void SteeringSystem::update_all(double delta)
                 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
             }
 
-            a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+            if (a.is_propelled && smash_len > 0.0)
+                a.velocity = target_velocity; // appliquer immédiatement la poussée d'explosion
+            else
+                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
 
             Vec2 old_pos = a.position;
             a.position = a.position + a.velocity * delta;
@@ -537,7 +540,7 @@ void SteeringSystem::update_all(double delta)
         double smash_len = safe_len(a.smash_force);
         if (a.is_propelled && smash_len > 0.0)
         {
-            target_velocity = Vec2(-a.smash_force.x, -a.smash_force.y);
+            target_velocity = Vec2(a.smash_force.x, a.smash_force.y);
         }
         else
         {
@@ -576,7 +579,10 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
-        a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+        if (a.is_propelled && smash_len > 0.0)
+            a.velocity = target_velocity; // priorité à la poussée sur l'inertie précédente
+        else
+            a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
 
         if (!a.is_propelled)
         {
