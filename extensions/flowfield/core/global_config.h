@@ -30,10 +30,10 @@ namespace ffcore
         double smash_min_cutoff = 0.20;
         double smash_cap = 500.0;
         double propelled_duration = 8.0;
-        double shockwave_speed = 300.0; // vitesse de propagation de l'onde (units/s)
+        double shockwave_speed = 150.0; // vitesse de propagation de l'onde (units/s)
         double explosion_falloff = 0.1; // puissance de l'atténuation (1.0 linéaire, >1 plus raide)
         double shockwave_stop_ratio = 2.0;       // rayon de blocage relatif à l'explosion
-        double shockwave_stop_duration_ms = 2000; // durée de blocage en millisecondes
+        double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
 
         void recompute_from_tile();
     };
