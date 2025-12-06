@@ -62,6 +62,8 @@ func _input(event: InputEvent) -> void:
 			_on_key_spawn_chars_massive(50)
 		elif event.keycode == KEY_B:
 			_on_key_trig_bomb()
+		elif event.keycode == KEY_N:
+			_on_key_trig_blood()
 			
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
