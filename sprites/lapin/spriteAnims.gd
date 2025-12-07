@@ -8,14 +8,14 @@ const H: int = 64
 const DEFAULT_ANIMATION: String = "Idle_S"
 
 const ANIMATION_RANGES: Dictionary = {
-	"Idle_N": Vector2i(22*13 + 0, 22*13 + 1),  # line 23
-	"Idle_W": Vector2i(23*13 + 0, 23*13 + 1),
-	"Idle_S": Vector2i(24*13 + 0, 24*13 + 1),
-	"Idle_E": Vector2i(25*13 + 0, 25*13 + 1),
-	"Walk_N": Vector2i(9*13 + 0, 9*13 + 7),
-	"Walk_W": Vector2i(10*13 + 0, 10*13 + 7),
-	"Walk_S": Vector2i(11*13 + 0, 11*13 + 7),
-	"Walk_E": Vector2i(12*13 + 0, 12*13 + 7),
+	"Idle_N": Vector2i(22*13 + 0, 22*13 + 0),  # single frame
+	"Idle_W": Vector2i(23*13 + 0, 23*13 + 0),
+	"Idle_S": Vector2i(24*13 + 0, 24*13 + 0),
+	"Idle_E": Vector2i(25*13 + 0, 25*13 + 0),
+	"Walk_N": Vector2i(8*13 + 0, 8*13 + 7),
+	"Walk_W": Vector2i(9*13 + 0, 9*13 + 7),
+	"Walk_S": Vector2i(10*13 + 0, 10*13 + 7),
+	"Walk_E": Vector2i(11*13 + 0, 11*13 + 7),
 }
 
 static var _cached_frames: SpriteFrames

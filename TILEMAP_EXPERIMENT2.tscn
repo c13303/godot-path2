@@ -1,9 +1,10 @@
-[gd_scene load_steps=20 format=4 uid="uid://dm7myvnaoy1xc"]
+[gd_scene load_steps=21 format=4 uid="uid://dm7myvnaoy1xc"]
 
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://pathfinder/FlowFieldCode.gd" id="2_2rfbb"]
 [ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://controls/controls.gd" id="2_ii2xt"]
 [ext_resource type="Script" uid="uid://rgvwggljlw8n" path="res://label.gd" id="4_k8xte"]
+[ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://global/agent_listener.gd" id="5_7az1b"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1274,5 +1275,8 @@ offset_bottom = 23.0
 script = ExtResource("4_k8xte")
 
 [node name="AgentManagerNative" type="AgentManagerNative" parent="."]
+
+[node name="Listener" type="Node" parent="AgentManagerNative"]
+script = ExtResource("5_7az1b")
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]

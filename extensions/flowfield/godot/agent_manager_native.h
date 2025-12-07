@@ -38,8 +38,10 @@ namespace godot
         };
 
         std::unordered_map<Node2D *, LinkEntry> link_table;
+        std::unordered_map<int, Node2D *> id_to_node;
 
         ffcore::GroupID current_selected_group = ffcore::GROUP_IDLE;
+        void emit_agent_event(const String &event_name, int agent_id, const Variant &payload);
 
     public:
         static void _bind_methods();
@@ -57,6 +59,10 @@ namespace godot
         void set_current_selected_group(ffcore::GroupID group);
         void cleanup_groups();
         void mark_group_has_order(ffcore::GroupID group);
+
+        void update_godot_agent(Node2D *node, int agent_id);
+        Node2D *find_node_by_agent(int agent_id);
+        void send_agent_event(const String &event_name, int agent_id, const Variant &payload);
     };
 
 }

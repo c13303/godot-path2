@@ -4,6 +4,8 @@
 #include "../flow/flow_field.h"
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../agent_manager/agent_manager.h"
 #include <cstdlib>
@@ -23,6 +25,13 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_current_selected_group", "group_id"), &AgentManagerNative::set_current_selected_group);
     ClassDB::bind_method(D_METHOD("cleanup_groups"), &AgentManagerNative::cleanup_groups);
     ClassDB::bind_method(D_METHOD("mark_group_has_order", "group_id"), &AgentManagerNative::mark_group_has_order);
+    ClassDB::bind_method(D_METHOD("update_godot_agent", "node", "agent_id"), &AgentManagerNative::update_godot_agent);
+    ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
+    ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
+    ADD_SIGNAL(MethodInfo("agent_event",
+                          PropertyInfo(Variant::STRING, "event_name"),
+                          PropertyInfo(Variant::INT, "agent_id"),
+                          PropertyInfo(Variant::DICTIONARY, "payload")));
 }
 
 void AgentManagerNative::_ready()
@@ -47,6 +56,35 @@ void AgentManagerNative::_ready()
 AgentManagerNative::~AgentManagerNative() {}
 
 AgentManagerNative::AgentManagerNative() : next_id(1) {}
+
+void AgentManagerNative::emit_agent_event(const String &event_name, int agent_id, const Variant &payload)
+{
+    emit_signal("agent_event", event_name, agent_id, payload);
+}
+
+void AgentManagerNative::update_godot_agent(Node2D *node, int agent_id)
+{
+    if (!node)
+        return;
+
+    Dictionary payload;
+    payload["node_path"] = node->get_path();
+    payload["position"] = node->get_global_position();
+    emit_agent_event("spawned", agent_id, payload);
+}
+
+Node2D *AgentManagerNative::find_node_by_agent(int agent_id)
+{
+    auto it = id_to_node.find(agent_id);
+    if (it == id_to_node.end())
+        return nullptr;
+    return it->second;
+}
+
+void AgentManagerNative::send_agent_event(const String &event_name, int agent_id, const Variant &payload)
+{
+    emit_agent_event(event_name, agent_id, payload);
+}
 
 int AgentManagerNative::create_group()
 {
@@ -95,6 +133,8 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     if (auto *sn = get_node<SteeringSystemNative>(NodePath("/root/Node2D/SteeringSystemNative")))
         sn->register_node_mapping(node, nav_id);
+
+    id_to_node[nav_id] = node;
 
     return nav_id;
 }

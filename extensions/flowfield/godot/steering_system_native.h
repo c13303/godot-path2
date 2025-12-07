@@ -13,6 +13,7 @@
 
 namespace godot
 {
+    class AgentManagerNative;
 
     class SteeringSystemNative : public Node2D
     {
@@ -23,11 +24,15 @@ namespace godot
 
         Node2D *flowfield = nullptr;
         Node2D *grid = nullptr;
+        AgentManagerNative *agent_manager = nullptr;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, bool> agent_propelled_states;
+        std::unordered_map<int, int> agent_direction_codes;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
+        void maybe_emit_direction_changed(int agent_id, const Vector2 &velocity);
+        int _direction_code(const Vector2 &v) const;
 
     public:
         static void _bind_methods();
