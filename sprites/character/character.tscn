@@ -11,7 +11,8 @@ z_index = 2
 script = ExtResource("1_3omya")
 
 [node name="LapinSprite2D" type="AnimatedSprite2D" parent="."]
-scale = Vector2(0.5, 0.5)
+position = Vector2(0, -16)
+scale = Vector2(0.75, 0.75)
 sprite_frames = SubResource("SpriteFrames_a7qlq")
 script = ExtResource("2_6sbwq")
 sheet = ExtResource("3_4dgh7")
