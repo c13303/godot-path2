@@ -127,13 +127,24 @@ void SteeringSystemNative::_process(double delta)
         if (!a)
             continue;
         maybe_emit_propelled_state(id, a->is_propelled);
+        bool needs_direction = false;
         Vector2 flow_vec;
         if (a->flow && a->flow->is_ready())
         {
-            ffcore::Vec2 fd = a->flow->compute_flow_dir(ffcore::Vec2(a->position.x, a->position.y));
-            flow_vec = Vector2(fd.x, fd.y);
+            ffcore::Vec2 world_pos(a->position.x, a->position.y);
+            ffcore::Vec2i cell = a->flow->world_to_cell(world_pos);
+
+            auto it_cell = agent_last_cells.find(id);
+            if (it_cell == agent_last_cells.end() || it_cell->second != Vector2i(cell.x, cell.y))
+            {
+                agent_last_cells[id] = Vector2i(cell.x, cell.y);
+                ffcore::Vec2 fd = a->flow->compute_flow_dir(world_pos);
+                flow_vec = Vector2(fd.x, fd.y);
+                needs_direction = true;
+            }
         }
-        maybe_emit_direction_changed(id, flow_vec);
+        if (needs_direction)
+            maybe_emit_direction_changed(id, flow_vec);
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 }

@@ -5,6 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <unordered_map>
 
 #include "../steering/steering_system.h"
@@ -29,6 +30,7 @@ namespace godot
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, bool> agent_propelled_states;
         std::unordered_map<int, int> agent_direction_codes;
+        std::unordered_map<int, Vector2i> agent_last_cells;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
         void maybe_emit_direction_changed(int agent_id, const Vector2 &velocity);
