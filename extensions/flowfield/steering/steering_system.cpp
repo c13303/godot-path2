@@ -350,6 +350,12 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
         a.has_arrived = false;
         a.is_first = false;
     }
+    else
+    {
+        // Clearing flow also clears arrival flags so future orders can trigger correctly.
+        a.has_arrived = false;
+        a.is_first = false;
+    }
 }
 
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
@@ -540,6 +546,7 @@ void SteeringSystem::update_all(double delta)
 
         Vec2 goal_pos = ff->goal_center_world();
         double dist_to_target = (a.position - goal_pos).length();
+        bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
 
         double slow_factor = 1.0;
         if (dist_to_target < cfg.target_slow_radius)
@@ -565,7 +572,7 @@ void SteeringSystem::update_all(double delta)
         if (!a.has_arrived && dist_to_target < cfg.target_approach_radius)
             a.has_arrived = true;
 
-        if (!ff->first_is_arrived && a.has_arrived && dist_to_target < cfg.target_occupy_radius)
+        if (!ff->first_is_arrived && a.has_arrived && (dist_to_target < cfg.target_occupy_radius || reached_goal_cell))
         {
             smooth_stop(a.id);
             a.is_first = true;

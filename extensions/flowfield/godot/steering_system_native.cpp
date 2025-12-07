@@ -147,9 +147,12 @@ void SteeringSystemNative::_process(double delta)
         const ffcore::AgentData *a = system.get_agent(id);
         if (!a)
             continue;
+
         maybe_emit_propelled_state(id, a->is_propelled);
+
         bool needs_direction = (agent_direction_codes.find(id) == agent_direction_codes.end());
         Vector2 flow_vec;
+
         if (a->flow && a->flow->is_ready())
         {
             ffcore::Vec2 world_pos(a->position.x, a->position.y);
@@ -171,6 +174,7 @@ void SteeringSystemNative::_process(double delta)
             agent_last_cells.erase(id);
             needs_direction = false;
         }
+
         // Emit only on state change with a non-zero flow vector.
         if (needs_direction && flow_vec.length_squared() > 1e-6)
         {
@@ -181,6 +185,7 @@ void SteeringSystemNative::_process(double delta)
                 dir_events_this_frame++;
             }
         }
+
         maybe_emit_arrived(id, a->has_arrived);
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
