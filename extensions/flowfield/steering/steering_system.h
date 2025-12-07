@@ -27,6 +27,7 @@ namespace ffcore
         GroupID group = INVALID_GROUP;
         Vec2 smash_force{};
         bool is_propelled = false;
+        double arrived_dwell_ms = 0.0;
         double propelled_timer = 0.0;
         bool smash_just_reset = false;
         double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global

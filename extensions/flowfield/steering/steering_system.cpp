@@ -569,17 +569,38 @@ void SteeringSystem::update_all(double delta)
             target_velocity = desired_dir * a.max_speed * slow_factor;
         }
 
-        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius)
-            a.has_arrived = true;
+        const double arrive_speed_eps = 5.0;
+        const double arrive_dwell_ms = 500.0;
 
-        if (!ff->first_is_arrived && a.has_arrived && (dist_to_target < cfg.target_occupy_radius || reached_goal_cell))
+        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius)
+        {
+            a.has_arrived = true;
+            a.arrived_dwell_ms = 0.0;
+        }
+        else if (!a.has_arrived)
+        {
+            a.arrived_dwell_ms = 0.0;
+        }
+
+        if (a.has_arrived)
+        {
+            if (dist_to_target < cfg.target_approach_radius)
+                a.arrived_dwell_ms += delta * 1000.0;
+            else
+                a.arrived_dwell_ms = 0.0;
+        }
+
+        bool can_complete = a.has_arrived && ((dist_to_target < cfg.target_occupy_radius) ||
+                                              reached_goal_cell ||
+                                              (safe_len(a.velocity) < arrive_speed_eps && a.arrived_dwell_ms >= arrive_dwell_ms));
+
+        if (can_complete)
         {
             smooth_stop(a.id);
-            a.is_first = true;
+            a.is_first = false;
 
             ff->refcount--;
             ff->arrived_count++;
-            ff->first_is_arrived = true;
 
             a.flow = nullptr;
             ffcore::cleanup_flow_if_unused(ff);

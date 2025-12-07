@@ -180,9 +180,18 @@ namespace ffcore
         if (g == GROUP_IDLE || g >= MAX_GROUPS)
             return true;
 
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+
         for (const auto &a : agents)
         {
-            if (a.group == g)
+            if (a.group != g)
+                continue;
+
+            if (!steering)
+                return false;
+
+            const ffcore::AgentData *ad = steering->get_agent(a.id);
+            if (ad && ad->active)
                 return false;
         }
         return true;
