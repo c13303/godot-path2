@@ -114,6 +114,27 @@ void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, const Vect
     agent_manager->send_agent_event("direction", agent_id, payload);
 }
 
+void SteeringSystemNative::maybe_emit_arrived(int agent_id, bool arrived)
+{
+    if (!agent_manager)
+        return;
+
+    auto it = agent_arrived_states.find(agent_id);
+    bool last = (it != agent_arrived_states.end()) ? it->second : false;
+    if (last == arrived)
+        return;
+
+    agent_arrived_states[agent_id] = arrived;
+    Dictionary payload;
+    payload["arrived"] = arrived;
+    int last_code = -1;
+    auto it_dir = agent_direction_codes.find(agent_id);
+    if (it_dir != agent_direction_codes.end())
+        last_code = it_dir->second;
+    payload["last_code"] = last_code;
+    agent_manager->send_agent_event("arrived", agent_id, payload);
+}
+
 void SteeringSystemNative::_process(double delta)
 {
     if (!flowfield || !grid)
@@ -138,13 +159,15 @@ void SteeringSystemNative::_process(double delta)
             if (it_cell == agent_last_cells.end() || it_cell->second != Vector2i(cell.x, cell.y))
             {
                 agent_last_cells[id] = Vector2i(cell.x, cell.y);
-                ffcore::Vec2 fd = a->flow->compute_flow_dir(world_pos);
+                // Avoid per-frame churn: reuse precomputed cell dir instead of recomputing a flow dir every frame.
+                ffcore::Vec2 fd = a->flow->dir(cell.x, cell.y);
                 flow_vec = Vector2(fd.x, fd.y);
                 needs_direction = true;
             }
         }
         if (needs_direction)
             maybe_emit_direction_changed(id, flow_vec);
+        maybe_emit_arrived(id, a->has_arrived);
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 }
