@@ -1,0 +1,13 @@
+[gd_scene load_steps=4 format=3 uid="uid://6bxgpgqndfrl"]
+
+[ext_resource type="Script" uid="uid://diwgtf74t17fc" path="res://sprites/lapin/myAnimatedCharacterSprite.gd" id="2_f5r4l"]
+[ext_resource type="Texture2D" uid="uid://corbmg0gi68vg" path="res://sprites/lapin/full.png" id="2_pnnmp"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_pnnmp"]
+
+[node name="Lapin" type="Node2D"]
+
+[node name="LapinSprite2D" type="AnimatedSprite2D" parent="."]
+sprite_frames = SubResource("SpriteFrames_pnnmp")
+script = ExtResource("2_f5r4l")
+sheet = ExtResource("2_pnnmp")

@@ -1,13 +1,17 @@
-[gd_scene load_steps=3 format=3 uid="uid://bvd1epaxpeblw"]
+[gd_scene load_steps=5 format=3 uid="uid://bvd1epaxpeblw"]
 
 [ext_resource type="Script" uid="uid://b0qndyhyi5wq7" path="res://sprites/character/character.gd" id="1_3omya"]
-[ext_resource type="Texture2D" uid="uid://bfnksbtphnvkw" path="res://png/perso.png" id="2_t4tkp"]
+[ext_resource type="Script" uid="uid://diwgtf74t17fc" path="res://sprites/lapin/myAnimatedCharacterSprite.gd" id="2_6sbwq"]
+[ext_resource type="Texture2D" uid="uid://corbmg0gi68vg" path="res://sprites/lapin/full.png" id="3_4dgh7"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_a7qlq"]
 
 [node name="MainChar" type="CharacterBody2D"]
 z_index = 2
 script = ExtResource("1_3omya")
 
-[node name="Sprite2D" type="Sprite2D" parent="."]
-z_index = 2
-texture = ExtResource("2_t4tkp")
-offset = Vector2(0, -8)
+[node name="LapinSprite2D" type="AnimatedSprite2D" parent="."]
+scale = Vector2(0.5, 0.5)
+sprite_frames = SubResource("SpriteFrames_a7qlq")
+script = ExtResource("2_6sbwq")
+sheet = ExtResource("3_4dgh7")

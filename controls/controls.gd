@@ -2,6 +2,8 @@ extends Node2D
 
 @onready var floorz: TileMapLayer = $"../MonTilemap/floor"
 @onready var wallz: TileMapLayer = $"../MonTilemap/wallz"
+@onready var blood_layer: Node2D = $"../MonTilemap/BloodLayer"
+@onready var blood_texture_rect: TextureRect = $"../MonTilemap/BloodLayer/bloodtexture"
 @onready var flow: Node = $"../FlowFieldNative"
 @onready var steering: Node = $"../SteeringSystemNative"
 @onready var agent_manager: Node = $"../AgentManagerNative"
@@ -19,6 +21,18 @@ const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 @export var zoom_speed: float = 0.1
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 3.0
+
+const BLOOD_COLORS: Array[Color] = [
+	Color(0.6, 0.1, 0.1, 0.75),
+	Color(0.45, 0.2, 0.08, 0.7),
+	Color(0.65, 0.2, 0.08, 0.6)
+]
+const BLOOD_RADIUS := 6
+const BLOOD_DOTS := 14
+
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var blood_image: Image
+var blood_image_texture: ImageTexture
 
 var current_flow: Node = null
 var current_group: int = -1
@@ -51,6 +65,8 @@ func _ready() -> void:
 		selection_rect.visible = false
 		selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		canvas.add_child(selection_rect)
+	rng.randomize()
+	_initialize_blood_canvas()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -254,6 +270,11 @@ func _on_key_trig_bomb() -> void:
 	if steering and steering.has_method("apply_explosion"):
 		steering.apply_explosion(mouse_pos, explosion_radius, explosion_intensity, explosion_friction)
 	_spawn_explosion_effect(mouse_pos)
+	_spawn_blood_spatter(mouse_pos)
+
+func _on_key_trig_blood() -> void:
+	var mouse_pos := get_global_mouse_position()
+	_spawn_blood_spatter(mouse_pos)
 
 func _spawn_explosion_effect(position: Vector2) -> void:
 	var circle = EXPLOSION_DEBUG_SCENE.instantiate()
@@ -266,3 +287,63 @@ func _spawn_explosion_effect(position: Vector2) -> void:
 	circle.scale = Vector2(scale, scale)
 	if circle.is_inside_tree():
 		circle.queue_free()
+
+func _initialize_blood_canvas() -> void:
+	if not floorz or not blood_layer or not blood_texture_rect:
+		return
+	var used := floorz.get_used_rect()
+	if used.size.x <= 0 or used.size.y <= 0:
+		return
+	var tile_set := floorz.tile_set
+	if not tile_set:
+		return
+	var tile_dimensions := tile_set.get_tile_size()
+	var tile_size: Vector2 = Vector2(max(tile_dimensions.x, 1), max(tile_dimensions.y, 1))
+	var used_size: Vector2 = Vector2(used.size.x, used.size.y)
+	var map_size: Vector2 = used_size * tile_size
+	var width: int = max(1, int(ceil(map_size.x)))
+	var height: int = max(1, int(ceil(map_size.y)))
+	if width <= 0 or height <= 0:
+		return
+	blood_image = Image.new()
+	blood_image.create(width, height, false, Image.FORMAT_RGBA8)
+	blood_image.fill(Color(0, 0, 0, 0))
+	blood_image_texture = ImageTexture.new()
+	blood_image_texture.create_from_image(blood_image)
+	blood_texture_rect.texture = blood_image_texture
+	blood_texture_rect.size = Vector2(width, height)
+	blood_texture_rect.position = Vector2.ZERO
+	blood_texture_rect.expand = true
+	var top_left_local := floorz.map_to_local(used.position)
+	var top_left_global := floorz.to_global(top_left_local)
+	blood_layer.position = top_left_global
+
+func _spawn_blood_spatter(position: Vector2) -> void:
+	if not blood_image or not blood_image_texture:
+		return
+	var width := blood_image.get_width()
+	var height := blood_image.get_height()
+	if width <= 0 or height <= 0:
+		return
+	var local_pos := blood_layer.to_local(position)
+	var center := Vector2i(int(round(local_pos.x)), int(round(local_pos.y)))
+	blood_image.lock()
+	var dots := 0
+	while dots < BLOOD_DOTS:
+		var offset := Vector2i(rng.randi_range(-BLOOD_RADIUS, BLOOD_RADIUS), rng.randi_range(-BLOOD_RADIUS, BLOOD_RADIUS))
+		if Vector2(offset).length() > BLOOD_RADIUS:
+			dots += 1
+			continue
+		var sample := center + offset
+		if sample.x < 0 or sample.y < 0 or sample.x >= width or sample.y >= height:
+			dots += 1
+			continue
+		var color := BLOOD_COLORS[rng.randi_range(0, BLOOD_COLORS.size() - 1)]
+		var alpha := rng.randf_range(0.3, 0.85)
+		var target := Color(color.r, color.g, color.b, alpha)
+		var existing := blood_image.get_pixel(sample.x, sample.y)
+		var blended: Color = existing.lerp(target, clamp(target.a, 0.0, 1.0))
+		blood_image.set_pixel(sample.x, sample.y, blended)
+		dots += 1
+	blood_image.unlock()
+	blood_image_texture.set_data(blood_image)
