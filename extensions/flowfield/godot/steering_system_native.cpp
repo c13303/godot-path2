@@ -161,6 +161,13 @@ void SteeringSystemNative::_process(double delta)
                 needs_direction = true;
             }
         }
+        else
+        {
+            // Flow missing/unready: drop cached direction so next valid flow will emit once.
+            agent_direction_codes.erase(id);
+            agent_last_cells.erase(id);
+            needs_direction = false;
+        }
         // Debounce: only emit when we actually have a non-zero vector and a state change (new cell or first-time).
         if (needs_direction)
         {
