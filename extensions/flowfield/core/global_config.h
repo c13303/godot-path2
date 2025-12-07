@@ -15,9 +15,9 @@ namespace ffcore
         double min_speed_fraction = 0.25;
         double cellgoal_cooldown_sec = 1.0;
 
-        double target_slow_radius = tile_size * 3.0;
-        double target_approach_radius = tile_size * 1.0;
-        double target_occupy_radius = tile_size * 0.4;
+        double target_slow_radius = tile_size * 3.0; // aka T1
+        double target_approach_radius = tile_size * 1.0; // aka T2
+        double target_occupy_radius = tile_size * 0.4; // aka T3
 
         double separation_radius = 18.0;
         double separation_strength = 400.0;

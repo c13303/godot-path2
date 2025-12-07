@@ -92,13 +92,9 @@ int SteeringSystemNative::_direction_code(const Vector2 &v) const
     return v.y >= 0.0 ? 2 : 3;     // S or N
 }
 
-void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, const Vector2 &flow_dir)
+void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, const Vector2 &flow_dir)
 {
     if (!agent_manager)
-        return;
-
-    int code = _direction_code(flow_dir);
-    if (code < 0)
         return;
 
     auto it = agent_direction_codes.find(agent_id);
@@ -148,7 +144,7 @@ void SteeringSystemNative::_process(double delta)
         if (!a)
             continue;
         maybe_emit_propelled_state(id, a->is_propelled);
-        bool needs_direction = false;
+        bool needs_direction = (agent_direction_codes.find(id) == agent_direction_codes.end());
         Vector2 flow_vec;
         if (a->flow && a->flow->is_ready())
         {
@@ -165,8 +161,21 @@ void SteeringSystemNative::_process(double delta)
                 needs_direction = true;
             }
         }
+        // Debounce: only emit when we actually have a non-zero vector and a state change (new cell or first-time).
         if (needs_direction)
-            maybe_emit_direction_changed(id, flow_vec);
+        {
+            // Flow dir may be zero in the goal cell; only emit if we have a usable vector.
+            if (flow_vec.length_squared() < 1e-6)
+            {
+                // No usable direction; keep last animation.
+            }
+            else
+            {
+                int code = _direction_code(flow_vec);
+                if (code >= 0)
+                    maybe_emit_direction_changed(id, code, flow_vec);
+            }
+        }
         maybe_emit_arrived(id, a->has_arrived);
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }

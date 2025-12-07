@@ -34,7 +34,7 @@ namespace godot
         std::unordered_map<int, bool> agent_arrived_states;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
-        void maybe_emit_direction_changed(int agent_id, const Vector2 &velocity);
+        void maybe_emit_direction_changed(int agent_id, int code, const Vector2 &dir);
         void maybe_emit_arrived(int agent_id, bool arrived);
         int _direction_code(const Vector2 &v) const;
 

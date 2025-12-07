@@ -344,6 +344,12 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
         ff->refcount++; // incrément nouveau FF
 
     a.active = (ff != nullptr);
+    // Reset arrival state when assigning a new flow so agents can arrive again.
+    if (ff != nullptr)
+    {
+        a.has_arrived = false;
+        a.is_first = false;
+    }
 }
 
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
