@@ -307,6 +307,9 @@ func _initialize_blood_canvas() -> void:
 		return
 	blood_image = Image.new()
 	blood_image.create(width, height, false, Image.FORMAT_RGBA8)
+	if blood_image.is_empty():
+		push_warning("Blood canvas image is empty, skipping init")
+		return
 	blood_image.fill(Color(0, 0, 0, 0))
 	blood_image_texture = ImageTexture.new()
 	blood_image_texture.create_from_image(blood_image)
