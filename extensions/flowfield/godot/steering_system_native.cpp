@@ -136,6 +136,10 @@ void SteeringSystemNative::_process(double delta)
     if (!flowfield || !grid)
         return;
 
+    // Back-pressure: cap direction event emissions per frame to avoid flooding GDScript.
+    const int max_dir_events_per_frame = 512;
+    int dir_events_this_frame = 0;
+
     system.update_all(delta);
 
     for (auto &[node, id] : agent_map)
@@ -155,7 +159,6 @@ void SteeringSystemNative::_process(double delta)
             if (it_cell == agent_last_cells.end() || it_cell->second != Vector2i(cell.x, cell.y))
             {
                 agent_last_cells[id] = Vector2i(cell.x, cell.y);
-                // Avoid per-frame churn: reuse precomputed cell dir instead of recomputing a flow dir every frame.
                 ffcore::Vec2 fd = a->flow->dir(cell.x, cell.y);
                 flow_vec = Vector2(fd.x, fd.y);
                 needs_direction = true;
@@ -163,24 +166,19 @@ void SteeringSystemNative::_process(double delta)
         }
         else
         {
-            // Flow missing/unready: drop cached direction so next valid flow will emit once.
+            // Flow missing/unready: drop caches; do not emit.
             agent_direction_codes.erase(id);
             agent_last_cells.erase(id);
             needs_direction = false;
         }
-        // Debounce: only emit when we actually have a non-zero vector and a state change (new cell or first-time).
-        if (needs_direction)
+        // Emit only on state change with a non-zero flow vector.
+        if (needs_direction && flow_vec.length_squared() > 1e-6)
         {
-            // Flow dir may be zero in the goal cell; only emit if we have a usable vector.
-            if (flow_vec.length_squared() < 1e-6)
+            int code = _direction_code(flow_vec);
+            if (code >= 0 && dir_events_this_frame < max_dir_events_per_frame)
             {
-                // No usable direction; keep last animation.
-            }
-            else
-            {
-                int code = _direction_code(flow_vec);
-                if (code >= 0)
-                    maybe_emit_direction_changed(id, code, flow_vec);
+                maybe_emit_direction_changed(id, code, flow_vec);
+                dir_events_this_frame++;
             }
         }
         maybe_emit_arrived(id, a->has_arrived);
