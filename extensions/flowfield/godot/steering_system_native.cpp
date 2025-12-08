@@ -96,13 +96,13 @@ void SteeringSystemNative::apply_explosion(const Vector2 &position, double radiu
 
 void SteeringSystemNative::_reset_agent_cache(int agent_id, bool preserve_arrival)
 {
-    agent_direction_codes.erase(agent_id);
-    agent_last_cells.erase(agent_id);
     if (!preserve_arrival)
     {
+        agent_direction_codes.erase(agent_id);
         agent_arrived_states.erase(agent_id);
         arrival_states.erase(agent_id);
     }
+    agent_last_cells.erase(agent_id);
     agent_last_flow.erase(agent_id);
 }
 

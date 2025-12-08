@@ -334,21 +334,15 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
 void SteeringSystem::smooth_stop(int id)
 {
-
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
 
     AgentData &a = agents[it->second];
-
-    if (!a.active)
-        return;
-
+    a.has_arrived = true;
     a.velocity = Vec2(0, 0);
+    godot::UtilityFunctions::print("smooth_stop agent ", id, " pos=(", a.position.x, ",", a.position.y, ") vel=", a.velocity.length());
     update_anim_state(a, globalconfig().velocity_min_trig_walk_animation);
-    godot::UtilityFunctions::print("smooth_stop agent ", id);
-
-    /// TODO actual smooth instead of violent
 }
 
 void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
@@ -619,8 +613,6 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
-      
-
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
@@ -637,6 +629,7 @@ void SteeringSystem::update_all(double delta)
             if (reached_claim && a.active)
             {
                 a.reached_claim_tile = true;
+                smooth_stop(a.id);
             }
         }
 
@@ -711,12 +704,7 @@ void SteeringSystem::update_all(double delta)
                 desired_dir = safe_normalize(to_goal);
             }
             double target_speed = a.max_speed;
-            if (dist_to_target <= t1_radius)
-            {
-                double t = (t1_radius <= 1e-6) ? 0.0 : dist_to_target / t1_radius;
-                target_speed = a.max_speed * clamp01(t);
-            }
-            else if (dist_to_target <= t2_radius)
+            if (dist_to_target <= t2_radius)
             {
                 double current_speed = safe_len(a.velocity);
                 double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
@@ -727,41 +715,6 @@ void SteeringSystem::update_all(double delta)
                     target_speed = t2_speed_target;
             }
             target_velocity = desired_dir * target_speed;
-        }
-
-        if (!a.has_arrived && dist_to_target <= t1_radius && safe_len(a.velocity) <= arrival_stop_speed)
-        {
-            a.has_arrived = true;
-        }
-
-        if (!a.has_arrived && reached_claim)
-            a.has_arrived = true;
-
-        bool can_complete = a.has_arrived && (dist_to_target <= t1_radius || reached_goal_cell);
-
-        if (can_complete)
-        {
-            smooth_stop(a.id);
-            a.is_first = false;
-
-            ff->refcount--;
-            ff->arrived_count++;
-
-            a.flow = nullptr;
-            ffcore::cleanup_flow_if_unused(ff);
-
-            a.active = false;
-            a.moving = false;
-            a.dir_code = -1;
-            a.update_animation_this_frame = true;
-
-            if (auto *mgr = ffcore::get_global_agent_manager())
-                if (auto *entry = mgr->get(a.id))
-                    if (mgr->is_group_active(entry->group) &&
-                        mgr->all_agents_inactive(entry->group))
-                        mgr->mark_group_finished(entry->group);
-
-            continue;
         }
 
         if (a.is_propelled)
