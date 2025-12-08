@@ -93,9 +93,11 @@ struct GlobalConfig {
     int max_neighbors = 16;                // Limite de voisins pour requêtes
 
     // Arrivée à destination
-    double target_slow_radius = 48.0;      // Distance de ralentissement
-    double target_approach_radius = 16.0;  // Zone d'approche
-    double target_occupy_radius = 6.4;     // Zone d'arrivée finale
+    double target_slow_radius_T1 = 48.0;      // Distance de ralentissement
+    double target_approach_radius_T2 = 16.0;  // Zone d'approche
+    double target_occupy_radius_T3 = 6.4;     // Zone d'arrivée finale
+    double arrival_speed_eps = 5.0;           // Seuil de vitesse pour valider l'arrêt
+    double arrival_dwell_ms = 500.0;          // Temps sous le seuil pour confirmer l'arrivée
 
     // Lissage
     double lerp_general = 0.02;            // Facteur de lissage du mouvement
@@ -490,7 +492,7 @@ Pour chaque agent:
     agent.position += agent.velocity * delta
 
     // 8. VÉRIFICATION ARRIVÉE
-    if (distance_to_goal < target_occupy_radius) {
+    if (distance_to_goal < target_occupy_radius_T3) {
         agent.has_arrived = true
     }
 ```

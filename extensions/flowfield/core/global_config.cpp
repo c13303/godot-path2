@@ -13,9 +13,9 @@ namespace ffcore
     {
         wall_avoid_radius = tile_size * 1.2;
         direct_steer_radius = tile_size * 2.5;
-        target_slow_radius = tile_size * 3.0;
-        target_approach_radius = tile_size * 1.0;
-        target_occupy_radius = tile_size * 0.4;
+        target_slow_radius_T1 = tile_size * 3.0;
+        target_approach_radius_T2 = tile_size * 1.0;
+        target_occupy_radius_T3 = tile_size * 0.4;
     }
 
     void reset_globalconfig()

@@ -34,14 +34,20 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_cellgoal_cooldown_sec"), &GlobalConfigNative::get_cellgoal_cooldown_sec);
     ClassDB::bind_method(D_METHOD("set_cellgoal_cooldown_sec", "value"), &GlobalConfigNative::set_cellgoal_cooldown_sec);
 
-    ClassDB::bind_method(D_METHOD("get_target_slow_radius"), &GlobalConfigNative::get_target_slow_radius);
-    ClassDB::bind_method(D_METHOD("set_target_slow_radius", "value"), &GlobalConfigNative::set_target_slow_radius);
+    ClassDB::bind_method(D_METHOD("get_target_slow_radius_T1"), &GlobalConfigNative::get_target_slow_radius_T1);
+    ClassDB::bind_method(D_METHOD("set_target_slow_radius_T1", "value"), &GlobalConfigNative::set_target_slow_radius_T1);
 
-    ClassDB::bind_method(D_METHOD("get_target_approach_radius"), &GlobalConfigNative::get_target_approach_radius);
-    ClassDB::bind_method(D_METHOD("set_target_approach_radius", "value"), &GlobalConfigNative::set_target_approach_radius);
+    ClassDB::bind_method(D_METHOD("get_target_approach_radius_T2"), &GlobalConfigNative::get_target_approach_radius_T2);
+    ClassDB::bind_method(D_METHOD("set_target_approach_radius_T2", "value"), &GlobalConfigNative::set_target_approach_radius_T2);
 
-    ClassDB::bind_method(D_METHOD("get_target_occupy_radius"), &GlobalConfigNative::get_target_occupy_radius);
-    ClassDB::bind_method(D_METHOD("set_target_occupy_radius", "value"), &GlobalConfigNative::set_target_occupy_radius);
+    ClassDB::bind_method(D_METHOD("get_target_occupy_radius_T3"), &GlobalConfigNative::get_target_occupy_radius_T3);
+    ClassDB::bind_method(D_METHOD("set_target_occupy_radius_T3", "value"), &GlobalConfigNative::set_target_occupy_radius_T3);
+
+    ClassDB::bind_method(D_METHOD("get_arrival_speed_eps"), &GlobalConfigNative::get_arrival_speed_eps);
+    ClassDB::bind_method(D_METHOD("set_arrival_speed_eps", "value"), &GlobalConfigNative::set_arrival_speed_eps);
+
+    ClassDB::bind_method(D_METHOD("get_arrival_dwell_ms"), &GlobalConfigNative::get_arrival_dwell_ms);
+    ClassDB::bind_method(D_METHOD("set_arrival_dwell_ms", "value"), &GlobalConfigNative::set_arrival_dwell_ms);
 
     ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
     ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
@@ -85,9 +91,11 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_slow_radius"), "set_target_slow_radius", "get_target_slow_radius");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_approach_radius"), "set_target_approach_radius", "get_target_approach_radius");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_occupy_radius"), "set_target_occupy_radius", "get_target_occupy_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_slow_radius_T1"), "set_target_slow_radius_T1", "get_target_slow_radius_T1");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_approach_radius_T2"), "set_target_approach_radius_T2", "get_target_approach_radius_T2");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_occupy_radius_T3"), "set_target_occupy_radius_T3", "get_target_occupy_radius_T3");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "arrival_speed_eps"), "set_arrival_speed_eps", "get_arrival_speed_eps");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "arrival_dwell_ms"), "set_arrival_dwell_ms", "get_arrival_dwell_ms");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
@@ -133,14 +141,20 @@ void GlobalConfigNative::set_min_speed_fraction(double v) { cfg().min_speed_frac
 double GlobalConfigNative::get_cellgoal_cooldown_sec() const { return cfg().cellgoal_cooldown_sec; }
 void GlobalConfigNative::set_cellgoal_cooldown_sec(double v) { cfg().cellgoal_cooldown_sec = std::max(0.0, v); }
 
-double GlobalConfigNative::get_target_slow_radius() const { return cfg().target_slow_radius; }
-void GlobalConfigNative::set_target_slow_radius(double v) { cfg().target_slow_radius = std::max(0.0, v); }
+double GlobalConfigNative::get_target_slow_radius_T1() const { return cfg().target_slow_radius_T1; }
+void GlobalConfigNative::set_target_slow_radius_T1(double v) { cfg().target_slow_radius_T1 = std::max(0.0, v); }
 
-double GlobalConfigNative::get_target_approach_radius() const { return cfg().target_approach_radius; }
-void GlobalConfigNative::set_target_approach_radius(double v) { cfg().target_approach_radius = std::max(0.0, v); }
+double GlobalConfigNative::get_target_approach_radius_T2() const { return cfg().target_approach_radius_T2; }
+void GlobalConfigNative::set_target_approach_radius_T2(double v) { cfg().target_approach_radius_T2 = std::max(0.0, v); }
 
-double GlobalConfigNative::get_target_occupy_radius() const { return cfg().target_occupy_radius; }
-void GlobalConfigNative::set_target_occupy_radius(double v) { cfg().target_occupy_radius = std::max(0.0, v); }
+double GlobalConfigNative::get_target_occupy_radius_T3() const { return cfg().target_occupy_radius_T3; }
+void GlobalConfigNative::set_target_occupy_radius_T3(double v) { cfg().target_occupy_radius_T3 = std::max(0.0, v); }
+
+double GlobalConfigNative::get_arrival_speed_eps() const { return cfg().arrival_speed_eps; }
+void GlobalConfigNative::set_arrival_speed_eps(double v) { cfg().arrival_speed_eps = std::max(0.0, v); }
+
+double GlobalConfigNative::get_arrival_dwell_ms() const { return cfg().arrival_dwell_ms; }
+void GlobalConfigNative::set_arrival_dwell_ms(double v) { cfg().arrival_dwell_ms = std::max(0.0, v); }
 
 double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
 void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }

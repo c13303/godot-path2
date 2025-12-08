@@ -15,9 +15,11 @@ namespace ffcore
         double min_speed_fraction = 0.25;
         double cellgoal_cooldown_sec = 1.0;
 
-        double target_slow_radius = tile_size * 3.0; // aka T1
-        double target_approach_radius = tile_size * 1.0; // aka T2
-        double target_occupy_radius = tile_size * 0.4; // aka T3
+        double target_slow_radius_T1 = tile_size * 3.0; // aka T1
+        double target_approach_radius_T2 = tile_size * 1.0; // aka T2
+        double target_occupy_radius_T3 = tile_size * 0.4; // aka T3
+        double arrival_speed_eps = 5.0;      // seuil de vitesse pour valider l'arrêt
+        double arrival_dwell_ms = 500.0;     // durée minimale sous le seuil pour considérer l'arrivée
 
         double separation_radius = 18.0;
         double separation_strength = 400.0;

@@ -475,9 +475,9 @@ void FlowFieldNative::_draw()
         const int segments = 128;
         const float thickness = 1.0f;
 
-        draw_arc(goal_center, cfg.target_slow_radius, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
-        draw_arc(goal_center, cfg.target_approach_radius, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
-        draw_arc(goal_center, cfg.target_occupy_radius, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_slow_radius_T1, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_approach_radius_T2, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
+        draw_arc(goal_center, cfg.target_occupy_radius_T3, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
     }
 }
 

@@ -542,17 +542,18 @@ void SteeringSystem::update_all(double delta)
         if (!ff || !ff->is_ready())
             continue;
 
-        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
-
         Vec2 goal_pos = ff->goal_center_world();
-        double dist_to_target = (a.position - goal_pos).length();
+        Vec2 to_goal = goal_pos - a.position;
+        double dist_to_target = safe_len(to_goal);
+
+        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
+        Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
 
         double slow_factor = 1.0;
-        if (dist_to_target < cfg.target_slow_radius)
+        if (dist_to_target < cfg.target_slow_radius_T1)
         {
-            double t = dist_to_target / cfg.target_slow_radius;
-            slow_factor = std::clamp(t * t, cfg.min_speed_fraction, 1.0);
+            slow_factor = std::clamp(dist_to_target / cfg.target_slow_radius_T1, cfg.min_speed_fraction, 1.0);
         }
 
         Vec2 target_velocity;
@@ -563,16 +564,18 @@ void SteeringSystem::update_all(double delta)
         else
         {
             Vec2 combined = wall_repel + separation;
-            combined += flow_dir * cfg.flow_weight;
+            combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
+            if (desired_dir.is_zero() && dist_to_target > cfg.target_approach_radius_T2 && !in_shockwave)
+            {
+                // Keep pushing toward the goal so we never stall before entering T2
+                desired_dir = safe_normalize(to_goal);
+            }
             target_velocity = desired_dir * a.max_speed * slow_factor;
         }
 
-        const double arrive_speed_eps = 5.0;
-        const double arrive_dwell_ms = 500.0;
-
-        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius)
+        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius_T2)
         {
             a.has_arrived = true;
             a.arrived_dwell_ms = 0.0;
@@ -584,15 +587,15 @@ void SteeringSystem::update_all(double delta)
 
         if (a.has_arrived)
         {
-            if (dist_to_target < cfg.target_approach_radius)
+            if (dist_to_target < cfg.target_approach_radius_T2)
                 a.arrived_dwell_ms += delta * 1000.0;
             else
                 a.arrived_dwell_ms = 0.0;
         }
 
-        bool can_complete = a.has_arrived && ((dist_to_target < cfg.target_occupy_radius) ||
+        bool can_complete = a.has_arrived && ((dist_to_target < cfg.target_occupy_radius_T3) ||
                                               reached_goal_cell ||
-                                              (safe_len(a.velocity) < arrive_speed_eps && a.arrived_dwell_ms >= arrive_dwell_ms));
+                                              (safe_len(a.velocity) < cfg.arrival_speed_eps && a.arrived_dwell_ms >= cfg.arrival_dwell_ms));
 
         if (can_complete)
         {
