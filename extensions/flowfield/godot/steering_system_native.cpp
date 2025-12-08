@@ -19,29 +19,10 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
-    ClassDB::bind_method(D_METHOD("get_arrival_goal_radius"), &SteeringSystemNative::get_arrival_goal_radius);
-    ClassDB::bind_method(D_METHOD("set_arrival_goal_radius", "value"), &SteeringSystemNative::set_arrival_goal_radius);
-    ClassDB::bind_method(D_METHOD("get_arrival_hysteresis_margin"), &SteeringSystemNative::get_arrival_hysteresis_margin);
-    ClassDB::bind_method(D_METHOD("set_arrival_hysteresis_margin", "value"), &SteeringSystemNative::set_arrival_hysteresis_margin);
-    ClassDB::bind_method(D_METHOD("get_arrival_velocity_threshold"), &SteeringSystemNative::get_arrival_velocity_threshold);
-    ClassDB::bind_method(D_METHOD("set_arrival_velocity_threshold", "value"), &SteeringSystemNative::set_arrival_velocity_threshold);
-    ClassDB::bind_method(D_METHOD("get_arrival_time_requirement"), &SteeringSystemNative::get_arrival_time_requirement);
-    ClassDB::bind_method(D_METHOD("set_arrival_time_requirement", "value"), &SteeringSystemNative::set_arrival_time_requirement);
-    ClassDB::bind_method(D_METHOD("get_arrival_enable_signals"), &SteeringSystemNative::get_arrival_enable_signals);
-    ClassDB::bind_method(D_METHOD("set_arrival_enable_signals", "value"), &SteeringSystemNative::set_arrival_enable_signals);
-    ClassDB::bind_method(D_METHOD("get_arrival_signals_per_frame_cap"), &SteeringSystemNative::get_arrival_signals_per_frame_cap);
-    ClassDB::bind_method(D_METHOD("set_arrival_signals_per_frame_cap", "value"), &SteeringSystemNative::set_arrival_signals_per_frame_cap);
-    ClassDB::bind_method(D_METHOD("get_arrival_debug_logs"), &SteeringSystemNative::get_arrival_debug_logs);
-    ClassDB::bind_method(D_METHOD("set_arrival_debug_logs", "value"), &SteeringSystemNative::set_arrival_debug_logs);
-    ClassDB::bind_method(D_METHOD("get_agent_arrival_metrics", "agent_id"), &SteeringSystemNative::get_agent_arrival_metrics);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
                           PropertyInfo(Variant::INT, "agent_id"),
                           PropertyInfo(Variant::BOOL, "propelled")));
-    ADD_SIGNAL(MethodInfo("agent_arrival_state_changed",
-                          PropertyInfo(Variant::INT, "agent_id"),
-                          PropertyInfo(Variant::BOOL, "arrived"),
-                          PropertyInfo(Variant::DICTIONARY, "metrics")));
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -96,13 +77,8 @@ void SteeringSystemNative::apply_explosion(const Vector2 &position, double radiu
 
 void SteeringSystemNative::_reset_agent_cache(int agent_id, bool preserve_arrival)
 {
-    if (!preserve_arrival)
-    {
-        agent_direction_codes.erase(agent_id);
-        agent_arrived_states.erase(agent_id);
-        arrival_states.erase(agent_id);
-    }
-    agent_last_cells.erase(agent_id);
+    (void)preserve_arrival;
+    agent_direction_codes.erase(agent_id);
     agent_last_flow.erase(agent_id);
 }
 
@@ -163,126 +139,6 @@ Vector2 SteeringSystemNative::_goal_position_for_agent(const ffcore::AgentData *
     return Vector2();
 }
 
-void SteeringSystemNative::_update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta)
-{
-    if (a && a->reached_claim_tile)
-    {
-        ArrivalState &st = arrival_states[agent_id];
-        st.goal_position = _goal_position_for_agent(a);
-        st.distance_to_goal = 0.0;
-        st.velocity_magnitude = 0.0;
-        st.is_near_goal = true;
-        st.is_stopped = true;
-        st.time_at_goal = arrival_time_requirement;
-        st.has_arrived = true;
-        st.arrived_last_frame = true;
-        return;
-    }
-
-    if (!a || !a->flow || !a->flow->is_ready())
-    {
-        arrival_states.erase(agent_id);
-        return;
-    }
-
-    ArrivalState &st = arrival_states[agent_id];
-    st.goal_position = _goal_position_for_agent(a);
-
-    Vector2 pos(a->position.x, a->position.y);
-    st.distance_to_goal = pos.distance_to(st.goal_position);
-    st.velocity_magnitude = Vector2(a->velocity.x, a->velocity.y).length();
-
-    double effective_radius = arrival_goal_radius;
-    if (st.has_arrived)
-        effective_radius += arrival_hysteresis_margin;
-
-    st.is_near_goal = st.distance_to_goal <= effective_radius;
-    st.is_stopped = st.velocity_magnitude <= arrival_velocity_threshold;
-
-    if (st.is_near_goal)
-        st.time_at_goal += delta;
-    else
-        st.time_at_goal = 0.0;
-
-    // Allow arrival if near goal and either stopped or has lingered long enough.
-    bool new_arrived = st.is_near_goal && ((st.is_stopped && st.time_at_goal >= arrival_time_requirement) ||
-                                           (st.time_at_goal >= arrival_time_requirement));
-    st.has_arrived = new_arrived;
-}
-
-bool SteeringSystemNative::_maybe_emit_arrival_changed(int agent_id, int &emitted_count)
-{
-    auto it = arrival_states.find(agent_id);
-    if (it == arrival_states.end())
-        return false;
-    bool current = it->second.has_arrived;
-    bool last = it->second.arrived_last_frame;
-    if (last == current)
-        return false;
-    it->second.arrived_last_frame = current;
-
-    if (arrival_debug_logs)
-    {
-        // kept for optional debug logging
-    }
-
-    if (arrival_enable_signals && emitted_count < arrival_signals_per_frame_cap)
-    {
-        if (agent_manager)
-        {
-            Dictionary payload;
-            payload["arrived"] = current;
-            payload["distance"] = it->second.distance_to_goal;
-            payload["velocity"] = it->second.velocity_magnitude;
-            payload["time_at_goal"] = it->second.time_at_goal;
-            payload["near_goal"] = it->second.is_near_goal;
-            payload["stopped"] = it->second.is_stopped;
-            int last_code = -1;
-            auto it_dir = agent_direction_codes.find(agent_id);
-            if (it_dir != agent_direction_codes.end())
-                last_code = it_dir->second;
-            payload["last_code"] = last_code;
-            agent_manager->send_agent_event("arrived", agent_id, payload);
-        }
-        emit_signal("agent_arrival_state_changed", agent_id, current, get_agent_arrival_metrics(agent_id));
-        emitted_count++;
-    }
-    return true;
-}
-
-// Arrival metrics getters
-double SteeringSystemNative::get_arrival_goal_radius() const { return arrival_goal_radius; }
-void SteeringSystemNative::set_arrival_goal_radius(double v) { arrival_goal_radius = std::max(0.0, v); }
-double SteeringSystemNative::get_arrival_hysteresis_margin() const { return arrival_hysteresis_margin; }
-void SteeringSystemNative::set_arrival_hysteresis_margin(double v) { arrival_hysteresis_margin = std::max(0.0, v); }
-double SteeringSystemNative::get_arrival_velocity_threshold() const { return arrival_velocity_threshold; }
-void SteeringSystemNative::set_arrival_velocity_threshold(double v) { arrival_velocity_threshold = std::max(0.0, v); }
-double SteeringSystemNative::get_arrival_time_requirement() const { return arrival_time_requirement; }
-void SteeringSystemNative::set_arrival_time_requirement(double v) { arrival_time_requirement = std::max(0.0, v); }
-bool SteeringSystemNative::get_arrival_enable_signals() const { return arrival_enable_signals; }
-void SteeringSystemNative::set_arrival_enable_signals(bool v) { arrival_enable_signals = v; }
-int SteeringSystemNative::get_arrival_signals_per_frame_cap() const { return arrival_signals_per_frame_cap; }
-void SteeringSystemNative::set_arrival_signals_per_frame_cap(int v) { arrival_signals_per_frame_cap = std::max(0, v); }
-bool SteeringSystemNative::get_arrival_debug_logs() const { return arrival_debug_logs; }
-void SteeringSystemNative::set_arrival_debug_logs(bool v) { arrival_debug_logs = v; }
-
-Dictionary SteeringSystemNative::get_agent_arrival_metrics(int agent_id) const
-{
-    Dictionary d;
-    auto it = arrival_states.find(agent_id);
-    if (it == arrival_states.end())
-        return d;
-    const ArrivalState &s = it->second;
-    d["distance"] = s.distance_to_goal;
-    d["velocity"] = s.velocity_magnitude;
-    d["near_goal"] = s.is_near_goal;
-    d["stopped"] = s.is_stopped;
-    d["time_at_goal"] = s.time_at_goal;
-    d["arrived"] = s.has_arrived;
-    d["goal"] = s.goal_position;
-    return d;
-}
-
 Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) const
 {
     Dictionary d;
@@ -325,10 +181,6 @@ void SteeringSystemNative::_process(double delta)
 {
     if (!flowfield || !grid)
         return;
-
-    arrival_debug_frame++;
-
-    int arrival_events_this_frame = 0;
 
     system.update_all(delta);
 
@@ -373,28 +225,6 @@ void SteeringSystemNative::_process(double delta)
                     agent_manager->send_agent_event("direction", id, payload);
                 }
                 agent_direction_codes[id] = code;
-            }
-        }
-
-        _update_arrival_state(id, a, delta);
-        _maybe_emit_arrival_changed(id, arrival_events_this_frame);
-
-        if (arrival_debug_logs && arrival_debug_frame % 30 == 0)
-        {
-            static int debug_printed = 0;
-            if (debug_printed < 5 && arrival_states.find(id) != arrival_states.end())
-            {
-                const ArrivalState &st = arrival_states[id];
-                UtilityFunctions::print("Arrival dbg frame=", arrival_debug_frame,
-                                        " agent=", id,
-                                        " dist=", st.distance_to_goal,
-                                        " vel=", st.velocity_magnitude,
-                                        " near=", st.is_near_goal,
-                                        " stopped=", st.is_stopped,
-                                        " t=", st.time_at_goal,
-                                        " arrived=", st.has_arrived,
-                                        " goal=", st.goal_position);
-                debug_printed++;
             }
         }
         node->set_global_position(Vector2(a->position.x, a->position.y));

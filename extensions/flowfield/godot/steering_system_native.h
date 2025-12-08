@@ -32,36 +32,11 @@ namespace godot
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, bool> agent_propelled_states;
         std::unordered_map<int, int> agent_direction_codes;
-        std::unordered_map<int, Vector2i> agent_last_cells;
-        std::unordered_map<int, bool> agent_arrived_states;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
-        struct ArrivalState
-        {
-            bool is_near_goal = false;
-            bool is_stopped = false;
-            bool has_arrived = false;
-            double time_at_goal = 0.0;
-            double distance_to_goal = 0.0;
-            double velocity_magnitude = 0.0;
-            Vector2 goal_position = Vector2();
-            bool arrived_last_frame = false;
-        };
-        std::unordered_map<int, ArrivalState> arrival_states;
-
-        double arrival_goal_radius = 10.0;
-        double arrival_hysteresis_margin = 5.0;
-        double arrival_velocity_threshold = 1.0;
-        double arrival_time_requirement = 0.5;
-        bool arrival_enable_signals = true;
-        int arrival_signals_per_frame_cap = 64;
-        bool arrival_debug_logs = false;
-        int arrival_debug_frame = 0;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
         void maybe_emit_direction_changed(int agent_id, int code, const Vector2 &dir, bool force = false);
         int _direction_code(const Vector2 &v) const;
-        void _update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta);
-        bool _maybe_emit_arrival_changed(int agent_id, int &emitted_count);
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
         void _reset_agent_cache(int agent_id, bool preserve_arrival = false);
         Dictionary _agent_summary(const ffcore::AgentData *a) const;
@@ -83,22 +58,6 @@ namespace godot
         int get_agent_id(Node2D *node);
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
 
-        double get_arrival_goal_radius() const;
-        void set_arrival_goal_radius(double v);
-        double get_arrival_hysteresis_margin() const;
-        void set_arrival_hysteresis_margin(double v);
-        double get_arrival_velocity_threshold() const;
-        void set_arrival_velocity_threshold(double v);
-        double get_arrival_time_requirement() const;
-        void set_arrival_time_requirement(double v);
-        bool get_arrival_enable_signals() const;
-        void set_arrival_enable_signals(bool v);
-        int get_arrival_signals_per_frame_cap() const;
-        void set_arrival_signals_per_frame_cap(int v);
-        bool get_arrival_debug_logs() const;
-        void set_arrival_debug_logs(bool v);
-
-        Dictionary get_agent_arrival_metrics(int agent_id) const;
         Array get_agents_in_map_cell(const Vector2i &cell) const;
     };
 
