@@ -170,7 +170,7 @@ void SteeringSystemNative::_process(double delta)
         bool moving;
         int code;
         ffcore::Vec2 vel;
-        if (system.consume_anim_state(id, moving, code, vel))
+        if (system.emit_animation_update(id, moving, code, vel))
         {
             Vector2 vel_vec(vel.x, vel.y);
             if (agent_manager)
@@ -179,7 +179,7 @@ void SteeringSystemNative::_process(double delta)
                 payload["moving"] = moving;
                 payload["code"] = code;
                 payload["direction"] = (moving && vel_vec.length_squared() > 1e-6) ? vel_vec.normalized() : vel_vec;
-                agent_manager->send_agent_event("direction", id, payload);
+                agent_manager->send_agent_event("main_animation_update", id, payload);
             }
             agent_direction_codes[id] = code;
         }

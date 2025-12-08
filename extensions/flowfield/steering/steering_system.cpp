@@ -451,7 +451,9 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
     }
 }
 
-bool SteeringSystem::consume_anim_state(int id, bool &moving, int &dir_code, Vec2 &vel)
+
+// Unique Function for emiting animation.
+bool SteeringSystem::emit_animation_update(int id, bool &moving, int &dir_code, Vec2 &vel)
 {
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
