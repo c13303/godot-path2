@@ -51,7 +51,7 @@ namespace godot
         double arrival_time_requirement = 0.5;
         bool arrival_enable_signals = true;
         int arrival_signals_per_frame_cap = 64;
-        bool arrival_debug_logs = true;
+        bool arrival_debug_logs = false;
         int arrival_debug_frame = 0;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
