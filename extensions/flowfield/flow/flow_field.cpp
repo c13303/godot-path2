@@ -206,14 +206,6 @@ void FlowField::compute_t2_tiles(int group_size)
             t2_tiles.push_back(c.cell);
     }
 
-    std::ostringstream oss;
-    oss << "T2 tiles (" << t2_tiles.size() << "), group_size=" << target << ":";
-    for (const auto &c : t2_tiles)
-        oss << " (" << c.x << "," << c.y << ")";
-    std::string msg = oss.str();
-
-        godot::UtilityFunctions::print(msg.c_str());
-
 }
 
 bool FlowField::is_cell_in_t2(const Vec2i &map_cell) const

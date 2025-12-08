@@ -33,6 +33,7 @@ namespace godot
         std::unordered_map<int, int> agent_direction_codes;
         std::unordered_map<int, Vector2i> agent_last_cells;
         std::unordered_map<int, bool> agent_arrived_states;
+        std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
         struct ArrivalState
         {
             bool is_near_goal = false;
@@ -60,6 +61,7 @@ namespace godot
         void _update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta);
         bool _maybe_emit_arrival_changed(int agent_id, int &emitted_count);
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
+        void _reset_agent_cache(int agent_id, bool preserve_arrival = false);
 
     public:
         static void _bind_methods();

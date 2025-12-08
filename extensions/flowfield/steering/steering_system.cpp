@@ -346,6 +346,7 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
     a.has_entered_t2 = false;
+    a.reached_claim_tile = false;
     // Reset arrival state when assigning a new flow so agents can arrive again.
     if (ff != nullptr)
     {
@@ -563,15 +564,17 @@ void SteeringSystem::update_all(double delta)
         bool has_claimed = (a.claimed_tile.x > -100000 && a.claimed_tile.y > -100000);
         double dist_to_claim = 1e9;
         bool reached_claim = false;
+        Vec2 claim_center(0, 0);
         if (has_claimed)
         {
             Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
-            Vec2 claim_center = ff->cell_to_world(rel_claim);
+            claim_center = ff->cell_to_world(rel_claim);
             dist_to_claim = safe_len(claim_center - a.position);
             reached_claim = dist_to_claim <= (ff->tile_size() * 0.5);
             if (reached_claim && a.active)
             {
-                godot::UtilityFunctions::print("Agent ", a.id, " reached claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")");
+               /*  godot::UtilityFunctions::print("Agent ", a.id, " reached claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")"); */
+                a.reached_claim_tile = true;
             }
         }
 
@@ -580,26 +583,14 @@ void SteeringSystem::update_all(double delta)
         if (map_cell != a.last_logged_tile)
         {
             a.last_logged_tile = map_cell;
-            godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")");
+          /*   godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")"); */
         }
         bool on_t2_tile = ff->is_cell_in_t2(map_cell);
         if (on_t2_tile)
         {
-            if (!a.has_entered_t2)
-                godot::UtilityFunctions::print("Agent ", a.id, " on T2 tile (", map_cell.x, ",", map_cell.y, "), stopping");
+           /*  if (!a.has_entered_t2)
+                godot::UtilityFunctions::print("Agent ", a.id, " on T2 tile (", map_cell.x, ",", map_cell.y, "), claim steering enabled"); */
             a.has_entered_t2 = true;
-            a.has_arrived = true;
-            a.active = false;
-            Vec2 old_pos = a.position;
-            if (has_claimed)
-            {
-                Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
-                Vec2 claim_center = ff->cell_to_world(rel_claim);
-                a.position = claim_center;
-            }
-            a.velocity = Vec2(0, 0);
-            grid->update(a.id, old_pos, a.position);
-            continue;
         }
 
         Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
@@ -619,10 +610,21 @@ void SteeringSystem::update_all(double delta)
         if (reached_claim)
         {
             a.has_arrived = true;
+            a.has_entered_t2 = true;
             a.active = false;
-            a.velocity = Vec2(0, 0);
-            grid->update(a.id, a.position, a.position);
+            a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
+            Vec2 old_pos = a.position;
+            a.position = a.position + a.velocity * delta;
+            ultimate_wall_correction(a, ff, delta);
+            grid->update(a.id, old_pos, a.position);
             continue;
+        }
+
+        if (a.has_entered_t2 && has_claimed)
+        {
+            Vec2 claim_dir = safe_normalize(claim_center - a.position);
+            if (!claim_dir.is_zero())
+                nav_dir = claim_dir;
         }
 
         Vec2 target_velocity;

@@ -36,6 +36,7 @@ namespace ffcore
         bool smash_pending = false;
         bool was_in_t2 = false;
         bool has_entered_t2 = false;
+        bool reached_claim_tile = false;
         Vec2i claimed_tile = Vec2i(-999999, -999999);
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
     };

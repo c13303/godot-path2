@@ -271,7 +271,6 @@ namespace ffcore
             int agent_id = group_agents[i].id;
             const Vec2i &tile = sorted_tiles[i];
             steering->set_agent_claimed_tile(agent_id, tile);
-            godot::UtilityFunctions::print("Agent ", agent_id, " claims tile (", tile.x, ",", tile.y, ")");
         }
     }
 
