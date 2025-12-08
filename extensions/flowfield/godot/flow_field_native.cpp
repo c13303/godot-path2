@@ -475,9 +475,11 @@ void FlowFieldNative::_draw()
         const int segments = 128;
         const float thickness = 1.0f;
 
-        draw_arc(goal_center, cfg.target_slow_radius_T1, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
-        draw_arc(goal_center, cfg.target_approach_radius_T2, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
-        draw_arc(goal_center, cfg.target_occupy_radius_T3, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness);
+        // Approximate visualization for T1/T2 with group size 1 (dynamic radii computed in steering)
+        double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio);
+        double t2 = t1 + cfg.target_T2_param_margin;
+        draw_arc(goal_center, t1, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
+        draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
     }
 }
 

@@ -92,12 +92,10 @@ struct GlobalConfig {
     double separation_strength = 400.0;    // Force de séparation
     int max_neighbors = 16;                // Limite de voisins pour requêtes
 
-    // Arrivée à destination
-    double target_slow_radius_T1 = 48.0;      // Distance de ralentissement
-    double target_approach_radius_T2 = 16.0;  // Zone d'approche
-    double target_occupy_radius_T3 = 6.4;     // Zone d'arrivée finale
-    double arrival_speed_eps = 5.0;           // Seuil de vitesse pour valider l'arrêt
-    double arrival_dwell_ms = 500.0;          // Temps sous le seuil pour confirmer l'arrivée
+    // Arrivée dynamique (fonction du nombre d'agents du groupe)
+    double target_T1_param_tile_ratio = 0.5;        // Rayon T1 = tile_size * ratio * sqrt(nb_agents)
+    double target_T2_param_margin = 32.0;           // Marge ajoutée autour de T1 (par défaut 2 * tile_size)
+    double target_T2_param_minimal_speed = 4.0;     // Vitesse mini en T2 (par défaut max(1, 0.25 * tile_size))
 
     // Lissage
     double lerp_general = 0.02;            // Facteur de lissage du mouvement
@@ -491,8 +489,9 @@ Pour chaque agent:
     // 7. MISE À JOUR POSITION
     agent.position += agent.velocity * delta
 
-    // 8. VÉRIFICATION ARRIVÉE
-    if (distance_to_goal < target_occupy_radius_T3) {
+    // 8. VÉRIFICATION ARRIVÉE (radii dynamiques)
+    t1_radius = tile_size * target_T1_param_tile_ratio * sqrt(group_size)
+    if (distance_to_goal <= t1_radius && speed <= stop_threshold) {
         agent.has_arrived = true
     }
 ```

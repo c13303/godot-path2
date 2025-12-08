@@ -490,6 +490,11 @@ void SteeringSystem::update_all(double delta)
         }
     }
 
+    std::unordered_map<GroupID, int> group_sizes;
+    group_sizes.reserve(agents.size());
+    for (const auto &a : agents)
+        group_sizes[a.group]++;
+
     for (auto &a : agents)
     {
         FlowField *nav = a.flow ? a.flow : default_flow;
@@ -550,11 +555,14 @@ void SteeringSystem::update_all(double delta)
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
 
-        double slow_factor = 1.0;
-        if (dist_to_target < cfg.target_slow_radius_T1)
-        {
-            slow_factor = std::clamp(dist_to_target / cfg.target_slow_radius_T1, cfg.min_speed_fraction, 1.0);
-        }
+        int group_size = 1;
+        if (auto it_count = group_sizes.find(a.group); it_count != group_sizes.end() && it_count->second > 0)
+            group_size = it_count->second;
+
+        double t1_radius = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)group_size);
+        double t2_radius = t1_radius + cfg.target_T2_param_margin;
+        double min_t2_speed = std::clamp(cfg.target_T2_param_minimal_speed, 0.0, a.max_speed);
+        double arrival_stop_speed = std::max(0.1, min_t2_speed * 0.25);
 
         Vec2 target_velocity;
         if (a.is_propelled)
@@ -567,35 +575,38 @@ void SteeringSystem::update_all(double delta)
             combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
-            if (desired_dir.is_zero() && dist_to_target > cfg.target_approach_radius_T2 && !in_shockwave)
+            if (desired_dir.is_zero() && dist_to_target > t2_radius && !in_shockwave)
             {
-                // Keep pushing toward the goal so we never stall before entering T2
+                // Keep pushing toward the goal so we never stall before entering slowdown zones
                 desired_dir = safe_normalize(to_goal);
             }
-            target_velocity = desired_dir * a.max_speed * slow_factor;
+            if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
+            {
+                desired_dir = safe_normalize(to_goal);
+            }
+            double target_speed = a.max_speed;
+            if (dist_to_target <= t1_radius)
+            {
+                double t = (t1_radius <= 1e-6) ? 0.0 : dist_to_target / t1_radius;
+                target_speed = a.max_speed * clamp01(t);
+            }
+            else if (dist_to_target <= t2_radius)
+            {
+                double span = std::max(1e-6, t2_radius - t1_radius);
+                double t = (dist_to_target - t1_radius) / span; // 0 at T1 edge, 1 at T2 edge
+                t = clamp01(t);
+                double desired_speed = a.max_speed * t;
+                target_speed = std::max(min_t2_speed, desired_speed);
+            }
+            target_velocity = desired_dir * target_speed;
         }
 
-        if (!a.has_arrived && dist_to_target < cfg.target_approach_radius_T2)
+        if (!a.has_arrived && dist_to_target <= t1_radius && safe_len(a.velocity) <= arrival_stop_speed)
         {
             a.has_arrived = true;
-            a.arrived_dwell_ms = 0.0;
-        }
-        else if (!a.has_arrived)
-        {
-            a.arrived_dwell_ms = 0.0;
         }
 
-        if (a.has_arrived)
-        {
-            if (dist_to_target < cfg.target_approach_radius_T2)
-                a.arrived_dwell_ms += delta * 1000.0;
-            else
-                a.arrived_dwell_ms = 0.0;
-        }
-
-        bool can_complete = a.has_arrived && ((dist_to_target < cfg.target_occupy_radius_T3) ||
-                                              reached_goal_cell ||
-                                              (safe_len(a.velocity) < cfg.arrival_speed_eps && a.arrived_dwell_ms >= cfg.arrival_dwell_ms));
+        bool can_complete = a.has_arrived && (dist_to_target <= t1_radius || reached_goal_cell);
 
         if (can_complete)
         {

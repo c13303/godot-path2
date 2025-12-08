@@ -43,20 +43,14 @@ namespace godot
         double get_cellgoal_cooldown_sec() const;
         void set_cellgoal_cooldown_sec(double v);
 
-        double get_target_slow_radius_T1() const;
-        void set_target_slow_radius_T1(double v);
+        double get_target_T1_param_tile_ratio() const;
+        void set_target_T1_param_tile_ratio(double v);
 
-        double get_target_approach_radius_T2() const;
-        void set_target_approach_radius_T2(double v);
+        double get_target_T2_param_margin() const;
+        void set_target_T2_param_margin(double v);
 
-        double get_target_occupy_radius_T3() const;
-        void set_target_occupy_radius_T3(double v);
-
-        double get_arrival_speed_eps() const;
-        void set_arrival_speed_eps(double v);
-
-        double get_arrival_dwell_ms() const;
-        void set_arrival_dwell_ms(double v);
+        double get_target_T2_param_minimal_speed() const;
+        void set_target_T2_param_minimal_speed(double v);
 
         double get_separation_radius() const;
         void set_separation_radius(double v);

@@ -15,11 +15,10 @@ namespace ffcore
         double min_speed_fraction = 0.25;
         double cellgoal_cooldown_sec = 1.0;
 
-        double target_slow_radius_T1 = tile_size * 3.0; // aka T1
-        double target_approach_radius_T2 = tile_size * 1.0; // aka T2
-        double target_occupy_radius_T3 = tile_size * 0.4; // aka T3
-        double arrival_speed_eps = 5.0;      // seuil de vitesse pour valider l'arrêt
-        double arrival_dwell_ms = 500.0;     // durée minimale sous le seuil pour considérer l'arrivée
+        // Arrivée dynamique
+        double target_T1_param_tile_ratio = 0.5;          // rayon T1 = tile_size * ratio * sqrt(nb_agents)
+        double target_T2_param_margin = tile_size * 2.0;  // marge ajoutée autour de T1
+        double target_T2_param_minimal_speed = tile_size * 0.25; // vitesse minimale absolue pendant T2
 
         double separation_radius = 18.0;
         double separation_strength = 400.0;
