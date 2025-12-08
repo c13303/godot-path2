@@ -39,6 +39,9 @@ namespace ffcore
         bool reached_claim_tile = false;
         Vec2i claimed_tile = Vec2i(-999999, -999999);
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
+        bool moving = false;
+        int dir_code = -1;
+        bool anim_dirty = false;
     };
 
     struct Shockwave
@@ -71,6 +74,7 @@ namespace ffcore
         void set_agent_flow_ptr(int id, FlowField *ff);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void set_agent_claimed_tile(int id, const Vec2i &tile);
+        bool consume_anim_state(int id, bool &moving, int &dir_code, Vec2 &vel);
 
     private:
         std::vector<AgentData> agents;

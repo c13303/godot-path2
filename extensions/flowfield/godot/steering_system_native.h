@@ -35,7 +35,6 @@ namespace godot
         std::unordered_map<int, Vector2i> agent_last_cells;
         std::unordered_map<int, bool> agent_arrived_states;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
-        std::unordered_map<int, bool> agent_moving_states;
         struct ArrivalState
         {
             bool is_near_goal = false;
@@ -59,15 +58,13 @@ namespace godot
         int arrival_debug_frame = 0;
 
         void maybe_emit_propelled_state(int agent_id, bool propelled);
-        void maybe_emit_direction_changed(int agent_id, int code, const Vector2 &dir);
+        void maybe_emit_direction_changed(int agent_id, int code, const Vector2 &dir, bool force = false);
         int _direction_code(const Vector2 &v) const;
         void _update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta);
         bool _maybe_emit_arrival_changed(int agent_id, int &emitted_count);
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
         void _reset_agent_cache(int agent_id, bool preserve_arrival = false);
-        bool _compute_is_moving(const Vector2 &vel) const;
-        int _compute_dir_from_velocity(const Vector2 &v) const;
-        void _maybe_update_animation(int agent_id, const Vector2 &vel);
+        Dictionary _agent_summary(const ffcore::AgentData *a) const;
 
     public:
         static void _bind_methods();
@@ -102,6 +99,7 @@ namespace godot
         void set_arrival_debug_logs(bool v);
 
         Dictionary get_agent_arrival_metrics(int agent_id) const;
+        Array get_agents_in_map_cell(const Vector2i &cell) const;
     };
 
 }

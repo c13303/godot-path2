@@ -34,6 +34,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_arrival_debug_logs"), &SteeringSystemNative::get_arrival_debug_logs);
     ClassDB::bind_method(D_METHOD("set_arrival_debug_logs", "value"), &SteeringSystemNative::set_arrival_debug_logs);
     ClassDB::bind_method(D_METHOD("get_agent_arrival_metrics", "agent_id"), &SteeringSystemNative::get_agent_arrival_metrics);
+    ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
         PropertyInfo(Variant::INT, "agent_id"),
         PropertyInfo(Variant::BOOL, "propelled")));
@@ -103,7 +104,6 @@ void SteeringSystemNative::_reset_agent_cache(int agent_id, bool preserve_arriva
         arrival_states.erase(agent_id);
     }
     agent_last_flow.erase(agent_id);
-    agent_moving_states.erase(agent_id);
 }
 
 void SteeringSystemNative::maybe_emit_propelled_state(int agent_id, bool propelled)
@@ -125,58 +125,14 @@ int SteeringSystemNative::_direction_code(const Vector2 &v) const
     return v.y >= 0.0 ? 2 : 3;     // S or N
 }
 
-bool SteeringSystemNative::_compute_is_moving(const Vector2 &vel) const
-{
-    double thresh = ffcore::globalconfig().velocity_min_trig_walk_animation;
-    double thresh2 = thresh * thresh;
-    return vel.length_squared() > thresh2;
-}
-
-int SteeringSystemNative::_compute_dir_from_velocity(const Vector2 &v) const
-{
-    if (v.length_squared() < 1e-6)
-        return -1;
-    return _direction_code(v);
-}
-
-void SteeringSystemNative::_maybe_update_animation(int agent_id, const Vector2 &vel)
-{
-    bool moving = _compute_is_moving(vel);
-    int code = _compute_dir_from_velocity(vel);
-
-    bool last_moving = agent_moving_states.count(agent_id) ? agent_moving_states[agent_id] : false;
-    int last_code = agent_direction_codes.count(agent_id) ? agent_direction_codes[agent_id] : -2;
-
-    bool should_emit = false;
-    if (moving != last_moving)
-        should_emit = true;
-    if (moving && code != last_code)
-        should_emit = true;
-
-    agent_moving_states[agent_id] = moving;
-    agent_direction_codes[agent_id] = code;
-
-    if (!should_emit)
-        return;
-
-    if (agent_manager)
-    {
-        Dictionary payload;
-        payload["moving"] = moving;
-        payload["code"] = code;
-        payload["direction"] = vel;
-        agent_manager->send_agent_event("direction", agent_id, payload);
-    }
-}
-
-void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, const Vector2 &flow_dir)
+void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, const Vector2 &flow_dir, bool force)
 {
     if (!agent_manager)
         return;
 
     auto it = agent_direction_codes.find(agent_id);
     int last = (it != agent_direction_codes.end()) ? it->second : -2;
-    if (last == code)
+    if (!force && last == code)
         return;
 
     agent_direction_codes[agent_id] = code;
@@ -184,6 +140,7 @@ void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, 
     Dictionary payload;
     payload["direction"] = flow_dir;
     payload["code"] = code;
+    payload["moving"] = true;
     agent_manager->send_agent_event("direction", agent_id, payload);
 }
 
@@ -280,6 +237,11 @@ bool SteeringSystemNative::_maybe_emit_arrival_changed(int agent_id, int &emitte
             payload["time_at_goal"] = it->second.time_at_goal;
             payload["near_goal"] = it->second.is_near_goal;
             payload["stopped"] = it->second.is_stopped;
+            int last_code = -1;
+            auto it_dir = agent_direction_codes.find(agent_id);
+            if (it_dir != agent_direction_codes.end())
+                last_code = it_dir->second;
+            payload["last_code"] = last_code;
             agent_manager->send_agent_event("arrived", agent_id, payload);
         }
         emit_signal("agent_arrival_state_changed", agent_id, current, get_agent_arrival_metrics(agent_id));
@@ -321,6 +283,44 @@ Dictionary SteeringSystemNative::get_agent_arrival_metrics(int agent_id) const
     return d;
 }
 
+Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) const
+{
+    Dictionary d;
+    if (!a)
+        return d;
+    Vector2 vel(a->velocity.x, a->velocity.y);
+    double thresh = ffcore::globalconfig().velocity_min_trig_walk_animation;
+    double thresh2 = thresh * thresh;
+    bool moving = vel.length_squared() > thresh2;
+    d["id"] = a->id;
+    d["is_moving"] = moving;
+    d["velocity"] = vel;
+    d["velocity_len"] = vel.length();
+    int code = _direction_code(vel);
+    d["dir_code"] = code;
+    ffcore::Vec2 pos = a->position + ffcore::Vec2(0, ffcore::globalconfig().agent_offset_y);
+    d["world_pos"] = Vector2(pos.x, pos.y);
+    return d;
+}
+
+Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
+{
+    Array out;
+    double offset_y = ffcore::globalconfig().agent_offset_y;
+    for (const auto &[node, id] : agent_map)
+    {
+        const ffcore::AgentData *a = system.get_agent(id);
+        if (!a || !a->flow || !a->flow->is_ready())
+            continue;
+        ffcore::Vec2 foot = a->position + ffcore::Vec2(0, offset_y);
+        ffcore::Vec2i rel = a->flow->world_to_cell(foot);
+        ffcore::Vec2i map(rel.x + a->flow->get_cell_origin().x, rel.y + a->flow->get_cell_origin().y);
+        if (map.x == cell.x && map.y == cell.y)
+            out.push_back(_agent_summary(a));
+    }
+    return out;
+}
+
 void SteeringSystemNative::_process(double delta)
 {
     if (!flowfield || !grid)
@@ -350,9 +350,31 @@ void SteeringSystemNative::_process(double delta)
         }
 
         maybe_emit_propelled_state(id, a->is_propelled);
-
-        Vector2 vel_vec(a->velocity.x, a->velocity.y);
-        _maybe_update_animation(id, vel_vec);
+        bool moving;
+        int code;
+        ffcore::Vec2 vel;
+        if (system.consume_anim_state(id, moving, code, vel))
+        {
+            Vector2 vel_vec(vel.x, vel.y);
+            if (moving && code >= 0)
+            {
+                maybe_emit_direction_changed(id, code, vel_vec.normalized(), true);
+            }
+            else
+            {
+                if (code < 0 && agent_direction_codes.count(id))
+                    code = agent_direction_codes[id];
+                if (agent_manager)
+                {
+                    Dictionary payload;
+                    payload["moving"] = moving;
+                    payload["code"] = code;
+                    payload["direction"] = vel_vec;
+                    agent_manager->send_agent_event("direction", id, payload);
+                }
+                agent_direction_codes[id] = code;
+            }
+        }
 
         _update_arrival_state(id, a, delta);
         _maybe_emit_arrival_changed(id, arrival_events_this_frame);

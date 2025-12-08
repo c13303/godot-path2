@@ -14,6 +14,14 @@
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
 static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
+static int velocity_dir_code(const Vec2 &v)
+{
+    if (v.length_squared() < 1e-6)
+        return -1;
+    if (std::abs(v.x) >= std::abs(v.y))
+        return v.x >= 0.0 ? 0 : 1; // E/W
+    return v.y >= 0.0 ? 2 : 3;     // S/N
+}
 
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
@@ -56,8 +64,10 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     a.flow = flow ? flow : default_flow;
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
+    const auto &cfg = globalconfig();
+    Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
-        grid->insert(a.id, pos);
+        grid->insert(a.id, pos + offset);
     g_goal_cooldown[a.id] = 0.0;
     return a.id;
 }
@@ -126,8 +136,10 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
 
+    const auto &cfg = globalconfig();
+    Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
-        grid->insert(a.id, pos);
+        grid->insert(a.id, pos + offset);
 
     g_goal_cooldown[a.id] = 0.0;
     /* godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system"); */
@@ -347,6 +359,9 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.was_in_t2 = false;
     a.has_entered_t2 = false;
     a.reached_claim_tile = false;
+    a.moving = false;
+    a.dir_code = -1;
+    a.anim_dirty = true;
     // Reset arrival state when assigning a new flow so agents can arrive again.
     if (ff != nullptr)
     {
@@ -419,6 +434,21 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         agent.flow = nullptr;
         agent.group = INVALID_GROUP;
     }
+}
+
+bool SteeringSystem::consume_anim_state(int id, bool &moving, int &dir_code, Vec2 &vel)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return false;
+    AgentData &a = agents[it->second];
+    if (!a.anim_dirty)
+        return false;
+    moving = a.moving;
+    dir_code = a.dir_code;
+    vel = a.velocity;
+    a.anim_dirty = false;
+    return true;
 }
 
 void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
@@ -528,6 +558,23 @@ void SteeringSystem::update_all(double delta)
             }
         }
 
+        const auto &cfg = globalconfig();
+        Vec2 offset(0, cfg.agent_offset_y);
+        auto update_anim = [&](AgentData &agent)
+        {
+            double thresh = std::max(0.0, cfg.velocity_min_trig_walk_animation);
+            double thresh2 = thresh * thresh;
+            double vlen2 = agent.velocity.length_squared();
+            bool new_moving = vlen2 > thresh2;
+            int new_dir = velocity_dir_code(agent.velocity);
+            if (new_moving != agent.moving || new_dir != agent.dir_code)
+            {
+                agent.moving = new_moving;
+                agent.dir_code = new_dir;
+                agent.anim_dirty = true;
+            }
+        };
+
         if (!a.active || !a.flow)
         {
             if (!a.is_propelled)
@@ -550,16 +597,20 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
-            grid->update(a.id, old_pos, a.position);
+            grid->update(a.id, old_pos + offset, a.position + offset);
+            update_anim(a);
             continue;
         }
 
         FlowField *ff = a.flow;
         if (!ff || !ff->is_ready())
+        {
+            update_anim(a);
             continue;
+        }
 
         Vec2 goal_pos = ff->goal_center_world();
-        Vec2 to_goal = goal_pos - a.position;
+        Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
         bool has_claimed = (a.claimed_tile.x > -100000 && a.claimed_tile.y > -100000);
         double dist_to_claim = 1e9;
@@ -569,16 +620,15 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
             claim_center = ff->cell_to_world(rel_claim);
-            dist_to_claim = safe_len(claim_center - a.position);
+            dist_to_claim = safe_len(claim_center - (a.position + offset));
             reached_claim = dist_to_claim <= (ff->tile_size() * 0.5);
             if (reached_claim && a.active)
             {
-               /*  godot::UtilityFunctions::print("Agent ", a.id, " reached claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")"); */
                 a.reached_claim_tile = true;
             }
         }
 
-        Vec2i rel_cell = ff->world_to_cell(a.position);
+        Vec2i rel_cell = ff->world_to_cell(a.position + offset);
         Vec2i map_cell(rel_cell.x + ff->get_cell_origin().x, rel_cell.y + ff->get_cell_origin().y);
         if (map_cell != a.last_logged_tile)
         {
@@ -591,7 +641,7 @@ void SteeringSystem::update_all(double delta)
             a.has_entered_t2 = true;
         }
 
-        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
+        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position + offset));
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
 
@@ -614,7 +664,10 @@ void SteeringSystem::update_all(double delta)
             Vec2 old_pos = a.position;
             a.position = a.position + a.velocity * delta;
             ultimate_wall_correction(a, ff, delta);
-            grid->update(a.id, old_pos, a.position);
+            grid->update(a.id, old_pos + offset, a.position + offset);
+            a.moving = false;
+            a.dir_code = -1;
+            a.anim_dirty = true;
             continue;
         }
 
@@ -717,6 +770,8 @@ void SteeringSystem::update_all(double delta)
 
         ultimate_wall_correction(a, ff, delta);
 
-        grid->update(a.id, old_pos, a.position);
+        grid->update(a.id, old_pos + offset, a.position + offset);
+
+        update_anim(a);
     }
 }

@@ -150,7 +150,16 @@ func _update_mouse_tile_ui() -> void:
 	var center := floorz.to_global(floorz.map_to_local(cell))
 
 	if fps_label and fps_label.has_method("set_hover_cell_text"):
-		fps_label.call("set_hover_cell_text", "Tile: (%d, %d)" % [cell.x, cell.y])
+		var lines := ["Tile: (%d, %d)" % [cell.x, cell.y]]
+		if steering and steering.has_method("get_agents_in_map_cell"):
+			var agents: Array = steering.get_agents_in_map_cell(cell)
+			for a in agents:
+				var id: int = a.get("id", -1)
+				var dir: int = a.get("dir_code", -1)
+				var moving: bool = a.get("is_moving", false)
+				var vel_len: float = a.get("velocity_len", 0.0)
+				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f" % [id, dir, moving, vel_len])
+		fps_label.call("set_hover_cell_text", "\n".join(lines))
 
 	if mouse_outline:
 		var tile_size := floorz.tile_set.get_tile_size()
