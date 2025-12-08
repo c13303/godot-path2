@@ -591,6 +591,12 @@ void SteeringSystem::update_all(double delta)
             a.has_arrived = true;
             a.active = false;
             Vec2 old_pos = a.position;
+            if (has_claimed)
+            {
+                Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
+                Vec2 claim_center = ff->cell_to_world(rel_claim);
+                a.position = claim_center;
+            }
             a.velocity = Vec2(0, 0);
             grid->update(a.id, old_pos, a.position);
             continue;
