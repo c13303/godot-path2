@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include "../flow/flow_field.h"
 #include <unordered_set>
 #include <unordered_map>
@@ -49,12 +50,16 @@ namespace godot
                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
                                 const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
+        void update_t2_tiles(const Rect2i &used,
+                             const Vector2i &goal_cell,
+                             const std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
 
         void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
         void compute_distance_field(const Rect2i &used,
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         std::vector<float> distance_field;
+        std::vector<Vector2i> t2_tiles;
         int group_size_for_draw() const;
 
     protected:
@@ -76,6 +81,7 @@ namespace godot
         static double move_cost_for_dir(int dir_index);
 
         godot::Vector2 compute_flow_dir(Vector2 world_pos) const;
+        Array get_tiles_in_t2() const;
 
         ffcore::FlowField *get_field() { return &field; }
         Vector2 get_goal_world() const { return goal_world; }

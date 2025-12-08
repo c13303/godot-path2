@@ -37,6 +37,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
+    ClassDB::bind_method(D_METHOD("get_tiles_in_t2"), &FlowFieldNative::get_tiles_in_t2);
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
@@ -305,6 +306,35 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
     }
 }
 
+void FlowFieldNative::update_t2_tiles(const Rect2i &used,
+                                      const Vector2i &goal_cell,
+                                      const std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
+{
+    t2_tiles.clear();
+    if (!floor_layer)
+        return;
+    if (!walkable_set.count(goal_cell))
+        return;
+
+    const auto &cfg = ffcore::globalconfig();
+    int nb = group_size_for_draw();
+    double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)nb);
+    double t2 = t1 + cfg.target_T2_param_margin;
+    double t2_sq = t2 * t2;
+
+    for (const Vector2i &cell : walkable_set)
+    {
+        if (cell.x < used.position.x || cell.y < used.position.y ||
+            cell.x >= used.position.x + used.size.x || cell.y >= used.position.y + used.size.y)
+            continue;
+
+        Vector2 local_center = floor_layer->map_to_local(cell);
+        Vector2 world_center = floor_layer->to_global(local_center);
+        if (goal_world.distance_squared_to(world_center) <= t2_sq)
+            t2_tiles.push_back(cell);
+    }
+}
+
 void FlowFieldNative::adjust_wall_tangents(const Rect2i &used,
                                            const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                            int radius)
@@ -374,6 +404,7 @@ void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_ce
 
 void FlowFieldNative::rebuild_async(Vector2 goal)
 {
+    t2_tiles.clear();
     Rect2i used;
     Vector2i goal_cell;
 
@@ -394,6 +425,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
     // adjust_wall_tangents(used, wall_set, 2); // 9 ms - Almost no effect
+    update_t2_tiles(used, goal_cell, walkable_set);
     finalize_field(used, goal_cell);
     /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
 
@@ -436,6 +468,15 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
     return (len2 > 1e-6f) ? (result / Math::sqrt(len2)) : Vector2(0, 0);
 }
 
+Array FlowFieldNative::get_tiles_in_t2() const
+{
+    Array cells;
+    cells.resize((int)t2_tiles.size());
+    for (int i = 0; i < (int)t2_tiles.size(); ++i)
+        cells[i] = t2_tiles[(size_t)i];
+    return cells;
+}
+
 void FlowFieldNative::_draw()
 {
     if (!floor_layer)
@@ -476,6 +517,18 @@ void FlowFieldNative::_draw()
         Vector2 goal_center = to_local(
             floor_layer->to_global(
                 floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
+        if (!t2_tiles.empty())
+        {
+            Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
+            for (const Vector2i &cell : t2_tiles)
+            {
+                Vector2 local_center = floor_layer->map_to_local(cell);
+                Vector2 world_center = floor_layer->to_global(local_center);
+                Vector2 draw_center = to_local(world_center);
+                Rect2 tile_rect(draw_center - cell_size * 0.5f, cell_size);
+                draw_rect(tile_rect, Color(0, 1, 0, 0.9f), false, 1.0);
+            }
+        }
 
         const int segments = 128;
         const float thickness = 1.0f;
@@ -490,8 +543,8 @@ void FlowFieldNative::_draw()
 
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
 {
-    rebuild_async(goal);
     current_group_id = group_id;
+    rebuild_async(goal);
 
     ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
     if (!mgr)
