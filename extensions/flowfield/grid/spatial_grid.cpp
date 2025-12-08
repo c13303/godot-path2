@@ -7,6 +7,7 @@ SpatialGrid::SpatialGrid(double cs) : cell_size(cs) {}
 
 void SpatialGrid::clear() {
     cells.clear();
+    id_cells.clear();
 }
 
 long long SpatialGrid::cell_key(int x, int y) const {
@@ -22,25 +23,27 @@ void SpatialGrid::insert(int id, const Vec2& pos) {
     Vec2i c = to_cell(pos);
     long long key = cell_key(c.x, c.y);
     cells[key].push_back(id);
+    id_cells[id] = key;
 }
 
 void SpatialGrid::update(int id, const Vec2& old_pos, const Vec2& new_pos) {
     Vec2i old_c = to_cell(old_pos);
     Vec2i new_c = to_cell(new_pos);
     if (old_c.x == new_c.x && old_c.y == new_c.y) return;
-    remove(id);
-    insert(id, new_pos);
+    long long old_key = cell_key(old_c.x, old_c.y);
+    long long new_key = cell_key(new_c.x, new_c.y);
+    remove_from_cell(old_key, id);
+    cells[new_key].push_back(id);
+    id_cells[id] = new_key;
 }
 
 void SpatialGrid::remove(int id) {
-    for (auto& [k, list] : cells) {
-        for (auto it = list.begin(); it != list.end(); ++it) {
-            if (*it == id) {
-                list.erase(it);
-                return;
-            }
-        }
-    }
+    auto it_cell = id_cells.find(id);
+    if (it_cell == id_cells.end())
+        return;
+    long long key = it_cell->second;
+    remove_from_cell(key, id);
+    id_cells.erase(it_cell);
 }
 
 std::vector<int> SpatialGrid::query_neighbors(const Vec2& pos, double radius) const {
@@ -60,4 +63,18 @@ std::vector<int> SpatialGrid::query_neighbors(const Vec2& pos, double radius) co
 
     
     return result;
+}
+
+bool SpatialGrid::remove_from_cell(long long key, int id) {
+    auto it = cells.find(key);
+    if (it == cells.end())
+        return false;
+    auto &list = it->second;
+    auto it_id = std::find(list.begin(), list.end(), id);
+    if (it_id == list.end())
+        return false;
+    list.erase(it_id);
+    if (list.empty())
+        cells.erase(it);
+    return true;
 }

@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include "../core/types.h"
 
 namespace ffcore {
@@ -25,9 +26,11 @@ public:
 private:
     double cell_size;
     std::unordered_map<long long, std::vector<int>> cells;
+    std::unordered_map<int, long long> id_cells;
 
     long long cell_key(int x, int y) const;
     Vec2i to_cell(const Vec2& pos) const;
+    bool remove_from_cell(long long key, int id);
 };
 
 } // namespace ffcore

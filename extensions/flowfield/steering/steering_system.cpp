@@ -588,8 +588,6 @@ void SteeringSystem::update_all(double delta)
         bool on_t2_tile = ff->is_cell_in_t2(map_cell);
         if (on_t2_tile)
         {
-           /*  if (!a.has_entered_t2)
-                godot::UtilityFunctions::print("Agent ", a.id, " on T2 tile (", map_cell.x, ",", map_cell.y, "), claim steering enabled"); */
             a.has_entered_t2 = true;
         }
 
@@ -620,7 +618,7 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
-        if (a.has_entered_t2 && has_claimed)
+        if (cfg.enable_claim_force && a.has_entered_t2 && has_claimed)
         {
             Vec2 claim_dir = safe_normalize(claim_center - a.position);
             if (!claim_dir.is_zero())

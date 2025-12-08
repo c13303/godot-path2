@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/string.hpp>
 #include <unordered_map>
 
 #include "../steering/steering_system.h"
@@ -34,6 +35,7 @@ namespace godot
         std::unordered_map<int, Vector2i> agent_last_cells;
         std::unordered_map<int, bool> agent_arrived_states;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
+        std::unordered_map<int, bool> agent_moving_states;
         struct ArrivalState
         {
             bool is_near_goal = false;
@@ -43,6 +45,7 @@ namespace godot
             double distance_to_goal = 0.0;
             double velocity_magnitude = 0.0;
             Vector2 goal_position = Vector2();
+            bool arrived_last_frame = false;
         };
         std::unordered_map<int, ArrivalState> arrival_states;
 
@@ -62,6 +65,9 @@ namespace godot
         bool _maybe_emit_arrival_changed(int agent_id, int &emitted_count);
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
         void _reset_agent_cache(int agent_id, bool preserve_arrival = false);
+        bool _compute_is_moving(const Vector2 &vel) const;
+        int _compute_dir_from_velocity(const Vector2 &v) const;
+        void _maybe_update_animation(int agent_id, const Vector2 &vel);
 
     public:
         static void _bind_methods();
