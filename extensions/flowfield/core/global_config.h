@@ -16,7 +16,7 @@ namespace ffcore
         double cellgoal_cooldown_sec = 1.0;
 
         // Arrivée dynamique
-        double target_T1_param_tile_ratio = 1;              // rayon T1 = tile_size * ratio * sqrt(nb_agents)
+        double target_T1_param_tile_ratio = 0.1;              // rayon T1 = tile_size * ratio * sqrt(nb_agents)
         double target_T2_param_margin = tile_size * 3.0;    // marge ajoutée autour de T1
         double target_T2_param_speed_ratio = 0.5;           // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;           // interpolation vers la vitesse cible en T2
