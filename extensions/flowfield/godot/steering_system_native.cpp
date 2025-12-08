@@ -126,6 +126,7 @@ void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, 
     Dictionary payload;
     payload["direction"] = flow_dir;
     payload["code"] = code;
+    UtilityFunctions::print("Signal direction/walk for agent ", agent_id, " code=", code, " dir=(", flow_dir.x, ",", flow_dir.y, ")");
     agent_manager->send_agent_event("direction", agent_id, payload);
 }
 
@@ -150,13 +151,7 @@ Vector2 SteeringSystemNative::_goal_position_for_agent(const ffcore::AgentData *
 
 void SteeringSystemNative::_update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta)
 {
-    if (!a || !a->flow || !a->flow->is_ready())
-    {
-        arrival_states.erase(agent_id);
-        return;
-    }
-
-    if (a->has_entered_t2)
+    if (a && a->reached_claim_tile)
     {
         ArrivalState &st = arrival_states[agent_id];
         st.goal_position = _goal_position_for_agent(a);
@@ -166,6 +161,12 @@ void SteeringSystemNative::_update_arrival_state(int agent_id, const ffcore::Age
         st.is_stopped = true;
         st.time_at_goal = arrival_time_requirement;
         st.has_arrived = true;
+        return;
+    }
+
+    if (!a || !a->flow || !a->flow->is_ready())
+    {
+        arrival_states.erase(agent_id);
         return;
     }
 
@@ -244,6 +245,7 @@ bool SteeringSystemNative::_maybe_emit_arrival_changed(int agent_id, int &emitte
             payload["stopped"] = it->second.is_stopped;
             agent_manager->send_agent_event("arrived", agent_id, payload);
         }
+        UtilityFunctions::print("Signal agent_arrival_state_changed for agent ", agent_id, " arrived=", current);
         emit_signal("agent_arrival_state_changed", agent_id, current, get_agent_arrival_metrics(agent_id));
         emitted_count++;
     }
