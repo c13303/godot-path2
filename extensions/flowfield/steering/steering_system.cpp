@@ -30,12 +30,13 @@ static inline void update_anim_state(ffcore::AgentData &agent, double thresh)
     double vlen2 = agent.velocity.length_squared();
     bool new_moving = vlen2 > thresh2;
     int new_dir = velocity_dir_code(agent.velocity);
-    godot::UtilityFunctions::print("Anim check agent ", agent.id, " v2=", vlen2, " thresh2=", thresh2);
+
     if (new_moving != agent.moving || new_dir != agent.dir_code)
     {
         agent.moving = new_moving;
         agent.dir_code = new_dir;
         agent.update_animation_this_frame = true;
+        godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " v2=", vlen2, " thresh2=", thresh2);
     }
 }
 
