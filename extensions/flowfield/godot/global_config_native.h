@@ -43,9 +43,6 @@ namespace godot
         double get_cellgoal_cooldown_sec() const;
         void set_cellgoal_cooldown_sec(double v);
 
-        double get_target_T1_param_tile_ratio() const;
-        void set_target_T1_param_tile_ratio(double v);
-
         double get_target_T2_param_margin() const;
         void set_target_T2_param_margin(double v);
 

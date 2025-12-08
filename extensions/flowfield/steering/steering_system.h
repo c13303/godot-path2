@@ -41,7 +41,7 @@ namespace ffcore
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
         bool moving = false;
         int dir_code = -1;
-        bool anim_dirty = false;
+        bool update_animation_this_frame = false;
     };
 
     struct Shockwave

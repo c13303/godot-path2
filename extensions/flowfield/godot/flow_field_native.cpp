@@ -522,12 +522,11 @@ void FlowFieldNative::_draw()
         const float thickness = 1.0f;
 
         int nb = group_size_for_draw();
-        double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)nb);
+
         double t2 = field.get_computed_t2_radius();
         double min_t2 = cfg.tile_size;
         if (t2 < min_t2)
             t2 = min_t2;
-        draw_arc(goal_center, t1, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness); // T1 red
         draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
     }
 }

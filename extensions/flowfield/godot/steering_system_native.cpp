@@ -36,12 +36,12 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_agent_arrival_metrics", "agent_id"), &SteeringSystemNative::get_agent_arrival_metrics);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
-        PropertyInfo(Variant::INT, "agent_id"),
-        PropertyInfo(Variant::BOOL, "propelled")));
+                          PropertyInfo(Variant::INT, "agent_id"),
+                          PropertyInfo(Variant::BOOL, "propelled")));
     ADD_SIGNAL(MethodInfo("agent_arrival_state_changed",
-        PropertyInfo(Variant::INT, "agent_id"),
-        PropertyInfo(Variant::BOOL, "arrived"),
-        PropertyInfo(Variant::DICTIONARY, "metrics")));
+                          PropertyInfo(Variant::INT, "agent_id"),
+                          PropertyInfo(Variant::BOOL, "arrived"),
+                          PropertyInfo(Variant::DICTIONARY, "metrics")));
 }
 
 SteeringSystemNative::SteeringSystemNative() {}

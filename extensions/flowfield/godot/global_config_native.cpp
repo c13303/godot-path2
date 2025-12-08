@@ -34,8 +34,7 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_cellgoal_cooldown_sec"), &GlobalConfigNative::get_cellgoal_cooldown_sec);
     ClassDB::bind_method(D_METHOD("set_cellgoal_cooldown_sec", "value"), &GlobalConfigNative::set_cellgoal_cooldown_sec);
 
-    ClassDB::bind_method(D_METHOD("get_target_T1_param_tile_ratio"), &GlobalConfigNative::get_target_T1_param_tile_ratio);
-    ClassDB::bind_method(D_METHOD("set_target_T1_param_tile_ratio", "value"), &GlobalConfigNative::set_target_T1_param_tile_ratio);
+   
 
     ClassDB::bind_method(D_METHOD("get_target_T2_param_margin"), &GlobalConfigNative::get_target_T2_param_margin);
     ClassDB::bind_method(D_METHOD("set_target_T2_param_margin", "value"), &GlobalConfigNative::set_target_T2_param_margin);
@@ -88,7 +87,6 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T1_param_tile_ratio"), "set_target_T1_param_tile_ratio", "get_target_T1_param_tile_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_margin"), "set_target_T2_param_margin", "get_target_T2_param_margin");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_ratio"), "set_target_T2_param_speed_ratio", "get_target_T2_param_speed_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
@@ -137,8 +135,7 @@ void GlobalConfigNative::set_min_speed_fraction(double v) { cfg().min_speed_frac
 double GlobalConfigNative::get_cellgoal_cooldown_sec() const { return cfg().cellgoal_cooldown_sec; }
 void GlobalConfigNative::set_cellgoal_cooldown_sec(double v) { cfg().cellgoal_cooldown_sec = std::max(0.0, v); }
 
-double GlobalConfigNative::get_target_T1_param_tile_ratio() const { return cfg().target_T1_param_tile_ratio; }
-void GlobalConfigNative::set_target_T1_param_tile_ratio(double v) { cfg().target_T1_param_tile_ratio = std::max(0.0, v); }
+
 
 double GlobalConfigNative::get_target_T2_param_margin() const { return cfg().target_T2_param_margin; }
 void GlobalConfigNative::set_target_T2_param_margin(double v) { cfg().target_T2_param_margin = std::max(0.0, v); }

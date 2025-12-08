@@ -23,6 +23,22 @@ static int velocity_dir_code(const Vec2 &v)
     return v.y >= 0.0 ? 2 : 3;     // S/N
 }
 
+static inline void update_anim_state(ffcore::AgentData &agent, double thresh)
+{
+    double safe_thresh = std::max(0.0, thresh);
+    double thresh2 = safe_thresh * safe_thresh;
+    double vlen2 = agent.velocity.length_squared();
+    bool new_moving = vlen2 > thresh2;
+    int new_dir = velocity_dir_code(agent.velocity);
+    godot::UtilityFunctions::print("Anim check agent ", agent.id, " v2=", vlen2, " thresh2=", thresh2);
+    if (new_moving != agent.moving || new_dir != agent.dir_code)
+    {
+        agent.moving = new_moving;
+        agent.dir_code = new_dir;
+        agent.update_animation_this_frame = true;
+    }
+}
+
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
 SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
@@ -68,6 +84,7 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
         grid->insert(a.id, pos + offset);
+    a.update_animation_this_frame = true;
     g_goal_cooldown[a.id] = 0.0;
     return a.id;
 }
@@ -141,6 +158,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     if (grid)
         grid->insert(a.id, pos + offset);
 
+    a.update_animation_this_frame = true;
     g_goal_cooldown[a.id] = 0.0;
     /* godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system"); */
     return a.id;
@@ -327,6 +345,8 @@ void SteeringSystem::smooth_stop(int id)
         return;
 
     a.velocity = Vec2(0, 0);
+    update_anim_state(a, globalconfig().velocity_min_trig_walk_animation);
+    godot::UtilityFunctions::print("smooth_stop agent ", id);
 
     /// TODO actual smooth instead of violent
 }
@@ -361,7 +381,7 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.reached_claim_tile = false;
     a.moving = false;
     a.dir_code = -1;
-    a.anim_dirty = true;
+    a.update_animation_this_frame = true;
     // Reset arrival state when assigning a new flow so agents can arrive again.
     if (ff != nullptr)
     {
@@ -442,12 +462,12 @@ bool SteeringSystem::consume_anim_state(int id, bool &moving, int &dir_code, Vec
     if (it == id_to_index.end())
         return false;
     AgentData &a = agents[it->second];
-    if (!a.anim_dirty)
+    if (!a.update_animation_this_frame)
         return false;
     moving = a.moving;
     dir_code = a.dir_code;
     vel = a.velocity;
-    a.anim_dirty = false;
+    a.update_animation_this_frame = false;
     return true;
 }
 
@@ -562,17 +582,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 offset(0, cfg.agent_offset_y);
         auto update_anim = [&](AgentData &agent)
         {
-            double thresh = std::max(0.0, cfg.velocity_min_trig_walk_animation);
-            double thresh2 = thresh * thresh;
-            double vlen2 = agent.velocity.length_squared();
-            bool new_moving = vlen2 > thresh2;
-            int new_dir = velocity_dir_code(agent.velocity);
-            if (new_moving != agent.moving || new_dir != agent.dir_code)
-            {
-                agent.moving = new_moving;
-                agent.dir_code = new_dir;
-                agent.anim_dirty = true;
-            }
+            update_anim_state(agent, cfg.velocity_min_trig_walk_animation);
         };
 
         if (!a.active || !a.flow)
@@ -609,6 +619,8 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
+      
+
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
@@ -633,7 +645,7 @@ void SteeringSystem::update_all(double delta)
         if (map_cell != a.last_logged_tile)
         {
             a.last_logged_tile = map_cell;
-          /*   godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")"); */
+            /*   godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")"); */
         }
         bool on_t2_tile = ff->is_cell_in_t2(map_cell);
         if (on_t2_tile)
@@ -649,7 +661,7 @@ void SteeringSystem::update_all(double delta)
         if (auto it_count = group_sizes.find(a.group); it_count != group_sizes.end() && it_count->second > 0)
             group_size = it_count->second;
 
-        double t1_radius = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)group_size);
+        double t1_radius = (cfg.tile_size * 0.1) * std::sqrt((double)group_size);
         double t2_radius = t1_radius + cfg.target_T2_param_margin;
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
@@ -667,7 +679,7 @@ void SteeringSystem::update_all(double delta)
             grid->update(a.id, old_pos + offset, a.position + offset);
             a.moving = false;
             a.dir_code = -1;
-            a.anim_dirty = true;
+            a.update_animation_this_frame = true;
             continue;
         }
 
@@ -739,6 +751,9 @@ void SteeringSystem::update_all(double delta)
             ffcore::cleanup_flow_if_unused(ff);
 
             a.active = false;
+            a.moving = false;
+            a.dir_code = -1;
+            a.update_animation_this_frame = true;
 
             if (auto *mgr = ffcore::get_global_agent_manager())
                 if (auto *entry = mgr->get(a.id))
