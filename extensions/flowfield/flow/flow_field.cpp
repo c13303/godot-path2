@@ -3,6 +3,8 @@
 #include <cmath>
 #include <queue>
 #include <unordered_set>
+#include <sstream>
+#include "../core/global_config.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace ffcore;
@@ -18,6 +20,9 @@ void FlowField::resize(int width, int height)
     w = width;
     h = height;
     dirs.assign(w * h, Vec2());
+    t2_tiles.clear();
+    computed_t2_radius = 0.0;
+    last_t2_log.clear();
     ready = (w > 0 && h > 0);
 }
 
@@ -74,6 +79,9 @@ Vec2 FlowField::cell_to_world(const Vec2i &cell) const
 void FlowField::clear()
 {
     std::fill(dirs.begin(), dirs.end(), Vec2());
+    t2_tiles.clear();
+    computed_t2_radius = 0.0;
+    last_t2_log.clear();
     ready = false;
     goal_cell = Vec2i(-1, -1);
 }
@@ -150,6 +158,68 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
     return best;
 }
 
+void FlowField::compute_t2_tiles(int group_size)
+{
+    t2_tiles.clear();
+    computed_t2_radius = 0.0;
+    if (!ready || !has_goal())
+        return;
+
+    int target = std::max(1, group_size);
+
+    struct CellDist
+    {
+        double d2 = 0.0;
+        Vec2i cell;
+    };
+    std::vector<CellDist> candidates;
+    candidates.reserve((size_t)(w * h));
+
+    Vec2 goal_center = cell_to_world(goal_cell);
+
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+        {
+            Vec2i rel(x, y);
+            if (!is_cell_navigable(rel))
+                continue;
+
+            Vec2 world_center = cell_to_world(rel);
+            double d2 = (world_center - goal_center).length_squared();
+            candidates.push_back({d2, Vec2i(cell_origin.x + x, cell_origin.y + y)});
+        }
+
+    if (candidates.empty())
+        return;
+
+    if (target > (int)candidates.size())
+        target = (int)candidates.size();
+
+    auto cmp = [](const CellDist &a, const CellDist &b)
+    { return a.d2 < b.d2; };
+
+    std::nth_element(candidates.begin(), candidates.begin() + (target - 1), candidates.end(), cmp);
+    double threshold = candidates[target - 1].d2;
+    computed_t2_radius = std::sqrt(threshold);
+
+    for (const auto &c : candidates)
+    {
+        if (c.d2 <= threshold + 1e-9)
+            t2_tiles.push_back(c.cell);
+    }
+
+    std::ostringstream oss;
+    oss << "T2 tiles (" << t2_tiles.size() << "):";
+    for (const auto &c : t2_tiles)
+        oss << " (" << c.x << "," << c.y << ")";
+    std::string msg = oss.str();
+    if (msg != last_t2_log)
+    {
+        last_t2_log = msg;
+        godot::UtilityFunctions::print(msg.c_str());
+    }
+}
+
 void FlowField::copy_from(const FlowField &src)
 {
     w = src.w;
@@ -159,4 +229,7 @@ void FlowField::copy_from(const FlowField &src)
     goal_cell = src.goal_cell;
     ready = src.ready;
     dirs = src.dirs;
+    t2_tiles = src.t2_tiles;
+    computed_t2_radius = src.computed_t2_radius;
+    last_t2_log = src.last_t2_log;
 }

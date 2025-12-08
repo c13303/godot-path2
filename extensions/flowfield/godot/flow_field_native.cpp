@@ -306,35 +306,6 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
     }
 }
 
-void FlowFieldNative::update_t2_tiles(const Rect2i &used,
-                                      const Vector2i &goal_cell,
-                                      const std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
-{
-    t2_tiles.clear();
-    if (!floor_layer)
-        return;
-    if (!walkable_set.count(goal_cell))
-        return;
-
-    const auto &cfg = ffcore::globalconfig();
-    int nb = group_size_for_draw();
-    double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)nb);
-    double t2 = t1 + cfg.target_T2_param_margin;
-    double t2_sq = t2 * t2;
-
-    for (const Vector2i &cell : walkable_set)
-    {
-        if (cell.x < used.position.x || cell.y < used.position.y ||
-            cell.x >= used.position.x + used.size.x || cell.y >= used.position.y + used.size.y)
-            continue;
-
-        Vector2 local_center = floor_layer->map_to_local(cell);
-        Vector2 world_center = floor_layer->to_global(local_center);
-        if (goal_world.distance_squared_to(world_center) <= t2_sq)
-            t2_tiles.push_back(cell);
-    }
-}
-
 void FlowFieldNative::adjust_wall_tangents(const Rect2i &used,
                                            const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                            int radius)
@@ -404,7 +375,6 @@ void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_ce
 
 void FlowFieldNative::rebuild_async(Vector2 goal)
 {
-    t2_tiles.clear();
     Rect2i used;
     Vector2i goal_cell;
 
@@ -424,11 +394,10 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
-    // adjust_wall_tangents(used, wall_set, 2); // 9 ms - Almost no effect
-    update_t2_tiles(used, goal_cell, walkable_set);
     finalize_field(used, goal_cell);
-    /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
+    field.compute_t2_tiles(group_size_for_draw());
 
+    /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
@@ -471,9 +440,10 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
 Array FlowFieldNative::get_tiles_in_t2() const
 {
     Array cells;
-    cells.resize((int)t2_tiles.size());
-    for (int i = 0; i < (int)t2_tiles.size(); ++i)
-        cells[i] = t2_tiles[(size_t)i];
+    const auto &vec = field.get_t2_tiles();
+    cells.resize((int)vec.size());
+    for (int i = 0; i < (int)vec.size(); ++i)
+        cells[i] = Vector2i(vec[(size_t)i].x, vec[(size_t)i].y);
     return cells;
 }
 
@@ -517,11 +487,13 @@ void FlowFieldNative::_draw()
         Vector2 goal_center = to_local(
             floor_layer->to_global(
                 floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
-        if (!t2_tiles.empty())
+        const auto &t2_cells = field.get_t2_tiles();
+        if (!t2_cells.empty())
         {
             Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
-            for (const Vector2i &cell : t2_tiles)
+            for (const ffcore::Vec2i &cell_rel : t2_cells)
             {
+                Vector2i cell(cell_rel.x, cell_rel.y);
                 Vector2 local_center = floor_layer->map_to_local(cell);
                 Vector2 world_center = floor_layer->to_global(local_center);
                 Vector2 draw_center = to_local(world_center);
@@ -535,7 +507,10 @@ void FlowFieldNative::_draw()
 
         int nb = group_size_for_draw();
         double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)nb);
-        double t2 = t1 + cfg.target_T2_param_margin;
+        double t2 = field.get_computed_t2_radius();
+        double min_t2 = cfg.tile_size;
+        if (t2 < min_t2)
+            t2 = min_t2;
         draw_arc(goal_center, t1, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness); // T1 red
         draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
     }

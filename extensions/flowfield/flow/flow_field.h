@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include "../core/types.h"
+#include <string>
 
 namespace ffcore
 {
@@ -48,6 +49,9 @@ namespace ffcore
 
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
+        void compute_t2_tiles(int group_size);
+        const std::vector<Vec2i> &get_t2_tiles() const { return t2_tiles; }
+        double get_computed_t2_radius() const { return computed_t2_radius; }
         int arrived_count = 0;
         bool first_is_arrived = false;
         void copy_from(const FlowField &src);
@@ -63,6 +67,9 @@ namespace ffcore
 
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;
+        std::vector<Vec2i> t2_tiles;
+        double computed_t2_radius = 0.0;
+        std::string last_t2_log;
 
         Vec2i goal_cell = Vec2i(-1, -1);
     };

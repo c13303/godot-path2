@@ -50,16 +50,12 @@ namespace godot
                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
                                 const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
-        void update_t2_tiles(const Rect2i &used,
-                             const Vector2i &goal_cell,
-                             const std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
 
         void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
         void compute_distance_field(const Rect2i &used,
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         std::vector<float> distance_field;
-        std::vector<Vector2i> t2_tiles;
         int group_size_for_draw() const;
 
     protected:
