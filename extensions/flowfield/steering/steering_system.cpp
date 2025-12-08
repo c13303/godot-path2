@@ -36,7 +36,7 @@ static inline void update_anim_state(ffcore::AgentData &agent, double thresh)
         agent.moving = new_moving;
         agent.dir_code = new_dir;
         agent.update_animation_this_frame = true;
-        godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " v2=", vlen2, " thresh2=", thresh2);
+      /*   godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " v2=", vlen2, " thresh2=", thresh2); */
     }
 }
 

@@ -20,9 +20,6 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
-    ADD_SIGNAL(MethodInfo("agent_propelled_state_changed",
-                          PropertyInfo(Variant::INT, "agent_id"),
-                          PropertyInfo(Variant::BOOL, "propelled")));
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -75,21 +72,10 @@ void SteeringSystemNative::apply_explosion(const Vector2 &position, double radiu
     system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss);
 }
 
-void SteeringSystemNative::_reset_agent_cache(int agent_id, bool preserve_arrival)
+void SteeringSystemNative::_reset_agent_cache(int agent_id)
 {
-    (void)preserve_arrival;
     agent_direction_codes.erase(agent_id);
     agent_last_flow.erase(agent_id);
-}
-
-void SteeringSystemNative::maybe_emit_propelled_state(int agent_id, bool propelled)
-{
-    auto it = agent_propelled_states.find(agent_id);
-    bool last = (it != agent_propelled_states.end()) ? it->second : false;
-    if (last == propelled)
-        return;
-    agent_propelled_states[agent_id] = propelled;
-    emit_signal("agent_propelled_state_changed", agent_id, propelled);
 }
 
 int SteeringSystemNative::_direction_code(const Vector2 &v) const
@@ -99,25 +85,6 @@ int SteeringSystemNative::_direction_code(const Vector2 &v) const
     if (Math::abs(v.x) >= Math::abs(v.y))
         return v.x >= 0.0 ? 0 : 1; // E or W
     return v.y >= 0.0 ? 2 : 3;     // S or N
-}
-
-void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, const Vector2 &flow_dir, bool force)
-{
-    if (!agent_manager)
-        return;
-
-    auto it = agent_direction_codes.find(agent_id);
-    int last = (it != agent_direction_codes.end()) ? it->second : -2;
-    if (!force && last == code)
-        return;
-
-    agent_direction_codes[agent_id] = code;
-
-    Dictionary payload;
-    payload["direction"] = flow_dir;
-    payload["code"] = code;
-    payload["moving"] = true;
-    agent_manager->send_agent_event("direction", agent_id, payload);
 }
 
 Vector2 SteeringSystemNative::_goal_position_for_agent(const ffcore::AgentData *a) const
@@ -195,37 +162,26 @@ void SteeringSystemNative::_process(double delta)
         bool flow_changed = (it_last_flow == agent_last_flow.end()) || (it_last_flow->second != flow_ptr);
         if (flow_changed || !a->active)
         {
-            bool preserve_arrival = (!flow_changed && !a->active);
-            _reset_agent_cache(id, preserve_arrival);
+            _reset_agent_cache(id);
             if (flow_ptr)
                 agent_last_flow[id] = flow_ptr;
         }
 
-        maybe_emit_propelled_state(id, a->is_propelled);
         bool moving;
         int code;
         ffcore::Vec2 vel;
         if (system.consume_anim_state(id, moving, code, vel))
         {
             Vector2 vel_vec(vel.x, vel.y);
-            if (moving && code >= 0)
+            if (agent_manager)
             {
-                maybe_emit_direction_changed(id, code, vel_vec.normalized(), true);
+                Dictionary payload;
+                payload["moving"] = moving;
+                payload["code"] = code;
+                payload["direction"] = (moving && vel_vec.length_squared() > 1e-6) ? vel_vec.normalized() : vel_vec;
+                agent_manager->send_agent_event("direction", id, payload);
             }
-            else
-            {
-                if (code < 0 && agent_direction_codes.count(id))
-                    code = agent_direction_codes[id];
-                if (agent_manager)
-                {
-                    Dictionary payload;
-                    payload["moving"] = moving;
-                    payload["code"] = code;
-                    payload["direction"] = vel_vec;
-                    agent_manager->send_agent_event("direction", id, payload);
-                }
-                agent_direction_codes[id] = code;
-            }
+            agent_direction_codes[id] = code;
         }
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
