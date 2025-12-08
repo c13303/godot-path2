@@ -344,6 +344,8 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
         ff->refcount++; // incrément nouveau FF
 
     a.active = (ff != nullptr);
+    a.was_in_t2 = false;
+    a.has_entered_t2 = false;
     // Reset arrival state when assigning a new flow so agents can arrive again.
     if (ff != nullptr)
     {
@@ -573,6 +575,27 @@ void SteeringSystem::update_all(double delta)
             }
         }
 
+        Vec2i rel_cell = ff->world_to_cell(a.position);
+        Vec2i map_cell(rel_cell.x + ff->get_cell_origin().x, rel_cell.y + ff->get_cell_origin().y);
+        if (map_cell != a.last_logged_tile)
+        {
+            a.last_logged_tile = map_cell;
+            godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")");
+        }
+        bool on_t2_tile = ff->is_cell_in_t2(map_cell);
+        if (on_t2_tile)
+        {
+            if (!a.has_entered_t2)
+                godot::UtilityFunctions::print("Agent ", a.id, " on T2 tile (", map_cell.x, ",", map_cell.y, "), stopping");
+            a.has_entered_t2 = true;
+            a.has_arrived = true;
+            a.active = false;
+            Vec2 old_pos = a.position;
+            a.velocity = Vec2(0, 0);
+            grid->update(a.id, old_pos, a.position);
+            continue;
+        }
+
         Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
@@ -595,16 +618,6 @@ void SteeringSystem::update_all(double delta)
             grid->update(a.id, a.position, a.position);
             continue;
         }
-
-        bool now_in_t2 = dist_to_target <= t2_radius;
-        if (now_in_t2 && !a.was_in_t2)
-        {
-            if (has_claimed)
-                godot::UtilityFunctions::print("Agent ", a.id, " entered T2 at claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")");
-            else
-                godot::UtilityFunctions::print("Agent ", a.id, " entered T2 (dist=", dist_to_target, ", r=", t2_radius, ")");
-        }
-        a.was_in_t2 = now_in_t2;
 
         Vec2 target_velocity;
         if (a.is_propelled)

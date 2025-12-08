@@ -1,12 +1,14 @@
 extends Label
 
-var t := 0.0
+var hover_cell_text := ""
 
 func _process(delta: float) -> void:
-	t += delta
-	if t < 1.0:
-		return
-	t = 0.0
+	var sb := ""
+	sb += "FPS: %d\n" % Engine.get_frames_per_second()
+	sb += "Agents: %d\n" % get_tree().get_nodes_in_group("main_chars").size()
+	if hover_cell_text != "":
+		sb += hover_cell_text
+	text = sb
 
-	text = "FPS: %d\n" % Engine.get_frames_per_second()
-	text += "Agents: %d" % get_tree().get_nodes_in_group("main_chars").size()
+func set_hover_cell_text(t: String) -> void:
+	hover_cell_text = t

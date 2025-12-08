@@ -52,6 +52,7 @@ namespace ffcore
         void compute_t2_tiles(int group_size);
         const std::vector<Vec2i> &get_t2_tiles() const { return t2_tiles; }
         double get_computed_t2_radius() const { return computed_t2_radius; }
+        bool is_cell_in_t2(const Vec2i &map_cell) const;
         int arrived_count = 0;
         bool first_is_arrived = false;
         void copy_from(const FlowField &src);

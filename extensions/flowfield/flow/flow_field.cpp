@@ -213,7 +213,15 @@ void FlowField::compute_t2_tiles(int group_size)
     std::string msg = oss.str();
 
         godot::UtilityFunctions::print(msg.c_str());
-    
+
+}
+
+bool FlowField::is_cell_in_t2(const Vec2i &map_cell) const
+{
+    for (const auto &c : t2_tiles)
+        if (c == map_cell)
+            return true;
+    return false;
 }
 
 void FlowField::copy_from(const FlowField &src)

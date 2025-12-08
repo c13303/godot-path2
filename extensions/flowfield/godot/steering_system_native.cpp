@@ -155,6 +155,20 @@ void SteeringSystemNative::_update_arrival_state(int agent_id, const ffcore::Age
         arrival_states.erase(agent_id);
         return;
     }
+
+    if (a->has_entered_t2)
+    {
+        ArrivalState &st = arrival_states[agent_id];
+        st.goal_position = _goal_position_for_agent(a);
+        st.distance_to_goal = 0.0;
+        st.velocity_magnitude = 0.0;
+        st.is_near_goal = true;
+        st.is_stopped = true;
+        st.time_at_goal = arrival_time_requirement;
+        st.has_arrived = true;
+        return;
+    }
+
     ArrivalState &st = arrival_states[agent_id];
     st.goal_position = _goal_position_for_agent(a);
 

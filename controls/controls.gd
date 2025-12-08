@@ -36,6 +36,8 @@ var blood_image_texture: ImageTexture
 
 var current_flow: Node = null
 var current_group: int = -1
+@onready var fps_label: Label = $"../CanvasLayer/Label"
+var mouse_outline: Line2D
 
 var selecting: bool = false
 var selection_start: Vector2
@@ -49,6 +51,16 @@ var preview_units: Array[Node2D] = []
 func _ready() -> void:
 	add_child(marker)
 	marker.visible = false
+
+	mouse_outline = Line2D.new()
+	mouse_outline.default_color = Color(1, 1, 1, 1)
+	mouse_outline.width = 1.0
+	mouse_outline.closed = true
+	mouse_outline.visible = false
+	if flow and flow is Node2D:
+		flow.add_child(mouse_outline)
+	else:
+		add_child(mouse_outline)
 
 	if ui_layer:
 		selection_rect = ColorRect.new()
@@ -115,6 +127,8 @@ func _process(delta: float) -> void:
 		selection_rect.size = Vector2(abs(mouse_pos.x - selection_start.x), abs(mouse_pos.y - selection_start.y))
 		_preview_selection(selection_rect.get_rect())
 
+	_update_mouse_tile_ui()
+
 	var mov := Vector2.ZERO
 	if Input.is_key_pressed(KEY_UP):
 		mov.y -= 1
@@ -126,6 +140,29 @@ func _process(delta: float) -> void:
 		mov.x += 1
 	if mov != Vector2.ZERO:
 		camera.position += mov.normalized() * speed * delta
+
+func _update_mouse_tile_ui() -> void:
+	if not floorz:
+		return
+
+	var mouse_world := get_global_mouse_position()
+	var cell := floorz.local_to_map(floorz.to_local(mouse_world))
+	var center := floorz.to_global(floorz.map_to_local(cell))
+
+	if fps_label and fps_label.has_method("set_hover_cell_text"):
+		fps_label.call("set_hover_cell_text", "Tile: (%d, %d)" % [cell.x, cell.y])
+
+	if mouse_outline:
+		var tile_size := floorz.tile_set.get_tile_size()
+		var half := Vector2(tile_size.x * 0.5, tile_size.y * 0.5)
+		mouse_outline.points = [
+			Vector2(-half.x, -half.y),
+			Vector2(half.x, -half.y),
+			Vector2(half.x, half.y),
+			Vector2(-half.x, half.y)
+		]
+		mouse_outline.global_position = center
+		mouse_outline.visible = true
 
 func _zoom_towards_mouse(amount: float) -> void:
 	var mouse_screen: Vector2 = get_viewport().get_mouse_position()
