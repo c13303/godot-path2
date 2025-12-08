@@ -558,6 +558,20 @@ void SteeringSystem::update_all(double delta)
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - a.position;
         double dist_to_target = safe_len(to_goal);
+        bool has_claimed = (a.claimed_tile.x > -100000 && a.claimed_tile.y > -100000);
+        double dist_to_claim = 1e9;
+        bool reached_claim = false;
+        if (has_claimed)
+        {
+            Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
+            Vec2 claim_center = ff->cell_to_world(rel_claim);
+            dist_to_claim = safe_len(claim_center - a.position);
+            reached_claim = dist_to_claim <= (ff->tile_size() * 0.5);
+            if (reached_claim && a.active)
+            {
+                godot::UtilityFunctions::print("Agent ", a.id, " reached claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")");
+            }
+        }
 
         Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position));
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
@@ -573,10 +587,22 @@ void SteeringSystem::update_all(double delta)
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
         double arrival_stop_speed = std::max(0.1, t2_speed_target * 0.25);
 
+        if (reached_claim)
+        {
+            a.has_arrived = true;
+            a.active = false;
+            a.velocity = Vec2(0, 0);
+            grid->update(a.id, a.position, a.position);
+            continue;
+        }
+
         bool now_in_t2 = dist_to_target <= t2_radius;
         if (now_in_t2 && !a.was_in_t2)
         {
-            godot::UtilityFunctions::print("Agent ", a.id, " entered T2 (dist=", dist_to_target, ", r=", t2_radius, ")");
+            if (has_claimed)
+                godot::UtilityFunctions::print("Agent ", a.id, " entered T2 at claimed tile (", a.claimed_tile.x, ",", a.claimed_tile.y, ")");
+            else
+                godot::UtilityFunctions::print("Agent ", a.id, " entered T2 (dist=", dist_to_target, ", r=", t2_radius, ")");
         }
         a.was_in_t2 = now_in_t2;
 
@@ -623,6 +649,9 @@ void SteeringSystem::update_all(double delta)
         {
             a.has_arrived = true;
         }
+
+        if (!a.has_arrived && reached_claim)
+            a.has_arrived = true;
 
         bool can_complete = a.has_arrived && (dist_to_target <= t1_radius || reached_goal_cell);
 

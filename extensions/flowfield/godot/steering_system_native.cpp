@@ -131,10 +131,21 @@ void SteeringSystemNative::maybe_emit_direction_changed(int agent_id, int code, 
 
 Vector2 SteeringSystemNative::_goal_position_for_agent(const ffcore::AgentData *a) const
 {
-    if (!a || !a->flow)
+    if (!a)
         return Vector2();
-    ffcore::Vec2 g = a->flow->goal_center_world();
-    return Vector2(g.x, g.y);
+    if (a->claimed_tile.x > -100000 && a->claimed_tile.y > -100000 && a->flow)
+    {
+        ffcore::Vec2i rel(a->claimed_tile.x - a->flow->get_cell_origin().x,
+                          a->claimed_tile.y - a->flow->get_cell_origin().y);
+        ffcore::Vec2 g = a->flow->cell_to_world(rel);
+        return Vector2(g.x, g.y);
+    }
+    if (a->flow)
+    {
+        ffcore::Vec2 g = a->flow->goal_center_world();
+        return Vector2(g.x, g.y);
+    }
+    return Vector2();
 }
 
 void SteeringSystemNative::_update_arrival_state(int agent_id, const ffcore::AgentData *a, double delta)
