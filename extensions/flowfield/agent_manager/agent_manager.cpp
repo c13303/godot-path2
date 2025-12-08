@@ -6,6 +6,7 @@
 #include "../godot/flow_field_native.h"
 #include "../core/types.h"
 #include "../core/nav_services.h"
+#include <algorithm>
 #include <cstdlib>
 
 namespace ffcore
@@ -234,18 +235,43 @@ namespace ffcore
         if (!steering)
             return;
 
-        std::vector<int> group_agents;
+        struct AgentPos
+        {
+            int id;
+            Vec2 pos;
+        };
+
+        std::vector<AgentPos> group_agents;
         group_agents.reserve(agents.size());
         for (const auto &a : agents)
             if (a.group == g)
-                group_agents.push_back(a.id);
+                if (const auto *ad = steering->get_agent(a.id))
+                    group_agents.push_back({a.id, ad->position});
 
-        size_t count = std::min(group_agents.size(), tiles.size());
+        auto by_row = [](const auto &lhs, const auto &rhs)
+        {
+            if (lhs.pos.y == rhs.pos.y)
+                return lhs.pos.x < rhs.pos.x;
+            return lhs.pos.y < rhs.pos.y;
+        };
+        std::sort(group_agents.begin(), group_agents.end(), by_row);
+
+        std::vector<Vec2i> sorted_tiles = tiles;
+        std::sort(sorted_tiles.begin(), sorted_tiles.end(),
+                  [](const Vec2i &a, const Vec2i &b)
+                  {
+                      if (a.y == b.y)
+                          return a.x < b.x;
+                      return a.y < b.y;
+                  });
+
+        size_t count = std::min(group_agents.size(), sorted_tiles.size());
         for (size_t i = 0; i < count; ++i)
         {
-            int agent_id = group_agents[i];
-            steering->set_agent_claimed_tile(agent_id, tiles[i]);
-            godot::UtilityFunctions::print("Agent ", agent_id, " claims tile (", tiles[i].x, ",", tiles[i].y, ")");
+            int agent_id = group_agents[i].id;
+            const Vec2i &tile = sorted_tiles[i];
+            steering->set_agent_claimed_tile(agent_id, tile);
+            godot::UtilityFunctions::print("Agent ", agent_id, " claims tile (", tile.x, ",", tile.y, ")");
         }
     }
 
