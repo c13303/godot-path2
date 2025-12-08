@@ -488,6 +488,20 @@ void FlowFieldNative::_draw()
             floor_layer->to_global(
                 floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
         const auto &t2_cells = field.get_t2_tiles();
+        std::vector<ffcore::Vec2i> claimed;
+        if (auto *mgr = ffcore::get_global_agent_manager())
+            mgr->get_claimed_tiles(current_group_id, claimed);
+
+        auto encode = [](const ffcore::Vec2i &c) -> int64_t
+        {
+            return (int64_t(c.x) << 32) ^ (uint32_t(c.y));
+        };
+
+        std::unordered_set<int64_t> claimed_set;
+        claimed_set.reserve(claimed.size() * 2 + 1);
+        for (const auto &c : claimed)
+            claimed_set.insert(encode(c));
+
         if (!t2_cells.empty())
         {
             Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
@@ -498,7 +512,9 @@ void FlowFieldNative::_draw()
                 Vector2 world_center = floor_layer->to_global(local_center);
                 Vector2 draw_center = to_local(world_center);
                 Rect2 tile_rect(draw_center - cell_size * 0.5f, cell_size);
-                draw_rect(tile_rect, Color(0, 1, 0, 0.9f), false, 1.0);
+                bool is_claimed = claimed_set.count(encode(cell_rel)) > 0;
+                Color col = is_claimed ? Color(0, 0.4f, 1.0f, 0.9f) : Color(0, 1, 0, 0.9f);
+                draw_rect(tile_rect, col, false, 1.0);
             }
         }
 
@@ -529,4 +545,5 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     ffcore::FlowFieldID fid = fm->register_copy(field);
     ffcore::FlowField *new_flow = fm->get(fid);
     mgr->set_group_flow(group_id, new_flow);
+    mgr->distribute_tiles_to_agents(group_id, field.get_t2_tiles());
 }

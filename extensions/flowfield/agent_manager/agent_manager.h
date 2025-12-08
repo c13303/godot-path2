@@ -45,6 +45,8 @@ namespace ffcore
         void mark_group_finished(GroupID g);
         void mark_group_has_order(GroupID g);
         int count_group_members(GroupID g) const;
+        void distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles);
+        void get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const;
 
     private:
         std::vector<AgentEntry> agents;

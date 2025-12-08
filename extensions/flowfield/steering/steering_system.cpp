@@ -417,6 +417,14 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         agent.group = INVALID_GROUP;
     }
 }
+
+void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].claimed_tile = tile;
+}
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())

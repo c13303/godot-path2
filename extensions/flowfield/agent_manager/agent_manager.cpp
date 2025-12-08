@@ -225,6 +225,54 @@ namespace ffcore
         return count;
     }
 
+    void AgentManager::distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles)
+    {
+        if (g == INVALID_GROUP || g == GROUP_IDLE || tiles.empty())
+            return;
+
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        if (!steering)
+            return;
+
+        std::vector<int> group_agents;
+        group_agents.reserve(agents.size());
+        for (const auto &a : agents)
+            if (a.group == g)
+                group_agents.push_back(a.id);
+
+        size_t count = std::min(group_agents.size(), tiles.size());
+        for (size_t i = 0; i < count; ++i)
+        {
+            int agent_id = group_agents[i];
+            steering->set_agent_claimed_tile(agent_id, tiles[i]);
+            godot::UtilityFunctions::print("Agent ", agent_id, " claims tile (", tiles[i].x, ",", tiles[i].y, ")");
+        }
+    }
+
+    void AgentManager::get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const
+    {
+        out.clear();
+        if (g == INVALID_GROUP || g == GROUP_IDLE)
+            return;
+
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        if (!steering)
+            return;
+
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            const auto *ad = steering->get_agent(a.id);
+            if (!ad)
+                continue;
+            // claimed_tile uses sentinel (-999999, -999999) when unset
+            if (ad->claimed_tile.x < -100000 || ad->claimed_tile.y < -100000)
+                continue;
+            out.push_back(ad->claimed_tile);
+        }
+    }
+
 
 
 }

@@ -35,6 +35,7 @@ namespace ffcore
         double pending_smash_friction = -1.0;
         bool smash_pending = false;
         bool was_in_t2 = false;
+        Vec2i claimed_tile = Vec2i(-999999, -999999);
     };
 
     struct Shockwave
@@ -66,6 +67,7 @@ namespace ffcore
         int register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow);
         void set_agent_flow_ptr(int id, FlowField *ff);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
+        void set_agent_claimed_tile(int id, const Vec2i &tile);
 
     private:
         std::vector<AgentData> agents;
