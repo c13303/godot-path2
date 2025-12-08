@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <chrono>
+#include <algorithm>
 #include "../core/global_config.h"
 
 using namespace godot;
@@ -198,6 +199,20 @@ void FlowFieldNative::compute_distance_field(const Rect2i &used,
         }
 }
 
+void FlowFieldNative::_ready()
+{
+    set_z_index(1);
+}
+
+int FlowFieldNative::group_size_for_draw() const
+{
+    auto *mgr = ffcore::get_global_agent_manager();
+    if (!mgr || current_group_id == ffcore::INVALID_GROUP)
+        return 1;
+    int count = mgr->count_group_members(current_group_id);
+    return std::max(1, count);
+}
+
 void FlowFieldNative::compute_directions(const Rect2i &used,
                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                          const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
@@ -359,12 +374,6 @@ void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_ce
 
 void FlowFieldNative::rebuild_async(Vector2 goal)
 {
-    const bool debug = false;
-    std::chrono::high_resolution_clock::time_point start;
-
-    if (debug)
-        start = std::chrono::high_resolution_clock::now();
-
     Rect2i used;
     Vector2i goal_cell;
 
@@ -388,12 +397,6 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     finalize_field(used, goal_cell);
     /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
 
-    if (debug)
-    {
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-        godot::UtilityFunctions::print("Duration (ms): ", String::num_uint64(duration));
-    }
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
@@ -435,32 +438,34 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
 
 void FlowFieldNative::_draw()
 {
-    if (!debug_draw || !floor_layer)
+    if (!floor_layer)
         return;
 
-    set_z_index(999);
-    Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
-    Rect2i used = floor_layer->get_used_rect();
-    int skip = Math::max(1, debug_stride);
-
-    for (int y = 0; y < field.height(); y += skip)
+    if (debug_draw)
     {
-        for (int x = 0; x < field.width(); x += skip)
+        Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
+        Rect2i used = floor_layer->get_used_rect();
+        int skip = Math::max(1, debug_stride);
+
+        for (int y = 0; y < field.height(); y += skip)
         {
-            ffcore::Vec2 dir_v = field.dir(x, y);
-            if (dir_v.x == 0.0f && dir_v.y == 0.0f)
-                continue;
+            for (int x = 0; x < field.width(); x += skip)
+            {
+                ffcore::Vec2 dir_v = field.dir(x, y);
+                if (dir_v.x == 0.0f && dir_v.y == 0.0f)
+                    continue;
 
-            Vector2i cell = used.position + Vector2i(x, y);
-            Vector2 local_center = floor_layer->map_to_local(cell);
-            Vector2 world_center = floor_layer->to_global(local_center);
-            Vector2 draw_center = to_local(world_center);
+                Vector2i cell = used.position + Vector2i(x, y);
+                Vector2 local_center = floor_layer->map_to_local(cell);
+                Vector2 world_center = floor_layer->to_global(local_center);
+                Vector2 draw_center = to_local(world_center);
 
-            Vector2 dir(dir_v.x, dir_v.y);
-            dir = dir.normalized();
+                Vector2 dir(dir_v.x, dir_v.y);
+                dir = dir.normalized();
 
-            float len = cell_size.x * debug_scale * 0.5f;
-            draw_line(draw_center, draw_center + dir * len, debug_color_dir, 1.0);
+                float len = cell_size.x * debug_scale * 0.5f;
+                draw_line(draw_center, draw_center + dir * len, debug_color_dir, 1.0);
+            }
         }
     }
 
@@ -475,17 +480,18 @@ void FlowFieldNative::_draw()
         const int segments = 128;
         const float thickness = 1.0f;
 
-        // Approximate visualization for T1/T2 with group size 1 (dynamic radii computed in steering)
-        double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio);
+        int nb = group_size_for_draw();
+        double t1 = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)nb);
         double t2 = t1 + cfg.target_T2_param_margin;
-        draw_arc(goal_center, t1, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness);
-        draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(1, 0.5, 0, 0.9), thickness);
+        draw_arc(goal_center, t1, 0, Math_TAU, segments, Color(1, 0, 0, 0.9), thickness); // T1 red
+        draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
     }
 }
 
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
 {
     rebuild_async(goal);
+    current_group_id = group_id;
 
     ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
     if (!mgr)

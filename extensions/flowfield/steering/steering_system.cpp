@@ -561,8 +561,9 @@ void SteeringSystem::update_all(double delta)
 
         double t1_radius = (cfg.tile_size * cfg.target_T1_param_tile_ratio) * std::sqrt((double)group_size);
         double t2_radius = t1_radius + cfg.target_T2_param_margin;
-        double min_t2_speed = std::clamp(cfg.target_T2_param_minimal_speed, 0.0, a.max_speed);
-        double arrival_stop_speed = std::max(0.1, min_t2_speed * 0.25);
+        double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
+        double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
+        double arrival_stop_speed = std::max(0.1, t2_speed_target * 0.25);
 
         Vec2 target_velocity;
         if (a.is_propelled)
@@ -592,11 +593,13 @@ void SteeringSystem::update_all(double delta)
             }
             else if (dist_to_target <= t2_radius)
             {
-                double span = std::max(1e-6, t2_radius - t1_radius);
-                double t = (dist_to_target - t1_radius) / span; // 0 at T1 edge, 1 at T2 edge
-                t = clamp01(t);
-                double desired_speed = a.max_speed * t;
-                target_speed = std::max(min_t2_speed, desired_speed);
+                double current_speed = safe_len(a.velocity);
+                double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
+                // avoid going under target; keep monotonic toward target
+                if (current_speed > t2_speed_target)
+                    target_speed = std::max(t2_speed_target, desired);
+                else
+                    target_speed = t2_speed_target;
             }
             target_velocity = desired_dir * target_speed;
         }

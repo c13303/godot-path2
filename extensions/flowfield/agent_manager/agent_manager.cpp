@@ -213,6 +213,18 @@ namespace ffcore
         groups[g].has_order = true;
     }
 
+    int AgentManager::count_group_members(GroupID g) const
+    {
+        if (g == INVALID_GROUP)
+            return 0;
+
+        int count = 0;
+        for (const auto &a : agents)
+            if (a.group == g)
+                ++count;
+        return count;
+    }
+
 
 
 }

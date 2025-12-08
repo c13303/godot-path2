@@ -26,6 +26,7 @@ namespace godot
 
     private:
         ffcore::FlowField field;
+        ffcore::GroupID current_group_id = ffcore::INVALID_GROUP;
 
         Vector2 goal_world;
 
@@ -54,6 +55,7 @@ namespace godot
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
 
         std::vector<float> distance_field;
+        int group_size_for_draw() const;
 
     protected:
         static void _bind_methods();
@@ -62,6 +64,7 @@ namespace godot
         FlowFieldNative() = default;
         ~FlowFieldNative() override = default;
 
+        void _ready() override;
         void set_floor_layer(Object *node);
         Object *get_floor_layer() const;
 

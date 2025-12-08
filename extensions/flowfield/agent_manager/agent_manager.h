@@ -44,6 +44,7 @@ namespace ffcore
         bool all_agents_inactive(GroupID g) const;
         void mark_group_finished(GroupID g);
         void mark_group_has_order(GroupID g);
+        int count_group_members(GroupID g) const;
 
     private:
         std::vector<AgentEntry> agents;

@@ -17,7 +17,7 @@ namespace ffcore
         int id = -1;
         Vec2 position;
         Vec2 velocity;
-        double max_speed = 60.0;
+        double max_speed = 50.0;
         bool active = true;
 
         FlowField *flow = nullptr;

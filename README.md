@@ -95,7 +95,8 @@ struct GlobalConfig {
     // Arrivée dynamique (fonction du nombre d'agents du groupe)
     double target_T1_param_tile_ratio = 0.5;        // Rayon T1 = tile_size * ratio * sqrt(nb_agents)
     double target_T2_param_margin = 32.0;           // Marge ajoutée autour de T1 (par défaut 2 * tile_size)
-    double target_T2_param_minimal_speed = 4.0;     // Vitesse mini en T2 (par défaut max(1, 0.25 * tile_size))
+    double target_T2_param_speed_ratio = 0.5;       // Vitesse cible en T2 (fraction de la vitesse max de l'agent)
+    double target_T2_param_speed_lerp = 0.05;       // Lerp vers la vitesse cible en T2
 
     // Lissage
     double lerp_general = 0.02;            // Facteur de lissage du mouvement

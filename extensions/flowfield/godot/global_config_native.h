@@ -49,8 +49,11 @@ namespace godot
         double get_target_T2_param_margin() const;
         void set_target_T2_param_margin(double v);
 
-        double get_target_T2_param_minimal_speed() const;
-        void set_target_T2_param_minimal_speed(double v);
+        double get_target_T2_param_speed_ratio() const;
+        void set_target_T2_param_speed_ratio(double v);
+
+        double get_target_T2_param_speed_lerp() const;
+        void set_target_T2_param_speed_lerp(double v);
 
         double get_separation_radius() const;
         void set_separation_radius(double v);

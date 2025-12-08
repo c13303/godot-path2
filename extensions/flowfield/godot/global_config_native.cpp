@@ -40,8 +40,11 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_target_T2_param_margin"), &GlobalConfigNative::get_target_T2_param_margin);
     ClassDB::bind_method(D_METHOD("set_target_T2_param_margin", "value"), &GlobalConfigNative::set_target_T2_param_margin);
 
-    ClassDB::bind_method(D_METHOD("get_target_T2_param_minimal_speed"), &GlobalConfigNative::get_target_T2_param_minimal_speed);
-    ClassDB::bind_method(D_METHOD("set_target_T2_param_minimal_speed", "value"), &GlobalConfigNative::set_target_T2_param_minimal_speed);
+    ClassDB::bind_method(D_METHOD("get_target_T2_param_speed_ratio"), &GlobalConfigNative::get_target_T2_param_speed_ratio);
+    ClassDB::bind_method(D_METHOD("set_target_T2_param_speed_ratio", "value"), &GlobalConfigNative::set_target_T2_param_speed_ratio);
+
+    ClassDB::bind_method(D_METHOD("get_target_T2_param_speed_lerp"), &GlobalConfigNative::get_target_T2_param_speed_lerp);
+    ClassDB::bind_method(D_METHOD("set_target_T2_param_speed_lerp", "value"), &GlobalConfigNative::set_target_T2_param_speed_lerp);
 
     ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
     ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
@@ -87,7 +90,8 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T1_param_tile_ratio"), "set_target_T1_param_tile_ratio", "get_target_T1_param_tile_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_margin"), "set_target_T2_param_margin", "get_target_T2_param_margin");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_minimal_speed"), "set_target_T2_param_minimal_speed", "get_target_T2_param_minimal_speed");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_ratio"), "set_target_T2_param_speed_ratio", "get_target_T2_param_speed_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
@@ -139,8 +143,11 @@ void GlobalConfigNative::set_target_T1_param_tile_ratio(double v) { cfg().target
 double GlobalConfigNative::get_target_T2_param_margin() const { return cfg().target_T2_param_margin; }
 void GlobalConfigNative::set_target_T2_param_margin(double v) { cfg().target_T2_param_margin = std::max(0.0, v); }
 
-double GlobalConfigNative::get_target_T2_param_minimal_speed() const { return cfg().target_T2_param_minimal_speed; }
-void GlobalConfigNative::set_target_T2_param_minimal_speed(double v) { cfg().target_T2_param_minimal_speed = std::max(0.0, v); }
+double GlobalConfigNative::get_target_T2_param_speed_ratio() const { return cfg().target_T2_param_speed_ratio; }
+void GlobalConfigNative::set_target_T2_param_speed_ratio(double v) { cfg().target_T2_param_speed_ratio = std::clamp(v, 0.0, 1.0); }
+
+double GlobalConfigNative::get_target_T2_param_speed_lerp() const { return cfg().target_T2_param_speed_lerp; }
+void GlobalConfigNative::set_target_T2_param_speed_lerp(double v) { cfg().target_T2_param_speed_lerp = std::clamp(v, 0.0, 1.0); }
 
 double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
 void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }
