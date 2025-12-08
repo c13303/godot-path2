@@ -34,6 +34,7 @@ namespace ffcore
         double smash_delay = 0.0;
         double pending_smash_friction = -1.0;
         bool smash_pending = false;
+        bool was_in_t2 = false;
     };
 
     struct Shockwave

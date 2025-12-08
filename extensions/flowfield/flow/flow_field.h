@@ -69,7 +69,6 @@ namespace ffcore
         std::vector<Vec2> dirs;
         std::vector<Vec2i> t2_tiles;
         double computed_t2_radius = 0.0;
-        std::string last_t2_log;
 
         Vec2i goal_cell = Vec2i(-1, -1);
     };

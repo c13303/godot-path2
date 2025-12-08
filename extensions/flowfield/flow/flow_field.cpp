@@ -22,7 +22,6 @@ void FlowField::resize(int width, int height)
     dirs.assign(w * h, Vec2());
     t2_tiles.clear();
     computed_t2_radius = 0.0;
-    last_t2_log.clear();
     ready = (w > 0 && h > 0);
 }
 
@@ -81,7 +80,6 @@ void FlowField::clear()
     std::fill(dirs.begin(), dirs.end(), Vec2());
     t2_tiles.clear();
     computed_t2_radius = 0.0;
-    last_t2_log.clear();
     ready = false;
     goal_cell = Vec2i(-1, -1);
 }
@@ -209,15 +207,13 @@ void FlowField::compute_t2_tiles(int group_size)
     }
 
     std::ostringstream oss;
-    oss << "T2 tiles (" << t2_tiles.size() << "):";
+    oss << "T2 tiles (" << t2_tiles.size() << "), group_size=" << target << ":";
     for (const auto &c : t2_tiles)
         oss << " (" << c.x << "," << c.y << ")";
     std::string msg = oss.str();
-    if (msg != last_t2_log)
-    {
-        last_t2_log = msg;
+
         godot::UtilityFunctions::print(msg.c_str());
-    }
+    
 }
 
 void FlowField::copy_from(const FlowField &src)
@@ -231,5 +227,4 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     t2_tiles = src.t2_tiles;
     computed_t2_radius = src.computed_t2_radius;
-    last_t2_log = src.last_t2_log;
 }

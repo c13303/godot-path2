@@ -565,6 +565,13 @@ void SteeringSystem::update_all(double delta)
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
         double arrival_stop_speed = std::max(0.1, t2_speed_target * 0.25);
 
+        bool now_in_t2 = dist_to_target <= t2_radius;
+        if (now_in_t2 && !a.was_in_t2)
+        {
+            godot::UtilityFunctions::print("Agent ", a.id, " entered T2 (dist=", dist_to_target, ", r=", t2_radius, ")");
+        }
+        a.was_in_t2 = now_in_t2;
+
         Vec2 target_velocity;
         if (a.is_propelled)
         {

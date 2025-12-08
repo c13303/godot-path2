@@ -21,7 +21,7 @@ namespace ffcore
         double target_T2_param_speed_ratio = 0.5;           // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;           // interpolation vers la vitesse cible en T2
 
-        double separation_radius = 18.0;
+        double separation_radius = 16.0;
         double separation_strength = 400.0;
         int max_neighbors = 16;
 
