@@ -236,10 +236,40 @@ namespace ffcore
         if (!steering)
             return;
 
+        FormationFootprint fp = compute_group_footprint(g);
+        double angle = fp.angle;
+        double cos_a = std::cos(angle);
+        double sin_a = std::sin(angle);
+
+        const ffcore::FlowField *ref_flow = nullptr;
+        Vec2 origin(0, 0);
+        double tsize = ffcore::globalconfig().tile_size;
+
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                if (ad->flow)
+                {
+                    ref_flow = ad->flow;
+                    origin = ad->flow->goal_center_world();
+                    tsize = ad->flow->tile_size();
+                    break;
+                }
+            }
+        }
+
+        if (!ref_flow)
+            return;
+
         struct AgentTile
         {
             int id;
             Vec2i tile;
+            double rx = 0.0;
+            double ry = 0.0;
         };
 
         std::vector<AgentTile> group_agents;
@@ -249,33 +279,53 @@ namespace ffcore
                 if (const auto *ad = steering->get_agent(a.id))
                 {
                     Vec2 foot = ad->position + Vec2(0, ffcore::globalconfig().agent_offset_y);
-                    Vec2i rel = ad->flow ? ad->flow->world_to_cell(foot) : Vec2i((int)std::round(foot.x / ffcore::globalconfig().tile_size), (int)std::round(foot.y / ffcore::globalconfig().tile_size));
+                    Vec2i rel = ad->flow ? ad->flow->world_to_cell(foot) : Vec2i((int)std::round(foot.x / tsize), (int)std::round(foot.y / tsize));
                     Vec2i map_cell = ad->flow ? Vec2i(rel.x + ad->flow->get_cell_origin().x, rel.y + ad->flow->get_cell_origin().y) : rel;
-                    group_agents.push_back({a.id, map_cell});
+                    Vec2 world_center = ad->flow ? ad->flow->cell_to_world(rel) : Vec2(map_cell.x * tsize, map_cell.y * tsize);
+                    Vec2 d = world_center - origin;
+                    double rx = cos_a * d.x + sin_a * d.y;
+                    double ry = -sin_a * d.x + cos_a * d.y;
+                    group_agents.push_back({a.id, map_cell, rx, ry});
                 }
 
         auto by_row = [](const auto &lhs, const auto &rhs)
         {
-            if (lhs.tile.y == rhs.tile.y)
-                return lhs.tile.x < rhs.tile.x;
-            return lhs.tile.y < rhs.tile.y;
+            if (lhs.ry == rhs.ry)
+                return lhs.rx < rhs.rx;
+            return lhs.ry < rhs.ry;
         };
         std::sort(group_agents.begin(), group_agents.end(), by_row);
 
         std::vector<Vec2i> sorted_tiles = tiles;
-        std::sort(sorted_tiles.begin(), sorted_tiles.end(),
-                  [](const Vec2i &a, const Vec2i &b)
+        struct SlotRot
+        {
+            Vec2i cell;
+            double rx;
+            double ry;
+        };
+        std::vector<SlotRot> slots;
+        slots.reserve(sorted_tiles.size());
+        for (const auto &c : sorted_tiles)
+        {
+            Vec2i rel(c.x - ref_flow->get_cell_origin().x, c.y - ref_flow->get_cell_origin().y);
+            Vec2 world_center = ref_flow->cell_to_world(rel);
+            Vec2 d = world_center - origin;
+            double rx = cos_a * d.x + sin_a * d.y;
+            double ry = -sin_a * d.x + cos_a * d.y;
+            slots.push_back({c, rx, ry});
+        }
+        std::sort(slots.begin(), slots.end(), [](const SlotRot &a, const SlotRot &b)
                   {
-                      if (a.y == b.y)
-                          return a.x < b.x;
-                      return a.y < b.y;
+                      if (a.ry == b.ry)
+                          return a.rx < b.rx;
+                      return a.ry < b.ry;
                   });
 
-        size_t count = std::min(group_agents.size(), sorted_tiles.size());
+        size_t count = std::min(group_agents.size(), slots.size());
         for (size_t i = 0; i < count; ++i)
         {
             int agent_id = group_agents[i].id;
-            const Vec2i &tile = sorted_tiles[i];
+            const Vec2i &tile = slots[i].cell;
             steering->set_agent_claimed_tile(agent_id, tile);
         }
     }
@@ -345,6 +395,7 @@ namespace ffcore
             return fp;
 
         double minx = 1e18, miny = 1e18, maxx = -1e18, maxy = -1e18;
+        double cx = 0.0, cy = 0.0;
         int count = 0;
         for (const auto &a : agents)
         {
@@ -356,15 +407,65 @@ namespace ffcore
                 miny = std::min(miny, ad->position.y);
                 maxx = std::max(maxx, ad->position.x);
                 maxy = std::max(maxy, ad->position.y);
+                cx += ad->position.x;
+                cy += ad->position.y;
                 ++count;
             }
         }
         if (count == 0)
             return fp;
 
+        cx /= count;
+        cy /= count;
+
+        // principal axis via covariance
+        double cov_xx = 0.0, cov_xy = 0.0, cov_yy = 0.0;
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                double dx = ad->position.x - cx;
+                double dy = ad->position.y - cy;
+                cov_xx += dx * dx;
+                cov_xy += dx * dy;
+                cov_yy += dy * dy;
+            }
+        }
+        if (count > 0)
+        {
+            cov_xx /= count;
+            cov_xy /= count;
+            cov_yy /= count;
+        }
+        // angle of principal axis (largest eigenvalue)
+        fp.angle = 0.5 * std::atan2(2.0 * cov_xy, cov_xx - cov_yy);
+
+        // bounding box in rotated frame
+        double cos_a = std::cos(fp.angle);
+        double sin_a = std::sin(fp.angle);
+        double rminx = 1e18, rminy = 1e18, rmaxx = -1e18, rmaxy = -1e18;
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                double dx = ad->position.x - cx;
+                double dy = ad->position.y - cy;
+                double rx = cos_a * dx + sin_a * dy;
+                double ry = -sin_a * dx + cos_a * dy;
+                rminx = std::min(rminx, rx);
+                rmaxx = std::max(rmaxx, rx);
+                rminy = std::min(rminy, ry);
+                rmaxy = std::max(rmaxy, ry);
+            }
+        }
+
         double tsize = std::max(1.0, ffcore::globalconfig().tile_size);
-        fp.w = std::max(1, (int)std::round((maxx - minx) / tsize) + 1);
-        fp.h = std::max(1, (int)std::round((maxy - miny) / tsize) + 1);
+        fp.w = std::max(1, (int)std::round((rmaxx - rminx) / tsize) + 1);
+        fp.h = std::max(1, (int)std::round((rmaxy - rminy) / tsize) + 1);
         return fp;
     }
 

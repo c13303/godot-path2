@@ -28,6 +28,7 @@ namespace godot
         Node2D *flowfield = nullptr;
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
+        bool paused = false;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, int> agent_direction_codes;
@@ -56,6 +57,7 @@ namespace godot
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
+        void set_paused(bool p) { paused = p; }
     };
 
 }

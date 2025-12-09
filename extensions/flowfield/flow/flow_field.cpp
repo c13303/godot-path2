@@ -165,18 +165,34 @@ void FlowField::compute_t2_tiles(int group_size, const FormationFootprint &footp
 
     const int fw = std::max(1, footprint.w);
     const int fh = std::max(1, footprint.h);
-    Vec2i start(cell_origin.x + goal_cell.x - fw / 2, cell_origin.y + goal_cell.y - fh / 2);
+    double angle = footprint.angle;
+    double cos_a = std::cos(angle);
+    double sin_a = std::sin(angle);
+
+    Vec2 goal_center = cell_to_world(goal_cell);
+    double tile = std::max(1.0, this->tile_size());
 
     std::vector<Vec2i> slots;
     slots.reserve(fw * fh);
-    for (int dy = 0; dy < fh; ++dy)
-        for (int dx = 0; dx < fw; ++dx)
+    std::unordered_set<int64_t> seen;
+    auto encode = [](const Vec2i &c) -> int64_t
+    { return (int64_t(c.x) << 32) ^ (uint32_t)c.y; };
+
+    for (int jy = 0; jy < fh; ++jy)
+        for (int ix = 0; ix < fw; ++ix)
         {
-            Vec2i cell(start.x + dx, start.y + dy);
-            Vec2i rel(cell.x - cell_origin.x, cell.y - cell_origin.y);
+            double lx = (ix - fw * 0.5 + 0.5) * tile;
+            double ly = (jy - fh * 0.5 + 0.5) * tile;
+            double rx = cos_a * lx - sin_a * ly;
+            double ry = sin_a * lx + cos_a * ly;
+            Vec2 world_pos = goal_center + Vec2(rx, ry);
+            Vec2i rel = world_to_cell(world_pos);
             if (!is_cell_navigable(rel))
                 continue;
-            slots.push_back(cell);
+            Vec2i map_cell(rel.x + cell_origin.x, rel.y + cell_origin.y);
+            int64_t key = encode(map_cell);
+            if (seen.insert(key).second)
+                slots.push_back(map_cell);
         }
 
     if (slots.empty())
@@ -192,7 +208,6 @@ void FlowField::compute_t2_tiles(int group_size, const FormationFootprint &footp
     int target = std::min<int>(std::max(1, group_size), slots.size());
     slots.resize(target);
 
-    Vec2 goal_center = cell_to_world(goal_cell);
     double max_d2 = 0.0;
     for (const auto &c : slots)
     {

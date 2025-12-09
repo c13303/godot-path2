@@ -20,6 +20,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
+    ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -144,6 +145,9 @@ Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
 
 void SteeringSystemNative::_process(double delta)
 {
+    if (paused)
+        return;
+
     if (!flowfield || !grid)
         return;
 

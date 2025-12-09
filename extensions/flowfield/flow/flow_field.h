@@ -10,6 +10,7 @@ namespace ffcore
     {
         int w = 1;
         int h = 1;
+        double angle = 0.0; // radians, principal axis of formation
     };
 
     class FlowField

@@ -92,6 +92,8 @@ func _input(event: InputEvent) -> void:
 			_on_key_trig_bomb()
 		elif event.keycode == KEY_N:
 			_on_key_trig_blood()
+		elif event.keycode == KEY_SPACE:
+			_toggle_pause()
 			
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -140,6 +142,18 @@ func _process(delta: float) -> void:
 		mov.x += 1
 	if mov != Vector2.ZERO:
 		camera.position += mov.normalized() * speed * delta
+
+var _paused: bool = false
+func _toggle_pause() -> void:
+	_paused = not _paused
+	if steering and steering.has_method("set_paused"):
+		steering.set_paused(_paused)
+	_toggle_units_visible(not _paused)
+
+func _toggle_units_visible(visible: bool) -> void:
+	for node in get_tree().get_nodes_in_group("main_chars"):
+		if node is Node2D:
+			node.visible = visible
 
 func _update_mouse_tile_ui() -> void:
 	if not floorz:
