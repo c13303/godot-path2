@@ -623,9 +623,6 @@ void SteeringSystem::update_all(double delta)
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
 
-        double slowdown_radius = ff->get_computed_t2_radius();
-        if (slowdown_radius <= 0.0)
-            slowdown_radius = cfg.tile_size; // minimal safety fallback
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
 
@@ -639,7 +636,11 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2 claim_dir = safe_normalize(claim_center - a.position);
             if (!claim_dir.is_zero())
-                nav_dir = claim_dir;
+            {
+                double blend_radius = ff->tile_size() * 2.0;
+                double blend = clamp01(1.0 - (dist_to_claim / blend_radius));
+                nav_dir = safe_normalize(nav_dir * (1.0 - blend) + claim_dir * blend);
+            }
         }
 
         Vec2 target_velocity;
@@ -653,7 +654,9 @@ void SteeringSystem::update_all(double delta)
             combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
-            if (desired_dir.is_zero() && dist_to_target > slowdown_radius && !in_shockwave)
+            double slow_metric = has_claimed ? dist_to_claim : dist_to_target;
+            double slow_threshold = has_claimed ? (ff->tile_size() * 1.5) : (ff->tile_size() * 2.0);
+            if (desired_dir.is_zero() && slow_metric > slow_threshold && !in_shockwave)
             {
                 // Keep pushing toward the goal so we never stall before entering slowdown zones
                 desired_dir = safe_normalize(to_goal);
@@ -663,7 +666,7 @@ void SteeringSystem::update_all(double delta)
                 desired_dir = safe_normalize(to_goal);
             }
             double target_speed = a.max_speed;
-            if (dist_to_target <= slowdown_radius)
+            if (slow_metric <= slow_threshold)
             {
                 double current_speed = safe_len(a.velocity);
                 double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
