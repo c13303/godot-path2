@@ -236,24 +236,29 @@ namespace ffcore
         if (!steering)
             return;
 
-        struct AgentPos
+        struct AgentTile
         {
             int id;
-            Vec2 pos;
+            Vec2i tile;
         };
 
-        std::vector<AgentPos> group_agents;
+        std::vector<AgentTile> group_agents;
         group_agents.reserve(agents.size());
         for (const auto &a : agents)
             if (a.group == g)
                 if (const auto *ad = steering->get_agent(a.id))
-                    group_agents.push_back({a.id, ad->position});
+                {
+                    Vec2 foot = ad->position + Vec2(0, ffcore::globalconfig().agent_offset_y);
+                    Vec2i rel = ad->flow ? ad->flow->world_to_cell(foot) : Vec2i((int)std::round(foot.x / ffcore::globalconfig().tile_size), (int)std::round(foot.y / ffcore::globalconfig().tile_size));
+                    Vec2i map_cell = ad->flow ? Vec2i(rel.x + ad->flow->get_cell_origin().x, rel.y + ad->flow->get_cell_origin().y) : rel;
+                    group_agents.push_back({a.id, map_cell});
+                }
 
         auto by_row = [](const auto &lhs, const auto &rhs)
         {
-            if (lhs.pos.y == rhs.pos.y)
-                return lhs.pos.x < rhs.pos.x;
-            return lhs.pos.y < rhs.pos.y;
+            if (lhs.tile.y == rhs.tile.y)
+                return lhs.tile.x < rhs.tile.x;
+            return lhs.tile.y < rhs.tile.y;
         };
         std::sort(group_agents.begin(), group_agents.end(), by_row);
 

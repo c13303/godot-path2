@@ -20,7 +20,7 @@ namespace ffcore
         double target_T2_param_margin = tile_size * 6.0; // margin around target, triggers slowdown (green circle)
 
         double target_T2_param_speed_ratio = 0.6; // fraction de la vitesse max visée dans T2
-        double target_T2_param_speed_lerp = 0.3; // bigger = less inertia
+        double target_T2_param_speed_lerp = 0.7; // bigger = less inertia
 
         double separation_radius = 16.0;
         double separation_strength = 400.0;
