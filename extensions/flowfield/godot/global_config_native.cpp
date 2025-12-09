@@ -102,6 +102,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_claimed_path"), "set_draw_claimed_path", "get_draw_claimed_path");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -181,6 +182,9 @@ void GlobalConfigNative::set_shockwave_stop_ratio(double v) { cfg().shockwave_st
 
 double GlobalConfigNative::get_shockwave_stop_duration_ms() const { return cfg().shockwave_stop_duration_ms; }
 void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockwave_stop_duration_ms = std::max(0.0, v); }
+
+bool GlobalConfigNative::get_draw_claimed_path() const { return cfg().draw_claimed_path; }
+void GlobalConfigNative::set_draw_claimed_path(bool v) { cfg().draw_claimed_path = v; }
 
 void GlobalConfigNative::reset_defaults()
 {

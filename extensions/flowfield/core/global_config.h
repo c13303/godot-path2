@@ -15,12 +15,12 @@ namespace ffcore
         double min_speed_fraction = 0.25;
         double cellgoal_cooldown_sec = 1.0;
 
-        // Arrivée dynamique
-   
-        double target_T2_param_margin = tile_size * 3.0; // marge ajoutée autour de T1
+        // 
+        // T2 = target of flowfield
+        double target_T2_param_margin = tile_size * 6.0; // margin around target, triggers slowdown (green circle)
 
-        double target_T2_param_speed_ratio = 0.5; // fraction de la vitesse max visée dans T2
-        double target_T2_param_speed_lerp = 0.05; // interpolation vers la vitesse cible en T2
+        double target_T2_param_speed_ratio = 0.6; // fraction de la vitesse max visée dans T2
+        double target_T2_param_speed_lerp = 0.3; // bigger = less inertia
 
         double separation_radius = 16.0;
         double separation_strength = 400.0;
@@ -40,6 +40,7 @@ namespace ffcore
         double explosion_falloff = 0.1;           // puissance de l'atténuation (1.0 linéaire, >1 plus raide)
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
+        bool draw_claimed_path = true;             // debug: draw agent→claim links
 
         void recompute_from_tile();
     };

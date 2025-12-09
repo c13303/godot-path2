@@ -183,6 +183,13 @@ void SteeringSystemNative::_process(double delta)
         }
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
+
+    // Ensure debug visuals (claimed links) get refreshed while agents move
+    if (ffcore::globalconfig().draw_claimed_path)
+    {
+        if (auto *ffnode = Object::cast_to<FlowFieldNative>(flowfield))
+            ffnode->queue_redraw();
+    }
 }
 
 int SteeringSystemNative::get_agent_id(Node2D *node)

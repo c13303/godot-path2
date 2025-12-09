@@ -24,6 +24,14 @@ namespace ffcore
         Vec2 position;
     };
 
+    struct AgentClaimDebug
+    {
+        int id = -1;
+        Vec2 pos;
+        Vec2i claimed_tile;
+        bool moving = false;
+    };
+
     class AgentManager
     {
     public:
@@ -47,6 +55,7 @@ namespace ffcore
         int count_group_members(GroupID g) const;
         void distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles);
         void get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const;
+        void get_group_claim_debug(GroupID g, std::vector<AgentClaimDebug> &out) const;
 
     private:
         std::vector<AgentEntry> agents;

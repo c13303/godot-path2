@@ -529,6 +529,38 @@ void FlowFieldNative::_draw()
             t2 = min_t2;
         draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
     }
+
+    // Debug: draw links from agents to their claimed tiles
+    if (ffcore::globalconfig().draw_claimed_path && floor_layer && current_group_id != ffcore::INVALID_GROUP)
+    {
+        if (auto *mgr = ffcore::get_global_agent_manager())
+        {
+            std::vector<ffcore::AgentClaimDebug> links;
+            mgr->get_group_claim_debug(current_group_id, links);
+            if (!links.empty())
+            {
+                const double offset_y = ffcore::globalconfig().agent_offset_y;
+                const Color col(0.6f, 0.6f, 0.6f, 0.9f);
+                const double dot_r = 3.0;
+                for (const auto &ln : links)
+                {
+                    if (!ln.moving)
+                        continue;
+                    Vector2 agent_world(ln.pos.x, ln.pos.y + offset_y);
+                    Vector2 agent_local = to_local(agent_world);
+
+                    Vector2i cell(ln.claimed_tile.x, ln.claimed_tile.y);
+                    Vector2 local_center = floor_layer->map_to_local(cell);
+                    Vector2 world_center = floor_layer->to_global(local_center);
+                    Vector2 tile_local = to_local(world_center);
+
+                    draw_line(agent_local, tile_local, col, 2.0);
+                    draw_circle(agent_local, dot_r, col);
+                    draw_circle(tile_local, dot_r, col);
+                }
+            }
+        }
+    }
 }
 
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)

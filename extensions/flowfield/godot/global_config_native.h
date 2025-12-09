@@ -88,6 +88,9 @@ namespace godot
         double get_shockwave_stop_duration_ms() const;
         void set_shockwave_stop_duration_ms(double v);
 
+        bool get_draw_claimed_path() const;
+        void set_draw_claimed_path(bool v);
+
         void reset_defaults();
     };
 

@@ -298,6 +298,35 @@ namespace ffcore
         }
     }
 
+    void AgentManager::get_group_claim_debug(GroupID g, std::vector<AgentClaimDebug> &out) const
+    {
+        out.clear();
+        if (g == INVALID_GROUP || g == GROUP_IDLE)
+            return;
+
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        if (!steering)
+            return;
+
+        out.reserve(agents.size());
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                if (ad->claimed_tile.x < -100000 || ad->claimed_tile.y < -100000)
+                    continue;
+                AgentClaimDebug dbg;
+                dbg.id = a.id;
+                dbg.pos = ad->position;
+                dbg.claimed_tile = ad->claimed_tile;
+                dbg.moving = ad->moving;
+                out.push_back(dbg);
+            }
+        }
+    }
+
 
 
 }
