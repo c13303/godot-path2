@@ -119,6 +119,12 @@ bool FlowField::is_cell_in_t2(const Vec2i &map_cell) const
     return false;
 }
 
+void FlowField::set_t2_tiles(const std::vector<Vec2i> &tiles, double radius)
+{
+    t2_tiles = tiles;
+    computed_t2_radius = radius;
+}
+
 void FlowField::copy_from(const FlowField &src)
 {
     w = src.w;
