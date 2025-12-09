@@ -631,47 +631,66 @@ void SteeringSystem::update_all(double delta)
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
 
-        if (reached_claim)
-        {
-            a.active = false;
-            a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
-        }
+        double t2_radius = ff->get_computed_t2_radius();
+        if (t2_radius <= 0.0)
+            t2_radius = ff->tile_size() * 2.0;
 
-        double claim_activation_radius = ff->get_computed_t2_radius();
-        if (claim_activation_radius <= 0.0)
-            claim_activation_radius = ff->tile_size() * 2.0;
+        bool in_t2 = dist_to_target <= t2_radius;
+        bool in_claim_zone = has_claimed && in_t2;
+        reached_claim = has_claimed && dist_to_claim <= (ff->tile_size() * 0.1);
 
-        bool in_t2_zone = dist_to_target <= claim_activation_radius;
-        bool use_claim_force = cfg.enable_claim_force && has_claimed && in_t2_zone && !reached_claim;
-        Vec2 claim_dir = use_claim_force ? safe_normalize(claim_center - a.position) : Vec2(0, 0);
+        // Zones:
+        // Outside T2 (no claim): FF+wall+sep, max_speed, lerp_general
+        // Entering T2 (no claim): FF+wall+sep, cap to t2_speed_target, lerp t2_speed_lerp
+        // Claim zone: wall+sep+claim, cap to t2_speed_target, lerp t2_speed_lerp
+        // Reached claim: wall+sep only, max_speed, lerp_general reset
 
         Vec2 target_velocity;
-        if (a.is_propelled)
+        Vec2 combined = wall_repel + separation;
+        Vec2 desired_dir;
+
+        if (reached_claim)
         {
-            target_velocity = a.velocity; // velocity déjà amortie par friction
+            desired_dir = safe_normalize(combined);
+            double target_speed = a.max_speed;
+            target_velocity = desired_dir * target_speed;
+        }
+        else if (in_claim_zone)
+        {
+            Vec2 claim_dir = safe_normalize(claim_center - a.position);
+            if (claim_dir.is_zero())
+                claim_dir = nav_dir;
+            combined += claim_dir * cfg.flow_weight;
+            desired_dir = safe_normalize(combined);
+            if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
+                desired_dir = safe_normalize(to_goal);
+            double target_speed = t2_speed_target;
+            double current_speed = safe_len(a.velocity);
+            double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
+            if (current_speed > t2_speed_target)
+                target_speed = std::max(t2_speed_target, desired);
+            target_velocity = desired_dir * target_speed;
+        }
+        else if (in_t2)
+        {
+            combined += nav_dir * cfg.flow_weight;
+            desired_dir = safe_normalize(combined);
+            if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
+                desired_dir = safe_normalize(to_goal);
+            double target_speed = t2_speed_target;
+            double current_speed = safe_len(a.velocity);
+            double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
+            if (current_speed > t2_speed_target)
+                target_speed = std::max(t2_speed_target, desired);
+            target_velocity = desired_dir * target_speed;
         }
         else
         {
-            Vec2 combined = wall_repel + separation;
-            Vec2 used_dir = nav_dir;
-            if (use_claim_force && !claim_dir.is_zero())
-                used_dir = claim_dir;
-            combined += used_dir * cfg.flow_weight;
-
-            Vec2 desired_dir = safe_normalize(combined);
+            combined += nav_dir * cfg.flow_weight;
+            desired_dir = safe_normalize(combined);
             if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
                 desired_dir = safe_normalize(to_goal);
-
             double target_speed = a.max_speed;
-            if (in_t2_zone)
-            {
-                double current_speed = safe_len(a.velocity);
-                double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
-                if (current_speed > t2_speed_target)
-                    target_speed = std::max(t2_speed_target, desired);
-                else
-                    target_speed = t2_speed_target;
-            }
             target_velocity = desired_dir * target_speed;
         }
 
@@ -681,7 +700,9 @@ void SteeringSystem::update_all(double delta)
         }
         else
         {
-            double blend = in_t2_zone ? t2_speed_lerp : cfg.lerp_general;
+            double blend = cfg.lerp_general;
+            if (!reached_claim && (in_claim_zone || in_t2))
+                blend = t2_speed_lerp;
             blend = std::clamp(blend, 0.0, 1.0);
             a.velocity = a.velocity.lerp(target_velocity, blend);
         }

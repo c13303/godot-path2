@@ -9,6 +9,7 @@
 #include "../core/nav_services.h"
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 
 namespace ffcore
 {
@@ -248,6 +249,73 @@ namespace ffcore
         return best;
     }
 
+    // Hungarian algorithm for square cost matrix (agents <= slots); pads if needed.
+    static std::vector<int> hungarian(const std::vector<std::vector<double>> &cost)
+    {
+        int n = (int)cost.size();
+        int m = (n == 0) ? 0 : (int)cost[0].size();
+        int dim = std::max(n, m);
+        const double INF = 1e18;
+        std::vector<std::vector<double>> c(dim, std::vector<double>(dim, INF));
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < m; ++j)
+                c[i][j] = cost[i][j];
+
+        std::vector<double> u(dim + 1), v(dim + 1);
+        std::vector<int> p(dim + 1), way(dim + 1);
+        for (int i = 1; i <= dim; ++i)
+        {
+            p[0] = i;
+            int j0 = 0;
+            std::vector<double> minv(dim + 1, INF);
+            std::vector<char> used(dim + 1, false);
+            do
+            {
+                used[j0] = true;
+                int i0 = p[j0], j1 = 0;
+                double delta = INF;
+                for (int j = 1; j <= dim; ++j)
+                {
+                    if (used[j])
+                        continue;
+                    double cur = c[i0 - 1][j - 1] - u[i0] - v[j];
+                    if (cur < minv[j])
+                    {
+                        minv[j] = cur;
+                        way[j] = j0;
+                    }
+                    if (minv[j] < delta)
+                    {
+                        delta = minv[j];
+                        j1 = j;
+                    }
+                }
+                for (int j = 0; j <= dim; ++j)
+                {
+                    if (used[j])
+                    {
+                        u[p[j]] += delta;
+                        v[j] -= delta;
+                    }
+                    else
+                        minv[j] -= delta;
+                }
+                j0 = j1;
+            } while (p[j0] != 0);
+            do
+            {
+                int j1 = way[j0];
+                p[j0] = p[j1];
+                j0 = j1;
+            } while (j0);
+        }
+        std::vector<int> assignment(n, -1);
+        for (int j = 1; j <= dim; ++j)
+            if (p[j] <= n && j <= m)
+                assignment[p[j] - 1] = j - 1;
+        return assignment;
+    }
+
     void AgentManager::distribute_tiles_to_agents(GroupID g)
     {
         if (g == INVALID_GROUP || g == GROUP_IDLE)
@@ -343,31 +411,37 @@ namespace ffcore
             }
 
         size_t count = std::min(group_agents.size(), slots.size());
-        std::vector<bool> slot_used(slots.size(), false);
-        std::vector<Vec2i> assigned_tiles;
+        if (count == 0)
+            return;
+
+        // build cost matrix with penalty for changing claim
+        double penalty = (tsize * 10.0) * (tsize * 10.0);
+        std::vector<std::vector<double>> cost(count, std::vector<double>(slots.size(), 1e18));
         for (size_t i = 0; i < count; ++i)
         {
             const auto &agt = group_agents[i];
-            double best_cost = 1e18;
-            int best_idx = -1;
             for (size_t j = 0; j < slots.size(); ++j)
             {
-                if (slot_used[j])
-                    continue;
                 double dx = agt.rx - slots[j].rx;
                 double dy = agt.ry - slots[j].ry;
-                double cost = dx * dx + dy * dy;
-                if (cost < best_cost)
+                double c = dx * dx + dy * dy;
+                if (const auto *ad = steering->get_agent(agt.id))
                 {
-                    best_cost = cost;
-                    best_idx = (int)j;
+                    if (ad->claimed_tile != slots[j].cell)
+                        c += penalty;
                 }
+                cost[i][j] = c;
             }
-            if (best_idx >= 0)
+        }
+        std::vector<int> assign = hungarian(cost);
+        std::vector<Vec2i> assigned_tiles;
+        for (size_t i = 0; i < count; ++i)
+        {
+            int j = (i < assign.size()) ? assign[i] : -1;
+            if (j >= 0 && j < (int)slots.size())
             {
-                slot_used[best_idx] = true;
-                steering->set_agent_claimed_tile(agt.id, slots[best_idx].cell);
-                assigned_tiles.push_back(slots[best_idx].cell);
+                steering->set_agent_claimed_tile(group_agents[i].id, slots[j].cell);
+                assigned_tiles.push_back(slots[j].cell);
             }
         }
 
@@ -509,6 +583,12 @@ namespace ffcore
             double dot = prev_axis.x * new_axis.x + prev_axis.y * new_axis.y;
             if (dot < 0.0)
                 angle += 3.14159265358979323846;
+            // hysteresis: keep old angle if change is small
+            double delta = std::abs(angle - grp.last_angle);
+            while (delta > 3.14159265358979323846)
+                delta -= 3.14159265358979323846;
+            if (delta < (15.0 * 3.14159265358979323846 / 180.0))
+                angle = grp.last_angle;
         }
         fp.angle = angle;
         grp.last_angle = angle;
