@@ -56,7 +56,7 @@ static inline void update_anim_state(ffcore::AgentData &agent, double delta, boo
                 agent.claimed_tile = Vec2i(-999999, -999999); */
         if (agent.micro_osc >= cfg.micro_osc_limit_before_cancel * 20)
         {
-            godot::UtilityFunctions::print("Agent ", agent.id, " Micro Osc Detected RESET AGENT ", agent.micro_osc);
+           /*  godot::UtilityFunctions::print("Agent ", agent.id, " reset (osc overflow)", agent.micro_osc); */
             agent.active = false;
             agent.velocity = Vec2(0, 0);
             agent.flow = nullptr;
@@ -66,7 +66,9 @@ static inline void update_anim_state(ffcore::AgentData &agent, double delta, boo
         return;
     }
 
-    if (new_moving != agent.moving || new_dir != agent.dir_code)
+
+
+    if (new_moving != agent.moving || new_dir != agent.dir_code) /// ACT THE UPDATE
     {
         agent.moving = new_moving;
         agent.dir_code = new_dir;
