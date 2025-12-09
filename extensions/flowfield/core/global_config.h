@@ -17,12 +17,13 @@ namespace ffcore
 
         // 
         // T2 = target of flowfield
-        double target_T2_param_margin = tile_size * 6.0; // margin around target, triggers slowdown (green circle)
+        double target_T2_param_margin = tile_size * 3.0; // margin around target, triggers slowdown (green circle)
 
         double target_T2_param_speed_ratio = 0.6; // fraction de la vitesse max visée dans T2
-        double target_T2_param_speed_lerp = 0.7; // bigger = less inertia
+        double target_T2_param_speed_lerp = 0.05; // bigger = less inertia
+        double target_T2_slow_threshold = tile_size * 3.0; // slowdown starts this many tiles from claim
 
-        double separation_radius = 16.0;
+        double separation_radius = tile_size;
         double separation_strength = 400.0;
         int max_neighbors = 16;
 

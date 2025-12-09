@@ -358,7 +358,6 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
-    a.has_entered_t2 = false;
     a.reached_claim_tile = false;
 
     a.dir_code = -1;
@@ -613,12 +612,6 @@ void SteeringSystem::update_all(double delta)
             a.last_logged_tile = map_cell;
             /*   godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")"); */
         }
-        bool on_t2_tile = ff->is_cell_in_t2(map_cell);
-        if (on_t2_tile)
-        {
-            a.has_entered_t2 = true;
-        }
-
         Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position + offset));
         bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
@@ -632,7 +625,11 @@ void SteeringSystem::update_all(double delta)
             a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
         }
 
-        if (cfg.enable_claim_force && a.has_entered_t2 && has_claimed)
+        double claim_activation_radius = ff->get_computed_t2_radius();
+        if (claim_activation_radius <= 0.0)
+            claim_activation_radius = ff->tile_size() * 2.0;
+
+        if (cfg.enable_claim_force && has_claimed && dist_to_target <= claim_activation_radius)
         {
             Vec2 claim_dir = safe_normalize(claim_center - a.position);
             if (!claim_dir.is_zero())
@@ -654,8 +651,8 @@ void SteeringSystem::update_all(double delta)
             combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
-            double slow_metric = has_claimed ? dist_to_claim : dist_to_target;
-            double slow_threshold = has_claimed ? (ff->tile_size() * 1.5) : (ff->tile_size() * 2.0);
+            double slow_metric = dist_to_claim;
+            double slow_threshold = cfg.target_T2_slow_threshold;
             if (desired_dir.is_zero() && slow_metric > slow_threshold && !in_shockwave)
             {
                 // Keep pushing toward the goal so we never stall before entering slowdown zones
@@ -685,7 +682,11 @@ void SteeringSystem::update_all(double delta)
         }
         else
         {
-            a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+            double slow_metric = dist_to_claim;
+            double slow_threshold = cfg.target_T2_slow_threshold;
+            double blend = (slow_metric <= slow_threshold) ? t2_speed_lerp : cfg.lerp_general;
+            blend = std::clamp(blend, 0.0, 1.0);
+            a.velocity = a.velocity.lerp(target_velocity, blend);
         }
 
         if (!a.is_propelled)

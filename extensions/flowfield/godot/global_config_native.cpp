@@ -90,6 +90,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_margin"), "set_target_T2_param_margin", "get_target_T2_param_margin");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_ratio"), "set_target_T2_param_speed_ratio", "get_target_T2_param_speed_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_slow_threshold"), "set_target_T2_slow_threshold", "get_target_T2_slow_threshold");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
@@ -146,6 +147,8 @@ void GlobalConfigNative::set_target_T2_param_speed_ratio(double v) { cfg().targe
 
 double GlobalConfigNative::get_target_T2_param_speed_lerp() const { return cfg().target_T2_param_speed_lerp; }
 void GlobalConfigNative::set_target_T2_param_speed_lerp(double v) { cfg().target_T2_param_speed_lerp = std::clamp(v, 0.0, 1.0); }
+double GlobalConfigNative::get_target_T2_slow_threshold() const { return cfg().target_T2_slow_threshold; }
+void GlobalConfigNative::set_target_T2_slow_threshold(double v) { cfg().target_T2_slow_threshold = std::max(0.0, v); }
 
 double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
 void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }

@@ -51,6 +51,8 @@ namespace godot
 
         double get_target_T2_param_speed_lerp() const;
         void set_target_T2_param_speed_lerp(double v);
+        double get_target_T2_slow_threshold() const;
+        void set_target_T2_slow_threshold(double v);
 
         double get_separation_radius() const;
         void set_separation_radius(double v);
