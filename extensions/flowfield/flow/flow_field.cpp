@@ -156,78 +156,18 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
     return best;
 }
 
-void FlowField::compute_t2_tiles(int group_size, const FormationFootprint &footprint)
-{
-    t2_tiles.clear();
-    computed_t2_radius = 0.0;
-    if (!ready || !has_goal())
-        return;
-
-    const int fw = std::max(1, footprint.w);
-    const int fh = std::max(1, footprint.h);
-    double angle = footprint.angle;
-    double cos_a = std::cos(angle);
-    double sin_a = std::sin(angle);
-
-    Vec2 goal_center = cell_to_world(goal_cell);
-    double tile = std::max(1.0, this->tile_size());
-
-    std::vector<Vec2i> slots;
-    slots.reserve(fw * fh);
-    std::unordered_set<int64_t> seen;
-    auto encode = [](const Vec2i &c) -> int64_t
-    { return (int64_t(c.x) << 32) ^ (uint32_t)c.y; };
-
-    for (int jy = 0; jy < fh; ++jy)
-        for (int ix = 0; ix < fw; ++ix)
-        {
-            double lx = (ix - fw * 0.5 + 0.5) * tile;
-            double ly = (jy - fh * 0.5 + 0.5) * tile;
-            double rx = cos_a * lx - sin_a * ly;
-            double ry = sin_a * lx + cos_a * ly;
-            Vec2 world_pos = goal_center + Vec2(rx, ry);
-            Vec2i rel = world_to_cell(world_pos);
-            if (!is_cell_navigable(rel))
-                continue;
-            Vec2i map_cell(rel.x + cell_origin.x, rel.y + cell_origin.y);
-            int64_t key = encode(map_cell);
-            if (seen.insert(key).second)
-                slots.push_back(map_cell);
-        }
-
-    if (slots.empty())
-        return;
-
-    std::sort(slots.begin(), slots.end(), [](const Vec2i &a, const Vec2i &b)
-              {
-                  if (a.y == b.y)
-                      return a.x < b.x;
-                  return a.y < b.y;
-              });
-
-    int target = std::min<int>(std::max(1, group_size), slots.size());
-    slots.resize(target);
-
-    double max_d2 = 0.0;
-    for (const auto &c : slots)
-    {
-        t2_tiles.push_back(c);
-        Vec2i rel(c.x - cell_origin.x, c.y - cell_origin.y);
-        double d2 = (cell_to_world(rel) - goal_center).length_squared();
-        if (d2 > max_d2)
-            max_d2 = d2;
-    }
-
-    const auto &cfg = globalconfig();
-    computed_t2_radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
-}
-
 bool FlowField::is_cell_in_t2(const Vec2i &map_cell) const
 {
     for (const auto &c : t2_tiles)
         if (c == map_cell)
             return true;
     return false;
+}
+
+void FlowField::set_t2_tiles(const std::vector<Vec2i> &tiles, double radius)
+{
+    t2_tiles = tiles;
+    computed_t2_radius = radius;
 }
 
 void FlowField::copy_from(const FlowField &src)

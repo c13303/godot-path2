@@ -55,9 +55,9 @@ namespace ffcore
 
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
-        void compute_t2_tiles(int group_size, const FormationFootprint &footprint = FormationFootprint());
         const std::vector<Vec2i> &get_t2_tiles() const { return t2_tiles; }
         double get_computed_t2_radius() const { return computed_t2_radius; }
+        void set_t2_tiles(const std::vector<Vec2i> &tiles, double radius);
         bool is_cell_in_t2(const Vec2i &map_cell) const;
         int arrived_count = 0;
         bool first_is_arrived = false;

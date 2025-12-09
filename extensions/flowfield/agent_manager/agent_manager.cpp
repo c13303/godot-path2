@@ -8,7 +8,10 @@
 #include "../core/types.h"
 #include "../core/nav_services.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <utility>
+#include <unordered_set>
 
 namespace ffcore
 {
@@ -227,42 +230,91 @@ namespace ffcore
         return count;
     }
 
-    void AgentManager::distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles)
+    void AgentManager::distribute_tiles_to_agents(GroupID g, FlowField &flow)
     {
-        if (g == INVALID_GROUP || g == GROUP_IDLE || tiles.empty())
+        flow.set_t2_tiles({}, 0.0);
+        if (g == INVALID_GROUP || g == GROUP_IDLE)
+            return;
+
+        FormationFootprint fp = compute_group_footprint(g);
+        auto compute_t2 = [&](int group_size) -> std::pair<std::vector<Vec2i>, double>
+        {
+            std::vector<Vec2i> slots;
+            double radius = 0.0;
+            if (!flow.is_ready() || !flow.has_goal())
+                return {slots, radius};
+
+            const int fw = std::max(1, fp.w);
+            const int fh = std::max(1, fp.h);
+            double angle = fp.angle;
+            double cos_a = std::cos(angle);
+            double sin_a = std::sin(angle);
+
+            Vec2 goal_center = flow.goal_center_world();
+            double tile_size = std::max(1.0, flow.tile_size());
+
+            std::unordered_set<int64_t> seen;
+            seen.reserve((size_t)fw * (size_t)fh * 2);
+            auto encode = [](const Vec2i &c) -> int64_t
+            { return (int64_t(c.x) << 32) ^ (uint32_t)c.y; };
+
+            for (int jy = 0; jy < fh; ++jy)
+                for (int ix = 0; ix < fw; ++ix)
+                {
+                    double lx = (ix - fw * 0.5 + 0.5) * tile_size;
+                    double ly = (jy - fh * 0.5 + 0.5) * tile_size;
+                    double rx = cos_a * lx - sin_a * ly;
+                    double ry = sin_a * lx + cos_a * ly;
+                    Vec2 world_pos = goal_center + Vec2(rx, ry);
+                    Vec2i rel = flow.world_to_cell(world_pos);
+                    if (!flow.is_cell_navigable(rel))
+                        continue;
+                    Vec2i map_cell(rel.x + flow.get_cell_origin().x, rel.y + flow.get_cell_origin().y);
+                    int64_t key = encode(map_cell);
+                    if (seen.insert(key).second)
+                        slots.push_back(map_cell);
+                }
+
+            if (slots.empty())
+                return {slots, radius};
+
+            std::sort(slots.begin(), slots.end(), [](const Vec2i &a, const Vec2i &b)
+                      {
+                          if (a.y == b.y)
+                              return a.x < b.x;
+                          return a.y < b.y;
+                      });
+
+            int target = std::min<int>(std::max(1, group_size), slots.size());
+            slots.resize(target);
+
+            double max_d2 = 0.0;
+            for (const auto &c : slots)
+            {
+                Vec2i rel(c.x - flow.get_cell_origin().x, c.y - flow.get_cell_origin().y);
+                double d2 = (flow.cell_to_world(rel) - goal_center).length_squared();
+                if (d2 > max_d2)
+                    max_d2 = d2;
+            }
+
+            const auto &cfg = globalconfig();
+            radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
+            return {slots, radius};
+        };
+
+        auto [tiles, radius] = compute_t2(std::max(1, count_group_members(g)));
+        flow.set_t2_tiles(tiles, radius);
+        if (tiles.empty())
             return;
 
         SteeringSystem *steering = ffcore::get_global_steering_system();
         if (!steering)
             return;
 
-        FormationFootprint fp = compute_group_footprint(g);
         double angle = fp.angle;
         double cos_a = std::cos(angle);
         double sin_a = std::sin(angle);
-
-        const ffcore::FlowField *ref_flow = nullptr;
-        Vec2 origin(0, 0);
-        double tsize = ffcore::globalconfig().tile_size;
-
-        for (const auto &a : agents)
-        {
-            if (a.group != g)
-                continue;
-            if (const auto *ad = steering->get_agent(a.id))
-            {
-                if (ad->flow)
-                {
-                    ref_flow = ad->flow;
-                    origin = ad->flow->goal_center_world();
-                    tsize = ad->flow->tile_size();
-                    break;
-                }
-            }
-        }
-
-        if (!ref_flow)
-            return;
+        Vec2 origin = flow.goal_center_world();
 
         struct AgentTile
         {
@@ -279,9 +331,9 @@ namespace ffcore
                 if (const auto *ad = steering->get_agent(a.id))
                 {
                     Vec2 foot = ad->position + Vec2(0, ffcore::globalconfig().agent_offset_y);
-                    Vec2i rel = ad->flow ? ad->flow->world_to_cell(foot) : Vec2i((int)std::round(foot.x / tsize), (int)std::round(foot.y / tsize));
-                    Vec2i map_cell = ad->flow ? Vec2i(rel.x + ad->flow->get_cell_origin().x, rel.y + ad->flow->get_cell_origin().y) : rel;
-                    Vec2 world_center = ad->flow ? ad->flow->cell_to_world(rel) : Vec2(map_cell.x * tsize, map_cell.y * tsize);
+                    Vec2i rel = flow.world_to_cell(foot);
+                    Vec2i map_cell(rel.x + flow.get_cell_origin().x, rel.y + flow.get_cell_origin().y);
+                    Vec2 world_center = flow.cell_to_world(rel);
                     Vec2 d = world_center - origin;
                     double rx = cos_a * d.x + sin_a * d.y;
                     double ry = -sin_a * d.x + cos_a * d.y;
@@ -296,7 +348,6 @@ namespace ffcore
         };
         std::sort(group_agents.begin(), group_agents.end(), by_row);
 
-        std::vector<Vec2i> sorted_tiles = tiles;
         struct SlotRot
         {
             Vec2i cell;
@@ -304,11 +355,11 @@ namespace ffcore
             double ry;
         };
         std::vector<SlotRot> slots;
-        slots.reserve(sorted_tiles.size());
-        for (const auto &c : sorted_tiles)
+        slots.reserve(tiles.size());
+        for (const auto &c : tiles)
         {
-            Vec2i rel(c.x - ref_flow->get_cell_origin().x, c.y - ref_flow->get_cell_origin().y);
-            Vec2 world_center = ref_flow->cell_to_world(rel);
+            Vec2i rel(c.x - flow.get_cell_origin().x, c.y - flow.get_cell_origin().y);
+            Vec2 world_center = flow.cell_to_world(rel);
             Vec2 d = world_center - origin;
             double rx = cos_a * d.x + sin_a * d.y;
             double ry = -sin_a * d.x + cos_a * d.y;
