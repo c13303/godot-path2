@@ -23,12 +23,12 @@ static int velocity_dir_code(const Vec2 &v)
     return v.y >= 0.0 ? 2 : 3;     // S/N
 }
 
-static inline void update_anim_state(ffcore::AgentData &agent, double thresh)
+static inline void update_anim_state(ffcore::AgentData &agent)
 {
-    double safe_thresh = std::max(0.0, thresh);
-    double thresh2 = safe_thresh * safe_thresh;
+    double safe_thresh = std::max(0.0, ffcore::globalconfig().walk_animation_threshold);
     double vlen2 = agent.velocity.length_squared();
-    bool new_moving = vlen2 > thresh2;
+    bool new_moving = vlen2 > safe_thresh;
+   
     int new_dir = velocity_dir_code(agent.velocity);
 
     if (new_moving != agent.moving || new_dir != agent.dir_code)
@@ -36,7 +36,7 @@ static inline void update_anim_state(ffcore::AgentData &agent, double thresh)
         agent.moving = new_moving;
         agent.dir_code = new_dir;
         agent.update_animation_this_frame = true;
-      /*   godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " v2=", vlen2, " thresh2=", thresh2); */
+        /* godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " velocity²=", vlen2, " threshold=", safe_thresh); */
     }
 }
 
@@ -118,8 +118,6 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
         if (a.flow != field)
             continue;
         a.active = true;
-        a.has_arrived = false;
-        a.is_first = false;
     }
 }
 
@@ -333,19 +331,6 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     return separation_force;
 }
 
-void SteeringSystem::smooth_stop(int id)
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return;
-
-    AgentData &a = agents[it->second];
-    a.has_arrived = true;
-    a.velocity = Vec2(0, 0);
-    godot::UtilityFunctions::print("smooth_stop agent ", id, " pos=(", a.position.x, ",", a.position.y, ") vel=", a.velocity.length());
-    update_anim_state(a, globalconfig().velocity_min_trig_walk_animation);
-}
-
 void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 {
     auto it = id_to_index.find(id);
@@ -374,21 +359,9 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.was_in_t2 = false;
     a.has_entered_t2 = false;
     a.reached_claim_tile = false;
-    a.moving = false;
+
     a.dir_code = -1;
     a.update_animation_this_frame = true;
-    // Reset arrival state when assigning a new flow so agents can arrive again.
-    if (ff != nullptr)
-    {
-        a.has_arrived = false;
-        a.is_first = false;
-    }
-    else
-    {
-        // Clearing flow also clears arrival flags so future orders can trigger correctly.
-        a.has_arrived = false;
-        a.is_first = false;
-    }
 }
 
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
@@ -443,14 +416,11 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         if (!agent.active)
         {
             agent.active = true;
-            agent.has_arrived = false;
-            agent.is_first = false;
         }
         agent.flow = nullptr;
         agent.group = INVALID_GROUP;
     }
 }
-
 
 // Unique Function for emiting animation.
 bool SteeringSystem::emit_animation_update(int id, bool &moving, int &dir_code, Vec2 &vel)
@@ -577,10 +547,6 @@ void SteeringSystem::update_all(double delta)
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, cfg.agent_offset_y);
-        auto update_anim = [&](AgentData &agent)
-        {
-            update_anim_state(agent, cfg.velocity_min_trig_walk_animation);
-        };
 
         if (!a.active || !a.flow)
         {
@@ -591,6 +557,8 @@ void SteeringSystem::update_all(double delta)
                 Vec2 local_dir = safe_normalize(combined);
                 if (local_dir.is_zero())
                 {
+                    /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
+                    update_anim_state(a);
                     continue;
                 }
                 Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
@@ -605,14 +573,14 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            update_anim(a);
+            update_anim_state(a);
             continue;
         }
 
         FlowField *ff = a.flow;
         if (!ff || !ff->is_ready())
         {
-            update_anim(a);
+            update_anim_state(a);
             continue;
         }
 
@@ -632,7 +600,7 @@ void SteeringSystem::update_all(double delta)
             if (reached_claim && a.active)
             {
                 a.reached_claim_tile = true;
-                smooth_stop(a.id);
+                a.velocity = Vec2(0, 0);
             }
         }
 
@@ -665,18 +633,8 @@ void SteeringSystem::update_all(double delta)
 
         if (reached_claim)
         {
-            a.has_arrived = true;
-            a.has_entered_t2 = true;
             a.active = false;
             a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
-            Vec2 old_pos = a.position;
-            a.position = a.position + a.velocity * delta;
-            ultimate_wall_correction(a, ff, delta);
-            grid->update(a.id, old_pos + offset, a.position + offset);
-            a.moving = false;
-            a.dir_code = -1;
-            a.update_animation_this_frame = true;
-            continue;
         }
 
         if (cfg.enable_claim_force && a.has_entered_t2 && has_claimed)
@@ -743,6 +701,6 @@ void SteeringSystem::update_all(double delta)
 
         grid->update(a.id, old_pos + offset, a.position + offset);
 
-        update_anim(a);
+        update_anim_state(a);
     }
 }

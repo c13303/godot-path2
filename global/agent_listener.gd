@@ -53,7 +53,7 @@ func _apply_anim_update(agent_id: int, payload: Dictionary) -> void:
 			2: sprite.animation = ANIM_S
 			3: sprite.animation = ANIM_N
 			_: sprite.animation = ANIM_S
-	else:
+	else:	
 		match code:
 			0: sprite.animation = "Idle_E"
 			1: sprite.animation = "Idle_W"

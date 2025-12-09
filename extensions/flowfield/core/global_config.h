@@ -28,7 +28,7 @@ namespace ffcore
 
         double lerp_general = 0.02;
         bool enable_claim_force = true;
-        double velocity_min_trig_walk_animation = 0.5;
+        double walk_animation_threshold = 50;
         double agent_offset_y = 0.0;
 
         double friction_factor = 0.91;

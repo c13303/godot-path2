@@ -22,7 +22,7 @@ namespace ffcore
 
         FlowField *flow = nullptr;
 
-        bool has_arrived = false;
+    
         bool is_first = false;
         GroupID group = INVALID_GROUP;
         Vec2 smash_force{};
