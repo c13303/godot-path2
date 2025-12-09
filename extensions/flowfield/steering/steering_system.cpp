@@ -629,16 +629,9 @@ void SteeringSystem::update_all(double delta)
         if (claim_activation_radius <= 0.0)
             claim_activation_radius = ff->tile_size() * 2.0;
 
-        if (cfg.enable_claim_force && has_claimed && dist_to_target <= claim_activation_radius)
-        {
-            Vec2 claim_dir = safe_normalize(claim_center - a.position);
-            if (!claim_dir.is_zero())
-            {
-                double blend_radius = ff->tile_size() * 2.0;
-                double blend = clamp01(1.0 - (dist_to_claim / blend_radius));
-                nav_dir = safe_normalize(nav_dir * (1.0 - blend) + claim_dir * blend);
-            }
-        }
+        bool in_t2_zone = dist_to_target <= claim_activation_radius;
+        bool use_claim_force = cfg.enable_claim_force && has_claimed && in_t2_zone && !reached_claim;
+        Vec2 claim_dir = use_claim_force ? safe_normalize(claim_center - a.position) : Vec2(0, 0);
 
         Vec2 target_velocity;
         if (a.is_propelled)
@@ -648,26 +641,20 @@ void SteeringSystem::update_all(double delta)
         else
         {
             Vec2 combined = wall_repel + separation;
-            combined += nav_dir * cfg.flow_weight;
+            Vec2 used_dir = nav_dir;
+            if (use_claim_force && !claim_dir.is_zero())
+                used_dir = claim_dir;
+            combined += used_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
-            double slow_metric = dist_to_claim;
-            double slow_threshold = cfg.target_T2_slow_threshold;
-            if (desired_dir.is_zero() && slow_metric > slow_threshold && !in_shockwave)
-            {
-                // Keep pushing toward the goal so we never stall before entering slowdown zones
-                desired_dir = safe_normalize(to_goal);
-            }
             if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
-            {
                 desired_dir = safe_normalize(to_goal);
-            }
+
             double target_speed = a.max_speed;
-            if (slow_metric <= slow_threshold)
+            if (in_t2_zone)
             {
                 double current_speed = safe_len(a.velocity);
                 double desired = current_speed + (t2_speed_target - current_speed) * t2_speed_lerp;
-                // avoid going under target; keep monotonic toward target
                 if (current_speed > t2_speed_target)
                     target_speed = std::max(t2_speed_target, desired);
                 else
@@ -682,9 +669,7 @@ void SteeringSystem::update_all(double delta)
         }
         else
         {
-            double slow_metric = dist_to_claim;
-            double slow_threshold = cfg.target_T2_slow_threshold;
-            double blend = (slow_metric <= slow_threshold) ? t2_speed_lerp : cfg.lerp_general;
+            double blend = in_t2_zone ? t2_speed_lerp : cfg.lerp_general;
             blend = std::clamp(blend, 0.0, 1.0);
             a.velocity = a.velocity.lerp(target_velocity, blend);
         }
