@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
 #include <utility>
 #include <unordered_set>
 
@@ -287,8 +288,7 @@ namespace ffcore
                   {
                       if (lhs.map_cell.y == rhs.map_cell.y)
                           return lhs.map_cell.x < rhs.map_cell.x;
-                      return lhs.map_cell.y < rhs.map_cell.y;
-                  });
+                      return lhs.map_cell.y < rhs.map_cell.y; });
 
         int n = (int)group_agents.size();
         int w = (int)std::ceil(std::sqrt((double)n));
@@ -297,26 +297,104 @@ namespace ffcore
         int start_x = goal_map.x - w / 2;
         int start_y = goal_map.y - h / 2;
 
-        std::vector<Vec2i> tiles;
-        tiles.reserve(n);
-        for (int jy = 0; jy < h && (int)tiles.size() < n; ++jy)
-            for (int ix = 0; ix < w && (int)tiles.size() < n; ++ix)
+        // Génère n cellules candidates autour du goal, sans filtrage initial
+        std::vector<Vec2i> candidate_cells;
+        candidate_cells.reserve(n);
+        for (int jy = 0; jy < h && (int)candidate_cells.size() < n; ++jy)
+            for (int ix = 0; ix < w && (int)candidate_cells.size() < n; ++ix)
+                candidate_cells.push_back(Vec2i(start_x + ix, start_y + jy));
+
+        auto is_free_map_cell = [&](const Vec2i &map_cell) -> bool
+        {
+            if (blocked.count(encode(map_cell)))
+                return false;
+            Vec2i rel(map_cell.x - origin.x, map_cell.y - origin.y);
+            if (!flow.is_cell_navigable(rel))
+                return false;
+            return true;
+        };
+
+        std::unordered_set<int64_t> used = blocked; // cases déjà prises par d'autres groupes ou par nous
+        auto find_free_tile = [&](const Vec2i &start_rel) -> std::optional<Vec2i>
+        {
+            auto consider_rel = [&](const Vec2i &rel) -> std::optional<Vec2i>
             {
-                Vec2i map_cell(start_x + ix, start_y + jy);
-                if (blocked.count(encode(map_cell)))
-                    continue;
-                Vec2i rel(map_cell.x - origin.x, map_cell.y - origin.y);
                 if (!flow.is_cell_navigable(rel))
-                    continue;
-                tiles.push_back(map_cell);
+                    return std::nullopt;
+                Vec2i map(rel.x + origin.x, rel.y + origin.y);
+                int64_t code = encode(map);
+                if (used.count(code))
+                    return std::nullopt;
+                if (blocked.count(code))
+                    return std::nullopt;
+                return map;
+            };
+
+            // Première tentative : nearest navigable fourni par le flow
+            Vec2i nearest_rel = flow.find_nearest_navigable(start_rel);
+            if (auto m = consider_rel(nearest_rel))
+                return m;
+
+            // Sinon, recherche en spirale bornée
+            const int MAX_RADIUS = 20;
+            Vec2i best_map;
+            double best_d2 = 1e18;
+            for (int r = 1; r <= MAX_RADIUS; ++r)
+            {
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    for (int dy = -r; dy <= r; ++dy)
+                    {
+                        Vec2i rel(start_rel.x + dx, start_rel.y + dy);
+                        double d2 = double(dx * dx + dy * dy);
+                        if (d2 > best_d2)
+                            continue;
+                        if (auto m = consider_rel(rel))
+                        {
+                            best_d2 = d2;
+                            best_map = *m;
+                        }
+                    }
+                }
+                if (best_d2 < 1e18)
+                    return best_map;
+            }
+            return std::nullopt;
+        };
+
+        std::vector<Vec2i> assigned_tiles;
+        assigned_tiles.reserve(group_agents.size());
+        for (size_t idx = 0; idx < candidate_cells.size(); ++idx)
+        {
+            Vec2i candidate = candidate_cells[idx];
+            Vec2i rel(candidate.x - origin.x, candidate.y - origin.y);
+            if (is_free_map_cell(candidate) && !used.count(encode(candidate)))
+            {
+                used.insert(encode(candidate));
+                assigned_tiles.push_back(candidate);
+                continue;
             }
 
+            auto replacement = find_free_tile(rel);
+            if (replacement)
+            {
+                godot::UtilityFunctions::print("Not Free [", candidate.x, ",", candidate.y, "] => Replaced [",
+                                               replacement->x, ",", replacement->y, "]");
+                used.insert(encode(*replacement));
+                assigned_tiles.push_back(*replacement);
+            }
+            else
+            {
+                godot::UtilityFunctions::print("Not Free, Not Replaced ! [", candidate.x, ",", candidate.y, "]");
+            }
+        }
+
         double radius = 0.0;
-        if (!tiles.empty())
+        if (!assigned_tiles.empty())
         {
             Vec2 goal_center = flow.goal_center_world();
             double max_d2 = 0.0;
-            for (const auto &c : tiles)
+            for (const auto &c : assigned_tiles)
             {
                 Vec2i rel(c.x - origin.x, c.y - origin.y);
                 double d2 = (flow.cell_to_world(rel) - goal_center).length_squared();
@@ -327,16 +405,15 @@ namespace ffcore
             radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
         }
 
-        flow.set_t2_tiles(tiles, radius);
-        if (tiles.empty())
+        flow.set_t2_tiles(assigned_tiles, radius);
+        if (assigned_tiles.empty())
             return;
 
-        size_t count = std::min(group_agents.size(), tiles.size());
+        size_t count = std::min(group_agents.size(), assigned_tiles.size());
         for (size_t i = 0; i < count; ++i)
         {
             int agent_id = group_agents[i].id;
-            const Vec2i &tile = tiles[i];
-            steering->set_agent_claimed_tile(agent_id, tile);
+            steering->set_agent_claimed_tile(agent_id, assigned_tiles[i]);
         }
     }
 
@@ -478,7 +555,5 @@ namespace ffcore
         fp.h = std::max(1, (int)std::round((rmaxy - rminy) / tsize) + 1);
         return fp;
     }
-
-
 
 }
