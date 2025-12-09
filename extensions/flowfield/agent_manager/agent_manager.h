@@ -16,6 +16,9 @@ namespace ffcore
         bool active = false;
         FlowField *flow = nullptr;
         bool has_order = false;
+        double last_angle = 0.0;
+        bool angle_initialized = false;
+        Vec2 last_origin{};
     };
 
     struct AgentEntry
@@ -55,10 +58,10 @@ namespace ffcore
         void mark_group_finished(GroupID g);
         void mark_group_has_order(GroupID g);
         int count_group_members(GroupID g) const;
-        void distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles);
+        void distribute_tiles_to_agents(GroupID g);
         void get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const;
         void get_group_claim_debug(GroupID g, std::vector<AgentClaimDebug> &out) const;
-        FormationFootprint compute_group_footprint(GroupID g) const;
+        FormationFootprint compute_group_footprint(GroupID g);
 
     private:
         std::vector<AgentEntry> agents;

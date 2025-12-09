@@ -395,10 +395,6 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
     finalize_field(used, goal_cell);
-    ffcore::FormationFootprint fp;
-    if (auto *mgr = ffcore::get_global_agent_manager())
-        fp = mgr->compute_group_footprint(current_group_id);
-    field.compute_t2_tiles(group_size_for_draw(), fp);
 
     /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
 }
@@ -584,5 +580,5 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     ffcore::FlowFieldID fid = fm->register_copy(field);
     ffcore::FlowField *new_flow = fm->get(fid);
     mgr->set_group_flow(group_id, new_flow);
-    mgr->distribute_tiles_to_agents(group_id, field.get_t2_tiles());
+    mgr->distribute_tiles_to_agents(group_id);
 }
