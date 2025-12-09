@@ -597,7 +597,8 @@ void SteeringSystem::update_all(double delta)
             Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
             claim_center = ff->cell_to_world(rel_claim);
             dist_to_claim = safe_len(claim_center - (a.position + offset));
-            reached_claim = dist_to_claim <= (ff->tile_size() * 0.5);
+            reached_claim = dist_to_claim <= (ff->tile_size() * 0.1); /// claim distance before reach
+
             if (reached_claim && a.active)
             {
                 a.reached_claim_tile = true;
