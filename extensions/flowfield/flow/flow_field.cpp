@@ -163,17 +163,17 @@ void FlowField::compute_t2_tiles(int group_size)
     if (!ready || !has_goal())
         return;
 
-    int target = std::max(1, group_size);
+    const int target = std::max(1, group_size);
 
     struct CellDist
     {
-        double d2 = 0.0;
+        double d2;
         Vec2i cell;
     };
     std::vector<CellDist> candidates;
-    candidates.reserve((size_t)(w * h));
+    candidates.reserve(w * h);
 
-    Vec2 goal_center = cell_to_world(goal_cell);
+    const Vec2 goal_center = cell_to_world(goal_cell);
 
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x)
@@ -190,22 +190,25 @@ void FlowField::compute_t2_tiles(int group_size)
     if (candidates.empty())
         return;
 
-    if (target > (int)candidates.size())
-        target = (int)candidates.size();
-
-    auto cmp = [](const CellDist &a, const CellDist &b)
+    int k = std::min<int>(target, candidates.size());
+    auto by_dist = [](const CellDist &a, const CellDist &b)
     { return a.d2 < b.d2; };
+    std::nth_element(candidates.begin(), candidates.begin() + (k - 1), candidates.end(), by_dist);
+    double max_d2 = candidates[k - 1].d2;
 
-    std::nth_element(candidates.begin(), candidates.begin() + (target - 1), candidates.end(), cmp);
-    double threshold = candidates[target - 1].d2;
-    computed_t2_radius = std::sqrt(threshold);
-
+    // garde uniquement les k plus proches (≤ max_d2) puis trie NW→SE pour l’affectation
+    t2_tiles.reserve(k);
     for (const auto &c : candidates)
-    {
-        if (c.d2 <= threshold + 1e-9)
+        if ((int)t2_tiles.size() < k && c.d2 <= max_d2 + 1e-9)
             t2_tiles.push_back(c.cell);
-    }
 
+    std::sort(t2_tiles.begin(), t2_tiles.end(), [](const Vec2i &a, const Vec2i &b)
+              {
+        if (a.y == b.y) return a.x < b.x; // NW→SE
+        return a.y < b.y; });
+
+    const auto &cfg = globalconfig();
+    computed_t2_radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
 }
 
 bool FlowField::is_cell_in_t2(const Vec2i &map_cell) const

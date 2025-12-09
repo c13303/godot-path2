@@ -13,8 +13,7 @@ namespace ffcore
     void GlobalConfig::recompute_from_tile()
     {
         wall_avoid_radius = tile_size * 1.2;
-        direct_steer_radius = tile_size * 2.5;
-        target_T1_param_tile_ratio = 0.1;
+        direct_steer_radius = tile_size * 2.5;     
         target_T2_param_margin = tile_size * 2.0;
         // vitesse cible ratio reste inchangée; lerp constant
     }
