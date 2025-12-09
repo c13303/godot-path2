@@ -25,10 +25,11 @@ static int velocity_dir_code(const Vec2 &v)
 
 static inline void update_anim_state(ffcore::AgentData &agent)
 {
-    double safe_thresh = std::max(0.0, ffcore::globalconfig().walk_animation_threshold);
+    double thresh = std::max(0.0, ffcore::globalconfig().walk_animation_threshold);
+    double thresh2 = thresh * thresh;
     double vlen2 = agent.velocity.length_squared();
-    bool new_moving = vlen2 > safe_thresh;
-   
+    bool new_moving = vlen2 > thresh2;
+
     int new_dir = velocity_dir_code(agent.velocity);
 
     if (new_moving != agent.moving || new_dir != agent.dir_code)
@@ -36,7 +37,7 @@ static inline void update_anim_state(ffcore::AgentData &agent)
         agent.moving = new_moving;
         agent.dir_code = new_dir;
         agent.update_animation_this_frame = true;
-        /* godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " velocity²=", vlen2, " threshold=", safe_thresh); */
+        /* godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " velocity²=", vlen2, " threshold²=", thresh2); */
     }
 }
 
@@ -558,10 +559,13 @@ void SteeringSystem::update_all(double delta)
                 if (local_dir.is_zero())
                 {
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
+                    Vec2 target_velocity = Vec2(0, 0);
+                    a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
                     update_anim_state(a);
                     continue;
                 }
-                Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction;
+                Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction; /// velocity if moved by others
+                /*   Vec2 target_velocity = Vec2(0, 0); */
                 a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
             }
             // si propulsé, on conserve la velocity existante (déjà amortie)
@@ -580,6 +584,8 @@ void SteeringSystem::update_all(double delta)
         FlowField *ff = a.flow;
         if (!ff || !ff->is_ready())
         {
+            Vec2 target_velocity = Vec2(0, 0);
+            a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
             update_anim_state(a);
             continue;
         }
