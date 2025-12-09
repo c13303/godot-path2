@@ -23,14 +23,48 @@ static int velocity_dir_code(const Vec2 &v)
     return v.y >= 0.0 ? 2 : 3;     // S/N
 }
 
-static inline void update_anim_state(ffcore::AgentData &agent)
+static inline void update_anim_state(ffcore::AgentData &agent, double delta, bool in_claim_zone)
 {
-    double thresh = std::max(0.0, ffcore::globalconfig().walk_animation_threshold);
+    const auto &cfg = ffcore::globalconfig();
+    double thresh = std::max(0.0, cfg.walk_animation_threshold);
     double thresh2 = thresh * thresh;
     double vlen2 = agent.velocity.length_squared();
     bool new_moving = vlen2 > thresh2;
 
     int new_dir = velocity_dir_code(agent.velocity);
+    bool dir_changed = (new_dir != agent.dir_code);
+
+    if (in_claim_zone && new_moving && dir_changed)
+    {
+        agent.micro_osc += 1;
+        agent.micro_osc_timer = cfg.micro_osc_win_time;
+    }
+
+    if (agent.micro_osc_timer > 0.0)
+    {
+        agent.micro_osc_timer = std::max(0.0, agent.micro_osc_timer - delta);
+        if (agent.micro_osc_timer <= 0.0)
+            agent.micro_osc = 0;
+    }
+
+    if (in_claim_zone && agent.micro_osc >= cfg.micro_osc_limit_before_cancel)
+    {
+        /*      godot::UtilityFunctions::print("Agent ", agent.id, " Micro Osc Detected ", agent.micro_osc); */
+        /*         agent.active = false;
+                agent.velocity = Vec2(0, 0);
+                agent.flow = nullptr;
+                agent.claimed_tile = Vec2i(-999999, -999999); */
+        if (agent.micro_osc >= cfg.micro_osc_limit_before_cancel * 20)
+        {
+            godot::UtilityFunctions::print("Agent ", agent.id, " Micro Osc Detected RESET AGENT ", agent.micro_osc);
+            agent.active = false;
+            agent.velocity = Vec2(0, 0);
+            agent.flow = nullptr;
+            agent.claimed_tile = Vec2i(-999999, -999999);
+        }
+
+        return;
+    }
 
     if (new_moving != agent.moving || new_dir != agent.dir_code)
     {
@@ -88,7 +122,7 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     AgentData a;
     a.id = next_id++;
     a.position = pos;
-    a.max_speed = max_speed;
+    a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow ? flow : default_flow;
     a.debug_color = hashed_color(a.id);
     agents.push_back(a);
@@ -149,7 +183,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     AgentData a;
     a.id = fixed_id;
     a.position = pos;
-    a.max_speed = max_speed;
+    a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow;
     a.active = flow != nullptr; // ✅ Inactif si pas de flow
     a.debug_color = hashed_color(a.id);
@@ -567,7 +601,7 @@ void SteeringSystem::update_all(double delta)
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
                     Vec2 target_velocity = Vec2(0, 0);
                     a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-                    update_anim_state(a);
+                    update_anim_state(a, delta, false);
                     continue;
                 }
                 Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction; /// velocity if moved by others
@@ -583,7 +617,7 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            update_anim_state(a);
+            update_anim_state(a, delta, false);
             continue;
         }
 
@@ -592,7 +626,7 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2 target_velocity = Vec2(0, 0);
             a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-            update_anim_state(a);
+            update_anim_state(a, delta, false);
             continue;
         }
 
@@ -700,6 +734,7 @@ void SteeringSystem::update_all(double delta)
 
         grid->update(a.id, old_pos + offset, a.position + offset);
 
-        update_anim_state(a);
+        bool in_claim_zone = has_claimed && in_t2_zone && !reached_claim;
+        update_anim_state(a, delta, in_claim_zone);
     }
 }

@@ -4,7 +4,8 @@ namespace ffcore
 {
     struct GlobalConfig
     {
-        double flow_weight = 1.0;
+        double agent_max_speed = 150.0;
+        double flow_weight = 0.8;
         double center_pull = 1.0;
         double tile_size = 16.0;
 
@@ -42,6 +43,8 @@ namespace ffcore
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
         bool draw_claimed_path = true;             // debug: draw agent→claim links
+        double micro_osc_win_time = 2.0;           // seconds window before micro-osc counter resets
+        int micro_osc_limit_before_cancel = 5;     // threshold to cancel agent when oscillating
 
         void recompute_from_tile();
     };

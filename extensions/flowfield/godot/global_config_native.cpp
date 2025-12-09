@@ -12,6 +12,8 @@ void GlobalConfigNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("get_flow_weight"), &GlobalConfigNative::get_flow_weight);
     ClassDB::bind_method(D_METHOD("set_flow_weight", "value"), &GlobalConfigNative::set_flow_weight);
+    ClassDB::bind_method(D_METHOD("get_agent_max_speed"), &GlobalConfigNative::get_agent_max_speed);
+    ClassDB::bind_method(D_METHOD("set_agent_max_speed", "value"), &GlobalConfigNative::set_agent_max_speed);
 
     ClassDB::bind_method(D_METHOD("get_center_pull"), &GlobalConfigNative::get_center_pull);
     ClassDB::bind_method(D_METHOD("set_center_pull", "value"), &GlobalConfigNative::set_center_pull);
@@ -80,6 +82,7 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_weight"), "set_flow_weight", "get_flow_weight");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_max_speed"), "set_agent_max_speed", "get_agent_max_speed");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "center_pull"), "set_center_pull", "get_center_pull");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tile_size"), "set_tile_size", "get_tile_size");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_avoid_radius"), "set_wall_avoid_radius", "get_wall_avoid_radius");
@@ -108,6 +111,9 @@ void GlobalConfigNative::_bind_methods()
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
 void GlobalConfigNative::set_flow_weight(double v) { cfg().flow_weight = v; }
+
+double GlobalConfigNative::get_agent_max_speed() const { return cfg().agent_max_speed; }
+void GlobalConfigNative::set_agent_max_speed(double v) { cfg().agent_max_speed = std::max(0.0, v); }
 
 double GlobalConfigNative::get_center_pull() const { return cfg().center_pull; }
 void GlobalConfigNative::set_center_pull(double v) { cfg().center_pull = v; }

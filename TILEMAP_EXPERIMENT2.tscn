@@ -1256,7 +1256,7 @@ zoom = Vector2(2, 2)
 [node name="SteeringSystemNative" type="SteeringSystemNative" parent="."]
 
 [node name="FlowFieldNative" type="FlowFieldNative" parent="."]
-z_index = 999
+z_index = 1
 
 [node name="FlowFieldCode" type="Node2D" parent="FlowFieldNative"]
 script = ExtResource("2_2rfbb")
@@ -1280,3 +1280,5 @@ script = ExtResource("4_k8xte")
 script = ExtResource("5_7az1b")
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
+flow_weight = 5.0
+center_pull = 5.0

@@ -21,6 +21,8 @@ namespace godot
 
         double get_flow_weight() const;
         void set_flow_weight(double v);
+        double get_agent_max_speed() const;
+        void set_agent_max_speed(double v);
 
         double get_center_pull() const;
         void set_center_pull(double v);

@@ -41,6 +41,8 @@ namespace ffcore
         bool moving = false;
         int dir_code = -1;
         bool update_animation_this_frame = false;
+        int micro_osc = 0;
+        double micro_osc_timer = 0.0;
         Vec3 debug_color{};
     };
 
