@@ -158,7 +158,22 @@ func _update_mouse_tile_ui() -> void:
 				var dir: int = a.get("dir_code", -1)
 				var moving: bool = a.get("is_moving", false)
 				var vel_len: float = a.get("velocity_len", 0.0)
-				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f" % [id, dir, moving, vel_len])
+				var anim: String
+				if moving:
+					match dir:
+						0: anim = "Walk_E"
+						1: anim = "Walk_W"
+						2: anim = "Walk_S"
+						3: anim = "Walk_N"
+						_: anim = "Walk_S"
+				else:
+					match dir:
+						0: anim = "Idle_E"
+						1: anim = "Idle_W"
+						2: anim = "Idle_S"
+						3: anim = "Idle_N"
+						_: anim = "Idle_S"
+				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f, anim=%s" % [id, dir, moving, vel_len, anim])
 		fps_label.call("set_hover_cell_text", "\n".join(lines))
 
 	if mouse_outline:

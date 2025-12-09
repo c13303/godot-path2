@@ -112,11 +112,9 @@ Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) cons
     if (!a)
         return d;
     Vector2 vel(a->velocity.x, a->velocity.y);
-    double thresh = ffcore::globalconfig().walk_animation_threshold;
-    double thresh2 = thresh * thresh;
-    bool moving = vel.length_squared() > thresh2;
+
     d["id"] = a->id;
-    d["is_moving"] = moving;
+    d["is_moving"] = a->moving;
     d["velocity"] = vel;
     d["velocity_len"] = vel.length();
     int code = _direction_code(vel);
