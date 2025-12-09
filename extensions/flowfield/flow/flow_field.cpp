@@ -156,56 +156,52 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
     return best;
 }
 
-void FlowField::compute_t2_tiles(int group_size)
+void FlowField::compute_t2_tiles(int group_size, const FormationFootprint &footprint)
 {
     t2_tiles.clear();
     computed_t2_radius = 0.0;
     if (!ready || !has_goal())
         return;
 
-    const int target = std::max(1, group_size);
+    const int fw = std::max(1, footprint.w);
+    const int fh = std::max(1, footprint.h);
+    Vec2i start(cell_origin.x + goal_cell.x - fw / 2, cell_origin.y + goal_cell.y - fh / 2);
 
-    struct CellDist
-    {
-        double d2;
-        Vec2i cell;
-    };
-    std::vector<CellDist> candidates;
-    candidates.reserve(w * h);
-
-    const Vec2 goal_center = cell_to_world(goal_cell);
-
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x)
+    std::vector<Vec2i> slots;
+    slots.reserve(fw * fh);
+    for (int dy = 0; dy < fh; ++dy)
+        for (int dx = 0; dx < fw; ++dx)
         {
-            Vec2i rel(x, y);
+            Vec2i cell(start.x + dx, start.y + dy);
+            Vec2i rel(cell.x - cell_origin.x, cell.y - cell_origin.y);
             if (!is_cell_navigable(rel))
                 continue;
-
-            Vec2 world_center = cell_to_world(rel);
-            double d2 = (world_center - goal_center).length_squared();
-            candidates.push_back({d2, Vec2i(cell_origin.x + x, cell_origin.y + y)});
+            slots.push_back(cell);
         }
 
-    if (candidates.empty())
+    if (slots.empty())
         return;
 
-    int k = std::min<int>(target, candidates.size());
-    auto by_dist = [](const CellDist &a, const CellDist &b)
-    { return a.d2 < b.d2; };
-    std::nth_element(candidates.begin(), candidates.begin() + (k - 1), candidates.end(), by_dist);
-    double max_d2 = candidates[k - 1].d2;
-
-    // garde uniquement les k plus proches (≤ max_d2) puis trie NW→SE pour l’affectation
-    t2_tiles.reserve(k);
-    for (const auto &c : candidates)
-        if ((int)t2_tiles.size() < k && c.d2 <= max_d2 + 1e-9)
-            t2_tiles.push_back(c.cell);
-
-    std::sort(t2_tiles.begin(), t2_tiles.end(), [](const Vec2i &a, const Vec2i &b)
+    std::sort(slots.begin(), slots.end(), [](const Vec2i &a, const Vec2i &b)
               {
-        if (a.y == b.y) return a.x < b.x; // NW→SE
-        return a.y < b.y; });
+                  if (a.y == b.y)
+                      return a.x < b.x;
+                  return a.y < b.y;
+              });
+
+    int target = std::min<int>(std::max(1, group_size), slots.size());
+    slots.resize(target);
+
+    Vec2 goal_center = cell_to_world(goal_cell);
+    double max_d2 = 0.0;
+    for (const auto &c : slots)
+    {
+        t2_tiles.push_back(c);
+        Vec2i rel(c.x - cell_origin.x, c.y - cell_origin.y);
+        double d2 = (cell_to_world(rel) - goal_center).length_squared();
+        if (d2 > max_d2)
+            max_d2 = d2;
+    }
 
     const auto &cfg = globalconfig();
     computed_t2_radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);

@@ -2,6 +2,7 @@
 #include "../core/nav_config.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../flow/flow_field_manager.h"
+#include "../flow/flow_field.h"
 #include "../steering/steering_system.h"
 #include "../godot/flow_field_native.h"
 #include "../core/types.h"
@@ -325,6 +326,40 @@ namespace ffcore
                 out.push_back(dbg);
             }
         }
+    }
+
+    ffcore::FormationFootprint AgentManager::compute_group_footprint(GroupID g) const
+    {
+        FormationFootprint fp;
+        if (g == INVALID_GROUP || g == GROUP_IDLE)
+            return fp;
+
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        if (!steering)
+            return fp;
+
+        double minx = 1e18, miny = 1e18, maxx = -1e18, maxy = -1e18;
+        int count = 0;
+        for (const auto &a : agents)
+        {
+            if (a.group != g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                minx = std::min(minx, ad->position.x);
+                miny = std::min(miny, ad->position.y);
+                maxx = std::max(maxx, ad->position.x);
+                maxy = std::max(maxy, ad->position.y);
+                ++count;
+            }
+        }
+        if (count == 0)
+            return fp;
+
+        double tsize = std::max(1.0, ffcore::globalconfig().tile_size);
+        fp.w = std::max(1, (int)std::round((maxx - minx) / tsize) + 1);
+        fp.h = std::max(1, (int)std::round((maxy - miny) / tsize) + 1);
+        return fp;
     }
 
 

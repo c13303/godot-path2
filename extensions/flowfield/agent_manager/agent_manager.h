@@ -6,6 +6,7 @@
 namespace ffcore
 {
     class FlowField;
+    struct FormationFootprint;
 }
 namespace ffcore
 {
@@ -56,6 +57,7 @@ namespace ffcore
         void distribute_tiles_to_agents(GroupID g, const std::vector<Vec2i> &tiles);
         void get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const;
         void get_group_claim_debug(GroupID g, std::vector<AgentClaimDebug> &out) const;
+        FormationFootprint compute_group_footprint(GroupID g) const;
 
     private:
         std::vector<AgentEntry> agents;
