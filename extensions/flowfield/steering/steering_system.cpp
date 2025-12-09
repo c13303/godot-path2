@@ -71,6 +71,16 @@ static inline Vec2 hashed_unit_dir(int id) // Génère une direction pseudo-alé
     return Vec2(std::cos(a), std::sin(a));
 }
 
+static Vec3 hashed_color(int id)
+{
+    unsigned h = (unsigned)id * 2654435761u + 1013904223u;
+    auto chan = [&](unsigned shift) -> double
+    {
+        return ((h >> shift) & 0xFFu) / 255.0;
+    };
+    return Vec3{chan(0), chan(8), chan(16)};
+}
+
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
 
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
@@ -80,6 +90,7 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     a.position = pos;
     a.max_speed = max_speed;
     a.flow = flow ? flow : default_flow;
+    a.debug_color = hashed_color(a.id);
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
     const auto &cfg = globalconfig();
@@ -141,6 +152,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     a.max_speed = max_speed;
     a.flow = flow;
     a.active = flow != nullptr; // ✅ Inactif si pas de flow
+    a.debug_color = hashed_color(a.id);
 
     if (auto *entry = ffcore::get_global_agent_manager()->get(fixed_id))
         a.group = entry->group;

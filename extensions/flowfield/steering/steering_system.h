@@ -41,6 +41,7 @@ namespace ffcore
         bool moving = false;
         int dir_code = -1;
         bool update_animation_this_frame = false;
+        Vec3 debug_color{};
     };
 
     struct Shockwave

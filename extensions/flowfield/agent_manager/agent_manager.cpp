@@ -328,6 +328,7 @@ namespace ffcore
                 dbg.pos = ad->position;
                 dbg.claimed_tile = ad->claimed_tile;
                 dbg.moving = ad->moving;
+                dbg.color = ad->debug_color;
                 out.push_back(dbg);
             }
         }

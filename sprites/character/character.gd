@@ -39,7 +39,10 @@ func set_selected(enabled: bool) -> void:
 		if not _selection_indicator:
 			_selection_indicator = SelectionIndicator.new()
 			_selection_indicator.position = SELECTION_OFFSET
+			_selection_indicator.color = _agent_color()
 			add_child(_selection_indicator)
+		else:
+			_selection_indicator.color = _agent_color()
 	else:
 		if _selection_indicator:
 			_selection_indicator.queue_free()
@@ -62,3 +65,12 @@ func _exit_tree() -> void:
 	if _selection_indicator:
 		_selection_indicator.queue_free()
 		_selection_indicator = null
+
+func _agent_color() -> Color:
+	if nav_id < 0:
+		return Color(0.0, 0.75, 0.0, 0.45)
+	var h: int = int(((nav_id * 2654435761) + 1013904223) & 0xFFFFFFFF)
+	var r: float = float(h & 0xFF) / 255.0
+	var g: float = float((h >> 8) & 0xFF) / 255.0
+	var b: float = float((h >> 16) & 0xFF) / 255.0
+	return Color(r, g, b, 0.6)

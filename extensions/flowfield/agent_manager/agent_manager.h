@@ -31,6 +31,7 @@ namespace ffcore
         Vec2 pos;
         Vec2i claimed_tile;
         bool moving = false;
+        Vec3 color;
     };
 
     class AgentManager

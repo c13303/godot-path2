@@ -543,12 +543,17 @@ void FlowFieldNative::_draw()
             if (!links.empty())
             {
                 const double offset_y = ffcore::globalconfig().agent_offset_y;
-                const Color col(0.6f, 0.6f, 0.6f, 0.9f);
+                const Color default_col(0.6f, 0.6f, 0.6f, 0.9f);
                 const double dot_r = 3.0;
                 for (const auto &ln : links)
                 {
                     if (!ln.moving)
                         continue;
+                    Color col = default_col;
+                    col.r = (float)std::clamp(ln.color.x, 0.0, 1.0);
+                    col.g = (float)std::clamp(ln.color.y, 0.0, 1.0);
+                    col.b = (float)std::clamp(ln.color.z, 0.0, 1.0);
+                    col.a = 0.9f;
                     Vector2 agent_world(ln.pos.x, ln.pos.y + offset_y);
                     Vector2 agent_local = to_local(agent_world);
 

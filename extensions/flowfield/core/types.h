@@ -77,4 +77,11 @@ namespace ffcore
         inline bool operator!=(const Vec2i &v) const { return !(*this == v); }
     };
 
+    struct Vec3
+    {
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+    };
+
 } // namespace ffcore

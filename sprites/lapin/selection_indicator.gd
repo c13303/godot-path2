@@ -5,7 +5,8 @@ class_name SelectionIndicator
 const WIDTH: float = 16.0
 const HEIGHT: float = 8.0
 const SEGMENTS: int = 24
-const COLOR: Color = Color(0.0, 0.75, 0.0, 0.45)
+
+@export var color: Color = Color(0.0, 0.75, 0.0, 0.45)
 
 var _filled_points: PackedVector2Array = PackedVector2Array()
 
@@ -25,4 +26,4 @@ func _build_polygon() -> void:
 func _draw() -> void:
 	if _filled_points.size() == 0:
 		_build_polygon()
-	draw_polygon(_filled_points, [COLOR])
+	draw_polygon(_filled_points, [color])
