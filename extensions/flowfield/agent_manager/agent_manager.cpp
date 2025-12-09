@@ -233,95 +233,39 @@ namespace ffcore
     void AgentManager::distribute_tiles_to_agents(GroupID g, FlowField &flow)
     {
         flow.set_t2_tiles({}, 0.0);
-        if (g == INVALID_GROUP || g == GROUP_IDLE)
-            return;
-
-        FormationFootprint fp = compute_group_footprint(g);
-        auto compute_t2 = [&](int group_size) -> std::pair<std::vector<Vec2i>, double>
-        {
-            std::vector<Vec2i> slots;
-            double radius = 0.0;
-            if (!flow.is_ready() || !flow.has_goal())
-                return {slots, radius};
-
-            const int fw = std::max(1, fp.w);
-            const int fh = std::max(1, fp.h);
-            double angle = fp.angle;
-            double cos_a = std::cos(angle);
-            double sin_a = std::sin(angle);
-
-            Vec2 goal_center = flow.goal_center_world();
-            double tile_size = std::max(1.0, flow.tile_size());
-
-            std::unordered_set<int64_t> seen;
-            seen.reserve((size_t)fw * (size_t)fh * 2);
-            auto encode = [](const Vec2i &c) -> int64_t
-            { return (int64_t(c.x) << 32) ^ (uint32_t)c.y; };
-
-            for (int jy = 0; jy < fh; ++jy)
-                for (int ix = 0; ix < fw; ++ix)
-                {
-                    double lx = (ix - fw * 0.5 + 0.5) * tile_size;
-                    double ly = (jy - fh * 0.5 + 0.5) * tile_size;
-                    double rx = cos_a * lx - sin_a * ly;
-                    double ry = sin_a * lx + cos_a * ly;
-                    Vec2 world_pos = goal_center + Vec2(rx, ry);
-                    Vec2i rel = flow.world_to_cell(world_pos);
-                    if (!flow.is_cell_navigable(rel))
-                        continue;
-                    Vec2i map_cell(rel.x + flow.get_cell_origin().x, rel.y + flow.get_cell_origin().y);
-                    int64_t key = encode(map_cell);
-                    if (seen.insert(key).second)
-                        slots.push_back(map_cell);
-                }
-
-            if (slots.empty())
-                return {slots, radius};
-
-            std::sort(slots.begin(), slots.end(), [](const Vec2i &a, const Vec2i &b)
-                      {
-                          if (a.y == b.y)
-                              return a.x < b.x;
-                          return a.y < b.y;
-                      });
-
-            int target = std::min<int>(std::max(1, group_size), slots.size());
-            slots.resize(target);
-
-            double max_d2 = 0.0;
-            for (const auto &c : slots)
-            {
-                Vec2i rel(c.x - flow.get_cell_origin().x, c.y - flow.get_cell_origin().y);
-                double d2 = (flow.cell_to_world(rel) - goal_center).length_squared();
-                if (d2 > max_d2)
-                    max_d2 = d2;
-            }
-
-            const auto &cfg = globalconfig();
-            radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
-            return {slots, radius};
-        };
-
-        auto [tiles, radius] = compute_t2(std::max(1, count_group_members(g)));
-        flow.set_t2_tiles(tiles, radius);
-        if (tiles.empty())
+        if (g == INVALID_GROUP || g == GROUP_IDLE || !flow.is_ready() || !flow.has_goal())
             return;
 
         SteeringSystem *steering = ffcore::get_global_steering_system();
         if (!steering)
             return;
 
-        double angle = fp.angle;
-        double cos_a = std::cos(angle);
-        double sin_a = std::sin(angle);
-        Vec2 origin = flow.goal_center_world();
+        const Vec2i origin = flow.get_cell_origin();
+        const Vec2i goal_rel = flow.get_goal_cell();
+        const Vec2i goal_map(goal_rel.x + origin.x, goal_rel.y + origin.y);
+
+        auto encode = [](const Vec2i &c) -> int64_t
+        { return (int64_t(c.x) << 32) ^ (uint32_t)c.y; };
+
+        std::unordered_set<int64_t> blocked;
+        blocked.reserve(agents.size() * 2 + 1);
+        for (const auto &a : agents)
+        {
+            if (a.group == g)
+                continue;
+            if (const auto *ad = steering->get_agent(a.id))
+            {
+                Vec2i ct = ad->claimed_tile;
+                if (ct.x < -100000 || ct.y < -100000)
+                    continue;
+                blocked.insert(encode(ct));
+            }
+        }
 
         struct AgentTile
         {
             int id;
-            Vec2i tile;
-            double rx = 0.0;
-            double ry = 0.0;
+            Vec2i map_cell;
         };
 
         std::vector<AgentTile> group_agents;
@@ -332,51 +276,66 @@ namespace ffcore
                 {
                     Vec2 foot = ad->position + Vec2(0, ffcore::globalconfig().agent_offset_y);
                     Vec2i rel = flow.world_to_cell(foot);
-                    Vec2i map_cell(rel.x + flow.get_cell_origin().x, rel.y + flow.get_cell_origin().y);
-                    Vec2 world_center = flow.cell_to_world(rel);
-                    Vec2 d = world_center - origin;
-                    double rx = cos_a * d.x + sin_a * d.y;
-                    double ry = -sin_a * d.x + cos_a * d.y;
-                    group_agents.push_back({a.id, map_cell, rx, ry});
+                    Vec2i map_cell(rel.x + origin.x, rel.y + origin.y);
+                    group_agents.push_back({a.id, map_cell});
                 }
 
-        auto by_row = [](const auto &lhs, const auto &rhs)
-        {
-            if (lhs.ry == rhs.ry)
-                return lhs.rx < rhs.rx;
-            return lhs.ry < rhs.ry;
-        };
-        std::sort(group_agents.begin(), group_agents.end(), by_row);
+        if (group_agents.empty())
+            return;
 
-        struct SlotRot
-        {
-            Vec2i cell;
-            double rx;
-            double ry;
-        };
-        std::vector<SlotRot> slots;
-        slots.reserve(tiles.size());
-        for (const auto &c : tiles)
-        {
-            Vec2i rel(c.x - flow.get_cell_origin().x, c.y - flow.get_cell_origin().y);
-            Vec2 world_center = flow.cell_to_world(rel);
-            Vec2 d = world_center - origin;
-            double rx = cos_a * d.x + sin_a * d.y;
-            double ry = -sin_a * d.x + cos_a * d.y;
-            slots.push_back({c, rx, ry});
-        }
-        std::sort(slots.begin(), slots.end(), [](const SlotRot &a, const SlotRot &b)
+        std::sort(group_agents.begin(), group_agents.end(), [](const AgentTile &lhs, const AgentTile &rhs)
                   {
-                      if (a.ry == b.ry)
-                          return a.rx < b.rx;
-                      return a.ry < b.ry;
+                      if (lhs.map_cell.y == rhs.map_cell.y)
+                          return lhs.map_cell.x < rhs.map_cell.x;
+                      return lhs.map_cell.y < rhs.map_cell.y;
                   });
 
-        size_t count = std::min(group_agents.size(), slots.size());
+        int n = (int)group_agents.size();
+        int w = (int)std::ceil(std::sqrt((double)n));
+        int h = (int)std::ceil((double)n / std::max(1, w));
+
+        int start_x = goal_map.x - w / 2;
+        int start_y = goal_map.y - h / 2;
+
+        std::vector<Vec2i> tiles;
+        tiles.reserve(n);
+        for (int jy = 0; jy < h && (int)tiles.size() < n; ++jy)
+            for (int ix = 0; ix < w && (int)tiles.size() < n; ++ix)
+            {
+                Vec2i map_cell(start_x + ix, start_y + jy);
+                if (blocked.count(encode(map_cell)))
+                    continue;
+                Vec2i rel(map_cell.x - origin.x, map_cell.y - origin.y);
+                if (!flow.is_cell_navigable(rel))
+                    continue;
+                tiles.push_back(map_cell);
+            }
+
+        double radius = 0.0;
+        if (!tiles.empty())
+        {
+            Vec2 goal_center = flow.goal_center_world();
+            double max_d2 = 0.0;
+            for (const auto &c : tiles)
+            {
+                Vec2i rel(c.x - origin.x, c.y - origin.y);
+                double d2 = (flow.cell_to_world(rel) - goal_center).length_squared();
+                if (d2 > max_d2)
+                    max_d2 = d2;
+            }
+            const auto &cfg = globalconfig();
+            radius = std::sqrt(max_d2) + std::max(0.0, cfg.target_T2_param_margin);
+        }
+
+        flow.set_t2_tiles(tiles, radius);
+        if (tiles.empty())
+            return;
+
+        size_t count = std::min(group_agents.size(), tiles.size());
         for (size_t i = 0; i < count; ++i)
         {
             int agent_id = group_agents[i].id;
-            const Vec2i &tile = slots[i].cell;
+            const Vec2i &tile = tiles[i];
             steering->set_agent_claimed_tile(agent_id, tile);
         }
     }
