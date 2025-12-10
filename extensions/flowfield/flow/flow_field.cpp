@@ -20,6 +20,7 @@ void FlowField::resize(int width, int height)
     w = width;
     h = height;
     dirs.assign(w * h, Vec2());
+    distance_field.assign(w * h, 0.0f);
     t2_tiles.clear();
     computed_t2_radius = 0.0;
     ready = (w > 0 && h > 0);
@@ -78,6 +79,7 @@ Vec2 FlowField::cell_to_world(const Vec2i &cell) const
 void FlowField::clear()
 {
     std::fill(dirs.begin(), dirs.end(), Vec2());
+    std::fill(distance_field.begin(), distance_field.end(), 0.0f);
     t2_tiles.clear();
     computed_t2_radius = 0.0;
     ready = false;
@@ -181,4 +183,50 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     t2_tiles = src.t2_tiles;
     computed_t2_radius = src.computed_t2_radius;
+    distance_field = src.distance_field;
+}
+
+bool FlowField::has_distance_field() const
+{
+    return w > 0 && h > 0 && distance_field.size() == static_cast<size_t>(w * h);
+}
+
+float FlowField::distance_at_cell(const Vec2i &cell) const
+{
+    if (!has_distance_field())
+        return 0.0f;
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return 0.0f;
+    return distance_field[cell.y * w + cell.x];
+}
+
+Vec2 FlowField::distance_gradient_at_cell(const Vec2i &cell) const
+{
+    if (!has_distance_field())
+        return Vec2(0, 0);
+
+    auto sample = [&](int cx, int cy) -> float
+    {
+        int sx = std::clamp(cx, 0, w - 1);
+        int sy = std::clamp(cy, 0, h - 1);
+        return distance_field[sy * w + sx];
+    };
+
+    int x = std::clamp(cell.x, 0, w - 1);
+    int y = std::clamp(cell.y, 0, h - 1);
+
+    float gx = sample(x + 1, y) - sample(x - 1, y);
+    float gy = sample(x, y + 1) - sample(x, y - 1);
+
+    return Vec2((double)gx, (double)gy);
+}
+
+void FlowField::set_distance_field(const std::vector<float> &df)
+{
+    if ((int)df.size() != w * h)
+    {
+        distance_field.assign(w * h, 0.0f);
+        return;
+    }
+    distance_field = df;
 }

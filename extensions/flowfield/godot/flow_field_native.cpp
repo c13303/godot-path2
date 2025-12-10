@@ -204,6 +204,8 @@ void FlowFieldNative::compute_distance_field(const Rect2i &used,
                 d = Math::min(d, distance_field[(y + 1) * w + (x + 1)] + 1.4142f);
             distance_field[y * w + x] = d;
         }
+
+    field.set_distance_field(distance_field);
 }
 
 void FlowFieldNative::_ready()

@@ -214,6 +214,22 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
 Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
 {
     const auto &cfg = globalconfig();
+
+    if (ff && ff->has_distance_field())
+    {
+        Vec2i cur = ff->world_to_cell(a.position);
+        Vec2 grad = ff->distance_gradient_at_cell(cur);
+        if (!grad.is_zero())
+        {
+            double dist_world = static_cast<double>(ff->distance_at_cell(cur)) * ff->tile_size();
+            if (dist_world < cfg.wall_avoid_radius)
+            {
+                double falloff = std::pow(std::max(0.0, 1.0 - dist_world / cfg.wall_avoid_radius), 2.0);
+                return safe_normalize(grad) * (cfg.wall_repel_strength * falloff);
+            }
+        }
+    }
+
     Vec2i cur = ff->world_to_cell(a.position);
     Vec2 r(0, 0);
     for (int dx = -1; dx <= 1; ++dx)

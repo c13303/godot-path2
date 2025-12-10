@@ -62,6 +62,10 @@ namespace ffcore
         int arrived_count = 0;
         bool first_is_arrived = false;
         void copy_from(const FlowField &src);
+        bool has_distance_field() const;
+        float distance_at_cell(const Vec2i &cell) const;
+        Vec2 distance_gradient_at_cell(const Vec2i &cell) const;
+        void set_distance_field(const std::vector<float> &df);
 
         int refcount = 0; /// nbre d'agent dedans pour delete a la fin
         FlowFieldID id = INVALID_FLOWFIELD;
@@ -76,6 +80,7 @@ namespace ffcore
         std::vector<Vec2> dirs;
         std::vector<Vec2i> t2_tiles;
         double computed_t2_radius = 0.0;
+        std::vector<float> distance_field;
 
         Vec2i goal_cell = Vec2i(-1, -1);
     };
