@@ -6,7 +6,13 @@ const WIDTH: float = 16.0
 const HEIGHT: float = 8.0
 const SEGMENTS: int = 24
 
-@export var color: Color = Color(0.0, 0.75, 0.0, 0.45)
+var _color: Color = Color(0.0, 0.75, 0.0, 0.45)
+@export var color: Color:
+	set(value):
+		_color = value
+		queue_redraw()  # This triggers _draw() to be called again
+	get:
+		return _color
 
 var _filled_points: PackedVector2Array = PackedVector2Array()
 
@@ -26,4 +32,4 @@ func _build_polygon() -> void:
 func _draw() -> void:
 	if _filled_points.size() == 0:
 		_build_polygon()
-	draw_polygon(_filled_points, [color])
+	draw_polygon(_filled_points, [_color])  # Use _color instead of color

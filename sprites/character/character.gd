@@ -7,6 +7,7 @@ const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
 var _shadow_indicator: SelectionIndicator
 var _show_shadow: bool = true
 var _colored_shadow: bool = false
+var _colored_shadow_when_selected: bool = true
 
 @export var use_native_steering := true
 @export var show_shadow: bool = false:
@@ -21,6 +22,12 @@ var _colored_shadow: bool = false
 		_update_shadow()
 	get:
 		return _colored_shadow
+@export var colored_shadow_when_selected: bool = true:
+	set(value):
+		_colored_shadow_when_selected = value
+		_update_shadow()
+	get:
+		return _colored_shadow_when_selected
 
 @export var max_speed: float = 100.0
 @export var max_force: float = 1200.0
@@ -58,6 +65,7 @@ func set_selected(enabled: bool) -> void:
 		return
 
 	_is_selected = enabled
+	_update_shadow()
 
 	if not enabled:
 		modulate = Color(1, 1, 1, 1)
@@ -87,6 +95,8 @@ func _agent_color() -> Color:
 	return Color(r, g, b, 0.3)
 
 func _shadow_color() -> Color:
+	if _colored_shadow_when_selected and _is_selected:
+		return agent_color
 	if _colored_shadow:
 		return agent_color
 	return Color(0, 0, 0, 0.3)
