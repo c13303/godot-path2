@@ -77,6 +77,7 @@ namespace ffcore
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void set_agent_claimed_tile(int id, const Vec2i &tile);
         bool emit_animation_update(int id, bool &moving, int &dir_code, Vec2 &vel);
+        void reset_agent(int id);
 
     private:
         std::vector<AgentData> agents;

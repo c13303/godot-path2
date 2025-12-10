@@ -42,9 +42,12 @@ namespace ffcore
         double explosion_falloff = 0.1;           // puissance de l'atténuation (1.0 linéaire, >1 plus raide)
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
-        bool draw_claimed_path = true;             // debug: draw agent→claim links
+        
+        
+        bool draw_claimed_path = false;             // debug: draw agent→claim links
+
         double micro_osc_win_time = 1;           // seconds window before micro-osc counter resets
-        int micro_osc_limit_before_cancel = 5;     // threshold to cancel agent when oscillating
+        int micro_osc_limit_before_cancel = 100;     // threshold to cancel agent when oscillating
 
         void recompute_from_tile();
     };

@@ -529,7 +529,8 @@ void FlowFieldNative::_draw()
         double min_t2 = cfg.tile_size;
         if (t2 < min_t2)
             t2 = min_t2;
-        draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
+        if (cfg.draw_claimed_path)
+            draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
     }
 
     // Debug: draw links from agents to their claimed tiles

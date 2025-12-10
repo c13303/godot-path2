@@ -47,26 +47,14 @@ static inline void update_anim_state(ffcore::AgentData &agent, double delta, boo
             agent.micro_osc = 0;
     }
 
-    if (in_claim_zone && agent.micro_osc >= cfg.micro_osc_limit_before_cancel)
+    if (in_claim_zone && agent.micro_osc >= cfg.micro_osc_limit_before_cancel) /// micro osc detected
     {
-        /*      godot::UtilityFunctions::print("Agent ", agent.id, " Micro Osc Detected ", agent.micro_osc); */
-        /*         agent.active = false;
-                agent.velocity = Vec2(0, 0);
-                agent.flow = nullptr;
-                agent.claimed_tile = Vec2i(-999999, -999999); */
-        if (agent.micro_osc >= cfg.micro_osc_limit_before_cancel * 20)
-        {
-            /*  godot::UtilityFunctions::print("Agent ", agent.id, " reset (osc overflow)", agent.micro_osc); */
-            agent.active = false;
-            agent.velocity = Vec2(0, 0);
-            agent.flow = nullptr;
-            agent.claimed_tile = Vec2i(-999999, -999999);
-        }
-
+        if (auto *ss = ffcore::get_global_steering_system())
+            ss->reset_agent(agent.id);
         return;
     }
 
-    if (agent.micro_osc > 0) // dont remove this security
+    if (agent.micro_osc > 0) // dont update animation if micro-oscillating
         return;
 
     if (new_moving != agent.moving || new_dir != agent.dir_code) /// ACT THE UPDATE
@@ -494,6 +482,19 @@ void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
         return;
     agents[it->second].claimed_tile = tile;
 }
+
+void SteeringSystem::reset_agent(int id)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &agent = agents[it->second];
+    agent.active = false;
+    agent.velocity = Vec2(0, 0);
+    agent.flow = nullptr;
+    agent.claimed_tile = Vec2i(-999999, -999999);
+}
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -650,7 +651,7 @@ void SteeringSystem::update_all(double delta)
             if (reached_claim && a.active)
             {
                 a.reached_claim_tile = true;
-                a.velocity = Vec2(0, 0);
+                reset_agent(a.id);
             }
         }
 
