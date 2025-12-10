@@ -379,13 +379,16 @@ void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_ce
     queue_redraw();
 }
 
-void FlowFieldNative::rebuild_async(Vector2 goal)
+bool FlowFieldNative::rebuild_async(Vector2 goal)
 {
     Rect2i used;
     Vector2i goal_cell;
 
     if (!prepare_layers(goal, used, goal_cell))
-        return;
+    {
+        field.resize(0, 0);
+        return false;
+    }
 
     distance_field.clear();
     distance_field.resize(field.width() * field.height(), 0.0f);
@@ -395,7 +398,10 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     build_sets(wall_set, walkable_set);
 
     if (!walkable_set.count(goal_cell))
-        return;
+    {
+        field.resize(0, 0);
+        return false;
+    }
 
     // Precompute clearance to walls so flow directions can blend in distance gradients.
     compute_distance_field(used, wall_set);
@@ -409,6 +415,7 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
         fp = mgr->compute_group_footprint(current_group_id);
 
     /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
+    return true;
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
@@ -585,7 +592,8 @@ void FlowFieldNative::_draw()
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
 {
     current_group_id = group_id;
-    rebuild_async(goal);
+    if (!rebuild_async(goal))
+        return;
 
     ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
     if (!mgr)

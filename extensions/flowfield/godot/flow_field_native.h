@@ -75,7 +75,7 @@ namespace godot
         void set_wall_layer(Object *node);
         Object *get_wall_layer() const;
 
-        void rebuild_async(Vector2 goal);
+        bool rebuild_async(Vector2 goal);
         void _draw() override;
         static double move_cost_for_dir(int dir_index);
 
