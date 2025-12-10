@@ -3,11 +3,16 @@ class_name FlowAgent
 
 const SelectionIndicator = preload("res://sprites/lapin/selection_indicator.gd")
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
+const AVAILABLE_SKINS: Array[StringName] = [
+	"rabbit",
+	"pig",
+]
 
 var _shadow_indicator: SelectionIndicator
 var _show_shadow: bool = true
 var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = true
+var _skin: StringName = ""
 
 @export var use_native_steering := true
 @export var show_shadow: bool = false:
@@ -28,6 +33,14 @@ var _colored_shadow_when_selected: bool = true
 		_update_shadow()
 	get:
 		return _colored_shadow_when_selected
+@export var skin: StringName = "":
+	set(value):
+		_skin = value
+		if _skin == "":
+			_skin = _random_skin()
+		_apply_skin()
+	get:
+		return _skin
 
 @export var max_speed: float = 100.0
 @export var max_force: float = 1200.0
@@ -55,6 +68,9 @@ var _is_previewed: bool = false
 func _ready() -> void:
 	if use_native_steering:
 		set_physics_process(false)
+	if _skin == "":
+		_skin = _random_skin()
+	_apply_skin()
 	_update_shadow()
 
 func _process(_delta: float) -> void:
@@ -112,3 +128,14 @@ func _update_shadow() -> void:
 		if _shadow_indicator:
 			_shadow_indicator.queue_free()
 			_shadow_indicator = null
+
+func _apply_skin() -> void:
+	var sprite := get_node_or_null("LapinSprite2D")
+	if sprite and sprite.has_method("set"):
+		sprite.set("skin", _skin)
+
+func _random_skin() -> StringName:
+	if AVAILABLE_SKINS.is_empty():
+		return "rabbit"
+	var idx := randi() % AVAILABLE_SKINS.size()
+	return AVAILABLE_SKINS[idx]
