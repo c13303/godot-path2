@@ -33,6 +33,8 @@ namespace ffcore
         double walk_animation_threshold = 25;
         double agent_offset_y = 0.0;
 
+        double flow_field_wall_clearance = 0.5; // weight for pushing flow away from walls (distance field blend)
+
         double friction_factor = 0.91;
         double smash_threshold = 5.0;
         double smash_min_cutoff = 0.20;
@@ -42,12 +44,14 @@ namespace ffcore
         double explosion_falloff = 0.1;           // puissance de l'atténuation (1.0 linéaire, >1 plus raide)
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
-        
-        
+
+
+        /* drawing options */
         bool draw_claimed_path = false;             // debug: draw agent→claim links
+        bool draw_flow_field = false;               // debug: draw flow field arrows
 
         double micro_osc_win_time = 1;           // seconds window before micro-osc counter resets
-        int micro_osc_limit_before_cancel = 500;     // threshold to cancel agent when oscillating
+        int micro_osc_limit_before_cancel = 50000000;     // threshold to cancel agent when oscillating
 
         void recompute_from_tile();
     };

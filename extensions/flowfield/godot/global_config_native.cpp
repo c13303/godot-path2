@@ -27,6 +27,9 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_wall_repel_strength"), &GlobalConfigNative::get_wall_repel_strength);
     ClassDB::bind_method(D_METHOD("set_wall_repel_strength", "value"), &GlobalConfigNative::set_wall_repel_strength);
 
+    ClassDB::bind_method(D_METHOD("get_flow_field_wall_clearance"), &GlobalConfigNative::get_flow_field_wall_clearance);
+    ClassDB::bind_method(D_METHOD("set_flow_field_wall_clearance", "value"), &GlobalConfigNative::set_flow_field_wall_clearance);
+
     ClassDB::bind_method(D_METHOD("get_direct_steer_radius"), &GlobalConfigNative::get_direct_steer_radius);
     ClassDB::bind_method(D_METHOD("set_direct_steer_radius", "value"), &GlobalConfigNative::set_direct_steer_radius);
 
@@ -78,6 +81,10 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_ratio", "value"), &GlobalConfigNative::set_shockwave_stop_ratio);
     ClassDB::bind_method(D_METHOD("get_shockwave_stop_duration_ms"), &GlobalConfigNative::get_shockwave_stop_duration_ms);
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_duration_ms", "value"), &GlobalConfigNative::set_shockwave_stop_duration_ms);
+    ClassDB::bind_method(D_METHOD("get_draw_claimed_path"), &GlobalConfigNative::get_draw_claimed_path);
+    ClassDB::bind_method(D_METHOD("set_draw_claimed_path", "value"), &GlobalConfigNative::set_draw_claimed_path);
+    ClassDB::bind_method(D_METHOD("get_draw_flow_field"), &GlobalConfigNative::get_draw_flow_field);
+    ClassDB::bind_method(D_METHOD("set_draw_flow_field", "value"), &GlobalConfigNative::set_draw_flow_field);
 
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
@@ -87,6 +94,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tile_size"), "set_tile_size", "get_tile_size");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_avoid_radius"), "set_wall_avoid_radius", "get_wall_avoid_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_repel_strength"), "set_wall_repel_strength", "get_wall_repel_strength");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_field_wall_clearance"), "set_flow_field_wall_clearance", "get_flow_field_wall_clearance");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
@@ -107,6 +115,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_claimed_path"), "set_draw_claimed_path", "get_draw_claimed_path");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_flow_field"), "set_draw_flow_field", "get_draw_flow_field");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -133,6 +142,9 @@ void GlobalConfigNative::set_wall_avoid_radius(double v) { cfg().wall_avoid_radi
 
 double GlobalConfigNative::get_wall_repel_strength() const { return cfg().wall_repel_strength; }
 void GlobalConfigNative::set_wall_repel_strength(double v) { cfg().wall_repel_strength = std::max(0.0, v); }
+
+double GlobalConfigNative::get_flow_field_wall_clearance() const { return cfg().flow_field_wall_clearance; }
+void GlobalConfigNative::set_flow_field_wall_clearance(double v) { cfg().flow_field_wall_clearance = std::max(0.0, v); }
 
 double GlobalConfigNative::get_direct_steer_radius() const { return cfg().direct_steer_radius; }
 void GlobalConfigNative::set_direct_steer_radius(double v) { cfg().direct_steer_radius = std::max(0.0, v); }
@@ -194,6 +206,8 @@ void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockw
 
 bool GlobalConfigNative::get_draw_claimed_path() const { return cfg().draw_claimed_path; }
 void GlobalConfigNative::set_draw_claimed_path(bool v) { cfg().draw_claimed_path = v; }
+bool GlobalConfigNative::get_draw_flow_field() const { return cfg().draw_flow_field; }
+void GlobalConfigNative::set_draw_flow_field(bool v) { cfg().draw_flow_field = v; }
 
 void GlobalConfigNative::reset_defaults()
 {

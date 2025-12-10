@@ -92,8 +92,13 @@ namespace godot
         double get_shockwave_stop_duration_ms() const;
         void set_shockwave_stop_duration_ms(double v);
 
+        double get_flow_field_wall_clearance() const;
+        void set_flow_field_wall_clearance(double v);
+
         bool get_draw_claimed_path() const;
         void set_draw_claimed_path(bool v);
+        bool get_draw_flow_field() const;
+        void set_draw_flow_field(bool v);
 
         void reset_defaults();
     };

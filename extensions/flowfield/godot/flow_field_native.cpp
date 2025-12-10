@@ -31,6 +31,8 @@ void FlowFieldNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal"), &FlowFieldNative::assign_flow_to_group);
+    ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
+    ClassDB::bind_method(D_METHOD("get_debug_draw"), &FlowFieldNative::get_debug_draw);
     ClassDB::bind_method(D_METHOD("set_floor_layer", "node"), &FlowFieldNative::set_floor_layer);
     ClassDB::bind_method(D_METHOD("set_wall_layer", "node"), &FlowFieldNative::set_wall_layer);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
@@ -38,12 +40,16 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
     ClassDB::bind_method(D_METHOD("get_tiles_in_t2"), &FlowFieldNative::get_tiles_in_t2);
+
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw"), "set_debug_draw", "get_debug_draw");
 }
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
 void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_to<TileMapLayer>(node); }
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
+
+void FlowFieldNative::set_debug_draw(bool enabled) { debug_draw = enabled; queue_redraw(); }
 
 bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell)
 {
@@ -289,7 +295,7 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
             if (grad_df.length() > 1e-6)
                 grad_df = grad_df.normalized();
 
-            float k = 0.5f;
+            const double k = ffcore::globalconfig().flow_field_wall_clearance;
 
             dir = (dir + grad_df * k).normalized();
             //// END OF PASSAGE GOULOT
@@ -391,6 +397,9 @@ void FlowFieldNative::rebuild_async(Vector2 goal)
     if (!walkable_set.count(goal_cell))
         return;
 
+    // Precompute clearance to walls so flow directions can blend in distance gradients.
+    compute_distance_field(used, wall_set);
+
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);
     compute_directions(used, walkable_set, costs, wall_set);
@@ -454,7 +463,10 @@ void FlowFieldNative::_draw()
     if (!floor_layer)
         return;
 
-    if (debug_draw)
+    const auto &cfg = ffcore::globalconfig();
+    const bool draw_flow = debug_draw || cfg.draw_flow_field;
+
+    if (draw_flow)
     {
         Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
         Rect2i used = floor_layer->get_used_rect();
@@ -484,7 +496,6 @@ void FlowFieldNative::_draw()
 
     if (field.has_goal())
     {
-        const auto &cfg = ffcore::globalconfig();
         ffcore::Vec2i goal = field.get_goal_cell();
         Vector2 goal_center = to_local(
             floor_layer->to_global(

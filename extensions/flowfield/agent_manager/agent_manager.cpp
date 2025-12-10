@@ -378,8 +378,8 @@ namespace ffcore
             auto replacement = find_free_tile(rel);
             if (replacement)
             {
-                godot::UtilityFunctions::print("Not Free [", candidate.x, ",", candidate.y, "] => Replaced [",
-                                               replacement->x, ",", replacement->y, "]");
+              /*   godot::UtilityFunctions::print("Not Free [", candidate.x, ",", candidate.y, "] => Replaced [",
+                                               replacement->x, ",", replacement->y, "]"); */
                 used.insert(encode(*replacement));
                 assigned_tiles.push_back(*replacement);
             }

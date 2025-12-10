@@ -65,6 +65,9 @@ namespace godot
         FlowFieldNative() = default;
         ~FlowFieldNative() override = default;
 
+        void set_debug_draw(bool enabled);
+        bool get_debug_draw() const { return debug_draw; }
+
         void _ready() override;
         void set_floor_layer(Object *node);
         Object *get_floor_layer() const;
