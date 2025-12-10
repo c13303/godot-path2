@@ -10,7 +10,7 @@ namespace ffcore
         double tile_size = 16.0;
 
         double wall_avoid_radius = tile_size * 1.2;
-        double wall_repel_strength = 8.4;
+        double wall_repel_strength = 12;
 
         double direct_steer_radius = tile_size * 2.5;
         double min_speed_fraction = 0.25;
