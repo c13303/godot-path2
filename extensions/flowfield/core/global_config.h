@@ -18,7 +18,7 @@ namespace ffcore
 
         // 
         // T2 = target of flowfield
-        double target_T2_param_margin = tile_size * 3.0; // margin around target, triggers slowdown (green circle)
+        double target_T2_param_margin = tile_size * 1.0; // margin around target, triggers slowdown (green circle)
 
         double target_T2_param_speed_ratio = 0.6; // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05; // bigger = less inertia
