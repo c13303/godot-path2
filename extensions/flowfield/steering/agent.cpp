@@ -1,6 +1,7 @@
 #include "agent.h"
 
 #include "../core/global_config.h"
+#include <godot_cpp/variant/utility_functions.hpp>
 #include <algorithm>
 #include <cmath>
 
@@ -24,9 +25,11 @@ namespace ffcore
         velocity = Vec2(0, 0);
         flow = nullptr;
         claimed_tile = Vec2i(-999999, -999999);
+        micro_osc = 0;
+        micro_osc_timer = 0.0;
     }
 
-    void AgentData::update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool forceAnimation)
+    void AgentData::update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_animation)
     {
         double thresh = std::max(0.0, cfg.walk_animation_threshold);
         double thresh2 = thresh * thresh;
@@ -35,12 +38,7 @@ namespace ffcore
 
         int new_dir = velocity_dir_code(velocity);
         bool dir_changed = (new_dir != dir_code);
-
-        if (in_claim_zone && new_moving && dir_changed)
-        {
-            micro_osc += 1;
-            micro_osc_timer = cfg.micro_osc_win_time;
-        }
+        bool changed = dir_changed || (new_moving != moving);
 
         if (micro_osc_timer > 0.0)
         {
@@ -49,22 +47,58 @@ namespace ffcore
                 micro_osc = 0;
         }
 
-        if (in_claim_zone && micro_osc >= cfg.micro_osc_limit_before_cancel) /// micro osc detected
+        // If an agent oscillates too much, cancel it
+        if (micro_osc >= cfg.micro_osc_limit_before_cancel)
         {
             reset();
-            if (!forceAnimation)
+            if (!force_animation)
                 return;
         }
 
-        if (micro_osc > 0 && !forceAnimation) // dont update animation if micro-oscillating
+        if (!changed && !force_animation)
             return;
 
-        if (new_moving != moving || new_dir != dir_code || forceAnimation) /// ACT THE UPDATE
+        if (!force_animation)
+        {
+            if (micro_osc > 0)
+            {
+                // If we were idle and start moving, allow the update despite cooldown
+                if (!(moving == false && new_moving == true))
+                {
+                    micro_osc += 1;
+                    if (micro_osc >= cfg.micro_osc_limit_before_cancel)
+                    {
+                        godot::UtilityFunctions::print("Micro osc overlow", id);
+                        reset();
+                    }
+
+                    return;
+                }
+                // reset cooldown when leaving idle
+                micro_osc = 0;
+                micro_osc_timer = 0.0;
+            }
+
+            // First change after cooldown: start window
+            micro_osc += 1;
+            micro_osc_timer = cfg.micro_osc_win_time;
+        }
+        else
+        {
+            micro_osc = 0;
+            micro_osc_timer = 0.0;
+        }
+
+        if (changed || force_animation) /// ACT THE UPDATE
         {
             moving = new_moving;
             dir_code = new_dir;
             update_animation_this_frame = true;
-            /* godot::UtilityFunctions::print("Anim Changed Detected ", id, " velocity²=", vlen2, " threshold²=", thresh2); */
+
+            /*    if (force_animation)
+               {
+                   godot::UtilityFunctions::print("Forced Anim ", id, " velocity²=", vlen2, " threshold²=", thresh2);
+               } */
         }
     }
 } // namespace ffcore

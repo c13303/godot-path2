@@ -342,7 +342,6 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
-    a.reached_claim_tile = false;
 
     a.dir_code = -1;
     a.update_animation_this_frame = true;
@@ -507,6 +506,8 @@ void SteeringSystem::update_all(double delta)
     {
         FlowField *nav = a.flow ? a.flow : default_flow;
 
+        bool force_animation = false;
+
         Vec2 wall_repel(0, 0);
         if (nav)
             wall_repel = wall_repulsion_force(a, nav);
@@ -585,9 +586,10 @@ void SteeringSystem::update_all(double delta)
 
             if (reached_claim && a.active)
             {
-                a.reached_claim_tile = true;
+
                 a.reset();
-                a.update_animation(delta, true, cfg, true);
+                force_animation = true;
+                /*    godot::UtilityFunctions::print("Agent ", a.id, " REACHCLAIMED"); */
             }
         }
 
@@ -675,6 +677,6 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos + offset, a.position + offset);
 
         bool in_claim_zone = has_claimed && in_t2_zone && !reached_claim;
-        a.update_animation(delta, in_claim_zone, cfg);
+        a.update_animation(delta, in_claim_zone, cfg, force_animation);
     }
 }

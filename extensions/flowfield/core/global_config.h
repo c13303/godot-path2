@@ -47,7 +47,7 @@ namespace ffcore
         bool draw_claimed_path = false;             // debug: draw agent→claim links
 
         double micro_osc_win_time = 1;           // seconds window before micro-osc counter resets
-        int micro_osc_limit_before_cancel = 100;     // threshold to cancel agent when oscillating
+        int micro_osc_limit_before_cancel = 500;     // threshold to cancel agent when oscillating
 
         void recompute_from_tile();
     };
