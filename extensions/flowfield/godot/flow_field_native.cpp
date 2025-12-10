@@ -533,10 +533,19 @@ void FlowFieldNative::_draw()
                 Vector2 local_center = floor_layer->map_to_local(cell);
                 Vector2 world_center = floor_layer->to_global(local_center);
                 Vector2 draw_center = to_local(world_center);
-                Rect2 tile_rect(draw_center - cell_size * 0.5f, cell_size);
                 bool is_claimed = claimed_set.count(encode(cell_rel)) > 0;
-                Color col = is_claimed ? Color(0, 0.4f, 1.0f, 0.9f) : Color(0, 1, 0, 0.9f);
-                draw_rect(tile_rect, col, false, 1.0);
+                if (is_claimed)
+                {
+                    float radius = std::min(cell_size.x, cell_size.y) * 0.45f;
+                    const int claimed_segments = 48;
+                    const float claimed_thickness = 1.5f;
+                    draw_arc(draw_center, radius, 0, Math_TAU, claimed_segments, Color(0.6f, 1.0f, 0.6f, 0.9f), claimed_thickness);
+                }
+                else
+                {
+                    Rect2 tile_rect(draw_center - cell_size * 0.5f, cell_size);
+                    draw_rect(tile_rect, Color(0, 1, 0, 0.9f), false, 1.0);
+                }
             }
         }
 
