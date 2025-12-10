@@ -1,0 +1,45 @@
+#pragma once
+
+#include "../core/types.h"
+
+namespace ffcore
+{
+    struct GlobalConfig;
+    class FlowField;
+
+    struct AgentData
+    {
+        int id = -1;
+        Vec2 position;
+        Vec2 velocity;
+        double max_speed = 50.0;
+        bool active = true;
+
+        FlowField *flow = nullptr;
+
+        bool is_first = false;
+        GroupID group = INVALID_GROUP;
+        Vec2 smash_force{};
+        bool is_propelled = false;
+        double propelled_timer = 0.0;
+        bool smash_just_reset = false;
+        double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global
+        Vec2 pending_smash{};
+        double smash_delay = 0.0;
+        double pending_smash_friction = -1.0;
+        bool smash_pending = false;
+        bool was_in_t2 = false;
+        bool reached_claim_tile = false;
+        Vec2i claimed_tile = Vec2i(-999999, -999999);
+        Vec2i last_logged_tile = Vec2i(-999999, -999999);
+        bool moving = false;
+        int dir_code = -1;
+        bool update_animation_this_frame = false;
+        int micro_osc = 0;
+        double micro_osc_timer = 0.0;
+        Vec3 debug_color{};
+
+        void reset();
+        void update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_animation = false);
+    };
+} // namespace ffcore

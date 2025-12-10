@@ -13,59 +13,6 @@
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
-static inline double clamp01(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); } // Limite v entre 0 et 1
-static int velocity_dir_code(const Vec2 &v)
-{
-    if (v.length_squared() < 1e-6)
-        return -1;
-    if (std::abs(v.x) >= std::abs(v.y))
-        return v.x >= 0.0 ? 0 : 1; // E/W
-    return v.y >= 0.0 ? 2 : 3;     // S/N
-}
-
-static inline void update_anim_state(ffcore::AgentData &agent, double delta, bool in_claim_zone)
-{
-    const auto &cfg = ffcore::globalconfig();
-    double thresh = std::max(0.0, cfg.walk_animation_threshold);
-    double thresh2 = thresh * thresh;
-    double vlen2 = agent.velocity.length_squared();
-    bool new_moving = vlen2 > thresh2;
-
-    int new_dir = velocity_dir_code(agent.velocity);
-    bool dir_changed = (new_dir != agent.dir_code);
-
-    if (in_claim_zone && new_moving && dir_changed)
-    {
-        agent.micro_osc += 1;
-        agent.micro_osc_timer = cfg.micro_osc_win_time;
-    }
-
-    if (agent.micro_osc_timer > 0.0)
-    {
-        agent.micro_osc_timer = std::max(0.0, agent.micro_osc_timer - delta);
-        if (agent.micro_osc_timer <= 0.0)
-            agent.micro_osc = 0;
-    }
-
-    if (in_claim_zone && agent.micro_osc >= cfg.micro_osc_limit_before_cancel) /// micro osc detected
-    {
-        if (auto *ss = ffcore::get_global_steering_system())
-            ss->reset_agent(agent.id);
-        return;
-    }
-
-    if (agent.micro_osc > 0) // dont update animation if micro-oscillating
-        return;
-
-    if (new_moving != agent.moving || new_dir != agent.dir_code) /// ACT THE UPDATE
-    {
-        agent.moving = new_moving;
-        agent.dir_code = new_dir;
-        agent.update_animation_this_frame = true;
-        /* godot::UtilityFunctions::print("Anim Changed Detected ", agent.id, " velocity²=", vlen2, " threshold²=", thresh2); */
-    }
-}
-
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
 SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
@@ -483,18 +430,6 @@ void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
     agents[it->second].claimed_tile = tile;
 }
 
-void SteeringSystem::reset_agent(int id)
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return;
-
-    AgentData &agent = agents[it->second];
-    agent.active = false;
-    agent.velocity = Vec2(0, 0);
-    agent.flow = nullptr;
-    agent.claimed_tile = Vec2i(-999999, -999999);
-}
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -605,7 +540,7 @@ void SteeringSystem::update_all(double delta)
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
                     Vec2 target_velocity = Vec2(0, 0);
                     a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-                    update_anim_state(a, delta, false);
+                    a.update_animation(delta, false, cfg);
                     continue;
                 }
                 Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction; /// velocity if moved by others
@@ -621,7 +556,7 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            update_anim_state(a, delta, false);
+            a.update_animation(delta, false, cfg);
             continue;
         }
 
@@ -630,7 +565,7 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2 target_velocity = Vec2(0, 0);
             a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-            update_anim_state(a, delta, false);
+            a.update_animation(delta, false, cfg);
             continue;
         }
 
@@ -651,7 +586,8 @@ void SteeringSystem::update_all(double delta)
             if (reached_claim && a.active)
             {
                 a.reached_claim_tile = true;
-                reset_agent(a.id);
+                a.reset();
+                a.update_animation(delta, true, cfg, true);
             }
         }
 
@@ -739,6 +675,6 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos + offset, a.position + offset);
 
         bool in_claim_zone = has_claimed && in_t2_zone && !reached_claim;
-        update_anim_state(a, delta, in_claim_zone);
+        a.update_animation(delta, in_claim_zone, cfg);
     }
 }
