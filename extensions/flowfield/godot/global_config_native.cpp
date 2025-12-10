@@ -50,6 +50,9 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_target_T2_param_speed_lerp"), &GlobalConfigNative::get_target_T2_param_speed_lerp);
     ClassDB::bind_method(D_METHOD("set_target_T2_param_speed_lerp", "value"), &GlobalConfigNative::set_target_T2_param_speed_lerp);
 
+    ClassDB::bind_method(D_METHOD("get_target_T2_slow_threshold"), &GlobalConfigNative::get_target_T2_slow_threshold);
+    ClassDB::bind_method(D_METHOD("set_target_T2_slow_threshold", "value"), &GlobalConfigNative::set_target_T2_slow_threshold);
+
     ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
     ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
 
