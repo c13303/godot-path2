@@ -593,6 +593,17 @@ void SteeringSystem::update_all(double delta)
         double dist_to_claim = 1e9;
         bool reached_claim = false;
         Vec2 claim_center(0, 0);
+        double target_radius = ff->get_ff_target_radius();
+        if (!ffcore::globalconfig().enable_claiming_tiles)
+        {
+            if (target_radius > 0.0 && dist_to_target <= target_radius)
+            {
+                godot::UtilityFunctions::print("Agent ", a.id, "  arrived in target radius ");
+                a.reset();
+                force_animation = true;
+                continue;
+            }
+        }
         if (has_claimed)
         {
             Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);

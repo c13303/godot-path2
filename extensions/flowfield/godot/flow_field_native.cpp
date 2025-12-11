@@ -16,6 +16,11 @@
 
 using namespace godot;
 
+namespace
+{
+    constexpr double FLOWFIELD_TARGET_RADIUS_PI = 3.14159265358979323846;
+}
+
 struct DijkstraNode
 {
     double cost;
@@ -49,7 +54,11 @@ void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_t
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 
-void FlowFieldNative::set_debug_draw(bool enabled) { debug_draw = enabled; queue_redraw(); }
+void FlowFieldNative::set_debug_draw(bool enabled)
+{
+    debug_draw = enabled;
+    queue_redraw();
+}
 
 bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell)
 {
@@ -614,6 +623,19 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     auto *fm = ffcore::flowfields();
     ffcore::FlowFieldID fid = fm->register_copy(field);
     ffcore::FlowField *new_flow = fm->get(fid);
+    int agent_count = mgr->count_group_members(group_id);
+    double target_radius = 0.0;
+    if (agent_count > 1)
+    {
+        double denominator = double(std::max(0, agent_count - 1));
+        target_radius = std::ceil(std::sqrt(denominator / FLOWFIELD_TARGET_RADIUS_PI));
+    }
+    auto goal_tile = new_flow->get_goal_cell();
+    double world_radius = (target_radius + 1) * new_flow->tile_size();
+    godot::UtilityFunctions::print(
+        "Flow target radius (tiles):", target_radius, "mapped world radius:", world_radius,
+        "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size());
+    new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(group_id, new_flow);
     if (ffcore::globalconfig().enable_claiming_tiles)
         mgr->distribute_tiles_to_agents(group_id, *new_flow);

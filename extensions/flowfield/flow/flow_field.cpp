@@ -23,6 +23,7 @@ void FlowField::resize(int width, int height)
     distance_field.assign(w * h, 0.0f);
     t2_tiles.clear();
     computed_t2_radius = 0.0;
+    ff_target_radius = 0.0;
     ready = (w > 0 && h > 0);
 }
 
@@ -82,6 +83,7 @@ void FlowField::clear()
     std::fill(distance_field.begin(), distance_field.end(), 0.0f);
     t2_tiles.clear();
     computed_t2_radius = 0.0;
+    ff_target_radius = 0.0;
     ready = false;
     goal_cell = Vec2i(-1, -1);
 }
@@ -183,6 +185,7 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     t2_tiles = src.t2_tiles;
     computed_t2_radius = src.computed_t2_radius;
+    ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
 }
 
