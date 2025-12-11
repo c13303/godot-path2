@@ -423,7 +423,8 @@ func _spawn_explosion_effect(position: Vector2) -> void:
 	var circle = EXPLOSION_DEBUG_SCENE.instantiate()
 	get_tree().current_scene.add_child(circle)
 	circle.global_position = position
-	circle.z_index = 99
+	circle.z_index = 999
+	circle.visible = true
 	var timer = get_tree().create_timer(explosion_debug_duration)
 	await timer.timeout
 	var scale = explosion_radius / 16
