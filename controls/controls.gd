@@ -19,6 +19,10 @@ const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
+var scroll_margin_pixel: float = 100.0
+@export var lock_mouse_to_view: bool = true
+var _mouse_locked: bool = false
+var _mouse_was_locked_before_pause: bool = false
 @export var zoom_speed: float = 0.1
 @export var min_zoom: float = 0.5
 @export var max_zoom: float = 3.0
@@ -81,6 +85,8 @@ func _ready() -> void:
 	var scene = get_tree().get_current_scene()
 	if scene:
 		global_config_node = scene.get_node_or_null("GlobalConfigNative")
+	if lock_mouse_to_view:
+		_set_mouse_locked(true)
 	rng.randomize()
 	_initialize_blood_canvas()
 
@@ -98,6 +104,10 @@ func _input(event: InputEvent) -> void:
 			_on_key_trig_blood()
 		elif event.keycode == KEY_SPACE:
 			_toggle_pause()
+		elif event.keycode == KEY_ESCAPE:
+			_set_mouse_locked(false)
+		elif event.keycode == KEY_TAB:
+			_set_mouse_locked(true)
 			
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -146,12 +156,63 @@ func _process(delta: float) -> void:
 		mov.x += 1
 	if mov != Vector2.ZERO:
 		camera.position += mov.normalized() * speed * delta
+	_scroll_camera_via_mouse(delta)
 
 var _paused: bool = false
+func _scroll_camera_via_mouse(delta: float) -> void:
+	if not camera or scroll_margin_pixel <= 0.0:
+		return
+
+	var viewport_rect: Rect2 = get_viewport().get_visible_rect()
+	var mouse_pos: Vector2 = get_viewport().get_mouse_position()
+	var scroll_vec: Vector2 = Vector2.ZERO
+
+	scroll_vec.x = _scroll_axis(mouse_pos.x, viewport_rect.size.x)
+	scroll_vec.y = _scroll_axis(mouse_pos.y, viewport_rect.size.y)
+
+	if scroll_vec == Vector2.ZERO:
+		return
+
+	camera.position += scroll_vec * delta
+
+func _scroll_axis(coord: float, dimension: float) -> float:
+	if coord < 0.0 or coord > dimension:
+		return 0.0
+
+	var factor := 0.0
+	if coord <= scroll_margin_pixel:
+		var progress: float = clamp((scroll_margin_pixel - coord) / scroll_margin_pixel, 0.0, 1.0)
+		factor = 0.2 + 0.8 * progress
+		return -speed * factor
+	elif coord >= dimension - scroll_margin_pixel:
+		var dist: float = dimension - coord
+		var progress: float = clamp((scroll_margin_pixel - dist) / scroll_margin_pixel, 0.0, 1.0)
+		factor = 0.2 + 0.8 * progress
+		return speed * factor
+
+	return 0.0
+
+func _set_mouse_locked(enabled: bool) -> void:
+	if _mouse_locked == enabled:
+		return
+
+	_mouse_locked = enabled
+	var mode: int = Input.MOUSE_MODE_VISIBLE
+	if enabled:
+		mode = Input.MOUSE_MODE_CONFINED
+	Input.set_mouse_mode(mode)
+
 func _toggle_pause() -> void:
 	_paused = not _paused
 	if steering and steering.has_method("set_paused"):
 		steering.set_paused(_paused)
+	if _paused:
+		_mouse_was_locked_before_pause = _mouse_locked
+		if _mouse_locked:
+			_set_mouse_locked(false)
+	else:
+		if lock_mouse_to_view and _mouse_was_locked_before_pause:
+			_set_mouse_locked(true)
 	var hide_units := _paused
 	if hide_units and global_config_node and global_config_node.has_method("get_draw_claimed_path"):
 		if not global_config_node.get_draw_claimed_path():

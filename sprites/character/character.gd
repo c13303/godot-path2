@@ -113,6 +113,8 @@ func _agent_color() -> Color:
 func _shadow_color() -> Color:
 	if _colored_shadow_when_selected and _is_selected:
 		return agent_color
+	if _is_selected:
+		return Color(0, 1, 0, 0.45)
 	if _colored_shadow:
 		return agent_color
 	return Color(0, 0, 0, 0.3)
