@@ -529,6 +529,7 @@ void FlowFieldNative::_draw()
             Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
             for (const ffcore::Vec2i &cell_rel : t2_cells)
             {
+                /// Drawing Claimed Tiled Indicator
                 Vector2i cell(cell_rel.x, cell_rel.y);
                 Vector2 local_center = floor_layer->map_to_local(cell);
                 Vector2 world_center = floor_layer->to_global(local_center);
@@ -539,7 +540,7 @@ void FlowFieldNative::_draw()
                     float radius = std::min(cell_size.x, cell_size.y) * 0.45f;
                     const int claimed_segments = 48;
                     const float claimed_thickness = 1.5f;
-                    draw_arc(draw_center, radius, 0, Math_TAU, claimed_segments, Color(0.6f, 1.0f, 0.6f, 0.9f), claimed_thickness);
+                    draw_arc(draw_center, radius, 0, Math_TAU, claimed_segments, Color(0.6f, 1.0f, 0.6f, 0.5f), claimed_thickness);
                 }
                 else
                 {

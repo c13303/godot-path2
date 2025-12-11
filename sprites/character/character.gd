@@ -1,14 +1,14 @@
 extends CharacterBody2D
 class_name FlowAgent
 
-const SelectionIndicator = preload("res://sprites/lapin/selection_indicator.gd")
+const CharacterShadow = preload("res://sprites/lapin/character_shadow.gd")
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
 const AVAILABLE_SKINS: Array[StringName] = [
 	"rabbit",
 	"pig",
 ]
 
-var _shadow_indicator: SelectionIndicator
+var _shadow_indicator: CharacterShadow
 var _show_shadow: bool = true
 var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = true
@@ -120,7 +120,7 @@ func _shadow_color() -> Color:
 func _update_shadow() -> void:
 	if _show_shadow:
 		if not _shadow_indicator:
-			_shadow_indicator = SelectionIndicator.new()
+			_shadow_indicator = CharacterShadow.new()
 			_shadow_indicator.position = SELECTION_OFFSET
 			add_child(_shadow_indicator)
 		_shadow_indicator.color = _shadow_color()

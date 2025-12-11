@@ -1,6 +1,6 @@
 extends Node2D
 
-class_name SelectionIndicator
+class_name CharacterShadow
 
 const WIDTH: float = 16.0
 const HEIGHT: float = 8.0
