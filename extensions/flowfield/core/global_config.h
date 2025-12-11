@@ -30,6 +30,7 @@ namespace ffcore
 
         double lerp_general = 0.02;
         bool enable_claim_force = true;
+        bool enable_claiming_tiles = false;
         double walk_animation_threshold = 25;
         double agent_offset_y = 0.0;
 

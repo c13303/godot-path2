@@ -59,6 +59,7 @@ namespace ffcore
         void get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const;
         void get_group_claim_debug(GroupID g, std::vector<AgentClaimDebug> &out) const;
         FormationFootprint compute_group_footprint(GroupID g) const;
+        void clear_group_claims(GroupID g);
 
     private:
         std::vector<AgentEntry> agents;

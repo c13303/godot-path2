@@ -16,6 +16,7 @@
 
 namespace ffcore
 {
+    static const Vec2i CLAIMED_TILE_SENTINEL(-999999, -999999);
     static AgentManager *g_agent_manager = nullptr;
     static AgentManager GLOBAL_INSTANCE;
 
@@ -416,6 +417,23 @@ namespace ffcore
             steering->set_agent_claimed_tile(agent_id, assigned_tiles[i]);
         }
     }
+
+	void AgentManager::clear_group_claims(GroupID g)
+	{
+		if (g == INVALID_GROUP || g == GROUP_IDLE)
+			return;
+
+		SteeringSystem *steering = ffcore::get_global_steering_system();
+		if (!steering)
+			return;
+
+		for (const auto &a : agents)
+		{
+			if (a.group != g)
+				continue;
+			steering->set_agent_claimed_tile(a.id, CLAIMED_TILE_SENTINEL);
+		}
+	}
 
     void AgentManager::get_claimed_tiles(GroupID g, std::vector<Vec2i> &out) const
     {

@@ -615,6 +615,9 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     ffcore::FlowFieldID fid = fm->register_copy(field);
     ffcore::FlowField *new_flow = fm->get(fid);
     mgr->set_group_flow(group_id, new_flow);
-    mgr->distribute_tiles_to_agents(group_id, *new_flow);
+    if (ffcore::globalconfig().enable_claiming_tiles)
+        mgr->distribute_tiles_to_agents(group_id, *new_flow);
+    else
+        mgr->clear_group_claims(group_id);
     field.set_t2_tiles(new_flow->get_t2_tiles(), new_flow->get_computed_t2_radius());
 }

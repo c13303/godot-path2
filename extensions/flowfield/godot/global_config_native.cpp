@@ -84,6 +84,9 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_ratio", "value"), &GlobalConfigNative::set_shockwave_stop_ratio);
     ClassDB::bind_method(D_METHOD("get_shockwave_stop_duration_ms"), &GlobalConfigNative::get_shockwave_stop_duration_ms);
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_duration_ms", "value"), &GlobalConfigNative::set_shockwave_stop_duration_ms);
+    ClassDB::bind_method(D_METHOD("get_enable_claiming_tiles"), &GlobalConfigNative::get_enable_claiming_tiles);
+    ClassDB::bind_method(D_METHOD("set_enable_claiming_tiles", "value"), &GlobalConfigNative::set_enable_claiming_tiles);
+
     ClassDB::bind_method(D_METHOD("get_draw_claimed_path"), &GlobalConfigNative::get_draw_claimed_path);
     ClassDB::bind_method(D_METHOD("set_draw_claimed_path", "value"), &GlobalConfigNative::set_draw_claimed_path);
     ClassDB::bind_method(D_METHOD("get_draw_flow_field"), &GlobalConfigNative::get_draw_flow_field);
@@ -117,6 +120,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enable_claiming_tiles"), "set_enable_claiming_tiles", "get_enable_claiming_tiles");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_claimed_path"), "set_draw_claimed_path", "get_draw_claimed_path");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_flow_field"), "set_draw_flow_field", "get_draw_flow_field");
 }
@@ -148,6 +152,9 @@ void GlobalConfigNative::set_wall_repel_strength(double v) { cfg().wall_repel_st
 
 double GlobalConfigNative::get_flow_field_wall_clearance() const { return cfg().flow_field_wall_clearance; }
 void GlobalConfigNative::set_flow_field_wall_clearance(double v) { cfg().flow_field_wall_clearance = std::max(0.0, v); }
+
+bool GlobalConfigNative::get_enable_claiming_tiles() const { return cfg().enable_claiming_tiles; }
+void GlobalConfigNative::set_enable_claiming_tiles(bool v) { cfg().enable_claiming_tiles = v; }
 
 double GlobalConfigNative::get_direct_steer_radius() const { return cfg().direct_steer_radius; }
 void GlobalConfigNative::set_direct_steer_radius(double v) { cfg().direct_steer_radius = std::max(0.0, v); }
