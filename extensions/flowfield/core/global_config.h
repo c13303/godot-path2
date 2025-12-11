@@ -16,12 +16,12 @@ namespace ffcore
         double min_speed_fraction = 0.25;
         double cellgoal_cooldown_sec = 1.0;
 
-        // 
+        //
         // T2 = target of flowfield
         double target_T2_param_margin = tile_size * 1.0; // margin around target, triggers slowdown (green circle)
 
-        double target_T2_param_speed_ratio = 0.6; // fraction de la vitesse max visée dans T2
-        double target_T2_param_speed_lerp = 0.05; // bigger = less inertia
+        double target_T2_param_speed_ratio = 0.6;          // fraction de la vitesse max visée dans T2
+        double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia
         double target_T2_slow_threshold = tile_size * 3.0; // slowdown starts this many tiles from claim
 
         double separation_radius = tile_size;
@@ -31,7 +31,11 @@ namespace ffcore
         double lerp_general = 0.02;
         bool enable_claim_force = true;
         bool enable_claiming_tiles = false;
+
+        /* target radius = flow field only stop ssystem (enable_claiming_tiles = false )*/
         double target_radius_time_before_stop = 1.0;
+        double target_radius_time_group_size_ratio = 0.2; // group_size x ratio
+
         double walk_animation_threshold = 25;
         double agent_offset_y = 0.0;
 
@@ -47,13 +51,12 @@ namespace ffcore
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
 
-
         /* drawing options */
-        bool draw_claimed_path = false;             // debug: draw agent→claim links
-        bool draw_flow_field = false;               // debug: draw flow field arrows
+        bool draw_claimed_path = false; // debug: draw agent→claim links
+        bool draw_flow_field = false;   // debug: draw flow field arrows
 
-        double micro_osc_win_time = 1;           // seconds window before micro-osc counter resets
-        int micro_osc_limit_before_cancel = 50000000;     // threshold to cancel agent when oscillating
+        double micro_osc_win_time = 1;                // seconds window before micro-osc counter resets
+        int micro_osc_limit_before_cancel = 50000000; // threshold to cancel agent when oscillating
 
         void recompute_from_tile();
     };

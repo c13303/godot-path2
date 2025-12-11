@@ -358,6 +358,7 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
+    a.target_radius_timer = 0.0;
 
     a.dir_code = -1;
     a.update_animation_this_frame = true;
@@ -598,9 +599,16 @@ void SteeringSystem::update_all(double delta)
         {
             if (dist_to_target <= target_radius && a.target_radius_timer <= 0.0)
             {
-                a.target_radius_timer = cfg.target_radius_time_before_stop;
-               /*  godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
-                                               a.target_radius_timer); */
+                int group_size = 0;
+                if (a.group != INVALID_GROUP)
+                {
+                    if (auto *mgr = ffcore::get_global_agent_manager())
+                        group_size = mgr->count_group_members(a.group);
+                }
+                a.target_radius_timer =
+                    cfg.target_radius_time_before_stop + group_size * cfg.target_radius_time_group_size_ratio;
+                /* godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
+                                               a.target_radius_timer, " (group size ", group_size, ")"); */
             }
 
             if (a.target_radius_timer > 0.0)
@@ -608,13 +616,12 @@ void SteeringSystem::update_all(double delta)
                 a.target_radius_timer -= delta;
                 if (a.target_radius_timer <= 0.0)
                 {
-                   /*  godot::UtilityFunctions::print("Agent ", a.id, " stopped after elapsed target-radius timer"); */
+                    /*    godot::UtilityFunctions::print("Agent ", a.id, " timer expired inside target radius"); */
                     a.reset();
                     force_animation = true;
                     continue;
                 }
             }
-
         }
         if (has_claimed)
         {
