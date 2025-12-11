@@ -9,6 +9,7 @@ extends Node2D
 @onready var agent_manager: Node = $"../AgentManagerNative"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 @onready var ui_layer: CanvasLayer = $"../CanvasLayer"
+var global_config_node: Node = null
 const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
 @export var explosion_radius: float = 100
@@ -77,6 +78,9 @@ func _ready() -> void:
 		selection_rect.visible = false
 		selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		canvas.add_child(selection_rect)
+	var scene = get_tree().get_current_scene()
+	if scene:
+		global_config_node = scene.get_node_or_null("GlobalConfigNative")
 	rng.randomize()
 	_initialize_blood_canvas()
 
@@ -148,7 +152,11 @@ func _toggle_pause() -> void:
 	_paused = not _paused
 	if steering and steering.has_method("set_paused"):
 		steering.set_paused(_paused)
-	_toggle_units_visible(not _paused)
+	var hide_units := _paused
+	if hide_units and global_config_node and global_config_node.has_method("get_draw_claimed_path"):
+		if not global_config_node.get_draw_claimed_path():
+			hide_units = false
+	_toggle_units_visible(not hide_units)
 
 func _toggle_units_visible(visible: bool) -> void:
 	for node in get_tree().get_nodes_in_group("main_chars"):
