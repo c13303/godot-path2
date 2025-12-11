@@ -31,6 +31,7 @@ namespace ffcore
         double lerp_general = 0.02;
         bool enable_claim_force = true;
         bool enable_claiming_tiles = false;
+        double target_radius_time_before_stop = 1.0;
         double walk_animation_threshold = 25;
         double agent_offset_y = 0.0;
 

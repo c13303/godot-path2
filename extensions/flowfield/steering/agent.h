@@ -38,6 +38,7 @@ namespace ffcore
         int micro_osc = 0;
         double micro_osc_timer = 0.0;
         Vec3 debug_color{};
+        double target_radius_timer = 0.0;
 
         void reset();
         void update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_animation = false);

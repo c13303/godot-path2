@@ -594,15 +594,27 @@ void SteeringSystem::update_all(double delta)
         bool reached_claim = false;
         Vec2 claim_center(0, 0);
         double target_radius = ff->get_ff_target_radius();
-        if (!ffcore::globalconfig().enable_claiming_tiles)
+        if (!ffcore::globalconfig().enable_claiming_tiles && target_radius > 0.0)
         {
-            if (target_radius > 0.0 && dist_to_target <= target_radius)
+            if (dist_to_target <= target_radius && a.target_radius_timer <= 0.0)
             {
-                godot::UtilityFunctions::print("Agent ", a.id, "  arrived in target radius ");
-                a.reset();
-                force_animation = true;
-                continue;
+                a.target_radius_timer = cfg.target_radius_time_before_stop;
+               /*  godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
+                                               a.target_radius_timer); */
             }
+
+            if (a.target_radius_timer > 0.0)
+            {
+                a.target_radius_timer -= delta;
+                if (a.target_radius_timer <= 0.0)
+                {
+                   /*  godot::UtilityFunctions::print("Agent ", a.id, " stopped after elapsed target-radius timer"); */
+                    a.reset();
+                    force_animation = true;
+                    continue;
+                }
+            }
+
         }
         if (has_claimed)
         {

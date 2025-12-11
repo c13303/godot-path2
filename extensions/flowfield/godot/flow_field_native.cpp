@@ -632,9 +632,9 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     }
     auto goal_tile = new_flow->get_goal_cell();
     double world_radius = (target_radius + 1) * new_flow->tile_size();
-    godot::UtilityFunctions::print(
+  /*   godot::UtilityFunctions::print(
         "Flow target radius (tiles):", target_radius, "mapped world radius:", world_radius,
-        "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size());
+        "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size()); */
     new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(group_id, new_flow);
     if (ffcore::globalconfig().enable_claiming_tiles)
