@@ -34,7 +34,7 @@ namespace ffcore
 
         /* target radius = flow field only stop ssystem (enable_claiming_tiles = false )*/
         double target_radius_time_before_stop = 1.0;
-        double target_radius_time_group_size_ratio = 0.2; // group_size x ratio
+        double target_radius_time_group_size_ratio = 0.005; // group_size x ratio
 
         double walk_animation_threshold = 25;
         double agent_offset_y = 0.0;

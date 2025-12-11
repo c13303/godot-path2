@@ -81,6 +81,8 @@ namespace ffcore
 
         // Mise à jour du groupe
         agents[it->second].group = group;
+        if (auto *steering = ffcore::get_global_steering_system())
+            steering->set_agent_group(agent_id, group);
 
         // Réaffectation du FlowField si le groupe a déjà un flow actif
         FlowField *ff = groups[group].flow;

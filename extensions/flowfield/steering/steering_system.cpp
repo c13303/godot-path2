@@ -607,8 +607,8 @@ void SteeringSystem::update_all(double delta)
                 }
                 a.target_radius_timer =
                     cfg.target_radius_time_before_stop + group_size * cfg.target_radius_time_group_size_ratio;
-                /* godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
-                                               a.target_radius_timer, " (group size ", group_size, ")"); */
+                godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
+                                               a.target_radius_timer, " (group size ", group_size, ")");
             }
 
             if (a.target_radius_timer > 0.0)

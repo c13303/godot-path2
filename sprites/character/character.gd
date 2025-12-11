@@ -11,7 +11,7 @@ const AVAILABLE_SKINS: Array[StringName] = [
 var _shadow_indicator: CharacterShadow
 var _show_shadow: bool = true
 var _colored_shadow: bool = false
-var _colored_shadow_when_selected: bool = true
+var _colored_shadow_when_selected: bool = false
 var _skin: StringName = ""
 
 @export var use_native_steering := true
