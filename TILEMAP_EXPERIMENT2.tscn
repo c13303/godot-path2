@@ -1,10 +1,16 @@
-[gd_scene load_steps=21 format=4 uid="uid://dm7myvnaoy1xc"]
+[gd_scene load_steps=27 format=4 uid="uid://dm7myvnaoy1xc"]
 
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://pathfinder/FlowFieldCode.gd" id="2_2rfbb"]
 [ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://controls/controls.gd" id="2_ii2xt"]
 [ext_resource type="Script" uid="uid://rgvwggljlw8n" path="res://label.gd" id="4_k8xte"]
 [ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://global/agent_listener.gd" id="5_7az1b"]
+[ext_resource type="Script" uid="uid://cyemr34mbedp8" path="res://controls/camera_controller.gd" id="6_camctrl"]
+[ext_resource type="Script" uid="uid://ckwrvivdsqn33" path="res://controls/selection_controller.gd" id="7_selctrl"]
+[ext_resource type="Script" uid="uid://cnwuw6yc1uspi" path="res://controls/spawn_controller.gd" id="8_spawnctrl"]
+[ext_resource type="Script" uid="uid://bv0f1nmtnfwi3" path="res://controls/fx_controller.gd" id="9_fxctrl"]
+[ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://controls/tile_hover_info.gd" id="10_hoverctrl"]
+[ext_resource type="Script" uid="uid://bye6q0k7j4v32" path="res://controls/pause_overlay.gd" id="11_pauseovl"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(8, 8, -8, 8, -8, -8, 8, -8)
@@ -1232,6 +1238,21 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("2_ii2xt")
 camera = NodePath("../UI/Camera2D")
 
+[node name="CameraController" type="Node" parent="Controls"]
+script = ExtResource("6_camctrl")
+
+[node name="SelectionController" type="Node" parent="Controls"]
+script = ExtResource("7_selctrl")
+
+[node name="SpawnController" type="Node" parent="Controls"]
+script = ExtResource("8_spawnctrl")
+
+[node name="FXController" type="Node" parent="Controls"]
+script = ExtResource("9_fxctrl")
+
+[node name="TileHoverInfo" type="Node" parent="Controls"]
+script = ExtResource("10_hoverctrl")
+
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="."]
 flow_weight = 5.0
 center_pull = 5.0
@@ -1261,6 +1282,9 @@ script = ExtResource("2_2rfbb")
 offset_right = 40.0
 offset_bottom = 23.0
 script = ExtResource("4_k8xte")
+
+[node name="PauseOverlay" type="Panel" parent="UI/CanvasLayer"]
+script = ExtResource("11_pauseovl")
 
 [node name="Camera2D" type="Camera2D" parent="UI"]
 position = Vector2(500, 500)

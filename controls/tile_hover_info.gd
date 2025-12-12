@@ -1,0 +1,81 @@
+extends Node
+class_name TileHoverInfo
+
+var floorz: TileMapLayer
+var steering: Node
+var fps_label: Label
+var flow_node: Node
+var mouse_outline: Line2D
+
+func setup(floor_layer: TileMapLayer, steering_in: Node, label_in: Label, flow_in: Node) -> void:
+	floorz = floor_layer
+	steering = steering_in
+	fps_label = label_in
+	flow_node = flow_in
+
+	mouse_outline = Line2D.new()
+	mouse_outline.default_color = Color(1, 1, 1, 1)
+	mouse_outline.width = 1.0
+	mouse_outline.closed = true
+	mouse_outline.visible = false
+	if flow_node and flow_node is Node2D:
+		var flow_2d: Node2D = flow_node
+		flow_2d.add_child(mouse_outline)
+	else:
+		add_child(mouse_outline)
+
+func process() -> void:
+	if not floorz:
+		return
+
+	var mouse_world: Vector2
+	if floorz is Node2D:
+		var floor_node: Node2D = floorz
+		mouse_world = floor_node.get_global_mouse_position()
+	else:
+		var cam: Camera2D = get_viewport().get_camera_2d()
+		if cam:
+			mouse_world = cam.get_global_mouse_position()
+		else:
+			mouse_world = Vector2.ZERO
+	var cell: Vector2i = floorz.local_to_map(floorz.to_local(mouse_world))
+	var center: Vector2 = floorz.to_global(floorz.map_to_local(cell))
+
+	if fps_label and fps_label.has_method("set_hover_cell_text"):
+		var lines: Array[String] = ["Tile: (%d, %d)" % [cell.x, cell.y]]
+		if steering and steering.has_method("get_agents_in_map_cell"):
+			var agents: Array = steering.call("get_agents_in_map_cell", cell)
+			for a in agents:
+				var id: int = int(a.get("id", -1))
+				var dir: int = int(a.get("dir_code", -1))
+				var moving: bool = bool(a.get("is_moving", false))
+				var vel_len: float = float(a.get("velocity_len", 0.0))
+				var anim: String = ""
+				if moving:
+					match dir:
+						0: anim = "Walk_E"
+						1: anim = "Walk_W"
+						2: anim = "Walk_S"
+						3: anim = "Walk_N"
+						_: anim = "Walk_S"
+				else:
+					match dir:
+						0: anim = "Idle_E"
+						1: anim = "Idle_W"
+						2: anim = "Idle_S"
+						3: anim = "Idle_N"
+						_: anim = "Idle_S"
+				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f, anim=%s" % [id, dir, moving, vel_len, anim])
+		fps_label.call("set_hover_cell_text", "\n".join(lines))
+
+	if mouse_outline:
+		var tile_size: Vector2i = floorz.tile_set.get_tile_size()
+		var half: Vector2 = Vector2(float(tile_size.x) * 0.5, float(tile_size.y) * 0.5)
+		mouse_outline.points = [
+			Vector2(-half.x, -half.y),
+			Vector2(half.x, -half.y),
+			Vector2(half.x, half.y),
+			Vector2(-half.x, half.y)
+		]
+		mouse_outline.global_position = center
+		mouse_outline.visible = true
