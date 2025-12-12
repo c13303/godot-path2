@@ -17,7 +17,7 @@ func _ready():
 	)
 
 
-func stamp_world(world_pos: Vector2):
+func blood_spot(world_pos: Vector2):
 	if not rect_world.has_point(world_pos):
 		return
 

@@ -1237,8 +1237,9 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 
 [node name="Node2D" type="Node2D"]
 
-[node name="Controls" type="Node2D" parent="." node_paths=PackedStringArray("camera")]
+[node name="Controls" type="Node2D" parent="." node_paths=PackedStringArray("bloodcanvas", "camera")]
 script = ExtResource("2_ii2xt")
+bloodcanvas = NodePath("../Map/MonTilemap/BloodLayer/BloodCanvas")
 camera = NodePath("../UI/Camera2D")
 
 [node name="CameraController" type="Node" parent="Controls"]
@@ -1312,9 +1313,9 @@ script = ExtResource("12_tl173")
 tilemap = NodePath("../../floor")
 blood_frames = ExtResource("13_0w47p")
 
-[node name="Node2D" type="Node2D" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("canvas")]
+[node name="Node2D" type="Node2D" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("bloodcanvas")]
 script = ExtResource("13_e3tb4")
-canvas = NodePath("../BloodCanvas")
+bloodcanvas = NodePath("../BloodCanvas")
 
 [node name="wallz" type="TileMapLayer" parent="Map/MonTilemap"]
 z_index = -50
