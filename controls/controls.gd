@@ -47,6 +47,7 @@ var mouse_outline: Line2D
 var selecting: bool = false
 var selection_start: Vector2
 var selection_rect: ColorRect
+var pause_outline: Panel
 
 var selected_units: Array[Node2D] = []
 var preview_units: Array[Node2D] = []
@@ -54,6 +55,7 @@ var preview_units: Array[Node2D] = []
 #signal mouse_goal_set(world_pos: Vector2)
 
 func _ready() -> void:
+	print("Controls _ready: ui_layer=", ui_layer)
 	add_child(marker)
 	marker.visible = false
 
@@ -73,15 +75,19 @@ func _ready() -> void:
 		selection_rect.visible = false
 		selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		ui_layer.add_child(selection_rect)
+		print("Controls: using existing ui_layer=", ui_layer)
 	else:
 		var canvas := CanvasLayer.new()
 		canvas.layer = 100
 		add_child(canvas)
+		ui_layer = canvas
 		selection_rect = ColorRect.new()
 		selection_rect.color = Color(0, 1, 0, 0.25)
 		selection_rect.visible = false
 		selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		canvas.add_child(selection_rect)
+		print("Controls: created fallback ui_layer=", ui_layer)
+	_initialize_pause_outline()
 	var scene = get_tree().get_current_scene()
 	if scene:
 		global_config_node = scene.get_node_or_null("GlobalConfigNative")
@@ -159,7 +165,10 @@ func _process(delta: float) -> void:
 	_scroll_camera_via_mouse(delta)
 
 var _paused: bool = false
+var _saved_animation_speed: Dictionary[int, float] = {}
 func _scroll_camera_via_mouse(delta: float) -> void:
+	if _paused:
+		return
 	if not camera or scroll_margin_pixel <= 0.0:
 		return
 
@@ -201,7 +210,36 @@ func _set_mouse_locked(enabled: bool) -> void:
 	if enabled:
 		mode = Input.MOUSE_MODE_CONFINED
 	Input.set_mouse_mode(mode)
-
+func _initialize_pause_outline() -> void:
+	if not ui_layer:
+		print("Controls: ui_layer is null, cannot create pause_outline")
+		return
+	pause_outline = Panel.new()
+	pause_outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_outline.visible = false
+	pause_outline.z_index = 100
+	pause_outline.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_outline.offset_left = 0.0
+	pause_outline.offset_top = 0.0
+	pause_outline.offset_right = 0.0
+	pause_outline.offset_bottom = 0.0
+	var style := StyleBoxFlat.new()
+	style.border_color = Color(1, 0, 0, 1)
+	style.border_width_top = 4.0
+	style.border_width_bottom = 4.0
+	style.border_width_left = 4.0
+	style.border_width_right = 4.0
+	style.bg_color = Color(0, 0, 0, 0)
+	pause_outline.add_theme_stylebox_override("panel", style)
+	ui_layer.add_child(pause_outline)
+	print("Controls: pause_outline created, parent ui_layer=", ui_layer)
+func _set_pause_outline_visible(enabled: bool) -> void:
+	if not pause_outline:
+		print("Controls: pause_outline is null in _set_pause_outline_visible, enabled=", enabled)
+		return
+	pause_outline.visible = enabled
+	print("Controls: pause_outline visible=", pause_outline.visible)
+	
 func _toggle_pause() -> void:
 	_paused = not _paused
 	if steering and steering.has_method("set_paused"):
@@ -218,11 +256,30 @@ func _toggle_pause() -> void:
 		if not global_config_node.get_draw_claimed_path():
 			hide_units = false
 	_toggle_units_visible(not hide_units)
+	_set_character_animations_playing(not _paused)
+	_set_pause_outline_visible(_paused)
 
 func _toggle_units_visible(visible: bool) -> void:
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		if node is Node2D:
 			node.visible = visible
+
+func _set_character_animations_playing(play: bool) -> void:
+	for main_char in get_tree().get_nodes_in_group("main_chars"):
+		if main_char is Node:
+			for child in main_char.get_children():
+				if child is AnimatedSprite2D:
+					var child_id := child.get_instance_id()
+					if play:
+						if _saved_animation_speed.has(child_id):
+							child.speed_scale = _saved_animation_speed[child_id]
+							_saved_animation_speed.erase(child_id)
+						elif child.speed_scale == 0.0:
+							child.speed_scale = 1.0
+					else:
+						if child.is_playing():
+							_saved_animation_speed[child_id] = child.speed_scale
+						child.speed_scale = 0.0
 
 func _update_mouse_tile_ui() -> void:
 	if not floorz:

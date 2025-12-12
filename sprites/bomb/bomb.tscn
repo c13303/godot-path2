@@ -1,20 +1,26 @@
 [gd_scene load_steps=4 format=3 uid="uid://docloe83fvlom"]
 
 [ext_resource type="Script" uid="uid://cmxeb3lweqb64" path="res://sprites/bomb/bomb.gd" id="1_upnju"]
-[ext_resource type="Texture2D" uid="uid://ukl5ox2mifjc" path="res://sprites/bomb/bomb.png" id="2_pdkcs"]
+[ext_resource type="Texture2D" uid="uid://ftb55gwm2ojc" path="res://sprites/bomb/explosion96.png" id="2_pdkcs"]
 
 [sub_resource type="GDScript" id="GDScript_pdkcs"]
-script/source = "extends Node
+script/source = "extends Sprite2D
 
+@export var frame_time: float = 0.05
+var _timer: float = 0.0
 
-# Called when the node enters the scene tree for the first time.
 func _ready() -> void:
-	pass # Replace with function body.
+	frame = 0
 
-
-# Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
-	pass
+	_timer += delta
+	if _timer >= frame_time:
+		_timer -= frame_time
+		var next_frame := frame + 1
+		if next_frame >= hframes * vframes:
+			queue_free()
+		else:
+			frame = next_frame
 "
 
 [node name="Bomb" type="Node2D"]
@@ -22,4 +28,5 @@ script = ExtResource("1_upnju")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = ExtResource("2_pdkcs")
+hframes = 12
 script = SubResource("GDScript_pdkcs")
