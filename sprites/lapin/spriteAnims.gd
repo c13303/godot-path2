@@ -77,16 +77,17 @@ func _get_shared_frames(tex: Texture2D) -> SpriteFrames:
 	_cached_frames[key] = frames
 	return frames
 
+@warning_ignore("INTEGER_DIVISION")
 func _build_frames(tex: Texture2D) -> SpriteFrames:
 	var img: Image = tex.get_image()
 	var cols: int = tex.get_width() / W
 
 	var frames: SpriteFrames = SpriteFrames.new()
 	for name_key in ANIMATION_RANGES.keys():
-		var name: String = name_key
-		frames.add_animation(name)
+		var anim_name: String = name_key
+		frames.add_animation(anim_name)
 
-		var anim_range: Vector2i = ANIMATION_RANGES[name]
+		var anim_range: Vector2i = ANIMATION_RANGES[anim_name]
 		for i: int in range(anim_range.x, anim_range.y + 1):
 			var x: int = (i % cols) * W
 			var y: int = int(i / cols) * H
@@ -98,6 +99,6 @@ func _build_frames(tex: Texture2D) -> SpriteFrames:
 			var tex_frame: ImageTexture = ImageTexture.new()
 			tex_frame.set_image(sub_img)
 
-			frames.add_frame(name, tex_frame)
+			frames.add_frame(anim_name, tex_frame)
 
 	return frames

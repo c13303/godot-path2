@@ -1,7 +1,6 @@
 extends CharacterBody2D
 class_name FlowAgent
 
-const CharacterShadow = preload("res://sprites/lapin/character_shadow.gd")
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
 const AVAILABLE_SKINS: Array[StringName] = [
 	"rabbit",
@@ -51,7 +50,6 @@ var _skin: StringName = ""
 var arrived: bool = false
 var arrived_reported: bool = false
 var prev_dist_to_target: float = INF
-var _sample_phase: int = 0
 var _nav_id: int = -1  # ID dans le FF/Steering
 var agent_color: Color = _agent_color()
 var nav_id: int = -1:

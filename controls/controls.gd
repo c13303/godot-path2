@@ -225,10 +225,10 @@ func _initialize_pause_outline() -> void:
 	pause_outline.offset_bottom = 0.0
 	var style := StyleBoxFlat.new()
 	style.border_color = Color(1, 0, 0, 1)
-	style.border_width_top = 4.0
-	style.border_width_bottom = 4.0
-	style.border_width_left = 4.0
-	style.border_width_right = 4.0
+	style.border_width_top = 4
+	style.border_width_bottom = 4
+	style.border_width_left = 4
+	style.border_width_right = 4
 	style.bg_color = Color(0, 0, 0, 0)
 	pause_outline.add_theme_stylebox_override("panel", style)
 	ui_layer.add_child(pause_outline)
@@ -259,10 +259,10 @@ func _toggle_pause() -> void:
 	_set_character_animations_playing(not _paused)
 	_set_pause_outline_visible(_paused)
 
-func _toggle_units_visible(visible: bool) -> void:
+func _toggle_units_visible(isvisible: bool) -> void:
 	for node in get_tree().get_nodes_in_group("main_chars"):
 		if node is Node2D:
-			node.visible = visible
+			node.visible = isvisible
 
 func _set_character_animations_playing(play: bool) -> void:
 	for main_char in get_tree().get_nodes_in_group("main_chars"):
@@ -476,16 +476,16 @@ func _on_key_trig_blood() -> void:
 	var mouse_pos := get_global_mouse_position()
 	_spawn_blood_spatter(mouse_pos)
 
-func _spawn_explosion_effect(position: Vector2) -> void:
+func _spawn_explosion_effect(bposition: Vector2) -> void:
 	var circle = EXPLOSION_DEBUG_SCENE.instantiate()
 	get_tree().current_scene.add_child(circle)
-	circle.global_position = position
+	circle.global_position = bposition
 	circle.z_index = 999
 	circle.visible = true
 	var timer = get_tree().create_timer(explosion_debug_duration)
 	await timer.timeout
-	var scale = explosion_radius / 16
-	circle.scale = Vector2(scale, scale)
+	var mscale = explosion_radius / 16
+	circle.scale = Vector2(mscale, mscale)
 	if circle.is_inside_tree():
 		circle.queue_free()
 
@@ -506,8 +506,7 @@ func _initialize_blood_canvas() -> void:
 	var height: int = max(1, int(ceil(map_size.y)))
 	if width <= 0 or height <= 0:
 		return
-	blood_image = Image.new()
-	blood_image.create(width, height, false, Image.FORMAT_RGBA8)
+	blood_image = Image.create(width, height, false, Image.FORMAT_RGBA8)
 	if blood_image.is_empty():
 		push_warning("Blood canvas image is empty, skipping init")
 		return

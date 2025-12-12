@@ -29,8 +29,8 @@ func _ready() -> void:
 	await get_tree().process_frame
 
 	ff.compute_distance_field_global()
-	var d = ff.compute_flow_dir(global_position)
-	#print("Direction lue après rebuild:", d)
+	var _d = ff.compute_flow_dir(global_position)
+	#print("Direction lue après rebuild:", _d)
 
 
 	print("FlowFieldCode: initialization complete--------------------------------")
