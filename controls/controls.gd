@@ -1,14 +1,14 @@
 extends Node2D
 
-@onready var floorz: TileMapLayer = $"../MonTilemap/floor"
-@onready var wallz: TileMapLayer = $"../MonTilemap/wallz"
-@onready var blood_layer: Node2D = $"../MonTilemap/BloodLayer"
-@onready var blood_texture_rect: TextureRect = $"../MonTilemap/BloodLayer/bloodtexture"
-@onready var flow: Node = $"../FlowFieldNative"
-@onready var steering: Node = $"../SteeringSystemNative"
-@onready var agent_manager: Node = $"../AgentManagerNative"
+@onready var floorz: TileMapLayer = $"../Map/MonTilemap/floor"
+@onready var wallz: TileMapLayer = $"../Map/MonTilemap/wallz"
+@onready var blood_layer: Node2D = $"../Map/MonTilemap/BloodLayer"
+@onready var blood_texture_rect: TextureRect = $"../Map/MonTilemap/BloodLayer/bloodtexture"
+@onready var flow: Node = $"../CPP/FlowFieldNative"
+@onready var steering: Node = $"../CPP/SteeringSystemNative"
+@onready var agent_manager: Node = $"../CPP/AgentManagerNative"
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
-@onready var ui_layer: CanvasLayer = $"../CanvasLayer"
+@onready var ui_layer: CanvasLayer = $"../UI/CanvasLayer"
 var global_config_node: Node = null
 const EXPLOSION_DEBUG_SCENE := preload("res://sprites/bomb/bomb.tscn")
 
@@ -41,7 +41,7 @@ var blood_image_texture: ImageTexture
 
 var current_flow: Node = null
 var current_group: int = -1
-@onready var fps_label: Label = $"../CanvasLayer/Label"
+@onready var fps_label: Label = $"../UI/CanvasLayer/Label"
 var mouse_outline: Line2D
 
 var selecting: bool = false
@@ -522,14 +522,14 @@ func _initialize_blood_canvas() -> void:
 	var top_left_global := floorz.to_global(top_left_local)
 	blood_layer.position = top_left_global
 
-func _spawn_blood_spatter(position: Vector2) -> void:
+func _spawn_blood_spatter(bposition: Vector2) -> void:
 	if not blood_image or not blood_image_texture:
 		return
 	var width := blood_image.get_width()
 	var height := blood_image.get_height()
 	if width <= 0 or height <= 0:
 		return
-	var local_pos := blood_layer.to_local(position)
+	var local_pos := blood_layer.to_local(bposition)
 	var center := Vector2i(int(round(local_pos.x)), int(round(local_pos.y)))
 	blood_image.lock()
 	var dots := 0

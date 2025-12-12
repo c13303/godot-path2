@@ -1,8 +1,8 @@
 extends Node2D
 
 @onready var ff: FlowFieldNative = get_parent()
-@onready var floor_layer: TileMapLayer = $"../../MonTilemap/floor"
-@onready var wall_layer: TileMapLayer = $"../../MonTilemap/wallz"
+@onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
+@onready var wall_layer: TileMapLayer = $"../../../Map/MonTilemap/wallz"
 
 func _ready() -> void:
 	
