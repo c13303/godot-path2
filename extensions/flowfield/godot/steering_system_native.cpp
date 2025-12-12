@@ -169,6 +169,21 @@ void SteeringSystemNative::_process(double delta)
                 agent_last_flow[id] = flow_ptr;
         }
 
+        auto it_propelled_state = agent_propelled_states.find(id);
+        bool prev_propelled = false;
+        if (it_propelled_state != agent_propelled_states.end())
+            prev_propelled = it_propelled_state->second;
+        if (it_propelled_state == agent_propelled_states.end() || prev_propelled != a->is_propelled)
+        {
+            agent_propelled_states[id] = a->is_propelled;
+            if (agent_manager)
+            {
+                Dictionary payload;
+                payload["is_propelled"] = a->is_propelled;
+                agent_manager->send_agent_event("propelled_state_update", id, payload);
+            }
+        }
+
         bool moving;
         int code;
         ffcore::Vec2 vel;
@@ -181,6 +196,7 @@ void SteeringSystemNative::_process(double delta)
                 payload["moving"] = moving;
                 payload["code"] = code;
                 payload["direction"] = (moving && vel_vec.length_squared() > 1e-6) ? vel_vec.normalized() : vel_vec;
+                payload["is_propelled"] = a->is_propelled;
                 agent_manager->send_agent_event("main_animation_update", id, payload);
             }
             agent_direction_codes[id] = code;

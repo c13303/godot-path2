@@ -2,6 +2,7 @@ extends CharacterBody2D
 class_name FlowAgent
 
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
+const PROPELLED_SHADOW_COLOR: Color = Color(1, 0, 0, 0.45)
 const AVAILABLE_SKINS: Array[StringName] = [
 	"rabbit",
 	"pig",
@@ -12,6 +13,7 @@ var _show_shadow: bool = true
 var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = false
 var _skin: StringName = ""
+var _is_propelled: bool = false
 
 @export var use_native_steering := true
 @export var show_shadow: bool = false:
@@ -94,6 +96,13 @@ func set_previewed(enabled: bool) -> void:
 	else:
 		modulate = Color(1, 1, 1, 1)
 
+func set_propelled_state(enabled: bool) -> void:
+	if _is_propelled == enabled:
+		return
+
+	_is_propelled = enabled
+	_update_shadow()
+
 func _exit_tree() -> void:
 	if _shadow_indicator:
 		_shadow_indicator.queue_free()
@@ -109,6 +118,8 @@ func _agent_color() -> Color:
 	return Color(r, g, b, 0.3)
 
 func _shadow_color() -> Color:
+	if _is_propelled:
+		return PROPELLED_SHADOW_COLOR
 	if _colored_shadow_when_selected and _is_selected:
 		return agent_color
 	if _is_selected:

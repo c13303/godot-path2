@@ -33,6 +33,7 @@ namespace godot
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, int> agent_direction_codes;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
+        std::unordered_map<int, bool> agent_propelled_states;
 
         int _direction_code(const Vector2 &v) const;
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;

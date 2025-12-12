@@ -23,18 +23,19 @@ func _on_agent_event(event_name: String, agent_id: int, payload: Dictionary) -> 
 	if debug_events:
 		print("AgentListener event:", event_name, "agent:", agent_id, "payload:", payload)
 
-	if event_name == "main_animation_update":
-		_apply_anim_update(agent_id, payload)
+	match event_name:
+		"main_animation_update":
+			_apply_anim_update(agent_id, payload)
+		"propelled_state_update":
+			_apply_propelled_state(agent_id, payload)
 
 var _last_dir_code: Dictionary = {}
 
 func _apply_anim_update(agent_id: int, payload: Dictionary) -> void:
-	var mgr := get_parent()
-	if not mgr or not mgr.has_method("find_node_by_agent"):
-		return
-	var node: Node2D = mgr.find_node_by_agent(agent_id)
+	var node := _get_agent_node(agent_id)
 	if node == null:
 		return
+	_apply_propelled_payload(node, payload)
 	var sprite: AnimatedSprite2D = node.get_node_or_null("LapinSprite2D")
 	if sprite == null:
 		return
@@ -61,3 +62,20 @@ func _apply_anim_update(agent_id: int, payload: Dictionary) -> void:
 			3: sprite.animation = "Idle_N"
 			_: sprite.animation = "Idle_S"
 	sprite.play()
+
+func _apply_propelled_state(agent_id: int, payload: Dictionary) -> void:
+	var node := _get_agent_node(agent_id)
+	if node == null:
+		return
+	_apply_propelled_payload(node, payload)
+
+func _apply_propelled_payload(node: Node2D, payload: Dictionary) -> void:
+	var propelled: bool = bool(payload.get("is_propelled", false))
+	if node.has_method("set_propelled_state"):
+		node.set_propelled_state(propelled)
+
+func _get_agent_node(agent_id: int) -> Node2D:
+	var mgr := get_parent()
+	if not mgr or not mgr.has_method("find_node_by_agent"):
+		return null
+	return mgr.find_node_by_agent(agent_id)
