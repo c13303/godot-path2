@@ -751,7 +751,6 @@ sources/0 = SubResource("TileSetAtlasSource_vbdlb")
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_nynk0"]
 shader = ExtResource("12_e3tb4")
 shader_parameter/frames = 3.0
-shader_parameter/blood_color = Color(0.6, 0, 0, 0.75)
 
 [sub_resource type="QuadMesh" id="QuadMesh_0w47p"]
 size = Vector2(32, 32)

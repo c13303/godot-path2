@@ -3,6 +3,9 @@ class_name FlowAgent
 
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
 const PROPELLED_SHADOW_COLOR: Color = Color(1, 0, 0, 0.45)
+const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
+const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
+const BLOOD_DROP_INTERVAL: float = 0.1
 const AVAILABLE_SKINS: Array[StringName] = [
 	"rabbit",
 	"pig",
@@ -14,6 +17,8 @@ var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = false
 var _skin: StringName = ""
 var _is_propelled: bool = false
+var _blood_drop_timer: float = 0.0
+var _blood_layer: Node2D
 
 @export var use_native_steering := true
 @export var show_shadow: bool = false:
@@ -73,8 +78,57 @@ func _ready() -> void:
 	_apply_skin()
 	_update_shadow()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	z_index = int(position.y)
+	_process_blood(delta)
+
+func _process_blood(delta: float) -> void:
+	if not _is_propelled:
+		_blood_drop_timer = 0.0
+		return
+
+	_blood_drop_timer -= delta
+	if _blood_drop_timer > 0.0:
+		return
+
+	_blood_drop_timer = BLOOD_DROP_INTERVAL
+	_spawn_blood_drop()
+
+func _spawn_blood_drop() -> void:
+	var blood_node := _get_blood_layer()
+	if blood_node and blood_node.has_method("spawn_blood"):
+		blood_node.spawn_blood(
+			blood_node.to_local(global_position)
+		)
+
+
+func _get_blood_layer() -> Node2D:
+	if _blood_layer:
+		return _blood_layer
+
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		_blood_layer = scene.get_node_or_null(BLOOD_NODE_PATH)
+	if not _blood_layer:
+		_blood_layer = _find_blood_node_by_name()
+	if not _blood_layer:
+		var tree_root: Node = get_tree().get_root()
+		if tree_root:
+			_blood_layer = tree_root.get_node_or_null(BLOOD_NODE_PATH)
+	if not _blood_layer:
+		_blood_layer = _find_blood_node_by_name()
+	return _blood_layer
+
+func _find_blood_node_by_name() -> Node2D:
+	var tree = get_tree()
+	if not tree:
+		return null
+	var root: Node = tree.get_current_scene()
+	if not root:
+		root = tree.get_root()
+	if not root:
+		return null
+	return root.find_node(BLOOD_NODE_NAME, true, false) as Node2D
 
 func set_selected(enabled: bool) -> void:
 	if _is_selected == enabled:
@@ -102,6 +156,8 @@ func set_propelled_state(enabled: bool) -> void:
 
 	_is_propelled = enabled
 	_update_shadow()
+	if _is_propelled:
+		_blood_drop_timer = 0.0
 
 func _exit_tree() -> void:
 	if _shadow_indicator:
