@@ -15,7 +15,7 @@ extends Node2D
 @onready var fx_controller: FXController = $FXController
 @onready var tile_hover_info: TileHoverInfo = $TileHoverInfo
 
-@export var bloodcanvas: Node
+
 
 @onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 
