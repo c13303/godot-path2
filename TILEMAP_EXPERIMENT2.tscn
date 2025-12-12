@@ -1307,13 +1307,9 @@ navigation_enabled = false
 [node name="BloodLayer" type="Node2D" parent="Map/MonTilemap"]
 z_index = -75
 
-[node name="BloodSprite" type="Sprite2D" parent="Map/MonTilemap/BloodLayer"]
-z_index = 1
-
-[node name="BloodCanvas" type="Node" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("tilemap", "target_sprite")]
+[node name="BloodCanvas" type="Node" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("tilemap")]
 script = ExtResource("12_tl173")
 tilemap = NodePath("../../floor")
-target_sprite = NodePath("../BloodSprite")
 blood_frames = ExtResource("13_0w47p")
 
 [node name="Node2D" type="Node2D" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("canvas")]
