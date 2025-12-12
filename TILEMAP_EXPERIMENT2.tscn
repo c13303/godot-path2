@@ -1,4 +1,4 @@
-[gd_scene load_steps=29 format=4 uid="uid://dm7myvnaoy1xc"]
+[gd_scene load_steps=30 format=4 uid="uid://dm7myvnaoy1xc"]
 
 [ext_resource type="Texture2D" uid="uid://crj5n3snte7f0" path="res://png/tileset_full.png" id="1_k8xte"]
 [ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://pathfinder/FlowFieldCode.gd" id="2_2rfbb"]
@@ -12,6 +12,7 @@
 [ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://controls/tile_hover_info.gd" id="10_hoverctrl"]
 [ext_resource type="Script" uid="uid://bye6q0k7j4v32" path="res://controls/pause_overlay.gd" id="11_pauseovl"]
 [ext_resource type="Script" uid="uid://bmgd5v20ceikr" path="res://map_drawing/blood_canvas.gd" id="12_tl173"]
+[ext_resource type="SpriteFrames" uid="uid://b6xn4bjnp4nr" path="res://sprites/blood/blood_frames.tres" id="13_0w47p"]
 [ext_resource type="Script" uid="uid://cct76v4jnack8" path="res://map_drawing/drawtest.gd" id="13_e3tb4"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
@@ -1309,9 +1310,11 @@ z_index = -75
 [node name="BloodSprite" type="Sprite2D" parent="Map/MonTilemap/BloodLayer"]
 z_index = 1
 
-[node name="BloodCanvas" type="Node" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("target_sprite")]
+[node name="BloodCanvas" type="Node" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("tilemap", "target_sprite")]
 script = ExtResource("12_tl173")
+tilemap = NodePath("../../floor")
 target_sprite = NodePath("../BloodSprite")
+blood_frames = ExtResource("13_0w47p")
 
 [node name="Node2D" type="Node2D" parent="Map/MonTilemap/BloodLayer" node_paths=PackedStringArray("canvas")]
 script = ExtResource("13_e3tb4")

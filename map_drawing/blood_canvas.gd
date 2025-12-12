@@ -1,19 +1,37 @@
 extends Node
 
+@export var tilemap: TileMapLayer
 @export var target_sprite: Sprite2D
-@export var world_size: Vector2 = Vector2(4096, 4096)
-@export var texture_size: Vector2i = Vector2i(1024, 1024)
+@export var pixels_per_tile: int = 16
 @export var brush_radius_px: int = 8
 @export var brush_color: Color = Color(0.7, 0.0, 0.0, 0.85)
+@export var blood_frames: SpriteFrames
 
 var img: Image
 var tex: ImageTexture
+
 var rect_world: Rect2
+var texture_size: Vector2i
 var inv_world_size: Vector2
 
 func _ready():
-	rect_world = Rect2(-world_size * 0.5, world_size)
-	inv_world_size = Vector2(1.0 / world_size.x, 1.0 / world_size.y)
+	var used = tilemap.get_used_rect()
+	var tile_size = tilemap.tile_set.tile_size
+
+	rect_world = Rect2(
+		tilemap.to_global(used.position * tile_size),
+		used.size * tile_size
+	)
+
+	texture_size = Vector2i(
+		used.size.x * pixels_per_tile,
+		used.size.y * pixels_per_tile
+	)
+
+	inv_world_size = Vector2(
+		1.0 / rect_world.size.x,
+		1.0 / rect_world.size.y
+	)
 
 	img = Image.create(texture_size.x, texture_size.y, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
@@ -34,42 +52,9 @@ func stamp_world(world_pos: Vector2):
 	)
 
 	stamp_px(px)
+	
 
-func stamp_px(p: Vector2i):
-	var r = brush_radius_px
-	var r2 = r * r
 
-	var min_x = max(p.x - r, 0)
-	var max_x = min(p.x + r, texture_size.x - 1)
-	var min_y = max(p.y - r, 0)
-	var max_y = min(p.y + r, texture_size.y - 1)
-
-	var a = brush_color.a
-	var cr = brush_color.r * a
-	var cg = brush_color.g * a
-	var cb = brush_color.b * a
-
-	for y in range(min_y, max_y + 1):
-		var dy = y - p.y
-		for x in range(min_x, max_x + 1):
-			var dx = x - p.x
-			if dx * dx + dy * dy > r2:
-				continue
-
-			var dst = img.get_pixel(x, y)
-			var out_a = a + dst.a * (1.0 - a)
-			var inv_out_a = 1.0 / max(out_a, 0.000001)
-
-			img.set_pixel(
-				x,
-				y,
-				Color(
-					(cr + dst.r * dst.a * (1.0 - a)) * inv_out_a,
-					(cg + dst.g * dst.a * (1.0 - a)) * inv_out_a,
-					(cb + dst.b * dst.a * (1.0 - a)) * inv_out_a,
-					out_a
-				)
-			)
 
 func flush():
 	tex.update(img)
@@ -77,3 +62,48 @@ func flush():
 func clear():
 	img.fill(Color(0, 0, 0, 0))
 	tex.update(img)
+	
+
+
+
+
+func stamp_px(p: Vector2i):
+	var myseed = int(p.x * 928371 + p.y * 364479)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = myseed
+
+	var frame_count = blood_frames.get_frame_count("blood")
+	var frame_idx = rng.randi_range(0, frame_count - 1)
+	var src_tex: Texture2D = blood_frames.get_frame_texture("blood", frame_idx)
+	if src_tex == null:
+		return
+
+	var src = src_tex.get_image()
+	src.convert(Image.FORMAT_RGBA8)
+
+	var angle = rng.randf() * TAU
+	var sin_a = sin(-angle)
+	var cos_a = cos(-angle)
+
+	var w = src.get_width()
+	var h = src.get_height()
+	var half = Vector2(w * 0.5, h * 0.5)
+
+	for dy in range(-half.y, half.y):
+		for dx in range(-half.x, half.x):
+			var sx = int(dx * cos_a - dy * sin_a + half.x)
+			var sy = int(dx * sin_a + dy * cos_a + half.y)
+
+			if sx < 0 or sy < 0 or sx >= w or sy >= h:
+				continue
+
+			if src.get_pixel(sx, sy).a < 0.1:
+				continue
+
+			var tx = p.x + dx
+			var ty = p.y + dy
+
+			if tx < 0 or ty < 0 or tx >= texture_size.x or ty >= texture_size.y:
+				continue
+
+			img.set_pixel(tx, ty, brush_color)
