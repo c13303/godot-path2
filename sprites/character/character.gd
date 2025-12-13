@@ -3,6 +3,7 @@ class_name FlowAgent
 
 const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
 const PROPELLED_SHADOW_COLOR: Color = Color(1, 0, 0, 0.45)
+const BLOOD_ENABLED: bool = false
 const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
@@ -83,10 +84,11 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
-	_process_blood(delta)
+	if BLOOD_ENABLED:
+		_process_blood(delta)
 
 func _process_blood(delta: float) -> void:
-	if not _is_propelled or not _should_drop_blood():
+	if not BLOOD_ENABLED or not _is_propelled or not _should_drop_blood():
 		_blood_drop_timer = 0.0
 		return
 

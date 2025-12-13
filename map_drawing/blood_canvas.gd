@@ -1,5 +1,8 @@
 extends Node
 
+const BLOOD_FADE_DURATION: float = 5.0
+const BLOOD_INITIAL_ALPHA: float = 0.8
+
 @export var tilemap: TileMapLayer
 @export var blood_frames: SpriteFrames
 @export var blood_z_index: int = -75
@@ -15,6 +18,7 @@ func _ready():
 		tilemap.to_global(used.position * tile_size),
 		used.size * tile_size
 	)
+	set_process(true)
 
 
 func blood_spot(world_pos: Vector2):
@@ -42,6 +46,7 @@ func blood_spot(world_pos: Vector2):
 	sprite.centered = true
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sprite.modulate = Color(1, 1, 1, 0.8)
+	sprite.set_meta("fade_time", BLOOD_FADE_DURATION)
 
 	add_child(sprite)
 
@@ -50,3 +55,15 @@ func clear():
 	for c in get_children():
 		if c is Sprite2D:
 			c.queue_free()
+
+func _process(delta: float) -> void:
+	for c in get_children():
+		if c is Sprite2D:
+			var remaining := c.get_meta("fade_time") if c.has_meta("fade_time") else BLOOD_FADE_DURATION
+			remaining -= delta
+			if remaining <= 0.0:
+				c.queue_free()
+				continue
+			c.set_meta("fade_time", remaining)
+			var factor := clamp(remaining / BLOOD_FADE_DURATION, 0.0, 1.0)
+			c.modulate.a = BLOOD_INITIAL_ALPHA * factor

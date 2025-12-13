@@ -1,0 +1,9 @@
+[gd_resource type="JSON" format=3 uid="uid://d23nyuhj0xcfy"]
+
+[resource]
+data = {
+"remove": -1.0,
+"spawner": 3.0,
+"wall1": 1.0,
+"wall2": 2.0
+}
