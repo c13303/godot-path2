@@ -26,6 +26,8 @@ void GlobalConfigNative::_bind_methods()
 
     ClassDB::bind_method(D_METHOD("get_wall_repel_strength"), &GlobalConfigNative::get_wall_repel_strength);
     ClassDB::bind_method(D_METHOD("set_wall_repel_strength", "value"), &GlobalConfigNative::set_wall_repel_strength);
+    ClassDB::bind_method(D_METHOD("get_walk_animation_threshold"), &GlobalConfigNative::get_walk_animation_threshold);
+    ClassDB::bind_method(D_METHOD("set_walk_animation_threshold", "value"), &GlobalConfigNative::set_walk_animation_threshold);
 
     ClassDB::bind_method(D_METHOD("get_flow_field_wall_clearance"), &GlobalConfigNative::get_flow_field_wall_clearance);
     ClassDB::bind_method(D_METHOD("set_flow_field_wall_clearance", "value"), &GlobalConfigNative::set_flow_field_wall_clearance);
@@ -100,6 +102,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tile_size"), "set_tile_size", "get_tile_size");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_avoid_radius"), "set_wall_avoid_radius", "get_wall_avoid_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_repel_strength"), "set_wall_repel_strength", "get_wall_repel_strength");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "walk_animation_threshold"), "set_walk_animation_threshold", "get_walk_animation_threshold");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_field_wall_clearance"), "set_flow_field_wall_clearance", "get_flow_field_wall_clearance");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
@@ -149,6 +152,12 @@ void GlobalConfigNative::set_wall_avoid_radius(double v) { cfg().wall_avoid_radi
 
 double GlobalConfigNative::get_wall_repel_strength() const { return cfg().wall_repel_strength; }
 void GlobalConfigNative::set_wall_repel_strength(double v) { cfg().wall_repel_strength = std::max(0.0, v); }
+
+double GlobalConfigNative::get_walk_animation_threshold() const { return cfg().walk_animation_threshold; }
+void GlobalConfigNative::set_walk_animation_threshold(double v)
+{
+    cfg().walk_animation_threshold = std::max(0.0, v);
+}
 
 double GlobalConfigNative::get_flow_field_wall_clearance() const { return cfg().flow_field_wall_clearance; }
 void GlobalConfigNative::set_flow_field_wall_clearance(double v) { cfg().flow_field_wall_clearance = std::max(0.0, v); }

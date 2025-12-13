@@ -6,6 +6,7 @@ const PROPELLED_SHADOW_COLOR: Color = Color(1, 0, 0, 0.45)
 const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
+const GLOBAL_CONFIG_NODE_NAME: String = "GlobalConfigNative"
 const AVAILABLE_SKINS: Array[StringName] = [
 	"rabbit",
 	"pig",
@@ -19,6 +20,8 @@ var _skin: StringName = ""
 var _is_propelled: bool = false
 var _blood_drop_timer: float = 0.0
 var _blood_layer: Node2D
+var _global_config_node: Node
+var _velocity_len: float = 0.0
 
 @export var use_native_steering := true
 @export var show_shadow: bool = false:
@@ -83,7 +86,7 @@ func _process(delta: float) -> void:
 	_process_blood(delta)
 
 func _process_blood(delta: float) -> void:
-	if not _is_propelled:
+	if not _is_propelled or not _should_drop_blood():
 		_blood_drop_timer = 0.0
 		return
 
@@ -130,6 +133,31 @@ func _find_blood_node_by_name() -> Node2D:
 		return null
 	return root.find_node(BLOOD_NODE_NAME, true, false) as Node2D
 
+func _should_drop_blood() -> bool:
+	var threshold: float = _walk_animation_threshold()
+	if threshold <= 0.0:
+		return true
+	return _velocity_len >= threshold
+
+func _walk_animation_threshold() -> float:
+	var config: Node = _get_global_config_node()
+	if config and config.has_method("get_walk_animation_threshold"):
+		return float(config.call("get_walk_animation_threshold"))
+	return 0.0
+
+func _get_global_config_node() -> Node:
+	if _global_config_node:
+		return _global_config_node
+
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		_global_config_node = scene.get_node_or_null(GLOBAL_CONFIG_NODE_NAME)
+	if not _global_config_node:
+		var root: Node = get_tree().get_root()
+		if root:
+			_global_config_node = root.get_node_or_null(GLOBAL_CONFIG_NODE_NAME)
+	return _global_config_node
+
 func set_selected(enabled: bool) -> void:
 	if _is_selected == enabled:
 		return
@@ -158,6 +186,9 @@ func set_propelled_state(enabled: bool) -> void:
 	_update_shadow()
 	if _is_propelled:
 		_blood_drop_timer = 0.0
+
+func set_velocity_len(value: float) -> void:
+	_velocity_len = value
 
 func _exit_tree() -> void:
 	if _shadow_indicator:

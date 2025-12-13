@@ -73,6 +73,10 @@ func _apply_propelled_payload(node: Node2D, payload: Dictionary) -> void:
 	var propelled: bool = bool(payload.get("is_propelled", false))
 	if node.has_method("set_propelled_state"):
 		node.set_propelled_state(propelled)
+	if payload.has("velocity_len"):
+		var vel: float = float(payload.get("velocity_len", 0.0))
+		if node.has_method("set_velocity_len"):
+			node.set_velocity_len(vel)
 
 func _get_agent_node(agent_id: int) -> Node2D:
 	var mgr := get_parent()
