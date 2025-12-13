@@ -9,20 +9,21 @@ const TILE_LABEL_OFFSET := Vector2(12, 12)
 const DEFAULT_WALL_TILE_KEY := "wall1"
 
 var _tile_index: Dictionary = {}
-var _tile_specs: Array[Dictionary] = []
-
 var _tile_selection_keys: Array[String] = []
+
 var _current_tile_key: String = DEFAULT_WALL_TILE_KEY
 var _current_tile_key_index: int = 0
-var _wall_tile_id: int = 1
+var _current_atlas_coords: Vector2i = Vector2i(-1, -1)
+
+var _atlas_source_id: int = -1
 
 var _hover_label: Label
 var _hover_active: bool = false
 var _hover_cell: Vector2i
 
 func _ready() -> void:
+	_resolve_atlas_source_id()
 	_load_tile_index()
-	_tile_specs = _collect_tiles_from_tileset()
 	_prepare_hover_label()
 	set_process(true)
 	set_process_input(true)
@@ -47,11 +48,29 @@ func _process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not _is_paused():
 		return
+
 	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_select_next_tile(-1)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_select_next_tile(1)
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				_select_next_tile(-1)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				_select_next_tile(1)
+			MOUSE_BUTTON_LEFT:
+				_apply_tile_to_wallz()
+			MOUSE_BUTTON_RIGHT:
+				_remove_tile_from_wallz()
+
+func _resolve_atlas_source_id() -> void:
+	var ref := previewbuild if previewbuild else wallz
+	if not ref or not ref.tile_set:
+		return
+
+	var ts := ref.tile_set
+	for i in range(ts.get_source_count()):
+		var sid := ts.get_source_id(i)
+		if ts.get_source(sid) is TileSetAtlasSource:
+			_atlas_source_id = sid
+			return
 
 func _load_tile_index() -> void:
 	var res := load(BUILD_TILES_INDEX_PATH)
@@ -71,35 +90,72 @@ func _load_tile_index() -> void:
 		_current_tile_key = _tile_selection_keys[0]
 
 	_current_tile_key_index = _tile_selection_keys.find(_current_tile_key)
-	_wall_tile_id = int(_tile_index.get(_current_tile_key, 1))
+	_select_tile_by_key(_current_tile_key)
 
 func _select_next_tile(dir: int) -> void:
 	if _tile_selection_keys.is_empty():
 		return
+
 	_current_tile_key_index = (_current_tile_key_index + dir) % _tile_selection_keys.size()
 	if _current_tile_key_index < 0:
 		_current_tile_key_index += _tile_selection_keys.size()
-	_current_tile_key = _tile_selection_keys[_current_tile_key_index]
-	_wall_tile_id = int(_tile_index.get(_current_tile_key, 1))
+
+	_select_tile_by_key(_tile_selection_keys[_current_tile_key_index])
+
 	if _hover_active:
 		_draw_preview(_hover_cell)
 		_update_label()
 
+func _select_tile_by_key(key: String) -> void:
+	_current_tile_key = key
+
+	var raw: Array = []
+	if _tile_index.has(key):
+		raw = _tile_index[key] as Array
+
+	if raw.size() != 2:
+		_current_atlas_coords = Vector2i(-1, -1)
+		return
+
+	_current_atlas_coords = Vector2i(int(raw[0]), int(raw[1]))
+
+
 func _draw_preview(cell: Vector2i) -> void:
-	if _tile_specs.is_empty():
+	if _atlas_source_id < 0:
 		return
-	if _wall_tile_id < 1 or _wall_tile_id > _tile_specs.size():
+
+	if _current_atlas_coords == Vector2i(-1, -1):
 		previewbuild.erase_cell(cell)
-		previewbuild.update_internals()
-		return
-	var spec := _tile_specs[_wall_tile_id - 1]
-	previewbuild.set_cell(
-		cell,
-		int(spec["source_id"]),
-		spec["atlas_coords"],
-		int(spec["alternative_tile"])
-	)
+	else:
+		previewbuild.set_cell(
+			cell,
+			_atlas_source_id,
+			_current_atlas_coords,
+			0
+		)
 	previewbuild.update_internals()
+
+func _apply_tile_to_wallz() -> void:
+	if not _hover_active:
+		return
+	if _atlas_source_id < 0:
+		return
+	if _current_atlas_coords == Vector2i(-1, -1):
+		return
+
+	wallz.set_cell(
+		_hover_cell,
+		_atlas_source_id,
+		_current_atlas_coords,
+		0
+	)
+	wallz.update_internals()
+
+func _remove_tile_from_wallz() -> void:
+	if not _hover_active:
+		return
+	wallz.erase_cell(_hover_cell)
+	wallz.update_internals()
 
 func _clear_hover() -> void:
 	if not _hover_active:
@@ -124,29 +180,10 @@ func _prepare_hover_label() -> void:
 	pause_overlay.add_child(_hover_label)
 
 func _update_label() -> void:
-	_hover_label.text = "%s (id %d)" % [_current_tile_key, _wall_tile_id]
+	_hover_label.text = "%s [%d,%d]" % [
+		_current_tile_key,
+		_current_atlas_coords.x,
+		_current_atlas_coords.y
+	]
 	_hover_label.position = get_viewport().get_mouse_position() + TILE_LABEL_OFFSET
 	_hover_label.visible = true
-
-func _collect_tiles_from_tileset() -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	var ref := previewbuild if previewbuild else wallz
-	if not ref or not ref.tile_set:
-		return out
-	var ts := ref.tile_set
-	for i in range(ts.get_source_count()):
-		var sid := ts.get_source_id(i)
-		var src := ts.get_source(sid)
-		if src is TileSetAtlasSource:
-			var atlas := src as TileSetAtlasSource
-			var grid := atlas.get_atlas_grid_size()
-			for x in range(grid.x):
-				for y in range(grid.y):
-					var c := Vector2i(x, y)
-					if atlas.get_tile_at_coords(c) == c:
-						out.append({
-							"source_id": sid,
-							"atlas_coords": c,
-							"alternative_tile": 0
-						})
-	return out

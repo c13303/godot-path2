@@ -2,8 +2,7 @@
 
 [resource]
 data = {
-"remove": -1.0,
-"spawner": 3.0,
-"wall1": 1.0,
-"wall2": 2.0
+"spawner": [14.0, 15.0],
+"wall1": [11.0, 11.0],
+"wall2": [1.0, 13.0]
 }

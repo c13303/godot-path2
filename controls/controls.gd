@@ -86,9 +86,9 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_on_click_set_goal()
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and not _paused:
 			camera_controller.handle_mouse_wheel(zoom_speed)
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and not _paused:
 			camera_controller.handle_mouse_wheel(-zoom_speed)
 
 func _process(delta: float) -> void:
