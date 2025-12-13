@@ -133,9 +133,18 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
 
         for (int i = 0; i < 8; i++)
         {
-            Vector2i nb = cur.cell + dirs8[i];
+            const Vector2i d = dirs8[i];
+            Vector2i nb = cur.cell + d;
             if (!walkable_set.count(nb))
                 continue;
+
+            // Prevent diagonal corner-cutting through obstacles.
+            if ((std::abs(d.x) + std::abs(d.y)) == 2)
+            {
+                if (!walkable_set.count(cur.cell + Vector2i(d.x, 0)) ||
+                    !walkable_set.count(cur.cell + Vector2i(0, d.y)))
+                    continue;
+            }
 
             double step = (i < 4) ? 1.0 : 1.41421356237;
             double new_cost = cur.cost + step;
@@ -242,6 +251,17 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
         return (it == costs.end()) ? std::numeric_limits<double>::infinity() : it->second;
     };
 
+    auto is_walkable = [&](const Vector2i &p) -> bool
+    { return walkable_set.count(p) != 0; };
+
+    auto diagonal_ok = [&](const Vector2i &c, const Vector2i &d) -> bool
+    {
+        if ((std::abs(d.x) + std::abs(d.y)) != 2)
+            return true;
+        // Disallow diagonals that would "cut" between two blocked cells.
+        return is_walkable(c + Vector2i(d.x, 0)) && is_walkable(c + Vector2i(0, d.y));
+    };
+
     const Vector2i dirs8[8] = {
         {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
 
@@ -251,43 +271,41 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
         {
             Vector2i c = used.position + Vector2i(x, y);
             double cc = cost_at(c);
-            if (!walkable_set.count(c) || !std::isfinite(cc))
+            if (!is_walkable(c) || !std::isfinite(cc))
             {
                 field.set_dir(x, y, {0.0, 0.0});
                 continue;
             }
 
-            double gx = 0.0, gy = 0.0, weights = 0.0;
-
+            // Base direction: steepest-descent to the best neighboring cell.
+            Vector2i best_step(0, 0);
+            double best_cost = cc;
             for (const Vector2i &d : dirs8)
             {
+                if (!diagonal_ok(c, d))
+                    continue;
                 Vector2i n = c + d;
+                if (!is_walkable(n))
+                    continue;
                 double nc = cost_at(n);
                 if (!std::isfinite(nc))
                     continue;
 
-                double dx = (double)d.x;
-                double dy = (double)d.y;
-                double w = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.7071 : 1.0;
-
-                gx += (nc - cc) * dx * w;
-                gy += (nc - cc) * dy * w;
-                weights += w;
+                if (nc < best_cost)
+                {
+                    best_cost = nc;
+                    best_step = d;
+                }
             }
 
-            if (weights > 0.0)
-            {
-                gx /= weights;
-                gy /= weights;
-            }
-
-            //// COMPUTING DU MEILLEUR PASSAGE GOULOT COULOIR GRACE A DISTANCE_FIELD
-            ffcore::Vec2 dir(-gx, -gy);
-            if (dir.length() <= 1e-6)
+            if (best_step == Vector2i(0, 0))
             {
                 field.set_dir(x, y, {0.0, 0.0});
                 continue;
             }
+
+            //// COMPUTING DU MEILLEUR PASSAGE GOULOT COULOIR GRACE A DISTANCE_FIELD
+            ffcore::Vec2 dir((double)best_step.x, (double)best_step.y);
             dir = dir.normalized();
 
             float dfc = distance_field[y * field.width() + x];
@@ -318,7 +336,35 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
             angle = std::round(angle / step) * step;
             dir.x = std::cos(angle);
             dir.y = std::sin(angle);
-            field.set_dir(x, y, dir);
+
+            // Ensure the final direction still points to a valid (walkable) downhill neighbor.
+            Vector2i final_step(0, 0);
+            double best_score = -1.0;
+            for (const Vector2i &d : dirs8)
+            {
+                if (!diagonal_ok(c, d))
+                    continue;
+                Vector2i n = c + d;
+                if (!is_walkable(n))
+                    continue;
+                double nc = cost_at(n);
+                if (!std::isfinite(nc) || nc > cc)
+                    continue;
+
+                const double inv_len = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.70710678118 : 1.0;
+                const double score = (dir.x * (double)d.x + dir.y * (double)d.y) * inv_len;
+                if (score > best_score)
+                {
+                    best_score = score;
+                    final_step = d;
+                }
+            }
+
+            if (final_step == Vector2i(0, 0))
+                final_step = best_step;
+
+            ffcore::Vec2 final_dir((double)final_step.x, (double)final_step.y);
+            field.set_dir(x, y, final_dir.normalized());
         }
     }
 }
@@ -439,8 +485,11 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
 
     Vector2 local = floor_layer->to_local(world_pos);
     Vector2i base = floor_layer->local_to_map(local);
-    Vector2 frac = Vector2(fmod(local.x, tile_size) / tile_size,
-                           fmod(local.y, tile_size) / tile_size);
+    // Fraction within the cell, robust for negative coordinates.
+    Vector2 base_center = floor_layer->map_to_local(base);
+    Vector2 delta = local - base_center;
+    Vector2 frac = Vector2((float)clamp01(delta.x / tile_size + 0.5),
+                           (float)clamp01(delta.y / tile_size + 0.5));
 
     Rect2i used = floor_layer->get_used_rect();
 
