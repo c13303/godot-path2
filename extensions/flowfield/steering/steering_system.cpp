@@ -597,14 +597,22 @@ void SteeringSystem::update_all(double delta)
         double target_radius = ff->get_ff_target_radius();
         if (!ffcore::globalconfig().enable_claiming_tiles && target_radius > 0.0)
         {
+            int group_size = 0;
+            if (a.group != INVALID_GROUP)
+            {
+                if (auto *mgr = ffcore::get_global_agent_manager())
+                    group_size = mgr->count_group_members(a.group);
+            }
+
+            if (group_size <= 2 && dist_to_target <= ff->tile_size() * 0.5)
+            {
+                a.reset();
+                force_animation = true;
+                continue;
+            }
+
             if (dist_to_target <= target_radius && a.target_radius_timer <= 0.0)
             {
-                int group_size = 0;
-                if (a.group != INVALID_GROUP)
-                {
-                    if (auto *mgr = ffcore::get_global_agent_manager())
-                        group_size = mgr->count_group_members(a.group);
-                }
                 a.target_radius_timer =
                     cfg.target_radius_time_before_stop + group_size * cfg.target_radius_time_group_size_ratio;
                 /*  godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
