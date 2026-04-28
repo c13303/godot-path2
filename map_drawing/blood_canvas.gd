@@ -25,9 +25,9 @@ func blood_spot(world_pos: Vector2):
 	if not rect_world.has_point(world_pos):
 		return
 
-	var seed = int(world_pos.x * 928371 + world_pos.y * 364479)
+	var mySeed = int(world_pos.x * 928371 + world_pos.y * 364479)
 	var rng = RandomNumberGenerator.new()
-	rng.seed = seed
+	rng.seed = mySeed
 
 	var frame_count = blood_frames.get_frame_count("blood")
 	if frame_count == 0:
@@ -57,13 +57,16 @@ func clear():
 			c.queue_free()
 
 func _process(delta: float) -> void:
-	for c in get_children():
+	for c: Node in get_children():
 		if c is Sprite2D:
-			var remaining := c.get_meta("fade_time") if c.has_meta("fade_time") else BLOOD_FADE_DURATION
+			var sprite := c as Sprite2D
+			var remaining: float = float(sprite.get_meta("fade_time", BLOOD_FADE_DURATION))
 			remaining -= delta
+
 			if remaining <= 0.0:
-				c.queue_free()
+				sprite.queue_free()
 				continue
-			c.set_meta("fade_time", remaining)
-			var factor := clamp(remaining / BLOOD_FADE_DURATION, 0.0, 1.0)
-			c.modulate.a = BLOOD_INITIAL_ALPHA * factor
+
+			sprite.set_meta("fade_time", remaining)
+			var factor: float = clampf(remaining / BLOOD_FADE_DURATION, 0.0, 1.0)
+			sprite.modulate.a = BLOOD_INITIAL_ALPHA * factor
