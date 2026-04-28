@@ -1,0 +1,72 @@
+CPP / GDExtension compilation notes
+===================================
+
+Main command
+------------
+Use the MSYS2 MINGW64 shell, go to the project root, then run:
+
+    ./run.sh
+
+This script compiles the native extension, then launches Godot.
+
+
+Required tools
+--------------
+- MSYS2 with the MINGW64 environment.
+- MinGW-w64 GCC/G++ from MSYS2:
+    - /mingw64/bin/gcc
+    - /mingw64/bin/g++
+- Python + SCons available in the MSYS2 MINGW64 shell.
+- Godot 4.5.1 executable, currently expected by run.sh at:
+    /c/CHARLES/DEV/GODOTPROJS/RABBITGAME/engine/Godot_v4.5.1-stable_win64.exe
+
+
+godot-cpp dependency
+--------------------
+The extension links against godot-cpp. The SConstruct expects the repo here:
+
+    /c/CHARLES/DEV/GODOTPROJS/RABBITGAME/godot-cpp
+
+Relative to this project, that is:
+
+    ../godot-cpp
+
+godot-cpp must already be compiled, because this project links against:
+
+    godot-cpp/bin/libgodot-cpp.windows.template_debug.x86_64.a
+
+If this file is missing after cloning/moving to a new computer, build godot-cpp first
+from the MSYS2 MINGW64 shell:
+
+    cd /c/CHARLES/DEV/GODOTPROJS/RABBITGAME/godot-cpp
+    scons platform=windows target=template_debug use_mingw=yes
+
+For release builds, also build:
+
+    scons platform=windows target=template_release use_mingw=yes
+
+
+What this project builds
+------------------------
+The project build command is:
+
+    scons -C extensions target=template_debug use_mingw=yes
+
+It uses C++17 and compiles the C++ files under:
+
+    extensions/flowfield/**/*.cpp
+    extensions/register_types.cpp
+
+The output library is written to:
+
+    extensions/flowfield/bin/flowfield.dll
+
+
+First-time setup checklist
+--------------------------
+1. Install MSYS2.
+2. Open the "MSYS2 MINGW64" shell, not the plain MSYS shell.
+3. Install GCC/G++, Python, and SCons if missing.
+4. Place or clone godot-cpp at ../godot-cpp next to this project.
+5. Build godot-cpp with the same Godot version/branch as the project.
+6. Run ./run.sh from this project root.
