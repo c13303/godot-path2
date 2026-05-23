@@ -7,11 +7,11 @@ namespace ffcore
         double agent_max_speed = 150.0;
         double flow_weight = 0.8;
         double center_pull = 1.0;
-        double tile_size = 16.0;
+        double tile_size = 32.0;
 
         // Startup/default value. If tile_size is changed through GlobalConfigNative,
         // recompute_from_tile() overwrites this unless wall_avoid_radius is set after it.
-        double wall_avoid_radius = tile_size * 5;
+        double wall_avoid_radius = tile_size * 1.2;
         double wall_repel_strength = 12;
 
         double direct_steer_radius = tile_size * 2.5;
@@ -20,7 +20,7 @@ namespace ffcore
 
         //
         // T2 = target of flowfield
-        double target_T2_param_margin = tile_size * 1.0; // margin around target, triggers slowdown (green circle)
+        double target_T2_param_margin = tile_size * 2.0; // margin around target, triggers slowdown (green circle)
 
         double target_T2_param_speed_ratio = 0.6;          // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia

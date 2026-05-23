@@ -8,5 +8,5 @@ namespace ffcore
     constexpr GroupID GROUP_IDLE = 0;
     constexpr int FLOW_WIDTH = 256;
     constexpr int FLOW_HEIGHT = 256;
-    constexpr double FLOW_TILE_SIZE = 16.0;
+    constexpr double FLOW_TILE_SIZE = 32.0;
 }

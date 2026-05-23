@@ -4,6 +4,7 @@
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
+#include <godot_cpp/classes/tile_set.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../core/nav_services.h"
 #include <queue>
@@ -30,6 +31,29 @@ struct DijkstraNode
 static inline double clamp01(double v)
 {
     return (v < 0.0) ? 0.0 : (v > 1.0 ? 1.0 : v);
+}
+
+static double tile_size_from_layer(TileMapLayer *layer)
+{
+    if (!layer)
+        return ffcore::globalconfig().tile_size;
+
+    Ref<TileSet> tile_set = layer->get_tile_set();
+    if (tile_set.is_null())
+        return ffcore::globalconfig().tile_size;
+
+    Vector2i size = tile_set->get_tile_size();
+    return std::max(1.0, static_cast<double>(size.x));
+}
+
+static void sync_global_tile_size(double tile_size)
+{
+    ffcore::GlobalConfig &cfg = ffcore::globalconfig();
+    if (std::abs(cfg.tile_size - tile_size) <= 1e-6)
+        return;
+
+    cfg.tile_size = tile_size;
+    cfg.recompute_from_tile();
 }
 
 void FlowFieldNative::_bind_methods()
@@ -72,8 +96,11 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     if (used.size.x <= 0 || used.size.y <= 0)
         return false;
 
+    double tile_size = tile_size_from_layer(floor_layer);
+    sync_global_tile_size(tile_size);
+
     field.resize(used.size.x, used.size.y);
-    field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
+    field.set_tile_size(tile_size);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
     field.first_is_arrived = false;
     field.arrived_count = 0;
@@ -166,8 +193,11 @@ void FlowFieldNative::compute_distance_field_global()
     if (used.size.x <= 0 || used.size.y <= 0)
         return;
 
+    double tile_size = tile_size_from_layer(floor_layer);
+    sync_global_tile_size(tile_size);
+
     field.resize(used.size.x, used.size.y);
-    field.set_tile_size(floor_layer->get_tile_set()->get_tile_size().x);
+    field.set_tile_size(tile_size);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;

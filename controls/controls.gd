@@ -59,7 +59,7 @@ func _ready() -> void:
 
 	selection_controller.setup(ui_layer, agent_manager)
 	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
-	fx_controller.setup(steering)
+	fx_controller.setup(steering, floorz)
 	tile_hover_info.setup(floorz, steering, fps_label, flow)
 
 	var scene: Node = get_tree().get_current_scene()

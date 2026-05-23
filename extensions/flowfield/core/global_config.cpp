@@ -16,6 +16,7 @@ namespace ffcore
         wall_avoid_radius = tile_size * 1.2;
         direct_steer_radius = tile_size * 2.5;     
         target_T2_param_margin = tile_size * 2.0;
+        separation_radius = tile_size;
         // vitesse cible ratio reste inchangée; lerp constant
     }
 
