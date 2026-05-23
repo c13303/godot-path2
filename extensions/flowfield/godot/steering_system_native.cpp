@@ -18,6 +18,9 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &SteeringSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("get_agent_id", "agent"), &SteeringSystemNative::get_agent_id);
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
+    ClassDB::bind_method(D_METHOD("set_agent_control_mode", "agent_id", "mode"), &SteeringSystemNative::set_agent_control_mode);
+    ClassDB::bind_method(D_METHOD("set_agent_input", "agent_id", "direction"), &SteeringSystemNative::set_agent_input);
+    ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
@@ -71,6 +74,24 @@ void SteeringSystemNative::set_grid(Object *obj)
 void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
 {
     system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss);
+}
+
+void SteeringSystemNative::set_agent_control_mode(int agent_id, int mode)
+{
+    system.set_agent_control_mode(agent_id, mode);
+}
+
+void SteeringSystemNative::set_agent_input(int agent_id, const Vector2 &direction)
+{
+    system.set_agent_input(agent_id, ffcore::Vec2(direction.x, direction.y));
+}
+
+Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
+{
+    const ffcore::AgentData *a = system.get_agent(agent_id);
+    if (!a)
+        return Vector2();
+    return Vector2(a->position.x, a->position.y);
 }
 
 void SteeringSystemNative::_reset_agent_cache(int agent_id)

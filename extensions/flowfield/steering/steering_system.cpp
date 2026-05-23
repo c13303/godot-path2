@@ -54,6 +54,9 @@ static Vec3 hashed_color(int id)
 }
 
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
+static std::unordered_map<int, bool> g_logged_manual_mode;
+static std::unordered_map<int, bool> g_logged_manual_input;
+static std::unordered_map<int, bool> g_logged_manual_update;
 
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
@@ -93,6 +96,9 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     agents.pop_back();
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
+    g_logged_manual_mode.erase(id);
+    g_logged_manual_input.erase(id);
+    g_logged_manual_update.erase(id);
 }
 
 void SteeringSystem::reactivate_agents_for_field(FlowField *field)
@@ -364,6 +370,48 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.update_animation_this_frame = true;
 }
 
+void SteeringSystem::set_agent_control_mode(int id, int mode)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &a = agents[it->second];
+    a.control_mode = (mode == static_cast<int>(AgentControlMode::Manual))
+                         ? AgentControlMode::Manual
+                         : AgentControlMode::FlowField;
+
+    if (a.control_mode == AgentControlMode::FlowField)
+    {
+        a.manual_input_dir = Vec2(0, 0);
+    }
+    else
+    {
+        a.active = true;
+        if (!g_logged_manual_mode[id])
+        {
+            godot::UtilityFunctions::print("[PlayerControl] agent ", id, " set to manual mode");
+            g_logged_manual_mode[id] = true;
+        }
+    }
+}
+
+void SteeringSystem::set_agent_input(int id, const Vec2 &direction)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &a = agents[it->second];
+    a.manual_input_dir = safe_normalize(direction);
+    if (!a.manual_input_dir.is_zero() && !g_logged_manual_input[id])
+    {
+        godot::UtilityFunctions::print("[PlayerControl] agent ", id, " received manual input ",
+                                       a.manual_input_dir.x, ", ", a.manual_input_dir.y);
+        g_logged_manual_input[id] = true;
+    }
+}
+
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
 {
     if (radius <= 0.0 || !grid)
@@ -521,7 +569,10 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
-        FlowField *nav = a.flow ? a.flow : default_flow;
+        const bool is_manual = a.control_mode == AgentControlMode::Manual;
+        FlowField *nav = a.flow ? a.flow : (is_manual ? nullptr : default_flow);
+        if (nav && !nav->is_ready())
+            nav = nullptr;
 
         bool force_animation = false;
 
@@ -548,6 +599,46 @@ void SteeringSystem::update_all(double delta)
 
         if (!a.active || !a.flow)
         {
+            if (a.control_mode == AgentControlMode::Manual)
+            {
+                if (!a.is_propelled)
+                {
+                    Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+                    Vec2 correction = wall_repel + separation;
+                    Vec2 target_velocity = manual_dir.is_zero()
+                                               ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
+                                               : manual_dir * a.max_speed + correction;
+                    a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                }
+
+                if (!a.is_propelled)
+                {
+                    double vlen = safe_len(a.velocity);
+                    if (vlen > a.max_speed)
+                        a.velocity = a.velocity * (a.max_speed / vlen);
+                }
+
+                Vec2 old_pos = a.position;
+                a.position = a.position + a.velocity * delta;
+
+                if (nav)
+                    ultimate_wall_correction(a, nav, delta);
+
+                if (!g_logged_manual_update[a.id] && !a.manual_input_dir.is_zero())
+                {
+                    godot::UtilityFunctions::print("[PlayerControl] update agent ", a.id,
+                                                   " old=", old_pos.x, ",", old_pos.y,
+                                                   " new=", a.position.x, ",", a.position.y,
+                                                   " vel=", a.velocity.x, ",", a.velocity.y,
+                                                   " nav=", nav != nullptr);
+                    g_logged_manual_update[a.id] = true;
+                }
+
+                grid->update(a.id, old_pos + offset, a.position + offset);
+                a.update_animation(delta, false, cfg);
+                continue;
+            }
+
             if (!a.is_propelled)
             {
                 Vec2 combined = wall_repel + separation;
@@ -566,6 +657,46 @@ void SteeringSystem::update_all(double delta)
                 a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
             }
             // si propulsé, on conserve la velocity existante (déjà amortie)
+
+            Vec2 old_pos = a.position;
+            a.position = a.position + a.velocity * delta;
+
+            if (nav)
+                ultimate_wall_correction(a, nav, delta);
+
+            if (!g_logged_manual_update[a.id] && !a.manual_input_dir.is_zero())
+            {
+                godot::UtilityFunctions::print("[PlayerControl] update agent ", a.id,
+                                               " old=", old_pos.x, ",", old_pos.y,
+                                               " new=", a.position.x, ",", a.position.y,
+                                               " vel=", a.velocity.x, ",", a.velocity.y,
+                                               " nav=", nav != nullptr);
+                g_logged_manual_update[a.id] = true;
+            }
+
+            grid->update(a.id, old_pos + offset, a.position + offset);
+            a.update_animation(delta, false, cfg);
+            continue;
+        }
+
+        if (a.control_mode == AgentControlMode::Manual)
+        {
+            if (!a.is_propelled)
+            {
+                Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+                Vec2 correction = wall_repel + separation;
+                Vec2 target_velocity = manual_dir.is_zero()
+                                           ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
+                                           : manual_dir * a.max_speed + correction;
+                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+            }
+
+            if (!a.is_propelled)
+            {
+                double vlen = safe_len(a.velocity);
+                if (vlen > a.max_speed)
+                    a.velocity = a.velocity * (a.max_speed / vlen);
+            }
 
             Vec2 old_pos = a.position;
             a.position = a.position + a.velocity * delta;

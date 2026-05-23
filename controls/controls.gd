@@ -1,5 +1,7 @@
 extends Node2D
 
+const CONTROL_MODE_MANUAL: int = 1
+
 @onready var floorz: TileMapLayer = $"../Map/MonTilemap/floor"
 @onready var wallz: TileMapLayer = $"../Map/MonTilemap/wallz"
 @onready var flow: Node = $"../CPP/FlowFieldNative"
@@ -31,6 +33,8 @@ var global_config_node: Node = null
 var current_flow: Node = null
 var _paused: bool = false
 var _mouse_was_locked_before_pause: bool = false
+var player_nav_id: int = -1
+var _reported_missing_manual_api: bool = false
 
 func _ready() -> void:
 	add_child(marker)
@@ -53,7 +57,7 @@ func _ready() -> void:
 	)
 
 	selection_controller.setup(ui_layer, agent_manager)
-	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
+	spawn_controller.setup(floorz, wallz, agent_manager, get_parent(), steering)
 	fx_controller.setup(steering)
 	tile_hover_info.setup(floorz, steering, fps_label, flow)
 
@@ -61,26 +65,24 @@ func _ready() -> void:
 	if scene:
 		global_config_node = scene.get_node_or_null("GlobalConfigNative")
 
+	call_deferred("_spawn_player")
+
 func _input(event: InputEvent) -> void:
 	selection_controller.on_input(event)
 
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
 		if key_event.pressed and not key_event.echo:
-			if key_event.keycode == KEY_A:
+			if key_event.keycode == KEY_F1:
 				_spawn_chars(1)
-			elif key_event.keycode == KEY_Z:
+			elif key_event.keycode == KEY_F2:
 				_spawn_chars(10)
-			elif key_event.keycode == KEY_E:
+			elif key_event.keycode == KEY_F3:
 				_spawn_chars(50)
 			elif key_event.keycode == KEY_B:
 				fx_controller.trigger_bomb(get_global_mouse_position())
 			elif key_event.keycode == KEY_SPACE:
 				_toggle_pause()
-			elif key_event.keycode == KEY_ESCAPE:
-				camera_controller.set_mouse_locked(false)
-			elif key_event.keycode == KEY_TAB:
-				camera_controller.set_mouse_locked(true)
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
@@ -92,9 +94,63 @@ func _input(event: InputEvent) -> void:
 			camera_controller.handle_mouse_wheel(-zoom_speed)
 
 func _process(delta: float) -> void:
+	_update_player_input()
 	selection_controller.process(delta)
 	tile_hover_info.process()
 	camera_controller.process(delta, _paused)
+
+func _player_spawn_position() -> Vector2:
+	if camera:
+		return camera.get_screen_center_position()
+	return global_position
+
+func _spawn_player() -> void:
+	player_nav_id = spawn_controller.spawn_player(_player_spawn_position())
+	if steering and steering.has_method("set_agent_control_mode") and player_nav_id >= 0:
+		steering.call("set_agent_control_mode", player_nav_id, CONTROL_MODE_MANUAL)
+	elif not _reported_missing_manual_api:
+		_reported_missing_manual_api = true
+		push_warning("SteeringSystemNative manual-control API is unavailable. Rebuild the GDExtension DLL.")
+	var player := _get_player_node()
+	if player:
+		camera_controller.set_follow_target(player, true)
+
+func _get_player_node() -> Node2D:
+	for node in get_tree().get_nodes_in_group("player"):
+		if node is Node2D:
+			return node
+	return null
+
+func _update_player_input() -> void:
+	if not steering or player_nav_id < 0:
+		return
+	if not steering.has_method("set_agent_input"):
+		if not _reported_missing_manual_api:
+			_reported_missing_manual_api = true
+			push_warning("SteeringSystemNative.set_agent_input is unavailable. Rebuild the GDExtension DLL.")
+		return
+
+	var dir: Vector2 = Vector2.ZERO
+	if not _paused:
+		if _is_any_key_pressed([KEY_Z, KEY_W]):
+			dir.y -= 1.0
+		if _is_any_key_pressed([KEY_S]):
+			dir.y += 1.0
+		if _is_any_key_pressed([KEY_Q, KEY_A]):
+			dir.x -= 1.0
+		if _is_any_key_pressed([KEY_D]):
+			dir.x += 1.0
+
+	if dir.length_squared() > 1.0:
+		dir = dir.normalized()
+
+	steering.call("set_agent_input", player_nav_id, dir)
+
+func _is_any_key_pressed(keys: Array[int]) -> bool:
+	for key in keys:
+		if Input.is_key_pressed(key) or Input.is_physical_key_pressed(key):
+			return true
+	return false
 
 func _toggle_pause() -> void:
 	_paused = not _paused

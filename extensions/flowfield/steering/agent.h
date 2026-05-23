@@ -7,6 +7,12 @@ namespace ffcore
     struct GlobalConfig;
     class FlowField;
 
+    enum class AgentControlMode
+    {
+        FlowField = 0,
+        Manual = 1,
+    };
+
     struct AgentData
     {
         int id = -1;
@@ -16,6 +22,8 @@ namespace ffcore
         bool active = true;
 
         FlowField *flow = nullptr;
+        AgentControlMode control_mode = AgentControlMode::FlowField;
+        Vec2 manual_input_dir{};
 
         bool is_first = false;
         GroupID group = INVALID_GROUP;

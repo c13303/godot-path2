@@ -55,6 +55,9 @@ namespace godot
         void register_node_mapping(Node2D *node, int agent_id);
 
         int get_agent_id(Node2D *node);
+        void set_agent_control_mode(int agent_id, int mode);
+        void set_agent_input(int agent_id, const Vector2 &direction);
+        Vector2 get_agent_position(int agent_id) const;
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;

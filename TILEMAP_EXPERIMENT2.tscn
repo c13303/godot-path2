@@ -1343,3 +1343,5 @@ script = ExtResource("15_nynk0")
 wallz = NodePath("../MonTilemap/wallz")
 previewbuild = NodePath("../MonTilemap/previewbuild")
 pause_overlay = NodePath("../../UI/CanvasLayer/PauseOverlay")
+
+[node name="Node" type="Node" parent="." unique_id=1631584488]
