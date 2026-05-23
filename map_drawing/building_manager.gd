@@ -12,7 +12,7 @@ const INVALID_CELL := Vector2i(2147483647, 2147483647)
 @export var flow: Node
 @export var agent_manager: Node
 @export var parent_for_agents: Node
-@export var debug_logs: bool = true
+@export var debug_logs: bool = false
 
 var _tile_defs_by_atlas: Dictionary = {}
 var _houses: Dictionary = {}
@@ -23,13 +23,37 @@ var _last_wall_signature: int = 0
 var _flow_rebuild_pending: bool = false
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
+var _flow_ready: bool = false
 
 func _ready() -> void:
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
+	_wait_for_flow_ready()
+
+func _wait_for_flow_ready() -> void:
+	var code_node: Node = null
+	if flow:
+		for child in flow.get_children():
+			if child.has_signal("flow_field_ready"):
+				code_node = child
+				break
+	if code_node == null:
+		_flow_ready = true
+		_scan_buildings()
+		return
+	if bool(code_node.get("is_ready")):
+		_flow_ready = true
+		_scan_buildings()
+		return
+	code_node.connect("flow_field_ready", Callable(self, "_on_flow_field_ready"))
+
+func _on_flow_field_ready() -> void:
+	_flow_ready = true
 	_scan_buildings()
 
 func _process(delta: float) -> void:
+	if not _flow_ready:
+		return
 	_scan_timer -= delta
 	if _scan_timer <= 0.0:
 		_scan_timer = 0.25

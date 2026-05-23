@@ -1,8 +1,12 @@
 extends Node2D
 
+signal flow_field_ready
+
 @onready var ff: FlowFieldNative = get_parent()
 @onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
 @onready var wall_layer: TileMapLayer = $"../../../Map/MonTilemap/wallz"
+
+var is_ready: bool = false
 
 func _ready() -> void:
 	
@@ -33,6 +37,8 @@ func _ready() -> void:
 	#print("Direction lue après rebuild:", _d)
 
 
+	is_ready = true
+	flow_field_ready.emit()
 	print("FlowFieldCode: initialization complete--------------------------------")
 
 
