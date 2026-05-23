@@ -22,17 +22,14 @@ namespace ffcore
 
         double target_T2_param_speed_ratio = 0.6;          // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia
-        double target_T2_slow_threshold = tile_size * 3.0; // slowdown starts this many tiles from claim
 
         double separation_radius = tile_size;
         double separation_strength = 400.0;
         int max_neighbors = 16;
 
         double lerp_general = 0.02;
-        bool enable_claim_force = true;
-        bool enable_claiming_tiles = false;
 
-        /* target radius = flow field only stop ssystem (enable_claiming_tiles = false )*/
+        /* target radius = flow field stop system */
         double target_radius_time_before_stop = 1.0;
         double target_radius_time_group_size_ratio = 0.005; // group_size x ratio
 
@@ -52,7 +49,6 @@ namespace ffcore
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
 
         /* drawing options */
-        bool draw_claimed_path = false; // debug: draw agent→claim links
         bool draw_flow_field = false;   // debug: draw flow field arrows
 
         double micro_osc_win_time = 1;                // seconds window before micro-osc counter resets

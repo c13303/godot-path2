@@ -39,8 +39,7 @@ namespace ffcore
         double pending_smash_friction = -1.0;
         bool smash_pending = false;
         bool was_in_t2 = false;
-      
-        Vec2i claimed_tile = Vec2i(-999999, -999999);
+
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
         bool moving = false;
         int dir_code = -1;
@@ -50,6 +49,6 @@ namespace ffcore
         double target_radius_timer = 0.0;
 
         void reset();
-        void update_motion_state(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_motion_state = false);
+        void update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state = false);
     };
 } // namespace ffcore

@@ -56,8 +56,6 @@ namespace godot
 
         double get_target_T2_param_speed_lerp() const;
         void set_target_T2_param_speed_lerp(double v);
-        double get_target_T2_slow_threshold() const;
-        void set_target_T2_slow_threshold(double v);
 
         double get_separation_radius() const;
         void set_separation_radius(double v);
@@ -98,11 +96,6 @@ namespace godot
         double get_flow_field_wall_clearance() const;
         void set_flow_field_wall_clearance(double v);
 
-        bool get_enable_claiming_tiles() const;
-        void set_enable_claiming_tiles(bool v);
-
-        bool get_draw_claimed_path() const;
-        void set_draw_claimed_path(bool v);
         bool get_draw_flow_field() const;
         void set_draw_flow_field(bool v);
 

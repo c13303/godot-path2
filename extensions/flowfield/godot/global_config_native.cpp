@@ -52,9 +52,6 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_target_T2_param_speed_lerp"), &GlobalConfigNative::get_target_T2_param_speed_lerp);
     ClassDB::bind_method(D_METHOD("set_target_T2_param_speed_lerp", "value"), &GlobalConfigNative::set_target_T2_param_speed_lerp);
 
-    ClassDB::bind_method(D_METHOD("get_target_T2_slow_threshold"), &GlobalConfigNative::get_target_T2_slow_threshold);
-    ClassDB::bind_method(D_METHOD("set_target_T2_slow_threshold", "value"), &GlobalConfigNative::set_target_T2_slow_threshold);
-
     ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
     ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
 
@@ -86,11 +83,6 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_ratio", "value"), &GlobalConfigNative::set_shockwave_stop_ratio);
     ClassDB::bind_method(D_METHOD("get_shockwave_stop_duration_ms"), &GlobalConfigNative::get_shockwave_stop_duration_ms);
     ClassDB::bind_method(D_METHOD("set_shockwave_stop_duration_ms", "value"), &GlobalConfigNative::set_shockwave_stop_duration_ms);
-    ClassDB::bind_method(D_METHOD("get_enable_claiming_tiles"), &GlobalConfigNative::get_enable_claiming_tiles);
-    ClassDB::bind_method(D_METHOD("set_enable_claiming_tiles", "value"), &GlobalConfigNative::set_enable_claiming_tiles);
-
-    ClassDB::bind_method(D_METHOD("get_draw_claimed_path"), &GlobalConfigNative::get_draw_claimed_path);
-    ClassDB::bind_method(D_METHOD("set_draw_claimed_path", "value"), &GlobalConfigNative::set_draw_claimed_path);
     ClassDB::bind_method(D_METHOD("get_draw_flow_field"), &GlobalConfigNative::get_draw_flow_field);
     ClassDB::bind_method(D_METHOD("set_draw_flow_field", "value"), &GlobalConfigNative::set_draw_flow_field);
 
@@ -110,7 +102,6 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_margin"), "set_target_T2_param_margin", "get_target_T2_param_margin");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_ratio"), "set_target_T2_param_speed_ratio", "get_target_T2_param_speed_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_slow_threshold"), "set_target_T2_slow_threshold", "get_target_T2_slow_threshold");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
@@ -123,8 +114,6 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enable_claiming_tiles"), "set_enable_claiming_tiles", "get_enable_claiming_tiles");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_claimed_path"), "set_draw_claimed_path", "get_draw_claimed_path");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_flow_field"), "set_draw_flow_field", "get_draw_flow_field");
 }
 
@@ -162,9 +151,6 @@ void GlobalConfigNative::set_movement_threshold(double v)
 double GlobalConfigNative::get_flow_field_wall_clearance() const { return cfg().flow_field_wall_clearance; }
 void GlobalConfigNative::set_flow_field_wall_clearance(double v) { cfg().flow_field_wall_clearance = std::max(0.0, v); }
 
-bool GlobalConfigNative::get_enable_claiming_tiles() const { return cfg().enable_claiming_tiles; }
-void GlobalConfigNative::set_enable_claiming_tiles(bool v) { cfg().enable_claiming_tiles = v; }
-
 double GlobalConfigNative::get_direct_steer_radius() const { return cfg().direct_steer_radius; }
 void GlobalConfigNative::set_direct_steer_radius(double v) { cfg().direct_steer_radius = std::max(0.0, v); }
 
@@ -184,8 +170,6 @@ void GlobalConfigNative::set_target_T2_param_speed_ratio(double v) { cfg().targe
 
 double GlobalConfigNative::get_target_T2_param_speed_lerp() const { return cfg().target_T2_param_speed_lerp; }
 void GlobalConfigNative::set_target_T2_param_speed_lerp(double v) { cfg().target_T2_param_speed_lerp = std::clamp(v, 0.0, 1.0); }
-double GlobalConfigNative::get_target_T2_slow_threshold() const { return cfg().target_T2_slow_threshold; }
-void GlobalConfigNative::set_target_T2_slow_threshold(double v) { cfg().target_T2_slow_threshold = std::max(0.0, v); }
 
 double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
 void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }
@@ -223,8 +207,6 @@ void GlobalConfigNative::set_shockwave_stop_ratio(double v) { cfg().shockwave_st
 double GlobalConfigNative::get_shockwave_stop_duration_ms() const { return cfg().shockwave_stop_duration_ms; }
 void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockwave_stop_duration_ms = std::max(0.0, v); }
 
-bool GlobalConfigNative::get_draw_claimed_path() const { return cfg().draw_claimed_path; }
-void GlobalConfigNative::set_draw_claimed_path(bool v) { cfg().draw_claimed_path = v; }
 bool GlobalConfigNative::get_draw_flow_field() const { return cfg().draw_flow_field; }
 void GlobalConfigNative::set_draw_flow_field(bool v) { cfg().draw_flow_field = v; }
 

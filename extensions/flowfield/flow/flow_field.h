@@ -55,12 +55,8 @@ namespace ffcore
 
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
-        const std::vector<Vec2i> &get_t2_tiles() const { return t2_tiles; }
-        double get_computed_t2_radius() const { return computed_t2_radius; }
         double get_ff_target_radius() const { return ff_target_radius; }
         void set_ff_target_radius(double radius) { ff_target_radius = radius; }
-        void set_t2_tiles(const std::vector<Vec2i> &tiles, double radius);
-        bool is_cell_in_t2(const Vec2i &map_cell) const;
         int arrived_count = 0;
         bool first_is_arrived = false;
         void copy_from(const FlowField &src);
@@ -80,8 +76,6 @@ namespace ffcore
 
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;
-        std::vector<Vec2i> t2_tiles;
-        double computed_t2_radius = 0.0;
         std::vector<float> distance_field;
 
         Vec2i goal_cell = Vec2i(-1, -1);

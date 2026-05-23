@@ -177,12 +177,7 @@ func _toggle_pause() -> void:
 		if lock_mouse_to_view and _mouse_was_locked_before_pause:
 			camera_controller.set_mouse_locked(true)
 
-	var hide_units: bool = _paused
-	if hide_units and global_config_node and global_config_node.has_method("get_draw_claimed_path"):
-		if not bool(global_config_node.call("get_draw_claimed_path")):
-			hide_units = false
-
-	_toggle_units_visible(not hide_units)
+	_toggle_units_visible(not _paused)
 	if pause_overlay:
 		pause_overlay.set_paused(_paused)
 

@@ -44,7 +44,6 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
-    ClassDB::bind_method(D_METHOD("get_tiles_in_t2"), &FlowFieldNative::get_tiles_in_t2);
 
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw"), "set_debug_draw", "get_debug_draw");
 }
@@ -515,16 +514,6 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
     return (len2 > 1e-6f) ? (result / Math::sqrt(len2)) : Vector2(0, 0);
 }
 
-Array FlowFieldNative::get_tiles_in_t2() const
-{
-    Array cells;
-    const auto &vec = field.get_t2_tiles();
-    cells.resize((int)vec.size());
-    for (int i = 0; i < (int)vec.size(); ++i)
-        cells[i] = Vector2i(vec[(size_t)i].x, vec[(size_t)i].y);
-    return cells;
-}
-
 void FlowFieldNative::_draw()
 {
     if (!floor_layer)
@@ -561,102 +550,6 @@ void FlowFieldNative::_draw()
         }
     }
 
-    if (field.has_goal())
-    {
-        ffcore::Vec2i goal = field.get_goal_cell();
-        Vector2 goal_center = to_local(
-            floor_layer->to_global(
-                floor_layer->map_to_local(Vector2i(goal.x, goal.y))));
-        const auto &t2_cells = field.get_t2_tiles();
-        std::vector<ffcore::Vec2i> claimed;
-        if (auto *mgr = ffcore::get_global_agent_manager())
-            mgr->get_claimed_tiles(current_group_id, claimed);
-
-        auto encode = [](const ffcore::Vec2i &c) -> int64_t
-        {
-            return (int64_t(c.x) << 32) ^ (uint32_t(c.y));
-        };
-
-        std::unordered_set<int64_t> claimed_set;
-        claimed_set.reserve(claimed.size() * 2 + 1);
-        for (const auto &c : claimed)
-            claimed_set.insert(encode(c));
-
-        if (!t2_cells.empty())
-        {
-            Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
-            for (const ffcore::Vec2i &cell_rel : t2_cells)
-            {
-                /// Drawing Claimed Tiled Indicator
-                Vector2i cell(cell_rel.x, cell_rel.y);
-                Vector2 local_center = floor_layer->map_to_local(cell);
-                Vector2 world_center = floor_layer->to_global(local_center);
-                Vector2 draw_center = to_local(world_center);
-                bool is_claimed = claimed_set.count(encode(cell_rel)) > 0;
-                if (is_claimed)
-                {
-                    float radius = std::min(cell_size.x, cell_size.y) * 0.45f;
-                    const int claimed_segments = 48;
-                    const float claimed_thickness = 1.5f;
-                    draw_arc(draw_center, radius, 0, Math_TAU, claimed_segments, Color(0.6f, 1.0f, 0.6f, 0.5f), claimed_thickness);
-                }
-                else
-                {
-                    Rect2 tile_rect(draw_center - cell_size * 0.5f, cell_size);
-                    draw_rect(tile_rect, Color(0, 1, 0, 0.9f), false, 1.0);
-                }
-            }
-        }
-
-        const int segments = 128;
-        const float thickness = 1.0f;
-
-        int nb = group_size_for_draw();
-
-        double t2 = field.get_computed_t2_radius();
-        double min_t2 = cfg.tile_size;
-        if (t2 < min_t2)
-            t2 = min_t2;
-        if (cfg.draw_claimed_path)
-            draw_arc(goal_center, t2, 0, Math_TAU, segments, Color(0, 1, 0, 0.9), thickness); // T2 green
-    }
-
-    // Debug: draw links from agents to their claimed tiles
-    if (ffcore::globalconfig().draw_claimed_path && floor_layer && current_group_id != ffcore::INVALID_GROUP)
-    {
-        if (auto *mgr = ffcore::get_global_agent_manager())
-        {
-            std::vector<ffcore::AgentClaimDebug> links;
-            mgr->get_group_claim_debug(current_group_id, links);
-            if (!links.empty())
-            {
-                const double offset_y = ffcore::globalconfig().agent_offset_y;
-                const Color default_col(0.6f, 0.6f, 0.6f, 0.9f);
-                const double dot_r = 3.0;
-                for (const auto &ln : links)
-                {
-                    if (!ln.moving)
-                        continue;
-                    Color col = default_col;
-                    col.r = (float)std::clamp(ln.color.x, 0.0, 1.0);
-                    col.g = (float)std::clamp(ln.color.y, 0.0, 1.0);
-                    col.b = (float)std::clamp(ln.color.z, 0.0, 1.0);
-                    col.a = 0.9f;
-                    Vector2 agent_world(ln.pos.x, ln.pos.y + offset_y);
-                    Vector2 agent_local = to_local(agent_world);
-
-                    Vector2i cell(ln.claimed_tile.x, ln.claimed_tile.y);
-                    Vector2 local_center = floor_layer->map_to_local(cell);
-                    Vector2 world_center = floor_layer->to_global(local_center);
-                    Vector2 tile_local = to_local(world_center);
-
-                    draw_line(agent_local, tile_local, col, 2.0);
-                    draw_circle(agent_local, dot_r, col);
-                    draw_circle(tile_local, dot_r, col);
-                }
-            }
-        }
-    }
 }
 
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
@@ -686,9 +579,4 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
         "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size()); */
     new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(group_id, new_flow);
-    if (ffcore::globalconfig().enable_claiming_tiles)
-        mgr->distribute_tiles_to_agents(group_id, *new_flow);
-    else
-        mgr->clear_group_claims(group_id);
-    field.set_t2_tiles(new_flow->get_t2_tiles(), new_flow->get_computed_t2_radius());
 }

@@ -46,7 +46,6 @@ namespace ffcore
         void set_agent_input(int id, const Vec2 &direction);
         void set_agent_manual_motion(int id, double acceleration, double deceleration);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
-        void set_agent_claimed_tile(int id, const Vec2i &tile);
 
     private:
         std::vector<AgentData> agents;

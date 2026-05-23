@@ -470,14 +470,6 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
     }
 }
 
-void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return;
-    agents[it->second].claimed_tile = tile;
-}
-
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -610,7 +602,7 @@ void SteeringSystem::update_all(double delta)
                     ultimate_wall_correction(a, nav, delta);
 
                 grid->update(a.id, old_pos + offset, a.position + offset);
-                a.update_motion_state(delta, false, cfg);
+                a.update_motion_state(delta, cfg);
                 continue;
             }
 
@@ -624,7 +616,7 @@ void SteeringSystem::update_all(double delta)
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
                     Vec2 target_velocity = Vec2(0, 0);
                     a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-                    a.update_motion_state(delta, false, cfg);
+                    a.update_motion_state(delta, cfg);
                     continue;
                 }
                 Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction; /// velocity if moved by others
@@ -640,7 +632,7 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            a.update_motion_state(delta, false, cfg);
+            a.update_motion_state(delta, cfg);
             continue;
         }
 
@@ -671,7 +663,7 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            a.update_motion_state(delta, false, cfg);
+            a.update_motion_state(delta, cfg);
             continue;
         }
 
@@ -680,19 +672,15 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2 target_velocity = Vec2(0, 0);
             a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-            a.update_motion_state(delta, false, cfg);
+            a.update_motion_state(delta, cfg);
             continue;
         }
 
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
-        bool has_claimed = (a.claimed_tile.x > -100000 && a.claimed_tile.y > -100000);
-        double dist_to_claim = 1e9;
-        bool reached_claim = false;
-        Vec2 claim_center(0, 0);
         double target_radius = ff->get_ff_target_radius();
-        if (!ffcore::globalconfig().enable_claiming_tiles && target_radius > 0.0)
+        if (target_radius > 0.0)
         {
             int group_size = 0;
             if (a.group != INVALID_GROUP)
@@ -712,8 +700,6 @@ void SteeringSystem::update_all(double delta)
             {
                 a.target_radius_timer =
                     cfg.target_radius_time_before_stop + group_size * cfg.target_radius_time_group_size_ratio;
-                /*  godot::UtilityFunctions::print("Agent ", a.id, " entered target radius; timer started at",
-                                                a.target_radius_timer, " (group size ", group_size, ")"); */
             }
 
             if (a.target_radius_timer > 0.0)
@@ -721,26 +707,10 @@ void SteeringSystem::update_all(double delta)
                 a.target_radius_timer -= delta;
                 if (a.target_radius_timer <= 0.0)
                 {
-                    /*    godot::UtilityFunctions::print("Agent ", a.id, " timer expired inside target radius"); */
                     a.reset();
                     force_motion_state = true;
                     continue;
                 }
-            }
-        }
-        if (has_claimed)
-        {
-            Vec2i rel_claim(a.claimed_tile.x - ff->get_cell_origin().x, a.claimed_tile.y - ff->get_cell_origin().y);
-            claim_center = ff->cell_to_world(rel_claim);
-            dist_to_claim = safe_len(claim_center - (a.position + offset));
-            reached_claim = dist_to_claim <= (ff->tile_size() * 0.1); /// claim distance before reach
-
-            if (reached_claim && a.active)
-            {
-
-                a.reset();
-                force_motion_state = true;
-                /*    godot::UtilityFunctions::print("Agent ", a.id, " REACHCLAIMED"); */
             }
         }
 
@@ -749,28 +719,14 @@ void SteeringSystem::update_all(double delta)
         if (map_cell != a.last_logged_tile)
         {
             a.last_logged_tile = map_cell;
-            /*   godot::UtilityFunctions::print("Agent ", a.id, " is in tile (", map_cell.x, ",", map_cell.y, ")"); */
         }
         Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position + offset));
-        bool reached_goal_cell = flow_dir.is_zero(); // fallback when flow dir vanishes near/at goal
         Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
 
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
 
-        if (reached_claim)
-        {
-            a.active = false;
-            a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
-        }
-
-        double claim_activation_radius = ff->get_computed_t2_radius();
-        if (claim_activation_radius <= 0.0)
-            claim_activation_radius = ff->tile_size() * 2.0;
-
-        bool in_t2_zone = dist_to_target <= claim_activation_radius;
-        bool use_claim_force = cfg.enable_claim_force && has_claimed && in_t2_zone && !reached_claim;
-        Vec2 claim_dir = use_claim_force ? safe_normalize(claim_center - a.position) : Vec2(0, 0);
+        bool in_t2_zone = target_radius > 0.0 && dist_to_target <= target_radius;
 
         Vec2 target_velocity;
         if (a.is_propelled)
@@ -780,10 +736,7 @@ void SteeringSystem::update_all(double delta)
         else
         {
             Vec2 combined = wall_repel + separation;
-            Vec2 used_dir = nav_dir;
-            if (use_claim_force && !claim_dir.is_zero())
-                used_dir = claim_dir;
-            combined += used_dir * cfg.flow_weight;
+            combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
             if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
@@ -827,7 +780,6 @@ void SteeringSystem::update_all(double delta)
 
         grid->update(a.id, old_pos + offset, a.position + offset);
 
-        bool in_claim_zone = has_claimed && in_t2_zone && !reached_claim;
-        a.update_motion_state(delta, in_claim_zone, cfg, force_motion_state);
+        a.update_motion_state(delta, cfg, force_motion_state);
     }
 }

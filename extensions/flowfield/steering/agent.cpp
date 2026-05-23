@@ -24,13 +24,12 @@ void AgentData::reset()
     active = false;
     velocity = Vec2(0, 0);
     flow = nullptr;
-    claimed_tile = Vec2i(-999999, -999999);
     micro_osc = 0;
     micro_osc_timer = 0.0;
     target_radius_timer = 0.0;
 }
 
-    void AgentData::update_motion_state(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_motion_state)
+    void AgentData::update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state)
     {
         double thresh = std::max(0.0, cfg.movement_threshold);
         double thresh2 = thresh * thresh;
