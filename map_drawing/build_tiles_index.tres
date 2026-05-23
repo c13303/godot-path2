@@ -8,7 +8,7 @@ data = {
 "layer": "buildings"
 },
 "spawner": {
-"atlas": [14.0, 15.0],
+"atlas": [14.0, 0.0],
 "cooldown": 2.0,
 "kind": "spawner",
 "layer": "buildings"
@@ -24,4 +24,3 @@ data = {
 "layer": "wallz"
 }
 }
-mon

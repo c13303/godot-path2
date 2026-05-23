@@ -176,17 +176,22 @@ func _register_house(cell: Vector2i) -> void:
 		push_warning("BuildingManager: cannot register house at %s, create_group() returned %d." % [cell, group_id])
 		return
 
+	var target_cell := _find_walkable_cell_near(cell)
+	if target_cell == INVALID_CELL:
+		push_warning("BuildingManager: house at %s has no walkable floor tile within range." % cell)
+		return
+
 	_houses[cell] = {
 		"flow_ready": false,
 		"group_id": group_id,
-		"world": _cell_center(cell)
+		"target_cell": target_cell,
+		"world": _cell_center(target_cell)
 	}
-	_log("registered house cell=%s world=%s group=%d floor=%s wall=%s" % [
+	_log("registered house cell=%s target=%s world=%s group=%d" % [
 		cell,
+		target_cell,
 		_houses[cell]["world"],
-		group_id,
-		_has_floor(cell),
-		_has_wall(cell)
+		group_id
 	])
 	_queue_house_flow_rebuild()
 
@@ -224,21 +229,13 @@ func _assign_house_flow(cell: Vector2i) -> void:
 	var world: Vector2 = house.get("world", _cell_center(cell))
 	if flow.has_method("rebuild_async"):
 		var can_build := bool(flow.call("rebuild_async", world))
-		_log("house flow precheck cell=%s group=%d world=%s can_build=%s floor=%s wall=%s" % [
+		_log("house flow precheck cell=%s group=%d world=%s can_build=%s" % [
 			cell,
 			group_id,
 			world,
-			can_build,
-			_has_floor(cell),
-			_has_wall(cell)
+			can_build
 		])
 		if not can_build:
-			push_warning("BuildingManager: house at %s is detected but FlowFieldNative rejected it as a target. floor=%s wall=%s world=%s" % [
-				cell,
-				_has_floor(cell),
-				_has_wall(cell),
-				world
-			])
 			house["flow_ready"] = false
 			_houses[cell] = house
 			return
@@ -342,6 +339,17 @@ func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_r
 			for dy in range(-r, r + 1):
 				var cell := start_cell + Vector2i(dx, dy)
 				if cell not in occupied and _is_walkable(cell):
+					return cell
+	return INVALID_CELL
+
+func _find_walkable_cell_near(start_cell: Vector2i, max_radius: int = 8) -> Vector2i:
+	if _is_walkable(start_cell):
+		return start_cell
+	for r in range(1, max_radius + 1):
+		for dx in range(-r, r + 1):
+			for dy in range(-r, r + 1):
+				var cell := start_cell + Vector2i(dx, dy)
+				if _is_walkable(cell):
 					return cell
 	return INVALID_CELL
 
