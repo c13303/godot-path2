@@ -12,6 +12,7 @@ const INVALID_CELL := Vector2i(2147483647, 2147483647)
 @export var flow: Node
 @export var agent_manager: Node
 @export var parent_for_agents: Node
+@export var debug_logs: bool = true
 
 var _tile_defs_by_atlas: Dictionary = {}
 var _houses: Dictionary = {}
@@ -19,6 +20,9 @@ var _spawners: Dictionary = {}
 var _spawn_timers: Dictionary = {}
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
+var _flow_rebuild_pending: bool = false
+var _last_scan_summary: String = ""
+var _last_spawn_failure: String = ""
 
 func _ready() -> void:
 	_load_tile_definitions()
@@ -58,16 +62,17 @@ func _scan_buildings() -> void:
 	if not buildings:
 		return
 
-	_migrate_special_tiles_from_wallz()
+	var migrated := _migrate_special_tiles_from_wallz()
 
 	var wall_signature := _tile_layer_signature(wallz)
-	var walls_changed := wall_signature != _last_wall_signature
+	var walls_changed := wall_signature != _last_wall_signature or migrated
 	_last_wall_signature = wall_signature
 
 	var seen_houses: Dictionary = {}
 	var seen_spawners: Dictionary = {}
 	_scan_special_layer(buildings, seen_houses, seen_spawners)
 	_scan_special_layer(wallz, seen_houses, seen_spawners)
+	_log_scan_summary(seen_houses, seen_spawners, migrated, walls_changed)
 
 	for raw_house_cell in _houses.keys():
 		var cell: Vector2i = raw_house_cell
@@ -80,8 +85,8 @@ func _scan_buildings() -> void:
 			_spawners.erase(cell)
 			_spawn_timers.erase(cell)
 
-	if walls_changed:
-		_rebuild_house_flows()
+	if walls_changed or _has_pending_house_flows():
+		_queue_house_flow_rebuild()
 
 func _scan_special_layer(layer: TileMapLayer, seen_houses: Dictionary, seen_spawners: Dictionary) -> void:
 	if not layer:
@@ -92,15 +97,29 @@ func _scan_special_layer(layer: TileMapLayer, seen_houses: Dictionary, seen_spaw
 		var definition := _definition_for_layer_cell(layer, map_cell)
 		var kind := str(definition.get("kind", ""))
 		if kind == "house":
+			_log("detected house layer=%s cell=%s atlas=%s floor=%s wall=%s" % [
+				layer.name,
+				map_cell,
+				layer.get_cell_atlas_coords(map_cell),
+				_has_floor(map_cell),
+				_has_wall(map_cell)
+			])
 			seen_houses[map_cell] = true
 			_register_house(map_cell)
 		elif kind == "spawner":
+			_log("detected spawner layer=%s cell=%s atlas=%s floor=%s wall=%s" % [
+				layer.name,
+				map_cell,
+				layer.get_cell_atlas_coords(map_cell),
+				_has_floor(map_cell),
+				_has_wall(map_cell)
+			])
 			seen_spawners[map_cell] = true
 			_register_spawner(map_cell, float(definition.get("cooldown", DEFAULT_SPAWN_COOLDOWN)))
 
-func _migrate_special_tiles_from_wallz() -> void:
+func _migrate_special_tiles_from_wallz() -> bool:
 	if not wallz or not buildings:
-		return
+		return false
 
 	var migrated := false
 	for raw_cell in wallz.get_used_cells():
@@ -118,10 +137,16 @@ func _migrate_special_tiles_from_wallz() -> void:
 		)
 		wallz.erase_cell(cell)
 		migrated = true
+		_log("migrated special tile kind=%s cell=%s atlas=%s from wallz to buildings" % [
+			kind,
+			cell,
+			buildings.get_cell_atlas_coords(cell)
+		])
 
 	if migrated:
 		buildings.update_internals()
 		wallz.update_internals()
+	return migrated
 
 func _definition_for_cell(cell: Vector2i) -> Dictionary:
 	return _definition_for_layer_cell(buildings, cell)
@@ -135,37 +160,92 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 
 func _register_house(cell: Vector2i) -> void:
 	if _houses.has(cell):
+		var house: Dictionary = _houses[cell] as Dictionary
+		if not bool(house.get("flow_ready", false)):
+			_queue_house_flow_rebuild()
 		return
 	if not agent_manager or not agent_manager.has_method("create_group"):
+		push_warning("BuildingManager: cannot register house, AgentManager has no create_group().")
 		return
 	if not flow or not flow.has_method("assign_flow_to_group"):
+		push_warning("BuildingManager: cannot register house, FlowFieldNative has no assign_flow_to_group().")
 		return
 
 	var group_id := int(agent_manager.call("create_group"))
 	if group_id < 0:
+		push_warning("BuildingManager: cannot register house at %s, create_group() returned %d." % [cell, group_id])
 		return
 
 	_houses[cell] = {
+		"flow_ready": false,
 		"group_id": group_id,
 		"world": _cell_center(cell)
 	}
-	_assign_house_flow(cell)
+	_log("registered house cell=%s world=%s group=%d floor=%s wall=%s" % [
+		cell,
+		_houses[cell]["world"],
+		group_id,
+		_has_floor(cell),
+		_has_wall(cell)
+	])
+	_queue_house_flow_rebuild()
 
 func _rebuild_house_flows() -> void:
+	_flow_rebuild_pending = false
 	for raw_house_cell in _houses.keys():
 		var cell: Vector2i = raw_house_cell
 		_assign_house_flow(cell)
+
+func _has_pending_house_flows() -> bool:
+	for raw_house_cell in _houses.keys():
+		var cell: Vector2i = raw_house_cell
+		var house: Dictionary = _houses[cell] as Dictionary
+		if not bool(house.get("flow_ready", false)):
+			return true
+	return false
+
+func _queue_house_flow_rebuild() -> void:
+	if _flow_rebuild_pending:
+		return
+	_flow_rebuild_pending = true
+	call_deferred("_rebuild_house_flows")
 
 func _assign_house_flow(cell: Vector2i) -> void:
 	if not _houses.has(cell):
 		return
 	if not flow or not flow.has_method("assign_flow_to_group"):
+		push_warning("BuildingManager: cannot assign house flow, FlowFieldNative missing assign_flow_to_group().")
 		return
 	var house: Dictionary = _houses[cell] as Dictionary
 	var group_id := int(house.get("group_id", -1))
 	if group_id < 0:
+		push_warning("BuildingManager: cannot assign house flow for %s, invalid group %d." % [cell, group_id])
 		return
-	flow.call("assign_flow_to_group", group_id, house.get("world", _cell_center(cell)))
+	var world: Vector2 = house.get("world", _cell_center(cell))
+	if flow.has_method("rebuild_async"):
+		var can_build := bool(flow.call("rebuild_async", world))
+		_log("house flow precheck cell=%s group=%d world=%s can_build=%s floor=%s wall=%s" % [
+			cell,
+			group_id,
+			world,
+			can_build,
+			_has_floor(cell),
+			_has_wall(cell)
+		])
+		if not can_build:
+			push_warning("BuildingManager: house at %s is detected but FlowFieldNative rejected it as a target. floor=%s wall=%s world=%s" % [
+				cell,
+				_has_floor(cell),
+				_has_wall(cell),
+				world
+			])
+			house["flow_ready"] = false
+			_houses[cell] = house
+			return
+	flow.call("assign_flow_to_group", group_id, world)
+	house["flow_ready"] = true
+	_houses[cell] = house
+	_log("house flow ready cell=%s group=%d world=%s" % [cell, group_id, world])
 
 func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 	_spawners[cell] = {
@@ -176,6 +256,8 @@ func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 
 func _process_spawners(delta: float) -> void:
 	if _houses.is_empty():
+		if not _spawners.is_empty():
+			_log_spawn_failure("no valid house found for %d spawner(s)" % _spawners.size())
 		return
 
 	for raw_cell in _spawners.keys():
@@ -194,16 +276,22 @@ func _process_spawners(delta: float) -> void:
 func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	var house_cell := _nearest_house_cell(spawner_cell)
 	if house_cell == INVALID_CELL:
+		_log_spawn_failure("spawner %s has no nearest house" % spawner_cell)
 		return false
 
 	var house: Dictionary = _houses[house_cell] as Dictionary
+	if not bool(house.get("flow_ready", false)):
+		_log_spawn_failure("spawner %s nearest house %s exists but flow is not ready" % [spawner_cell, house_cell])
+		return false
 	var group_id := int(house.get("group_id", -1))
 	if group_id < 0:
+		_log_spawn_failure("spawner %s nearest house %s has invalid group %d" % [spawner_cell, house_cell, group_id])
 		return false
 
 	var occupied := _occupied_cells()
 	var spawn_cell := _find_free_cell_near(spawner_cell, occupied)
 	if spawn_cell == INVALID_CELL:
+		_log_spawn_failure("spawner %s could not find a walkable spawn cell" % spawner_cell)
 		return false
 
 	var agent: Node2D = AGENT_SCENE.instantiate()
@@ -216,8 +304,12 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	if agent_manager and agent_manager.has_method("spawn_agent"):
 		var nav_id := int(agent_manager.call("spawn_agent", agent, group_id))
 		agent.set("nav_id", nav_id)
-		if agent_manager.has_method("assign_agent"):
-			agent_manager.call("assign_agent", agent, group_id)
+		_log("spawned monster nav_id=%d spawn_cell=%s target_house=%s group=%d" % [
+			nav_id,
+			spawn_cell,
+			house_cell,
+			group_id
+		])
 
 	return true
 
@@ -254,11 +346,13 @@ func _find_free_cell_near(start_cell: Vector2i, occupied: Array[Vector2i], max_r
 	return INVALID_CELL
 
 func _is_walkable(cell: Vector2i) -> bool:
-	if not floorz:
-		return false
-	var has_floor := floorz.get_cell_tile_data(cell) != null
-	var has_wall := wallz and wallz.get_cell_tile_data(cell) != null
-	return has_floor and not has_wall
+	return _has_floor(cell) and not _has_wall(cell)
+
+func _has_floor(cell: Vector2i) -> bool:
+	return floorz != null and floorz.get_cell_tile_data(cell) != null
+
+func _has_wall(cell: Vector2i) -> bool:
+	return wallz != null and wallz.get_cell_tile_data(cell) != null
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))
@@ -276,3 +370,27 @@ func _tile_layer_signature(layer: TileMapLayer) -> int:
 		signature += int(cell.x * 73856093 + cell.y * 19349663)
 		signature += int(atlas.x * 83492791 + atlas.y * 2654435761)
 	return signature
+
+func _log(message: String) -> void:
+	if debug_logs:
+		print("BuildingManager: ", message)
+
+func _log_spawn_failure(message: String) -> void:
+	if message == _last_spawn_failure:
+		return
+	_last_spawn_failure = message
+	push_warning("BuildingManager: " + message)
+
+func _log_scan_summary(seen_houses: Dictionary, seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
+	var summary := "scan houses=%d spawners=%d registered_houses=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
+		seen_houses.size(),
+		seen_spawners.size(),
+		_houses.size(),
+		_spawners.size(),
+		migrated,
+		walls_changed
+	]
+	if summary == _last_scan_summary:
+		return
+	_last_scan_summary = summary
+	_log(summary)

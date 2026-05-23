@@ -130,6 +130,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     double max_speed = ffcore::globalconfig().agent_max_speed;
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
+    core_mgr->add_agent_to_group(nav_id, group_id);
 
     if (steering_native)
         steering_native->register_node_mapping(node, nav_id);
