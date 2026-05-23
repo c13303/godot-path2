@@ -62,6 +62,7 @@ namespace ffcore
         Vec2 force_voisine(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
+        Vec2 apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
     };
 
     SteeringSystem *get_global_steering_system();

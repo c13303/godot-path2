@@ -184,6 +184,26 @@ static Vec2 project_to_navigable(FlowField *ff, const Vec2 &from, const Vec2 &to
     return lo;
 }
 
+Vec2 SteeringSystem::apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff)
+{
+    if (!ff || (step.x == 0.0 && step.y == 0.0))
+        return from + step;
+
+    Vec2 full = from + step;
+    if (ff->is_cell_navigable(ff->world_to_cell(full)))
+        return full;
+
+    Vec2 only_x(from.x + step.x, from.y);
+    if (step.x != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_x)))
+        return only_x;
+
+    Vec2 only_y(from.x, from.y + step.y);
+    if (step.y != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_y)))
+        return only_y;
+
+    return from;
+}
+
 void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, double delta)
 {
     Vec2i cell = ff->world_to_cell(a.position);
@@ -554,7 +574,7 @@ void SteeringSystem::update_all(double delta)
     for (auto &a : agents)
     {
         const bool is_manual = a.control_mode == AgentControlMode::Manual;
-        FlowField *nav = a.flow ? a.flow : (is_manual ? nullptr : default_flow);
+        FlowField *nav = a.flow ? a.flow : default_flow;
         if (nav && !nav->is_ready())
             nav = nullptr;
 
@@ -604,7 +624,9 @@ void SteeringSystem::update_all(double delta)
                 }
 
                 Vec2 old_pos = a.position;
-                a.position = a.position + a.velocity * delta;
+                Vec2 step = a.velocity * delta;
+                Vec2 new_pos = apply_walk_with_walls(a.position, step, nav);
+                a.position = new_pos;
 
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
@@ -665,7 +687,9 @@ void SteeringSystem::update_all(double delta)
             }
 
             Vec2 old_pos = a.position;
-            a.position = a.position + a.velocity * delta;
+            Vec2 step = a.velocity * delta;
+            Vec2 new_pos = apply_walk_with_walls(a.position, step, nav);
+            a.position = new_pos;
 
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
