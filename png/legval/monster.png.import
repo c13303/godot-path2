@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bxls4vv2qb6ia"
-path="res://.godot/imported/piggy.png-773bf325228d05313e2903ba24e33477.ctex"
+uid="uid://ch6eoqidb06ck"
+path="res://.godot/imported/monster.png-a849a976c9758f8914d1223f721495a5.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://sprites/lapin/piggy.png"
-dest_files=["res://.godot/imported/piggy.png-773bf325228d05313e2903ba24e33477.ctex"]
+source_file="res://png/legval/monster.png"
+dest_files=["res://.godot/imported/monster.png-a849a976c9758f8914d1223f721495a5.ctex"]
 
 [params]
 

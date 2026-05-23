@@ -36,8 +36,8 @@ namespace godot
         double get_wall_repel_strength() const;
         void set_wall_repel_strength(double v);
 
-        double get_walk_animation_threshold() const;
-        void set_walk_animation_threshold(double v);
+        double get_movement_threshold() const;
+        void set_movement_threshold(double v);
 
         double get_direct_steer_radius() const;
         void set_direct_steer_radius(double v);

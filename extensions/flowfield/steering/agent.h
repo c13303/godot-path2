@@ -24,6 +24,8 @@ namespace ffcore
         FlowField *flow = nullptr;
         AgentControlMode control_mode = AgentControlMode::FlowField;
         Vec2 manual_input_dir{};
+        double manual_acceleration = 900.0;
+        double manual_deceleration = 1200.0;
 
         bool is_first = false;
         GroupID group = INVALID_GROUP;
@@ -42,13 +44,12 @@ namespace ffcore
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
         bool moving = false;
         int dir_code = -1;
-        bool update_animation_this_frame = false;
         int micro_osc = 0;
         double micro_osc_timer = 0.0;
         Vec3 debug_color{};
         double target_radius_timer = 0.0;
 
         void reset();
-        void update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_animation = false);
+        void update_motion_state(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_motion_state = false);
     };
 } // namespace ffcore

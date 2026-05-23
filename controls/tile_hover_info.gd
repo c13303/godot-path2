@@ -50,22 +50,7 @@ func process() -> void:
 				var dir: int = int(a.get("dir_code", -1))
 				var moving: bool = bool(a.get("is_moving", false))
 				var vel_len: float = float(a.get("velocity_len", 0.0))
-				var anim: String = ""
-				if moving:
-					match dir:
-						0: anim = "Walk_E"
-						1: anim = "Walk_W"
-						2: anim = "Walk_S"
-						3: anim = "Walk_N"
-						_: anim = "Walk_S"
-				else:
-					match dir:
-						0: anim = "Idle_E"
-						1: anim = "Idle_W"
-						2: anim = "Idle_S"
-						3: anim = "Idle_N"
-						_: anim = "Idle_S"
-				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f, anim=%s" % [id, dir, moving, vel_len, anim])
+				lines.append("Agent %d : dir %d, moving=%s, vel=%.2f" % [id, dir, moving, vel_len])
 		fps_label.call("set_hover_cell_text", "\n".join(lines))
 
 	if mouse_outline:

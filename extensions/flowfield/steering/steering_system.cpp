@@ -36,6 +36,15 @@ static inline double safe_len(const Vec2 &v) // Renvoie la longueur d’un vecte
     return (l < 1e-6) ? 0.0 : l;
 }
 
+static inline Vec2 move_toward_vec(const Vec2 &current, const Vec2 &target, double max_delta)
+{
+    Vec2 diff = target - current;
+    double dist = safe_len(diff);
+    if (dist <= max_delta || dist <= 1e-6)
+        return target;
+    return current + diff * (max_delta / dist);
+}
+
 static inline Vec2 hashed_unit_dir(int id) // Génère une direction pseudo-aléatoire stable basée sur un id
 {
     unsigned h = (unsigned)id * 1664525u + 1013904223u;
@@ -54,9 +63,6 @@ static Vec3 hashed_color(int id)
 }
 
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
-static std::unordered_map<int, bool> g_logged_manual_mode;
-static std::unordered_map<int, bool> g_logged_manual_input;
-static std::unordered_map<int, bool> g_logged_manual_update;
 
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
@@ -72,7 +78,6 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
         grid->insert(a.id, pos + offset);
-    a.update_animation_this_frame = true;
     g_goal_cooldown[a.id] = 0.0;
     return a.id;
 }
@@ -96,9 +101,6 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     agents.pop_back();
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
-    g_logged_manual_mode.erase(id);
-    g_logged_manual_input.erase(id);
-    g_logged_manual_update.erase(id);
 }
 
 void SteeringSystem::reactivate_agents_for_field(FlowField *field)
@@ -148,7 +150,6 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     if (grid)
         grid->insert(a.id, pos + offset);
 
-    a.update_animation_this_frame = true;
     g_goal_cooldown[a.id] = 0.0;
     /* godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system"); */
     return a.id;
@@ -367,7 +368,6 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.target_radius_timer = 0.0;
 
     a.dir_code = -1;
-    a.update_animation_this_frame = true;
 }
 
 void SteeringSystem::set_agent_control_mode(int id, int mode)
@@ -388,11 +388,6 @@ void SteeringSystem::set_agent_control_mode(int id, int mode)
     else
     {
         a.active = true;
-        if (!g_logged_manual_mode[id])
-        {
-            godot::UtilityFunctions::print("[PlayerControl] agent ", id, " set to manual mode");
-            g_logged_manual_mode[id] = true;
-        }
     }
 }
 
@@ -404,12 +399,17 @@ void SteeringSystem::set_agent_input(int id, const Vec2 &direction)
 
     AgentData &a = agents[it->second];
     a.manual_input_dir = safe_normalize(direction);
-    if (!a.manual_input_dir.is_zero() && !g_logged_manual_input[id])
-    {
-        godot::UtilityFunctions::print("[PlayerControl] agent ", id, " received manual input ",
-                                       a.manual_input_dir.x, ", ", a.manual_input_dir.y);
-        g_logged_manual_input[id] = true;
-    }
+}
+
+void SteeringSystem::set_agent_manual_motion(int id, double acceleration, double deceleration)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &a = agents[it->second];
+    a.manual_acceleration = std::max(0.0, acceleration);
+    a.manual_deceleration = std::max(0.0, deceleration);
 }
 
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
@@ -468,22 +468,6 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         agent.flow = nullptr;
         agent.group = INVALID_GROUP;
     }
-}
-
-// Unique Function for emiting animation.
-bool SteeringSystem::emit_animation_update(int id, bool &moving, int &dir_code, Vec2 &vel)
-{
-    auto it = id_to_index.find(id);
-    if (it == id_to_index.end())
-        return false;
-    AgentData &a = agents[it->second];
-    if (!a.update_animation_this_frame)
-        return false;
-    moving = a.moving;
-    dir_code = a.dir_code;
-    vel = a.velocity;
-    a.update_animation_this_frame = false;
-    return true;
 }
 
 void SteeringSystem::set_agent_claimed_tile(int id, const Vec2i &tile)
@@ -574,7 +558,7 @@ void SteeringSystem::update_all(double delta)
         if (nav && !nav->is_ready())
             nav = nullptr;
 
-        bool force_animation = false;
+        bool force_motion_state = false;
 
         Vec2 wall_repel(0, 0);
         if (nav)
@@ -608,7 +592,8 @@ void SteeringSystem::update_all(double delta)
                     Vec2 target_velocity = manual_dir.is_zero()
                                                ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                                : manual_dir * a.max_speed + correction;
-                    a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                    double accel = manual_dir.is_zero() ? a.manual_deceleration : a.manual_acceleration;
+                    a.velocity = move_toward_vec(a.velocity, target_velocity, accel * delta);
                 }
 
                 if (!a.is_propelled)
@@ -624,18 +609,8 @@ void SteeringSystem::update_all(double delta)
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
 
-                if (!g_logged_manual_update[a.id] && !a.manual_input_dir.is_zero())
-                {
-                    godot::UtilityFunctions::print("[PlayerControl] update agent ", a.id,
-                                                   " old=", old_pos.x, ",", old_pos.y,
-                                                   " new=", a.position.x, ",", a.position.y,
-                                                   " vel=", a.velocity.x, ",", a.velocity.y,
-                                                   " nav=", nav != nullptr);
-                    g_logged_manual_update[a.id] = true;
-                }
-
                 grid->update(a.id, old_pos + offset, a.position + offset);
-                a.update_animation(delta, false, cfg);
+                a.update_motion_state(delta, false, cfg);
                 continue;
             }
 
@@ -649,7 +624,7 @@ void SteeringSystem::update_all(double delta)
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
                     Vec2 target_velocity = Vec2(0, 0);
                     a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-                    a.update_animation(delta, false, cfg);
+                    a.update_motion_state(delta, false, cfg);
                     continue;
                 }
                 Vec2 target_velocity = local_dir * a.max_speed * cfg.min_speed_fraction; /// velocity if moved by others
@@ -664,18 +639,8 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
-            if (!g_logged_manual_update[a.id] && !a.manual_input_dir.is_zero())
-            {
-                godot::UtilityFunctions::print("[PlayerControl] update agent ", a.id,
-                                               " old=", old_pos.x, ",", old_pos.y,
-                                               " new=", a.position.x, ",", a.position.y,
-                                               " vel=", a.velocity.x, ",", a.velocity.y,
-                                               " nav=", nav != nullptr);
-                g_logged_manual_update[a.id] = true;
-            }
-
             grid->update(a.id, old_pos + offset, a.position + offset);
-            a.update_animation(delta, false, cfg);
+            a.update_motion_state(delta, false, cfg);
             continue;
         }
 
@@ -688,7 +653,8 @@ void SteeringSystem::update_all(double delta)
                 Vec2 target_velocity = manual_dir.is_zero()
                                            ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                            : manual_dir * a.max_speed + correction;
-                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                double accel = manual_dir.is_zero() ? a.manual_deceleration : a.manual_acceleration;
+                a.velocity = move_toward_vec(a.velocity, target_velocity, accel * delta);
             }
 
             if (!a.is_propelled)
@@ -705,7 +671,7 @@ void SteeringSystem::update_all(double delta)
                 ultimate_wall_correction(a, nav, delta);
 
             grid->update(a.id, old_pos + offset, a.position + offset);
-            a.update_animation(delta, false, cfg);
+            a.update_motion_state(delta, false, cfg);
             continue;
         }
 
@@ -714,7 +680,7 @@ void SteeringSystem::update_all(double delta)
         {
             Vec2 target_velocity = Vec2(0, 0);
             a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
-            a.update_animation(delta, false, cfg);
+            a.update_motion_state(delta, false, cfg);
             continue;
         }
 
@@ -738,7 +704,7 @@ void SteeringSystem::update_all(double delta)
             if (group_size <= 2 && dist_to_target <= ff->tile_size() * 0.5)
             {
                 a.reset();
-                force_animation = true;
+                force_motion_state = true;
                 continue;
             }
 
@@ -757,7 +723,7 @@ void SteeringSystem::update_all(double delta)
                 {
                     /*    godot::UtilityFunctions::print("Agent ", a.id, " timer expired inside target radius"); */
                     a.reset();
-                    force_animation = true;
+                    force_motion_state = true;
                     continue;
                 }
             }
@@ -773,7 +739,7 @@ void SteeringSystem::update_all(double delta)
             {
 
                 a.reset();
-                force_animation = true;
+                force_motion_state = true;
                 /*    godot::UtilityFunctions::print("Agent ", a.id, " REACHCLAIMED"); */
             }
         }
@@ -862,6 +828,6 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos + offset, a.position + offset);
 
         bool in_claim_zone = has_claimed && in_t2_zone && !reached_claim;
-        a.update_animation(delta, in_claim_zone, cfg, force_animation);
+        a.update_motion_state(delta, in_claim_zone, cfg, force_motion_state);
     }
 }

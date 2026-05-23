@@ -44,9 +44,9 @@ namespace ffcore
         void set_agent_flow_ptr(int id, FlowField *ff);
         void set_agent_control_mode(int id, int mode);
         void set_agent_input(int id, const Vec2 &direction);
+        void set_agent_manual_motion(int id, double acceleration, double deceleration);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void set_agent_claimed_tile(int id, const Vec2i &tile);
-        bool emit_animation_update(int id, bool &moving, int &dir_code, Vec2 &vel);
 
     private:
         std::vector<AgentData> agents;

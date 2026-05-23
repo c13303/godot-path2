@@ -20,6 +20,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("register_node_mapping", "node", "agent_id"), &SteeringSystemNative::register_node_mapping);
     ClassDB::bind_method(D_METHOD("set_agent_control_mode", "agent_id", "mode"), &SteeringSystemNative::set_agent_control_mode);
     ClassDB::bind_method(D_METHOD("set_agent_input", "agent_id", "direction"), &SteeringSystemNative::set_agent_input);
+    ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
@@ -86,6 +87,11 @@ void SteeringSystemNative::set_agent_input(int agent_id, const Vector2 &directio
     system.set_agent_input(agent_id, ffcore::Vec2(direction.x, direction.y));
 }
 
+void SteeringSystemNative::set_agent_manual_motion(int agent_id, double acceleration, double deceleration)
+{
+    system.set_agent_manual_motion(agent_id, acceleration, deceleration);
+}
+
 Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
 {
     const ffcore::AgentData *a = system.get_agent(agent_id);
@@ -96,7 +102,6 @@ Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
 
 void SteeringSystemNative::_reset_agent_cache(int agent_id)
 {
-    agent_direction_codes.erase(agent_id);
     agent_last_flow.erase(agent_id);
 }
 
@@ -205,23 +210,6 @@ void SteeringSystemNative::_process(double delta)
             }
         }
 
-        bool moving;
-        int code;
-        ffcore::Vec2 vel;
-        if (system.emit_animation_update(id, moving, code, vel))
-        {
-            Vector2 vel_vec(vel.x, vel.y);
-            if (agent_manager)
-            {
-                Dictionary payload;
-                payload["moving"] = moving;
-                payload["code"] = code;
-                payload["direction"] = (moving && vel_vec.length_squared() > 1e-6) ? vel_vec.normalized() : vel_vec;
-                payload["is_propelled"] = a->is_propelled;
-                agent_manager->send_agent_event("main_animation_update", id, payload);
-            }
-            agent_direction_codes[id] = code;
-        }
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 

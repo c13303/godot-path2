@@ -31,7 +31,6 @@ namespace godot
         bool paused = false;
 
         std::unordered_map<Node2D *, int> agent_map;
-        std::unordered_map<int, int> agent_direction_codes;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
         std::unordered_map<int, bool> agent_propelled_states;
 
@@ -57,6 +56,7 @@ namespace godot
         int get_agent_id(Node2D *node);
         void set_agent_control_mode(int agent_id, int mode);
         void set_agent_input(int agent_id, const Vector2 &direction);
+        void set_agent_manual_motion(int agent_id, double acceleration, double deceleration);
         Vector2 get_agent_position(int agent_id) const;
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
 

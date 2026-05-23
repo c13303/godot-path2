@@ -28,6 +28,7 @@ const CONTROL_MODE_MANUAL: int = 1
 @export var max_zoom: float = 3.0
 @export var lock_mouse_to_view: bool = true
 @export var scroll_margin_pixel: float = 100.0
+@export var enable_mouse_unit_commands: bool = false
 
 var global_config_node: Node = null
 var current_flow: Node = null
@@ -57,7 +58,7 @@ func _ready() -> void:
 	)
 
 	selection_controller.setup(ui_layer, agent_manager)
-	spawn_controller.setup(floorz, wallz, agent_manager, get_parent(), steering)
+	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
 	fx_controller.setup(steering)
 	tile_hover_info.setup(floorz, steering, fps_label, flow)
 
@@ -65,10 +66,11 @@ func _ready() -> void:
 	if scene:
 		global_config_node = scene.get_node_or_null("GlobalConfigNative")
 
-	call_deferred("_spawn_player")
+	call_deferred("_setup_player")
 
 func _input(event: InputEvent) -> void:
-	selection_controller.on_input(event)
+	if enable_mouse_unit_commands:
+		selection_controller.on_input(event)
 
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
@@ -79,14 +81,12 @@ func _input(event: InputEvent) -> void:
 				_spawn_chars(10)
 			elif key_event.keycode == KEY_F3:
 				_spawn_chars(50)
-			elif key_event.keycode == KEY_B:
-				fx_controller.trigger_bomb(get_global_mouse_position())
 			elif key_event.keycode == KEY_SPACE:
 				_toggle_pause()
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
-		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+		if enable_mouse_unit_commands and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_on_click_set_goal()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and not _paused:
 			camera_controller.handle_mouse_wheel(zoom_speed)
@@ -95,27 +95,39 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_update_player_input()
-	selection_controller.process(delta)
+	if enable_mouse_unit_commands:
+		selection_controller.process(delta)
 	tile_hover_info.process()
 	camera_controller.process(delta, _paused)
 
-func _player_spawn_position() -> Vector2:
-	if camera:
-		return camera.get_screen_center_position()
-	return global_position
+func _setup_player() -> void:
+	var player := _get_player_node()
+	if not player:
+		push_warning("Controls: Player node not found.")
+		return
 
-func _spawn_player() -> void:
-	player_nav_id = spawn_controller.spawn_player(_player_spawn_position())
+	if agent_manager and agent_manager.has_method("spawn_agent"):
+		player_nav_id = int(agent_manager.call("spawn_agent", player, 0))
+		player.set("nav_id", player_nav_id)
+
 	if steering and steering.has_method("set_agent_control_mode") and player_nav_id >= 0:
 		steering.call("set_agent_control_mode", player_nav_id, CONTROL_MODE_MANUAL)
 	elif not _reported_missing_manual_api:
 		_reported_missing_manual_api = true
 		push_warning("SteeringSystemNative manual-control API is unavailable. Rebuild the GDExtension DLL.")
-	var player := _get_player_node()
+
+	if steering and steering.has_method("set_agent_manual_motion") and player_nav_id >= 0:
+		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
+
 	if player:
 		camera_controller.set_follow_target(player, true)
 
 func _get_player_node() -> Node2D:
+	var scene := get_tree().get_current_scene()
+	if scene:
+		var root_player := scene.get_node_or_null("Player")
+		if root_player is Node2D:
+			return root_player
 	for node in get_tree().get_nodes_in_group("player"):
 		if node is Node2D:
 			return node
@@ -171,7 +183,6 @@ func _toggle_pause() -> void:
 			hide_units = false
 
 	_toggle_units_visible(not hide_units)
-	_set_character_animations_playing(not _paused)
 	if pause_overlay:
 		pause_overlay.set_paused(_paused)
 
@@ -180,26 +191,6 @@ func _toggle_units_visible(isvisible: bool) -> void:
 		if node is Node2D:
 			var unit: Node2D = node
 			unit.visible = isvisible
-
-var _saved_animation_speed: Dictionary[int, float] = {}
-func _set_character_animations_playing(play: bool) -> void:
-	for main_char in get_tree().get_nodes_in_group("main_chars"):
-		if main_char is Node:
-			var main_node: Node = main_char
-			for child in main_node.get_children():
-				if child is AnimatedSprite2D:
-					var sprite: AnimatedSprite2D = child
-					var child_id: int = sprite.get_instance_id()
-					if play:
-						if _saved_animation_speed.has(child_id):
-							sprite.speed_scale = _saved_animation_speed[child_id]
-							_saved_animation_speed.erase(child_id)
-						elif sprite.speed_scale == 0.0:
-							sprite.speed_scale = 1.0
-					else:
-						if sprite.is_playing():
-							_saved_animation_speed[child_id] = sprite.speed_scale
-						sprite.speed_scale = 0.0
 
 func _spawn_chars(count: int) -> void:
 	var mouse_pos: Vector2 = get_global_mouse_position()

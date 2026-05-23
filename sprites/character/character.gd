@@ -8,16 +8,11 @@ const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
 const GLOBAL_CONFIG_NODE_NAME: String = "GlobalConfigNative"
-const AVAILABLE_SKINS: Array[StringName] = [
-	"rabbit",
-	"pig",
-]
 
 var _shadow_indicator: CharacterShadow
 var _show_shadow: bool = true
 var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = false
-var _skin: StringName = ""
 var _is_propelled: bool = false
 var _blood_drop_timer: float = 0.0
 var _blood_layer: Node2D
@@ -43,14 +38,6 @@ var _velocity_len: float = 0.0
 		_update_shadow()
 	get:
 		return _colored_shadow_when_selected
-@export var skin: StringName = "":
-	set(value):
-		_skin = value
-		if _skin == "":
-			_skin = _random_skin()
-		_apply_skin()
-	get:
-		return _skin
 
 @export var max_speed: float = 100.0
 @export var max_force: float = 1200.0
@@ -77,9 +64,6 @@ var _is_previewed: bool = false
 func _ready() -> void:
 	if use_native_steering:
 		set_physics_process(false)
-	if _skin == "":
-		_skin = _random_skin()
-	_apply_skin()
 	_update_shadow()
 
 func _process(delta: float) -> void:
@@ -136,15 +120,15 @@ func _find_blood_node_by_name() -> Node2D:
 	return root.find_node(BLOOD_NODE_NAME, true, false) as Node2D
 
 func _should_drop_blood() -> bool:
-	var threshold: float = _walk_animation_threshold()
+	var threshold: float = _movement_threshold()
 	if threshold <= 0.0:
 		return true
 	return _velocity_len >= threshold
 
-func _walk_animation_threshold() -> float:
+func _movement_threshold() -> float:
 	var config: Node = _get_global_config_node()
-	if config and config.has_method("get_walk_animation_threshold"):
-		return float(config.call("get_walk_animation_threshold"))
+	if config and config.has_method("get_movement_threshold"):
+		return float(config.call("get_movement_threshold"))
 	return 0.0
 
 func _get_global_config_node() -> Node:
@@ -228,14 +212,3 @@ func _update_shadow() -> void:
 		if _shadow_indicator:
 			_shadow_indicator.queue_free()
 			_shadow_indicator = null
-
-func _apply_skin() -> void:
-	var sprite := get_node_or_null("LapinSprite2D")
-	if sprite and sprite.has_method("set"):
-		sprite.set("skin", _skin)
-
-func _random_skin() -> StringName:
-	if AVAILABLE_SKINS.is_empty():
-		return "rabbit"
-	var idx := randi() % AVAILABLE_SKINS.size()
-	return AVAILABLE_SKINS[idx]

@@ -36,7 +36,7 @@ namespace ffcore
         double target_radius_time_before_stop = 1.0;
         double target_radius_time_group_size_ratio = 0.005; // group_size x ratio
 
-        double walk_animation_threshold = 25;
+        double movement_threshold = 25;
         double agent_offset_y = 0.0;
 
         double flow_field_wall_clearance = 0.5; // weight for pushing flow away from walls (distance field blend)

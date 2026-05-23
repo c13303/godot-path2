@@ -30,9 +30,9 @@ void AgentData::reset()
     target_radius_timer = 0.0;
 }
 
-    void AgentData::update_animation(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_animation)
+    void AgentData::update_motion_state(double delta, bool in_claim_zone, const GlobalConfig &cfg, bool force_motion_state)
     {
-        double thresh = std::max(0.0, cfg.walk_animation_threshold);
+        double thresh = std::max(0.0, cfg.movement_threshold);
         double thresh2 = thresh * thresh;
         double vlen2 = velocity.length_squared();
         bool new_moving = vlen2 > thresh2;
@@ -52,14 +52,14 @@ void AgentData::reset()
         if (micro_osc >= cfg.micro_osc_limit_before_cancel)
         {
             reset();
-            if (!force_animation)
+            if (!force_motion_state)
                 return;
         }
 
-        if (!changed && !force_animation)
+        if (!changed && !force_motion_state)
             return;
 
-        if (!force_animation)
+        if (!force_motion_state)
         {
             if (micro_osc > 0)
             {
@@ -90,15 +90,14 @@ void AgentData::reset()
             micro_osc_timer = 0.0;
         }
 
-        if (changed || force_animation) /// ACT THE UPDATE
+        if (changed || force_motion_state) /// ACT THE UPDATE
         {
             moving = new_moving;
             dir_code = new_dir;
-            update_animation_this_frame = true;
 
-            /*    if (force_animation)
+            /*    if (force_motion_state)
                {
-                   godot::UtilityFunctions::print("Forced Anim ", id, " velocity²=", vlen2, " threshold²=", thresh2);
+                   godot::UtilityFunctions::print("Forced motion state ", id, " velocity²=", vlen2, " threshold²=", thresh2);
                } */
         }
     }

@@ -1,6 +1,7 @@
 extends Node
 
 @export var wallz: TileMapLayer
+@export var buildings: TileMapLayer
 @export var previewbuild: TileMapLayer
 @export var pause_overlay: PauseOverlay
 
@@ -14,6 +15,8 @@ var _tile_selection_keys: Array[String] = []
 var _current_tile_key: String = DEFAULT_WALL_TILE_KEY
 var _current_tile_key_index: int = 0
 var _current_atlas_coords: Vector2i = Vector2i(-1, -1)
+var _current_tile_kind: String = "wall"
+var _current_target_layer: String = "wallz"
 
 var _atlas_source_id: int = -1
 
@@ -56,9 +59,9 @@ func _input(event: InputEvent) -> void:
 			MOUSE_BUTTON_WHEEL_DOWN:
 				_select_next_tile(1)
 			MOUSE_BUTTON_LEFT:
-				_apply_tile_to_wallz()
+				_apply_current_tile()
 			MOUSE_BUTTON_RIGHT:
-				_remove_tile_from_wallz()
+				_remove_tile()
 
 func _resolve_atlas_source_id() -> void:
 	var ref := previewbuild if previewbuild else wallz
@@ -111,7 +114,16 @@ func _select_tile_by_key(key: String) -> void:
 
 	var raw: Array = []
 	if _tile_index.has(key):
-		raw = _tile_index[key] as Array
+		var definition: Variant = _tile_index[key]
+		if definition is Dictionary:
+			var tile_definition: Dictionary = definition as Dictionary
+			_current_tile_kind = str(tile_definition.get("kind", "wall"))
+			_current_target_layer = str(tile_definition.get("layer", "wallz"))
+			raw = tile_definition.get("atlas", []) as Array
+		elif definition is Array:
+			_current_tile_kind = "wall"
+			_current_target_layer = "wallz"
+			raw = definition as Array
 
 	if raw.size() != 2:
 		_current_atlas_coords = Vector2i(-1, -1)
@@ -135,7 +147,7 @@ func _draw_preview(cell: Vector2i) -> void:
 		)
 	previewbuild.update_internals()
 
-func _apply_tile_to_wallz() -> void:
+func _apply_current_tile() -> void:
 	if not _hover_active:
 		return
 	if _atlas_source_id < 0:
@@ -143,19 +155,41 @@ func _apply_tile_to_wallz() -> void:
 	if _current_atlas_coords == Vector2i(-1, -1):
 		return
 
-	wallz.set_cell(
+	var target_layer := _target_tile_layer()
+	if not target_layer:
+		return
+
+	_clear_other_build_layer(target_layer)
+	target_layer.set_cell(
 		_hover_cell,
 		_atlas_source_id,
 		_current_atlas_coords,
 		0
 	)
-	wallz.update_internals()
+	target_layer.update_internals()
 
-func _remove_tile_from_wallz() -> void:
+func _remove_tile() -> void:
 	if not _hover_active:
 		return
-	wallz.erase_cell(_hover_cell)
-	wallz.update_internals()
+	if wallz:
+		wallz.erase_cell(_hover_cell)
+		wallz.update_internals()
+	if buildings:
+		buildings.erase_cell(_hover_cell)
+		buildings.update_internals()
+
+func _target_tile_layer() -> TileMapLayer:
+	if _current_target_layer == "buildings":
+		return buildings
+	return wallz
+
+func _clear_other_build_layer(target_layer: TileMapLayer) -> void:
+	if target_layer != wallz and wallz:
+		wallz.erase_cell(_hover_cell)
+		wallz.update_internals()
+	if target_layer != buildings and buildings:
+		buildings.erase_cell(_hover_cell)
+		buildings.update_internals()
 
 func _clear_hover() -> void:
 	if not _hover_active:

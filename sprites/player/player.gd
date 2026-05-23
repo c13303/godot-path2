@@ -1,6 +1,9 @@
 extends CharacterBody2D
 class_name PlayerCharacter
 
+@export var acceleration: float = 900.0
+@export var deceleration: float = 1200.0
+
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _velocity_len: float = 0.0

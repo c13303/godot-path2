@@ -2,20 +2,16 @@ extends Node
 class_name SpawnController
 
 const AGENT_SCENE := preload("res://sprites/character/character.tscn")
-const PLAYER_SCENE := preload("res://sprites/player/player.tscn")
-const CONTROL_MODE_MANUAL: int = 1
 
 var floorz: TileMapLayer
 var wallz: TileMapLayer
 var agent_manager: Node
-var steering: Node
 var parent_for_agents: Node
 
-func setup(floor_layer: TileMapLayer, wall_layer: TileMapLayer, agent_mgr: Node, parent_node: Node, steering_node: Node = null) -> void:
+func setup(floor_layer: TileMapLayer, wall_layer: TileMapLayer, agent_mgr: Node, parent_node: Node) -> void:
 	floorz = floor_layer
 	wallz = wall_layer
 	agent_manager = agent_mgr
-	steering = steering_node
 	parent_for_agents = parent_node
 
 func spawn_mainchar(pos: Vector2, current_group: int) -> int:
@@ -40,28 +36,6 @@ func spawn_mainchar(pos: Vector2, current_group: int) -> int:
 		agent.set("nav_id", nav_id)
 
 	return group_id
-
-func spawn_player(pos: Vector2) -> int:
-	var target_cell: Vector2i = floorz.local_to_map(floorz.to_local(pos))
-	var occupied: Array[Vector2i] = _occupied_cells()
-	var free_cell: Vector2i = _find_free_cell_near(target_cell, occupied)
-	var free_pos: Vector2 = floorz.to_global(floorz.map_to_local(free_cell))
-	print("[PlayerControl] spawn target_cell=", target_cell, " free_cell=", free_cell, " free_pos=", free_pos, " walkable=", _is_walkable(free_cell))
-
-	var player: Node2D = PLAYER_SCENE.instantiate()
-	parent_for_agents.add_child(player)
-	player.global_position = free_pos
-	player.z_index = int(free_pos.y)
-	player.add_to_group("player")
-
-	if agent_manager and agent_manager.has_method("spawn_agent"):
-		var nav_id: int = int(agent_manager.call("spawn_agent", player, 0))
-		player.set("nav_id", nav_id)
-		if steering and steering.has_method("set_agent_control_mode"):
-			steering.call("set_agent_control_mode", nav_id, CONTROL_MODE_MANUAL)
-		return nav_id
-
-	return -1
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []

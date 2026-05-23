@@ -6,6 +6,8 @@
 [node name="Player" type="CharacterBody2D"]
 z_index = 2
 script = ExtResource("1_player")
+acceleration = 900.0
+deceleration = 1200.0
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 position = Vector2(0, -16)
