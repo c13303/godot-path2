@@ -325,6 +325,8 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	if agent_manager and agent_manager.has_method("spawn_agent"):
 		var nav_id := int(agent_manager.call("spawn_agent", agent, group_id))
 		agent.set("nav_id", nav_id)
+		if agent_manager.has_method("set_agent_never_rest"):
+			agent_manager.call("set_agent_never_rest", nav_id, true)
 		_log("spawned monster nav_id=%d spawn_cell=%s target_house=%s group=%d" % [
 			nav_id,
 			spawn_cell,

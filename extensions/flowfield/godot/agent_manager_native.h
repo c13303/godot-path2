@@ -63,6 +63,7 @@ namespace godot
         void update_godot_agent(Node2D *node, int agent_id);
         Node2D *find_node_by_agent(int agent_id);
         void send_agent_event(const String &event_name, int agent_id, const Variant &payload);
+        void set_agent_never_rest(int agent_id, bool value);
     };
 
 }

@@ -28,6 +28,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("update_godot_agent", "node", "agent_id"), &AgentManagerNative::update_godot_agent);
     ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
+    ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
     ADD_SIGNAL(MethodInfo("agent_event",
                           PropertyInfo(Variant::STRING, "event_name"),
                           PropertyInfo(Variant::INT, "agent_id"),
@@ -174,4 +175,11 @@ void AgentManagerNative::mark_group_has_order(ffcore::GroupID group)
         return;
 
     core_mgr->mark_group_has_order(group);
+}
+
+void AgentManagerNative::set_agent_never_rest(int agent_id, bool value)
+{
+    if (!steering)
+        return;
+    steering->set_agent_never_rest(agent_id, value);
 }

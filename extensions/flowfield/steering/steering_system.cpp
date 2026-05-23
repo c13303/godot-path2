@@ -470,6 +470,14 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
     }
 }
 
+void SteeringSystem::set_agent_never_rest(int id, bool value)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].never_rest = value;
+}
+
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -680,7 +688,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
         double target_radius = ff->get_ff_target_radius();
-        if (target_radius > 0.0)
+        if (target_radius > 0.0 && !a.never_rest)
         {
             int group_size = 0;
             if (a.group != INVALID_GROUP)

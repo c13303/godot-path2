@@ -47,6 +47,7 @@ namespace ffcore
         double micro_osc_timer = 0.0;
         Vec3 debug_color{};
         double target_radius_timer = 0.0;
+        bool never_rest = false;
 
         void reset();
         void update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state = false);
