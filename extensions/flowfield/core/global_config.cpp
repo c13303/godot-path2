@@ -12,8 +12,7 @@ namespace ffcore
 
     void GlobalConfig::recompute_from_tile()
     {
-        // Derived defaults for tile-size changes. Set explicit per-scene overrides
-        // after tile_size, because this resets tile-relative tuning values.
+        // use global_config.h !! those values arent used.
         wall_avoid_radius = tile_size * 1.2;
         direct_steer_radius = tile_size * 2.5;     
         target_T2_param_margin = tile_size * 2.0;
