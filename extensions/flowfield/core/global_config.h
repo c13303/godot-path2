@@ -9,7 +9,9 @@ namespace ffcore
         double center_pull = 1.0;
         double tile_size = 16.0;
 
-        double wall_avoid_radius = tile_size * 1.2;
+        // Startup/default value. If tile_size is changed through GlobalConfigNative,
+        // recompute_from_tile() overwrites this unless wall_avoid_radius is set after it.
+        double wall_avoid_radius = tile_size * 5;
         double wall_repel_strength = 12;
 
         double direct_steer_radius = tile_size * 2.5;

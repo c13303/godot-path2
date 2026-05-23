@@ -329,16 +329,19 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
             //// END OF PASSAGE GOULOT
 
             // QUANTIFICATION : divider (8 = 45°, 16 = 22.5°)
-            double q = 360 / 16;
+            const double q = 16.0;
             double angle = std::atan2(dir.y, dir.x);
             double step = 2.0 * 3.141592653589793 / q;
             angle = std::round(angle / step) * step;
             dir.x = std::cos(angle);
             dir.y = std::sin(angle);
 
-            // Ensure the final direction still points to a valid (walkable) downhill neighbor.
+            // Ensure the final direction still picks the best downhill neighbor.
+            // Clearance smoothing can only break cost ties, not override path cost.
             Vector2i final_step(0, 0);
+            double final_cost = std::numeric_limits<double>::infinity();
             double best_score = -1.0;
+            const double cost_eps = 1e-9;
             for (const Vector2i &d : dirs8)
             {
                 if (!diagonal_ok(c, d))
@@ -352,7 +355,13 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
 
                 const double inv_len = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.70710678118 : 1.0;
                 const double score = (dir.x * (double)d.x + dir.y * (double)d.y) * inv_len;
-                if (score > best_score)
+                if (nc + cost_eps < final_cost)
+                {
+                    final_cost = nc;
+                    best_score = score;
+                    final_step = d;
+                }
+                else if (std::abs(nc - final_cost) <= cost_eps && score > best_score)
                 {
                     best_score = score;
                     final_step = d;
