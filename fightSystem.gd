@@ -1,13 +1,11 @@
 extends Node
 class_name FightSystem
 
-const DEFAULT_WEAPONS: Array[WeaponData] = [
+@export var visualize_AOE_weapons: bool = true
+@export var weapons: Array[WeaponData] = [
 	preload("res://weapons/bomb.tres"),
 	preload("res://weapons/sword.tres"),
 ]
-
-@export var visualize_AOE_weapons: bool = true
-@export var weapons: Array[WeaponData] = DEFAULT_WEAPONS
 
 var _steering: Node
 var _drawer
