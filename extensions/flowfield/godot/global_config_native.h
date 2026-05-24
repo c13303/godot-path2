@@ -109,6 +109,9 @@ namespace godot
         double get_flow_field_wall_clearance() const;
         void set_flow_field_wall_clearance(double v);
 
+        double get_lost_retry_seconds() const;
+        void set_lost_retry_seconds(double v);
+
         bool get_draw_flow_field() const;
         void set_draw_flow_field(bool v);
 

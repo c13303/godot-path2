@@ -582,6 +582,7 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
     a.target_radius_timer = 0.0;
+    a.lost_timer = 0.0;
 
     a.dir_code = -1;
 }
@@ -1125,6 +1126,14 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
 
+        if (a.lost_timer > 0.0)
+        {
+            a.lost_timer = std::max(0.0, a.lost_timer - delta);
+            a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
+            a.update_motion_state(delta, cfg);
+            continue;
+        }
+
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
@@ -1172,6 +1181,14 @@ void SteeringSystem::update_all(double delta)
             a.last_logged_tile = map_cell;
         }
         Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position + offset));
+        const double lost_goal_margin = std::max(ff->tile_size() * 0.5, target_radius);
+        if (flow_dir.is_zero() && dist_to_target > lost_goal_margin)
+        {
+            a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
+            a.velocity = Vec2(0, 0);
+            a.update_motion_state(delta, cfg, true);
+            continue;
+        }
         Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
 
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);

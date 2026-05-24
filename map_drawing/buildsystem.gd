@@ -6,6 +6,8 @@ const ItemCatalog = preload("res://items/item_catalog.gd")
 @export var buildings: TileMapLayer
 @export var previewbuild: TileMapLayer
 @export var game_ui: CanvasLayer
+@export var notif: Node
+@export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
 
 var _atlas_source_id: int = -1
 
@@ -86,6 +88,10 @@ func _apply_place_tile(place_tile: Dictionary) -> void:
 		return
 
 	_hover_cell = _hovered_cell()
+	if _is_tile_occupied(_hover_cell, target_layer):
+		_notify("invalid tile")
+		return
+
 	_clear_other_build_layer(target_layer)
 	target_layer.set_cell(
 		_hover_cell,
@@ -107,6 +113,34 @@ func _clear_other_build_layer(target_layer: TileMapLayer) -> void:
 	if target_layer != buildings and buildings:
 		buildings.erase_cell(_hover_cell)
 		buildings.update_internals()
+
+func _is_tile_occupied(cell: Vector2i, target_layer: TileMapLayer) -> bool:
+	if target_layer.get_cell_source_id(cell) >= 0:
+		return true
+	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
+		return true
+	if buildings and buildings != target_layer and buildings.get_cell_source_id(cell) >= 0:
+		return true
+	return _is_occupied_by_group_node(cell)
+
+func _is_occupied_by_group_node(cell: Vector2i) -> bool:
+	var map_layer := previewbuild if previewbuild else wallz
+	if not map_layer:
+		return false
+	for group_name in occupied_groups:
+		for node in get_tree().get_nodes_in_group(group_name):
+			if node is Node2D:
+				var occupant := node as Node2D
+				var occupant_cell := map_layer.local_to_map(map_layer.to_local(occupant.global_position))
+				if occupant_cell == cell:
+					return true
+	return false
+
+func _notify(message: String) -> void:
+	if not notif:
+		return
+	if notif.has_method("show_notif"):
+		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
 	if not _hover_active:

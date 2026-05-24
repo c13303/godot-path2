@@ -298,6 +298,8 @@ String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a
         return "no flow";
     if (!a->flow->is_ready())
         return "flow not ready";
+    if (a->lost_timer > 0.0)
+        return "lost t=" + String::num_real(a->lost_timer);
     if (a->target_radius_timer > 0.0)
         return "target wait " + String::num_real(a->target_radius_timer);
     if (a->micro_osc > 0)

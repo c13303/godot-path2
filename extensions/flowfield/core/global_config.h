@@ -44,6 +44,7 @@ namespace ffcore
         double agent_offset_y = 0.0;
 
         double flow_field_wall_clearance = 0.5; // weight for pushing flow away from walls (distance field blend)
+        double lost_retry_seconds = 5.0;
 
         double friction_factor = 0.91;
         double smash_threshold = 5.0;

@@ -31,6 +31,8 @@ void GlobalConfigNative::_bind_methods()
 
     ClassDB::bind_method(D_METHOD("get_flow_field_wall_clearance"), &GlobalConfigNative::get_flow_field_wall_clearance);
     ClassDB::bind_method(D_METHOD("set_flow_field_wall_clearance", "value"), &GlobalConfigNative::set_flow_field_wall_clearance);
+    ClassDB::bind_method(D_METHOD("get_lost_retry_seconds"), &GlobalConfigNative::get_lost_retry_seconds);
+    ClassDB::bind_method(D_METHOD("set_lost_retry_seconds", "value"), &GlobalConfigNative::set_lost_retry_seconds);
 
     ClassDB::bind_method(D_METHOD("get_direct_steer_radius"), &GlobalConfigNative::get_direct_steer_radius);
     ClassDB::bind_method(D_METHOD("set_direct_steer_radius", "value"), &GlobalConfigNative::set_direct_steer_radius);
@@ -109,6 +111,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wall_repel_strength"), "set_wall_repel_strength", "get_wall_repel_strength");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "movement_threshold"), "set_movement_threshold", "get_movement_threshold");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_field_wall_clearance"), "set_flow_field_wall_clearance", "get_flow_field_wall_clearance");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lost_retry_seconds"), "set_lost_retry_seconds", "get_lost_retry_seconds");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "direct_steer_radius"), "set_direct_steer_radius", "get_direct_steer_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "min_speed_fraction"), "set_min_speed_fraction", "get_min_speed_fraction");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cellgoal_cooldown_sec"), "set_cellgoal_cooldown_sec", "get_cellgoal_cooldown_sec");
@@ -168,6 +171,8 @@ void GlobalConfigNative::set_movement_threshold(double v)
 
 double GlobalConfigNative::get_flow_field_wall_clearance() const { return cfg().flow_field_wall_clearance; }
 void GlobalConfigNative::set_flow_field_wall_clearance(double v) { cfg().flow_field_wall_clearance = std::max(0.0, v); }
+double GlobalConfigNative::get_lost_retry_seconds() const { return cfg().lost_retry_seconds; }
+void GlobalConfigNative::set_lost_retry_seconds(double v) { cfg().lost_retry_seconds = std::max(0.0, v); }
 
 double GlobalConfigNative::get_direct_steer_radius() const { return cfg().direct_steer_radius; }
 void GlobalConfigNative::set_direct_steer_radius(double v) { cfg().direct_steer_radius = std::max(0.0, v); }

@@ -78,6 +78,7 @@ namespace ffcore
         int debug_bottleneck_zone = -1;
         double debug_log_timer = 0.0;
         double target_radius_timer = 0.0;
+        double lost_timer = 0.0;
         bool never_rest = false;
 
         void reset();
