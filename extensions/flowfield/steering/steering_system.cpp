@@ -71,15 +71,20 @@ static inline Vec2 agent_foot_point(const AgentData &a)
 
 static inline double agent_fight_query_padding(const AgentData &a)
 {
-    return std::abs(a.profile.foot_offset_y) + std::sqrt(a.profile.fight_half_w * a.profile.fight_half_w + a.profile.fight_half_h * a.profile.fight_half_h);
+    return std::abs(a.profile.foot_offset_y - a.profile.fight_offset_y) + std::sqrt(a.profile.fight_half_w * a.profile.fight_half_w + a.profile.fight_half_h * a.profile.fight_half_h);
+}
+
+static inline Vec2 agent_fight_center(const AgentData &a)
+{
+    return a.position + Vec2(0, a.profile.fight_offset_y);
 }
 
 static inline Vec2 aabb_radial_direction(const Vec2 &origin, const AgentData &agent)
 {
-    Vec2 closest = closest_point_on_aabb(origin, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+    Vec2 closest = closest_point_on_aabb(origin, agent_fight_center(agent), agent.profile.fight_half_w, agent.profile.fight_half_h);
     Vec2 dir = closest - origin;
     if (dir.is_zero())
-        dir = agent.position - origin;
+        dir = agent_fight_center(agent) - origin;
     return dir;
 }
 
@@ -92,6 +97,7 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
     sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
     sanitized.world_radius = sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.separation_radius * 0.5;
     sanitized.foot_offset_y = std::isnan(sanitized.foot_offset_y) ? cfg.agent_offset_y : sanitized.foot_offset_y;
+    sanitized.fight_offset_y = std::isfinite(sanitized.fight_offset_y) ? sanitized.fight_offset_y : 0.0;
     sanitized.fight_half_w = std::max(0.0, sanitized.fight_half_w);
     sanitized.fight_half_h = std::max(0.0, sanitized.fight_half_h);
     if (sanitized.smash_class < 0)
@@ -625,7 +631,8 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
-        double dist = point_aabb_distance(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+        Vec2 fight_center = agent_fight_center(agent);
+        double dist = point_aabb_distance(pos, fight_center, agent.profile.fight_half_w, agent.profile.fight_half_h);
         if (dist > radius)
             continue;
 
@@ -667,7 +674,8 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
-        Vec2 nearest = closest_point_on_aabb(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+        Vec2 fight_center = agent_fight_center(agent);
+        Vec2 nearest = closest_point_on_aabb(pos, fight_center, agent.profile.fight_half_w, agent.profile.fight_half_h);
         Vec2 to_agent = nearest - pos;
         double dist = to_agent.length();
         if (dist > radius)
@@ -675,7 +683,7 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
 
         if (angle_degrees < 360.0 && dist > 1e-3)
         {
-            Vec2 angle_dir = to_agent.is_zero() ? agent.position - pos : to_agent;
+            Vec2 angle_dir = to_agent.is_zero() ? fight_center - pos : to_agent;
             if (!angle_dir.is_zero() && safe_normalize(angle_dir).dot(facing) < min_dot)
                 continue;
         }
@@ -717,7 +725,7 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
             continue;
 
         Vec2 diff = aabb_radial_direction(pos, agent);
-        double dist = point_aabb_distance(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+        double dist = point_aabb_distance(pos, agent_fight_center(agent), agent.profile.fight_half_w, agent.profile.fight_half_h);
         if (dist > radius)
             continue;
 
@@ -804,7 +812,8 @@ void SteeringSystem::update_all(double delta)
                 continue;
 
             Vec2 diff = aabb_radial_direction(zone.pos, agent);
-            double dist = point_aabb_distance(zone.pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+            Vec2 fight_center = agent_fight_center(agent);
+            double dist = point_aabb_distance(zone.pos, fight_center, agent.profile.fight_half_w, agent.profile.fight_half_h);
             if (dist > zone.radius)
                 continue;
 
@@ -817,10 +826,10 @@ void SteeringSystem::update_all(double delta)
             {
                 double half_angle = zone.angle_degrees * 0.5;
                 double min_dot = std::cos(half_angle * 3.14159265358979323846 / 180.0);
-                Vec2 nearest = closest_point_on_aabb(zone.pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+                Vec2 nearest = closest_point_on_aabb(zone.pos, fight_center, agent.profile.fight_half_w, agent.profile.fight_half_h);
                 Vec2 angle_dir = nearest - zone.pos;
                 if (angle_dir.is_zero())
-                    angle_dir = agent.position - zone.pos;
+                    angle_dir = fight_center - zone.pos;
                 if (dist > 1e-3 && !angle_dir.is_zero() && safe_normalize(angle_dir).dot(zone.direction) < min_dot)
                     continue;
                 impulse_dir = zone.direction;

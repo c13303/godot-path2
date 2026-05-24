@@ -3,6 +3,8 @@
 #include "../core/nav_config.h"
 #include "../flow/flow_field.h"
 #include <godot_cpp/classes/node2d.hpp>
+#include <godot_cpp/classes/sprite2d.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string_name.hpp>
@@ -15,8 +17,52 @@
 
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/object.hpp>
+#include <cmath>
 
 using namespace godot;
+
+static Sprite2D *find_first_sprite(Node *node)
+{
+    if (!node)
+        return nullptr;
+
+    for (int i = 0; i < node->get_child_count(); ++i)
+    {
+        Node *child = node->get_child(i);
+        if (auto *sprite = Object::cast_to<Sprite2D>(child))
+            return sprite;
+    }
+
+    return nullptr;
+}
+
+static void apply_sprite_fight_hitbox(Node2D *node, ffcore::AgentProfile &profile)
+{
+    Sprite2D *sprite = find_first_sprite(node);
+    if (!sprite)
+        return;
+
+    Ref<Texture2D> texture = sprite->get_texture();
+    if (texture.is_null())
+        return;
+
+    Vector2 texture_size = texture->get_size();
+    Vector2 scale = sprite->get_scale();
+    Vector2 half_size(
+        texture_size.x * std::abs(scale.x) * 0.5,
+        texture_size.y * std::abs(scale.y) * 0.5);
+
+    Vector2 center = sprite->get_position();
+    if (!sprite->is_centered())
+    {
+        center.x += half_size.x;
+        center.y += half_size.y;
+    }
+
+    profile.fight_offset_y = center.y;
+    profile.fight_half_w = half_size.x;
+    profile.fight_half_h = half_size.y;
+}
 
 void AgentManagerNative::_bind_methods()
 {
@@ -133,6 +179,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
     double max_speed = ffcore::globalconfig().agent_max_speed;
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
     ffcore::AgentProfile profile;
+    apply_sprite_fight_hitbox(node, profile);
     if (node->is_in_group(StringName("player")))
     {
         profile.smash_class = ffcore::SMASH_CLASS_PLAYER;

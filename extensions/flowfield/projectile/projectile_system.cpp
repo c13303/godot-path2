@@ -130,7 +130,8 @@ namespace ffcore
                         (a->profile.smash_class & p.affected_smash_classes) == 0)
                         continue;
 
-                    if (circle_overlaps_aabb(p.pos, cfg.radius, a->position, a->profile.fight_half_w, a->profile.fight_half_h))
+                    Vec2 fight_center = a->position + Vec2(0, a->profile.fight_offset_y);
+                    if (circle_overlaps_aabb(p.pos, cfg.radius, fight_center, a->profile.fight_half_w, a->profile.fight_half_h))
                     {
                         hit = true;
                         break;

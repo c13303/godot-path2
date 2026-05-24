@@ -150,8 +150,21 @@ func _setup_player() -> void:
 		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
 
 	if steering and steering.has_method("set_agent_profile") and player_nav_id >= 0:
+		var player_world_radius := 16.0
+		var sprite := player.get_node_or_null("Sprite2D") as Sprite2D
+		var fight_half_size := Vector2(32.0, 32.0)
+		var fight_offset_y := -32.0
+		if sprite and sprite.texture:
+			var sprite_size: Vector2 = sprite.texture.get_size() * sprite.scale.abs()
+			fight_half_size = sprite_size * 0.5
+			fight_offset_y = sprite.position.y
 		steering.call("set_agent_profile", player_nav_id, {
 			"crowd_push_strength": 2.0,
+			"world_radius": player_world_radius,
+			"foot_offset_y": -player_world_radius,
+			"fight_offset_y": fight_offset_y,
+			"fight_half_w": fight_half_size.x,
+			"fight_half_h": fight_half_size.y,
 			"smash_class": SMASH_CLASS_PLAYER,
 		})
 

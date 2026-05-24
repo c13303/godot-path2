@@ -194,6 +194,8 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.world_radius = double(profile["world_radius"]);
     if (profile.has("foot_offset_y"))
         native_profile.foot_offset_y = double(profile["foot_offset_y"]);
+    if (profile.has("fight_offset_y"))
+        native_profile.fight_offset_y = double(profile["fight_offset_y"]);
     if (profile.has("fight_half_w"))
         native_profile.fight_half_w = double(profile["fight_half_w"]);
     if (profile.has("fight_half_h"))
@@ -249,7 +251,7 @@ Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) cons
     d["velocity_len"] = vel.length();
     int code = _direction_code(vel);
     d["dir_code"] = code;
-    ffcore::Vec2 pos = a->position + ffcore::Vec2(0, ffcore::globalconfig().agent_offset_y);
+    ffcore::Vec2 pos = a->position + ffcore::Vec2(0, a->profile.foot_offset_y);
     d["world_pos"] = Vector2(pos.x, pos.y);
     return d;
 }
@@ -257,13 +259,12 @@ Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) cons
 Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
 {
     Array out;
-    double offset_y = ffcore::globalconfig().agent_offset_y;
     for (const auto &[node, id] : agent_map)
     {
         const ffcore::AgentData *a = system.get_agent(id);
         if (!a || !a->flow || !a->flow->is_ready())
             continue;
-        ffcore::Vec2 foot = a->position + ffcore::Vec2(0, offset_y);
+        ffcore::Vec2 foot = a->position + ffcore::Vec2(0, a->profile.foot_offset_y);
         ffcore::Vec2i rel = a->flow->world_to_cell(foot);
         ffcore::Vec2i map(rel.x + a->flow->get_cell_origin().x, rel.y + a->flow->get_cell_origin().y);
         if (map.x == cell.x && map.y == cell.y)
@@ -355,7 +356,7 @@ void SteeringSystemNative::_draw()
 
         if (debug_draw_fight_hitbox)
         {
-            Vector2 fight_center = to_local(Vector2(a->position.x, a->position.y));
+            Vector2 fight_center = to_local(Vector2(a->position.x, a->position.y + a->profile.fight_offset_y));
             Vector2 half_size(a->profile.fight_half_w, a->profile.fight_half_h);
             Rect2 rect(fight_center - half_size, half_size * 2.0);
             draw_rect(rect, fight_color, false, 2.0);

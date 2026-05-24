@@ -1,18 +1,12 @@
 extends CharacterBody2D
 class_name FlowAgent
 
-const SELECTION_OFFSET: Vector2 = Vector2(0, 8)
-const PROPELLED_SHADOW_COLOR: Color = Color(1, 0, 0, 0.45)
 const BLOOD_ENABLED: bool = false
 const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
 const GLOBAL_CONFIG_NODE_NAME: String = "GlobalConfigNative"
 
-var _shadow_indicator: CharacterShadow
-var _show_shadow: bool = true
-var _colored_shadow: bool = false
-var _colored_shadow_when_selected: bool = false
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
 var _blood_drop_timer: float = 0.0
@@ -21,25 +15,6 @@ var _global_config_node: Node
 var _velocity_len: float = 0.0
 
 @export var use_native_steering := true
-@export var show_shadow: bool = false:
-	set(value):
-		_show_shadow = value
-		_update_shadow()
-	get:
-		return _show_shadow
-@export var colored_shadow: bool = false:
-	set(value):
-		_colored_shadow = value
-		_update_shadow()
-	get:
-		return _colored_shadow
-@export var colored_shadow_when_selected: bool = true:
-	set(value):
-		_colored_shadow_when_selected = value
-		_update_shadow()
-	get:
-		return _colored_shadow_when_selected
-
 @export var max_speed: float = 100.0
 @export var max_force: float = 1200.0
 @export var steering_smooth: float = 0.45
@@ -50,14 +25,11 @@ var arrived: bool = false
 var arrived_reported: bool = false
 var prev_dist_to_target: float = INF
 var _nav_id: int = -1  # ID dans le FF/Steering
-var agent_color: Color = _agent_color()
 var nav_id: int = -1:
 	get:
 		return _nav_id
 	set(value):
 		_nav_id = value
-		agent_color = _agent_color()
-		_update_shadow()
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
@@ -65,7 +37,6 @@ var _is_previewed: bool = false
 func _ready() -> void:
 	if use_native_steering:
 		set_physics_process(false)
-	_update_shadow()
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
@@ -150,7 +121,6 @@ func set_selected(enabled: bool) -> void:
 		return
 
 	_is_selected = enabled
-	_update_shadow()
 
 	if not enabled:
 		modulate = Color(1, 1, 1, 1)
@@ -170,7 +140,6 @@ func set_propelled_state(enabled: bool) -> void:
 		return
 
 	_is_propelled = enabled
-	_update_shadow()
 	if _is_propelled:
 		_blood_drop_timer = 0.0
 
@@ -183,43 +152,6 @@ func set_control_impaired_state(enabled: bool) -> void:
 
 func set_velocity_len(value: float) -> void:
 	_velocity_len = value
-
-func _exit_tree() -> void:
-	if _shadow_indicator:
-		_shadow_indicator.queue_free()
-		_shadow_indicator = null
-
-func _agent_color() -> Color:
-	if _nav_id < 0:
-		return Color(0.0, 0.75, 0.0, 0.45)
-	var h: int = int(((_nav_id * 2654435761) + 1013904223) & 0xFFFFFFFF)
-	var r: float = float(h & 0xFF) / 255.0
-	var g: float = float((h >> 8) & 0xFF) / 255.0
-	var b: float = float((h >> 16) & 0xFF) / 255.0
-	return Color(r, g, b, 0.3)
-
-func _shadow_color() -> Color:
-	if _is_propelled:
-		return PROPELLED_SHADOW_COLOR
-	if _colored_shadow_when_selected and _is_selected:
-		return agent_color
-	if _is_selected:
-		return Color(0, 1, 0, 0.45)
-	if _colored_shadow:
-		return agent_color
-	return Color(0, 0, 0, 0.3)
-
-func _update_shadow() -> void:
-	if _show_shadow:
-		if not _shadow_indicator:
-			_shadow_indicator = CharacterShadow.new()
-			_shadow_indicator.position = SELECTION_OFFSET
-			add_child(_shadow_indicator)
-		_shadow_indicator.color = _shadow_color()
-	else:
-		if _shadow_indicator:
-			_shadow_indicator.queue_free()
-			_shadow_indicator = null
 
 func _update_sprite_tint() -> void:
 	_set_sprite_tint_recursive(self, Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1))
