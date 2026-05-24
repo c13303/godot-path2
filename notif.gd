@@ -1,6 +1,6 @@
 extends RichTextLabel
 
-@export var default_duration_seconds: float = 5.0
+@export var default_duration_seconds: float = 2.0
 
 var _hide_after_seconds: float = 0.0
 
