@@ -11,7 +11,7 @@ namespace ffcore
 
         // Startup/default value. If tile_size is changed through GlobalConfigNative,
         // recompute_from_tile() overwrites this unless wall_avoid_radius is set after it.
-        double wall_avoid_radius = tile_size * 1.2;
+        double wall_avoid_radius = tile_size * 1.3;
         double wall_repel_strength = 12;
 
         double direct_steer_radius = tile_size * 2.5;
