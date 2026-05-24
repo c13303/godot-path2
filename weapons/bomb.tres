@@ -1,19 +1,14 @@
-[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://bwltg6bu0pjg"]
 
-[ext_resource type="Script" path="res://weapons/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="Script" uid="uid://7fy1vw4t2nil" path="res://weapons/weapon_data.gd" id="1_weapon_data"]
 
 [resource]
 script = ExtResource("1_weapon_data")
 id = "bomb"
-directional_area_angle = 360.0
 radius = 100.0
 aoe_duration = 0.35
 smash_force = 200.0
-control_suppression = 1.0
 control_suppression_duration = 0.35
-damage = 1
-friction = 0.91
 falloff = 0.1
 radial = true
 detach_flow = true
-affected_smash_classes = 4
