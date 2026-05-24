@@ -46,6 +46,14 @@ namespace ffcore
         double flow_field_wall_clearance = 0.5; // weight for pushing flow away from walls (distance field blend)
         double lost_retry_seconds = 5.0;
 
+        // Wall-stuck detector: agent wants to move (desired_dir set) but
+        // velocity along that direction stays near zero AND wall_repel
+        // dominates separation (geometry, not neighbors, is the blocker).
+        // Triggers a lost_timer recovery (brake + flow re-query).
+        double wall_stuck_detect_seconds = 0.6;      // sustained window before flagging
+        double wall_stuck_velocity_ratio = 0.1;      // |v.desired_dir| / max_speed below this counts as "not progressing"
+        double wall_stuck_wall_vs_sep_ratio = 1.5;   // |wall_repel| must exceed this * |separation| to attribute to walls
+
         double friction_factor = 0.91;
         double smash_threshold = 5.0;
         double smash_min_cutoff = 0.20;

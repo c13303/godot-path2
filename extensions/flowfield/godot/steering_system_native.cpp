@@ -289,7 +289,7 @@ String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a
     if (a->smash_pending)
         return "smash pending";
     if (a->is_propelled)
-        return "propelled v=" + String::num_real(velocity_len) + " t=" + String::num_real(a->propelled_timer);
+        return "propelled";
     if (a->control_mode == ffcore::AgentControlMode::Manual)
         return velocity_len > 1.0 ? "manual moving" : "manual idle";
     if (!a->active)
@@ -299,15 +299,17 @@ String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a
     if (!a->flow->is_ready())
         return "flow not ready";
     if (a->lost_timer > 0.0)
-        return "lost t=" + String::num_real(a->lost_timer);
+        return "lost";
+    if (a->stuck_in_wall_accum > 0.0)
+        return "stuck in wall";
     if (a->target_radius_timer > 0.0)
-        return "target wait " + String::num_real(a->target_radius_timer);
+        return "target wait";
     if (a->micro_osc > 0)
-        return "following flow osc=" + String::num_int64(a->micro_osc);
+        return "flow osc";
     if (velocity_len <= 1.0)
-        return "following flow idle";
+        return "flow idle";
 
-    return "following flow";
+    return "flow";
 }
 
 Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const

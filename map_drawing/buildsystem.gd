@@ -88,12 +88,9 @@ func _apply_place_tile(place_tile: Dictionary) -> void:
 		return
 
 	_hover_cell = _hovered_cell()
-	print("[BuildSystem] try place at cell ", _hover_cell, " layer=", target_layer.name)
 	if _is_tile_occupied(_hover_cell, target_layer):
-		print("[BuildSystem] -> blocked, occupied")
 		_notify("invalid construction")
 		return
-	print("[BuildSystem] -> placing")
 
 	_clear_other_build_layer(target_layer)
 	target_layer.set_cell(
@@ -132,12 +129,10 @@ func _is_occupied_by_group_node(cell: Vector2i) -> bool:
 		return false
 	for group_name in occupied_groups:
 		var nodes := get_tree().get_nodes_in_group(group_name)
-		print("[BuildSystem] group=", group_name, " count=", nodes.size())
 		for node in nodes:
 			if node is Node2D:
 				var occupant := node as Node2D
 				var occupant_cell := map_layer.local_to_map(map_layer.to_local(occupant.global_position))
-				print("[BuildSystem]   occupant ", occupant.name, " pos=", occupant.global_position, " cell=", occupant_cell, " vs ", cell)
 				if occupant_cell == cell:
 					return true
 	return false

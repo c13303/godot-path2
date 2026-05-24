@@ -79,6 +79,7 @@ namespace ffcore
         double debug_log_timer = 0.0;
         double target_radius_timer = 0.0;
         double lost_timer = 0.0;
+        double stuck_in_wall_accum = 0.0;
         bool never_rest = false;
 
         void reset();

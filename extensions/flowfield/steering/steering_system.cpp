@@ -1221,6 +1221,37 @@ void SteeringSystem::update_all(double delta)
         a.debug_desired_dir = desired_dir;
         a.debug_target_velocity = target_velocity;
 
+        // Wall-stuck detector: wants to move into geometry it can't traverse.
+        // Crowd-throttled agents (separation dominates) are intentionally ignored.
+        if (!a.is_propelled && !desired_dir.is_zero() && cfg.wall_stuck_detect_seconds > 0.0)
+        {
+            double wall_mag = safe_len(wall_repel);
+            double sep_mag = safe_len(separation);
+            double v_along = a.velocity.x * desired_dir.x + a.velocity.y * desired_dir.y;
+            bool not_progressing = v_along < a.max_speed * cfg.wall_stuck_velocity_ratio;
+            bool wall_dominates = wall_mag > cfg.wall_stuck_wall_vs_sep_ratio * sep_mag && wall_mag > 1e-3;
+            if (not_progressing && wall_dominates)
+            {
+                a.stuck_in_wall_accum += delta;
+                if (a.stuck_in_wall_accum >= cfg.wall_stuck_detect_seconds)
+                {
+                    a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
+                    a.stuck_in_wall_accum = 0.0;
+                    a.velocity = Vec2(0, 0);
+                    a.update_motion_state(delta, cfg, true);
+                    continue;
+                }
+            }
+            else
+            {
+                a.stuck_in_wall_accum = 0.0;
+            }
+        }
+        else
+        {
+            a.stuck_in_wall_accum = 0.0;
+        }
+
         apply_bottleneck_traffic(a, ff, target_velocity, delta);
 
         if (!a.is_propelled)
@@ -1248,24 +1279,5 @@ void SteeringSystem::update_all(double delta)
 
         a.update_motion_state(delta, cfg, force_motion_state);
 
-        if ((a.debug_bottleneck_core >= 0 || a.debug_bottleneck_zone >= 0) && safe_len(a.velocity) < a.max_speed * 0.2)
-        {
-            a.debug_log_timer -= delta;
-            if (a.debug_log_timer <= 0.0)
-            {
-                a.debug_log_timer = 0.5;
-                godot::UtilityFunctions::print(
-                    "BN agent=", a.id,
-                    " cell=", rel_cell.x, ",", rel_cell.y,
-                    " core=", a.debug_bottleneck_core,
-                    " zone=", a.debug_bottleneck_zone,
-                    " vel=", safe_len(a.velocity),
-                    " nav=", nav_dir.x, ",", nav_dir.y,
-                    " wall=", wall_repel.x, ",", wall_repel.y,
-                    " sep=", separation.x, ",", separation.y,
-                    " desired=", desired_dir.x, ",", desired_dir.y,
-                    " target=", target_velocity.x, ",", target_velocity.y);
-            }
-        }
     }
 }

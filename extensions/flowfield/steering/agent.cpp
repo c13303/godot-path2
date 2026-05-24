@@ -28,6 +28,7 @@ void AgentData::reset()
     micro_osc_timer = 0.0;
     target_radius_timer = 0.0;
     lost_timer = 0.0;
+    stuck_in_wall_accum = 0.0;
 }
 
     void AgentData::update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state)
