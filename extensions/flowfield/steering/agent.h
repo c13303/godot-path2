@@ -69,6 +69,14 @@ namespace ffcore
         int micro_osc = 0;
         double micro_osc_timer = 0.0;
         Vec3 debug_color{};
+        Vec2 debug_nav_dir{};
+        Vec2 debug_wall_repel{};
+        Vec2 debug_separation{};
+        Vec2 debug_desired_dir{};
+        Vec2 debug_target_velocity{};
+        int debug_bottleneck_core = -1;
+        int debug_bottleneck_zone = -1;
+        double debug_log_timer = 0.0;
         double target_radius_timer = 0.0;
         bool never_rest = false;
 

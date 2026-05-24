@@ -392,6 +392,10 @@ void SteeringSystemNative::_draw()
 
     const Color world_color(0.1, 0.85, 0.35, 0.8);
     const Color bottleneck_zone_color(0.0, 0.2, 1.0, 1.0);
+    const Color nav_color(0.0, 0.9, 1.0, 0.95);
+    const Color wall_color(1.0, 0.65, 0.0, 0.95);
+    const Color sep_color(1.0, 0.0, 1.0, 0.95);
+    const Color desired_color(1.0, 1.0, 1.0, 0.95);
     const Color fight_color(1.0, 0.25, 0.1, 0.8);
     const Color label_color(1.0, 1.0, 1.0, 0.95);
     const Color label_shadow_color(0.0, 0.0, 0.0, 0.8);
@@ -440,6 +444,19 @@ void SteeringSystemNative::_draw()
         {
             Vector2 world_center = to_local(Vector2(a->position.x, a->position.y + a->profile.foot_offset_y));
             draw_arc(world_center, a->profile.world_radius, 0.0, 6.28318530717958647692, 48, world_color, 2.0, true);
+
+            if (a->debug_bottleneck_core >= 0 || a->debug_bottleneck_zone >= 0)
+            {
+                auto draw_vec = [&](const ffcore::Vec2 &v, const Color &color, double scale)
+                {
+                    Vector2 end = world_center + Vector2(v.x, v.y) * scale;
+                    draw_line(world_center, end, color, 2.0);
+                };
+                draw_vec(a->debug_nav_dir, nav_color, 24.0);
+                draw_vec(a->debug_wall_repel, wall_color, 0.12);
+                draw_vec(a->debug_separation, sep_color, 0.02);
+                draw_vec(a->debug_desired_dir, desired_color, 18.0);
+            }
         }
 
         if (debug_draw_fight_hitbox)

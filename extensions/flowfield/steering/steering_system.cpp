@@ -1121,6 +1121,8 @@ void SteeringSystem::update_all(double delta)
 
         Vec2i rel_cell = ff->world_to_cell(a.position + offset);
         Vec2i map_cell(rel_cell.x + ff->get_cell_origin().x, rel_cell.y + ff->get_cell_origin().y);
+        a.debug_bottleneck_core = ff->bottleneck_core_at_cell(rel_cell);
+        a.debug_bottleneck_zone = ff->bottleneck_zone_at_cell(rel_cell);
         if (map_cell != a.last_logged_tile)
         {
             a.last_logged_tile = map_cell;
@@ -1134,11 +1136,12 @@ void SteeringSystem::update_all(double delta)
         bool in_t2_zone = target_radius > 0.0 && dist_to_target <= target_radius;
 
         Vec2 target_velocity;
+        Vec2 desired_dir;
         {
             Vec2 combined = wall_repel + separation;
             combined += nav_dir * cfg.flow_weight;
 
-            Vec2 desired_dir = safe_normalize(combined);
+            desired_dir = safe_normalize(combined);
             if (desired_dir.is_zero() && dist_to_target > 0.0)
                 desired_dir = safe_normalize(to_goal);
 
@@ -1154,6 +1157,12 @@ void SteeringSystem::update_all(double delta)
             }
             target_velocity = desired_dir * target_speed;
         }
+
+        a.debug_nav_dir = nav_dir;
+        a.debug_wall_repel = wall_repel;
+        a.debug_separation = separation;
+        a.debug_desired_dir = desired_dir;
+        a.debug_target_velocity = target_velocity;
 
         apply_bottleneck_traffic(a, ff, target_velocity, delta);
 
@@ -1181,5 +1190,25 @@ void SteeringSystem::update_all(double delta)
         grid->update(a.id, old_pos + offset, agent_foot_point(a));
 
         a.update_motion_state(delta, cfg, force_motion_state);
+
+        if ((a.debug_bottleneck_core >= 0 || a.debug_bottleneck_zone >= 0) && safe_len(a.velocity) < a.max_speed * 0.2)
+        {
+            a.debug_log_timer -= delta;
+            if (a.debug_log_timer <= 0.0)
+            {
+                a.debug_log_timer = 0.5;
+                godot::UtilityFunctions::print(
+                    "BN agent=", a.id,
+                    " cell=", rel_cell.x, ",", rel_cell.y,
+                    " core=", a.debug_bottleneck_core,
+                    " zone=", a.debug_bottleneck_zone,
+                    " vel=", safe_len(a.velocity),
+                    " nav=", nav_dir.x, ",", nav_dir.y,
+                    " wall=", wall_repel.x, ",", wall_repel.y,
+                    " sep=", separation.x, ",", separation.y,
+                    " desired=", desired_dir.x, ",", desired_dir.y,
+                    " target=", target_velocity.x, ",", target_velocity.y);
+            }
+        }
     }
 }
