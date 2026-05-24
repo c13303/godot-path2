@@ -134,7 +134,10 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
     ffcore::AgentProfile profile;
     if (node->is_in_group(StringName("player")))
+    {
         profile.smash_class = ffcore::SMASH_CLASS_PLAYER;
+        profile.weapon_immune = true;
+    }
     else if (node->is_in_group(StringName("monsters")))
         profile.smash_class = ffcore::SMASH_CLASS_MONSTER;
     else if (node->is_in_group(StringName("main_chars")))

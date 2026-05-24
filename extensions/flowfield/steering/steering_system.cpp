@@ -512,6 +512,8 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
         return;
 
     AgentData &agent = agents[it->second];
+    if (agent.profile.weapon_immune)
+        return;
     Vec2 dir = safe_normalize(direction.is_zero() ? hashed_unit_dir(agent.id) : direction);
     Vec2 smash = dir * std::max(0.0, force);
 
@@ -562,6 +564,8 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (agent.profile.weapon_immune)
+            continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
@@ -602,6 +606,8 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (agent.profile.weapon_immune)
+            continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
@@ -629,16 +635,11 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
     if (radius <= 0.0 || !grid)
         return;
 
-    const auto &cfg = globalconfig();
     auto neighbors = grid->query_neighbors(pos, radius);
     if (neighbors.empty())
         return;
 
-    double stop_radius = radius * std::max(0.0, cfg.shockwave_stop_ratio);
-    double stop_time_ms = std::max(0.0, cfg.shockwave_stop_duration_ms);
-    if (stop_radius > 0.0 && stop_time_ms > 0.0)
-        shockwaves.push_back({pos, stop_radius, stop_time_ms, ignored_agent_id, affected_smash_classes});
-
+    double safe_falloff = std::max(0.0, falloff);
     for (int nid : neighbors)
     {
         if (nid == ignored_agent_id)
@@ -649,6 +650,8 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
             continue;
 
         AgentData &agent = agents[it->second];
+        if (agent.profile.weapon_immune)
+            continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
@@ -659,10 +662,9 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
 
         Vec2 dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
         double base = std::max(0.0, 1.0 - dist / radius);
-        double attenuation = std::pow(base, std::max(0.0, falloff));
+        double attenuation = std::pow(base, safe_falloff);
 
-        double wave_speed = std::max(1.0, cfg.shockwave_speed);
-        apply_smash_impulse(nid, dir, intensity * attenuation, friction_loss, dist / wave_speed, true, control_suppression, control_suppression_duration);
+        apply_smash_impulse(nid, dir, intensity * attenuation, friction_loss, 0.0, true, control_suppression, control_suppression_duration);
     }
 }
 
@@ -685,14 +687,6 @@ void SteeringSystem::update_all(double delta)
 
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
-
-    // Mettre à jour les shockwaves persistantes
-    for (auto &w : shockwaves)
-        w.time_left_ms -= delta * 1000.0;
-    shockwaves.erase(std::remove_if(shockwaves.begin(), shockwaves.end(),
-                                    [](const Shockwave &w)
-                                    { return w.time_left_ms <= 0.0; }),
-                     shockwaves.end());
 
     for (auto &a : agents)
     {
@@ -770,22 +764,6 @@ void SteeringSystem::update_all(double delta)
             wall_repel = wall_repulsion_force(a, nav);
 
         Vec2 separation = force_voisine(a);
-        bool in_shockwave = false;
-        if (!a.is_propelled)
-        {
-            for (const auto &w : shockwaves)
-            {
-                if (a.id == w.ignored_agent_id)
-                    continue;
-                if (w.affected_smash_classes != 0 && (a.profile.smash_class & w.affected_smash_classes) == 0)
-                    continue;
-                if (w.time_left_ms > 0.0 && (a.position - w.pos).length() <= w.radius)
-                {
-                    in_shockwave = true;
-                    break;
-                }
-            }
-        }
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, cfg.agent_offset_y);
@@ -796,7 +774,7 @@ void SteeringSystem::update_all(double delta)
         {
             if (a.control_mode == AgentControlMode::Manual)
             {
-                Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+                Vec2 manual_dir = safe_normalize(a.manual_input_dir);
                 Vec2 correction = separation;
                 Vec2 target_velocity = manual_dir.is_zero()
                                            ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
@@ -861,7 +839,7 @@ void SteeringSystem::update_all(double delta)
 
         if (a.control_mode == AgentControlMode::Manual)
         {
-            Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+            Vec2 manual_dir = safe_normalize(a.manual_input_dir);
             Vec2 correction = separation;
             Vec2 target_velocity = manual_dir.is_zero()
                                        ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
@@ -946,8 +924,8 @@ void SteeringSystem::update_all(double delta)
         {
             a.last_logged_tile = map_cell;
         }
-        Vec2 flow_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(ff->compute_flow_dir(a.position + offset));
-        Vec2 nav_dir = (flow_dir.is_zero() && !in_shockwave) ? safe_normalize(to_goal) : flow_dir;
+        Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position + offset));
+        Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
 
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);
@@ -960,7 +938,7 @@ void SteeringSystem::update_all(double delta)
             combined += nav_dir * cfg.flow_weight;
 
             Vec2 desired_dir = safe_normalize(combined);
-            if (desired_dir.is_zero() && dist_to_target > 0.0 && !in_shockwave)
+            if (desired_dir.is_zero() && dist_to_target > 0.0)
                 desired_dir = safe_normalize(to_goal);
 
             double target_speed = a.max_speed;

@@ -152,6 +152,8 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
     if (profile.has("smash_class"))
         native_profile.smash_class = int(profile["smash_class"]);
+    if (profile.has("weapon_immune"))
+        native_profile.weapon_immune = bool(profile["weapon_immune"]);
 
     system.set_agent_profile(agent_id, native_profile);
 }

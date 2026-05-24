@@ -14,15 +14,6 @@ namespace ffcore
     class AgentManager;
     class SteeringSystem;
 
-    struct Shockwave
-    {
-        Vec2 pos;
-        double radius = 0.0;
-        double time_left_ms = 0.0;
-        int ignored_agent_id = -1;
-        int affected_smash_classes = 0;
-    };
-
     class SteeringSystem
     {
     public:
@@ -59,7 +50,6 @@ namespace ffcore
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
-        std::vector<Shockwave> shockwaves;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;

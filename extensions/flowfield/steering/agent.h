@@ -22,6 +22,7 @@ namespace ffcore
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
         int smash_class = SMASH_CLASS_MAIN_CHAR;
+        bool weapon_immune = false;
     };
 
     struct AgentData
