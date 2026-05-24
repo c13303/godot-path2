@@ -83,9 +83,8 @@ namespace ffcore
         Vec2 force_voisine(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
-        Vec2 apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
-        bool is_player_footprint_navigable(const Vec2 &bottom_center, FlowField *ff) const;
-        Vec2 apply_player_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
+        Vec2 apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff);
+        bool is_agent_footprint_navigable(const Vec2 &body_position, const AgentProfile &profile, FlowField *ff) const;
         AgentProfile sanitize_agent_profile(const AgentProfile &profile) const;
         void recompute_hitbox_query_extents();
     };

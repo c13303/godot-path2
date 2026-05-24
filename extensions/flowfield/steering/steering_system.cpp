@@ -238,34 +238,69 @@ static Vec2 project_to_navigable(FlowField *ff, const Vec2 &from, const Vec2 &to
     return lo;
 }
 
-Vec2 SteeringSystem::apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff)
+bool SteeringSystem::is_agent_footprint_navigable(const Vec2 &body_position, const AgentProfile &profile, FlowField *ff) const
+{
+    if (!ff)
+        return true;
+
+    Vec2 center = body_position + Vec2(0, profile.foot_offset_y);
+    double radius = std::max(0.0, profile.world_radius);
+    Vec2i center_cell = ff->world_to_cell(center);
+
+    if (radius <= 0.0)
+        return ff->is_cell_navigable(center_cell);
+
+    const double tile = ff->tile_size();
+    const double half_tile = tile * 0.5;
+    const double epsilon = 1e-6;
+    const int scan_radius = std::max(1, static_cast<int>(std::ceil((radius + half_tile) / tile)));
+
+    for (int dy = -scan_radius; dy <= scan_radius; ++dy)
+    {
+        for (int dx = -scan_radius; dx <= scan_radius; ++dx)
+        {
+            Vec2i cell(center_cell.x + dx, center_cell.y + dy);
+            if (ff->is_cell_navigable(cell))
+                continue;
+
+            Vec2 wall_center = ff->cell_to_world(cell);
+            double distance = point_aabb_distance(center, wall_center, half_tile, half_tile);
+            if (distance < radius - epsilon)
+                return false;
+        }
+    }
+
+    return true;
+}
+
+Vec2 SteeringSystem::apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff)
 {
     if (!ff || (step.x == 0.0 && step.y == 0.0))
-        return from + step;
+        return agent.position + step;
 
     const double max_step = std::max(1.0, ff->tile_size() * 0.25);
     int steps = std::max(1, static_cast<int>(std::ceil(step.length() / max_step)));
-    Vec2 pos = from;
+    Vec2 pos = agent.position;
     Vec2 sub_step = step * (1.0 / static_cast<double>(steps));
 
     for (int i = 0; i < steps; ++i)
     {
         Vec2 full = pos + sub_step;
-        if (ff->is_cell_navigable(ff->world_to_cell(full)))
+        if (is_agent_footprint_navigable(full, agent.profile, ff))
         {
             pos = full;
             continue;
         }
 
         Vec2 only_x(pos.x + sub_step.x, pos.y);
-        if (sub_step.x != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_x)))
+        if (sub_step.x != 0.0 && is_agent_footprint_navigable(only_x, agent.profile, ff))
         {
             pos = only_x;
             continue;
         }
 
         Vec2 only_y(pos.x, pos.y + sub_step.y);
-        if (sub_step.y != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_y)))
+        if (sub_step.y != 0.0 && is_agent_footprint_navigable(only_y, agent.profile, ff))
         {
             pos = only_y;
             continue;
@@ -277,75 +312,29 @@ Vec2 SteeringSystem::apply_walk_with_walls(const Vec2 &from, const Vec2 &step, F
     return pos;
 }
 
-bool SteeringSystem::is_player_footprint_navigable(const Vec2 &bottom_center, FlowField *ff) const
-{
-    if (!ff)
-        return true;
-
-    constexpr double footprint = 32.0;
-    constexpr double half = footprint * 0.5;
-    constexpr double epsilon = 0.001;
-
-    const Vec2 samples[] = {
-        Vec2(bottom_center.x - half + epsilon, bottom_center.y - footprint + epsilon),
-        Vec2(bottom_center.x + half - epsilon, bottom_center.y - footprint + epsilon),
-        Vec2(bottom_center.x - half + epsilon, bottom_center.y - epsilon),
-        Vec2(bottom_center.x + half - epsilon, bottom_center.y - epsilon),
-    };
-
-    for (const Vec2 &sample : samples)
-    {
-        if (!ff->is_cell_navigable(ff->world_to_cell(sample)))
-            return false;
-    }
-
-    return true;
-}
-
-Vec2 SteeringSystem::apply_player_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff)
-{
-    if (!ff || (step.x == 0.0 && step.y == 0.0))
-        return from + step;
-
-    Vec2 full = from + step;
-    if (is_player_footprint_navigable(full, ff))
-        return full;
-
-    Vec2 only_x(from.x + step.x, from.y);
-    if (step.x != 0.0 && is_player_footprint_navigable(only_x, ff))
-        return only_x;
-
-    Vec2 only_y(from.x, from.y + step.y);
-    if (step.y != 0.0 && is_player_footprint_navigable(only_y, ff))
-        return only_y;
-
-    return from;
-}
-
 void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, double delta)
 {
-    Vec2i cell = ff->world_to_cell(a.position);
-    if (ff->is_cell_navigable(cell))
+    Vec2 footprint_center = agent_foot_point(a);
+    Vec2i cell = ff->world_to_cell(footprint_center);
+    if (is_agent_footprint_navigable(a.position, a.profile, ff))
         return;
 
-    Vec2i best_cell = ff->find_nearest_navigable(cell);
     Vec2 wall_center = ff->cell_to_world(cell);
-    Vec2 free_center = ff->cell_to_world(best_cell);
-    Vec2 dir = safe_normalize(free_center - wall_center);
 
     // Hard clamp intégré : sécurité absolue
-    Vec2i check = ff->world_to_cell(a.position);
+    Vec2i check = ff->world_to_cell(footprint_center);
 
     /*     godot::UtilityFunctions::print("Hard Bounce Triggered"); */
 
     Vec2i safe = ff->find_nearest_navigable(check);
     Vec2 safe_center = ff->cell_to_world(safe);
 
-    Vec2 wall_normal = safe_normalize(a.position - wall_center);
+    Vec2 wall_normal = safe_normalize(footprint_center - wall_center);
     Vec2 tangent(-wall_normal.y, wall_normal.x);
 
     double softness = 0.2;
-    Vec2 target = safe_center + tangent * (ff->tile_size() * 0.05);
+    Vec2 target_foot = safe_center + tangent * (ff->tile_size() * 0.05);
+    Vec2 target = target_foot - Vec2(0, a.profile.foot_offset_y);
 
     // Collision murale : annuler la poussée pour éviter de re-rentrer immédiatement
     a.smash_force = Vec2(0, 0);
@@ -359,10 +348,11 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
 Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
 {
     const auto &cfg = globalconfig();
+    Vec2 footprint_center = agent_foot_point(a);
 
     if (ff && ff->has_distance_field())
     {
-        Vec2i cur = ff->world_to_cell(a.position);
+        Vec2i cur = ff->world_to_cell(footprint_center);
         Vec2 grad = ff->distance_gradient_at_cell(cur);
         if (!grad.is_zero())
         {
@@ -375,7 +365,7 @@ Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
         }
     }
 
-    Vec2i cur = ff->world_to_cell(a.position);
+    Vec2i cur = ff->world_to_cell(footprint_center);
     Vec2 r(0, 0);
     for (int dx = -1; dx <= 1; ++dx)
         for (int dy = -1; dy <= 1; ++dy)
@@ -385,7 +375,7 @@ Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
             Vec2i n{cur.x + dx, cur.y + dy};
             if (!ff->is_cell_navigable(n))
             {
-                Vec2 d = a.position - ff->cell_to_world(n);
+                Vec2 d = footprint_center - ff->cell_to_world(n);
                 double L = d.length();
                 if (L < cfg.wall_avoid_radius && L > 1e-3)
                 {
@@ -951,7 +941,7 @@ void SteeringSystem::update_all(double delta)
                 Vec2 old_pos = a.position;
                 Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
                 Vec2 step = move_velocity * delta;
-                Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
+                Vec2 new_pos = apply_walk_with_walls(a, step, nav);
                 a.position = new_pos;
 
                 if (nav)
@@ -983,7 +973,7 @@ void SteeringSystem::update_all(double delta)
 
             Vec2 old_pos = a.position;
             Vec2 step = a.velocity * delta;
-            a.position = apply_walk_with_walls(a.position, step, nav);
+            a.position = apply_walk_with_walls(a, step, nav);
 
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
@@ -1016,7 +1006,7 @@ void SteeringSystem::update_all(double delta)
             Vec2 old_pos = a.position;
             Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
             Vec2 step = move_velocity * delta;
-            Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
+            Vec2 new_pos = apply_walk_with_walls(a, step, nav);
             a.position = new_pos;
 
             if (nav)
@@ -1127,7 +1117,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 old_pos = a.position;
         Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
         Vec2 step = move_velocity * delta;
-        a.position = apply_walk_with_walls(a.position, step, ff);
+        a.position = apply_walk_with_walls(a, step, ff);
 
         ultimate_wall_correction(a, ff, delta);
 
