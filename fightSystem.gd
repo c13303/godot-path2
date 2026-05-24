@@ -23,46 +23,36 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		return false
 	var radius: float = weapon.radius
 	var angle: float = weapon.directional_area_angle
-	if radius <= 0.0:
+	var duration: float = weapon.aoe_duration
+	if radius <= 0.0 or duration <= 0.0:
 		return false
 
 	var facing: Vector2 = direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
 	if visualize_AOE_weapons:
-		_drawer.show_weapon_area(origin, facing, radius, angle, weapon.control_suppression_duration)
+		_drawer.show_weapon_area(origin, facing, radius, angle, duration)
 
 	if not _steering:
 		return true
 
-	var force: float = weapon.smash_force
-	var friction: float = weapon.friction
-	var falloff: float = weapon.falloff
-	var detach_flow: bool = weapon.detach_flow
-	var control_suppression: float = weapon.control_suppression
-	var control_suppression_duration: float = weapon.control_suppression_duration
-	var affected_classes: int = weapon.affected_smash_classes
-	var ignored_agent_id: int = source_agent_id
+	if not _steering.has_method("spawn_aoe_zone"):
+		return false
 
-	if weapon.radial:
-		if _steering.has_method("apply_explosion_filtered"):
-			_steering.call("apply_explosion_filtered", origin, radius, force, friction, falloff, ignored_agent_id, control_suppression, control_suppression_duration, affected_classes)
-		return true
-
-	if _steering.has_method("apply_cone_smash"):
-		_steering.call(
-			"apply_cone_smash",
-			origin,
-			radius,
-			facing,
-			angle,
-			force,
-			friction,
-			falloff,
-			detach_flow,
-			control_suppression,
-			control_suppression_duration,
-			ignored_agent_id,
-			affected_classes
-		)
+	_steering.call(
+		"spawn_aoe_zone",
+		origin,
+		facing,
+		radius,
+		angle,
+		duration,
+		weapon.smash_force,
+		weapon.friction,
+		weapon.falloff,
+		weapon.detach_flow,
+		weapon.control_suppression,
+		weapon.control_suppression_duration,
+		source_agent_id,
+		weapon.affected_smash_classes
+	)
 	return true
 
 func _rebuild_weapon_index() -> void:

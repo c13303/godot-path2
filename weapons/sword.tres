@@ -7,6 +7,7 @@ script = ExtResource("1_weapon_data")
 id = "sword"
 directional_area_angle = 180.0
 radius = 64.0
+aoe_duration = 0.15
 smash_force = 200.0
 control_suppression = 0.35
 control_suppression_duration = 0.15

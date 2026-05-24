@@ -4,6 +4,7 @@ class_name WeaponData
 @export var id: String = ""
 @export var directional_area_angle: float = 360.0
 @export var radius: float = 0.0
+@export var aoe_duration: float = 0.0
 @export var smash_force: float = 0.0
 @export_range(0.0, 1.0, 0.01) var control_suppression: float = 1.0
 @export var control_suppression_duration: float = 0.0

@@ -5,6 +5,7 @@
 #include "../grid/spatial_grid.h"
 #include "agent.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace ffcore
@@ -13,6 +14,24 @@ namespace ffcore
     class SpatialGrid;
     class AgentManager;
     class SteeringSystem;
+
+    struct ActiveAoE
+    {
+        Vec2 pos;
+        Vec2 direction;        // ignored when angle_degrees >= 360 (radial)
+        double radius = 0.0;
+        double angle_degrees = 360.0;
+        double force = 0.0;
+        double friction_loss = 0.0;
+        double falloff = 0.0;
+        bool detach_flow = false;
+        double control_suppression = 1.0;
+        double control_suppression_duration = 0.0;
+        int ignored_agent_id = -1;
+        int affected_smash_classes = 0;
+        double time_left = 0.0;
+        std::unordered_set<int> hit_ids;
+    };
 
     class SteeringSystem
     {
@@ -44,12 +63,14 @@ namespace ffcore
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
+        void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void set_agent_never_rest(int id, bool value);
 
     private:
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
+        std::vector<ActiveAoE> active_aoes;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;

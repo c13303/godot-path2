@@ -668,6 +668,40 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
     }
 }
 
+void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
+{
+    if (radius <= 0.0 || duration <= 0.0)
+        return;
+
+    ActiveAoE zone;
+    zone.pos = pos;
+    double clamped_angle = std::clamp(angle_degrees, 0.0, 360.0);
+    if (clamped_angle < 360.0)
+    {
+        Vec2 facing = safe_normalize(direction);
+        if (facing.is_zero())
+            return;
+        zone.direction = facing;
+    }
+    else
+    {
+        zone.direction = Vec2(0, 0);
+    }
+    zone.radius = radius;
+    zone.angle_degrees = clamped_angle;
+    zone.force = force;
+    zone.friction_loss = friction_loss;
+    zone.falloff = std::max(0.0, falloff);
+    zone.detach_flow = detach_flow;
+    zone.control_suppression = control_suppression;
+    zone.control_suppression_duration = control_suppression_duration;
+    zone.ignored_agent_id = ignored_agent_id;
+    zone.affected_smash_classes = affected_smash_classes;
+    zone.time_left = duration;
+
+    active_aoes.push_back(std::move(zone));
+}
+
 void SteeringSystem::set_agent_never_rest(int id, bool value)
 {
     auto it = id_to_index.find(id);
@@ -687,6 +721,58 @@ void SteeringSystem::update_all(double delta)
 
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
+
+    for (auto &zone : active_aoes)
+    {
+        auto neighbors = grid->query_neighbors(zone.pos, zone.radius);
+        for (int nid : neighbors)
+        {
+            if (nid == zone.ignored_agent_id)
+                continue;
+            if (zone.hit_ids.count(nid) != 0)
+                continue;
+
+            auto it = id_to_index.find(nid);
+            if (it == id_to_index.end())
+                continue;
+
+            AgentData &agent = agents[it->second];
+            if (agent.profile.weapon_immune)
+                continue;
+            if (zone.affected_smash_classes != 0 && (agent.profile.smash_class & zone.affected_smash_classes) == 0)
+                continue;
+
+            Vec2 diff = agent.position - zone.pos;
+            double dist = diff.length();
+            if (dist > zone.radius)
+                continue;
+
+            Vec2 impulse_dir;
+            if (zone.angle_degrees >= 360.0)
+            {
+                impulse_dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
+            }
+            else
+            {
+                double half_angle = zone.angle_degrees * 0.5;
+                double min_dot = std::cos(half_angle * 3.14159265358979323846 / 180.0);
+                if (safe_normalize(diff).dot(zone.direction) < min_dot)
+                    continue;
+                impulse_dir = zone.direction;
+            }
+
+            double base = std::max(0.0, 1.0 - dist / zone.radius);
+            double attenuation = std::pow(base, zone.falloff);
+
+            apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
+            zone.hit_ids.insert(nid);
+        }
+
+        zone.time_left -= delta;
+    }
+    active_aoes.erase(std::remove_if(active_aoes.begin(), active_aoes.end(),
+                                     [](const ActiveAoE &z) { return z.time_left <= 0.0; }),
+                      active_aoes.end());
 
     for (auto &a : agents)
     {
