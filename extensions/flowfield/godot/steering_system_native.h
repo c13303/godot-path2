@@ -30,7 +30,7 @@ namespace godot
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
         bool debug_draw_world_hitbox = true;
-        bool debug_draw_bottleneck_zones = true;
+        bool debug_draw_bottleneck_zones = false;
         bool debug_draw_fight_hitbox = true;
         bool debug_show_agent_state_labels = true;
 
