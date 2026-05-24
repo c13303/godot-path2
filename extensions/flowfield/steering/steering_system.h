@@ -65,12 +65,15 @@ namespace ffcore
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void set_agent_never_rest(int id, bool value);
+        double get_max_fight_query_padding() const { return max_fight_query_padding; }
 
     private:
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
         std::vector<ActiveAoE> active_aoes;
+        double max_fight_query_padding = 0.0;
+        double max_world_radius = 0.0;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
@@ -83,6 +86,8 @@ namespace ffcore
         Vec2 apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
         bool is_player_footprint_navigable(const Vec2 &bottom_center, FlowField *ff) const;
         Vec2 apply_player_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
+        AgentProfile sanitize_agent_profile(const AgentProfile &profile) const;
+        void recompute_hitbox_query_extents();
     };
 
     SteeringSystem *get_global_steering_system();

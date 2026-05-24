@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.h"
+#include <limits>
 
 namespace ffcore
 {
@@ -21,6 +22,10 @@ namespace ffcore
     {
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
+        double world_radius = 0.0;
+        double foot_offset_y = std::numeric_limits<double>::quiet_NaN();
+        double fight_half_w = 32.0;
+        double fight_half_h = 32.0;
         int smash_class = SMASH_CLASS_MAIN_CHAR;
         bool weapon_immune = false;
     };

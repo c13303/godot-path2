@@ -95,8 +95,6 @@ namespace ffcore
             std::vector<Projectile> &pool = pools[t];
             TypePool &tp = meta[t];
 
-            double hit_radius_sq = cfg.radius * cfg.radius;
-
             for (std::size_t i = 0; i < pool.size(); ++i)
             {
                 Projectile &p = pool[i];
@@ -112,7 +110,8 @@ namespace ffcore
                     continue;
                 }
 
-                auto neighbors = grid->query_neighbors(p.pos, cfg.radius);
+                double query_radius = cfg.radius + (steering ? steering->get_max_fight_query_padding() : 0.0);
+                auto neighbors = grid->query_neighbors(p.pos, query_radius);
                 bool hit = false;
                 for (int nid : neighbors)
                 {
@@ -131,9 +130,7 @@ namespace ffcore
                         (a->profile.smash_class & p.affected_smash_classes) == 0)
                         continue;
 
-                    double dx = a->position.x - p.pos.x;
-                    double dy = a->position.y - p.pos.y;
-                    if (dx * dx + dy * dy <= hit_radius_sq)
+                    if (circle_overlaps_aabb(p.pos, cfg.radius, a->position, a->profile.fight_half_w, a->profile.fight_half_h))
                     {
                         hit = true;
                         break;

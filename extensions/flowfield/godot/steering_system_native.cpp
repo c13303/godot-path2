@@ -169,6 +169,14 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.crowd_push_strength = double(profile["crowd_push_strength"]);
     if (profile.has("crowd_resist_strength"))
         native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
+    if (profile.has("world_radius"))
+        native_profile.world_radius = double(profile["world_radius"]);
+    if (profile.has("foot_offset_y"))
+        native_profile.foot_offset_y = double(profile["foot_offset_y"]);
+    if (profile.has("fight_half_w"))
+        native_profile.fight_half_w = double(profile["fight_half_w"]);
+    if (profile.has("fight_half_h"))
+        native_profile.fight_half_h = double(profile["fight_half_h"]);
     if (profile.has("smash_class"))
         native_profile.smash_class = int(profile["smash_class"]);
     if (profile.has("weapon_immune"))

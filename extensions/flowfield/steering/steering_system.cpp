@@ -64,6 +64,53 @@ static Vec3 hashed_color(int id)
 
 static std::unordered_map<int, double> g_goal_cooldown; // Cooldown global pour les agents autour des objectifs
 
+static inline Vec2 agent_foot_point(const AgentData &a)
+{
+    return a.position + Vec2(0, a.profile.foot_offset_y);
+}
+
+static inline double agent_fight_query_padding(const AgentData &a)
+{
+    return std::abs(a.profile.foot_offset_y) + std::sqrt(a.profile.fight_half_w * a.profile.fight_half_w + a.profile.fight_half_h * a.profile.fight_half_h);
+}
+
+static inline Vec2 aabb_radial_direction(const Vec2 &origin, const AgentData &agent)
+{
+    Vec2 closest = closest_point_on_aabb(origin, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+    Vec2 dir = closest - origin;
+    if (dir.is_zero())
+        dir = agent.position - origin;
+    return dir;
+}
+
+AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile) const
+{
+    AgentProfile sanitized = profile;
+    const auto &cfg = globalconfig();
+
+    sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
+    sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
+    sanitized.world_radius = sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.separation_radius * 0.5;
+    sanitized.foot_offset_y = std::isnan(sanitized.foot_offset_y) ? cfg.agent_offset_y : sanitized.foot_offset_y;
+    sanitized.fight_half_w = std::max(0.0, sanitized.fight_half_w);
+    sanitized.fight_half_h = std::max(0.0, sanitized.fight_half_h);
+    if (sanitized.smash_class < 0)
+        sanitized.smash_class = 0;
+
+    return sanitized;
+}
+
+void SteeringSystem::recompute_hitbox_query_extents()
+{
+    max_fight_query_padding = 0.0;
+    max_world_radius = 0.0;
+    for (const auto &agent : agents)
+    {
+        max_fight_query_padding = std::max(max_fight_query_padding, agent_fight_query_padding(agent));
+        max_world_radius = std::max(max_world_radius, agent.profile.world_radius);
+    }
+}
+
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
     AgentData a;
@@ -71,13 +118,13 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     a.position = pos;
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow ? flow : default_flow;
+    a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
-    const auto &cfg = globalconfig();
-    Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
-        grid->insert(a.id, pos + offset);
+        grid->insert(a.id, agent_foot_point(a));
+    recompute_hitbox_query_extents();
     g_goal_cooldown[a.id] = 0.0;
     return a.id;
 }
@@ -101,6 +148,7 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     agents.pop_back();
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
+    recompute_hitbox_query_extents();
 }
 
 void SteeringSystem::reactivate_agents_for_field(FlowField *field)
@@ -132,6 +180,7 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow;
     a.active = flow != nullptr; // ✅ Inactif si pas de flow
+    a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);
 
     if (auto *entry = ffcore::get_global_agent_manager()->get(fixed_id))
@@ -145,12 +194,11 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     agents.push_back(a);
     id_to_index[a.id] = (int)agents.size() - 1;
 
-    const auto &cfg = globalconfig();
-    Vec2 offset(0, cfg.agent_offset_y);
     if (grid)
-        grid->insert(a.id, pos + offset);
+        grid->insert(a.id, agent_foot_point(a));
 
     g_goal_cooldown[a.id] = 0.0;
+    recompute_hitbox_query_extents();
     /* godot::UtilityFunctions::print("Agent", a.id, " ajouté dans steering system"); */
     return a.id;
 }
@@ -351,7 +399,8 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     if (!grid)
         return Vec2(0, 0);
 
-    std::vector<int> neighbor_ids = grid->query_neighbors(agent.position, cfg.separation_radius);
+    Vec2 agent_foot = agent_foot_point(agent);
+    std::vector<int> neighbor_ids = grid->query_neighbors(agent_foot, agent.profile.world_radius + max_world_radius);
 
     struct NeighborDist
     {
@@ -372,10 +421,14 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
         const AgentData &n = agents[it->second];
 
-        Vec2 diff = agent.position - n.position;
+        double sum_radius = agent.profile.world_radius + n.profile.world_radius;
+        if (sum_radius <= 0.0)
+            continue;
+
+        Vec2 diff = agent_foot - agent_foot_point(n);
         double dist_sq = diff.length_squared();
 
-        if (dist_sq <= cfg.separation_radius * cfg.separation_radius)
+        if (dist_sq <= sum_radius * sum_radius)
             candidates.push_back({nid, dist_sq});
     }
 
@@ -393,12 +446,16 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         auto it = id_to_index.find(candidates[i].id);
         const AgentData &n = agents[it->second];
 
-        Vec2 diff = agent.position - n.position;
+        double sum_radius = agent.profile.world_radius + n.profile.world_radius;
+        if (sum_radius <= 0.0)
+            continue;
+
+        Vec2 diff = agent_foot - agent_foot_point(n);
         double dist = diff.length();
         if (dist < 0.001)
             dist = 0.001;
 
-        double falloff = std::pow(std::max(0.0, 1.0 - dist / cfg.separation_radius), 2.0);
+        double falloff = std::pow(std::max(0.0, 1.0 - dist / sum_radius), 2.0);
 
         double weight = 1.0;
         double resist = std::max(0.001, agent.profile.crowd_resist_strength);
@@ -454,13 +511,12 @@ void SteeringSystem::set_agent_profile(int id, const AgentProfile &profile)
     if (it == id_to_index.end())
         return;
 
-    AgentProfile sanitized = profile;
-    sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
-    sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
-    if (sanitized.smash_class < 0)
-        sanitized.smash_class = 0;
-
-    agents[it->second].profile = sanitized;
+    AgentData &agent = agents[it->second];
+    Vec2 old_foot = agent_foot_point(agent);
+    agent.profile = sanitize_agent_profile(profile);
+    if (grid)
+        grid->update(agent.id, old_foot, agent_foot_point(agent));
+    recompute_hitbox_query_extents();
 }
 
 void SteeringSystem::set_agent_control_mode(int id, int mode)
@@ -549,7 +605,7 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
     if (radius <= 0.0 || !grid)
         return;
 
-    auto neighbors = grid->query_neighbors(pos, radius);
+    auto neighbors = grid->query_neighbors(pos, radius + max_fight_query_padding);
     if (neighbors.empty())
         return;
 
@@ -569,7 +625,7 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
-        double dist = (agent.position - pos).length();
+        double dist = point_aabb_distance(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
         if (dist > radius)
             continue;
 
@@ -588,7 +644,7 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
     if (facing.is_zero())
         return;
 
-    auto neighbors = grid->query_neighbors(pos, radius);
+    auto neighbors = grid->query_neighbors(pos, radius + max_fight_query_padding);
     if (neighbors.empty())
         return;
 
@@ -611,13 +667,18 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
-        Vec2 to_agent = agent.position - pos;
+        Vec2 nearest = closest_point_on_aabb(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+        Vec2 to_agent = nearest - pos;
         double dist = to_agent.length();
         if (dist > radius)
             continue;
 
-        if (angle_degrees < 360.0 && safe_normalize(to_agent).dot(facing) < min_dot)
-            continue;
+        if (angle_degrees < 360.0 && dist > 1e-3)
+        {
+            Vec2 angle_dir = to_agent.is_zero() ? agent.position - pos : to_agent;
+            if (!angle_dir.is_zero() && safe_normalize(angle_dir).dot(facing) < min_dot)
+                continue;
+        }
 
         double base = std::max(0.0, 1.0 - dist / radius);
         double attenuation = std::pow(base, safe_falloff);
@@ -635,7 +696,7 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
     if (radius <= 0.0 || !grid)
         return;
 
-    auto neighbors = grid->query_neighbors(pos, radius);
+    auto neighbors = grid->query_neighbors(pos, radius + max_fight_query_padding);
     if (neighbors.empty())
         return;
 
@@ -655,12 +716,12 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
             continue;
 
-        Vec2 diff = agent.position - pos;
-        double dist = diff.length();
+        Vec2 diff = aabb_radial_direction(pos, agent);
+        double dist = point_aabb_distance(pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
         if (dist > radius)
             continue;
 
-        Vec2 dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
+        Vec2 dir = safe_normalize(diff.is_zero() ? hashed_unit_dir(agent.id) : diff);
         double base = std::max(0.0, 1.0 - dist / radius);
         double attenuation = std::pow(base, safe_falloff);
 
@@ -724,7 +785,7 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &zone : active_aoes)
     {
-        auto neighbors = grid->query_neighbors(zone.pos, zone.radius);
+        auto neighbors = grid->query_neighbors(zone.pos, zone.radius + max_fight_query_padding);
         for (int nid : neighbors)
         {
             if (nid == zone.ignored_agent_id)
@@ -742,21 +803,25 @@ void SteeringSystem::update_all(double delta)
             if (zone.affected_smash_classes != 0 && (agent.profile.smash_class & zone.affected_smash_classes) == 0)
                 continue;
 
-            Vec2 diff = agent.position - zone.pos;
-            double dist = diff.length();
+            Vec2 diff = aabb_radial_direction(zone.pos, agent);
+            double dist = point_aabb_distance(zone.pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
             if (dist > zone.radius)
                 continue;
 
             Vec2 impulse_dir;
             if (zone.angle_degrees >= 360.0)
             {
-                impulse_dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
+                impulse_dir = safe_normalize(diff.is_zero() ? hashed_unit_dir(agent.id) : diff);
             }
             else
             {
                 double half_angle = zone.angle_degrees * 0.5;
                 double min_dot = std::cos(half_angle * 3.14159265358979323846 / 180.0);
-                if (safe_normalize(diff).dot(zone.direction) < min_dot)
+                Vec2 nearest = closest_point_on_aabb(zone.pos, agent.position, agent.profile.fight_half_w, agent.profile.fight_half_h);
+                Vec2 angle_dir = nearest - zone.pos;
+                if (angle_dir.is_zero())
+                    angle_dir = agent.position - zone.pos;
+                if (dist > 1e-3 && !angle_dir.is_zero() && safe_normalize(angle_dir).dot(zone.direction) < min_dot)
                     continue;
                 impulse_dir = zone.direction;
             }
@@ -852,7 +917,7 @@ void SteeringSystem::update_all(double delta)
         Vec2 separation = force_voisine(a);
 
         const auto &cfg = globalconfig();
-        Vec2 offset(0, cfg.agent_offset_y);
+        Vec2 offset(0, a.profile.foot_offset_y);
         double active_control_suppression = (a.is_propelled && a.smash_control_suppression_timer > 0.0) ? std::clamp(a.smash_control_suppression, 0.0, 1.0) : 0.0;
         double smash_control_factor = a.is_propelled ? (1.0 - active_control_suppression) : 1.0;
 
@@ -887,7 +952,7 @@ void SteeringSystem::update_all(double delta)
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
 
-                grid->update(a.id, old_pos + offset, a.position + offset);
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg);
                 continue;
             }
@@ -918,7 +983,7 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
-            grid->update(a.id, old_pos + offset, a.position + offset);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
             a.update_motion_state(delta, cfg);
             continue;
         }
@@ -952,7 +1017,7 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
-            grid->update(a.id, old_pos + offset, a.position + offset);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
             a.update_motion_state(delta, cfg);
             continue;
         }
@@ -1061,7 +1126,7 @@ void SteeringSystem::update_all(double delta)
 
         ultimate_wall_correction(a, ff, delta);
 
-        grid->update(a.id, old_pos + offset, a.position + offset);
+        grid->update(a.id, old_pos + offset, agent_foot_point(a));
 
         a.update_motion_state(delta, cfg, force_motion_state);
     }

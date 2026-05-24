@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -83,5 +84,26 @@ namespace ffcore
         double y = 0.0;
         double z = 0.0;
     };
+
+    inline Vec2 closest_point_on_aabb(const Vec2 &p, const Vec2 &center, double half_w, double half_h)
+    {
+        return Vec2(
+            std::clamp(p.x, center.x - half_w, center.x + half_w),
+            std::clamp(p.y, center.y - half_h, center.y + half_h));
+    }
+
+    inline double point_aabb_distance(const Vec2 &p, const Vec2 &center, double half_w, double half_h)
+    {
+        Vec2 closest = closest_point_on_aabb(p, center, half_w, half_h);
+        return (p - closest).length();
+    }
+
+    inline bool circle_overlaps_aabb(const Vec2 &circle_center, double circle_radius, const Vec2 &aabb_center, double half_w, double half_h)
+    {
+        if (circle_radius < 0.0)
+            return false;
+        double dist = point_aabb_distance(circle_center, aabb_center, half_w, half_h);
+        return dist <= circle_radius;
+    }
 
 } // namespace ffcore
