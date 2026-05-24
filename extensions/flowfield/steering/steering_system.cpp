@@ -388,8 +388,6 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     Vec2 separation_force(0, 0);
     int count = 0;
 
-    bool self_has_flow = (agent.flow != nullptr);
-
     for (int i = 0; i < limit; ++i)
     {
         auto it = id_to_index.find(candidates[i].id);
@@ -402,13 +400,9 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
         double falloff = std::pow(std::max(0.0, 1.0 - dist / cfg.separation_radius), 2.0);
 
-        bool other_has_flow = (n.flow != nullptr);
-
         double weight = 1.0;
-        if (self_has_flow && !other_has_flow)
-            weight *= 2.0;
-        if (!self_has_flow && other_has_flow)
-            weight *= 0.5;
+        double resist = std::max(0.001, agent.profile.crowd_resist_strength);
+        weight *= std::max(0.0, n.profile.crowd_push_strength) / resist;
 
         separation_force = separation_force + (diff * (1.0 / dist)) * falloff * weight;
         count++;
@@ -452,6 +446,19 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.target_radius_timer = 0.0;
 
     a.dir_code = -1;
+}
+
+void SteeringSystem::set_agent_profile(int id, const AgentProfile &profile)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentProfile sanitized = profile;
+    sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
+    sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
+
+    agents[it->second].profile = sanitized;
 }
 
 void SteeringSystem::set_agent_control_mode(int id, int mode)

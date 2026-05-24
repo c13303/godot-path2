@@ -13,6 +13,12 @@ namespace ffcore
         Manual = 1,
     };
 
+    struct AgentProfile
+    {
+        double crowd_push_strength = 1.0;
+        double crowd_resist_strength = 1.0;
+    };
+
     struct AgentData
     {
         int id = -1;
@@ -20,6 +26,7 @@ namespace ffcore
         Vec2 velocity;
         double max_speed = 50.0;
         bool active = true;
+        AgentProfile profile{};
 
         FlowField *flow = nullptr;
         AgentControlMode control_mode = AgentControlMode::FlowField;

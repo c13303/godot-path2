@@ -119,6 +119,11 @@ func _setup_player() -> void:
 	if steering and steering.has_method("set_agent_manual_motion") and player_nav_id >= 0:
 		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
 
+	if steering and steering.has_method("set_agent_profile") and player_nav_id >= 0:
+		steering.call("set_agent_profile", player_nav_id, {
+			"crowd_push_strength": 2.0,
+		})
+
 	if player:
 		camera_controller.set_follow_target(player, true)
 

@@ -21,6 +21,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_control_mode", "agent_id", "mode"), &SteeringSystemNative::set_agent_control_mode);
     ClassDB::bind_method(D_METHOD("set_agent_input", "agent_id", "direction"), &SteeringSystemNative::set_agent_input);
     ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
+    ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_id", "profile"), &SteeringSystemNative::set_agent_profile);
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
@@ -90,6 +91,18 @@ void SteeringSystemNative::set_agent_input(int agent_id, const Vector2 &directio
 void SteeringSystemNative::set_agent_manual_motion(int agent_id, double acceleration, double deceleration)
 {
     system.set_agent_manual_motion(agent_id, acceleration, deceleration);
+}
+
+void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &profile)
+{
+    ffcore::AgentProfile native_profile;
+
+    if (profile.has("crowd_push_strength"))
+        native_profile.crowd_push_strength = double(profile["crowd_push_strength"]);
+    if (profile.has("crowd_resist_strength"))
+        native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
+
+    system.set_agent_profile(agent_id, native_profile);
 }
 
 Vector2 SteeringSystemNative::get_agent_position(int agent_id) const

@@ -45,6 +45,7 @@ namespace ffcore
         void set_agent_control_mode(int id, int mode);
         void set_agent_input(int id, const Vec2 &direction);
         void set_agent_manual_motion(int id, double acceleration, double deceleration);
+        void set_agent_profile(int id, const AgentProfile &profile);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void set_agent_never_rest(int id, bool value);
 
