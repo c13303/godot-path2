@@ -63,6 +63,8 @@ namespace ffcore
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
         Vec2 apply_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
+        bool is_player_footprint_navigable(const Vec2 &bottom_center, FlowField *ff) const;
+        Vec2 apply_player_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff);
     };
 
     SteeringSystem *get_global_steering_system();

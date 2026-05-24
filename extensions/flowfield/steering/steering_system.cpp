@@ -189,16 +189,80 @@ Vec2 SteeringSystem::apply_walk_with_walls(const Vec2 &from, const Vec2 &step, F
     if (!ff || (step.x == 0.0 && step.y == 0.0))
         return from + step;
 
+    const double max_step = std::max(1.0, ff->tile_size() * 0.25);
+    int steps = std::max(1, static_cast<int>(std::ceil(step.length() / max_step)));
+    Vec2 pos = from;
+    Vec2 sub_step = step * (1.0 / static_cast<double>(steps));
+
+    for (int i = 0; i < steps; ++i)
+    {
+        Vec2 full = pos + sub_step;
+        if (ff->is_cell_navigable(ff->world_to_cell(full)))
+        {
+            pos = full;
+            continue;
+        }
+
+        Vec2 only_x(pos.x + sub_step.x, pos.y);
+        if (sub_step.x != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_x)))
+        {
+            pos = only_x;
+            continue;
+        }
+
+        Vec2 only_y(pos.x, pos.y + sub_step.y);
+        if (sub_step.y != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_y)))
+        {
+            pos = only_y;
+            continue;
+        }
+
+        break;
+    }
+
+    return pos;
+}
+
+bool SteeringSystem::is_player_footprint_navigable(const Vec2 &bottom_center, FlowField *ff) const
+{
+    if (!ff)
+        return true;
+
+    constexpr double footprint = 32.0;
+    constexpr double half = footprint * 0.5;
+    constexpr double epsilon = 0.001;
+
+    const Vec2 samples[] = {
+        Vec2(bottom_center.x - half + epsilon, bottom_center.y - footprint + epsilon),
+        Vec2(bottom_center.x + half - epsilon, bottom_center.y - footprint + epsilon),
+        Vec2(bottom_center.x - half + epsilon, bottom_center.y - epsilon),
+        Vec2(bottom_center.x + half - epsilon, bottom_center.y - epsilon),
+    };
+
+    for (const Vec2 &sample : samples)
+    {
+        if (!ff->is_cell_navigable(ff->world_to_cell(sample)))
+            return false;
+    }
+
+    return true;
+}
+
+Vec2 SteeringSystem::apply_player_walk_with_walls(const Vec2 &from, const Vec2 &step, FlowField *ff)
+{
+    if (!ff || (step.x == 0.0 && step.y == 0.0))
+        return from + step;
+
     Vec2 full = from + step;
-    if (ff->is_cell_navigable(ff->world_to_cell(full)))
+    if (is_player_footprint_navigable(full, ff))
         return full;
 
     Vec2 only_x(from.x + step.x, from.y);
-    if (step.x != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_x)))
+    if (step.x != 0.0 && is_player_footprint_navigable(only_x, ff))
         return only_x;
 
     Vec2 only_y(from.x, from.y + step.y);
-    if (step.y != 0.0 && ff->is_cell_navigable(ff->world_to_cell(only_y)))
+    if (step.y != 0.0 && is_player_footprint_navigable(only_y, ff))
         return only_y;
 
     return from;
@@ -608,7 +672,7 @@ void SteeringSystem::update_all(double delta)
                 if (!a.is_propelled)
                 {
                     Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
-                    Vec2 correction = wall_repel + separation;
+                    Vec2 correction = separation;
                     Vec2 target_velocity = manual_dir.is_zero()
                                                ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                                : manual_dir * a.max_speed + correction;
@@ -625,7 +689,7 @@ void SteeringSystem::update_all(double delta)
 
                 Vec2 old_pos = a.position;
                 Vec2 step = a.velocity * delta;
-                Vec2 new_pos = apply_walk_with_walls(a.position, step, nav);
+                Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
                 a.position = new_pos;
 
                 if (nav)
@@ -656,7 +720,8 @@ void SteeringSystem::update_all(double delta)
             // si propulsé, on conserve la velocity existante (déjà amortie)
 
             Vec2 old_pos = a.position;
-            a.position = a.position + a.velocity * delta;
+            Vec2 step = a.velocity * delta;
+            a.position = apply_walk_with_walls(a.position, step, nav);
 
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
@@ -671,7 +736,7 @@ void SteeringSystem::update_all(double delta)
             if (!a.is_propelled)
             {
                 Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
-                Vec2 correction = wall_repel + separation;
+                Vec2 correction = separation;
                 Vec2 target_velocity = manual_dir.is_zero()
                                            ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                            : manual_dir * a.max_speed + correction;
@@ -688,7 +753,7 @@ void SteeringSystem::update_all(double delta)
 
             Vec2 old_pos = a.position;
             Vec2 step = a.velocity * delta;
-            Vec2 new_pos = apply_walk_with_walls(a.position, step, nav);
+            Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
             a.position = new_pos;
 
             if (nav)
@@ -806,7 +871,8 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 old_pos = a.position;
-        a.position = a.position + a.velocity * delta;
+        Vec2 step = a.velocity * delta;
+        a.position = apply_walk_with_walls(a.position, step, ff);
 
         ultimate_wall_correction(a, ff, delta);
 

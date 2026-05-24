@@ -10,5 +10,5 @@ acceleration = 900.0
 deceleration = 1200.0
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(0, -16)
+position = Vector2(0, -31.5)
 texture = ExtResource("2_farmer")
