@@ -19,6 +19,8 @@ namespace ffcore
         Vec2 pos;
         double radius = 0.0;
         double time_left_ms = 0.0;
+        int ignored_agent_id = -1;
+        int affected_smash_classes = 0;
     };
 
     class SteeringSystem
@@ -46,9 +48,11 @@ namespace ffcore
         void set_agent_input(int id, const Vec2 &direction);
         void set_agent_manual_motion(int id, double acceleration, double deceleration);
         void set_agent_profile(int id, const AgentProfile &profile);
-        void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow);
-        void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow);
+        void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
+        void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
+        void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
+        void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void set_agent_never_rest(int id, bool value);
 
     private:

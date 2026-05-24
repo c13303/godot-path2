@@ -13,10 +13,15 @@ namespace ffcore
         Manual = 1,
     };
 
+    constexpr int SMASH_CLASS_PLAYER = 1 << 0;
+    constexpr int SMASH_CLASS_MAIN_CHAR = 1 << 1;
+    constexpr int SMASH_CLASS_MONSTER = 1 << 2;
+
     struct AgentProfile
     {
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
+        int smash_class = SMASH_CLASS_MAIN_CHAR;
     };
 
     struct AgentData
@@ -41,9 +46,13 @@ namespace ffcore
         double propelled_timer = 0.0;
         bool smash_just_reset = false;
         double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global
+        double smash_control_suppression = 1.0;
+        double smash_control_suppression_timer = 0.0;
         Vec2 pending_smash{};
         double smash_delay = 0.0;
         double pending_smash_friction = -1.0;
+        double pending_smash_control_suppression = 1.0;
+        double pending_smash_control_suppression_duration = 0.0;
         bool smash_pending = false;
         bool was_in_t2 = false;
 

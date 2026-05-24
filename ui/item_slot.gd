@@ -149,3 +149,4 @@ func _gui_input(event: InputEvent) -> void:
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
 			if slot_index >= 0 and slot_index < 8 and game_ui and game_ui.has_method("select_quick_slot"):
 				game_ui.call("select_quick_slot", slot_index)
+				accept_event()

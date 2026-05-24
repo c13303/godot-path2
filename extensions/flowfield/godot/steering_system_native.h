@@ -33,6 +33,7 @@ namespace godot
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
         std::unordered_map<int, bool> agent_propelled_states;
+        std::unordered_map<int, bool> agent_control_impaired_states;
 
         int _direction_code(const Vector2 &v) const;
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
@@ -59,9 +60,11 @@ namespace godot
         void set_agent_manual_motion(int agent_id, double acceleration, double deceleration);
         void set_agent_profile(int agent_id, const Dictionary &profile);
         Vector2 get_agent_position(int agent_id) const;
-        void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow);
-        void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow);
+        void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
+        void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
+        void apply_cone_smash(const Vector2 &position, double radius, const Vector2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
+        void apply_explosion_filtered(const Vector2 &position, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         void set_paused(bool p) { paused = p; }

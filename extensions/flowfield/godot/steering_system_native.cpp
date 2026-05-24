@@ -23,9 +23,11 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
     ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_id", "profile"), &SteeringSystemNative::set_agent_profile);
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
-    ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow"), &SteeringSystemNative::apply_smash_impulse);
-    ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow"), &SteeringSystemNative::apply_area_smash);
+    ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
+    ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_area_smash);
+    ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
+    ClassDB::bind_method(D_METHOD("apply_explosion_filtered", "position", "radius", "intensity", "friction_loss", "falloff", "ignored_agent_id", "control_suppression", "control_suppression_duration", "affected_smash_classes"), &SteeringSystemNative::apply_explosion_filtered);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
 }
@@ -80,12 +82,17 @@ void SteeringSystemNative::apply_explosion(const Vector2 &position, double radiu
     system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss);
 }
 
-void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow)
+void SteeringSystemNative::apply_explosion_filtered(const Vector2 &position, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes)
 {
-    system.apply_smash_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss, delay, detach_flow);
+    system.apply_explosion_filtered(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss, falloff, ignored_agent_id, control_suppression, control_suppression_duration, affected_smash_classes);
 }
 
-void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow)
+void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
+{
+    system.apply_smash_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration);
+}
+
+void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
 {
     system.apply_area_smash(
         ffcore::Vec2(position.x, position.y),
@@ -94,7 +101,28 @@ void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radi
         force,
         friction_loss,
         falloff,
-        detach_flow);
+        detach_flow,
+        control_suppression,
+        control_suppression_duration,
+        ignored_agent_id,
+        affected_smash_classes);
+}
+
+void SteeringSystemNative::apply_cone_smash(const Vector2 &position, double radius, const Vector2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
+{
+    system.apply_cone_smash(
+        ffcore::Vec2(position.x, position.y),
+        radius,
+        ffcore::Vec2(direction.x, direction.y),
+        angle_degrees,
+        force,
+        friction_loss,
+        falloff,
+        detach_flow,
+        control_suppression,
+        control_suppression_duration,
+        ignored_agent_id,
+        affected_smash_classes);
 }
 
 void SteeringSystemNative::set_agent_control_mode(int agent_id, int mode)
@@ -115,11 +143,15 @@ void SteeringSystemNative::set_agent_manual_motion(int agent_id, double accelera
 void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &profile)
 {
     ffcore::AgentProfile native_profile;
+    if (const ffcore::AgentData *existing = system.get_agent(agent_id))
+        native_profile = existing->profile;
 
     if (profile.has("crowd_push_strength"))
         native_profile.crowd_push_strength = double(profile["crowd_push_strength"]);
     if (profile.has("crowd_resist_strength"))
         native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
+    if (profile.has("smash_class"))
+        native_profile.smash_class = int(profile["smash_class"]);
 
     system.set_agent_profile(agent_id, native_profile);
 }
@@ -220,13 +252,25 @@ void SteeringSystemNative::_process(double delta)
         bool prev_propelled = false;
         if (it_propelled_state != agent_propelled_states.end())
             prev_propelled = it_propelled_state->second;
-        if (it_propelled_state == agent_propelled_states.end() || prev_propelled != a->is_propelled)
+
+        bool control_impaired = a->is_propelled && a->smash_control_suppression_timer > 0.0 && a->smash_control_suppression > 0.001;
+        auto it_control_impaired_state = agent_control_impaired_states.find(id);
+        bool prev_control_impaired = false;
+        if (it_control_impaired_state != agent_control_impaired_states.end())
+            prev_control_impaired = it_control_impaired_state->second;
+
+        bool propelled_changed = it_propelled_state == agent_propelled_states.end() || prev_propelled != a->is_propelled;
+        bool control_impaired_changed = it_control_impaired_state == agent_control_impaired_states.end() || prev_control_impaired != control_impaired;
+        if (propelled_changed || control_impaired_changed)
         {
             agent_propelled_states[id] = a->is_propelled;
+            agent_control_impaired_states[id] = control_impaired;
             if (agent_manager)
             {
                 Dictionary payload;
                 payload["is_propelled"] = a->is_propelled;
+                payload["controls_impaired"] = control_impaired;
+                payload["control_suppression"] = a->smash_control_suppression;
                 agent_manager->send_agent_event("propelled_state_update", id, payload);
             }
         }

@@ -108,6 +108,11 @@ func select_quick_slot(index: int) -> void:
 	selected_quick_index = index
 	_refresh_all_slots()
 
+func get_selected_quick_item_id() -> String:
+	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
+		return ""
+	return inventory_slots[selected_quick_index]
+
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):

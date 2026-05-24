@@ -1,12 +1,14 @@
 extends Node2D
 
 const CONTROL_MODE_MANUAL: int = 1
+const SMASH_CLASS_PLAYER: int = 1
 
 @onready var floorz: TileMapLayer = $"../Map/MonTilemap/floor"
 @onready var wallz: TileMapLayer = $"../Map/MonTilemap/wallz"
 @onready var flow: Node = $"../CPP/FlowFieldNative"
 @onready var steering: Node = $"../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../CPP/AgentManagerNative"
+@onready var fight_system: FightSystem = $"../fightSystem"
 @onready var ui_layer: CanvasLayer = $"../UI/CanvasLayer"
 @onready var game_ui: CanvasLayer = $"../GameUI"
 @onready var fps_label: Label = $"../UI/CanvasLayer/Label"
@@ -15,8 +17,7 @@ const CONTROL_MODE_MANUAL: int = 1
 @onready var camera_controller: CameraController = $CameraController
 @onready var selection_controller: SelectionController = $SelectionController
 @onready var spawn_controller: SpawnController = $SpawnController
-@onready var fx_controller: FXController = $FXController
-@onready var tile_hover_info: TileHoverInfo = $TileHoverInfo
+@onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 
 
 
@@ -60,8 +61,8 @@ func _ready() -> void:
 
 	selection_controller.setup(ui_layer, agent_manager)
 	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
-	fx_controller.setup(steering, floorz)
-	tile_hover_info.setup(floorz, steering, fps_label, flow)
+	if tile_hover_info:
+		tile_hover_info.setup(floorz, steering, fps_label, flow)
 
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
@@ -82,14 +83,14 @@ func _input(event: InputEvent) -> void:
 				_spawn_chars(10)
 			elif key_event.keycode == KEY_F3:
 				_spawn_chars(50)
-			elif key_event.keycode == KEY_B:
-				fx_controller.trigger_bomb(get_global_mouse_position())
 			elif key_event.keycode == KEY_SPACE:
 				_toggle_pause()
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
-		if enable_mouse_unit_commands and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
+			_try_use_equipped_item()
+		elif enable_mouse_unit_commands and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_on_click_set_goal()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.ctrl_pressed and not _paused and not _is_inventory_open():
 			camera_controller.handle_mouse_wheel(zoom_speed)
@@ -100,7 +101,8 @@ func _process(delta: float) -> void:
 	_update_player_input()
 	if enable_mouse_unit_commands:
 		selection_controller.process(delta)
-	tile_hover_info.process()
+	if tile_hover_info:
+		tile_hover_info.process()
 	camera_controller.process(delta, _paused)
 
 func _setup_player() -> void:
@@ -125,6 +127,7 @@ func _setup_player() -> void:
 	if steering and steering.has_method("set_agent_profile") and player_nav_id >= 0:
 		steering.call("set_agent_profile", player_nav_id, {
 			"crowd_push_strength": 2.0,
+			"smash_class": SMASH_CLASS_PLAYER,
 		})
 
 	if player:
@@ -174,6 +177,24 @@ func _is_any_key_pressed(keys: Array[int]) -> bool:
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
+
+func _selected_item_id() -> String:
+	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
+		return ""
+	return String(game_ui.call("get_selected_quick_item_id"))
+
+func _try_use_equipped_item() -> void:
+	if get_viewport().gui_get_hovered_control() != null:
+		return
+	var weapon_id := _selected_item_id()
+	if weapon_id == "":
+		return
+	var player := _get_player_node()
+	if not player or not fight_system:
+		return
+	var direction := get_global_mouse_position() - player.global_position
+	if bool(fight_system.use_weapon(weapon_id, player.global_position, direction, player_nav_id)):
+		get_viewport().set_input_as_handled()
 
 func _toggle_pause() -> void:
 	_paused = not _paused

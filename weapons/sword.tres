@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://weapons/weapon_data.gd" id="1_weapon_data"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+id = "sword"
+directional_area_angle = 180.0
+radius = 64.0
+smash_force = 200.0
+control_suppression = 0.35
+control_suppression_duration = 0.15
+damage = 1
+friction = 0.91
+falloff = 0.0
+radial = false
+detach_flow = false
+affected_smash_classes = 4

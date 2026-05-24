@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../agent_manager/agent_manager.h"
@@ -131,6 +132,14 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
 
     double max_speed = ffcore::globalconfig().agent_max_speed;
     steering->register_agent_with_id(nav_id, pos, max_speed, nullptr);
+    ffcore::AgentProfile profile;
+    if (node->is_in_group(StringName("player")))
+        profile.smash_class = ffcore::SMASH_CLASS_PLAYER;
+    else if (node->is_in_group(StringName("monsters")))
+        profile.smash_class = ffcore::SMASH_CLASS_MONSTER;
+    else if (node->is_in_group(StringName("main_chars")))
+        profile.smash_class = ffcore::SMASH_CLASS_MAIN_CHAR;
+    steering->set_agent_profile(nav_id, profile);
     core_mgr->add_agent_to_group(nav_id, group_id);
 
     if (steering_native)

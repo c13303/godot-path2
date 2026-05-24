@@ -457,6 +457,8 @@ void SteeringSystem::set_agent_profile(int id, const AgentProfile &profile)
     AgentProfile sanitized = profile;
     sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
     sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
+    if (sanitized.smash_class < 0)
+        sanitized.smash_class = 0;
 
     agents[it->second].profile = sanitized;
 }
@@ -503,7 +505,7 @@ void SteeringSystem::set_agent_manual_motion(int id, double acceleration, double
     a.manual_deceleration = std::max(0.0, deceleration);
 }
 
-void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow)
+void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
 {
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
@@ -521,6 +523,8 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     agent.smash_delay = std::max(0.0, delay);
     agent.pending_smash = smash;
     agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
+    agent.pending_smash_control_suppression = std::clamp(control_suppression, 0.0, 1.0);
+    agent.pending_smash_control_suppression_duration = std::max(0.0, control_suppression_duration);
     agent.smash_pending = true;
     agent.smash_force = Vec2(0, 0);
     agent.smash_just_reset = false;
@@ -538,7 +542,7 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     }
 }
 
-void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow)
+void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
 {
     if (radius <= 0.0 || !grid)
         return;
@@ -550,22 +554,77 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
     double safe_falloff = std::max(0.0, falloff);
     for (int nid : neighbors)
     {
+        if (nid == ignored_agent_id)
+            continue;
+
         auto it = id_to_index.find(nid);
         if (it == id_to_index.end())
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+            continue;
+
         double dist = (agent.position - pos).length();
         if (dist > radius)
             continue;
 
         double base = std::max(0.0, 1.0 - dist / radius);
         double attenuation = std::pow(base, safe_falloff);
-        apply_smash_impulse(nid, direction, force * attenuation, friction_loss, 0.0, detach_flow);
+        apply_smash_impulse(nid, direction, force * attenuation, friction_loss, 0.0, detach_flow, control_suppression, control_suppression_duration);
+    }
+}
+
+void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
+{
+    if (radius <= 0.0 || !grid)
+        return;
+
+    Vec2 facing = safe_normalize(direction);
+    if (facing.is_zero())
+        return;
+
+    auto neighbors = grid->query_neighbors(pos, radius);
+    if (neighbors.empty())
+        return;
+
+    double half_angle = std::clamp(angle_degrees, 0.0, 360.0) * 0.5;
+    double min_dot = std::cos(half_angle * 3.14159265358979323846 / 180.0);
+    double safe_falloff = std::max(0.0, falloff);
+
+    for (int nid : neighbors)
+    {
+        if (nid == ignored_agent_id)
+            continue;
+
+        auto it = id_to_index.find(nid);
+        if (it == id_to_index.end())
+            continue;
+
+        const AgentData &agent = agents[it->second];
+        if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+            continue;
+
+        Vec2 to_agent = agent.position - pos;
+        double dist = to_agent.length();
+        if (dist > radius)
+            continue;
+
+        if (angle_degrees < 360.0 && safe_normalize(to_agent).dot(facing) < min_dot)
+            continue;
+
+        double base = std::max(0.0, 1.0 - dist / radius);
+        double attenuation = std::pow(base, safe_falloff);
+        apply_smash_impulse(nid, facing, force * attenuation, friction_loss, 0.0, detach_flow, control_suppression, control_suppression_duration);
     }
 }
 
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
+{
+    apply_explosion_filtered(pos, radius, intensity, friction_loss, globalconfig().explosion_falloff, -1, 1.0, globalconfig().propelled_duration, 0);
+}
+
+void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes)
 {
     if (radius <= 0.0 || !grid)
         return;
@@ -578,15 +637,20 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
     double stop_radius = radius * std::max(0.0, cfg.shockwave_stop_ratio);
     double stop_time_ms = std::max(0.0, cfg.shockwave_stop_duration_ms);
     if (stop_radius > 0.0 && stop_time_ms > 0.0)
-        shockwaves.push_back({pos, stop_radius, stop_time_ms});
+        shockwaves.push_back({pos, stop_radius, stop_time_ms, ignored_agent_id, affected_smash_classes});
 
     for (int nid : neighbors)
     {
+        if (nid == ignored_agent_id)
+            continue;
+
         auto it = id_to_index.find(nid);
         if (it == id_to_index.end())
             continue;
 
         AgentData &agent = agents[it->second];
+        if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+            continue;
 
         Vec2 diff = agent.position - pos;
         double dist = diff.length();
@@ -595,10 +659,10 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
 
         Vec2 dir = safe_normalize(dist < 1e-3 ? hashed_unit_dir(agent.id) : diff);
         double base = std::max(0.0, 1.0 - dist / radius);
-        double attenuation = std::pow(base, std::max(0.0, cfg.explosion_falloff));
+        double attenuation = std::pow(base, std::max(0.0, falloff));
 
         double wave_speed = std::max(1.0, cfg.shockwave_speed);
-        apply_smash_impulse(nid, dir, intensity * attenuation, friction_loss, dist / wave_speed, true);
+        apply_smash_impulse(nid, dir, intensity * attenuation, friction_loss, dist / wave_speed, true, control_suppression, control_suppression_duration);
     }
 }
 
@@ -641,6 +705,10 @@ void SteeringSystem::update_all(double delta)
                 a.pending_smash = Vec2(0, 0);
                 a.smash_friction = a.pending_smash_friction;
                 a.pending_smash_friction = -1.0;
+                a.smash_control_suppression = a.pending_smash_control_suppression;
+                a.pending_smash_control_suppression = 1.0;
+                a.smash_control_suppression_timer = a.pending_smash_control_suppression_duration;
+                a.pending_smash_control_suppression_duration = 0.0;
                 a.smash_pending = false;
                 a.smash_just_reset = true;
             }
@@ -649,6 +717,9 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        if (a.smash_control_suppression_timer > 0.0)
+            a.smash_control_suppression_timer = std::max(0.0, a.smash_control_suppression_timer - delta);
+
         if (a.smash_just_reset)
         {
             a.smash_just_reset = false;
@@ -674,6 +745,8 @@ void SteeringSystem::update_all(double delta)
                 a.propelled_timer = 0.0;
                 a.smash_force = Vec2(0, 0);
                 a.smash_friction = -1.0;
+                a.smash_control_suppression = 1.0;
+                a.smash_control_suppression_timer = 0.0;
                 a.velocity = Vec2(0, 0);
             }
         }
@@ -702,6 +775,10 @@ void SteeringSystem::update_all(double delta)
         {
             for (const auto &w : shockwaves)
             {
+                if (a.id == w.ignored_agent_id)
+                    continue;
+                if (w.affected_smash_classes != 0 && (a.profile.smash_class & w.affected_smash_classes) == 0)
+                    continue;
                 if (w.time_left_ms > 0.0 && (a.position - w.pos).length() <= w.radius)
                 {
                     in_shockwave = true;
@@ -712,18 +789,20 @@ void SteeringSystem::update_all(double delta)
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, cfg.agent_offset_y);
+        double active_control_suppression = (a.is_propelled && a.smash_control_suppression_timer > 0.0) ? std::clamp(a.smash_control_suppression, 0.0, 1.0) : 0.0;
+        double smash_control_factor = a.is_propelled ? (1.0 - active_control_suppression) : 1.0;
 
         if (!a.active || !a.flow)
         {
             if (a.control_mode == AgentControlMode::Manual)
             {
+                Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+                Vec2 correction = separation;
+                Vec2 target_velocity = manual_dir.is_zero()
+                                           ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
+                                           : manual_dir * a.max_speed + correction;
                 if (!a.is_propelled)
                 {
-                    Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
-                    Vec2 correction = separation;
-                    Vec2 target_velocity = manual_dir.is_zero()
-                                               ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
-                                               : manual_dir * a.max_speed + correction;
                     double accel = manual_dir.is_zero() ? a.manual_deceleration : a.manual_acceleration;
                     a.velocity = move_toward_vec(a.velocity, target_velocity, accel * delta);
                 }
@@ -736,7 +815,8 @@ void SteeringSystem::update_all(double delta)
                 }
 
                 Vec2 old_pos = a.position;
-                Vec2 step = a.velocity * delta;
+                Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+                Vec2 step = move_velocity * delta;
                 Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
                 a.position = new_pos;
 
@@ -781,13 +861,13 @@ void SteeringSystem::update_all(double delta)
 
         if (a.control_mode == AgentControlMode::Manual)
         {
+            Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
+            Vec2 correction = separation;
+            Vec2 target_velocity = manual_dir.is_zero()
+                                       ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
+                                       : manual_dir * a.max_speed + correction;
             if (!a.is_propelled)
             {
-                Vec2 manual_dir = in_shockwave ? Vec2(0, 0) : safe_normalize(a.manual_input_dir);
-                Vec2 correction = separation;
-                Vec2 target_velocity = manual_dir.is_zero()
-                                           ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
-                                           : manual_dir * a.max_speed + correction;
                 double accel = manual_dir.is_zero() ? a.manual_deceleration : a.manual_acceleration;
                 a.velocity = move_toward_vec(a.velocity, target_velocity, accel * delta);
             }
@@ -800,7 +880,8 @@ void SteeringSystem::update_all(double delta)
             }
 
             Vec2 old_pos = a.position;
-            Vec2 step = a.velocity * delta;
+            Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+            Vec2 step = move_velocity * delta;
             Vec2 new_pos = apply_player_walk_with_walls(a.position, step, nav);
             a.position = new_pos;
 
@@ -874,11 +955,6 @@ void SteeringSystem::update_all(double delta)
         bool in_t2_zone = target_radius > 0.0 && dist_to_target <= target_radius;
 
         Vec2 target_velocity;
-        if (a.is_propelled)
-        {
-            target_velocity = a.velocity; // velocity déjà amortie par friction
-        }
-        else
         {
             Vec2 combined = wall_repel + separation;
             combined += nav_dir * cfg.flow_weight;
@@ -900,11 +976,7 @@ void SteeringSystem::update_all(double delta)
             target_velocity = desired_dir * target_speed;
         }
 
-        if (a.is_propelled)
-        {
-            a.velocity = target_velocity; // on conserve la vélocité propulsée (déjà amortie)
-        }
-        else
+        if (!a.is_propelled)
         {
             double blend = in_t2_zone ? t2_speed_lerp : cfg.lerp_general;
             blend = std::clamp(blend, 0.0, 1.0);
@@ -919,7 +991,8 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 old_pos = a.position;
-        Vec2 step = a.velocity * delta;
+        Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+        Vec2 step = move_velocity * delta;
         a.position = apply_walk_with_walls(a.position, step, ff);
 
         ultimate_wall_correction(a, ff, delta);

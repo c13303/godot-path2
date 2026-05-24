@@ -14,6 +14,7 @@ var _show_shadow: bool = true
 var _colored_shadow: bool = false
 var _colored_shadow_when_selected: bool = false
 var _is_propelled: bool = false
+var _controls_impaired: bool = false
 var _blood_drop_timer: float = 0.0
 var _blood_layer: Node2D
 var _global_config_node: Node
@@ -173,6 +174,13 @@ func set_propelled_state(enabled: bool) -> void:
 	if _is_propelled:
 		_blood_drop_timer = 0.0
 
+func set_control_impaired_state(enabled: bool) -> void:
+	if _controls_impaired == enabled:
+		return
+
+	_controls_impaired = enabled
+	_update_sprite_tint()
+
 func set_velocity_len(value: float) -> void:
 	_velocity_len = value
 
@@ -212,3 +220,13 @@ func _update_shadow() -> void:
 		if _shadow_indicator:
 			_shadow_indicator.queue_free()
 			_shadow_indicator = null
+
+func _update_sprite_tint() -> void:
+	_set_sprite_tint_recursive(self, Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1))
+
+func _set_sprite_tint_recursive(node: Node, color: Color) -> void:
+	if node is Sprite2D:
+		var sprite: Sprite2D = node
+		sprite.self_modulate = color
+	for child in node.get_children():
+		_set_sprite_tint_recursive(child, color)
