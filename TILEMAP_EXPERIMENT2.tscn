@@ -1391,12 +1391,12 @@ tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/_edit_lock_ = true
 
-[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("wallz", "buildings", "previewbuild", "pause_overlay")]
+[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("wallz", "buildings", "previewbuild", "game_ui")]
 script = ExtResource("15_nynk0")
 wallz = NodePath("../MonTilemap/wallz")
 buildings = NodePath("../MonTilemap/buildings")
 previewbuild = NodePath("../MonTilemap/previewbuild")
-pause_overlay = NodePath("../../UI/CanvasLayer/PauseOverlay")
+game_ui = NodePath("../../GameUI")
 
 [node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("floorz", "wallz", "buildings", "flow", "agent_manager", "parent_for_agents")]
 script = ExtResource("18_buildmgr")

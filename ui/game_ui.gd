@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 const ItemSlotScript = preload("res://ui/item_slot.gd")
+const ItemCatalog = preload("res://items/item_catalog.gd")
 const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
@@ -11,33 +12,6 @@ const INVENTORY_COLUMNS: int = 8
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../Controls/TileHoverInfo"
-
-var item_defs: Dictionary = {
-	"sword": {
-		"id": "sword",
-		"name": "Sword",
-		"category": "tools",
-		"frame": 0,
-	},
-	"bomb": {
-		"id": "bomb",
-		"name": "Bomb",
-		"category": "tools",
-		"frame": 1,
-	},
-	"water": {
-		"id": "water",
-		"name": "Water",
-		"category": "tools",
-		"frame": 2,
-	},
-	"wall": {
-		"id": "wall",
-		"name": "Wall",
-		"category": "tiles",
-		"frame": 3,
-	},
-}
 
 var inventory_slots: Array[String] = []
 var selected_quick_index: int = 0
@@ -113,6 +87,12 @@ func get_selected_quick_item_id() -> String:
 		return ""
 	return inventory_slots[selected_quick_index]
 
+func get_selected_quick_item_def() -> Dictionary:
+	return ItemCatalog.get_item_def(get_selected_quick_item_id())
+
+func selected_quick_item_places_tile() -> bool:
+	return ItemCatalog.item_places_tile(get_selected_quick_item_id())
+
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
@@ -181,8 +161,9 @@ func _refresh_all_slots() -> void:
 
 func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
 	var item_id := inventory_slots[slot_index]
-	if item_defs.has(item_id):
-		slot.set_item(item_defs[item_id])
+	var item_def := ItemCatalog.get_item_def(item_id)
+	if not item_def.is_empty():
+		slot.set_item(item_def)
 	else:
 		slot.set_item({})
 	slot.set_selected(slot_index == selected_quick_index)

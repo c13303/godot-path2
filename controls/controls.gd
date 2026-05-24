@@ -83,12 +83,12 @@ func _input(event: InputEvent) -> void:
 				_spawn_chars(10)
 			elif key_event.keycode == KEY_F3:
 				_spawn_chars(50)
-			elif key_event.keycode == KEY_SPACE:
-				_toggle_pause()
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
+			if _selected_item_places_tile():
+				return
 			var weapon_id := _selected_item_id()
 			if fight_system and fight_system.is_gun(weapon_id):
 				fight_system.reset_gun_cooldown(weapon_id)
@@ -220,6 +220,9 @@ func _selected_item_id() -> String:
 	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
 		return ""
 	return String(game_ui.call("get_selected_quick_item_id"))
+
+func _selected_item_places_tile() -> bool:
+	return game_ui and game_ui.has_method("selected_quick_item_places_tile") and bool(game_ui.call("selected_quick_item_places_tile"))
 
 func _try_use_equipped_item() -> void:
 	if get_viewport().gui_get_hovered_control() != null:

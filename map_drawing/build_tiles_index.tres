@@ -12,15 +12,5 @@ data = {
 "cooldown": 2.0,
 "kind": "spawner",
 "layer": "buildings"
-},
-"wall1": {
-"atlas": [11.0, 11.0],
-"kind": "wall",
-"layer": "wallz"
-},
-"wall2": {
-"atlas": [1.0, 13.0],
-"kind": "wall",
-"layer": "wallz"
 }
 }
