@@ -55,6 +55,10 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_separation_radius"), &GlobalConfigNative::get_separation_radius);
     ClassDB::bind_method(D_METHOD("set_separation_radius", "value"), &GlobalConfigNative::set_separation_radius);
 
+    ClassDB::bind_method(D_METHOD("get_agent_world_diameter_ratio"), &GlobalConfigNative::get_agent_world_diameter_ratio);
+    ClassDB::bind_method(D_METHOD("set_agent_world_diameter_ratio", "value"), &GlobalConfigNative::set_agent_world_diameter_ratio);
+    ClassDB::bind_method(D_METHOD("get_agent_world_radius"), &GlobalConfigNative::get_agent_world_radius);
+
     ClassDB::bind_method(D_METHOD("get_separation_strength"), &GlobalConfigNative::get_separation_strength);
     ClassDB::bind_method(D_METHOD("set_separation_strength", "value"), &GlobalConfigNative::set_separation_strength);
 
@@ -103,6 +107,7 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_ratio"), "set_target_T2_param_speed_ratio", "get_target_T2_param_speed_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_world_diameter_ratio"), "set_agent_world_diameter_ratio", "get_agent_world_diameter_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
@@ -173,6 +178,10 @@ void GlobalConfigNative::set_target_T2_param_speed_lerp(double v) { cfg().target
 
 double GlobalConfigNative::get_separation_radius() const { return cfg().separation_radius; }
 void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radius = std::max(0.0, v); }
+
+double GlobalConfigNative::get_agent_world_diameter_ratio() const { return cfg().agent_world_diameter_ratio; }
+void GlobalConfigNative::set_agent_world_diameter_ratio(double v) { cfg().agent_world_diameter_ratio = std::max(0.0, v); }
+double GlobalConfigNative::get_agent_world_radius() const { return cfg().tile_size * cfg().agent_world_diameter_ratio * 0.5; }
 
 double GlobalConfigNative::get_separation_strength() const { return cfg().separation_strength; }
 void GlobalConfigNative::set_separation_strength(double v) { cfg().separation_strength = std::max(0.0, v); }

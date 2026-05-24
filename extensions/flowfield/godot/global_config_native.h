@@ -60,6 +60,10 @@ namespace godot
         double get_separation_radius() const;
         void set_separation_radius(double v);
 
+        double get_agent_world_diameter_ratio() const;
+        void set_agent_world_diameter_ratio(double v);
+        double get_agent_world_radius() const;
+
         double get_separation_strength() const;
         void set_separation_strength(double v);
 

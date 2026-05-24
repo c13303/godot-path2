@@ -95,7 +95,7 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
 
     sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
     sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
-    sanitized.world_radius = sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.separation_radius * 0.5;
+    sanitized.world_radius = sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
     sanitized.foot_offset_y = std::isnan(sanitized.foot_offset_y) ? cfg.agent_offset_y : sanitized.foot_offset_y;
     sanitized.fight_offset_y = std::isfinite(sanitized.fight_offset_y) ? sanitized.fight_offset_y : 0.0;
     sanitized.fight_half_w = std::max(0.0, sanitized.fight_half_w);

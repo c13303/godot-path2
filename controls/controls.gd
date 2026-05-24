@@ -150,7 +150,7 @@ func _setup_player() -> void:
 		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
 
 	if steering and steering.has_method("set_agent_profile") and player_nav_id >= 0:
-		var player_world_radius := 16.0
+		var player_world_radius := _agent_world_radius()
 		var sprite := player.get_node_or_null("Sprite2D") as Sprite2D
 		var fight_half_size := Vector2(32.0, 32.0)
 		var fight_offset_y := -32.0
@@ -170,6 +170,11 @@ func _setup_player() -> void:
 
 	if player:
 		camera_controller.set_follow_target(player, true)
+
+func _agent_world_radius() -> float:
+	if global_config_node and global_config_node.has_method("get_agent_world_radius"):
+		return float(global_config_node.call("get_agent_world_radius"))
+	return 12.0
 
 func _get_player_node() -> Node2D:
 	var scene := get_tree().get_current_scene()

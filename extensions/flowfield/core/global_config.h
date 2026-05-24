@@ -25,6 +25,7 @@ namespace ffcore
         double target_T2_param_speed_ratio = 0.6;          // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia
 
+        double agent_world_diameter_ratio = 0.75;
         double separation_radius = tile_size;
         double separation_strength = 400.0;
         int max_neighbors = 16;

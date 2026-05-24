@@ -1315,6 +1315,7 @@ script = ExtResource("10_hoverctrl")
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="." unique_id=583329240]
 flow_weight = 5.0
 center_pull = 5.0
+agent_world_diameter_ratio = 0.75
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 
