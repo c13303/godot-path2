@@ -69,6 +69,8 @@ namespace godot
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         void set_paused(bool p) { paused = p; }
+
+        ffcore::SteeringSystem *get_system() { return &system; }
     };
 
 }

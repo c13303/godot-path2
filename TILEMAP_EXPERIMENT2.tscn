@@ -1333,6 +1333,8 @@ script = ExtResource("2_2rfbb")
 
 [node name="SteeringSystemNative" type="SteeringSystemNative" parent="CPP" unique_id=1185593092]
 
+[node name="ProjectileSystemNative" type="ProjectileSystemNative" parent="CPP" unique_id=1185593093]
+
 [node name="UI" type="Node" parent="." unique_id=303363402]
 
 [node name="CanvasLayer" type="CanvasLayer" parent="UI" unique_id=607979633]

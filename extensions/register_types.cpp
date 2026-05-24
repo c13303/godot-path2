@@ -4,6 +4,7 @@
 #include "flowfield/godot/steering_system_native.h"
 #include "flowfield/godot/agent_manager_native.h"
 #include "flowfield/godot/global_config_native.h"
+#include "flowfield/godot/projectile_system_native.h"
 
 #include "flowfield/agent_manager/agent_manager.h"
 #include "flowfield/steering/steering_system.h"
@@ -25,6 +26,7 @@ void initialize_flowfield_module(ModuleInitializationLevel p_level)
     ClassDB::register_class<SteeringSystemNative>();
     ClassDB::register_class<AgentManagerNative>();
     ClassDB::register_class<GlobalConfigNative>();
+    ClassDB::register_class<ProjectileSystemNative>();
 }
 
 void uninitialize_flowfield_module(ModuleInitializationLevel p_level)

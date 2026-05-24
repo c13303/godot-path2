@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(grep -v \"\\\\.import$\")",
-      "PowerShell(Add-Type -AssemblyName System.Drawing; $files = @\\(\"sprites\\\\lapin\\\\full.png\",\"sprites\\\\lapin\\\\piggy.png\"\\); foreach \\($f in $files\\) { $img = [System.Drawing.Image]::FromFile\\(\\(Resolve-Path $f\\)\\); \"$f : $\\($img.Width\\) x $\\($img.Height\\)\"; $img.Dispose\\(\\) })"
+      "PowerShell(Add-Type -AssemblyName System.Drawing; $files = @\\(\"sprites\\\\lapin\\\\full.png\",\"sprites\\\\lapin\\\\piggy.png\"\\); foreach \\($f in $files\\) { $img = [System.Drawing.Image]::FromFile\\(\\(Resolve-Path $f\\)\\); \"$f : $\\($img.Width\\) x $\\($img.Height\\)\"; $img.Dispose\\(\\) })",
+      "Bash(scons -j4)"
     ]
   }
 }

@@ -89,7 +89,11 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
-			_try_use_equipped_item()
+			var weapon_id := _selected_item_id()
+			if fight_system and fight_system.is_gun(weapon_id):
+				fight_system.reset_gun_cooldown(weapon_id)
+			else:
+				_try_use_equipped_item()
 		elif enable_mouse_unit_commands and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_on_click_set_goal()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.ctrl_pressed and not _paused and not _is_inventory_open():
@@ -99,11 +103,32 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	_update_player_input()
+	_update_gun_fire(delta)
 	if enable_mouse_unit_commands:
 		selection_controller.process(delta)
 	if tile_hover_info:
 		tile_hover_info.process()
 	camera_controller.process(delta, _paused)
+
+func _update_gun_fire(delta: float) -> void:
+	if _paused or _is_inventory_open():
+		return
+	if not fight_system:
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+	if get_viewport().gui_get_hovered_control() != null:
+		return
+	var weapon_id := _selected_item_id()
+	if weapon_id == "" or not fight_system.is_gun(weapon_id):
+		return
+	var player := _get_player_node()
+	if not player:
+		return
+	var direction := get_global_mouse_position() - player.global_position
+	if direction.length_squared() < 0.000001:
+		return
+	fight_system.fire_gun_held(weapon_id, player.global_position, direction, player_nav_id, delta)
 
 func _setup_player() -> void:
 	var player := _get_player_node()
