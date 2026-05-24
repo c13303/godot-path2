@@ -6,6 +6,7 @@ var steering: Node
 var fps_label: Label
 var flow_node: Node
 var mouse_outline: Line2D
+var enabled: bool = true
 
 func setup(floor_layer: TileMapLayer, steering_in: Node, label_in: Label, flow_in: Node) -> void:
 	floorz = floor_layer
@@ -25,6 +26,12 @@ func setup(floor_layer: TileMapLayer, steering_in: Node, label_in: Label, flow_i
 		add_child(mouse_outline)
 
 func process() -> void:
+	if not enabled:
+		if mouse_outline:
+			mouse_outline.visible = false
+		if fps_label and fps_label.has_method("set_hover_cell_text"):
+			fps_label.call("set_hover_cell_text", "")
+		return
 	if not floorz:
 		return
 
@@ -64,3 +71,8 @@ func process() -> void:
 		]
 		mouse_outline.global_position = center
 		mouse_outline.visible = true
+
+func set_enabled(value: bool) -> void:
+	enabled = value
+	if not enabled and mouse_outline:
+		mouse_outline.visible = false

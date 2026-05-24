@@ -8,6 +8,7 @@ const CONTROL_MODE_MANUAL: int = 1
 @onready var steering: Node = $"../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../CPP/AgentManagerNative"
 @onready var ui_layer: CanvasLayer = $"../UI/CanvasLayer"
+@onready var game_ui: CanvasLayer = $"../GameUI"
 @onready var fps_label: Label = $"../UI/CanvasLayer/Label"
 @onready var pause_overlay: PauseOverlay = $"../UI/CanvasLayer/PauseOverlay"
 
@@ -88,9 +89,9 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if enable_mouse_unit_commands and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			_on_click_set_goal()
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and not _paused:
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.ctrl_pressed and not _paused and not _is_inventory_open():
 			camera_controller.handle_mouse_wheel(zoom_speed)
-		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and not _paused:
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.ctrl_pressed and not _paused and not _is_inventory_open():
 			camera_controller.handle_mouse_wheel(-zoom_speed)
 
 func _process(delta: float) -> void:
@@ -168,6 +169,9 @@ func _is_any_key_pressed(keys: Array[int]) -> bool:
 		if Input.is_key_pressed(key) or Input.is_physical_key_pressed(key):
 			return true
 	return false
+
+func _is_inventory_open() -> bool:
+	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
 
 func _toggle_pause() -> void:
 	_paused = not _paused

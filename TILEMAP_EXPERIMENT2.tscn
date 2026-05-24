@@ -18,6 +18,31 @@
 [ext_resource type="Script" uid="uid://dcjngyugck8d1" path="res://sprites/player/player.gd" id="16_player"]
 [ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://png/legval/farmer.png" id="17_farmer"]
 [ext_resource type="Script" uid="uid://cv7jp6vpx4hh8" path="res://map_drawing/building_manager.gd" id="18_buildmgr"]
+[ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://ui/game_ui.gd" id="19_gameui"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_toolbar"]
+bg_color = Color(0.055, 0.058, 0.06, 0.86)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.22, 0.24, 0.25, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_modal"]
+bg_color = Color(0.075, 0.078, 0.08, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.28, 0.30, 0.31, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1382,3 +1407,194 @@ parent_for_agents = NodePath("../..")
 [node name="Node" type="Node" parent="." unique_id=1631584488]
 
 [node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
+layer = 50
+script = ExtResource("19_gameui")
+
+[node name="bottom anchor" type="Control" parent="GameUI" unique_id=904977731]
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -263.0
+offset_top = -84.0
+offset_right = 263.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="ToolbarPanel" type="Panel" parent="GameUI/bottom anchor" unique_id=2101533894]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="toolbar" type="HBoxContainer" parent="GameUI/bottom anchor" unique_id=1961685898]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 6.0
+offset_right = -8.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="Slot1" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=1499978282]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot2" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=507072269]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot3" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=654398446]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot4" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=836844939]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot5" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=2032118484]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot6" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=1459731651]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot7" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=1519458200]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot8" type="PanelContainer" parent="GameUI/bottom anchor/toolbar" unique_id=887537943]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Modals" type="Control" parent="GameUI" unique_id=966875778]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="inventoryModal" type="Panel" parent="GameUI/Modals" unique_id=828585163]
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -330.0
+offset_top = -245.0
+offset_right = 330.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_modal")
+
+[node name="CloseButton" type="Button" parent="GameUI/Modals/inventoryModal" unique_id=358385963]
+z_index = 20
+anchors_preset = -1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -42.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 42.0
+mouse_filter = 0
+text = "X"
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/Modals/inventoryModal" unique_id=541002244]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = 56.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer" unique_id=1601479495]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1225103106]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.88, 0.78, 1)
+theme_override_font_sizes/font_size = 22
+text = "Inventory"
+
+[node name="QuickbarRow" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1241883366]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="Slot1" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1832585777]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot2" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=640989024]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot3" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=781953931]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot4" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1832413037]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot5" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=770397693]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot6" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1615472159]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot7" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=2001303819]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot8" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1071131455]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="ExtraRow1" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1495809560]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="ExtraRow2" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1037910916]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="ExtraRow3" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1428965787]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
