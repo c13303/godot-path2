@@ -26,7 +26,7 @@ namespace ffcore
         double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia
 
         double agent_world_diameter_ratio = 0.75;
-        int bottleneck_zone_radius_tiles = 3;
+        int bottleneck_zone_radius_tiles = 2;
         double bottleneck_reservation_seconds = 1.0;
         double bottleneck_wait_speed_ratio = 0.05;
         double bottleneck_backoff_strength = 0.35;

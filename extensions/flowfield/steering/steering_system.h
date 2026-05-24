@@ -90,6 +90,7 @@ namespace ffcore
         Vec2 force_voisine(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta);
+        Vec2 desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &separation, double target_speed) const;
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
         Vec2 apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff);
         bool is_agent_footprint_navigable(const Vec2 &body_position, const AgentProfile &profile, FlowField *ff) const;

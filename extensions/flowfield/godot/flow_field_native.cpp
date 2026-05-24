@@ -214,7 +214,7 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
 {
     field.clear_bottlenecks();
 
-    const int zone_radius = std::max(0, ffcore::globalconfig().bottleneck_zone_radius_tiles);
+    const int zone_radius = std::clamp(ffcore::globalconfig().bottleneck_zone_radius_tiles, 0, 2);
     const Vector2i east(1, 0);
     const Vector2i west(-1, 0);
     const Vector2i south(0, 1);
@@ -232,7 +232,6 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
         const bool s = is_walkable(cell + south);
         const bool n = is_walkable(cell + north);
         const int neighbor_count = int(e) + int(w) + int(s) + int(n);
-
         int axis = 0;
         if (neighbor_count == 2 && e && w)
             axis = 1;

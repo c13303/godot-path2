@@ -511,6 +511,50 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
     return;
 }
 
+Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &separation, double target_speed) const
+{
+    const auto &cfg = globalconfig();
+    Vec2 nav = safe_normalize(nav_dir);
+    if (nav.is_zero())
+    {
+        Vec2 fallback = safe_normalize(wall_repel + separation);
+        return fallback * target_speed;
+    }
+
+    Vec2 correction = wall_repel + separation;
+    Vec2i cell = ff ? ff->world_to_cell(agent_foot_point(agent)) : Vec2i(-1, -1);
+    bool in_bottleneck_area = ff && (ff->bottleneck_core_at_cell(cell) >= 0 || ff->bottleneck_zone_at_cell(cell) >= 0);
+
+    if (in_bottleneck_area)
+    {
+        double forward = correction.dot(nav);
+        Vec2 lateral = correction - nav * forward;
+
+        if (forward < 0.0)
+            forward = 0.0;
+
+        double max_forward = cfg.flow_weight;
+        double max_lateral = cfg.flow_weight * 0.6;
+
+        if (forward > max_forward)
+            forward = max_forward;
+
+        double lateral_len = safe_len(lateral);
+        if (lateral_len > max_lateral && lateral_len > 1e-6)
+            lateral = lateral * (max_lateral / lateral_len);
+
+        Vec2 desired = safe_normalize(nav * cfg.flow_weight + nav * forward + lateral);
+        if (desired.is_zero())
+            desired = nav;
+        return desired * target_speed;
+    }
+
+    Vec2 desired = safe_normalize(correction + nav * cfg.flow_weight);
+    if (desired.is_zero())
+        desired = nav;
+    return desired * target_speed;
+}
+
 void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 {
     auto it = id_to_index.find(id);
@@ -1138,13 +1182,6 @@ void SteeringSystem::update_all(double delta)
         Vec2 target_velocity;
         Vec2 desired_dir;
         {
-            Vec2 combined = wall_repel + separation;
-            combined += nav_dir * cfg.flow_weight;
-
-            desired_dir = safe_normalize(combined);
-            if (desired_dir.is_zero() && dist_to_target > 0.0)
-                desired_dir = safe_normalize(to_goal);
-
             double target_speed = a.max_speed;
             if (in_t2_zone)
             {
@@ -1155,7 +1192,10 @@ void SteeringSystem::update_all(double delta)
                 else
                     target_speed = t2_speed_target;
             }
-            target_velocity = desired_dir * target_speed;
+            target_velocity = desired_velocity_for_flow(a, ff, nav_dir, wall_repel, separation, target_speed);
+            desired_dir = safe_normalize(target_velocity);
+            if (desired_dir.is_zero() && dist_to_target > 0.0)
+                desired_dir = safe_normalize(to_goal);
         }
 
         a.debug_nav_dir = nav_dir;

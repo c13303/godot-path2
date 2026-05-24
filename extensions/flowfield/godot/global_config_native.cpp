@@ -197,7 +197,7 @@ void GlobalConfigNative::set_agent_world_diameter_ratio(double v) { cfg().agent_
 double GlobalConfigNative::get_agent_world_radius() const { return cfg().tile_size * cfg().agent_world_diameter_ratio * 0.5; }
 
 int GlobalConfigNative::get_bottleneck_zone_radius_tiles() const { return cfg().bottleneck_zone_radius_tiles; }
-void GlobalConfigNative::set_bottleneck_zone_radius_tiles(int v) { cfg().bottleneck_zone_radius_tiles = std::max(0, v); }
+void GlobalConfigNative::set_bottleneck_zone_radius_tiles(int v) { cfg().bottleneck_zone_radius_tiles = std::clamp(v, 0, 2); }
 double GlobalConfigNative::get_bottleneck_reservation_seconds() const { return cfg().bottleneck_reservation_seconds; }
 void GlobalConfigNative::set_bottleneck_reservation_seconds(double v) { cfg().bottleneck_reservation_seconds = std::max(0.0, v); }
 double GlobalConfigNative::get_bottleneck_wait_speed_ratio() const { return cfg().bottleneck_wait_speed_ratio; }
