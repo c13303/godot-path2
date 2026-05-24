@@ -39,12 +39,15 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
     ClassDB::bind_method(D_METHOD("set_debug_draw_world_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_world_hitbox);
     ClassDB::bind_method(D_METHOD("get_debug_draw_world_hitbox"), &SteeringSystemNative::get_debug_draw_world_hitbox);
+    ClassDB::bind_method(D_METHOD("set_debug_draw_bottleneck_zones", "enabled"), &SteeringSystemNative::set_debug_draw_bottleneck_zones);
+    ClassDB::bind_method(D_METHOD("get_debug_draw_bottleneck_zones"), &SteeringSystemNative::get_debug_draw_bottleneck_zones);
     ClassDB::bind_method(D_METHOD("set_debug_draw_fight_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("get_debug_draw_fight_hitbox"), &SteeringSystemNative::get_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
     ClassDB::bind_method(D_METHOD("get_debug_show_agent_state_labels"), &SteeringSystemNative::get_debug_show_agent_state_labels);
 
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_bottleneck_zones"), "set_debug_draw_bottleneck_zones", "get_debug_draw_bottleneck_zones");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_fight_hitbox"), "set_debug_draw_fight_hitbox", "get_debug_draw_fight_hitbox");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_show_agent_state_labels"), "set_debug_show_agent_state_labels", "get_debug_show_agent_state_labels");
 }
@@ -97,6 +100,12 @@ void SteeringSystemNative::set_grid(Object *obj)
 void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
 {
     debug_draw_world_hitbox = enabled;
+    queue_redraw();
+}
+
+void SteeringSystemNative::set_debug_draw_bottleneck_zones(bool enabled)
+{
+    debug_draw_bottleneck_zones = enabled;
     queue_redraw();
 }
 
@@ -372,16 +381,17 @@ void SteeringSystemNative::_process(double delta)
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 
-    if (debug_draw_world_hitbox || debug_draw_fight_hitbox || debug_show_agent_state_labels)
+    if (debug_draw_world_hitbox || debug_draw_bottleneck_zones || debug_draw_fight_hitbox || debug_show_agent_state_labels)
         queue_redraw();
 }
 
 void SteeringSystemNative::_draw()
 {
-    if (!debug_draw_world_hitbox && !debug_draw_fight_hitbox && !debug_show_agent_state_labels)
+    if (!debug_draw_world_hitbox && !debug_draw_bottleneck_zones && !debug_draw_fight_hitbox && !debug_show_agent_state_labels)
         return;
 
     const Color world_color(0.1, 0.85, 0.35, 0.8);
+    const Color bottleneck_zone_color(0.0, 0.2, 1.0, 1.0);
     const Color fight_color(1.0, 0.25, 0.1, 0.8);
     const Color label_color(1.0, 1.0, 1.0, 0.95);
     const Color label_shadow_color(0.0, 0.0, 0.0, 0.8);
@@ -395,6 +405,27 @@ void SteeringSystemNative::_draw()
             Ref<Theme> default_theme = theme_db->get_default_theme();
             if (default_theme.is_valid())
                 debug_font = default_theme->get_default_font();
+        }
+    }
+
+    if (debug_draw_bottleneck_zones)
+    {
+        auto *ff_native = Object::cast_to<FlowFieldNative>(flowfield);
+        const ffcore::FlowField *ff = ff_native ? ff_native->get_field() : nullptr;
+        if (ff)
+        {
+            const double tile = ff->tile_size();
+            for (const ffcore::BottleneckInfo &bottleneck : ff->get_bottlenecks())
+            {
+                for (const ffcore::Vec2i &cell : bottleneck.zone_cells)
+                {
+                    ffcore::Vec2 center = ff->cell_to_world(cell);
+                    Vector2 top_left = to_local(Vector2(center.x - tile * 0.5, center.y - tile * 0.5));
+                    Vector2 bottom_right = to_local(Vector2(center.x + tile * 0.5, center.y + tile * 0.5));
+                    Rect2 rect(top_left, bottom_right - top_left);
+                    draw_rect(rect, bottleneck_zone_color, true);
+                }
+            }
         }
     }
 

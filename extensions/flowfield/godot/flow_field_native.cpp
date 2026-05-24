@@ -206,6 +206,62 @@ void FlowFieldNative::compute_distance_field_global()
     build_sets(wall_set, walkable_set);
 
     compute_distance_field(used, wall_set);
+    compute_bottlenecks(used, walkable_set);
+}
+
+void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
+                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
+{
+    field.clear_bottlenecks();
+
+    const int zone_radius = std::max(0, ffcore::globalconfig().bottleneck_zone_radius_tiles);
+    const Vector2i east(1, 0);
+    const Vector2i west(-1, 0);
+    const Vector2i south(0, 1);
+    const Vector2i north(0, -1);
+
+    auto is_walkable = [&](const Vector2i &cell) -> bool
+    {
+        return walkable_set.count(cell) > 0;
+    };
+
+    for (const Vector2i &cell : walkable_set)
+    {
+        const bool e = is_walkable(cell + east);
+        const bool w = is_walkable(cell + west);
+        const bool s = is_walkable(cell + south);
+        const bool n = is_walkable(cell + north);
+        const int neighbor_count = int(e) + int(w) + int(s) + int(n);
+
+        int axis = 0;
+        if (neighbor_count == 2 && e && w)
+            axis = 1;
+        else if (neighbor_count == 2 && n && s)
+            axis = 2;
+        else
+            continue;
+
+        Vector2i rel(cell.x - used.position.x, cell.y - used.position.y);
+        int bottleneck_index = field.add_bottleneck(ffcore::Vec2i(rel.x, rel.y), axis);
+        if (bottleneck_index < 0)
+            continue;
+
+        for (int dy = -zone_radius; dy <= zone_radius; ++dy)
+        {
+            for (int dx = -zone_radius; dx <= zone_radius; ++dx)
+            {
+                if (std::abs(dx) + std::abs(dy) > zone_radius)
+                    continue;
+
+                Vector2i zone_cell = cell + Vector2i(dx, dy);
+                if (!is_walkable(zone_cell))
+                    continue;
+
+                Vector2i zone_rel(zone_cell.x - used.position.x, zone_cell.y - used.position.y);
+                field.add_bottleneck_zone_cell(bottleneck_index, ffcore::Vec2i(zone_rel.x, zone_rel.y));
+            }
+        }
+    }
 }
 
 void FlowFieldNative::compute_distance_field(const Rect2i &used,
@@ -500,6 +556,7 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
 
     // Precompute clearance to walls so flow directions can blend in distance gradients.
     compute_distance_field(used, wall_set);
+    compute_bottlenecks(used, walkable_set);
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);

@@ -30,6 +30,7 @@ namespace godot
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
         bool debug_draw_world_hitbox = true;
+        bool debug_draw_bottleneck_zones = true;
         bool debug_draw_fight_hitbox = true;
         bool debug_show_agent_state_labels = true;
 
@@ -76,6 +77,8 @@ namespace godot
         void set_paused(bool p) { paused = p; }
         void set_debug_draw_world_hitbox(bool enabled);
         bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
+        void set_debug_draw_bottleneck_zones(bool enabled);
+        bool get_debug_draw_bottleneck_zones() const { return debug_draw_bottleneck_zones; }
         void set_debug_draw_fight_hitbox(bool enabled);
         bool get_debug_draw_fight_hitbox() const { return debug_draw_fight_hitbox; }
         void set_debug_show_agent_state_labels(bool enabled);

@@ -33,6 +33,12 @@ namespace ffcore
         std::unordered_set<int> hit_ids;
     };
 
+    struct BottleneckReservation
+    {
+        int owner_id = -1;
+        double time_left = 0.0;
+    };
+
     class SteeringSystem
     {
     public:
@@ -72,6 +78,7 @@ namespace ffcore
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
         std::vector<ActiveAoE> active_aoes;
+        std::unordered_map<FlowField *, std::unordered_map<int, BottleneckReservation>> bottleneck_reservations;
         double max_fight_query_padding = 0.0;
         double max_world_radius = 0.0;
 
@@ -82,6 +89,7 @@ namespace ffcore
 
         Vec2 force_voisine(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
+        void apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta);
         void ultimate_wall_correction(AgentData &a, FlowField *ff, double delta);
         Vec2 apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff);
         bool is_agent_footprint_navigable(const Vec2 &body_position, const AgentProfile &profile, FlowField *ff) const;

@@ -1316,6 +1316,10 @@ script = ExtResource("10_hoverctrl")
 flow_weight = 5.0
 center_pull = 5.0
 agent_world_diameter_ratio = 0.75
+bottleneck_zone_radius_tiles = 3
+bottleneck_reservation_seconds = 1.0
+bottleneck_wait_speed_ratio = 0.05
+bottleneck_backoff_strength = 0.35
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 

@@ -141,6 +141,19 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     if (it == id_to_index.end())
         return;
 
+    for (auto &field_entry : bottleneck_reservations)
+    {
+        for (auto &reservation_entry : field_entry.second)
+        {
+            BottleneckReservation &reservation = reservation_entry.second;
+            if (reservation.owner_id == id)
+            {
+                reservation.owner_id = -1;
+                reservation.time_left = 0.0;
+            }
+        }
+    }
+
     int idx = it->second;
     if (grid)
         grid->remove(id);
@@ -159,6 +172,7 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
 
 void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 {
+    bottleneck_reservations.erase(field);
     for (auto &a : agents)
     {
         if (a.flow != field)
@@ -470,6 +484,33 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     return separation_force;
 }
 
+void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta)
+{
+    (void)target_velocity;
+    (void)delta;
+
+    if (!ff)
+        return;
+
+    const auto &cfg = globalconfig();
+    Vec2 foot = agent_foot_point(agent);
+    Vec2i cell = ff->world_to_cell(foot);
+
+    int core_index = ff->bottleneck_core_at_cell(cell);
+    if (core_index >= 0)
+    {
+        BottleneckReservation &reservation = bottleneck_reservations[ff][core_index];
+        reservation.owner_id = agent.id;
+        reservation.time_left = cfg.bottleneck_reservation_seconds;
+        return;
+    }
+
+    // Zone-level yielding is intentionally disabled until the reservation model
+    // can choose the front-most entrant reliably. Bottleneck zones remain useful
+    // for debug and later traffic-rule tuning, but must not block entry.
+    return;
+}
+
 void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 {
     auto it = id_to_index.find(id);
@@ -776,6 +817,20 @@ void SteeringSystem::update_all(double delta)
 
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
+
+    for (auto &field_entry : bottleneck_reservations)
+    {
+        for (auto &reservation_entry : field_entry.second)
+        {
+            BottleneckReservation &reservation = reservation_entry.second;
+            if (reservation.owner_id >= 0)
+            {
+                reservation.time_left -= delta;
+                if (reservation.time_left <= 0.0)
+                    reservation.owner_id = -1;
+            }
+        }
+    }
 
     for (auto &zone : active_aoes)
     {
@@ -1099,6 +1154,8 @@ void SteeringSystem::update_all(double delta)
             }
             target_velocity = desired_dir * target_speed;
         }
+
+        apply_bottleneck_traffic(a, ff, target_velocity, delta);
 
         if (!a.is_propelled)
         {

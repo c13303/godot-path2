@@ -59,6 +59,15 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_world_diameter_ratio", "value"), &GlobalConfigNative::set_agent_world_diameter_ratio);
     ClassDB::bind_method(D_METHOD("get_agent_world_radius"), &GlobalConfigNative::get_agent_world_radius);
 
+    ClassDB::bind_method(D_METHOD("get_bottleneck_zone_radius_tiles"), &GlobalConfigNative::get_bottleneck_zone_radius_tiles);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_zone_radius_tiles", "value"), &GlobalConfigNative::set_bottleneck_zone_radius_tiles);
+    ClassDB::bind_method(D_METHOD("get_bottleneck_reservation_seconds"), &GlobalConfigNative::get_bottleneck_reservation_seconds);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_reservation_seconds", "value"), &GlobalConfigNative::set_bottleneck_reservation_seconds);
+    ClassDB::bind_method(D_METHOD("get_bottleneck_wait_speed_ratio"), &GlobalConfigNative::get_bottleneck_wait_speed_ratio);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_wait_speed_ratio", "value"), &GlobalConfigNative::set_bottleneck_wait_speed_ratio);
+    ClassDB::bind_method(D_METHOD("get_bottleneck_backoff_strength"), &GlobalConfigNative::get_bottleneck_backoff_strength);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_backoff_strength", "value"), &GlobalConfigNative::set_bottleneck_backoff_strength);
+
     ClassDB::bind_method(D_METHOD("get_separation_strength"), &GlobalConfigNative::get_separation_strength);
     ClassDB::bind_method(D_METHOD("set_separation_strength", "value"), &GlobalConfigNative::set_separation_strength);
 
@@ -108,6 +117,10 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "target_T2_param_speed_lerp"), "set_target_T2_param_speed_lerp", "get_target_T2_param_speed_lerp");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_radius"), "set_separation_radius", "get_separation_radius");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_world_diameter_ratio"), "set_agent_world_diameter_ratio", "get_agent_world_diameter_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "bottleneck_zone_radius_tiles"), "set_bottleneck_zone_radius_tiles", "get_bottleneck_zone_radius_tiles");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_reservation_seconds"), "set_bottleneck_reservation_seconds", "get_bottleneck_reservation_seconds");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_wait_speed_ratio"), "set_bottleneck_wait_speed_ratio", "get_bottleneck_wait_speed_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_backoff_strength"), "set_bottleneck_backoff_strength", "get_bottleneck_backoff_strength");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
@@ -182,6 +195,15 @@ void GlobalConfigNative::set_separation_radius(double v) { cfg().separation_radi
 double GlobalConfigNative::get_agent_world_diameter_ratio() const { return cfg().agent_world_diameter_ratio; }
 void GlobalConfigNative::set_agent_world_diameter_ratio(double v) { cfg().agent_world_diameter_ratio = std::max(0.0, v); }
 double GlobalConfigNative::get_agent_world_radius() const { return cfg().tile_size * cfg().agent_world_diameter_ratio * 0.5; }
+
+int GlobalConfigNative::get_bottleneck_zone_radius_tiles() const { return cfg().bottleneck_zone_radius_tiles; }
+void GlobalConfigNative::set_bottleneck_zone_radius_tiles(int v) { cfg().bottleneck_zone_radius_tiles = std::max(0, v); }
+double GlobalConfigNative::get_bottleneck_reservation_seconds() const { return cfg().bottleneck_reservation_seconds; }
+void GlobalConfigNative::set_bottleneck_reservation_seconds(double v) { cfg().bottleneck_reservation_seconds = std::max(0.0, v); }
+double GlobalConfigNative::get_bottleneck_wait_speed_ratio() const { return cfg().bottleneck_wait_speed_ratio; }
+void GlobalConfigNative::set_bottleneck_wait_speed_ratio(double v) { cfg().bottleneck_wait_speed_ratio = std::clamp(v, 0.0, 1.0); }
+double GlobalConfigNative::get_bottleneck_backoff_strength() const { return cfg().bottleneck_backoff_strength; }
+void GlobalConfigNative::set_bottleneck_backoff_strength(double v) { cfg().bottleneck_backoff_strength = std::clamp(v, 0.0, 1.0); }
 
 double GlobalConfigNative::get_separation_strength() const { return cfg().separation_strength; }
 void GlobalConfigNative::set_separation_strength(double v) { cfg().separation_strength = std::max(0.0, v); }

@@ -21,6 +21,7 @@ void FlowField::resize(int width, int height)
     h = height;
     dirs.assign(w * h, Vec2());
     distance_field.assign(w * h, 0.0f);
+    clear_bottlenecks();
     ff_target_radius = 0.0;
     ready = (w > 0 && h > 0);
 }
@@ -79,6 +80,7 @@ void FlowField::clear()
 {
     std::fill(dirs.begin(), dirs.end(), Vec2());
     std::fill(distance_field.begin(), distance_field.end(), 0.0f);
+    clear_bottlenecks();
     ff_target_radius = 0.0;
     ready = false;
     goal_cell = Vec2i(-1, -1);
@@ -156,6 +158,71 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
     return best;
 }
 
+void FlowField::clear_bottlenecks()
+{
+    bottlenecks.clear();
+    bottleneck_core_by_cell.assign(w * h, -1);
+    bottleneck_zone_by_cell.assign(w * h, -1);
+}
+
+int FlowField::add_bottleneck(const Vec2i &cell, int axis)
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return -1;
+
+    BottleneckInfo info;
+    info.cell = cell;
+    info.axis = axis;
+    bottlenecks.push_back(info);
+    int index = static_cast<int>(bottlenecks.size()) - 1;
+    bottleneck_core_by_cell[cell.y * w + cell.x] = index;
+    return index;
+}
+
+void FlowField::add_bottleneck_zone_cell(int bottleneck_index, const Vec2i &cell)
+{
+    if (bottleneck_index < 0 || bottleneck_index >= static_cast<int>(bottlenecks.size()))
+        return;
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return;
+
+    const int idx = cell.y * w + cell.x;
+    if (idx < 0 || idx >= static_cast<int>(bottleneck_zone_by_cell.size()))
+        return;
+    if (bottleneck_zone_by_cell[idx] >= 0)
+        return;
+
+    bottleneck_zone_by_cell[idx] = bottleneck_index;
+    bottlenecks[bottleneck_index].zone_cells.push_back(cell);
+}
+
+int FlowField::bottleneck_core_at_cell(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return -1;
+    const int idx = cell.y * w + cell.x;
+    if (idx < 0 || idx >= static_cast<int>(bottleneck_core_by_cell.size()))
+        return -1;
+    return bottleneck_core_by_cell[idx];
+}
+
+int FlowField::bottleneck_zone_at_cell(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return -1;
+    const int idx = cell.y * w + cell.x;
+    if (idx < 0 || idx >= static_cast<int>(bottleneck_zone_by_cell.size()))
+        return -1;
+    return bottleneck_zone_by_cell[idx];
+}
+
+const BottleneckInfo *FlowField::bottleneck_at(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(bottlenecks.size()))
+        return nullptr;
+    return &bottlenecks[index];
+}
+
 void FlowField::copy_from(const FlowField &src)
 {
     w = src.w;
@@ -167,6 +234,9 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
+    bottlenecks = src.bottlenecks;
+    bottleneck_core_by_cell = src.bottleneck_core_by_cell;
+    bottleneck_zone_by_cell = src.bottleneck_zone_by_cell;
 }
 
 bool FlowField::has_distance_field() const

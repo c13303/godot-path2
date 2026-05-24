@@ -64,6 +64,15 @@ namespace godot
         void set_agent_world_diameter_ratio(double v);
         double get_agent_world_radius() const;
 
+        int get_bottleneck_zone_radius_tiles() const;
+        void set_bottleneck_zone_radius_tiles(int v);
+        double get_bottleneck_reservation_seconds() const;
+        void set_bottleneck_reservation_seconds(double v);
+        double get_bottleneck_wait_speed_ratio() const;
+        void set_bottleneck_wait_speed_ratio(double v);
+        double get_bottleneck_backoff_strength() const;
+        void set_bottleneck_backoff_strength(double v);
+
         double get_separation_strength() const;
         void set_separation_strength(double v);
 

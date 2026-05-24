@@ -13,6 +13,13 @@ namespace ffcore
         double angle = 0.0; // radians, principal axis of formation
     };
 
+    struct BottleneckInfo
+    {
+        Vec2i cell;
+        int axis = 0; // 1 = horizontal, 2 = vertical
+        std::vector<Vec2i> zone_cells;
+    };
+
     class FlowField
     {
     public:
@@ -55,6 +62,13 @@ namespace ffcore
 
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
+        void clear_bottlenecks();
+        int add_bottleneck(const Vec2i &cell, int axis);
+        void add_bottleneck_zone_cell(int bottleneck_index, const Vec2i &cell);
+        int bottleneck_core_at_cell(const Vec2i &cell) const;
+        int bottleneck_zone_at_cell(const Vec2i &cell) const;
+        const BottleneckInfo *bottleneck_at(int index) const;
+        const std::vector<BottleneckInfo> &get_bottlenecks() const { return bottlenecks; }
         double get_ff_target_radius() const { return ff_target_radius; }
         void set_ff_target_radius(double radius) { ff_target_radius = radius; }
         int arrived_count = 0;
@@ -77,6 +91,9 @@ namespace ffcore
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;
         std::vector<float> distance_field;
+        std::vector<BottleneckInfo> bottlenecks;
+        std::vector<int> bottleneck_core_by_cell;
+        std::vector<int> bottleneck_zone_by_cell;
 
         Vec2i goal_cell = Vec2i(-1, -1);
         double ff_target_radius = 0.0;
