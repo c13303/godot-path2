@@ -31,6 +31,7 @@ namespace godot
         bool paused = false;
         bool debug_draw_world_hitbox = true;
         bool debug_draw_fight_hitbox = true;
+        bool debug_show_agent_state_labels = true;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
@@ -41,6 +42,7 @@ namespace godot
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
         void _reset_agent_cache(int agent_id);
         Dictionary _agent_summary(const ffcore::AgentData *a) const;
+        String _agent_debug_state_label(const ffcore::AgentData *a) const;
 
     public:
         static void _bind_methods();
@@ -76,6 +78,8 @@ namespace godot
         bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
         void set_debug_draw_fight_hitbox(bool enabled);
         bool get_debug_draw_fight_hitbox() const { return debug_draw_fight_hitbox; }
+        void set_debug_show_agent_state_labels(bool enabled);
+        bool get_debug_show_agent_state_labels() const { return debug_show_agent_state_labels; }
 
         ffcore::SteeringSystem *get_system() { return &system; }
     };

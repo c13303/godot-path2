@@ -4,6 +4,10 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/theme.hpp>
+#include <godot_cpp/classes/theme_db.hpp>
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/engine.hpp>
 #include "agent_manager_native.h"
@@ -37,9 +41,12 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_debug_draw_world_hitbox"), &SteeringSystemNative::get_debug_draw_world_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_draw_fight_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("get_debug_draw_fight_hitbox"), &SteeringSystemNative::get_debug_draw_fight_hitbox);
+    ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
+    ClassDB::bind_method(D_METHOD("get_debug_show_agent_state_labels"), &SteeringSystemNative::get_debug_show_agent_state_labels);
 
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_fight_hitbox"), "set_debug_draw_fight_hitbox", "get_debug_draw_fight_hitbox");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_show_agent_state_labels"), "set_debug_show_agent_state_labels", "get_debug_show_agent_state_labels");
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -96,6 +103,12 @@ void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
 void SteeringSystemNative::set_debug_draw_fight_hitbox(bool enabled)
 {
     debug_draw_fight_hitbox = enabled;
+    queue_redraw();
+}
+
+void SteeringSystemNative::set_debug_show_agent_state_labels(bool enabled)
+{
+    debug_show_agent_state_labels = enabled;
     queue_redraw();
 }
 
@@ -256,6 +269,36 @@ Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) cons
     return d;
 }
 
+String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a) const
+{
+    if (!a)
+        return "missing";
+
+    Vector2 vel(a->velocity.x, a->velocity.y);
+    double velocity_len = vel.length();
+
+    if (a->smash_pending)
+        return "smash pending";
+    if (a->is_propelled)
+        return "propelled v=" + String::num_real(velocity_len) + " t=" + String::num_real(a->propelled_timer);
+    if (a->control_mode == ffcore::AgentControlMode::Manual)
+        return velocity_len > 1.0 ? "manual moving" : "manual idle";
+    if (!a->active)
+        return a->flow ? "inactive" : "inactive / no flow";
+    if (!a->flow)
+        return "no flow";
+    if (!a->flow->is_ready())
+        return "flow not ready";
+    if (a->target_radius_timer > 0.0)
+        return "target wait " + String::num_real(a->target_radius_timer);
+    if (a->micro_osc > 0)
+        return "following flow osc=" + String::num_int64(a->micro_osc);
+    if (velocity_len <= 1.0)
+        return "following flow idle";
+
+    return "following flow";
+}
+
 Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
 {
     Array out;
@@ -329,17 +372,31 @@ void SteeringSystemNative::_process(double delta)
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 
-    if (debug_draw_world_hitbox || debug_draw_fight_hitbox)
+    if (debug_draw_world_hitbox || debug_draw_fight_hitbox || debug_show_agent_state_labels)
         queue_redraw();
 }
 
 void SteeringSystemNative::_draw()
 {
-    if (!debug_draw_world_hitbox && !debug_draw_fight_hitbox)
+    if (!debug_draw_world_hitbox && !debug_draw_fight_hitbox && !debug_show_agent_state_labels)
         return;
 
     const Color world_color(0.1, 0.85, 0.35, 0.8);
     const Color fight_color(1.0, 0.25, 0.1, 0.8);
+    const Color label_color(1.0, 1.0, 1.0, 0.95);
+    const Color label_shadow_color(0.0, 0.0, 0.0, 0.8);
+    Ref<Font> debug_font;
+    if (debug_show_agent_state_labels && ThemeDB::get_singleton())
+    {
+        ThemeDB *theme_db = ThemeDB::get_singleton();
+        debug_font = theme_db->get_fallback_font();
+        if (!debug_font.is_valid())
+        {
+            Ref<Theme> default_theme = theme_db->get_default_theme();
+            if (default_theme.is_valid())
+                debug_font = default_theme->get_default_font();
+        }
+    }
 
     for (const auto &entry : agent_map)
     {
@@ -360,6 +417,14 @@ void SteeringSystemNative::_draw()
             Vector2 half_size(a->profile.fight_half_w, a->profile.fight_half_h);
             Rect2 rect(fight_center - half_size, half_size * 2.0);
             draw_rect(rect, fight_color, false, 2.0);
+        }
+
+        if (debug_show_agent_state_labels && debug_font.is_valid())
+        {
+            String label = _agent_debug_state_label(a);
+            Vector2 label_pos = to_local(Vector2(a->position.x - a->profile.fight_half_w, a->position.y + a->profile.fight_offset_y - a->profile.fight_half_h - 8.0));
+            draw_string(debug_font, label_pos + Vector2(1.0, 1.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_shadow_color);
+            draw_string(debug_font, label_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_color);
         }
     }
 }

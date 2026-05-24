@@ -599,11 +599,7 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     if (!agent.active)
         agent.active = true;
 
-    if (detach_flow)
-    {
-        agent.flow = nullptr;
-        agent.group = INVALID_GROUP;
-    }
+    (void)detach_flow;
 }
 
 void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
