@@ -29,6 +29,8 @@ namespace godot
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
+        bool debug_draw_world_hitbox = true;
+        bool debug_draw_fight_hitbox = true;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
@@ -48,6 +50,7 @@ namespace godot
 
         void _ready() override;
         void _process(double delta) override;
+        void _draw() override;
 
         void set_flowfield(Object *obj);
         void set_grid(Object *obj);
@@ -69,6 +72,10 @@ namespace godot
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         void set_paused(bool p) { paused = p; }
+        void set_debug_draw_world_hitbox(bool enabled);
+        bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
+        void set_debug_draw_fight_hitbox(bool enabled);
+        bool get_debug_draw_fight_hitbox() const { return debug_draw_fight_hitbox; }
 
         ffcore::SteeringSystem *get_system() { return &system; }
     };

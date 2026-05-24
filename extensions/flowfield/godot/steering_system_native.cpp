@@ -2,6 +2,8 @@
 #include "flow_field_native.h"
 #include "spatial_grid_native.h"
 #include <godot_cpp/variant/utility_functions.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/engine.hpp>
 #include "agent_manager_native.h"
@@ -31,6 +33,13 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("spawn_aoe_zone", "position", "direction", "radius", "angle_degrees", "duration", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::spawn_aoe_zone);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
+    ClassDB::bind_method(D_METHOD("set_debug_draw_world_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_world_hitbox);
+    ClassDB::bind_method(D_METHOD("get_debug_draw_world_hitbox"), &SteeringSystemNative::get_debug_draw_world_hitbox);
+    ClassDB::bind_method(D_METHOD("set_debug_draw_fight_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_fight_hitbox);
+    ClassDB::bind_method(D_METHOD("get_debug_draw_fight_hitbox"), &SteeringSystemNative::get_debug_draw_fight_hitbox);
+
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_fight_hitbox"), "set_debug_draw_fight_hitbox", "get_debug_draw_fight_hitbox");
 }
 
 SteeringSystemNative::SteeringSystemNative() {}
@@ -76,6 +85,18 @@ void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
 void SteeringSystemNative::set_grid(Object *obj)
 {
     grid = Object::cast_to<Node2D>(obj);
+}
+
+void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
+{
+    debug_draw_world_hitbox = enabled;
+    queue_redraw();
+}
+
+void SteeringSystemNative::set_debug_draw_fight_hitbox(bool enabled)
+{
+    debug_draw_fight_hitbox = enabled;
+    queue_redraw();
 }
 
 void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
@@ -307,6 +328,39 @@ void SteeringSystemNative::_process(double delta)
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 
+    if (debug_draw_world_hitbox || debug_draw_fight_hitbox)
+        queue_redraw();
+}
+
+void SteeringSystemNative::_draw()
+{
+    if (!debug_draw_world_hitbox && !debug_draw_fight_hitbox)
+        return;
+
+    const Color world_color(0.1, 0.85, 0.35, 0.8);
+    const Color fight_color(1.0, 0.25, 0.1, 0.8);
+
+    for (const auto &entry : agent_map)
+    {
+        int id = entry.second;
+        const ffcore::AgentData *a = system.get_agent(id);
+        if (!a)
+            continue;
+
+        if (debug_draw_world_hitbox && a->profile.world_radius > 0.0)
+        {
+            Vector2 world_center = to_local(Vector2(a->position.x, a->position.y + a->profile.foot_offset_y));
+            draw_arc(world_center, a->profile.world_radius, 0.0, 6.28318530717958647692, 48, world_color, 2.0, true);
+        }
+
+        if (debug_draw_fight_hitbox)
+        {
+            Vector2 fight_center = to_local(Vector2(a->position.x, a->position.y));
+            Vector2 half_size(a->profile.fight_half_w, a->profile.fight_half_h);
+            Rect2 rect(fight_center - half_size, half_size * 2.0);
+            draw_rect(rect, fight_color, false, 2.0);
+        }
+    }
 }
 
 int SteeringSystemNative::get_agent_id(Node2D *node)
