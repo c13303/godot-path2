@@ -59,6 +59,8 @@ namespace godot
         void set_agent_manual_motion(int agent_id, double acceleration, double deceleration);
         void set_agent_profile(int agent_id, const Dictionary &profile);
         Vector2 get_agent_position(int agent_id) const;
+        void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow);
+        void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow);
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;

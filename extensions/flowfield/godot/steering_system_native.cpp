@@ -23,6 +23,8 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
     ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_id", "profile"), &SteeringSystemNative::set_agent_profile);
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
+    ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow"), &SteeringSystemNative::apply_smash_impulse);
+    ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow"), &SteeringSystemNative::apply_area_smash);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
@@ -76,6 +78,23 @@ void SteeringSystemNative::set_grid(Object *obj)
 void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
 {
     system.apply_explosion(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss);
+}
+
+void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow)
+{
+    system.apply_smash_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss, delay, detach_flow);
+}
+
+void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow)
+{
+    system.apply_area_smash(
+        ffcore::Vec2(position.x, position.y),
+        radius,
+        ffcore::Vec2(direction.x, direction.y),
+        force,
+        friction_loss,
+        falloff,
+        detach_flow);
 }
 
 void SteeringSystemNative::set_agent_control_mode(int agent_id, int mode)

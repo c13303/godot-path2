@@ -503,6 +503,68 @@ void SteeringSystem::set_agent_manual_motion(int id, double acceleration, double
     a.manual_deceleration = std::max(0.0, deceleration);
 }
 
+void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &agent = agents[it->second];
+    Vec2 dir = safe_normalize(direction.is_zero() ? hashed_unit_dir(agent.id) : direction);
+    Vec2 smash = dir * std::max(0.0, force);
+
+    const auto &cfg = globalconfig();
+    double len = safe_len(smash);
+    if (len > cfg.smash_cap)
+        smash = smash * (cfg.smash_cap / len);
+
+    agent.smash_delay = std::max(0.0, delay);
+    agent.pending_smash = smash;
+    agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
+    agent.smash_pending = true;
+    agent.smash_force = Vec2(0, 0);
+    agent.smash_just_reset = false;
+
+    agent.is_propelled = false;
+    agent.propelled_timer = 0.0;
+
+    if (!agent.active)
+        agent.active = true;
+
+    if (detach_flow)
+    {
+        agent.flow = nullptr;
+        agent.group = INVALID_GROUP;
+    }
+}
+
+void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow)
+{
+    if (radius <= 0.0 || !grid)
+        return;
+
+    auto neighbors = grid->query_neighbors(pos, radius);
+    if (neighbors.empty())
+        return;
+
+    double safe_falloff = std::max(0.0, falloff);
+    for (int nid : neighbors)
+    {
+        auto it = id_to_index.find(nid);
+        if (it == id_to_index.end())
+            continue;
+
+        const AgentData &agent = agents[it->second];
+        double dist = (agent.position - pos).length();
+        if (dist > radius)
+            continue;
+
+        double base = std::max(0.0, 1.0 - dist / radius);
+        double attenuation = std::pow(base, safe_falloff);
+        apply_smash_impulse(nid, direction, force * attenuation, friction_loss, 0.0, detach_flow);
+    }
+}
+
 void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss)
 {
     if (radius <= 0.0 || !grid)
@@ -535,29 +597,8 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
         double base = std::max(0.0, 1.0 - dist / radius);
         double attenuation = std::pow(base, std::max(0.0, cfg.explosion_falloff));
 
-        Vec2 smash = dir * (intensity * attenuation);
-
-        double len = safe_len(smash);
-        if (len > cfg.smash_cap)
-            smash = smash * (cfg.smash_cap / len);
-
         double wave_speed = std::max(1.0, cfg.shockwave_speed);
-        agent.smash_delay = dist / wave_speed;
-        agent.pending_smash = smash;
-        agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
-        agent.smash_pending = true;
-        agent.smash_force = Vec2(0, 0);
-        agent.smash_just_reset = false;
-
-        agent.is_propelled = false;
-        agent.propelled_timer = 0.0;
-
-        if (!agent.active)
-        {
-            agent.active = true;
-        }
-        agent.flow = nullptr;
-        agent.group = INVALID_GROUP;
+        apply_smash_impulse(nid, dir, intensity * attenuation, friction_loss, dist / wave_speed, true);
     }
 }
 

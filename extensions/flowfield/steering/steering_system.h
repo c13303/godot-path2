@@ -46,6 +46,8 @@ namespace ffcore
         void set_agent_input(int id, const Vec2 &direction);
         void set_agent_manual_motion(int id, double acceleration, double deceleration);
         void set_agent_profile(int id, const AgentProfile &profile);
+        void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow);
+        void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void set_agent_never_rest(int id, bool value);
 

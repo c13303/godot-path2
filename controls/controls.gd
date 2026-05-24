@@ -82,6 +82,8 @@ func _input(event: InputEvent) -> void:
 				_spawn_chars(10)
 			elif key_event.keycode == KEY_F3:
 				_spawn_chars(50)
+			elif key_event.keycode == KEY_B:
+				fx_controller.trigger_bomb(get_global_mouse_position())
 			elif key_event.keycode == KEY_SPACE:
 				_toggle_pause()
 
