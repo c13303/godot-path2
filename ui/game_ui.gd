@@ -138,7 +138,8 @@ func _build_inventory() -> void:
 	title.add_theme_color_override("font_color", Color(0.92, 0.88, 0.78))
 	inventory_content.add_child(title)
 
-	for row_index in range(int(INVENTORY_SLOT_COUNT / INVENTORY_COLUMNS)):
+	@warning_ignore("integer_division")
+	for row_index in range(INVENTORY_SLOT_COUNT / INVENTORY_COLUMNS):
 		var row := HBoxContainer.new()
 		row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		row.alignment = BoxContainer.ALIGNMENT_CENTER

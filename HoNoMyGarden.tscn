@@ -1431,6 +1431,7 @@ offset_right = 263.0
 offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
+metadata/_edit_lock_ = true
 
 [node name="ToolbarPanel" type="Panel" parent="GameUI/bottom anchor" unique_id=2101533894]
 layout_mode = 0
@@ -1626,3 +1627,4 @@ fit_content = true
 scroll_active = false
 horizontal_alignment = 1
 script = ExtResource("21_v8oxv")
+metadata/_edit_lock_ = true

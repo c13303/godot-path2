@@ -5,14 +5,16 @@ var floorz: TileMapLayer
 var steering: Node
 var fps_label: Label
 var flow_node: Node
+var game_ui: Node
 var mouse_outline: Line2D
 var enabled: bool = true
 
-func setup(floor_layer: TileMapLayer, steering_in: Node, label_in: Label, flow_in: Node) -> void:
+func setup(floor_layer: TileMapLayer, steering_in: Node, label_in: Label, flow_in: Node, game_ui_in: Node = null) -> void:
 	floorz = floor_layer
 	steering = steering_in
 	fps_label = label_in
 	flow_node = flow_in
+	game_ui = game_ui_in
 
 	mouse_outline = Line2D.new()
 	mouse_outline.default_color = Color(1, 1, 1, 1)
@@ -61,16 +63,27 @@ func process() -> void:
 		fps_label.call("set_hover_cell_text", "\n".join(lines))
 
 	if mouse_outline:
-		var tile_size: Vector2i = floorz.tile_set.get_tile_size()
-		var half: Vector2 = Vector2(float(tile_size.x) * 0.5, float(tile_size.y) * 0.5)
-		mouse_outline.points = [
-			Vector2(-half.x, -half.y),
-			Vector2(half.x, -half.y),
-			Vector2(half.x, half.y),
-			Vector2(-half.x, half.y)
-		]
-		mouse_outline.global_position = center
-		mouse_outline.visible = true
+		if _selected_item_places_tile():
+			var tile_size: Vector2i = floorz.tile_set.get_tile_size()
+			var half: Vector2 = Vector2(float(tile_size.x) * 0.5, float(tile_size.y) * 0.5)
+			mouse_outline.points = [
+				Vector2(-half.x, -half.y),
+				Vector2(half.x, -half.y),
+				Vector2(half.x, half.y),
+				Vector2(-half.x, half.y)
+			]
+			mouse_outline.global_position = center
+			mouse_outline.visible = true
+		else:
+			mouse_outline.visible = false
+
+func _selected_item_places_tile() -> bool:
+	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
+		return false
+	var item_id := String(game_ui.call("get_selected_quick_item_id"))
+	if item_id == "":
+		return false
+	return ItemCatalog.item_places_tile(item_id)
 
 func set_enabled(value: bool) -> void:
 	enabled = value

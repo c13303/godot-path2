@@ -62,7 +62,7 @@ func _ready() -> void:
 	selection_controller.setup(ui_layer, agent_manager)
 	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
 	if tile_hover_info:
-		tile_hover_info.setup(floorz, steering, fps_label, flow)
+		tile_hover_info.setup(floorz, steering, fps_label, flow, game_ui)
 
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
