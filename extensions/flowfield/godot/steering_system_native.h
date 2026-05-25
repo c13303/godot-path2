@@ -29,10 +29,10 @@ namespace godot
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
-        bool debug_draw_world_hitbox = true;
+        bool debug_draw_world_hitbox = false;
         bool debug_draw_bottleneck_zones = false;
-        bool debug_draw_fight_hitbox = true;
-        bool debug_show_agent_state_labels = true;
+        bool debug_draw_fight_hitbox = false;
+        bool debug_show_agent_state_labels = false;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;

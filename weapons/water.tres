@@ -1,7 +1,7 @@
-[gd_resource type="Resource" script_class="GunData" format=3]
+[gd_resource type="Resource" script_class="GunData" format=3 uid="uid://cq43ugaiagnon"]
 
-[ext_resource type="Script" path="res://weapons/gun_data.gd" id="1_gun_data"]
-[ext_resource type="Texture2D" path="res://png/legval/water_drip.png" id="2_water_drip"]
+[ext_resource type="Script" uid="uid://cojaivo3a6d7g" path="res://weapons/gun_data.gd" id="1_gun_data"]
+[ext_resource type="Texture2D" uid="uid://06ky1m645ait" path="res://png/legval/water_drip.png" id="2_water_drip"]
 
 [resource]
 script = ExtResource("1_gun_data")
@@ -9,13 +9,8 @@ id = "water"
 fire_delay_ms = 40.0
 projectile_speed = 700.0
 projectile_lifetime = 0.5
-projectile_size = 16.0
 projectile_sprite = ExtResource("2_water_drip")
-aoe_radius = 18.0
-smash_force = 80.0
+smash_force = 400.0
 smash_friction_loss = 0.6
-smash_falloff = 1.0
 smash_control_suppression = 0.2
 smash_control_suppression_duration = 0.05
-pool_size = 128
-affected_smash_classes = 4
