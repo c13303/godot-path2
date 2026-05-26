@@ -114,6 +114,8 @@ namespace godot
 
         bool get_draw_flow_field() const;
         void set_draw_flow_field(bool v);
+        bool get_debug_show_plant_zones() const;
+        void set_debug_show_plant_zones(bool v);
 
         double get_debug_plantff_frame_lag_ms() const;
         void set_debug_plantff_frame_lag_ms(double v);

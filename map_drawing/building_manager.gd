@@ -21,7 +21,7 @@ const PLANT_ZONE_MARGIN: int = 2
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
-@export var debug_show_plantzone: bool = false:
+@export var debug_show_plantzone: bool = true:
 	set(value):
 		debug_show_plantzone = value
 		if _zone_overlay:
@@ -97,13 +97,27 @@ func _on_flow_field_ready() -> void:
 func _setup_zone_overlay() -> void:
 	_zone_overlay = Node2D.new()
 	_zone_overlay.name = "PlantZoneOverlay"
-	_zone_overlay.z_index = 100
+	_zone_overlay.z_index = -99
 	_zone_overlay.z_as_relative = false
-	_zone_overlay.visible = debug_show_plantzone
+	_zone_overlay.visible = _plant_zone_debug_enabled()
 	_zone_overlay.set_script(load("res://map_drawing/plant_zone_overlay.gd"))
 	_zone_overlay.set("building_manager", self)
-	var overlay_parent: Node = floorz if floorz else self
+	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(_zone_overlay)
+
+func _plant_zone_debug_enabled() -> bool:
+	if global_config and global_config.has_method("get_debug_show_plant_zones"):
+		return bool(global_config.call("get_debug_show_plant_zones"))
+	return debug_show_plantzone
+
+func _sync_plant_zone_debug_visibility() -> void:
+	if not _zone_overlay:
+		return
+	var show: bool = _plant_zone_debug_enabled()
+	if _zone_overlay.visible == show:
+		return
+	_zone_overlay.visible = show
+	_zone_overlay.queue_redraw()
 
 func _process(delta: float) -> void:
 	if not _flow_ready:
@@ -123,6 +137,7 @@ func _process(delta: float) -> void:
 	_process_astar_out_arrivals()
 	_process_escape_arrivals()
 	_process_spawners(delta)
+	_sync_plant_zone_debug_visibility()
 
 	var frame_ms: int = Time.get_ticks_msec() - frame_start_ms
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()

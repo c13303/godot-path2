@@ -6,7 +6,7 @@ extends Node2D
 
 var building_manager: Node
 
-const ZONE_COLOR: Color = Color(1.0, 0.5, 0.0, 0.5)
+const ZONE_COLOR: Color = Color(1.0, 0.5, 0.0, 0.3)
 const MARGIN_COLOR: Color = Color(1.0, 0.5, 0.0, 1.0)
 
 func _draw() -> void:
@@ -21,6 +21,9 @@ func _draw() -> void:
 	var half: Vector2 = Vector2(float(tile_size.x), float(tile_size.y)) * 0.5
 
 	var zone_cells: Array = building_manager.call("get_plant_zone_tiles") if building_manager.has_method("get_plant_zone_tiles") else []
+	if zone_cells.is_empty():
+		return
+
 	for raw_cell in zone_cells:
 		var c: Vector2i = raw_cell
 		var center_local: Vector2 = _cell_center_local(floorz, c)

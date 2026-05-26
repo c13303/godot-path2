@@ -6,12 +6,14 @@ const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
 const GLOBAL_CONFIG_NODE_NAME: String = "GlobalConfigNative"
+const STEERING_SYSTEM_NODE_PATH: String = "CPP/SteeringSystemNative"
 
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
 var _blood_drop_timer: float = 0.0
 var _blood_layer: Node2D
 var _global_config_node: Node
+var _steering_debug_node: Node
 var _velocity_len: float = 0.0
 var _status_label: Label
 var _eating_timer: float = 0.0
@@ -47,6 +49,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	z_index = int(position.y)
 	_process_eating_status(delta)
+	_process_status_label_visibility()
 	if BLOOD_ENABLED:
 		_process_blood(delta)
 
@@ -65,9 +68,7 @@ func stop_eating() -> void:
 func start_flow_in() -> void:
 	status = "flow_in"
 	_eating_timer = 0.0
-	if _status_label:
-		_status_label.text = "flow in"
-		_status_label.visible = true
+	_show_status_label("flow in")
 
 func stop_flow_in() -> void:
 	if status == "flow_in":
@@ -78,9 +79,7 @@ func stop_flow_in() -> void:
 func start_escape() -> void:
 	status = "flow_out"
 	_eating_timer = 0.0
-	if _status_label:
-		_status_label.text = "flow out"
-		_status_label.visible = true
+	_show_status_label("flow out")
 
 func stop_escape() -> void:
 	if status == "escape" or status == "flow_out":
@@ -91,9 +90,7 @@ func stop_escape() -> void:
 func start_astar_in() -> void:
 	status = "astar_in"
 	_eating_timer = 0.0
-	if _status_label:
-		_status_label.text = "astar_in"
-		_status_label.visible = true
+	_show_status_label("astar_in")
 
 func stop_astar_in() -> void:
 	if status == "astar_in":
@@ -104,9 +101,7 @@ func stop_astar_in() -> void:
 func start_astar_out() -> void:
 	status = "astar_out"
 	_eating_timer = 0.0
-	if _status_label:
-		_status_label.text = "astar_out"
-		_status_label.visible = true
+	_show_status_label("astar_out")
 
 func stop_astar_out() -> void:
 	if status == "astar_out":
@@ -126,8 +121,45 @@ func _update_eating_label() -> void:
 	if _eating_timer <= 0.0:
 		_status_label.visible = false
 		return
-	_status_label.text = "eating %ds" % int(ceil(_eating_timer))
+	_show_status_label("eating %ds" % int(ceil(_eating_timer)))
+
+func _show_status_label(text: String) -> void:
+	if not _status_label:
+		return
+	_status_label.text = text
+	_status_label.visible = _status_labels_enabled()
+
+func _process_status_label_visibility() -> void:
+	if not _status_label:
+		return
+	if not _status_labels_enabled():
+		_status_label.visible = false
+		return
+	if status == "":
+		return
+	if status == "eating":
+		if _eating_timer > 0.0:
+			_update_eating_label()
+		return
 	_status_label.visible = true
+
+func _status_labels_enabled() -> bool:
+	var debug_node: Node = _get_steering_debug_node()
+	if debug_node and debug_node.has_method("get_debug_show_agent_state_labels"):
+		return bool(debug_node.call("get_debug_show_agent_state_labels"))
+	return false
+
+func _get_steering_debug_node() -> Node:
+	if is_instance_valid(_steering_debug_node):
+		return _steering_debug_node
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		_steering_debug_node = scene.get_node_or_null(STEERING_SYSTEM_NODE_PATH)
+	if not _steering_debug_node:
+		var root: Node = get_tree().get_root()
+		if root:
+			_steering_debug_node = root.find_child("SteeringSystemNative", true, false)
+	return _steering_debug_node
 
 func _process_blood(delta: float) -> void:
 	if not BLOOD_ENABLED or not _is_propelled or not _should_drop_blood():

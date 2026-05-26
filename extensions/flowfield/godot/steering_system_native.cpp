@@ -89,6 +89,10 @@ void SteeringSystemNative::_ready()
     if (Engine::get_singleton()->is_editor_hint())
         return;
 
+    set_z_index(3000);
+    set_z_as_relative(false);
+    set_as_top_level(true);
+
     Node *parent = get_parent();
     if (!parent)
         return;
@@ -153,6 +157,8 @@ bool SteeringSystemNative::get_debug_disable_all_debug() const { return ffcore::
 void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
 {
     ffcore::globalconfig().debug_draw_world_hitbox = enabled;
+    if (enabled)
+        ffcore::globalconfig().debug_disable_all_debug = false;
     queue_redraw();
 }
 bool SteeringSystemNative::get_debug_draw_world_hitbox() const { return ffcore::globalconfig().debug_draw_world_hitbox; }
@@ -160,6 +166,11 @@ bool SteeringSystemNative::get_debug_draw_world_hitbox() const { return ffcore::
 void SteeringSystemNative::set_debug_draw_bottleneck_zones(bool enabled)
 {
     ffcore::globalconfig().debug_draw_bottleneck_zones = enabled;
+    if (enabled)
+    {
+        ffcore::globalconfig().debug_disable_all_debug = false;
+        ffcore::globalconfig().debug_disable_bottlenecks = false;
+    }
     queue_redraw();
 }
 bool SteeringSystemNative::get_debug_draw_bottleneck_zones() const { return ffcore::globalconfig().debug_draw_bottleneck_zones; }
@@ -174,6 +185,8 @@ bool SteeringSystemNative::get_debug_disable_bottlenecks() const { return ffcore
 void SteeringSystemNative::set_debug_draw_fight_hitbox(bool enabled)
 {
     ffcore::globalconfig().debug_draw_fight_hitbox = enabled;
+    if (enabled)
+        ffcore::globalconfig().debug_disable_all_debug = false;
     queue_redraw();
 }
 bool SteeringSystemNative::get_debug_draw_fight_hitbox() const { return ffcore::globalconfig().debug_draw_fight_hitbox; }
@@ -181,6 +194,8 @@ bool SteeringSystemNative::get_debug_draw_fight_hitbox() const { return ffcore::
 void SteeringSystemNative::set_debug_show_agent_state_labels(bool enabled)
 {
     ffcore::globalconfig().debug_show_agent_state_labels = enabled;
+    if (enabled)
+        ffcore::globalconfig().debug_disable_all_debug = false;
     queue_redraw();
 }
 bool SteeringSystemNative::get_debug_show_agent_state_labels() const { return ffcore::globalconfig().debug_show_agent_state_labels; }

@@ -7,12 +7,13 @@ namespace ffcore
         // =========================================================
         // DEBUG TOGGLES (grouped at top for visibility)
         // =========================================================
-        bool debug_disable_all_debug = true;
+        bool debug_disable_all_debug = false;
         bool debug_disable_bottlenecks = false;
         bool debug_draw_world_hitbox = false;
         bool debug_draw_bottleneck_zones = true;
-        bool debug_draw_fight_hitbox = true;
+        bool debug_draw_fight_hitbox = false;
         bool debug_show_agent_state_labels = true;
+        bool debug_show_plant_zones = true;
         bool draw_flow_field = false;                  // debug: draw flow field arrows
         double debug_redraw_interval = 0.2;
         double debug_redraw_accum = 0.0;
