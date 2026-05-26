@@ -13,6 +13,9 @@ var _blood_drop_timer: float = 0.0
 var _blood_layer: Node2D
 var _global_config_node: Node
 var _velocity_len: float = 0.0
+var _status_label: Label
+var _eating_timer: float = 0.0
+var status: String = ""
 
 @export var use_native_steering := true
 @export var max_speed: float = 100.0
@@ -35,13 +38,43 @@ var _is_previewed: bool = false
 
 
 func _ready() -> void:
+	_status_label = get_node_or_null("StatusLabel") as Label
+	if _status_label:
+		_status_label.visible = false
 	if use_native_steering:
 		set_physics_process(false)
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
+	_process_eating_status(delta)
 	if BLOOD_ENABLED:
 		_process_blood(delta)
+
+func start_eating(seconds: float) -> void:
+	status = "eating"
+	_eating_timer = max(0.0, seconds)
+	_update_eating_label()
+
+func stop_eating() -> void:
+	status = ""
+	_eating_timer = 0.0
+	if _status_label:
+		_status_label.visible = false
+
+func _process_eating_status(delta: float) -> void:
+	if _eating_timer <= 0.0:
+		return
+	_eating_timer = max(0.0, _eating_timer - delta)
+	_update_eating_label()
+
+func _update_eating_label() -> void:
+	if not _status_label:
+		return
+	if _eating_timer <= 0.0:
+		_status_label.visible = false
+		return
+	_status_label.text = "eating %ds" % int(ceil(_eating_timer))
+	_status_label.visible = true
 
 func _process_blood(delta: float) -> void:
 	if not BLOOD_ENABLED or not _is_propelled or not _should_drop_blood():

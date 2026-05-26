@@ -4,23 +4,29 @@ class_name BuildingManager
 const AGENT_SCENE := preload("res://sprites/character/character.tscn")
 const BUILD_TILES_INDEX_PATH := "res://map_drawing/build_tiles_index.tres"
 const DEFAULT_SPAWN_COOLDOWN: float = 2.0
+const EATING_COOLDOWN: float = 5.0
+const IDLE_GROUP: int = 0
 const INVALID_CELL := Vector2i(2147483647, 2147483647)
 
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
+@export var plantz: TileMapLayer
 @export var buildings: TileMapLayer
+@export var plant_manager: Node
 @export var flow: Node
 @export var agent_manager: Node
 @export var parent_for_agents: Node
 @export var debug_logs: bool = false
 
 var _tile_defs_by_atlas: Dictionary = {}
-var _houses: Dictionary = {}
+var _plants_to_target: Dictionary = {}
 var _spawners: Dictionary = {}
 var _spawn_timers: Dictionary = {}
+var _eating_agents: Dictionary = {}
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _flow_rebuild_pending: bool = false
+var _force_flow_rebuild_all: bool = false
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _flow_ready: bool = false
@@ -28,6 +34,7 @@ var _flow_ready: bool = false
 func _ready() -> void:
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
+	_setup_plant_manager()
 	_wait_for_flow_ready()
 
 func _wait_for_flow_ready() -> void:
@@ -39,17 +46,17 @@ func _wait_for_flow_ready() -> void:
 				break
 	if code_node == null:
 		_flow_ready = true
-		_scan_buildings()
+		_sync_runtime_state()
 		return
 	if bool(code_node.get("is_ready")):
 		_flow_ready = true
-		_scan_buildings()
+		_sync_runtime_state()
 		return
 	code_node.connect("flow_field_ready", Callable(self, "_on_flow_field_ready"))
 
 func _on_flow_field_ready() -> void:
 	_flow_ready = true
-	_scan_buildings()
+	_sync_runtime_state()
 
 func _process(delta: float) -> void:
 	if not _flow_ready:
@@ -59,6 +66,8 @@ func _process(delta: float) -> void:
 		_scan_timer = 0.25
 		_scan_buildings()
 
+	_process_eating_agents(delta)
+	_process_plant_arrivals()
 	_process_spawners(delta)
 
 func _load_tile_definitions() -> void:
@@ -92,16 +101,10 @@ func _scan_buildings() -> void:
 	var walls_changed := wall_signature != _last_wall_signature or migrated
 	_last_wall_signature = wall_signature
 
-	var seen_houses: Dictionary = {}
 	var seen_spawners: Dictionary = {}
-	_scan_special_layer(buildings, seen_houses, seen_spawners)
-	_scan_special_layer(wallz, seen_houses, seen_spawners)
-	_log_scan_summary(seen_houses, seen_spawners, migrated, walls_changed)
-
-	for raw_house_cell in _houses.keys():
-		var cell: Vector2i = raw_house_cell
-		if not seen_houses.has(cell):
-			_houses.erase(cell)
+	_scan_special_layer(buildings, seen_spawners)
+	_scan_special_layer(wallz, seen_spawners)
+	_log_scan_summary(seen_spawners, migrated, walls_changed)
 
 	for raw_spawner_cell in _spawners.keys():
 		var cell: Vector2i = raw_spawner_cell
@@ -109,10 +112,42 @@ func _scan_buildings() -> void:
 			_spawners.erase(cell)
 			_spawn_timers.erase(cell)
 
-	if walls_changed or _has_pending_house_flows():
-		_queue_house_flow_rebuild()
+	if walls_changed:
+		_queue_plant_flow_rebuild(true)
+	elif _has_pending_plant_flows():
+		_queue_plant_flow_rebuild()
 
-func _scan_special_layer(layer: TileMapLayer, seen_houses: Dictionary, seen_spawners: Dictionary) -> void:
+func _sync_runtime_state() -> void:
+	_sync_plants_from_manager()
+	_scan_buildings()
+
+func _setup_plant_manager() -> void:
+	if not plant_manager:
+		return
+	if plant_manager.has_method("initialize_from_layer"):
+		plant_manager.call("initialize_from_layer")
+	if plant_manager.has_signal("plant_added") and not plant_manager.is_connected("plant_added", Callable(self, "_on_plant_added")):
+		plant_manager.connect("plant_added", Callable(self, "_on_plant_added"))
+	if plant_manager.has_signal("plant_removed") and not plant_manager.is_connected("plant_removed", Callable(self, "_on_plant_removed")):
+		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
+
+func _sync_plants_from_manager() -> void:
+	if not plant_manager or not plant_manager.has_method("get_plant_cells"):
+		return
+	for raw_cell in plant_manager.call("get_plant_cells"):
+		var cell: Vector2i = raw_cell
+		_register_plant_to_target(cell)
+
+func _on_plant_added(cell: Vector2i) -> void:
+	if not _flow_ready:
+		return
+	_register_plant_to_target(cell)
+
+func _on_plant_removed(cell: Vector2i) -> void:
+	_plants_to_target.erase(cell)
+	_retarget_monsters_from_plant(cell, null)
+
+func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void:
 	if not layer:
 		return
 
@@ -120,17 +155,7 @@ func _scan_special_layer(layer: TileMapLayer, seen_houses: Dictionary, seen_spaw
 		var map_cell: Vector2i = raw_cell
 		var definition := _definition_for_layer_cell(layer, map_cell)
 		var kind := str(definition.get("kind", ""))
-		if kind == "house":
-			_log("detected house layer=%s cell=%s atlas=%s floor=%s wall=%s" % [
-				layer.name,
-				map_cell,
-				layer.get_cell_atlas_coords(map_cell),
-				_has_floor(map_cell),
-				_has_wall(map_cell)
-			])
-			seen_houses[map_cell] = true
-			_register_house(map_cell)
-		elif kind == "spawner":
+		if kind == "spawner":
 			_log("detected spawner layer=%s cell=%s atlas=%s floor=%s wall=%s" % [
 				layer.name,
 				map_cell,
@@ -153,7 +178,10 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		if kind == "" or kind == "wall":
 			continue
 
-		buildings.set_cell(
+		var target_layer := plantz if kind == "plantsToTarget" else buildings
+		if not target_layer:
+			continue
+		target_layer.set_cell(
 			cell,
 			wallz.get_cell_source_id(cell),
 			wallz.get_cell_atlas_coords(cell),
@@ -161,14 +189,17 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		)
 		wallz.erase_cell(cell)
 		migrated = true
-		_log("migrated special tile kind=%s cell=%s atlas=%s from wallz to buildings" % [
+		_log("migrated special tile kind=%s cell=%s atlas=%s from wallz to %s" % [
 			kind,
 			cell,
-			buildings.get_cell_atlas_coords(cell)
+			target_layer.get_cell_atlas_coords(cell),
+			target_layer.name
 		])
 
 	if migrated:
 		buildings.update_internals()
+		if plantz:
+			plantz.update_internals()
 		wallz.update_internals()
 	return migrated
 
@@ -182,91 +213,84 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 	var atlas_key := _atlas_key(atlas)
 	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
 
-func _register_house(cell: Vector2i) -> void:
-	if _houses.has(cell):
-		var house: Dictionary = _houses[cell] as Dictionary
-		if not bool(house.get("flow_ready", false)):
-			_queue_house_flow_rebuild()
+func _register_plant_to_target(cell: Vector2i) -> void:
+	if _plants_to_target.has(cell):
+		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
+		if not bool(plant_to_target.get("flow_ready", false)):
+			_queue_plant_flow_rebuild()
 		return
 	if not agent_manager or not agent_manager.has_method("create_group"):
-		push_warning("BuildingManager: cannot register house, AgentManager has no create_group().")
+		push_warning("BuildingManager: cannot register plantsToTarget, AgentManager has no create_group().")
 		return
 	if not flow or not flow.has_method("assign_flow_to_group"):
-		push_warning("BuildingManager: cannot register house, FlowFieldNative has no assign_flow_to_group().")
+		push_warning("BuildingManager: cannot register plantsToTarget, FlowFieldNative has no assign_flow_to_group().")
 		return
 
 	var group_id := int(agent_manager.call("create_group"))
 	if group_id < 0:
-		push_warning("BuildingManager: cannot register house at %s, create_group() returned %d." % [cell, group_id])
+		push_warning("BuildingManager: cannot register plantsToTarget at %s, create_group() returned %d." % [cell, group_id])
 		return
 
 	var target_cell := _find_walkable_cell_near(cell)
 	if target_cell == INVALID_CELL:
-		push_warning("BuildingManager: house at %s has no walkable floor tile within range." % cell)
+		push_warning("BuildingManager: plantsToTarget at %s has no walkable floor tile within range." % cell)
 		return
 
-	_houses[cell] = {
+	_plants_to_target[cell] = {
 		"flow_ready": false,
 		"group_id": group_id,
 		"target_cell": target_cell,
 		"world": _cell_center(target_cell)
 	}
-	_log("registered house cell=%s target=%s world=%s group=%d" % [
+	_log("registered plantsToTarget cell=%s target=%s world=%s group=%d" % [
 		cell,
 		target_cell,
-		_houses[cell]["world"],
+		_plants_to_target[cell]["world"],
 		group_id
 	])
-	_queue_house_flow_rebuild()
+	_queue_plant_flow_rebuild()
 
-func _rebuild_house_flows() -> void:
+func _rebuild_plant_flows() -> void:
 	_flow_rebuild_pending = false
-	for raw_house_cell in _houses.keys():
-		var cell: Vector2i = raw_house_cell
-		_assign_house_flow(cell)
+	var force_all := _force_flow_rebuild_all
+	_force_flow_rebuild_all = false
+	for raw_plant_cell in _plants_to_target.keys():
+		var cell: Vector2i = raw_plant_cell
+		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
+		if force_all or not bool(plant_to_target.get("flow_ready", false)):
+			_assign_plant_flow(cell)
 
-func _has_pending_house_flows() -> bool:
-	for raw_house_cell in _houses.keys():
-		var cell: Vector2i = raw_house_cell
-		var house: Dictionary = _houses[cell] as Dictionary
-		if not bool(house.get("flow_ready", false)):
+func _has_pending_plant_flows() -> bool:
+	for raw_plant_cell in _plants_to_target.keys():
+		var cell: Vector2i = raw_plant_cell
+		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
+		if not bool(plant_to_target.get("flow_ready", false)):
 			return true
 	return false
 
-func _queue_house_flow_rebuild() -> void:
+func _queue_plant_flow_rebuild(force_all: bool = false) -> void:
+	_force_flow_rebuild_all = _force_flow_rebuild_all or force_all
 	if _flow_rebuild_pending:
 		return
 	_flow_rebuild_pending = true
-	call_deferred("_rebuild_house_flows")
+	call_deferred("_rebuild_plant_flows")
 
-func _assign_house_flow(cell: Vector2i) -> void:
-	if not _houses.has(cell):
+func _assign_plant_flow(cell: Vector2i) -> void:
+	if not _plants_to_target.has(cell):
 		return
 	if not flow or not flow.has_method("assign_flow_to_group"):
-		push_warning("BuildingManager: cannot assign house flow, FlowFieldNative missing assign_flow_to_group().")
+		push_warning("BuildingManager: cannot assign plantsToTarget flow, FlowFieldNative missing assign_flow_to_group().")
 		return
-	var house: Dictionary = _houses[cell] as Dictionary
-	var group_id := int(house.get("group_id", -1))
+	var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
+	var group_id := int(plant_to_target.get("group_id", -1))
 	if group_id < 0:
-		push_warning("BuildingManager: cannot assign house flow for %s, invalid group %d." % [cell, group_id])
+		push_warning("BuildingManager: cannot assign plantsToTarget flow for %s, invalid group %d." % [cell, group_id])
 		return
-	var world: Vector2 = house.get("world", _cell_center(cell))
-	if flow.has_method("rebuild_async"):
-		var can_build := bool(flow.call("rebuild_async", world))
-		_log("house flow precheck cell=%s group=%d world=%s can_build=%s" % [
-			cell,
-			group_id,
-			world,
-			can_build
-		])
-		if not can_build:
-			house["flow_ready"] = false
-			_houses[cell] = house
-			return
+	var world: Vector2 = plant_to_target.get("world", _cell_center(cell))
 	flow.call("assign_flow_to_group", group_id, world)
-	house["flow_ready"] = true
-	_houses[cell] = house
-	_log("house flow ready cell=%s group=%d world=%s" % [cell, group_id, world])
+	plant_to_target["flow_ready"] = true
+	_plants_to_target[cell] = plant_to_target
+	_log("plantsToTarget flow ready cell=%s group=%d world=%s" % [cell, group_id, world])
 
 func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 	_spawners[cell] = {
@@ -276,9 +300,9 @@ func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 		_spawn_timers[cell] = 0.0
 
 func _process_spawners(delta: float) -> void:
-	if _houses.is_empty():
+	if _plants_to_target.is_empty():
 		if not _spawners.is_empty():
-			_log_spawn_failure("no valid house found for %d spawner(s)" % _spawners.size())
+			_log_spawn_failure("no valid plantsToTarget found for %d spawner(s)" % _spawners.size())
 		return
 
 	for raw_cell in _spawners.keys():
@@ -295,18 +319,18 @@ func _process_spawners(delta: float) -> void:
 			_spawn_timers[cell] = 0.25
 
 func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
-	var house_cell := _nearest_house_cell(spawner_cell)
-	if house_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s has no nearest house" % spawner_cell)
+	var plant_cell := _nearest_plant_to_target_cell(spawner_cell)
+	if plant_cell == INVALID_CELL:
+		_log_spawn_failure("spawner %s has no nearest plantsToTarget" % spawner_cell)
 		return false
 
-	var house: Dictionary = _houses[house_cell] as Dictionary
-	if not bool(house.get("flow_ready", false)):
-		_log_spawn_failure("spawner %s nearest house %s exists but flow is not ready" % [spawner_cell, house_cell])
+	var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
+	if not bool(plant_to_target.get("flow_ready", false)):
+		_log_spawn_failure("spawner %s nearest plantsToTarget %s exists but flow is not ready" % [spawner_cell, plant_cell])
 		return false
-	var group_id := int(house.get("group_id", -1))
+	var group_id := int(plant_to_target.get("group_id", -1))
 	if group_id < 0:
-		_log_spawn_failure("spawner %s nearest house %s has invalid group %d" % [spawner_cell, house_cell, group_id])
+		_log_spawn_failure("spawner %s nearest plantsToTarget %s has invalid group %d" % [spawner_cell, plant_cell, group_id])
 		return false
 
 	var occupied := _occupied_cells()
@@ -325,28 +349,166 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	if agent_manager and agent_manager.has_method("spawn_agent"):
 		var nav_id := int(agent_manager.call("spawn_agent", agent, group_id))
 		agent.set("nav_id", nav_id)
+		agent.set_meta("target_plant_cell", plant_cell)
+		agent.set_meta("target_group_id", group_id)
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
-		_log("spawned monster nav_id=%d spawn_cell=%s target_house=%s group=%d" % [
+		_log("spawned monster nav_id=%d spawn_cell=%s target_plantsToTarget=%s group=%d" % [
 			nav_id,
 			spawn_cell,
-			house_cell,
+			plant_cell,
 			group_id
 		])
 
 	return true
 
-func _nearest_house_cell(from_cell: Vector2i) -> Vector2i:
+func _nearest_plant_to_target_cell(from_cell: Vector2i, excluded_cell: Vector2i = INVALID_CELL) -> Vector2i:
+	if plant_manager and plant_manager.has_method("nearest_plant_cell"):
+		var indexed_cell: Vector2i = plant_manager.call("nearest_plant_cell", from_cell, excluded_cell)
+		if indexed_cell == INVALID_CELL:
+			return INVALID_CELL
+		if not _plants_to_target.has(indexed_cell):
+			_register_plant_to_target(indexed_cell)
+		if _plants_to_target.has(indexed_cell):
+			return indexed_cell
+
 	var best_cell := INVALID_CELL
 	var best_dist_sq := 2147483647
-	for raw_house_cell in _houses.keys():
-		var house_cell: Vector2i = raw_house_cell
-		var d: Vector2i = house_cell - from_cell
+	for raw_plant_cell in _plants_to_target.keys():
+		var plant_cell: Vector2i = raw_plant_cell
+		if plant_cell == excluded_cell:
+			continue
+		var d: Vector2i = plant_cell - from_cell
 		var dist_sq := d.x * d.x + d.y * d.y
 		if dist_sq < best_dist_sq:
 			best_dist_sq = dist_sq
-			best_cell = house_cell
+			best_cell = plant_cell
 	return best_cell
+
+func _process_plant_arrivals() -> void:
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D):
+			continue
+		var agent: Node2D = node
+		var nav_id := int(agent.get("nav_id"))
+		if _eating_agents.has(nav_id):
+			continue
+		if not agent.has_meta("target_plant_cell"):
+			continue
+		var plant_cell: Vector2i = agent.get_meta("target_plant_cell")
+		if not _plants_to_target.has(plant_cell):
+			_assign_agent_to_nearest_plant(agent)
+			continue
+		var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
+		var target_cell: Vector2i = plant_to_target.get("target_cell", plant_cell)
+		if _agent_reached_cell(agent, target_cell):
+			_consume_plant_to_target(agent, plant_cell)
+
+func _consume_plant_to_target(eater: Node2D, plant_cell: Vector2i) -> void:
+	var plant_to_target: Dictionary = _plants_to_target.get(plant_cell, {}) as Dictionary
+	var hold_group := int(plant_to_target.get("group_id", -1))
+	if plant_manager and plant_manager.has_method("remove_plant"):
+		plant_manager.call("remove_plant", plant_cell, true)
+	else:
+		if plantz:
+			plantz.erase_cell(plant_cell)
+			plantz.update_internals()
+		_plants_to_target.erase(plant_cell)
+		_retarget_monsters_from_plant(plant_cell, eater)
+	if plantz and plantz.get_cell_source_id(plant_cell) >= 0:
+		plantz.erase_cell(plant_cell)
+		plantz.update_internals()
+	_assign_agent_to_idle(eater, hold_group)
+	_start_agent_eating(eater, EATING_COOLDOWN)
+
+func _retarget_monsters_from_plant(old_plant_cell: Vector2i, eater: Node2D = null) -> void:
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D) or (eater and node == eater):
+			continue
+		var agent: Node2D = node
+		if not agent.has_meta("target_plant_cell"):
+			continue
+		var target_cell: Vector2i = agent.get_meta("target_plant_cell")
+		if target_cell == old_plant_cell:
+			_assign_agent_to_nearest_plant(agent)
+
+func _process_eating_agents(delta: float) -> void:
+	var finished: Array[int] = []
+	for raw_nav_id in _eating_agents.keys():
+		var nav_id := int(raw_nav_id)
+		var data: Dictionary = _eating_agents[nav_id] as Dictionary
+		var timer := float(data.get("timer", 0.0)) - delta
+		data["timer"] = timer
+		_eating_agents[nav_id] = data
+		if timer <= 0.0:
+			finished.append(nav_id)
+
+	for nav_id in finished:
+		var data: Dictionary = _eating_agents.get(nav_id, {}) as Dictionary
+		_eating_agents.erase(nav_id)
+		var agent: Node2D = data.get("node", null) as Node2D
+		if is_instance_valid(agent):
+			if agent.has_method("stop_eating"):
+				agent.call("stop_eating")
+			_assign_agent_to_nearest_plant(agent)
+
+func _start_agent_eating(agent: Node2D, seconds: float) -> void:
+	var nav_id := int(agent.get("nav_id"))
+	_eating_agents[nav_id] = {
+		"node": agent,
+		"timer": seconds
+	}
+	if agent.has_method("start_eating"):
+		agent.call("start_eating", seconds)
+
+func _assign_agent_to_idle(agent: Node2D, hold_group: int = -1) -> void:
+	if not agent_manager or not agent_manager.has_method("assign_agent"):
+		return
+	if hold_group < 0 and agent_manager.has_method("create_group"):
+		hold_group = int(agent_manager.call("create_group"))
+	if hold_group >= 0 and flow and flow.has_method("assign_flow_to_group"):
+		agent_manager.call("assign_agent", agent, hold_group)
+		flow.call("assign_flow_to_group", hold_group, agent.global_position)
+		agent.set_meta("target_group_id", hold_group)
+	else:
+		agent_manager.call("assign_agent", agent, IDLE_GROUP)
+	var nav_id := int(agent.get("nav_id"))
+	if agent_manager.has_method("set_agent_never_rest"):
+		agent_manager.call("set_agent_never_rest", nav_id, false)
+
+func _assign_agent_to_nearest_plant(agent: Node2D) -> void:
+	if not agent_manager or not agent_manager.has_method("assign_agent"):
+		return
+	var from_cell := floorz.local_to_map(floorz.to_local(agent.global_position))
+	var plant_cell := _nearest_plant_to_target_cell(from_cell)
+	if plant_cell == INVALID_CELL:
+		_assign_agent_to_idle(agent)
+		if agent.has_meta("target_plant_cell"):
+			agent.remove_meta("target_plant_cell")
+		if agent.has_meta("target_group_id"):
+			agent.remove_meta("target_group_id")
+		return
+	var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
+	var group_id := int(plant_to_target.get("group_id", -1))
+	if group_id < 0:
+		_assign_agent_to_idle(agent)
+		return
+	agent_manager.call("assign_agent", agent, group_id)
+	agent.set_meta("target_plant_cell", plant_cell)
+	agent.set_meta("target_group_id", group_id)
+	var nav_id := int(agent.get("nav_id"))
+	if agent_manager.has_method("set_agent_never_rest"):
+		agent_manager.call("set_agent_never_rest", nav_id, true)
+
+func _agent_reached_cell(agent: Node2D, cell: Vector2i) -> bool:
+	var agent_cell := floorz.local_to_map(floorz.to_local(agent.global_position))
+	if agent_cell == cell:
+		return true
+	var tile_size := Vector2(32, 32)
+	if floorz and floorz.tile_set:
+		var raw_tile_size := floorz.tile_set.get_tile_size()
+		tile_size = Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
+	return agent.global_position.distance_to(_cell_center(cell)) <= max(tile_size.x, tile_size.y) * 0.5
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []
@@ -415,11 +577,12 @@ func _log_spawn_failure(message: String) -> void:
 	_last_spawn_failure = message
 	push_warning("BuildingManager: " + message)
 
-func _log_scan_summary(seen_houses: Dictionary, seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
-	var summary := "scan houses=%d spawners=%d registered_houses=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
-		seen_houses.size(),
+func _log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
+	var plant_count := int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else _plants_to_target.size()
+	var summary := "scan indexed_plants=%d spawners=%d registered_plantsToTarget=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
+		plant_count,
 		seen_spawners.size(),
-		_houses.size(),
+		_plants_to_target.size(),
 		_spawners.size(),
 		migrated,
 		walls_changed

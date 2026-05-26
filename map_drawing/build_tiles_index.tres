@@ -2,10 +2,10 @@
 
 [resource]
 data = {
-"house": {
+"plantsToTarget": {
 "atlas": [13.0, 1.0],
-"kind": "house",
-"layer": "buildings"
+"kind": "plantsToTarget",
+"layer": "plantz"
 },
 "spawner": {
 "atlas": [14.0, 0.0],

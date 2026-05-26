@@ -29,16 +29,22 @@ namespace godot
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
+        bool debug_disable_all_debug = true;
         bool debug_draw_world_hitbox = false;
         bool debug_draw_bottleneck_zones = false;
         bool debug_disable_bottlenecks = false;
         bool debug_draw_fight_hitbox = true;
         bool debug_show_agent_state_labels = true;
+        double debug_redraw_interval = 0.2;
+        double debug_redraw_accum = 0.0;
+        double debug_label_time = 0.0;
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
         std::unordered_map<int, bool> agent_propelled_states;
         std::unordered_map<int, bool> agent_control_impaired_states;
+        std::unordered_map<int, String> debug_agent_label_cache;
+        std::unordered_map<int, double> debug_agent_label_next_refresh;
 
         int _direction_code(const Vector2 &v) const;
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
@@ -76,6 +82,8 @@ namespace godot
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         void set_paused(bool p) { paused = p; }
+        void set_debug_disable_all_debug(bool enabled);
+        bool get_debug_disable_all_debug() const { return debug_disable_all_debug; }
         void set_debug_draw_world_hitbox(bool enabled);
         bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
         void set_debug_draw_bottleneck_zones(bool enabled);

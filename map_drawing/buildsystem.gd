@@ -3,8 +3,10 @@ extends Node
 const ItemCatalog = preload("res://items/item_catalog.gd")
 
 @export var wallz: TileMapLayer
+@export var plantz: TileMapLayer
 @export var buildings: TileMapLayer
 @export var previewbuild: TileMapLayer
+@export var plant_manager: Node
 @export var game_ui: CanvasLayer
 @export var notif: Node
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
@@ -100,8 +102,12 @@ func _apply_place_tile(place_tile: Dictionary) -> void:
 		0
 	)
 	target_layer.update_internals()
+	if target_layer == plantz and plant_manager and plant_manager.has_method("add_plant"):
+		plant_manager.call("add_plant", _hover_cell)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
+	if layer_name == "plantz":
+		return plantz
 	if layer_name == "buildings":
 		return buildings
 	return wallz
@@ -110,6 +116,11 @@ func _clear_other_build_layer(target_layer: TileMapLayer) -> void:
 	if target_layer != wallz and wallz:
 		wallz.erase_cell(_hover_cell)
 		wallz.update_internals()
+	if target_layer != plantz and plantz:
+		plantz.erase_cell(_hover_cell)
+		plantz.update_internals()
+		if plant_manager and plant_manager.has_method("remove_plant"):
+			plant_manager.call("remove_plant", _hover_cell, false)
 	if target_layer != buildings and buildings:
 		buildings.erase_cell(_hover_cell)
 		buildings.update_internals()
@@ -118,6 +129,8 @@ func _is_tile_occupied(cell: Vector2i, target_layer: TileMapLayer) -> bool:
 	if target_layer.get_cell_source_id(cell) >= 0:
 		return true
 	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
+		return true
+	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0:
 		return true
 	if buildings and buildings != target_layer and buildings.get_cell_source_id(cell) >= 0:
 		return true

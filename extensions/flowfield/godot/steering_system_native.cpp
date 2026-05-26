@@ -14,8 +14,29 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include "../flow/flow_field.h"
 #include "../core/global_config.h"
+#include <cmath>
+#include <vector>
 
 using namespace godot;
+
+namespace
+{
+    const std::vector<Vector2> &debug_unit_circle_points()
+    {
+        static std::vector<Vector2> points;
+        if (!points.empty())
+            return points;
+
+        constexpr int segment_count = 32;
+        points.reserve(segment_count + 1);
+        for (int i = 0; i <= segment_count; ++i)
+        {
+            double angle = (double)i / (double)segment_count * 6.28318530717958647692;
+            points.emplace_back(std::cos(angle), std::sin(angle));
+        }
+        return points;
+    }
+}
 
 void SteeringSystemNative::_bind_methods()
 {
@@ -37,6 +58,8 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("spawn_aoe_zone", "position", "direction", "radius", "angle_degrees", "duration", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::spawn_aoe_zone);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
+    ClassDB::bind_method(D_METHOD("set_debug_disable_all_debug", "enabled"), &SteeringSystemNative::set_debug_disable_all_debug);
+    ClassDB::bind_method(D_METHOD("get_debug_disable_all_debug"), &SteeringSystemNative::get_debug_disable_all_debug);
     ClassDB::bind_method(D_METHOD("set_debug_draw_world_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_world_hitbox);
     ClassDB::bind_method(D_METHOD("get_debug_draw_world_hitbox"), &SteeringSystemNative::get_debug_draw_world_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_draw_bottleneck_zones", "enabled"), &SteeringSystemNative::set_debug_draw_bottleneck_zones);
@@ -48,6 +71,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
     ClassDB::bind_method(D_METHOD("get_debug_show_agent_state_labels"), &SteeringSystemNative::get_debug_show_agent_state_labels);
 
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_disable_all_debug"), "set_debug_disable_all_debug", "get_debug_disable_all_debug");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_bottleneck_zones"), "set_debug_draw_bottleneck_zones", "get_debug_draw_bottleneck_zones");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_disable_bottlenecks"), "set_debug_disable_bottlenecks", "get_debug_disable_bottlenecks");
@@ -101,6 +125,12 @@ void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
 void SteeringSystemNative::set_grid(Object *obj)
 {
     grid = Object::cast_to<Node2D>(obj);
+}
+
+void SteeringSystemNative::set_debug_disable_all_debug(bool enabled)
+{
+    debug_disable_all_debug = enabled;
+    queue_redraw();
 }
 
 void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
@@ -254,6 +284,8 @@ Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
 void SteeringSystemNative::_reset_agent_cache(int agent_id)
 {
     agent_last_flow.erase(agent_id);
+    debug_agent_label_cache.erase(agent_id);
+    debug_agent_label_next_refresh.erase(agent_id);
 }
 
 int SteeringSystemNative::_direction_code(const Vector2 &v) const
@@ -351,6 +383,8 @@ void SteeringSystemNative::_process(double delta)
     if (paused)
         return;
 
+    debug_label_time += delta;
+
     if (!flowfield || !grid)
         return;
 
@@ -402,12 +436,22 @@ void SteeringSystemNative::_process(double delta)
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 
-    if (debug_draw_world_hitbox || debug_draw_bottleneck_zones || debug_draw_fight_hitbox || debug_show_agent_state_labels)
+    if (!debug_disable_all_debug &&
+        (debug_draw_world_hitbox || debug_draw_bottleneck_zones || debug_draw_fight_hitbox || debug_show_agent_state_labels))
+    {
+        debug_redraw_accum += delta;
+        if (debug_redraw_accum < debug_redraw_interval)
+            return;
+        debug_redraw_accum = 0.0;
         queue_redraw();
+    }
 }
 
 void SteeringSystemNative::_draw()
 {
+    if (debug_disable_all_debug)
+        return;
+
     if (!debug_draw_world_hitbox && !debug_draw_bottleneck_zones && !debug_draw_fight_hitbox && !debug_show_agent_state_labels)
         return;
 
@@ -471,7 +515,15 @@ void SteeringSystemNative::_draw()
         if (debug_draw_world_hitbox && a->profile.world_radius > 0.0)
         {
             Vector2 world_center = to_local(Vector2(a->position.x, a->position.y + a->profile.foot_offset_y));
-            draw_arc(world_center, a->profile.world_radius, 0.0, 6.28318530717958647692, 48, world_color, 2.0, true);
+            const std::vector<Vector2> &circle = debug_unit_circle_points();
+            for (int i = 1; i < static_cast<int>(circle.size()); ++i)
+            {
+                draw_line(
+                    world_center + circle[i - 1] * a->profile.world_radius,
+                    world_center + circle[i] * a->profile.world_radius,
+                    world_color,
+                    2.0);
+            }
 
             if (a->debug_bottleneck_core >= 0 || a->debug_bottleneck_zone >= 0)
             {
@@ -497,7 +549,25 @@ void SteeringSystemNative::_draw()
 
         if (debug_show_agent_state_labels && debug_font.is_valid())
         {
-            String label = _agent_debug_state_label(a);
+            auto next_label_it = debug_agent_label_next_refresh.find(id);
+            if (next_label_it == debug_agent_label_next_refresh.end())
+            {
+                double stagger = double((id * 37) % 100) * 0.01;
+                debug_agent_label_next_refresh[id] = debug_label_time + stagger;
+            }
+
+            if (debug_label_time >= debug_agent_label_next_refresh[id])
+            {
+                double stagger = double((id * 37) % 100) * 0.01;
+                debug_agent_label_cache[id] = _agent_debug_state_label(a);
+                debug_agent_label_next_refresh[id] = debug_label_time + 1.0 + stagger;
+            }
+
+            auto label_it = debug_agent_label_cache.find(id);
+            if (label_it == debug_agent_label_cache.end())
+                continue;
+
+            const String &label = label_it->second;
             Vector2 label_pos = to_local(Vector2(a->position.x - a->profile.fight_half_w, a->position.y + a->profile.fight_offset_y - a->profile.fight_half_h - 8.0));
             draw_string(debug_font, label_pos + Vector2(1.0, 1.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_shadow_color);
             draw_string(debug_font, label_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_color);
