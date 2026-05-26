@@ -223,7 +223,7 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
                                           const std::unordered_map<Vector2i, double, Vector2iHash> &costs)
 {
     field.clear_bottlenecks();
-    if (ffcore::globalconfig().debug_disable_bottlenecks)
+    if (ffcore::globalconfig().effective_debug_disable_bottlenecks())
         return;
     if (costs.empty())
         return;
@@ -638,7 +638,7 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     }
     field.set_route_cost_field(route_costs);
 
-    if (!ffcore::globalconfig().debug_disable_bottlenecks)
+    if (!ffcore::globalconfig().effective_debug_disable_bottlenecks())
         compute_bottlenecks(used, walkable_set, costs);
     else
         field.clear_bottlenecks();
@@ -697,7 +697,7 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     snapshot.used = used;
     snapshot.goal_cell = goal_cell;
     snapshot.tile_size = tile_size;
-    snapshot.debug_disable_bottlenecks = cfg.debug_disable_bottlenecks;
+    snapshot.debug_disable_bottlenecks = cfg.effective_debug_disable_bottlenecks();
     snapshot.bottleneck_zone_radius_tiles = cfg.bottleneck_zone_radius_tiles;
     snapshot.flow_field_wall_clearance = cfg.flow_field_wall_clearance;
     return true;
@@ -1232,7 +1232,7 @@ void FlowFieldNative::_draw()
         return;
 
     const auto &cfg = ffcore::globalconfig();
-    const bool draw_flow = debug_draw || cfg.draw_flow_field;
+    const bool draw_flow = !cfg.debug_disable_all_debug && (debug_draw || cfg.effective_draw_flow_field());
 
     if (draw_flow)
     {

@@ -253,10 +253,10 @@ void GlobalConfigNative::set_shockwave_stop_ratio(double v) { cfg().shockwave_st
 double GlobalConfigNative::get_shockwave_stop_duration_ms() const { return cfg().shockwave_stop_duration_ms; }
 void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockwave_stop_duration_ms = std::max(0.0, v); }
 
-bool GlobalConfigNative::get_draw_flow_field() const { return cfg().draw_flow_field; }
+bool GlobalConfigNative::get_draw_flow_field() const { return cfg().effective_draw_flow_field(); }
 void GlobalConfigNative::set_draw_flow_field(bool v) { cfg().draw_flow_field = v; }
 
-bool GlobalConfigNative::get_debug_show_plant_zones() const { return cfg().debug_show_plant_zones; }
+bool GlobalConfigNative::get_debug_show_plant_zones() const { return cfg().effective_debug_show_plant_zones(); }
 void GlobalConfigNative::set_debug_show_plant_zones(bool v) { cfg().debug_show_plant_zones = v; }
 
 double GlobalConfigNative::get_debug_plantff_frame_lag_ms() const { return cfg().debug_plantff_frame_lag_ms; }

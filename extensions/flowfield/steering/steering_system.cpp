@@ -493,7 +493,7 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
         return;
 
     const auto &cfg = globalconfig();
-    if (cfg.debug_disable_bottlenecks)
+    if (cfg.effective_debug_disable_bottlenecks())
     {
         agent.active_bottleneck = -1;
         agent.completed_bottleneck = -1;
@@ -546,7 +546,7 @@ Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField
 
     Vec2 correction = wall_repel + separation;
     Vec2i cell = ff ? ff->world_to_cell(agent_foot_point(agent)) : Vec2i(-1, -1);
-    bool in_bottleneck_area = !cfg.debug_disable_bottlenecks &&
+    bool in_bottleneck_area = !cfg.effective_debug_disable_bottlenecks() &&
                               ff && (ff->bottleneck_core_at_cell(cell) >= 0 || ff->bottleneck_zone_at_cell(cell) >= 0);
 
     if (in_bottleneck_area)
@@ -1338,7 +1338,7 @@ void SteeringSystem::update_all(double delta)
             }
         }
 
-        if (cfg.debug_disable_bottlenecks)
+        if (cfg.effective_debug_disable_bottlenecks())
         {
             a.active_bottleneck = -1;
             a.completed_bottleneck = -1;

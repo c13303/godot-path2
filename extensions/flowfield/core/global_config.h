@@ -7,7 +7,7 @@ namespace ffcore
         // =========================================================
         // DEBUG TOGGLES (grouped at top for visibility)
         // =========================================================
-        bool debug_disable_all_debug = false;
+        bool debug_disable_all_debug = true;
         bool debug_disable_bottlenecks = false;
         bool debug_draw_world_hitbox = false;
         bool debug_draw_bottleneck_zones = true;
@@ -18,6 +18,21 @@ namespace ffcore
         double debug_redraw_interval = 0.2;
         double debug_redraw_accum = 0.0;
         double debug_label_time = 0.0;
+
+        bool effective_debug_disable_bottlenecks() const { return !debug_disable_all_debug && debug_disable_bottlenecks; }
+        bool effective_debug_draw_world_hitbox() const { return !debug_disable_all_debug && debug_draw_world_hitbox; }
+        bool effective_debug_draw_bottleneck_zones() const { return !debug_disable_all_debug && debug_draw_bottleneck_zones; }
+        bool effective_debug_draw_fight_hitbox() const { return !debug_disable_all_debug && debug_draw_fight_hitbox; }
+        bool effective_debug_show_agent_state_labels() const { return !debug_disable_all_debug && debug_show_agent_state_labels; }
+        bool effective_debug_show_plant_zones() const { return !debug_disable_all_debug && debug_show_plant_zones; }
+        bool effective_draw_flow_field() const { return !debug_disable_all_debug && draw_flow_field; }
+        bool effective_steering_debug_draw_enabled() const
+        {
+            return effective_debug_draw_world_hitbox() ||
+                   effective_debug_draw_bottleneck_zones() ||
+                   effective_debug_draw_fight_hitbox() ||
+                   effective_debug_show_agent_state_labels();
+        }
 
         // Lag detector sensitivities (used by BuildingManager via GlobalConfigNative bindings)
         double debug_plantff_frame_lag_ms = 35.0;     // warn if a BuildingManager frame exceeds this
