@@ -1,6 +1,7 @@
 extends Node2D
 
 signal flow_field_ready
+signal loading_progress(progress: float, label: String)
 
 @onready var ff: FlowFieldNative = get_parent()
 @onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
@@ -12,6 +13,7 @@ func _ready() -> void:
 	
 	
 	print(">>> FlowFieldCode.gd _ready() triggered <<<")
+	loading_progress.emit(0.05, "Preparing navigation")
 
 	await get_tree().process_frame
 
@@ -24,6 +26,7 @@ func _ready() -> void:
 	#print("FlowFieldCode: assigning layers...")
 	ff.set_floor_layer(floor_layer)
 	ff.set_wall_layer(wall_layer)
+	loading_progress.emit(0.15, "Reading map layers")
 
 	#print("floor_layer:", floor_layer)
 	#print("wall_layer:", wall_layer)
@@ -32,12 +35,16 @@ func _ready() -> void:
 
 	await get_tree().process_frame
 
+	loading_progress.emit(0.25, "Computing flow field")
+	await get_tree().process_frame
+
 	ff.compute_distance_field_global()
 	var _d = ff.compute_flow_dir(global_position)
 	#print("Direction lue après rebuild:", _d)
 
 
 	is_ready = true
+	loading_progress.emit(0.45, "Flow field ready")
 	flow_field_ready.emit()
 	print("FlowFieldCode: initialization complete--------------------------------")
 

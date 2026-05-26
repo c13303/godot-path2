@@ -1356,7 +1356,7 @@ script = ExtResource("12_vj62y")
 
 [node name="Camera2D" type="Camera2D" parent="UI" unique_id=1494994299]
 position = Vector2(1628, 1507)
-zoom = Vector2(2, 2)
+zoom = Vector2(1, 1)
 
 [node name="Map" type="Node" parent="." unique_id=214584774]
 

@@ -1,6 +1,9 @@
 extends Node
 class_name BuildingManager
 
+signal startup_loading_progress(progress: float, label: String)
+signal startup_loading_finished
+
 const AGENT_SCENE: PackedScene = preload("res://sprites/character/character.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://map_drawing/build_tiles_index.tres"
 const DEFAULT_SPAWN_COOLDOWN: float = 2.0
@@ -41,6 +44,8 @@ var _last_wall_signature: int = 0
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _flow_ready: bool = false
+var _startup_loading_started: bool = false
+var _startup_ready: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
 
 # Plant zone (one-shot at start). Tiles use the floorz tilemap cell space.
@@ -63,6 +68,7 @@ func _ff_lag_threshold_ms() -> float:
 	return DEBUG_PLANTFF_FF_LAG_MS_FALLBACK
 
 func _ready() -> void:
+	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
 	_setup_plant_manager()
@@ -78,20 +84,33 @@ func _wait_for_flow_ready() -> void:
 				break
 	if code_node == null:
 		_flow_ready = true
-		_build_plant_zone()
-		_sync_runtime_state()
+		call_deferred("_run_startup_after_flow_ready")
 		return
 	if bool(code_node.get("is_ready")):
 		_flow_ready = true
-		_build_plant_zone()
-		_sync_runtime_state()
+		call_deferred("_run_startup_after_flow_ready")
 		return
 	code_node.connect("flow_field_ready", Callable(self, "_on_flow_field_ready"))
 
 func _on_flow_field_ready() -> void:
 	_flow_ready = true
+	call_deferred("_run_startup_after_flow_ready")
+
+func _run_startup_after_flow_ready() -> void:
+	if _startup_loading_started or _startup_ready:
+		return
+	_startup_loading_started = true
+	startup_loading_progress.emit(0.55, "Building plant zone")
+	await get_tree().process_frame
+
 	_build_plant_zone()
-	_sync_runtime_state()
+	startup_loading_progress.emit(0.70, "Finding spawner routes")
+	await get_tree().process_frame
+
+	await _sync_runtime_state()
+	_startup_ready = true
+	startup_loading_progress.emit(1.0, "Ready")
+	startup_loading_finished.emit()
 
 func _setup_zone_overlay() -> void:
 	_zone_overlay = Node2D.new()
@@ -119,7 +138,7 @@ func _sync_plant_zone_debug_visibility() -> void:
 	_zone_overlay.queue_redraw()
 
 func _process(delta: float) -> void:
-	if not _flow_ready:
+	if not _flow_ready or not _startup_ready:
 		return
 	var frame_start_ms: int = Time.get_ticks_msec()
 	_scan_timer -= delta
@@ -202,8 +221,19 @@ func _scan_buildings() -> void:
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
-	for raw_spawner_cell in _spawners.keys():
-		_initialize_spawner_route(raw_spawner_cell)
+	var spawner_cells: Array = _spawners.keys()
+	var total_count: int = spawner_cells.size()
+	if total_count == 0:
+		startup_loading_progress.emit(0.98, "Ready")
+		return
+	var index: int = 0
+	for raw_spawner_cell in spawner_cells:
+		var spawner_cell: Vector2i = raw_spawner_cell
+		_initialize_spawner_route(spawner_cell)
+		index += 1
+		var progress: float = 0.75 + (float(index) / float(total_count)) * 0.23
+		startup_loading_progress.emit(progress, "Preparing routes")
+		await get_tree().process_frame
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -300,7 +330,7 @@ func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 	}
 	if not _spawn_timers.has(cell):
 		_spawn_timers[cell] = 0.0
-	if is_new and _flow_ready and _plant_zone_built:
+	if is_new and _flow_ready and _plant_zone_built and _startup_ready:
 		_initialize_spawner_route(cell)
 
 func _release_spawner_route(spawner_cell: Vector2i) -> void:

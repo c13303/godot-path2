@@ -16,15 +16,22 @@ var inventory_slots: Array[String] = []
 var selected_quick_index: int = 0
 var _toolbar_slot_nodes: Array[ItemSlot] = []
 var _inventory_slot_nodes: Array[ItemSlot] = []
+var _startup_loading_overlay: Control
+var _startup_loading_label: Label
+var _startup_loading_bar: ProgressBar
+var _startup_loading_value: float = 0.0
+var _startup_loading_finished: bool = false
 
 func _ready() -> void:
 	layer = 50
+	_create_startup_loading_overlay()
 	_setup_starting_inventory()
 	close_button.pressed.connect(_hide_inventory)
 	_build_toolbar()
 	_build_inventory()
 	_refresh_all_slots()
 	_set_inventory_open(false)
+	call_deferred("_connect_startup_loading_signals")
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -111,11 +118,132 @@ func _hide_inventory() -> void:
 func is_inventory_open() -> bool:
 	return inventory_modal.visible
 
+func is_startup_loading() -> bool:
+	return _startup_loading_overlay != null
+
 func _set_inventory_open(is_open: bool) -> void:
 	inventory_modal.visible = is_open
 	toolbar_anchor.visible = not is_open
 	if tile_hover_info and tile_hover_info.has_method("set_enabled"):
 		tile_hover_info.call("set_enabled", not is_open)
+
+func _create_startup_loading_overlay() -> void:
+	_startup_loading_overlay = Control.new()
+	_startup_loading_overlay.name = "StartupLoadingOverlay"
+	_startup_loading_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_startup_loading_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_startup_loading_overlay.z_index = 200
+	add_child(_startup_loading_overlay)
+
+	var background: ColorRect = ColorRect.new()
+	background.color = Color(0.05, 0.055, 0.045, 0.88)
+	background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_startup_loading_overlay.add_child(background)
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(360.0, 86.0)
+	panel.anchor_left = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -180.0
+	panel.offset_top = -43.0
+	panel.offset_right = 180.0
+	panel.offset_bottom = 43.0
+	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.12, 0.14, 0.105, 0.96)
+	panel_style.border_color = Color(0.42, 0.48, 0.25, 1.0)
+	panel_style.border_width_left = 2
+	panel_style.border_width_top = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_bottom = 2
+	panel_style.corner_radius_top_left = 6
+	panel_style.corner_radius_top_right = 6
+	panel_style.corner_radius_bottom_left = 6
+	panel_style.corner_radius_bottom_right = 6
+	panel.add_theme_stylebox_override("panel", panel_style)
+	_startup_loading_overlay.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+
+	var content: VBoxContainer = VBoxContainer.new()
+	content.add_theme_constant_override("separation", 10)
+	margin.add_child(content)
+
+	_startup_loading_label = Label.new()
+	_startup_loading_label.text = "Loading"
+	_startup_loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_startup_loading_label.add_theme_font_size_override("font_size", 16)
+	_startup_loading_label.add_theme_color_override("font_color", Color(0.92, 0.88, 0.78, 1.0))
+	content.add_child(_startup_loading_label)
+
+	_startup_loading_bar = ProgressBar.new()
+	_startup_loading_bar.min_value = 0.0
+	_startup_loading_bar.max_value = 100.0
+	_startup_loading_bar.value = 0.0
+	_startup_loading_bar.show_percentage = false
+	_startup_loading_bar.custom_minimum_size = Vector2(320.0, 16.0)
+	var bar_background: StyleBoxFlat = StyleBoxFlat.new()
+	bar_background.bg_color = Color(0.04, 0.045, 0.035, 1.0)
+	bar_background.corner_radius_top_left = 4
+	bar_background.corner_radius_top_right = 4
+	bar_background.corner_radius_bottom_left = 4
+	bar_background.corner_radius_bottom_right = 4
+	_startup_loading_bar.add_theme_stylebox_override("background", bar_background)
+	var bar_fill: StyleBoxFlat = StyleBoxFlat.new()
+	bar_fill.bg_color = Color(0.54, 0.68, 0.24, 1.0)
+	bar_fill.corner_radius_top_left = 4
+	bar_fill.corner_radius_top_right = 4
+	bar_fill.corner_radius_bottom_left = 4
+	bar_fill.corner_radius_bottom_right = 4
+	_startup_loading_bar.add_theme_stylebox_override("fill", bar_fill)
+	content.add_child(_startup_loading_bar)
+
+func _connect_startup_loading_signals() -> void:
+	var scene: Node = get_tree().get_current_scene()
+	if not scene:
+		return
+
+	var flow_code: Node = scene.get_node_or_null("CPP/FlowFieldNative/FlowFieldCode")
+	if flow_code:
+		if flow_code.has_signal("loading_progress"):
+			flow_code.connect("loading_progress", Callable(self, "_on_startup_loading_progress"))
+		if bool(flow_code.get("is_ready")):
+			_on_startup_loading_progress(0.45, "Flow field ready")
+
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
+	if building_manager:
+		if building_manager.has_signal("startup_loading_progress"):
+			building_manager.connect("startup_loading_progress", Callable(self, "_on_startup_loading_progress"))
+		if building_manager.has_signal("startup_loading_finished"):
+			building_manager.connect("startup_loading_finished", Callable(self, "_on_startup_loading_finished"))
+		if bool(building_manager.get("_startup_ready")):
+			_on_startup_loading_finished()
+
+func _on_startup_loading_progress(progress: float, label: String) -> void:
+	if _startup_loading_finished:
+		return
+	var clamped_progress: float = clampf(progress, 0.0, 1.0)
+	_startup_loading_value = maxf(_startup_loading_value, clamped_progress)
+	if _startup_loading_bar:
+		_startup_loading_bar.value = _startup_loading_value * 100.0
+	if _startup_loading_label:
+		_startup_loading_label.text = label
+
+func _on_startup_loading_finished() -> void:
+	if _startup_loading_finished:
+		return
+	_on_startup_loading_progress(1.0, "Ready")
+	_startup_loading_finished = true
+	await get_tree().create_timer(0.12).timeout
+	if _startup_loading_overlay:
+		_startup_loading_overlay.queue_free()
+		_startup_loading_overlay = null
 
 func _build_toolbar() -> void:
 	_clear_container(toolbar_slots)

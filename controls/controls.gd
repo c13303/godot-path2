@@ -26,8 +26,8 @@ const SMASH_CLASS_PLAYER: int = 1
 @export var camera: Camera2D
 @export var speed: float = 400.0
 @export var zoom_speed: float = 0.1
-@export var min_zoom: float = 0.5
-@export var max_zoom: float = 3.0
+@export var min_zoom: float = 0.25
+@export var max_zoom: float = 8.0
 @export var lock_mouse_to_view: bool = true
 @export var scroll_margin_pixel: float = 100.0
 @export var enable_mouse_unit_commands: bool = false
@@ -71,6 +71,10 @@ func _ready() -> void:
 	call_deferred("_setup_player")
 
 func _input(event: InputEvent) -> void:
+	if _startup_loading_active():
+		get_viewport().set_input_as_handled()
+		return
+
 	if enable_mouse_unit_commands:
 		selection_controller.on_input(event)
 
@@ -102,6 +106,9 @@ func _input(event: InputEvent) -> void:
 			camera_controller.handle_mouse_wheel(-zoom_speed)
 
 func _process(delta: float) -> void:
+	if _startup_loading_active():
+		return
+
 	_update_player_input()
 	_update_gun_fire(delta)
 	if enable_mouse_unit_commands:
@@ -175,6 +182,11 @@ func _agent_world_radius() -> float:
 	if global_config_node and global_config_node.has_method("get_agent_world_radius"):
 		return float(global_config_node.call("get_agent_world_radius"))
 	return 12.0
+
+func _startup_loading_active() -> bool:
+	if game_ui and game_ui.has_method("is_startup_loading"):
+		return bool(game_ui.call("is_startup_loading"))
+	return false
 
 func _get_player_node() -> Node2D:
 	var scene := get_tree().get_current_scene()

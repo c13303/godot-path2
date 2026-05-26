@@ -27,11 +27,12 @@ Utils="*res://global/utils.gd"
 
 window/size/viewport_width=1600
 window/size/viewport_height=900
+window/size/mode=2
 window/stretch/mode="viewport"
+window/stretch/aspect="expand"
 window/stretch/scale_mode="integer"
 
 [rendering]
 
-textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"

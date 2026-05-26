@@ -9,6 +9,7 @@ var max_zoom: float = 3.0
 var scroll_margin_pixel: float = 100.0
 var lock_mouse_to_view: bool = true
 var follow_smoothing: float = 8.0
+var zoom_snap_step: float = 0.25
 
 var _mouse_locked: bool = false
 var _follow_target: Node2D = null
@@ -71,13 +72,25 @@ func _zoom_towards_mouse(amount: float) -> void:
 	var world_before: Vector2 = xform_before.affine_inverse() * mouse_screen
 
 	var old_zoom: Vector2 = camera.zoom
-	var new_zoom: Vector2 = Vector2(
-		clamp(old_zoom.x + amount, min_zoom, max_zoom),
-		clamp(old_zoom.y + amount, min_zoom, max_zoom)
-	)
+	var new_zoom_value: float = _get_next_zoom_value(old_zoom.x, amount)
+	var new_zoom: Vector2 = Vector2(new_zoom_value, new_zoom_value)
 	camera.zoom = new_zoom
 
 	var xform_after: Transform2D = get_viewport().get_canvas_transform()
 	var world_after: Vector2 = xform_after.affine_inverse() * mouse_screen
 
 	camera.position += world_before - world_after
+
+func _get_next_zoom_value(current_zoom: float, amount: float) -> float:
+	var direction: float = sign(amount)
+	if direction == 0.0:
+		return clamp(current_zoom, min_zoom, max_zoom)
+
+	var raw_zoom: float = current_zoom + amount
+	var stepped_zoom: float = round(raw_zoom / zoom_snap_step) * zoom_snap_step
+	if direction > 0.0 and stepped_zoom <= current_zoom:
+		stepped_zoom += zoom_snap_step
+	elif direction < 0.0 and stepped_zoom >= current_zoom:
+		stepped_zoom -= zoom_snap_step
+
+	return clamp(stepped_zoom, min_zoom, max_zoom)
