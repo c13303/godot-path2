@@ -136,6 +136,10 @@ namespace ffcore
             std::abort();
         }
 
+        FlowField *old_group_flow = groups[group].flow;
+        if (old_group_flow != flow)
+            ffcore::cleanup_flow_if_unused(old_group_flow);
+
         groups[group].flow = flow;
         groups[group].has_order = true;
 

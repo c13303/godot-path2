@@ -1,4 +1,5 @@
 #include "../core/types.h"
+#include "../core/nav_config.h"
 #include "flow_field_native.h"
 #include "../steering/steering_system.h"
 #include "../agent_manager/agent_manager.h"
@@ -712,6 +713,12 @@ void FlowFieldNative::_draw()
 
 void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
 {
+    if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
+    {
+        UtilityFunctions::printerr("FlowFieldNative.assign_flow_to_group: invalid group_id ", group_id);
+        return;
+    }
+
     current_group_id = group_id;
     if (!rebuild_async(goal))
         return;
@@ -723,6 +730,11 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
     auto *fm = ffcore::flowfields();
     ffcore::FlowFieldID fid = fm->register_copy(field);
     ffcore::FlowField *new_flow = fm->get(fid);
+    if (fid == ffcore::INVALID_FLOWFIELD || !new_flow)
+    {
+        UtilityFunctions::printerr("FlowFieldNative.assign_flow_to_group: flowfield pool exhausted for group ", group_id);
+        return;
+    }
     int agent_count = mgr->count_group_members(group_id);
     double target_radius = 0.0;
     if (agent_count > 1)

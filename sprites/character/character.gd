@@ -17,7 +17,7 @@ var _status_label: Label
 var _eating_timer: float = 0.0
 var status: String = ""
 
-@export var use_native_steering := true
+@export var use_native_steering: bool = true
 @export var max_speed: float = 100.0
 @export var max_force: float = 1200.0
 @export var steering_smooth: float = 0.45
@@ -56,13 +56,27 @@ func start_eating(seconds: float) -> void:
 	_update_eating_label()
 
 func stop_eating() -> void:
-	status = ""
+	if status == "eating":
+		status = ""
 	_eating_timer = 0.0
 	if _status_label:
 		_status_label.visible = false
 
+func start_escape() -> void:
+	status = "escape"
+	_eating_timer = 0.0
+	if _status_label:
+		_status_label.text = "escape"
+		_status_label.visible = true
+
+func stop_escape() -> void:
+	if status == "escape":
+		status = ""
+	if _status_label:
+		_status_label.visible = false
+
 func _process_eating_status(delta: float) -> void:
-	if _eating_timer <= 0.0:
+	if status != "eating" or _eating_timer <= 0.0:
 		return
 	_eating_timer = max(0.0, _eating_timer - delta)
 	_update_eating_label()
@@ -89,7 +103,7 @@ func _process_blood(delta: float) -> void:
 	_spawn_blood_drop()
 
 func _spawn_blood_drop() -> void:
-	var blood_node := _get_blood_layer()
+	var blood_node: Node2D = _get_blood_layer()
 	if blood_node and blood_node.has_method("spawn_blood"):
 		blood_node.spawn_blood(
 			blood_node.to_local(global_position)

@@ -4,7 +4,7 @@ class_name PlantManager
 signal plant_added(cell: Vector2i)
 signal plant_removed(cell: Vector2i)
 
-const INVALID_CELL := Vector2i(2147483647, 2147483647)
+const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
