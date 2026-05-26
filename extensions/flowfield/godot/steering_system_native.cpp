@@ -41,6 +41,8 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_debug_draw_world_hitbox"), &SteeringSystemNative::get_debug_draw_world_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_draw_bottleneck_zones", "enabled"), &SteeringSystemNative::set_debug_draw_bottleneck_zones);
     ClassDB::bind_method(D_METHOD("get_debug_draw_bottleneck_zones"), &SteeringSystemNative::get_debug_draw_bottleneck_zones);
+    ClassDB::bind_method(D_METHOD("set_debug_disable_bottlenecks", "enabled"), &SteeringSystemNative::set_debug_disable_bottlenecks);
+    ClassDB::bind_method(D_METHOD("get_debug_disable_bottlenecks"), &SteeringSystemNative::get_debug_disable_bottlenecks);
     ClassDB::bind_method(D_METHOD("set_debug_draw_fight_hitbox", "enabled"), &SteeringSystemNative::set_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("get_debug_draw_fight_hitbox"), &SteeringSystemNative::get_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
@@ -48,11 +50,15 @@ void SteeringSystemNative::_bind_methods()
 
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_bottleneck_zones"), "set_debug_draw_bottleneck_zones", "get_debug_draw_bottleneck_zones");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_disable_bottlenecks"), "set_debug_disable_bottlenecks", "get_debug_disable_bottlenecks");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_fight_hitbox"), "set_debug_draw_fight_hitbox", "get_debug_draw_fight_hitbox");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_show_agent_state_labels"), "set_debug_show_agent_state_labels", "get_debug_show_agent_state_labels");
 }
 
-SteeringSystemNative::SteeringSystemNative() {}
+SteeringSystemNative::SteeringSystemNative()
+{
+    ffcore::globalconfig().debug_disable_bottlenecks = debug_disable_bottlenecks;
+}
 SteeringSystemNative::~SteeringSystemNative() {}
 
 void SteeringSystemNative::_ready()
@@ -106,6 +112,13 @@ void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
 void SteeringSystemNative::set_debug_draw_bottleneck_zones(bool enabled)
 {
     debug_draw_bottleneck_zones = enabled;
+    queue_redraw();
+}
+
+void SteeringSystemNative::set_debug_disable_bottlenecks(bool enabled)
+{
+    debug_disable_bottlenecks = enabled;
+    ffcore::globalconfig().debug_disable_bottlenecks = enabled;
     queue_redraw();
 }
 
@@ -421,7 +434,7 @@ void SteeringSystemNative::_draw()
         }
     }
 
-    if (debug_draw_bottleneck_zones)
+    if (debug_draw_bottleneck_zones && !ffcore::globalconfig().debug_disable_bottlenecks)
     {
         auto *ff_native = Object::cast_to<FlowFieldNative>(flowfield);
         const ffcore::FlowField *ff = ff_native ? ff_native->get_field() : nullptr;

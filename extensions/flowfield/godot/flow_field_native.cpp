@@ -215,6 +215,8 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
                                           const std::unordered_map<Vector2i, double, Vector2iHash> &costs)
 {
     field.clear_bottlenecks();
+    if (ffcore::globalconfig().debug_disable_bottlenecks)
+        return;
     if (costs.empty())
         return;
 
@@ -616,7 +618,10 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     }
     field.set_route_cost_field(route_costs);
 
-    compute_bottlenecks(used, walkable_set, costs);
+    if (!ffcore::globalconfig().debug_disable_bottlenecks)
+        compute_bottlenecks(used, walkable_set, costs);
+    else
+        field.clear_bottlenecks();
     compute_directions(used, walkable_set, costs, wall_set);
     finalize_field(used, goal_cell);
     ffcore::FormationFootprint fp;

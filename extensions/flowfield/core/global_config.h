@@ -27,6 +27,7 @@ namespace ffcore
 
         double agent_world_diameter_ratio = 0.75;
         int bottleneck_zone_radius_tiles = 2;
+        bool debug_disable_bottlenecks = true;
         double bottleneck_reservation_seconds = 1.0;
         double bottleneck_wait_speed_ratio = 0.05;
         double bottleneck_backoff_strength = 0.35;

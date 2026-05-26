@@ -493,6 +493,15 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
         return;
 
     const auto &cfg = globalconfig();
+    if (cfg.debug_disable_bottlenecks)
+    {
+        agent.active_bottleneck = -1;
+        agent.completed_bottleneck = -1;
+        agent.debug_in_bottleneck_state = false;
+        agent.debug_bottleneck_wait = false;
+        return;
+    }
+
     Vec2 foot = agent_foot_point(agent);
     Vec2i cell = ff->world_to_cell(foot);
 
@@ -537,7 +546,8 @@ Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField
 
     Vec2 correction = wall_repel + separation;
     Vec2i cell = ff ? ff->world_to_cell(agent_foot_point(agent)) : Vec2i(-1, -1);
-    bool in_bottleneck_area = ff && (ff->bottleneck_core_at_cell(cell) >= 0 || ff->bottleneck_zone_at_cell(cell) >= 0);
+    bool in_bottleneck_area = !cfg.debug_disable_bottlenecks &&
+                              ff && (ff->bottleneck_core_at_cell(cell) >= 0 || ff->bottleneck_zone_at_cell(cell) >= 0);
 
     if (in_bottleneck_area)
     {
@@ -1209,53 +1219,76 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
         Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
+        if (!flow_dir.is_zero())
+        {
+            int step_x = static_cast<int>(std::round(flow_dir.x));
+            int step_y = static_cast<int>(std::round(flow_dir.y));
+            Vec2i next_cell(rel_cell.x + step_x, rel_cell.y + step_y);
+            if (ff->is_cell_navigable(next_cell))
+            {
+                Vec2 next_center = ff->cell_to_world(next_cell);
+                Vec2 center_dir = safe_normalize(next_center - (a.position + offset));
+                if (!center_dir.is_zero())
+                    nav_dir = center_dir;
+            }
+        }
 
-        int next_bottleneck = ff->next_bottleneck_at_cell(rel_cell);
-        if (next_bottleneck != a.completed_bottleneck)
+        if (cfg.debug_disable_bottlenecks)
+        {
+            a.active_bottleneck = -1;
             a.completed_bottleneck = -1;
-
-        if (a.active_bottleneck >= 0)
-        {
-            const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
-            double current_cost = ff->route_cost_at_cell(rel_cell);
-            bool close_enough_to_door = false;
-            if (active)
-            {
-                Vec2 door_center = ff->cell_to_world(active->cell);
-                double release_radius = ff->tile_size() * 0.5;
-                close_enough_to_door = safe_len(door_center - (a.position + offset)) <= release_radius;
-            }
-
-            if (!active || current_cost < active->route_cost || close_enough_to_door)
-            {
-                if (active)
-                    a.completed_bottleneck = a.active_bottleneck;
-                a.active_bottleneck = -1;
-            }
+            a.debug_in_bottleneck_state = false;
+            a.debug_bottleneck_wait = false;
         }
-
-        if (a.active_bottleneck < 0)
+        else
         {
-            const BottleneckInfo *next = ff->bottleneck_at(next_bottleneck);
-            if (next && next_bottleneck != a.completed_bottleneck)
+            int next_bottleneck = ff->next_bottleneck_at_cell(rel_cell);
+            if (next_bottleneck != a.completed_bottleneck)
+                a.completed_bottleneck = -1;
+
+            if (a.active_bottleneck >= 0)
             {
+                const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
                 double current_cost = ff->route_cost_at_cell(rel_cell);
-                if (current_cost >= next->route_cost)
-                    a.active_bottleneck = next_bottleneck;
-            }
-        }
+                bool close_enough_to_door = false;
+                if (active)
+                {
+                    Vec2 door_center = ff->cell_to_world(active->cell);
+                    double release_radius = ff->tile_size() * 0.5;
+                    close_enough_to_door = safe_len(door_center - (a.position + offset)) <= release_radius;
+                }
 
-        a.debug_in_bottleneck_state = a.active_bottleneck >= 0;
-        if (a.active_bottleneck >= 0)
-        {
-            const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
-            if (active)
+                if (!active || current_cost < active->route_cost || close_enough_to_door)
+                {
+                    if (active)
+                        a.completed_bottleneck = a.active_bottleneck;
+                    a.active_bottleneck = -1;
+                }
+            }
+
+            if (a.active_bottleneck < 0)
             {
-                Vec2 door_center = ff->cell_to_world(active->cell);
-                Vec2 to_door = door_center - (a.position + offset);
-                Vec2 door_dir = safe_normalize(to_door);
-                if (!door_dir.is_zero())
-                    nav_dir = door_dir;
+                const BottleneckInfo *next = ff->bottleneck_at(next_bottleneck);
+                if (next && next_bottleneck != a.completed_bottleneck)
+                {
+                    double current_cost = ff->route_cost_at_cell(rel_cell);
+                    if (current_cost >= next->route_cost)
+                        a.active_bottleneck = next_bottleneck;
+                }
+            }
+
+            a.debug_in_bottleneck_state = a.active_bottleneck >= 0;
+            if (a.active_bottleneck >= 0)
+            {
+                const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
+                if (active)
+                {
+                    Vec2 door_center = ff->cell_to_world(active->cell);
+                    Vec2 to_door = door_center - (a.position + offset);
+                    Vec2 door_dir = safe_normalize(to_door);
+                    if (!door_dir.is_zero())
+                        nav_dir = door_dir;
+                }
             }
         }
 

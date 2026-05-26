@@ -29,8 +29,9 @@ namespace godot
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
         bool paused = false;
-        bool debug_draw_world_hitbox = true;
-        bool debug_draw_bottleneck_zones = true;
+        bool debug_draw_world_hitbox = false;
+        bool debug_draw_bottleneck_zones = false;
+        bool debug_disable_bottlenecks = false;
         bool debug_draw_fight_hitbox = true;
         bool debug_show_agent_state_labels = true;
 
@@ -79,6 +80,8 @@ namespace godot
         bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
         void set_debug_draw_bottleneck_zones(bool enabled);
         bool get_debug_draw_bottleneck_zones() const { return debug_draw_bottleneck_zones; }
+        void set_debug_disable_bottlenecks(bool enabled);
+        bool get_debug_disable_bottlenecks() const { return debug_disable_bottlenecks; }
         void set_debug_draw_fight_hitbox(bool enabled);
         bool get_debug_draw_fight_hitbox() const { return debug_draw_fight_hitbox; }
         void set_debug_show_agent_state_labels(bool enabled);
