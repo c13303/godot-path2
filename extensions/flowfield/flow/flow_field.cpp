@@ -21,6 +21,7 @@ void FlowField::resize(int width, int height)
     h = height;
     dirs.assign(w * h, Vec2());
     distance_field.assign(w * h, 0.0f);
+    route_cost_field.assign(w * h, 0.0);
     clear_bottlenecks();
     ff_target_radius = 0.0;
     ready = (w > 0 && h > 0);
@@ -80,6 +81,7 @@ void FlowField::clear()
 {
     std::fill(dirs.begin(), dirs.end(), Vec2());
     std::fill(distance_field.begin(), distance_field.end(), 0.0f);
+    std::fill(route_cost_field.begin(), route_cost_field.end(), 0.0);
     clear_bottlenecks();
     ff_target_radius = 0.0;
     ready = false;
@@ -163,9 +165,10 @@ void FlowField::clear_bottlenecks()
     bottlenecks.clear();
     bottleneck_core_by_cell.assign(w * h, -1);
     bottleneck_zone_by_cell.assign(w * h, -1);
+    next_bottleneck_by_cell.assign(w * h, -1);
 }
 
-int FlowField::add_bottleneck(const Vec2i &cell, int axis)
+int FlowField::add_bottleneck(const Vec2i &cell, int axis, double route_cost)
 {
     if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
         return -1;
@@ -173,6 +176,7 @@ int FlowField::add_bottleneck(const Vec2i &cell, int axis)
     BottleneckInfo info;
     info.cell = cell;
     info.axis = axis;
+    info.route_cost = route_cost;
     bottlenecks.push_back(info);
     int index = static_cast<int>(bottlenecks.size()) - 1;
     bottleneck_core_by_cell[cell.y * w + cell.x] = index;
@@ -189,10 +193,18 @@ void FlowField::add_bottleneck_zone_cell(int bottleneck_index, const Vec2i &cell
     const int idx = cell.y * w + cell.x;
     if (idx < 0 || idx >= static_cast<int>(bottleneck_zone_by_cell.size()))
         return;
-    if (bottleneck_zone_by_cell[idx] >= 0)
-        return;
+    if (bottleneck_zone_by_cell[idx] < 0)
+        bottleneck_zone_by_cell[idx] = bottleneck_index;
 
-    bottleneck_zone_by_cell[idx] = bottleneck_index;
+    double cell_cost = idx < static_cast<int>(route_cost_field.size()) ? route_cost_field[idx] : 0.0;
+    bool candidate_is_ahead = cell_cost >= bottlenecks[bottleneck_index].route_cost;
+    bool current_is_ahead = next_bottleneck_by_cell[idx] >= 0 &&
+                            cell_cost >= bottlenecks[next_bottleneck_by_cell[idx]].route_cost;
+    if (candidate_is_ahead &&
+        (!current_is_ahead ||
+         bottlenecks[bottleneck_index].route_cost > bottlenecks[next_bottleneck_by_cell[idx]].route_cost))
+        next_bottleneck_by_cell[idx] = bottleneck_index;
+
     bottlenecks[bottleneck_index].zone_cells.push_back(cell);
 }
 
@@ -216,6 +228,26 @@ int FlowField::bottleneck_zone_at_cell(const Vec2i &cell) const
     return bottleneck_zone_by_cell[idx];
 }
 
+int FlowField::next_bottleneck_at_cell(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return -1;
+    const int idx = cell.y * w + cell.x;
+    if (idx < 0 || idx >= static_cast<int>(next_bottleneck_by_cell.size()))
+        return -1;
+    return next_bottleneck_by_cell[idx];
+}
+
+double FlowField::route_cost_at_cell(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return 0.0;
+    const int idx = cell.y * w + cell.x;
+    if (idx < 0 || idx >= static_cast<int>(route_cost_field.size()))
+        return 0.0;
+    return route_cost_field[idx];
+}
+
 const BottleneckInfo *FlowField::bottleneck_at(int index) const
 {
     if (index < 0 || index >= static_cast<int>(bottlenecks.size()))
@@ -234,9 +266,11 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
+    route_cost_field = src.route_cost_field;
     bottlenecks = src.bottlenecks;
     bottleneck_core_by_cell = src.bottleneck_core_by_cell;
     bottleneck_zone_by_cell = src.bottleneck_zone_by_cell;
+    next_bottleneck_by_cell = src.next_bottleneck_by_cell;
 }
 
 bool FlowField::has_distance_field() const
@@ -282,4 +316,14 @@ void FlowField::set_distance_field(const std::vector<float> &df)
         return;
     }
     distance_field = df;
+}
+
+void FlowField::set_route_cost_field(const std::vector<double> &costs)
+{
+    if ((int)costs.size() != w * h)
+    {
+        route_cost_field.assign(w * h, 0.0);
+        return;
+    }
+    route_cost_field = costs;
 }

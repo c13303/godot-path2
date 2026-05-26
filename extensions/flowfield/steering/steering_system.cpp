@@ -505,6 +505,20 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
         return;
     }
 
+    if (agent.active_bottleneck >= 0)
+    {
+        auto field_it = bottleneck_reservations.find(ff);
+        if (field_it != bottleneck_reservations.end())
+        {
+            auto reservation_it = field_it->second.find(agent.active_bottleneck);
+            if (reservation_it != field_it->second.end())
+            {
+                const BottleneckReservation &reservation = reservation_it->second;
+                agent.debug_bottleneck_wait = reservation.owner_id >= 0 && reservation.owner_id != agent.id;
+            }
+        }
+    }
+
     // Zone-level yielding is intentionally disabled until the reservation model
     // can choose the front-most entrant reliably. Bottleneck zones remain useful
     // for debug and later traffic-rule tuning, but must not block entry.
@@ -583,6 +597,10 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
     a.was_in_t2 = false;
     a.target_radius_timer = 0.0;
     a.lost_timer = 0.0;
+    a.active_bottleneck = -1;
+    a.completed_bottleneck = -1;
+    a.debug_in_bottleneck_state = false;
+    a.debug_bottleneck_wait = false;
 
     a.dir_code = -1;
 }
@@ -1176,6 +1194,7 @@ void SteeringSystem::update_all(double delta)
         Vec2i map_cell(rel_cell.x + ff->get_cell_origin().x, rel_cell.y + ff->get_cell_origin().y);
         a.debug_bottleneck_core = ff->bottleneck_core_at_cell(rel_cell);
         a.debug_bottleneck_zone = ff->bottleneck_zone_at_cell(rel_cell);
+        a.debug_bottleneck_wait = false;
         if (map_cell != a.last_logged_tile)
         {
             a.last_logged_tile = map_cell;
@@ -1190,6 +1209,55 @@ void SteeringSystem::update_all(double delta)
             continue;
         }
         Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
+
+        int next_bottleneck = ff->next_bottleneck_at_cell(rel_cell);
+        if (next_bottleneck != a.completed_bottleneck)
+            a.completed_bottleneck = -1;
+
+        if (a.active_bottleneck >= 0)
+        {
+            const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
+            double current_cost = ff->route_cost_at_cell(rel_cell);
+            bool close_enough_to_door = false;
+            if (active)
+            {
+                Vec2 door_center = ff->cell_to_world(active->cell);
+                double release_radius = ff->tile_size() * 0.5;
+                close_enough_to_door = safe_len(door_center - (a.position + offset)) <= release_radius;
+            }
+
+            if (!active || current_cost < active->route_cost || close_enough_to_door)
+            {
+                if (active)
+                    a.completed_bottleneck = a.active_bottleneck;
+                a.active_bottleneck = -1;
+            }
+        }
+
+        if (a.active_bottleneck < 0)
+        {
+            const BottleneckInfo *next = ff->bottleneck_at(next_bottleneck);
+            if (next && next_bottleneck != a.completed_bottleneck)
+            {
+                double current_cost = ff->route_cost_at_cell(rel_cell);
+                if (current_cost >= next->route_cost)
+                    a.active_bottleneck = next_bottleneck;
+            }
+        }
+
+        a.debug_in_bottleneck_state = a.active_bottleneck >= 0;
+        if (a.active_bottleneck >= 0)
+        {
+            const BottleneckInfo *active = ff->bottleneck_at(a.active_bottleneck);
+            if (active)
+            {
+                Vec2 door_center = ff->cell_to_world(active->cell);
+                Vec2 to_door = door_center - (a.position + offset);
+                Vec2 door_dir = safe_normalize(to_door);
+                if (!door_dir.is_zero())
+                    nav_dir = door_dir;
+            }
+        }
 
         double t2_speed_target = a.max_speed * std::clamp(cfg.target_T2_param_speed_ratio, 0.0, 1.0);
         double t2_speed_lerp = std::clamp(cfg.target_T2_param_speed_lerp, 0.0, 1.0);

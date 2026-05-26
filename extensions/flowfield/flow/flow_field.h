@@ -17,6 +17,7 @@ namespace ffcore
     {
         Vec2i cell;
         int axis = 0; // 1 = horizontal, 2 = vertical
+        double route_cost = 0.0;
         std::vector<Vec2i> zone_cells;
     };
 
@@ -63,10 +64,12 @@ namespace ffcore
         bool is_cell_navigable(const Vec2i &cell) const;
         Vec2i find_nearest_navigable(Vec2i start) const;
         void clear_bottlenecks();
-        int add_bottleneck(const Vec2i &cell, int axis);
+        int add_bottleneck(const Vec2i &cell, int axis, double route_cost = 0.0);
         void add_bottleneck_zone_cell(int bottleneck_index, const Vec2i &cell);
         int bottleneck_core_at_cell(const Vec2i &cell) const;
         int bottleneck_zone_at_cell(const Vec2i &cell) const;
+        int next_bottleneck_at_cell(const Vec2i &cell) const;
+        double route_cost_at_cell(const Vec2i &cell) const;
         const BottleneckInfo *bottleneck_at(int index) const;
         const std::vector<BottleneckInfo> &get_bottlenecks() const { return bottlenecks; }
         double get_ff_target_radius() const { return ff_target_radius; }
@@ -78,6 +81,7 @@ namespace ffcore
         float distance_at_cell(const Vec2i &cell) const;
         Vec2 distance_gradient_at_cell(const Vec2i &cell) const;
         void set_distance_field(const std::vector<float> &df);
+        void set_route_cost_field(const std::vector<double> &costs);
 
         int refcount = 0; /// nbre d'agent dedans pour delete a la fin
         FlowFieldID id = INVALID_FLOWFIELD;
@@ -91,9 +95,11 @@ namespace ffcore
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;
         std::vector<float> distance_field;
+        std::vector<double> route_cost_field;
         std::vector<BottleneckInfo> bottlenecks;
         std::vector<int> bottleneck_core_by_cell;
         std::vector<int> bottleneck_zone_by_cell;
+        std::vector<int> next_bottleneck_by_cell;
 
         Vec2i goal_cell = Vec2i(-1, -1);
         double ff_target_radius = 0.0;

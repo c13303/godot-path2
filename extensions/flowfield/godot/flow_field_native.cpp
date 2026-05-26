@@ -206,13 +206,17 @@ void FlowFieldNative::compute_distance_field_global()
     build_sets(wall_set, walkable_set);
 
     compute_distance_field(used, wall_set);
-    compute_bottlenecks(used, walkable_set);
+    std::unordered_map<Vector2i, double, Vector2iHash> costs;
+    compute_bottlenecks(used, walkable_set, costs);
 }
 
 void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
-                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
+                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+                                          const std::unordered_map<Vector2i, double, Vector2iHash> &costs)
 {
     field.clear_bottlenecks();
+    if (costs.empty())
+        return;
 
     const int zone_radius = std::clamp(ffcore::globalconfig().bottleneck_zone_radius_tiles, 0, 2);
     const Vector2i east(1, 0);
@@ -225,7 +229,13 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
         return walkable_set.count(cell) > 0;
     };
 
-    for (const Vector2i &cell : walkable_set)
+    auto cost_at = [&](const Vector2i &cell) -> double
+    {
+        auto it = costs.find(cell);
+        return it == costs.end() ? std::numeric_limits<double>::infinity() : it->second;
+    };
+
+    auto is_narrow = [&](const Vector2i &cell, int *out_axis = nullptr) -> bool
     {
         const bool e = is_walkable(cell + east);
         const bool w = is_walkable(cell + west);
@@ -237,11 +247,46 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
             axis = 1;
         else if (neighbor_count == 2 && n && s)
             axis = 2;
-        else
+
+        if (out_axis)
+            *out_axis = axis;
+        return axis != 0;
+    };
+
+    std::unordered_set<Vector2i, Vector2iHash> added_doors;
+    const Vector2i cardinal_dirs[4] = {east, west, south, north};
+
+    for (const Vector2i &cell : walkable_set)
+    {
+        int axis = 0;
+        if (!is_narrow(cell, &axis))
             continue;
 
+        const double cell_cost = cost_at(cell);
+        if (!std::isfinite(cell_cost))
+            continue;
+
+        bool is_route_entry = false;
+        for (const Vector2i &d : cardinal_dirs)
+        {
+            Vector2i neighbor = cell + d;
+            if (!is_walkable(neighbor) || is_narrow(neighbor))
+                continue;
+
+            double neighbor_cost = cost_at(neighbor);
+            if (std::isfinite(neighbor_cost) && neighbor_cost > cell_cost)
+            {
+                is_route_entry = true;
+                break;
+            }
+        }
+
+        if (!is_route_entry || added_doors.count(cell) != 0)
+            continue;
+        added_doors.insert(cell);
+
         Vector2i rel(cell.x - used.position.x, cell.y - used.position.y);
-        int bottleneck_index = field.add_bottleneck(ffcore::Vec2i(rel.x, rel.y), axis);
+        int bottleneck_index = field.add_bottleneck(ffcore::Vec2i(rel.x, rel.y), axis, cell_cost);
         if (bottleneck_index < 0)
             continue;
 
@@ -555,10 +600,23 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
 
     // Precompute clearance to walls so flow directions can blend in distance gradients.
     compute_distance_field(used, wall_set);
-    compute_bottlenecks(used, walkable_set);
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_costs(walkable_set, goal_cell, costs);
+    std::vector<double> route_costs(field.width() * field.height(), std::numeric_limits<double>::infinity());
+    for (int y = 0; y < field.height(); ++y)
+    {
+        for (int x = 0; x < field.width(); ++x)
+        {
+            Vector2i cell = used.position + Vector2i(x, y);
+            auto it = costs.find(cell);
+            if (it != costs.end())
+                route_costs[y * field.width() + x] = it->second;
+        }
+    }
+    field.set_route_cost_field(route_costs);
+
+    compute_bottlenecks(used, walkable_set, costs);
     compute_directions(used, walkable_set, costs, wall_set);
     finalize_field(used, goal_cell);
     ffcore::FormationFootprint fp;

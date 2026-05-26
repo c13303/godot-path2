@@ -300,6 +300,10 @@ String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a
         return "flow not ready";
     if (a->lost_timer > 0.0)
         return "lost";
+    if (a->debug_bottleneck_wait)
+        return "bottleneck wait";
+    if (a->debug_in_bottleneck_state)
+        return "bottleneck";
     if (a->stuck_in_wall_accum > 0.0)
         return "stuck in wall";
     if (a->target_radius_timer > 0.0)
@@ -395,7 +399,8 @@ void SteeringSystemNative::_draw()
         return;
 
     const Color world_color(0.1, 0.85, 0.35, 0.8);
-    const Color bottleneck_zone_color(0.0, 0.2, 1.0, 1.0);
+    const Color bottleneck_zone_color(0.0, 0.2, 1.0, 0.5);
+    const Color bottleneck_core_color(0.0, 0.2, 1.0, 1.0);
     const Color nav_color(0.0, 0.9, 1.0, 0.95);
     const Color wall_color(1.0, 0.65, 0.0, 0.95);
     const Color sep_color(1.0, 0.0, 1.0, 0.95);
@@ -433,6 +438,12 @@ void SteeringSystemNative::_draw()
                     Rect2 rect(top_left, bottom_right - top_left);
                     draw_rect(rect, bottleneck_zone_color, true);
                 }
+
+                ffcore::Vec2 center = ff->cell_to_world(bottleneck.cell);
+                Vector2 top_left = to_local(Vector2(center.x - tile * 0.5, center.y - tile * 0.5));
+                Vector2 bottom_right = to_local(Vector2(center.x + tile * 0.5, center.y + tile * 0.5));
+                Rect2 rect(top_left, bottom_right - top_left);
+                draw_rect(rect, bottleneck_core_color, true);
             }
         }
     }

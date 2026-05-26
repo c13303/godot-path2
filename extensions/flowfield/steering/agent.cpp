@@ -29,6 +29,10 @@ void AgentData::reset()
     target_radius_timer = 0.0;
     lost_timer = 0.0;
     stuck_in_wall_accum = 0.0;
+    active_bottleneck = -1;
+    completed_bottleneck = -1;
+    debug_in_bottleneck_state = false;
+    debug_bottleneck_wait = false;
 }
 
     void AgentData::update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state)

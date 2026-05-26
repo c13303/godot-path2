@@ -55,7 +55,8 @@ namespace godot
         void compute_distance_field(const Rect2i &used,
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
         void compute_bottlenecks(const Rect2i &used,
-                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
+                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
+                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs);
 
         std::vector<float> distance_field;
         int group_size_for_draw() const;

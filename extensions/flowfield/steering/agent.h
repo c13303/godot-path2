@@ -76,6 +76,10 @@ namespace ffcore
         Vec2 debug_target_velocity{};
         int debug_bottleneck_core = -1;
         int debug_bottleneck_zone = -1;
+        int active_bottleneck = -1;
+        int completed_bottleneck = -1;
+        bool debug_in_bottleneck_state = false;
+        bool debug_bottleneck_wait = false;
         double debug_log_timer = 0.0;
         double target_radius_timer = 0.0;
         double lost_timer = 0.0;
