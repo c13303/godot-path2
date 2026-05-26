@@ -1,6 +1,5 @@
 extends Node
 
-const ItemCatalog = preload("res://items/item_catalog.gd")
 
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer

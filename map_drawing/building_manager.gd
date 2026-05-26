@@ -36,7 +36,6 @@ var _eating_agents: Dictionary = {}
 var _escaping_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
 var _astar_out_agents: Dictionary = {}
-var _removed_monsters: Array[Node2D] = []
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _last_scan_summary: String = ""
@@ -878,14 +877,14 @@ func _build_plant_zone() -> void:
 		return
 
 	# Seed = used cells on plantz.
-	var seed: Dictionary = {}
+	var seed_tiles: Dictionary = {}
 	for raw_cell in plantz.get_used_cells():
 		var c: Vector2i = raw_cell
-		seed[c] = true
+		seed_tiles[c] = true
 
 	# Dilate by PLANT_ZONE_MARGIN (Chebyshev), exclude wall tiles.
 	var dilated: Dictionary = {}
-	for raw_cell in seed.keys():
+	for raw_cell in seed_tiles.keys():
 		var c: Vector2i = raw_cell
 		for dy in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
 			for dx in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
@@ -895,7 +894,7 @@ func _build_plant_zone() -> void:
 				dilated[n] = true
 
 	# zone_tiles = (seed ∪ dilated) − walls.
-	for raw_cell in seed.keys():
+	for raw_cell in seed_tiles.keys():
 		var c: Vector2i = raw_cell
 		if _has_wall(c):
 			continue
@@ -907,7 +906,7 @@ func _build_plant_zone() -> void:
 	# margin_tiles = dilated − seed (entry/exit candidates).
 	for raw_cell in dilated.keys():
 		var c: Vector2i = raw_cell
-		if seed.has(c):
+		if seed_tiles.has(c):
 			continue
 		_plant_zone_margin_tiles[c] = true
 
@@ -935,6 +934,18 @@ func get_plant_zone_tiles() -> Array:
 
 func get_plant_zone_margin_tiles() -> Array:
 	return _plant_zone_margin_tiles.keys()
+
+func get_plant_zone_route_tiles() -> Array:
+	var route_tiles: Dictionary = {}
+	for raw_route in _spawner_routes.values():
+		var route: Dictionary = raw_route
+		var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+		if entry_cell != INVALID_CELL:
+			route_tiles[entry_cell] = true
+		var exit_cell: Vector2i = route.get("plant_zone_exit_cell", INVALID_CELL) as Vector2i
+		if exit_cell != INVALID_CELL:
+			route_tiles[exit_cell] = true
+	return route_tiles.keys()
 
 func get_floorz() -> TileMapLayer:
 	return floorz

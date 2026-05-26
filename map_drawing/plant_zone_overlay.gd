@@ -1,13 +1,13 @@
 extends Node2D
 
 # Drawn by BuildingManager when debug_show_plantzone is true.
-# - zone tiles: orange 50% opacity, filled.
-# - margin tiles (entry/exit candidates): orange 100%, filled (overdraws the 50%).
+# - zone tiles, including margin: orange 30% opacity, filled.
+# - selected A* entry/exit tiles: orange 100%, filled.
 
 var building_manager: Node
 
 const ZONE_COLOR: Color = Color(1.0, 0.5, 0.0, 0.3)
-const MARGIN_COLOR: Color = Color(1.0, 0.5, 0.0, 1.0)
+const ROUTE_COLOR: Color = Color(1.0, 0.5, 0.0, 1.0)
 
 func _draw() -> void:
 	if not visible:
@@ -29,11 +29,11 @@ func _draw() -> void:
 		var center_local: Vector2 = _cell_center_local(floorz, c)
 		draw_rect(Rect2(center_local - half, half * 2.0), ZONE_COLOR, true)
 
-	var margin_cells: Array = building_manager.call("get_plant_zone_margin_tiles") if building_manager.has_method("get_plant_zone_margin_tiles") else []
-	for raw_cell in margin_cells:
+	var route_cells: Array = building_manager.call("get_plant_zone_route_tiles") if building_manager.has_method("get_plant_zone_route_tiles") else []
+	for raw_cell in route_cells:
 		var c: Vector2i = raw_cell
 		var center_local: Vector2 = _cell_center_local(floorz, c)
-		draw_rect(Rect2(center_local - half, half * 2.0), MARGIN_COLOR, true)
+		draw_rect(Rect2(center_local - half, half * 2.0), ROUTE_COLOR, true)
 
 func _cell_center_local(floorz: TileMapLayer, cell: Vector2i) -> Vector2:
 	if get_parent() == floorz:
