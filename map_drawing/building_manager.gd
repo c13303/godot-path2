@@ -488,6 +488,8 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 		var nav_id: int = int(agent_manager.call("spawn_agent", agent, plant_group))
 		agent.set("nav_id", nav_id)
 		agent.set_meta("spawner_cell", spawner_cell)
+		if agent.has_method("start_flow_in"):
+			agent.call("start_flow_in")
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
 		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s" % [
@@ -548,8 +550,12 @@ func _process_plant_arrivals() -> void:
 	for raw_nav_id in _astar_in_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		var agent: Node2D = data.get("node", null) as Node2D
-		if not is_instance_valid(agent):
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			finished.append(nav_id)
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
 			finished.append(nav_id)
 			continue
 		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
@@ -596,8 +602,11 @@ func _process_eating_agents(delta: float) -> void:
 	for nav_id in finished:
 		var data: Dictionary = _eating_agents.get(nav_id, {}) as Dictionary
 		_erase_eating_agent(nav_id)
-		var agent: Node2D = data.get("node", null) as Node2D
-		if is_instance_valid(agent):
+		var raw_agent: Variant = data.get("node", null)
+		if is_instance_valid(raw_agent):
+			var agent: Node2D = raw_agent as Node2D
+			if agent == null:
+				continue
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
 			var spawner_cell: Vector2i = INVALID_CELL
@@ -665,8 +674,12 @@ func _process_astar_out_arrivals() -> void:
 	for raw_nav_id in _astar_out_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		var data: Dictionary = _astar_out_agents[nav_id] as Dictionary
-		var agent: Node2D = data.get("node", null) as Node2D
-		if not is_instance_valid(agent):
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			finished.append(nav_id)
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
 			finished.append(nav_id)
 			continue
 		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
@@ -724,8 +737,12 @@ func _process_escape_arrivals() -> void:
 	for raw_nav_id in _escaping_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		var data: Dictionary = _escaping_agents[nav_id] as Dictionary
-		var agent: Node2D = data.get("node", null) as Node2D
-		if not is_instance_valid(agent):
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			arrived.append(nav_id)
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
 			arrived.append(nav_id)
 			continue
 		var target_cell: Vector2i = data.get("target_cell", INVALID_CELL) as Vector2i

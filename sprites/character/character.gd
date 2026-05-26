@@ -62,15 +62,28 @@ func stop_eating() -> void:
 	if _status_label:
 		_status_label.visible = false
 
-func start_escape() -> void:
-	status = "escape"
+func start_flow_in() -> void:
+	status = "flow_in"
 	_eating_timer = 0.0
 	if _status_label:
-		_status_label.text = "escape"
+		_status_label.text = "flow in"
+		_status_label.visible = true
+
+func stop_flow_in() -> void:
+	if status == "flow_in":
+		status = ""
+	if _status_label:
+		_status_label.visible = false
+
+func start_escape() -> void:
+	status = "flow_out"
+	_eating_timer = 0.0
+	if _status_label:
+		_status_label.text = "flow out"
 		_status_label.visible = true
 
 func stop_escape() -> void:
-	if status == "escape":
+	if status == "escape" or status == "flow_out":
 		status = ""
 	if _status_label:
 		_status_label.visible = false
