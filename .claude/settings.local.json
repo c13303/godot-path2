@@ -3,7 +3,12 @@
     "allow": [
       "Bash(grep -v \"\\\\.import$\")",
       "PowerShell(Add-Type -AssemblyName System.Drawing; $files = @\\(\"sprites\\\\lapin\\\\full.png\",\"sprites\\\\lapin\\\\piggy.png\"\\); foreach \\($f in $files\\) { $img = [System.Drawing.Image]::FromFile\\(\\(Resolve-Path $f\\)\\); \"$f : $\\($img.Width\\) x $\\($img.Height\\)\"; $img.Dispose\\(\\) })",
-      "Bash(scons -j4)"
+      "Bash(scons -j4)",
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff --stat map_drawing/building_manager.gd)",
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" log --oneline -20 -- extensions/flowfield/)",
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" status --short)",
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff extensions/flowfield/core/global_config.h)",
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff extensions/flowfield/godot/steering_system_native.cpp)"
     ]
   }
 }

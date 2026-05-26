@@ -76,6 +76,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
     ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
+    ClassDB::bind_method(D_METHOD("detach_agent_flow", "agent_id"), &AgentManagerNative::detach_agent_flow);
     ADD_SIGNAL(MethodInfo("agent_event",
                           PropertyInfo(Variant::STRING, "event_name"),
                           PropertyInfo(Variant::INT, "agent_id"),
@@ -241,4 +242,16 @@ void AgentManagerNative::set_agent_never_rest(int agent_id, bool value)
     if (!steering)
         return;
     steering->set_agent_never_rest(agent_id, value);
+}
+
+void AgentManagerNative::detach_agent_flow(int agent_id)
+{
+    if (!steering)
+        return;
+    steering->set_agent_flow_ptr(agent_id, nullptr);
+    if (core_mgr)
+    {
+        if (auto *entry = core_mgr->get(agent_id))
+            entry->group = ffcore::GROUP_IDLE;
+    }
 }

@@ -4,6 +4,30 @@ namespace ffcore
 {
     struct GlobalConfig
     {
+        // =========================================================
+        // DEBUG TOGGLES (grouped at top for visibility)
+        // =========================================================
+        bool debug_disable_all_debug = true;
+        bool debug_disable_bottlenecks = false;
+        bool debug_draw_world_hitbox = false;
+        bool debug_draw_bottleneck_zones = false;
+        bool debug_draw_fight_hitbox = true;
+        bool debug_show_agent_state_labels = true;
+        bool draw_flow_field = false;                  // debug: draw flow field arrows
+        double debug_redraw_interval = 0.2;
+        double debug_redraw_accum = 0.0;
+        double debug_label_time = 0.0;
+
+        // Lag detector sensitivities (used by BuildingManager via GlobalConfigNative bindings)
+        double debug_plantff_frame_lag_ms = 35.0;     // warn if a BuildingManager frame exceeds this
+        double debug_plantff_ff_lag_ms = 35.0;         // warn if a single plant/escape FF rebuild exceeds this
+
+        // Runtime control (not strictly debug)
+        bool paused = false;
+
+        // =========================================================
+        // GAMEPLAY / STEERING CONFIG
+        // =========================================================
         double agent_max_speed = 150.0;
         double flow_weight = 0.8;
         double center_pull = 1.0;
@@ -27,7 +51,6 @@ namespace ffcore
 
         double agent_world_diameter_ratio = 0.75;
         int bottleneck_zone_radius_tiles = 2;
-        bool debug_disable_bottlenecks = true;
         double bottleneck_reservation_seconds = 1.0;
         double bottleneck_wait_speed_ratio = 0.05;
         double bottleneck_backoff_strength = 0.35;
@@ -64,9 +87,6 @@ namespace ffcore
         double explosion_falloff = 0.1;           // puissance de l'atténuation (1.0 linéaire, >1 plus raide)
         double shockwave_stop_ratio = 2.0;        // rayon de blocage relatif à l'explosion
         double shockwave_stop_duration_ms = 3000; // durée de blocage en millisecondes
-
-        /* drawing options */
-        bool draw_flow_field = false;   // debug: draw flow field arrows
 
         double micro_osc_win_time = 1;                // seconds window before micro-osc counter resets
         int micro_osc_limit_before_cancel = 50000000; // threshold to cancel agent when oscillating

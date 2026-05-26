@@ -81,7 +81,6 @@ void SteeringSystemNative::_bind_methods()
 
 SteeringSystemNative::SteeringSystemNative()
 {
-    ffcore::globalconfig().debug_disable_bottlenecks = debug_disable_bottlenecks;
 }
 SteeringSystemNative::~SteeringSystemNative() {}
 
@@ -127,42 +126,52 @@ void SteeringSystemNative::set_grid(Object *obj)
     grid = Object::cast_to<Node2D>(obj);
 }
 
+void SteeringSystemNative::set_paused(bool p)
+{
+    ffcore::globalconfig().paused = p;
+}
+
 void SteeringSystemNative::set_debug_disable_all_debug(bool enabled)
 {
-    debug_disable_all_debug = enabled;
+    ffcore::globalconfig().debug_disable_all_debug = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_disable_all_debug() const { return ffcore::globalconfig().debug_disable_all_debug; }
 
 void SteeringSystemNative::set_debug_draw_world_hitbox(bool enabled)
 {
-    debug_draw_world_hitbox = enabled;
+    ffcore::globalconfig().debug_draw_world_hitbox = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_draw_world_hitbox() const { return ffcore::globalconfig().debug_draw_world_hitbox; }
 
 void SteeringSystemNative::set_debug_draw_bottleneck_zones(bool enabled)
 {
-    debug_draw_bottleneck_zones = enabled;
+    ffcore::globalconfig().debug_draw_bottleneck_zones = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_draw_bottleneck_zones() const { return ffcore::globalconfig().debug_draw_bottleneck_zones; }
 
 void SteeringSystemNative::set_debug_disable_bottlenecks(bool enabled)
 {
-    debug_disable_bottlenecks = enabled;
     ffcore::globalconfig().debug_disable_bottlenecks = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_disable_bottlenecks() const { return ffcore::globalconfig().debug_disable_bottlenecks; }
 
 void SteeringSystemNative::set_debug_draw_fight_hitbox(bool enabled)
 {
-    debug_draw_fight_hitbox = enabled;
+    ffcore::globalconfig().debug_draw_fight_hitbox = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_draw_fight_hitbox() const { return ffcore::globalconfig().debug_draw_fight_hitbox; }
 
 void SteeringSystemNative::set_debug_show_agent_state_labels(bool enabled)
 {
-    debug_show_agent_state_labels = enabled;
+    ffcore::globalconfig().debug_show_agent_state_labels = enabled;
     queue_redraw();
 }
+bool SteeringSystemNative::get_debug_show_agent_state_labels() const { return ffcore::globalconfig().debug_show_agent_state_labels; }
 
 void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
 {
@@ -380,10 +389,11 @@ Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
 
 void SteeringSystemNative::_process(double delta)
 {
-    if (paused)
+    auto &cfg = ffcore::globalconfig();
+    if (cfg.paused)
         return;
 
-    debug_label_time += delta;
+    cfg.debug_label_time += delta;
 
     if (!flowfield || !grid)
         return;
@@ -436,23 +446,24 @@ void SteeringSystemNative::_process(double delta)
         node->set_global_position(Vector2(a->position.x, a->position.y));
     }
 
-    if (!debug_disable_all_debug &&
-        (debug_draw_world_hitbox || debug_draw_bottleneck_zones || debug_draw_fight_hitbox || debug_show_agent_state_labels))
+    if (!cfg.debug_disable_all_debug &&
+        (cfg.debug_draw_world_hitbox || cfg.debug_draw_bottleneck_zones || cfg.debug_draw_fight_hitbox || cfg.debug_show_agent_state_labels))
     {
-        debug_redraw_accum += delta;
-        if (debug_redraw_accum < debug_redraw_interval)
+        cfg.debug_redraw_accum += delta;
+        if (cfg.debug_redraw_accum < cfg.debug_redraw_interval)
             return;
-        debug_redraw_accum = 0.0;
+        cfg.debug_redraw_accum = 0.0;
         queue_redraw();
     }
 }
 
 void SteeringSystemNative::_draw()
 {
-    if (debug_disable_all_debug)
+    auto &cfg = ffcore::globalconfig();
+    if (cfg.debug_disable_all_debug)
         return;
 
-    if (!debug_draw_world_hitbox && !debug_draw_bottleneck_zones && !debug_draw_fight_hitbox && !debug_show_agent_state_labels)
+    if (!cfg.debug_draw_world_hitbox && !cfg.debug_draw_bottleneck_zones && !cfg.debug_draw_fight_hitbox && !cfg.debug_show_agent_state_labels)
         return;
 
     const Color world_color(0.1, 0.85, 0.35, 0.8);
@@ -466,7 +477,7 @@ void SteeringSystemNative::_draw()
     const Color label_color(1.0, 1.0, 1.0, 0.95);
     const Color label_shadow_color(0.0, 0.0, 0.0, 0.8);
     Ref<Font> debug_font;
-    if (debug_show_agent_state_labels && ThemeDB::get_singleton())
+    if (cfg.debug_show_agent_state_labels && ThemeDB::get_singleton())
     {
         ThemeDB *theme_db = ThemeDB::get_singleton();
         debug_font = theme_db->get_fallback_font();
@@ -478,7 +489,7 @@ void SteeringSystemNative::_draw()
         }
     }
 
-    if (debug_draw_bottleneck_zones && !ffcore::globalconfig().debug_disable_bottlenecks)
+    if (cfg.debug_draw_bottleneck_zones && !cfg.debug_disable_bottlenecks)
     {
         auto *ff_native = Object::cast_to<FlowFieldNative>(flowfield);
         const ffcore::FlowField *ff = ff_native ? ff_native->get_field() : nullptr;
@@ -512,7 +523,7 @@ void SteeringSystemNative::_draw()
         if (!a)
             continue;
 
-        if (debug_draw_world_hitbox && a->profile.world_radius > 0.0)
+        if (cfg.debug_draw_world_hitbox && a->profile.world_radius > 0.0)
         {
             Vector2 world_center = to_local(Vector2(a->position.x, a->position.y + a->profile.foot_offset_y));
             const std::vector<Vector2> &circle = debug_unit_circle_points();
@@ -539,7 +550,7 @@ void SteeringSystemNative::_draw()
             }
         }
 
-        if (debug_draw_fight_hitbox)
+        if (cfg.debug_draw_fight_hitbox)
         {
             Vector2 fight_center = to_local(Vector2(a->position.x, a->position.y + a->profile.fight_offset_y));
             Vector2 half_size(a->profile.fight_half_w, a->profile.fight_half_h);
@@ -547,20 +558,20 @@ void SteeringSystemNative::_draw()
             draw_rect(rect, fight_color, false, 2.0);
         }
 
-        if (debug_show_agent_state_labels && debug_font.is_valid())
+        if (cfg.debug_show_agent_state_labels && debug_font.is_valid())
         {
             auto next_label_it = debug_agent_label_next_refresh.find(id);
             if (next_label_it == debug_agent_label_next_refresh.end())
             {
                 double stagger = double((id * 37) % 100) * 0.01;
-                debug_agent_label_next_refresh[id] = debug_label_time + stagger;
+                debug_agent_label_next_refresh[id] = cfg.debug_label_time + stagger;
             }
 
-            if (debug_label_time >= debug_agent_label_next_refresh[id])
+            if (cfg.debug_label_time >= debug_agent_label_next_refresh[id])
             {
                 double stagger = double((id * 37) % 100) * 0.01;
                 debug_agent_label_cache[id] = _agent_debug_state_label(a);
-                debug_agent_label_next_refresh[id] = debug_label_time + 1.0 + stagger;
+                debug_agent_label_next_refresh[id] = cfg.debug_label_time + 1.0 + stagger;
             }
 
             auto label_it = debug_agent_label_cache.find(id);

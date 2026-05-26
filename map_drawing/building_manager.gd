@@ -16,23 +16,36 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 @export var flow: Node
 @export var agent_manager: Node
 @export var parent_for_agents: Node
+@export var global_config: Node
 @export var debug_logs: bool = false
 
 var _tile_defs_by_atlas: Dictionary = {}
-var _plants_to_target: Dictionary = {}
 var _spawners: Dictionary = {}
-var _escape_targets: Dictionary = {}
 var _spawn_timers: Dictionary = {}
+var _spawner_routes: Dictionary = {}
 var _eating_agents: Dictionary = {}
 var _escaping_agents: Dictionary = {}
 var _removed_monsters: Array[Node2D] = []
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
-var _flow_rebuild_pending: bool = false
-var _force_flow_rebuild_all: bool = false
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _flow_ready: bool = false
+var _dirty_spawner_plants: Dictionary = {}
+var _dirty_spawner_escapes: Dictionary = {}
+
+const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
+const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
+
+func _frame_lag_threshold_ms() -> float:
+	if global_config and global_config.has_method("get_debug_plantff_frame_lag_ms"):
+		return float(global_config.call("get_debug_plantff_frame_lag_ms"))
+	return DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK
+
+func _ff_lag_threshold_ms() -> float:
+	if global_config and global_config.has_method("get_debug_plantff_ff_lag_ms"):
+		return float(global_config.call("get_debug_plantff_ff_lag_ms"))
+	return DEBUG_PLANTFF_FF_LAG_MS_FALLBACK
 
 func _ready() -> void:
 	_load_tile_definitions()
@@ -64,15 +77,30 @@ func _on_flow_field_ready() -> void:
 func _process(delta: float) -> void:
 	if not _flow_ready:
 		return
+	var frame_start_ms: int = Time.get_ticks_msec()
 	_scan_timer -= delta
 	if _scan_timer <= 0.0:
 		_scan_timer = 0.25
 		_scan_buildings()
 
+	if not _dirty_spawner_plants.is_empty() or not _dirty_spawner_escapes.is_empty():
+		_drain_dirty_routes()
+
 	_process_eating_agents(delta)
 	_process_plant_arrivals()
 	_process_escape_arrivals()
 	_process_spawners(delta)
+
+	var frame_ms: int = Time.get_ticks_msec() - frame_start_ms
+	var frame_threshold_ms: float = _frame_lag_threshold_ms()
+	if float(frame_ms) > frame_threshold_ms:
+		push_warning("debug_plantff_frame_lag: %dms (threshold=%dms) eating=%d escaping=%d spawners=%d" % [
+			frame_ms,
+			int(frame_threshold_ms),
+			_eating_agents.size(),
+			_escaping_agents.size(),
+			_spawners.size()
+		])
 
 func _load_tile_definitions() -> void:
 	_tile_defs_by_atlas.clear()
@@ -115,18 +143,20 @@ func _scan_buildings() -> void:
 		if not seen_spawners.has(cell):
 			_spawners.erase(cell)
 			_spawn_timers.erase(cell)
-			_escape_targets.erase(cell)
+			_release_spawner_route(cell)
+			_dirty_spawner_plants.erase(cell)
+			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
-		_queue_plant_flow_rebuild(true)
-	elif _has_pending_plant_flows():
-		_queue_plant_flow_rebuild()
+		for raw_spawner_cell in _spawners.keys():
+			_dirty_spawner_plants[raw_spawner_cell] = true
+			_dirty_spawner_escapes[raw_spawner_cell] = true
 
 func _sync_runtime_state() -> void:
-	_sync_plants_from_manager()
 	_scan_buildings()
-	if _plants_to_target.is_empty():
-		_start_escape_for_all_monsters()
+	for raw_spawner_cell in _spawners.keys():
+		_dirty_spawner_plants[raw_spawner_cell] = true
+		_dirty_spawner_escapes[raw_spawner_cell] = true
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -138,22 +168,26 @@ func _setup_plant_manager() -> void:
 	if plant_manager.has_signal("plant_removed") and not plant_manager.is_connected("plant_removed", Callable(self, "_on_plant_removed")):
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 
-func _sync_plants_from_manager() -> void:
-	if not plant_manager or not plant_manager.has_method("get_plant_cells"):
-		return
-	for raw_cell in plant_manager.call("get_plant_cells"):
-		var cell: Vector2i = raw_cell
-		_register_plant_to_target(cell)
-
 func _on_plant_added(cell: Vector2i) -> void:
 	if not _flow_ready:
 		return
-	_register_plant_to_target(cell)
+	for raw_spawner_cell in _spawners.keys():
+		var route: Dictionary = _spawner_routes.get(raw_spawner_cell, {}) as Dictionary
+		var current_plant: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
+		if current_plant == INVALID_CELL:
+			_dirty_spawner_plants[raw_spawner_cell] = true
+			continue
+		var d_new: Vector2i = cell - raw_spawner_cell
+		var d_cur: Vector2i = current_plant - raw_spawner_cell
+		if (d_new.x * d_new.x + d_new.y * d_new.y) < (d_cur.x * d_cur.x + d_cur.y * d_cur.y):
+			_dirty_spawner_plants[raw_spawner_cell] = true
 
 func _on_plant_removed(cell: Vector2i) -> void:
-	_plants_to_target.erase(cell)
-	_retarget_monsters_from_plant(cell, null)
-	if _plants_to_target.is_empty():
+	for raw_spawner_cell in _spawner_routes.keys():
+		var route: Dictionary = _spawner_routes[raw_spawner_cell] as Dictionary
+		if route.get("plant_cell", INVALID_CELL) == cell:
+			_dirty_spawner_plants[raw_spawner_cell] = true
+	if _no_plants_remaining():
 		_start_escape_for_all_monsters()
 
 func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void:
@@ -222,148 +256,142 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 	var atlas_key: String = _atlas_key(atlas)
 	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
 
-func _register_plant_to_target(cell: Vector2i) -> void:
-	if _plants_to_target.has(cell):
-		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
-		if not bool(plant_to_target.get("flow_ready", false)):
-			_queue_plant_flow_rebuild()
-		return
-	if not agent_manager or not agent_manager.has_method("create_group"):
-		push_warning("BuildingManager: cannot register plantsToTarget, AgentManager has no create_group().")
-		return
-	if not flow or not flow.has_method("assign_flow_to_group"):
-		push_warning("BuildingManager: cannot register plantsToTarget, FlowFieldNative has no assign_flow_to_group().")
-		return
-
-	var group_id: int = int(agent_manager.call("create_group"))
-	if group_id <= IDLE_GROUP:
-		push_warning("BuildingManager: cannot register plantsToTarget at %s, create_group() returned %d." % [cell, group_id])
-		return
-
-	var target_cell: Vector2i = _find_walkable_cell_near(cell)
-	if target_cell == INVALID_CELL:
-		push_warning("BuildingManager: plantsToTarget at %s has no walkable floor tile within range." % cell)
-		return
-
-	_plants_to_target[cell] = {
-		"flow_ready": false,
-		"group_id": group_id,
-		"target_cell": target_cell,
-		"world": _cell_center(target_cell)
-	}
-	_log("registered plantsToTarget cell=%s target=%s world=%s group=%d" % [
-		cell,
-		target_cell,
-		_plants_to_target[cell]["world"],
-		group_id
-	])
-	_queue_plant_flow_rebuild()
-
-func _rebuild_plant_flows() -> void:
-	_flow_rebuild_pending = false
-	var force_all: bool = _force_flow_rebuild_all
-	_force_flow_rebuild_all = false
-	for raw_plant_cell in _plants_to_target.keys():
-		var cell: Vector2i = raw_plant_cell
-		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
-		if force_all or not bool(plant_to_target.get("flow_ready", false)):
-			_assign_plant_flow(cell)
-
-func _has_pending_plant_flows() -> bool:
-	for raw_plant_cell in _plants_to_target.keys():
-		var cell: Vector2i = raw_plant_cell
-		var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
-		if not bool(plant_to_target.get("flow_ready", false)):
-			return true
-	return false
-
-func _queue_plant_flow_rebuild(force_all: bool = false) -> void:
-	_force_flow_rebuild_all = _force_flow_rebuild_all or force_all
-	if _flow_rebuild_pending:
-		return
-	_flow_rebuild_pending = true
-	call_deferred("_rebuild_plant_flows")
-
-func _assign_plant_flow(cell: Vector2i) -> void:
-	if not _plants_to_target.has(cell):
-		return
-	if not flow or not flow.has_method("assign_flow_to_group"):
-		push_warning("BuildingManager: cannot assign plantsToTarget flow, FlowFieldNative missing assign_flow_to_group().")
-		return
-	var plant_to_target: Dictionary = _plants_to_target[cell] as Dictionary
-	var group_id: int = int(plant_to_target.get("group_id", -1))
-	if group_id <= IDLE_GROUP:
-		push_warning("BuildingManager: cannot assign plantsToTarget flow for %s, invalid group %d." % [cell, group_id])
-		return
-	var world: Vector2 = plant_to_target.get("world", _cell_center(cell)) as Vector2
-	flow.call("assign_flow_to_group", group_id, world)
-	plant_to_target["flow_ready"] = true
-	_plants_to_target[cell] = plant_to_target
-	_log("plantsToTarget flow ready cell=%s group=%d world=%s" % [cell, group_id, world])
-
 func _register_spawner(cell: Vector2i, cooldown: float) -> void:
+	if not _spawners.has(cell):
+		_dirty_spawner_plants[cell] = true
+		_dirty_spawner_escapes[cell] = true
 	_spawners[cell] = {
 		"cooldown": max(0.05, cooldown)
 	}
 	if not _spawn_timers.has(cell):
 		_spawn_timers[cell] = 0.0
 
-func _register_escape_target(cell: Vector2i) -> void:
-	if _escape_targets.has(cell):
+func _release_spawner_route(spawner_cell: Vector2i) -> void:
+	if not _spawner_routes.has(spawner_cell):
+		return
+	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+	var plant_group: int = int(route.get("plant_group", -1))
+	var escape_group: int = int(route.get("escape_group", -1))
+	if agent_manager and agent_manager.has_method("dissolve_group"):
+		if plant_group > IDLE_GROUP:
+			agent_manager.call("dissolve_group", plant_group)
+		if escape_group > IDLE_GROUP:
+			agent_manager.call("dissolve_group", escape_group)
+	_spawner_routes.erase(spawner_cell)
+
+func _drain_dirty_routes() -> void:
+	if not _flow_ready:
 		return
 	if not agent_manager or not agent_manager.has_method("create_group"):
 		return
-	var target_cell: Vector2i = _find_walkable_cell_near(cell)
-	if target_cell == INVALID_CELL:
-		return
-	var group_id: int = int(agent_manager.call("create_group"))
-	if group_id <= IDLE_GROUP:
-		return
-	_escape_targets[cell] = {
-		"group_id": group_id,
-		"target_cell": target_cell,
-		"world": _cell_center(target_cell),
-		"flow_ready": false
-	}
-	_assign_escape_flow(cell)
-
-func _register_escape_target_from_agent_group(cell: Vector2i, agent: Node2D) -> void:
-	if _escape_targets.has(cell):
-		return
-	if not agent.has_meta("target_group_id"):
-		return
-	var group_id: int = int(agent.get_meta("target_group_id"))
-	if group_id <= IDLE_GROUP:
-		return
-	var target_cell: Vector2i = _find_walkable_cell_near(cell)
-	if target_cell == INVALID_CELL:
-		return
-	_escape_targets[cell] = {
-		"group_id": group_id,
-		"target_cell": target_cell,
-		"world": _cell_center(target_cell),
-		"flow_ready": false
-	}
-	_assign_escape_flow(cell)
-
-func _assign_escape_flow(cell: Vector2i) -> void:
-	if not _escape_targets.has(cell):
-		return
 	if not flow or not flow.has_method("assign_flow_to_group"):
 		return
-	var escape_target: Dictionary = _escape_targets[cell] as Dictionary
-	var group_id: int = int(escape_target.get("group_id", -1))
-	if group_id <= IDLE_GROUP:
+
+	var plant_cells: Array = _dirty_spawner_plants.keys()
+	var escape_cells: Array = _dirty_spawner_escapes.keys()
+	_dirty_spawner_plants.clear()
+	_dirty_spawner_escapes.clear()
+
+	for raw_cell in plant_cells:
+		if _spawners.has(raw_cell):
+			_rebuild_spawner_plant_route(raw_cell)
+	for raw_cell in escape_cells:
+		if _spawners.has(raw_cell):
+			_rebuild_spawner_escape_route(raw_cell)
+
+func _rebuild_spawner_plant_route(spawner_cell: Vector2i) -> void:
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var plant_cell: Vector2i = _nearest_plant_cell_for_spawner(spawner_cell)
+	if plant_cell == INVALID_CELL:
+		route["plant_cell"] = INVALID_CELL
+		route["plant_target_cell"] = INVALID_CELL
+		route["plant_ready"] = false
+		_spawner_routes[spawner_cell] = route
 		return
-	var world: Vector2 = escape_target.get("world", _cell_center(cell)) as Vector2
-	flow.call("assign_flow_to_group", group_id, world)
-	escape_target["flow_ready"] = true
-	_escape_targets[cell] = escape_target
+	var plant_target_cell: Vector2i = _resolve_walkable_goal(plant_cell, "plantsToTarget@%s" % spawner_cell)
+	if plant_target_cell == INVALID_CELL:
+		route["plant_cell"] = INVALID_CELL
+		route["plant_target_cell"] = INVALID_CELL
+		route["plant_ready"] = false
+		_spawner_routes[spawner_cell] = route
+		return
+	var plant_group: int = int(route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		plant_group = int(agent_manager.call("create_group"))
+	if plant_group <= IDLE_GROUP:
+		push_error("BuildingManager: spawner %s could not allocate plant group (MAX_GROUPS exhausted)" % spawner_cell)
+		route["plant_ready"] = false
+		_spawner_routes[spawner_cell] = route
+		return
+	var plant_world: Vector2 = _cell_center(plant_target_cell)
+	var ff_start_ms: int = Time.get_ticks_msec()
+	flow.call("assign_flow_to_group", plant_group, plant_world)
+	var ff_ms: int = Time.get_ticks_msec() - ff_start_ms
+	if float(ff_ms) > _ff_lag_threshold_ms():
+		push_warning("debug_plantff_slow_plant_ff: spawner=%s plant=%s took=%dms" % [spawner_cell, plant_cell, ff_ms])
+	route["plant_cell"] = plant_cell
+	route["plant_target_cell"] = plant_target_cell
+	route["plant_world"] = plant_world
+	route["plant_group"] = plant_group
+	route["plant_ready"] = true
+	_spawner_routes[spawner_cell] = route
+
+func _rebuild_spawner_escape_route(spawner_cell: Vector2i) -> void:
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var escape_target_cell: Vector2i = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
+	if escape_target_cell == INVALID_CELL:
+		route["escape_target_cell"] = INVALID_CELL
+		route["escape_ready"] = false
+		_spawner_routes[spawner_cell] = route
+		return
+	var escape_group: int = int(route.get("escape_group", -1))
+	if escape_group <= IDLE_GROUP:
+		escape_group = int(agent_manager.call("create_group"))
+	if escape_group <= IDLE_GROUP:
+		push_error("BuildingManager: spawner %s could not allocate escape group (MAX_GROUPS exhausted)" % spawner_cell)
+		route["escape_ready"] = false
+		_spawner_routes[spawner_cell] = route
+		return
+	var escape_world: Vector2 = _cell_center(escape_target_cell)
+	var ff_start_ms: int = Time.get_ticks_msec()
+	flow.call("assign_flow_to_group", escape_group, escape_world)
+	var ff_ms: int = Time.get_ticks_msec() - ff_start_ms
+	if float(ff_ms) > _ff_lag_threshold_ms():
+		push_warning("debug_plantff_slow_escape_ff: spawner=%s took=%dms" % [spawner_cell, ff_ms])
+	route["escape_target_cell"] = escape_target_cell
+	route["escape_world"] = escape_world
+	route["escape_group"] = escape_group
+	route["escape_ready"] = true
+	_spawner_routes[spawner_cell] = route
+
+func _nearest_plant_cell_for_spawner(spawner_cell: Vector2i) -> Vector2i:
+	if plant_manager and plant_manager.has_method("nearest_plant_cell"):
+		return plant_manager.call("nearest_plant_cell", spawner_cell, INVALID_CELL) as Vector2i
+	return INVALID_CELL
+
+func _no_plants_remaining() -> bool:
+	if plant_manager and plant_manager.has_method("is_empty"):
+		return bool(plant_manager.call("is_empty"))
+	return true
+
+func _resolve_walkable_goal(cell: Vector2i, purpose: String) -> Vector2i:
+	if _is_walkable(cell):
+		return cell
+	var fallback: Vector2i = _find_walkable_cell_near(cell)
+	if fallback == INVALID_CELL:
+		push_error("BuildingManager: %s target cell %s is not walkable and no walkable cell found within range. floor=%s wall=%s" % [
+			purpose, cell, _has_floor(cell), _has_wall(cell)
+		])
+		return INVALID_CELL
+	push_error("BuildingManager: %s target cell %s is a wall/non-walkable; falling back to nearest free tile %s" % [
+		purpose, cell, fallback
+	])
+	return fallback
 
 func _process_spawners(delta: float) -> void:
-	if _plants_to_target.is_empty():
+	if _no_plants_remaining():
 		if not _spawners.is_empty():
-			_log_spawn_failure("no valid plantsToTarget found for %d spawner(s)" % _spawners.size())
+			_log_spawn_failure("no plants remaining for %d spawner(s)" % _spawners.size())
 		return
 
 	for raw_cell in _spawners.keys():
@@ -380,18 +408,17 @@ func _process_spawners(delta: float) -> void:
 			_spawn_timers[cell] = 0.25
 
 func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
-	var plant_cell: Vector2i = _nearest_plant_to_target_cell(spawner_cell)
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	if not bool(route.get("plant_ready", false)):
+		_log_spawn_failure("spawner %s plant route not ready" % spawner_cell)
+		return false
+	var plant_group: int = int(route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		_log_spawn_failure("spawner %s plant group invalid" % spawner_cell)
+		return false
+	var plant_cell: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
 	if plant_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s has no nearest plantsToTarget" % spawner_cell)
-		return false
-
-	var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
-	if not bool(plant_to_target.get("flow_ready", false)):
-		_log_spawn_failure("spawner %s nearest plantsToTarget %s exists but flow is not ready" % [spawner_cell, plant_cell])
-		return false
-	var group_id: int = int(plant_to_target.get("group_id", -1))
-	if group_id <= IDLE_GROUP:
-		_log_spawn_failure("spawner %s nearest plantsToTarget %s has invalid group %d" % [spawner_cell, plant_cell, group_id])
+		_log_spawn_failure("spawner %s has no plant cell" % spawner_cell)
 		return false
 
 	var occupied: Array[Vector2i] = _occupied_cells()
@@ -408,47 +435,22 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	agent.add_to_group("monsters")
 
 	if agent_manager and agent_manager.has_method("spawn_agent"):
-		var nav_id: int = int(agent_manager.call("spawn_agent", agent, group_id))
+		var nav_id: int = int(agent_manager.call("spawn_agent", agent, plant_group))
 		agent.set("nav_id", nav_id)
-		agent.set_meta("target_plant_cell", plant_cell)
-		agent.set_meta("target_group_id", group_id)
+		agent.set_meta("spawner_cell", spawner_cell)
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
-		_log("spawned monster nav_id=%d spawn_cell=%s target_plantsToTarget=%s group=%d" % [
+		_log("spawned monster nav_id=%d spawn_cell=%s plant=%s plant_group=%d spawner=%s" % [
 			nav_id,
 			spawn_cell,
 			plant_cell,
-			group_id
+			plant_group,
+			spawner_cell
 		])
 
 	return true
 
-func _nearest_plant_to_target_cell(from_cell: Vector2i, excluded_cell: Vector2i = INVALID_CELL) -> Vector2i:
-	if plant_manager and plant_manager.has_method("nearest_plant_cell"):
-		var indexed_cell: Vector2i = plant_manager.call("nearest_plant_cell", from_cell, excluded_cell) as Vector2i
-		if indexed_cell == INVALID_CELL:
-			return INVALID_CELL
-		if not _plants_to_target.has(indexed_cell):
-			_register_plant_to_target(indexed_cell)
-		if _plants_to_target.has(indexed_cell):
-			return indexed_cell
-
-	var best_cell: Vector2i = INVALID_CELL
-	var best_dist_sq: int = 2147483647
-	for raw_plant_cell in _plants_to_target.keys():
-		var plant_cell: Vector2i = raw_plant_cell
-		if plant_cell == excluded_cell:
-			continue
-		var d: Vector2i = plant_cell - from_cell
-		var dist_sq: int = d.x * d.x + d.y * d.y
-		if dist_sq < best_dist_sq:
-			best_dist_sq = dist_sq
-			best_cell = plant_cell
-	return best_cell
-
 func _process_plant_arrivals() -> void:
-	if _plants_to_target.is_empty():
-		return
 	for node in get_tree().get_nodes_in_group("monsters"):
 		if not (node is Node2D):
 			continue
@@ -456,47 +458,29 @@ func _process_plant_arrivals() -> void:
 		var nav_id: int = int(agent.get("nav_id"))
 		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
 			continue
-		if not agent.has_meta("target_plant_cell"):
+		if not agent.has_meta("spawner_cell"):
 			continue
-		var plant_cell: Vector2i = agent.get_meta("target_plant_cell") as Vector2i
-		if not _plants_to_target.has(plant_cell):
-			_assign_agent_to_nearest_plant(agent)
+		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
+		var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+		var plant_cell: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
+		if plant_cell == INVALID_CELL:
 			continue
-		var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
-		var target_cell: Vector2i = plant_to_target.get("target_cell", plant_cell) as Vector2i
-		if _agent_reached_cell(agent, target_cell):
-			_consume_plant_to_target(agent, plant_cell)
+		var plant_target_cell: Vector2i = route.get("plant_target_cell", plant_cell) as Vector2i
+		if _agent_reached_cell(agent, plant_target_cell):
+			if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
+				continue
+			_consume_plant(agent, spawner_cell, plant_cell)
 
-func _consume_plant_to_target(eater: Node2D, plant_cell: Vector2i) -> void:
-	var plant_to_target: Dictionary = _plants_to_target.get(plant_cell, {}) as Dictionary
-	var hold_group: int = int(plant_to_target.get("group_id", -1))
-	_assign_agent_to_idle(eater, hold_group)
+func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	_start_agent_eating(eater, EATING_COOLDOWN)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
-	else:
-		if plantz:
-			plantz.erase_cell(plant_cell)
-			plantz.update_internals()
-		_plants_to_target.erase(plant_cell)
-		_retarget_monsters_from_plant(plant_cell, eater)
+	elif plantz:
+		plantz.erase_cell(plant_cell)
+		plantz.update_internals()
 	if plantz and plantz.get_cell_source_id(plant_cell) >= 0:
 		plantz.erase_cell(plant_cell)
 		plantz.update_internals()
-
-func _retarget_monsters_from_plant(old_plant_cell: Vector2i, eater: Node2D = null) -> void:
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D) or (eater and node == eater):
-			continue
-		var agent: Node2D = node
-		var nav_id: int = int(agent.get("nav_id"))
-		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
-			continue
-		if not agent.has_meta("target_plant_cell"):
-			continue
-		var target_cell: Vector2i = agent.get_meta("target_plant_cell") as Vector2i
-		if target_cell == old_plant_cell:
-			_assign_agent_to_nearest_plant(agent)
 
 func _process_eating_agents(delta: float) -> void:
 	var finished: Array[int] = []
@@ -511,15 +495,15 @@ func _process_eating_agents(delta: float) -> void:
 
 	for nav_id in finished:
 		var data: Dictionary = _eating_agents.get(nav_id, {}) as Dictionary
-		_eating_agents.erase(nav_id)
+		_erase_eating_agent(nav_id)
 		var agent: Node2D = data.get("node", null) as Node2D
 		if is_instance_valid(agent):
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
-			if _plants_to_target.is_empty():
-				_assign_agent_to_escape(agent)
-			else:
-				_assign_agent_to_nearest_plant(agent)
+			_assign_agent_to_escape(agent)
+
+func _erase_eating_agent(nav_id: int) -> void:
+	_eating_agents.erase(nav_id)
 
 func _start_agent_eating(agent: Node2D, seconds: float) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
@@ -527,86 +511,49 @@ func _start_agent_eating(agent: Node2D, seconds: float) -> void:
 		"node": agent,
 		"timer": seconds
 	}
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", seconds)
-
-func _assign_agent_to_idle(agent: Node2D, hold_group: int = -1) -> void:
-	if not agent_manager or not agent_manager.has_method("assign_agent"):
-		return
-	if hold_group < 0 and agent_manager.has_method("create_group"):
-		hold_group = int(agent_manager.call("create_group"))
-	if hold_group > IDLE_GROUP and flow and flow.has_method("assign_flow_to_group"):
-		agent_manager.call("assign_agent", agent, hold_group)
-		flow.call("assign_flow_to_group", hold_group, agent.global_position)
-		agent.set_meta("target_group_id", hold_group)
-	else:
-		agent_manager.call("assign_agent", agent, IDLE_GROUP)
-	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager.has_method("set_agent_never_rest"):
-		agent_manager.call("set_agent_never_rest", nav_id, false)
-
-func _assign_agent_to_nearest_plant(agent: Node2D) -> void:
-	if not agent_manager or not agent_manager.has_method("assign_agent"):
-		return
-	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var plant_cell: Vector2i = _nearest_plant_to_target_cell(from_cell)
-	if plant_cell == INVALID_CELL:
-		_assign_agent_to_escape(agent)
-		return
-	var plant_to_target: Dictionary = _plants_to_target[plant_cell] as Dictionary
-	var group_id: int = int(plant_to_target.get("group_id", -1))
-	if group_id <= IDLE_GROUP:
-		_assign_agent_to_idle(agent)
-		return
-	agent_manager.call("assign_agent", agent, group_id)
-	agent.set_meta("target_plant_cell", plant_cell)
-	agent.set_meta("target_group_id", group_id)
-	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager.has_method("set_agent_never_rest"):
-		agent_manager.call("set_agent_never_rest", nav_id, true)
 
 func _start_escape_for_all_monsters() -> void:
 	for node in get_tree().get_nodes_in_group("monsters"):
 		if node is Node2D:
 			var agent: Node2D = node
 			var nav_id: int = int(agent.get("nav_id"))
-			if _escaping_agents.has(nav_id):
+			if _escaping_agents.has(nav_id) or _eating_agents.has(nav_id):
 				continue
 			_assign_agent_to_escape(agent)
 
 func _assign_agent_to_escape(agent: Node2D) -> void:
 	if not agent_manager or not agent_manager.has_method("assign_agent"):
 		return
-	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var spawner_cell: Vector2i = _nearest_spawner_cell(from_cell)
+	var spawner_cell: Vector2i = INVALID_CELL
+	if agent.has_meta("spawner_cell"):
+		var pre_linked: Vector2i = agent.get_meta("spawner_cell") as Vector2i
+		if _spawner_routes.has(pre_linked):
+			spawner_cell = pre_linked
 	if spawner_cell == INVALID_CELL:
-		_assign_agent_to_idle(agent)
+		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+		spawner_cell = _nearest_spawner_cell(from_cell)
+	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
 		return
-	if not _escape_targets.has(spawner_cell):
-		_register_escape_target(spawner_cell)
-	if not _escape_targets.has(spawner_cell):
-		_register_escape_target_from_agent_group(spawner_cell, agent)
-		if not _escape_targets.has(spawner_cell):
-			_assign_agent_to_idle(agent)
-			return
-	var escape_target: Dictionary = _escape_targets[spawner_cell] as Dictionary
-	if not bool(escape_target.get("flow_ready", false)):
-		_assign_escape_flow(spawner_cell)
-	var group_id: int = int(escape_target.get("group_id", -1))
-	if group_id <= IDLE_GROUP:
-		_assign_agent_to_idle(agent)
+	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+	if not bool(route.get("escape_ready", false)):
 		return
-	agent_manager.call("assign_agent", agent, group_id)
+	var escape_group: int = int(route.get("escape_group", -1))
+	if escape_group <= IDLE_GROUP:
+		return
+	agent_manager.call("assign_agent", agent, escape_group)
 	var nav_id: int = int(agent.get("nav_id"))
-	_eating_agents.erase(nav_id)
+	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
-	if agent.has_meta("target_plant_cell"):
-		agent.remove_meta("target_plant_cell")
-	agent.set_meta("escape_spawner_cell", spawner_cell)
+	agent.set_meta("spawner_cell", spawner_cell)
 	_escaping_agents[nav_id] = {
 		"node": agent,
-		"target_cell": escape_target.get("target_cell", spawner_cell)
+		"target_cell": route.get("escape_target_cell", spawner_cell),
+		"spawner_cell": spawner_cell
 	}
 	if agent.has_method("stop_eating"):
 		agent.call("stop_eating")
@@ -623,13 +570,14 @@ func _process_escape_arrivals() -> void:
 			arrived.append(nav_id)
 			continue
 		var target_cell: Vector2i = data.get("target_cell", INVALID_CELL) as Vector2i
-		if target_cell != INVALID_CELL and _agent_reached_cell(agent, target_cell):
+		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+		if _agent_within_tiles(agent, target_cell, 1) or _agent_within_tiles(agent, spawner_cell, 1):
 			_remove_escaped_monster(agent)
 			arrived.append(nav_id)
 
 	for nav_id in arrived:
 		_escaping_agents.erase(nav_id)
-		_eating_agents.erase(nav_id)
+		_erase_eating_agent(nav_id)
 
 func _remove_escaped_monster(agent: Node2D) -> void:
 	if agent.has_method("stop_escape"):
@@ -661,6 +609,13 @@ func _agent_reached_cell(agent: Node2D, cell: Vector2i) -> bool:
 		var raw_tile_size: Vector2i = floorz.tile_set.get_tile_size()
 		tile_size = Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
 	return agent.global_position.distance_to(_cell_center(cell)) <= max(tile_size.x, tile_size.y) * 0.5
+
+func _agent_within_tiles(agent: Node2D, cell: Vector2i, tiles: int) -> bool:
+	if cell == INVALID_CELL:
+		return false
+	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var d: Vector2i = agent_cell - cell
+	return abs(d.x) <= tiles and abs(d.y) <= tiles
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []
@@ -730,11 +685,10 @@ func _log_spawn_failure(message: String) -> void:
 	push_warning("BuildingManager: " + message)
 
 func _log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
-	var plant_count: int = int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else _plants_to_target.size()
-	var summary: String = "scan indexed_plants=%d spawners=%d registered_plantsToTarget=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
+	var plant_count: int = int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else 0
+	var summary: String = "scan indexed_plants=%d spawners=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
 		plant_count,
 		seen_spawners.size(),
-		_plants_to_target.size(),
 		_spawners.size(),
 		migrated,
 		walls_changed

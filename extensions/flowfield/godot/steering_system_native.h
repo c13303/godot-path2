@@ -28,16 +28,7 @@ namespace godot
         Node2D *flowfield = nullptr;
         Node2D *grid = nullptr;
         AgentManagerNative *agent_manager = nullptr;
-        bool paused = false;
-        bool debug_disable_all_debug = true;
-        bool debug_draw_world_hitbox = false;
-        bool debug_draw_bottleneck_zones = false;
-        bool debug_disable_bottlenecks = false;
-        bool debug_draw_fight_hitbox = true;
-        bool debug_show_agent_state_labels = true;
-        double debug_redraw_interval = 0.2;
-        double debug_redraw_accum = 0.0;
-        double debug_label_time = 0.0;
+        // Debug toggles + paused now live in ffcore::globalconfig() (see global_config.h).
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
@@ -81,19 +72,19 @@ namespace godot
         void spawn_aoe_zone(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
-        void set_paused(bool p) { paused = p; }
+        void set_paused(bool p);
         void set_debug_disable_all_debug(bool enabled);
-        bool get_debug_disable_all_debug() const { return debug_disable_all_debug; }
+        bool get_debug_disable_all_debug() const;
         void set_debug_draw_world_hitbox(bool enabled);
-        bool get_debug_draw_world_hitbox() const { return debug_draw_world_hitbox; }
+        bool get_debug_draw_world_hitbox() const;
         void set_debug_draw_bottleneck_zones(bool enabled);
-        bool get_debug_draw_bottleneck_zones() const { return debug_draw_bottleneck_zones; }
+        bool get_debug_draw_bottleneck_zones() const;
         void set_debug_disable_bottlenecks(bool enabled);
-        bool get_debug_disable_bottlenecks() const { return debug_disable_bottlenecks; }
+        bool get_debug_disable_bottlenecks() const;
         void set_debug_draw_fight_hitbox(bool enabled);
-        bool get_debug_draw_fight_hitbox() const { return debug_draw_fight_hitbox; }
+        bool get_debug_draw_fight_hitbox() const;
         void set_debug_show_agent_state_labels(bool enabled);
-        bool get_debug_show_agent_state_labels() const { return debug_show_agent_state_labels; }
+        bool get_debug_show_agent_state_labels() const;
 
         ffcore::SteeringSystem *get_system() { return &system; }
     };

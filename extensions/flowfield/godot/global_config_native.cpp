@@ -101,6 +101,11 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_draw_flow_field"), &GlobalConfigNative::get_draw_flow_field);
     ClassDB::bind_method(D_METHOD("set_draw_flow_field", "value"), &GlobalConfigNative::set_draw_flow_field);
 
+    ClassDB::bind_method(D_METHOD("get_debug_plantff_frame_lag_ms"), &GlobalConfigNative::get_debug_plantff_frame_lag_ms);
+    ClassDB::bind_method(D_METHOD("set_debug_plantff_frame_lag_ms", "value"), &GlobalConfigNative::set_debug_plantff_frame_lag_ms);
+    ClassDB::bind_method(D_METHOD("get_debug_plantff_ff_lag_ms"), &GlobalConfigNative::get_debug_plantff_ff_lag_ms);
+    ClassDB::bind_method(D_METHOD("set_debug_plantff_ff_lag_ms", "value"), &GlobalConfigNative::set_debug_plantff_ff_lag_ms);
+
     ClassDB::bind_method(D_METHOD("reset_defaults"), &GlobalConfigNative::reset_defaults);
 
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flow_weight"), "set_flow_weight", "get_flow_weight");
@@ -136,6 +141,8 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_flow_field"), "set_draw_flow_field", "get_draw_flow_field");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "debug_plantff_frame_lag_ms"), "set_debug_plantff_frame_lag_ms", "get_debug_plantff_frame_lag_ms");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "debug_plantff_ff_lag_ms"), "set_debug_plantff_ff_lag_ms", "get_debug_plantff_ff_lag_ms");
 }
 
 double GlobalConfigNative::get_flow_weight() const { return cfg().flow_weight; }
@@ -245,6 +252,12 @@ void GlobalConfigNative::set_shockwave_stop_duration_ms(double v) { cfg().shockw
 
 bool GlobalConfigNative::get_draw_flow_field() const { return cfg().draw_flow_field; }
 void GlobalConfigNative::set_draw_flow_field(bool v) { cfg().draw_flow_field = v; }
+
+double GlobalConfigNative::get_debug_plantff_frame_lag_ms() const { return cfg().debug_plantff_frame_lag_ms; }
+void GlobalConfigNative::set_debug_plantff_frame_lag_ms(double v) { cfg().debug_plantff_frame_lag_ms = std::max(0.0, v); }
+
+double GlobalConfigNative::get_debug_plantff_ff_lag_ms() const { return cfg().debug_plantff_ff_lag_ms; }
+void GlobalConfigNative::set_debug_plantff_ff_lag_ms(double v) { cfg().debug_plantff_ff_lag_ms = std::max(0.0, v); }
 
 void GlobalConfigNative::reset_defaults()
 {
