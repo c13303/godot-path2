@@ -98,10 +98,12 @@ func _setup_zone_overlay() -> void:
 	_zone_overlay = Node2D.new()
 	_zone_overlay.name = "PlantZoneOverlay"
 	_zone_overlay.z_index = 100
+	_zone_overlay.z_as_relative = false
 	_zone_overlay.visible = debug_show_plantzone
 	_zone_overlay.set_script(load("res://map_drawing/plant_zone_overlay.gd"))
 	_zone_overlay.set("building_manager", self)
-	add_child(_zone_overlay)
+	var overlay_parent: Node = floorz if floorz else self
+	overlay_parent.add_child(_zone_overlay)
 
 func _process(delta: float) -> void:
 	if not _flow_ready:
@@ -736,6 +738,9 @@ func _process_escape_arrivals() -> void:
 		_erase_eating_agent(nav_id)
 
 func _remove_escaped_monster(agent: Node2D) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	if agent_manager and agent_manager.has_method("unregister_agent"):
+		agent_manager.call("unregister_agent", nav_id)
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
 	agent.remove_from_group("monsters")
@@ -881,13 +886,12 @@ func _build_plant_zone() -> void:
 		var i: int = 0
 		for raw_cell in _plant_zone_tiles.keys():
 			var c: Vector2i = raw_cell
-			zone_arr[i] = Vector2(c.x, c.y)
+			zone_arr[i] = Vector2(float(c.x), float(c.y))
 			i += 1
 		if pathfinder.has_method("set_walkable_tiles"):
 			pathfinder.call("set_walkable_tiles", zone_arr)
-		# No blockers inside the zone for this game (walls already excluded above).
 		if pathfinder.has_method("set_blockers"):
-			pathfinder.call("set_blockers", PackedVector2Array())
+			pathfinder.call("set_blockers", _wall_blockers_for_zone_bounds())
 
 	_plant_zone_built = true
 	if _zone_overlay:
@@ -902,6 +906,31 @@ func get_plant_zone_margin_tiles() -> Array:
 
 func get_floorz() -> TileMapLayer:
 	return floorz
+
+func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
+	var blockers: PackedVector2Array = PackedVector2Array()
+	if not wallz or _plant_zone_tiles.is_empty():
+		return blockers
+
+	var min_cell: Vector2i = INVALID_CELL
+	var max_cell: Vector2i = Vector2i(-2147483648, -2147483648)
+	for raw_cell in _plant_zone_tiles.keys():
+		var c: Vector2i = raw_cell
+		if min_cell == INVALID_CELL:
+			min_cell = c
+			max_cell = c
+		else:
+			min_cell.x = mini(min_cell.x, c.x)
+			min_cell.y = mini(min_cell.y, c.y)
+			max_cell.x = maxi(max_cell.x, c.x)
+			max_cell.y = maxi(max_cell.y, c.y)
+
+	for raw_cell in wallz.get_used_cells():
+		var c: Vector2i = raw_cell
+		if c.x < min_cell.x or c.x > max_cell.x or c.y < min_cell.y or c.y > max_cell.y:
+			continue
+		blockers.append(Vector2(float(c.x), float(c.y)))
+	return blockers
 
 # ---------------------------------------------------------------------------
 # Exit-wall & adjacency helpers.

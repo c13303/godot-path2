@@ -10,7 +10,7 @@ namespace ffcore
         bool debug_disable_all_debug = true;
         bool debug_disable_bottlenecks = false;
         bool debug_draw_world_hitbox = false;
-        bool debug_draw_bottleneck_zones = false;
+        bool debug_draw_bottleneck_zones = true;
         bool debug_draw_fight_hitbox = true;
         bool debug_show_agent_state_labels = true;
         bool draw_flow_field = false;                  // debug: draw flow field arrows

@@ -121,6 +121,18 @@ void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
     agent_map[node] = agent_id;
 }
 
+void SteeringSystemNative::unregister_node_mapping(int agent_id)
+{
+    for (auto it = agent_map.begin(); it != agent_map.end();)
+    {
+        if (it->second == agent_id)
+            it = agent_map.erase(it);
+        else
+            ++it;
+    }
+    _reset_agent_cache(agent_id);
+}
+
 void SteeringSystemNative::set_grid(Object *obj)
 {
     grid = Object::cast_to<Node2D>(obj);

@@ -57,6 +57,7 @@ namespace godot
         void set_grid(Object *obj);
 
         void register_node_mapping(Node2D *node, int agent_id);
+        void unregister_node_mapping(int agent_id);
 
         int get_agent_id(Node2D *node);
         void set_agent_control_mode(int agent_id, int mode);

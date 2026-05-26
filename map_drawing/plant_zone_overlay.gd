@@ -23,13 +23,17 @@ func _draw() -> void:
 	var zone_cells: Array = building_manager.call("get_plant_zone_tiles") if building_manager.has_method("get_plant_zone_tiles") else []
 	for raw_cell in zone_cells:
 		var c: Vector2i = raw_cell
-		var center_world: Vector2 = floorz.to_global(floorz.map_to_local(c))
-		var center_local: Vector2 = to_local(center_world)
+		var center_local: Vector2 = _cell_center_local(floorz, c)
 		draw_rect(Rect2(center_local - half, half * 2.0), ZONE_COLOR, true)
 
 	var margin_cells: Array = building_manager.call("get_plant_zone_margin_tiles") if building_manager.has_method("get_plant_zone_margin_tiles") else []
 	for raw_cell in margin_cells:
 		var c: Vector2i = raw_cell
-		var center_world: Vector2 = floorz.to_global(floorz.map_to_local(c))
-		var center_local: Vector2 = to_local(center_world)
+		var center_local: Vector2 = _cell_center_local(floorz, c)
 		draw_rect(Rect2(center_local - half, half * 2.0), MARGIN_COLOR, true)
+
+func _cell_center_local(floorz: TileMapLayer, cell: Vector2i) -> Vector2:
+	if get_parent() == floorz:
+		return floorz.map_to_local(cell)
+	var center_world: Vector2 = floorz.to_global(floorz.map_to_local(cell))
+	return to_local(center_world)

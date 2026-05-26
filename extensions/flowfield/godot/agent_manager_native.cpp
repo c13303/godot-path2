@@ -74,6 +74,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("mark_group_has_order", "group_id"), &AgentManagerNative::mark_group_has_order);
     ClassDB::bind_method(D_METHOD("update_godot_agent", "node", "agent_id"), &AgentManagerNative::update_godot_agent);
     ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
+    ClassDB::bind_method(D_METHOD("unregister_agent", "agent_id"), &AgentManagerNative::unregister_agent);
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
     ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
     ClassDB::bind_method(D_METHOD("detach_agent_flow", "agent_id"), &AgentManagerNative::detach_agent_flow);
@@ -131,6 +132,17 @@ Node2D *AgentManagerNative::find_node_by_agent(int agent_id)
     if (it == id_to_node.end())
         return nullptr;
     return it->second;
+}
+
+void AgentManagerNative::unregister_agent(int agent_id)
+{
+    if (steering)
+        steering->unregister_agent(agent_id);
+    if (core_mgr)
+        core_mgr->remove_agent(agent_id);
+    if (steering_native)
+        steering_native->unregister_node_mapping(agent_id);
+    id_to_node.erase(agent_id);
 }
 
 void AgentManagerNative::send_agent_event(const String &event_name, int agent_id, const Variant &payload)
