@@ -8,6 +8,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 
 #include <unordered_map>
 
@@ -65,6 +66,10 @@ namespace godot
         void send_agent_event(const String &event_name, int agent_id, const Variant &payload);
         void set_agent_never_rest(int agent_id, bool value);
         void detach_agent_flow(int agent_id);
+
+        void assign_agent_path(int agent_id, const PackedVector2Array &waypoints_world);
+        void detach_agent_path(int agent_id);
+        bool agent_path_arrived(int agent_id) const;
     };
 
 }

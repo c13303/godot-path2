@@ -75,6 +75,32 @@ func stop_escape() -> void:
 	if _status_label:
 		_status_label.visible = false
 
+func start_astar_in() -> void:
+	status = "astar_in"
+	_eating_timer = 0.0
+	if _status_label:
+		_status_label.text = "astar_in"
+		_status_label.visible = true
+
+func stop_astar_in() -> void:
+	if status == "astar_in":
+		status = ""
+	if _status_label:
+		_status_label.visible = false
+
+func start_astar_out() -> void:
+	status = "astar_out"
+	_eating_timer = 0.0
+	if _status_label:
+		_status_label.text = "astar_out"
+		_status_label.visible = true
+
+func stop_astar_out() -> void:
+	if status == "astar_out":
+		status = ""
+	if _status_label:
+		_status_label.visible = false
+
 func _process_eating_status(delta: float) -> void:
 	if status != "eating" or _eating_timer <= 0.0:
 		return

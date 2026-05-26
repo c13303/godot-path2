@@ -7,6 +7,8 @@ const DEFAULT_SPAWN_COOLDOWN: float = 2.0
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
+const PLANT_ZONE_MARGIN: int = 2
 
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
@@ -15,9 +17,16 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 @export var plant_manager: Node
 @export var flow: Node
 @export var agent_manager: Node
+@export var pathfinder: Node
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
+@export var debug_show_plantzone: bool = false:
+	set(value):
+		debug_show_plantzone = value
+		if _zone_overlay:
+			_zone_overlay.visible = value
+			_zone_overlay.queue_redraw()
 
 var _tile_defs_by_atlas: Dictionary = {}
 var _spawners: Dictionary = {}
@@ -25,14 +34,21 @@ var _spawn_timers: Dictionary = {}
 var _spawner_routes: Dictionary = {}
 var _eating_agents: Dictionary = {}
 var _escaping_agents: Dictionary = {}
+var _astar_in_agents: Dictionary = {}
+var _astar_out_agents: Dictionary = {}
 var _removed_monsters: Array[Node2D] = []
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _flow_ready: bool = false
-var _dirty_spawner_plants: Dictionary = {}
 var _dirty_spawner_escapes: Dictionary = {}
+
+# Plant zone (one-shot at start). Tiles use the floorz tilemap cell space.
+var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
+var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
+var _plant_zone_built: bool = false
+var _zone_overlay: Node2D
 
 const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
@@ -51,6 +67,7 @@ func _ready() -> void:
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
 	_setup_plant_manager()
+	_setup_zone_overlay()
 	_wait_for_flow_ready()
 
 func _wait_for_flow_ready() -> void:
@@ -62,17 +79,29 @@ func _wait_for_flow_ready() -> void:
 				break
 	if code_node == null:
 		_flow_ready = true
+		_build_plant_zone()
 		_sync_runtime_state()
 		return
 	if bool(code_node.get("is_ready")):
 		_flow_ready = true
+		_build_plant_zone()
 		_sync_runtime_state()
 		return
 	code_node.connect("flow_field_ready", Callable(self, "_on_flow_field_ready"))
 
 func _on_flow_field_ready() -> void:
 	_flow_ready = true
+	_build_plant_zone()
 	_sync_runtime_state()
+
+func _setup_zone_overlay() -> void:
+	_zone_overlay = Node2D.new()
+	_zone_overlay.name = "PlantZoneOverlay"
+	_zone_overlay.z_index = 100
+	_zone_overlay.visible = debug_show_plantzone
+	_zone_overlay.set_script(load("res://map_drawing/plant_zone_overlay.gd"))
+	_zone_overlay.set("building_manager", self)
+	add_child(_zone_overlay)
 
 func _process(delta: float) -> void:
 	if not _flow_ready:
@@ -83,11 +112,13 @@ func _process(delta: float) -> void:
 		_scan_timer = 0.25
 		_scan_buildings()
 
-	if not _dirty_spawner_plants.is_empty() or not _dirty_spawner_escapes.is_empty():
+	if not _dirty_spawner_escapes.is_empty():
 		_drain_dirty_routes()
 
 	_process_eating_agents(delta)
+	_process_astar_in_arrivals()
 	_process_plant_arrivals()
+	_process_astar_out_arrivals()
 	_process_escape_arrivals()
 	_process_spawners(delta)
 
@@ -144,19 +175,19 @@ func _scan_buildings() -> void:
 			_spawners.erase(cell)
 			_spawn_timers.erase(cell)
 			_release_spawner_route(cell)
-			_dirty_spawner_plants.erase(cell)
 			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
+		# Walls reshape the FF cost field; rebuild every spawner's plant + escape FFs
+		# using their CACHED static goals (no goal re-derivation).
 		for raw_spawner_cell in _spawners.keys():
-			_dirty_spawner_plants[raw_spawner_cell] = true
+			_rebuild_spawner_plant_ff(raw_spawner_cell)
 			_dirty_spawner_escapes[raw_spawner_cell] = true
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
 	for raw_spawner_cell in _spawners.keys():
-		_dirty_spawner_plants[raw_spawner_cell] = true
-		_dirty_spawner_escapes[raw_spawner_cell] = true
+		_initialize_spawner_route(raw_spawner_cell)
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -168,25 +199,15 @@ func _setup_plant_manager() -> void:
 	if plant_manager.has_signal("plant_removed") and not plant_manager.is_connected("plant_removed", Callable(self, "_on_plant_removed")):
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 
-func _on_plant_added(cell: Vector2i) -> void:
-	if not _flow_ready:
-		return
-	for raw_spawner_cell in _spawners.keys():
-		var route: Dictionary = _spawner_routes.get(raw_spawner_cell, {}) as Dictionary
-		var current_plant: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
-		if current_plant == INVALID_CELL:
-			_dirty_spawner_plants[raw_spawner_cell] = true
-			continue
-		var d_new: Vector2i = cell - raw_spawner_cell
-		var d_cur: Vector2i = current_plant - raw_spawner_cell
-		if (d_new.x * d_new.x + d_new.y * d_new.y) < (d_cur.x * d_cur.x + d_cur.y * d_cur.y):
-			_dirty_spawner_plants[raw_spawner_cell] = true
+func _on_plant_added(_cell: Vector2i) -> void:
+	# FF goals are static (plant_zone_entry_cell), so plant changes no longer
+	# invalidate the FF layer. The plant zone itself is computed once at start
+	# and not rebuilt. Plant additions still appear in plant_manager for nearest-
+	# plant queries; that is enough.
+	pass
 
-func _on_plant_removed(cell: Vector2i) -> void:
-	for raw_spawner_cell in _spawner_routes.keys():
-		var route: Dictionary = _spawner_routes[raw_spawner_cell] as Dictionary
-		if route.get("plant_cell", INVALID_CELL) == cell:
-			_dirty_spawner_plants[raw_spawner_cell] = true
+func _on_plant_removed(_cell: Vector2i) -> void:
+	# See _on_plant_added: no FF dirty flag. Panic escape if zone is now empty.
 	if _no_plants_remaining():
 		_start_escape_for_all_monsters()
 
@@ -257,14 +278,14 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
 
 func _register_spawner(cell: Vector2i, cooldown: float) -> void:
-	if not _spawners.has(cell):
-		_dirty_spawner_plants[cell] = true
-		_dirty_spawner_escapes[cell] = true
+	var is_new: bool = not _spawners.has(cell)
 	_spawners[cell] = {
 		"cooldown": max(0.05, cooldown)
 	}
 	if not _spawn_timers.has(cell):
 		_spawn_timers[cell] = 0.0
+	if is_new and _flow_ready and _plant_zone_built:
+		_initialize_spawner_route(cell)
 
 func _release_spawner_route(spawner_cell: Vector2i) -> void:
 	if not _spawner_routes.has(spawner_cell):
@@ -287,87 +308,114 @@ func _drain_dirty_routes() -> void:
 	if not flow or not flow.has_method("assign_flow_to_group"):
 		return
 
-	var plant_cells: Array = _dirty_spawner_plants.keys()
 	var escape_cells: Array = _dirty_spawner_escapes.keys()
-	_dirty_spawner_plants.clear()
 	_dirty_spawner_escapes.clear()
 
-	for raw_cell in plant_cells:
-		if _spawners.has(raw_cell):
-			_rebuild_spawner_plant_route(raw_cell)
 	for raw_cell in escape_cells:
 		if _spawners.has(raw_cell):
-			_rebuild_spawner_escape_route(raw_cell)
+			_rebuild_spawner_escape_ff(raw_cell)
 
-func _rebuild_spawner_plant_route(spawner_cell: Vector2i) -> void:
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var plant_cell: Vector2i = _nearest_plant_cell_for_spawner(spawner_cell)
-	if plant_cell == INVALID_CELL:
-		route["plant_cell"] = INVALID_CELL
-		route["plant_target_cell"] = INVALID_CELL
-		route["plant_ready"] = false
-		_spawner_routes[spawner_cell] = route
+func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
+	# One-shot: compute all 4 static cells (exit_wall, escape_wall_target,
+	# plant_zone_entry, plant_zone_exit) and assign plant + escape FFs.
+	if not _flow_ready or not _plant_zone_built:
 		return
-	var plant_target_cell: Vector2i = _resolve_walkable_goal(plant_cell, "plantsToTarget@%s" % spawner_cell)
-	if plant_target_cell == INVALID_CELL:
-		route["plant_cell"] = INVALID_CELL
-		route["plant_target_cell"] = INVALID_CELL
+	if not agent_manager or not flow:
+		return
+
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+
+	# Exit wall tile (nearest atlas (13,0) on wallz by Manhattan distance).
+	var exit_wall_cell: Vector2i = _nearest_exit_wall_for_spawner(spawner_cell)
+	route["exit_wall_cell"] = exit_wall_cell
+
+	# Floor tile adjacent to the exit wall that the FF can target.
+	var escape_wall_target_cell: Vector2i = INVALID_CELL
+	if exit_wall_cell != INVALID_CELL:
+		escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
+	if escape_wall_target_cell == INVALID_CELL:
+		# Fallback to spawner cell if no walkable adjacency to an exit wall.
+		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
+	route["escape_wall_target_cell"] = escape_wall_target_cell
+
+	# Entry into plant zone (nearest margin tile to spawner).
+	var entry_cell: Vector2i = _nearest_margin_tile(spawner_cell)
+	route["plant_zone_entry_cell"] = entry_cell
+
+	# Exit out of plant zone (nearest margin tile to exit wall).
+	var exit_cell: Vector2i = INVALID_CELL
+	if exit_wall_cell != INVALID_CELL:
+		exit_cell = _nearest_margin_tile(exit_wall_cell)
+	if exit_cell == INVALID_CELL:
+		exit_cell = entry_cell
+	route["plant_zone_exit_cell"] = exit_cell
+
+	# Plant FF: goal = entry margin tile (static).
+	if entry_cell != INVALID_CELL:
+		var plant_group: int = int(route.get("plant_group", -1))
+		if plant_group <= IDLE_GROUP:
+			plant_group = int(agent_manager.call("create_group"))
+		if plant_group > IDLE_GROUP:
+			var entry_world: Vector2 = _cell_center(entry_cell)
+			flow.call("assign_flow_to_group", plant_group, entry_world)
+			route["plant_group"] = plant_group
+			route["plant_world"] = entry_world
+			route["plant_ready"] = true
+		else:
+			push_error("BuildingManager: spawner %s could not allocate plant group" % spawner_cell)
+			route["plant_ready"] = false
+	else:
 		route["plant_ready"] = false
-		_spawner_routes[spawner_cell] = route
+
+	# Escape FF: goal = floor tile adjacent to exit wall (static).
+	if escape_wall_target_cell != INVALID_CELL:
+		var escape_group: int = int(route.get("escape_group", -1))
+		if escape_group <= IDLE_GROUP:
+			escape_group = int(agent_manager.call("create_group"))
+		if escape_group > IDLE_GROUP:
+			var escape_world: Vector2 = _cell_center(escape_wall_target_cell)
+			flow.call("assign_flow_to_group", escape_group, escape_world)
+			route["escape_group"] = escape_group
+			route["escape_world"] = escape_world
+			route["escape_ready"] = true
+		else:
+			push_error("BuildingManager: spawner %s could not allocate escape group" % spawner_cell)
+			route["escape_ready"] = false
+	else:
+		route["escape_ready"] = false
+
+	_spawner_routes[spawner_cell] = route
+	_log("initialized spawner=%s exit_wall=%s escape_target=%s entry=%s exit=%s" % [
+		spawner_cell, exit_wall_cell, escape_wall_target_cell, entry_cell, exit_cell
+	])
+
+func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
+	# Re-run plant FF after walls change. Goal is the cached entry cell.
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+	if entry_cell == INVALID_CELL:
 		return
 	var plant_group: int = int(route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
-		plant_group = int(agent_manager.call("create_group"))
-	if plant_group <= IDLE_GROUP:
-		push_error("BuildingManager: spawner %s could not allocate plant group (MAX_GROUPS exhausted)" % spawner_cell)
-		route["plant_ready"] = false
-		_spawner_routes[spawner_cell] = route
 		return
-	var plant_world: Vector2 = _cell_center(plant_target_cell)
-	var ff_start_ms: int = Time.get_ticks_msec()
-	flow.call("assign_flow_to_group", plant_group, plant_world)
-	var ff_ms: int = Time.get_ticks_msec() - ff_start_ms
-	if float(ff_ms) > _ff_lag_threshold_ms():
-		push_warning("debug_plantff_slow_plant_ff: spawner=%s plant=%s took=%dms" % [spawner_cell, plant_cell, ff_ms])
-	route["plant_cell"] = plant_cell
-	route["plant_target_cell"] = plant_target_cell
-	route["plant_world"] = plant_world
-	route["plant_group"] = plant_group
-	route["plant_ready"] = true
+	var entry_world: Vector2 = _cell_center(entry_cell)
+	flow.call("assign_flow_to_group", plant_group, entry_world)
+	route["plant_world"] = entry_world
 	_spawner_routes[spawner_cell] = route
 
-func _rebuild_spawner_escape_route(spawner_cell: Vector2i) -> void:
+func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
+	# Re-run escape FF after walls change. Goal is the cached escape_wall_target_cell.
 	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var escape_target_cell: Vector2i = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
-	if escape_target_cell == INVALID_CELL:
-		route["escape_target_cell"] = INVALID_CELL
-		route["escape_ready"] = false
-		_spawner_routes[spawner_cell] = route
+	var target_cell: Vector2i = route.get("escape_wall_target_cell", INVALID_CELL) as Vector2i
+	if target_cell == INVALID_CELL:
 		return
 	var escape_group: int = int(route.get("escape_group", -1))
 	if escape_group <= IDLE_GROUP:
-		escape_group = int(agent_manager.call("create_group"))
-	if escape_group <= IDLE_GROUP:
-		push_error("BuildingManager: spawner %s could not allocate escape group (MAX_GROUPS exhausted)" % spawner_cell)
-		route["escape_ready"] = false
-		_spawner_routes[spawner_cell] = route
 		return
-	var escape_world: Vector2 = _cell_center(escape_target_cell)
-	var ff_start_ms: int = Time.get_ticks_msec()
+	var escape_world: Vector2 = _cell_center(target_cell)
 	flow.call("assign_flow_to_group", escape_group, escape_world)
-	var ff_ms: int = Time.get_ticks_msec() - ff_start_ms
-	if float(ff_ms) > _ff_lag_threshold_ms():
-		push_warning("debug_plantff_slow_escape_ff: spawner=%s took=%dms" % [spawner_cell, ff_ms])
-	route["escape_target_cell"] = escape_target_cell
 	route["escape_world"] = escape_world
-	route["escape_group"] = escape_group
-	route["escape_ready"] = true
 	_spawner_routes[spawner_cell] = route
-
-func _nearest_plant_cell_for_spawner(spawner_cell: Vector2i) -> Vector2i:
-	if plant_manager and plant_manager.has_method("nearest_plant_cell"):
-		return plant_manager.call("nearest_plant_cell", spawner_cell, INVALID_CELL) as Vector2i
-	return INVALID_CELL
 
 func _no_plants_remaining() -> bool:
 	if plant_manager and plant_manager.has_method("is_empty"):
@@ -416,9 +464,9 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	if plant_group <= IDLE_GROUP:
 		_log_spawn_failure("spawner %s plant group invalid" % spawner_cell)
 		return false
-	var plant_cell: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
-	if plant_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s has no plant cell" % spawner_cell)
+	var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+	if entry_cell == INVALID_CELL:
+		_log_spawn_failure("spawner %s has no plant zone entry cell" % spawner_cell)
 		return false
 
 	var occupied: Array[Vector2i] = _occupied_cells()
@@ -440,17 +488,15 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 		agent.set_meta("spawner_cell", spawner_cell)
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
-		_log("spawned monster nav_id=%d spawn_cell=%s plant=%s plant_group=%d spawner=%s" % [
-			nav_id,
-			spawn_cell,
-			plant_cell,
-			plant_group,
-			spawner_cell
+		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s" % [
+			nav_id, spawn_cell, entry_cell, spawner_cell
 		])
 
 	return true
 
-func _process_plant_arrivals() -> void:
+# Phase 1 -> 2: agent reached its plant_zone_entry_cell via FF. Compute A* to a
+# plant target, detach FF, attach path.
+func _process_astar_in_arrivals() -> void:
 	for node in get_tree().get_nodes_in_group("monsters"):
 		if not (node is Node2D):
 			continue
@@ -458,18 +504,70 @@ func _process_plant_arrivals() -> void:
 		var nav_id: int = int(agent.get("nav_id"))
 		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
 			continue
+		if _astar_in_agents.has(nav_id) or _astar_out_agents.has(nav_id):
+			continue
 		if not agent.has_meta("spawner_cell"):
 			continue
 		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
 		var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-		var plant_cell: Vector2i = route.get("plant_cell", INVALID_CELL) as Vector2i
+		var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+		if entry_cell == INVALID_CELL:
+			continue
+		if not _agent_reached_cell(agent, entry_cell):
+			continue
+		_start_astar_in(agent, spawner_cell)
+
+func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent(agent_cell)
+	if target_plant_cell == INVALID_CELL:
+		# No reachable plant in the zone; let panic-escape path take over later.
+		return
+	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, target_plant_cell)
+	if path_cells.is_empty():
+		return
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	if agent_manager and agent_manager.has_method("assign_agent_path"):
+		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_astar_in_agents[nav_id] = {
+		"node": agent,
+		"plant_cell": target_plant_cell,
+		"spawner_cell": spawner_cell
+	}
+	if agent.has_method("start_astar_in"):
+		agent.call("start_astar_in")
+
+# Phase 2 -> 3: astar_in path complete. Verify plant still exists; consume it.
+func _process_plant_arrivals() -> void:
+	var finished: Array[int] = []
+	for raw_nav_id in _astar_in_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		var agent: Node2D = data.get("node", null) as Node2D
+		if not is_instance_valid(agent):
+			finished.append(nav_id)
+			continue
+		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+			continue
+		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
+			continue
+		finished.append(nav_id)
+		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
+		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+		if agent.has_method("stop_astar_in"):
+			agent.call("stop_astar_in")
 		if plant_cell == INVALID_CELL:
 			continue
-		var plant_target_cell: Vector2i = route.get("plant_target_cell", plant_cell) as Vector2i
-		if _agent_reached_cell(agent, plant_target_cell):
-			if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
-				continue
-			_consume_plant(agent, spawner_cell, plant_cell)
+		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
+			# Plant disappeared while in transit; try to start astar_out toward exit.
+			_start_astar_out(agent, spawner_cell)
+			continue
+		_consume_plant(agent, spawner_cell, plant_cell)
+	for nav_id in finished:
+		_astar_in_agents.erase(nav_id)
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	_start_agent_eating(eater, EATING_COOLDOWN)
@@ -500,7 +598,10 @@ func _process_eating_agents(delta: float) -> void:
 		if is_instance_valid(agent):
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
-			_assign_agent_to_escape(agent)
+			var spawner_cell: Vector2i = INVALID_CELL
+			if agent.has_meta("spawner_cell"):
+				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+			_start_astar_out(agent, spawner_cell)
 
 func _erase_eating_agent(nav_id: int) -> void:
 	_eating_agents.erase(nav_id)
@@ -525,6 +626,58 @@ func _start_escape_for_all_monsters() -> void:
 				continue
 			_assign_agent_to_escape(agent)
 
+func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
+	if not is_instance_valid(agent):
+		return
+	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
+		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+		spawner_cell = _nearest_spawner_cell(from_cell)
+	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
+		return
+	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+	var exit_cell: Vector2i = route.get("plant_zone_exit_cell", INVALID_CELL) as Vector2i
+	if exit_cell == INVALID_CELL:
+		_assign_agent_to_escape(agent)
+		return
+	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, exit_cell)
+	if path_cells.is_empty():
+		_assign_agent_to_escape(agent)
+		return
+	var nav_id: int = int(agent.get("nav_id"))
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	if agent_manager and agent_manager.has_method("assign_agent_path"):
+		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_astar_out_agents[nav_id] = {
+		"node": agent,
+		"spawner_cell": spawner_cell,
+		"exit_cell": exit_cell
+	}
+	if agent.has_method("start_astar_out"):
+		agent.call("start_astar_out")
+
+func _process_astar_out_arrivals() -> void:
+	var finished: Array[int] = []
+	for raw_nav_id in _astar_out_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _astar_out_agents[nav_id] as Dictionary
+		var agent: Node2D = data.get("node", null) as Node2D
+		if not is_instance_valid(agent):
+			finished.append(nav_id)
+			continue
+		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+			continue
+		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
+			continue
+		finished.append(nav_id)
+		if agent.has_method("stop_astar_out"):
+			agent.call("stop_astar_out")
+		_assign_agent_to_escape(agent)
+	for nav_id in finished:
+		_astar_out_agents.erase(nav_id)
+
 func _assign_agent_to_escape(agent: Node2D) -> void:
 	if not agent_manager or not agent_manager.has_method("assign_agent"):
 		return
@@ -544,15 +697,19 @@ func _assign_agent_to_escape(agent: Node2D) -> void:
 	var escape_group: int = int(route.get("escape_group", -1))
 	if escape_group <= IDLE_GROUP:
 		return
-	agent_manager.call("assign_agent", agent, escape_group)
 	var nav_id: int = int(agent.get("nav_id"))
+	# Ensure path-follow is cleared before switching to FF group.
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	agent_manager.call("assign_agent", agent, escape_group)
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
 	agent.set_meta("spawner_cell", spawner_cell)
+	var escape_target_cell: Vector2i = route.get("escape_wall_target_cell", spawner_cell) as Vector2i
 	_escaping_agents[nav_id] = {
 		"node": agent,
-		"target_cell": route.get("escape_target_cell", spawner_cell),
+		"target_cell": escape_target_cell,
 		"spawner_cell": spawner_cell
 	}
 	if agent.has_method("stop_eating"):
@@ -570,8 +727,7 @@ func _process_escape_arrivals() -> void:
 			arrived.append(nav_id)
 			continue
 		var target_cell: Vector2i = data.get("target_cell", INVALID_CELL) as Vector2i
-		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-		if _agent_within_tiles(agent, target_cell, 1) or _agent_within_tiles(agent, spawner_cell, 1):
+		if target_cell != INVALID_CELL and _agent_within_tiles(agent, target_cell, 1):
 			_remove_escaped_monster(agent)
 			arrived.append(nav_id)
 
@@ -583,10 +739,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
 	agent.remove_from_group("monsters")
-	var parent: Node = agent.get_parent()
-	if parent:
-		parent.remove_child(agent)
-	_removed_monsters.append(agent)
+	agent.queue_free()
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL
@@ -673,6 +826,181 @@ func _tile_layer_signature(layer: TileMapLayer) -> int:
 		signature += int(cell.x * 73856093 + cell.y * 19349663)
 		signature += int(atlas.x * 83492791 + atlas.y * 2654435761)
 	return signature
+
+# ---------------------------------------------------------------------------
+# Plant zone (computed ONCE at start; never rebuilt).
+# ---------------------------------------------------------------------------
+func _build_plant_zone() -> void:
+	if _plant_zone_built:
+		return
+	_plant_zone_tiles.clear()
+	_plant_zone_margin_tiles.clear()
+
+	if not plantz:
+		_plant_zone_built = true
+		return
+
+	# Seed = used cells on plantz.
+	var seed: Dictionary = {}
+	for raw_cell in plantz.get_used_cells():
+		var c: Vector2i = raw_cell
+		seed[c] = true
+
+	# Dilate by PLANT_ZONE_MARGIN (Chebyshev), exclude wall tiles.
+	var dilated: Dictionary = {}
+	for raw_cell in seed.keys():
+		var c: Vector2i = raw_cell
+		for dy in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
+			for dx in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
+				var n: Vector2i = c + Vector2i(dx, dy)
+				if _has_wall(n):
+					continue
+				dilated[n] = true
+
+	# zone_tiles = (seed ∪ dilated) − walls.
+	for raw_cell in seed.keys():
+		var c: Vector2i = raw_cell
+		if _has_wall(c):
+			continue
+		_plant_zone_tiles[c] = true
+	for raw_cell in dilated.keys():
+		var c: Vector2i = raw_cell
+		_plant_zone_tiles[c] = true
+
+	# margin_tiles = dilated − seed (entry/exit candidates).
+	for raw_cell in dilated.keys():
+		var c: Vector2i = raw_cell
+		if seed.has(c):
+			continue
+		_plant_zone_margin_tiles[c] = true
+
+	# Push to native pathfinder.
+	if pathfinder:
+		var zone_arr: PackedVector2Array = PackedVector2Array()
+		zone_arr.resize(_plant_zone_tiles.size())
+		var i: int = 0
+		for raw_cell in _plant_zone_tiles.keys():
+			var c: Vector2i = raw_cell
+			zone_arr[i] = Vector2(c.x, c.y)
+			i += 1
+		if pathfinder.has_method("set_walkable_tiles"):
+			pathfinder.call("set_walkable_tiles", zone_arr)
+		# No blockers inside the zone for this game (walls already excluded above).
+		if pathfinder.has_method("set_blockers"):
+			pathfinder.call("set_blockers", PackedVector2Array())
+
+	_plant_zone_built = true
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
+	_log("plant zone built: zone_tiles=%d margin_tiles=%d" % [_plant_zone_tiles.size(), _plant_zone_margin_tiles.size()])
+
+func get_plant_zone_tiles() -> Array:
+	return _plant_zone_tiles.keys()
+
+func get_plant_zone_margin_tiles() -> Array:
+	return _plant_zone_margin_tiles.keys()
+
+func get_floorz() -> TileMapLayer:
+	return floorz
+
+# ---------------------------------------------------------------------------
+# Exit-wall & adjacency helpers.
+# ---------------------------------------------------------------------------
+func _nearest_exit_wall_for_spawner(spawner_cell: Vector2i) -> Vector2i:
+	if not wallz:
+		return INVALID_CELL
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in wallz.get_used_cells():
+		var c: Vector2i = raw_cell
+		if wallz.get_cell_atlas_coords(c) != EXIT_WALL_ATLAS:
+			continue
+		var d: Vector2i = c - spawner_cell
+		var manhattan: int = abs(d.x) + abs(d.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = c
+	return best_cell
+
+func _nearest_walkable_adjacent(cell: Vector2i) -> Vector2i:
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var n: Vector2i = cell + Vector2i(dx, dy)
+			if not _is_walkable(n):
+				continue
+			var manhattan: int = abs(dx) + abs(dy)
+			if manhattan < best_dist:
+				best_dist = manhattan
+				best_cell = n
+	return best_cell
+
+func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in _plant_zone_margin_tiles.keys():
+		var c: Vector2i = raw_cell
+		var d: Vector2i = c - from_cell
+		var manhattan: int = abs(d.x) + abs(d.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = c
+	return best_cell
+
+# ---------------------------------------------------------------------------
+# A* glue: find a path inside the plant zone via PathfinderNative.
+# ---------------------------------------------------------------------------
+func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
+	if pathfinder == null or not pathfinder.has_method("find_path"):
+		return PackedVector2Array()
+	# Snap endpoints to zone tiles if needed.
+	var start_tile: Vector2i = from_tile if _plant_zone_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile)
+	var end_tile: Vector2i = to_tile if _plant_zone_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile)
+	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
+		return PackedVector2Array()
+	return pathfinder.call("find_path", start_tile, end_tile)
+
+func _nearest_zone_tile_to(cell: Vector2i) -> Vector2i:
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in _plant_zone_tiles.keys():
+		var c: Vector2i = raw_cell
+		var d: Vector2i = c - cell
+		var manhattan: int = abs(d.x) + abs(d.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = c
+	return best_cell
+
+func _path_cells_to_world(path_cells: PackedVector2Array) -> PackedVector2Array:
+	var out: PackedVector2Array = PackedVector2Array()
+	out.resize(path_cells.size())
+	for i in range(path_cells.size()):
+		var v: Vector2 = path_cells[i]
+		out[i] = _cell_center(Vector2i(int(v.x), int(v.y)))
+	return out
+
+func _resolve_plant_target_for_agent(from_cell: Vector2i) -> Vector2i:
+	# Nearest plant cell to the agent's current cell, restricted to plants
+	# present inside the (static) plant zone. Plants outside the zone are
+	# ignored because we cannot A* to them.
+	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
+		return INVALID_CELL
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in plant_manager.call("get_plant_cells"):
+		var c: Vector2i = raw_cell
+		if not _plant_zone_tiles.has(c):
+			continue
+		var d: Vector2i = c - from_cell
+		var manhattan: int = abs(d.x) + abs(d.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = c
+	return best_cell
 
 func _log(message: String) -> void:
 	if debug_logs:

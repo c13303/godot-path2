@@ -33,6 +33,10 @@ void AgentData::reset()
     completed_bottleneck = -1;
     debug_in_bottleneck_state = false;
     debug_bottleneck_wait = false;
+    path_waypoints.clear();
+    path_index = 0;
+    path_active = false;
+    path_arrived = false;
 }
 
     void AgentData::update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state)

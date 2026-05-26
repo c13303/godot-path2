@@ -8,7 +8,9 @@
       "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" log --oneline -20 -- extensions/flowfield/)",
       "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" status --short)",
       "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff extensions/flowfield/core/global_config.h)",
-      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff extensions/flowfield/godot/steering_system_native.cpp)"
+      "Bash(git -C \"c:/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame\" diff extensions/flowfield/godot/steering_system_native.cpp)",
+      "Bash(awk 'NR>=1320 && NR<=1440' mainRun.tscn)",
+      "Bash(scons -j8)"
     ]
   }
 }

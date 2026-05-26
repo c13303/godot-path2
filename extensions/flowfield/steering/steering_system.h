@@ -73,6 +73,12 @@ namespace ffcore
         void set_agent_never_rest(int id, bool value);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 
+        // Path-follow API. Agent keeps its flow pointer (for wall-repel / bottleneck
+        // physics), but desired direction is sourced from the path while one is active.
+        void set_agent_path(int id, const std::vector<Vec2> &waypoints_world);
+        void clear_agent_path(int id);
+        bool agent_path_arrived(int id) const;
+
     private:
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;

@@ -77,6 +77,9 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
     ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
     ClassDB::bind_method(D_METHOD("detach_agent_flow", "agent_id"), &AgentManagerNative::detach_agent_flow);
+    ClassDB::bind_method(D_METHOD("assign_agent_path", "agent_id", "waypoints_world"), &AgentManagerNative::assign_agent_path);
+    ClassDB::bind_method(D_METHOD("detach_agent_path", "agent_id"), &AgentManagerNative::detach_agent_path);
+    ClassDB::bind_method(D_METHOD("agent_path_arrived", "agent_id"), &AgentManagerNative::agent_path_arrived);
     ADD_SIGNAL(MethodInfo("agent_event",
                           PropertyInfo(Variant::STRING, "event_name"),
                           PropertyInfo(Variant::INT, "agent_id"),
@@ -254,4 +257,32 @@ void AgentManagerNative::detach_agent_flow(int agent_id)
         if (auto *entry = core_mgr->get(agent_id))
             entry->group = ffcore::GROUP_IDLE;
     }
+}
+
+void AgentManagerNative::assign_agent_path(int agent_id, const PackedVector2Array &waypoints_world)
+{
+    if (!steering)
+        return;
+    std::vector<ffcore::Vec2> waypoints;
+    waypoints.reserve(waypoints_world.size());
+    for (int i = 0; i < waypoints_world.size(); ++i)
+    {
+        Vector2 v = waypoints_world[i];
+        waypoints.emplace_back(v.x, v.y);
+    }
+    steering->set_agent_path(agent_id, waypoints);
+}
+
+void AgentManagerNative::detach_agent_path(int agent_id)
+{
+    if (!steering)
+        return;
+    steering->clear_agent_path(agent_id);
+}
+
+bool AgentManagerNative::agent_path_arrived(int agent_id) const
+{
+    if (!steering)
+        return false;
+    return steering->agent_path_arrived(agent_id);
 }

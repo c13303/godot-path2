@@ -879,6 +879,43 @@ void SteeringSystem::set_agent_never_rest(int id, bool value)
     agents[it->second].never_rest = value;
 }
 
+void SteeringSystem::set_agent_path(int id, const std::vector<Vec2> &waypoints_world)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    AgentData &a = agents[it->second];
+    a.path_waypoints = waypoints_world;
+    a.path_index = 0;
+    a.path_active = !waypoints_world.empty();
+    a.path_arrived = waypoints_world.empty();
+    a.active = true;
+    a.lost_timer = 0.0;
+    a.target_radius_timer = 0.0;
+    a.active_bottleneck = -1;
+    a.completed_bottleneck = -1;
+}
+
+void SteeringSystem::clear_agent_path(int id)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    AgentData &a = agents[it->second];
+    a.path_waypoints.clear();
+    a.path_index = 0;
+    a.path_active = false;
+    a.path_arrived = false;
+}
+
+bool SteeringSystem::agent_path_arrived(int id) const
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return false;
+    return agents[it->second].path_arrived;
+}
+
 void SteeringSystem::update_all(double delta)
 {
     if (agents.empty())
@@ -1043,6 +1080,74 @@ void SteeringSystem::update_all(double delta)
         Vec2 offset(0, a.profile.foot_offset_y);
         double active_control_suppression = (a.is_propelled && a.smash_control_suppression_timer > 0.0) ? std::clamp(a.smash_control_suppression, 0.0, 1.0) : 0.0;
         double smash_control_factor = a.is_propelled ? (1.0 - active_control_suppression) : 1.0;
+
+        // Path-follow branch: desired direction comes from the path's current waypoint,
+        // not the flow field. wall_repel/separation/smash physics still apply.
+        if (a.path_active && a.control_mode != AgentControlMode::Manual)
+        {
+            // Advance waypoint while close enough to the current one.
+            const double waypoint_radius = (nav ? nav->tile_size() : cfg.tile_size) * 0.5;
+            const Vec2 foot = a.position + offset;
+            while (a.path_index < (int)a.path_waypoints.size())
+            {
+                Vec2 to_wp = a.path_waypoints[a.path_index] - foot;
+                if (safe_len(to_wp) <= waypoint_radius)
+                    a.path_index++;
+                else
+                    break;
+            }
+
+            if (a.path_index >= (int)a.path_waypoints.size())
+            {
+                a.path_active = false;
+                a.path_arrived = true;
+                if (!a.is_propelled)
+                {
+                    Vec2 target_velocity = Vec2(0, 0);
+                    a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                }
+                Vec2 old_pos = a.position;
+                Vec2 step = a.velocity * delta;
+                a.position = apply_walk_with_walls(a, step, nav);
+                if (nav)
+                    ultimate_wall_correction(a, nav, delta);
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                a.update_motion_state(delta, cfg);
+                continue;
+            }
+
+            Vec2 to_wp = a.path_waypoints[a.path_index] - foot;
+            Vec2 nav_dir = safe_normalize(to_wp);
+
+            Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, wall_repel, separation, a.max_speed);
+            Vec2 desired_dir = safe_normalize(target_velocity);
+            if (desired_dir.is_zero())
+                desired_dir = nav_dir;
+
+            a.debug_nav_dir = nav_dir;
+            a.debug_wall_repel = wall_repel;
+            a.debug_separation = separation;
+            a.debug_desired_dir = desired_dir;
+            a.debug_target_velocity = target_velocity;
+
+            if (!a.is_propelled)
+            {
+                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                double vlen = safe_len(a.velocity);
+                if (vlen > a.max_speed)
+                    a.velocity = a.velocity * (a.max_speed / vlen);
+            }
+
+            Vec2 old_pos = a.position;
+            Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+            Vec2 step = move_velocity * delta;
+            a.position = apply_walk_with_walls(a, step, nav);
+            if (nav)
+                ultimate_wall_correction(a, nav, delta);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
+            a.update_motion_state(delta, cfg);
+            continue;
+        }
 
         if (!a.active || !a.flow)
         {

@@ -1340,6 +1340,8 @@ script = ExtResource("10_8g1qu")
 
 [node name="ProjectileSystemNative" type="ProjectileSystemNative" parent="CPP" unique_id=1185593093]
 
+[node name="PathfinderNative" type="PathfinderNative" parent="CPP" unique_id=1185593094]
+
 [node name="UI" type="Node" parent="." unique_id=303363402]
 
 [node name="CanvasLayer" type="CanvasLayer" parent="UI" unique_id=607979633]
@@ -1416,7 +1418,7 @@ plant_manager = NodePath("../PlantManager")
 game_ui = NodePath("../../GameUI")
 notif = NodePath("../../GameUI/notif")
 
-[node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("floorz", "wallz", "plantz", "buildings", "plant_manager", "flow", "agent_manager", "parent_for_agents", "global_config")]
+[node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("floorz", "wallz", "plantz", "buildings", "plant_manager", "flow", "agent_manager", "pathfinder", "parent_for_agents", "global_config")]
 script = ExtResource("18_vt3yt")
 floorz = NodePath("../MonTilemap/floor")
 wallz = NodePath("../MonTilemap/wallz")
@@ -1425,6 +1427,7 @@ buildings = NodePath("../MonTilemap/buildings")
 plant_manager = NodePath("../PlantManager")
 flow = NodePath("../../CPP/FlowFieldNative")
 agent_manager = NodePath("../../CPP/AgentManagerNative")
+pathfinder = NodePath("../../CPP/PathfinderNative")
 parent_for_agents = NodePath("../..")
 global_config = NodePath("../../GlobalConfigNative")
 

@@ -2,6 +2,7 @@
 
 #include "../core/types.h"
 #include <limits>
+#include <vector>
 
 namespace ffcore
 {
@@ -85,6 +86,15 @@ namespace ffcore
         double lost_timer = 0.0;
         double stuck_in_wall_accum = 0.0;
         bool never_rest = false;
+
+        // Path-follow override: when path_active is true, the desired direction comes
+        // from "toward path_waypoints[path_index]" instead of the flow field. The flow
+        // field pointer is kept so wall-repulsion and bottleneck physics still work.
+        // path_waypoints stores world-space waypoint centers.
+        std::vector<Vec2> path_waypoints;
+        int path_index = 0;
+        bool path_active = false;
+        bool path_arrived = false;
 
         void reset();
         void update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state = false);
