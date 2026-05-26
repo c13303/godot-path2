@@ -415,7 +415,7 @@ func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 	if plant_group <= IDLE_GROUP:
 		return
 	var entry_world: Vector2 = _cell_center(entry_cell)
-	flow.call("assign_flow_to_group", plant_group, entry_world)
+	_request_group_flow_rebuild(plant_group, entry_world)
 	route["plant_world"] = entry_world
 	_spawner_routes[spawner_cell] = route
 
@@ -429,9 +429,15 @@ func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	if escape_group <= IDLE_GROUP:
 		return
 	var escape_world: Vector2 = _cell_center(target_cell)
-	flow.call("assign_flow_to_group", escape_group, escape_world)
+	_request_group_flow_rebuild(escape_group, escape_world)
 	route["escape_world"] = escape_world
 	_spawner_routes[spawner_cell] = route
+
+func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
+	if flow and flow.has_method("request_flow_to_group"):
+		flow.call("request_flow_to_group", group_id, goal_world)
+	elif flow and flow.has_method("assign_flow_to_group"):
+		flow.call("assign_flow_to_group", group_id, goal_world)
 
 func _no_plants_remaining() -> bool:
 	if plant_manager and plant_manager.has_method("is_empty"):

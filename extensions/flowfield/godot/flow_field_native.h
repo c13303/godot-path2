@@ -7,8 +7,14 @@
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include "../flow/flow_field.h"
+#include <cstdint>
 #include <unordered_set>
 #include <unordered_map>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 namespace godot
 {
@@ -33,6 +39,42 @@ namespace godot
 
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
+
+        struct AsyncFlowSnapshot
+        {
+            Rect2i used;
+            Vector2i goal_cell;
+            double tile_size = 1.0;
+            std::vector<Vector2i> walls;
+            std::vector<Vector2i> walkables;
+            bool debug_disable_bottlenecks = false;
+            int bottleneck_zone_radius_tiles = 0;
+            double flow_field_wall_clearance = 0.0;
+        };
+
+        struct AsyncFlowRequest
+        {
+            int group_id = ffcore::INVALID_GROUP;
+            uint64_t serial = 0;
+            AsyncFlowSnapshot snapshot;
+        };
+
+        struct AsyncFlowResult
+        {
+            int group_id = ffcore::INVALID_GROUP;
+            uint64_t serial = 0;
+            bool ok = false;
+            ffcore::FlowField field;
+        };
+
+        std::thread worker_thread;
+        mutable std::mutex async_mutex;
+        std::condition_variable async_cv;
+        std::deque<AsyncFlowRequest> pending_requests;
+        std::deque<AsyncFlowResult> completed_results;
+        std::unordered_map<int, uint64_t> latest_request_serial_by_group;
+        bool worker_stop = false;
+        uint64_t next_request_serial = 1;
 
         bool debug_draw = false;
         double debug_scale = 1;
@@ -60,18 +102,27 @@ namespace godot
 
         std::vector<float> distance_field;
         int group_size_for_draw() const;
+        bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot);
+        void start_worker();
+        void stop_worker();
+        void worker_loop();
+        void process_async_results();
+        AsyncFlowResult compute_async_request(const AsyncFlowRequest &request) const;
+        void apply_async_result(const AsyncFlowResult &result);
 
     protected:
         static void _bind_methods();
 
     public:
         FlowFieldNative() = default;
-        ~FlowFieldNative() override = default;
+        ~FlowFieldNative() override;
 
         void set_debug_draw(bool enabled);
         bool get_debug_draw() const { return debug_draw; }
 
         void _ready() override;
+        void _process(double delta) override;
+        void _exit_tree() override;
         void set_floor_layer(Object *node);
         Object *get_floor_layer() const;
 
@@ -79,6 +130,7 @@ namespace godot
         Object *get_wall_layer() const;
 
         bool rebuild_async(Vector2 goal);
+        void request_flow_to_group(int group_id, Vector2 goal);
         void _draw() override;
         static double move_cost_for_dir(int dir_index);
 
