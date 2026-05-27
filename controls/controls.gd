@@ -25,9 +25,9 @@ const SMASH_CLASS_PLAYER: int = 1
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
-@export var zoom_speed: float = 0.1
+@export var zoom_speed: float = 0.125
 @export var min_zoom: float = 0.25
-@export var max_zoom: float = 8.0
+@export var max_zoom: float = 4.0
 @export var lock_mouse_to_view: bool = true
 @export var scroll_margin_pixel: float = 100.0
 @export var enable_mouse_unit_commands: bool = false

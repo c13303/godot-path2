@@ -8,3 +8,4 @@ func _apply_startup_window_mode() -> void:
 	if not window:
 		return
 	window.mode = Window.MODE_FULLSCREEN
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED)

@@ -9,7 +9,8 @@ var max_zoom: float = 3.0
 var scroll_margin_pixel: float = 100.0
 var lock_mouse_to_view: bool = true
 var follow_smoothing: float = 8.0
-var zoom_snap_step: float = 0.25
+var zoom_snap_step: float = 0.125
+var position_snap_step: float = 0.5
 
 var _mouse_locked: bool = false
 var _follow_target: Node2D = null
@@ -40,7 +41,8 @@ func process(delta: float, paused: bool) -> void:
 		return
 
 	var t: float = 1.0 - exp(-follow_smoothing * delta)
-	camera.global_position = camera.global_position.lerp(_follow_target.global_position, t)
+	var next_position: Vector2 = camera.global_position.lerp(_follow_target.global_position, t)
+	camera.global_position = _snap_position(next_position)
 
 func set_follow_target(target: Node2D, snap: bool = false) -> void:
 	_follow_target = target
@@ -94,3 +96,11 @@ func _get_next_zoom_value(current_zoom: float, amount: float) -> float:
 		stepped_zoom -= zoom_snap_step
 
 	return clamp(stepped_zoom, min_zoom, max_zoom)
+
+func _snap_position(pos: Vector2) -> Vector2:
+	if position_snap_step <= 0.0:
+		return pos
+	return Vector2(
+		round(pos.x / position_snap_step) * position_snap_step,
+		round(pos.y / position_snap_step) * position_snap_step
+	)
