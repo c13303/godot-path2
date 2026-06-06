@@ -287,6 +287,69 @@ bool SteeringSystem::is_agent_footprint_navigable(const Vec2 &body_position, con
     return true;
 }
 
+static bool wall_contact_normal_for_footprint(const Vec2 &body_position, const AgentProfile &profile, FlowField *ff, Vec2 &out_normal)
+{
+    if (!ff)
+        return false;
+
+    Vec2 center = body_position + Vec2(0, profile.foot_offset_y);
+    double radius = std::max(0.0, profile.world_radius);
+    if (radius <= 0.0)
+        return false;
+
+    Vec2i center_cell = ff->world_to_cell(center);
+    const double tile = ff->tile_size();
+    const double half_tile = tile * 0.5;
+    const double epsilon = 1e-6;
+    const int scan_radius = std::max(1, static_cast<int>(std::ceil((radius + half_tile) / tile)));
+
+    Vec2 normal_sum(0, 0);
+    double total_weight = 0.0;
+
+    for (int dy = -scan_radius; dy <= scan_radius; ++dy)
+    {
+        for (int dx = -scan_radius; dx <= scan_radius; ++dx)
+        {
+            Vec2i cell(center_cell.x + dx, center_cell.y + dy);
+            if (ff->is_cell_navigable(cell))
+                continue;
+
+            Vec2 wall_center = ff->cell_to_world(cell);
+            Vec2 closest = closest_point_on_aabb(center, wall_center, half_tile, half_tile);
+            Vec2 away = center - closest;
+            double distance = safe_len(away);
+            if (distance >= radius - epsilon)
+                continue;
+
+            Vec2 normal = distance > epsilon ? away * (1.0 / distance) : safe_normalize(center - wall_center);
+            if (normal.is_zero())
+                continue;
+
+            double penetration = std::max(epsilon, radius - distance);
+            normal_sum += normal * penetration;
+            total_weight += penetration;
+        }
+    }
+
+    if (total_weight <= 0.0 || normal_sum.is_zero())
+        return false;
+
+    out_normal = safe_normalize(normal_sum);
+    return !out_normal.is_zero();
+}
+
+static Vec2 slide_step_against_wall(const Vec2 &step, const Vec2 &wall_normal)
+{
+    double into_wall = step.dot(wall_normal);
+    if (into_wall >= -1e-6)
+        return Vec2(0, 0);
+
+    Vec2 slide = step - wall_normal * into_wall;
+    if (slide.length_squared() < 1e-8)
+        return Vec2(0, 0);
+    return slide;
+}
+
 Vec2 SteeringSystem::apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff)
 {
     if (!ff || (step.x == 0.0 && step.y == 0.0))
@@ -296,15 +359,65 @@ Vec2 SteeringSystem::apply_walk_with_walls(const AgentData &agent, const Vec2 &s
     int steps = std::max(1, static_cast<int>(std::ceil(step.length() / max_step)));
     Vec2 pos = agent.position;
     Vec2 sub_step = step * (1.0 / static_cast<double>(steps));
+    const int slide_iterations = 3;
+    const int sweep_iterations = 8;
+    const double min_step_len2 = 1e-8;
 
     for (int i = 0; i < steps; ++i)
     {
-        Vec2 full = pos + sub_step;
-        if (is_agent_footprint_navigable(full, agent.profile, ff))
+        Vec2 before_slide = pos;
+        Vec2 remaining = sub_step;
+        bool moved_or_slid = false;
+
+        for (int slide_iter = 0; slide_iter < slide_iterations; ++slide_iter)
         {
-            pos = full;
-            continue;
+            if (remaining.length_squared() < min_step_len2)
+                break;
+
+            Vec2 full = pos + remaining;
+            if (is_agent_footprint_navigable(full, agent.profile, ff))
+            {
+                pos = full;
+                moved_or_slid = true;
+                remaining = Vec2(0, 0);
+                break;
+            }
+
+            double lo = 0.0;
+            double hi = 1.0;
+            for (int sweep_iter = 0; sweep_iter < sweep_iterations; ++sweep_iter)
+            {
+                double mid = (lo + hi) * 0.5;
+                Vec2 mid_pos = pos + remaining * mid;
+                if (is_agent_footprint_navigable(mid_pos, agent.profile, ff))
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+
+            if (lo > 0.0)
+            {
+                pos = pos + remaining * lo;
+                moved_or_slid = true;
+            }
+
+            Vec2 blocked_pos = pos + remaining * (hi - lo);
+            Vec2 wall_normal(0, 0);
+            if (!wall_contact_normal_for_footprint(blocked_pos, agent.profile, ff, wall_normal))
+                break;
+
+            Vec2 unused_step = remaining * (1.0 - lo);
+            Vec2 slide_step = slide_step_against_wall(unused_step, wall_normal);
+            if (slide_step.length_squared() < min_step_len2)
+                break;
+
+            remaining = slide_step;
         }
+
+        if (moved_or_slid)
+            continue;
+
+        pos = before_slide;
 
         Vec2 only_x(pos.x + sub_step.x, pos.y);
         if (sub_step.x != 0.0 && is_agent_footprint_navigable(only_x, agent.profile, ff))
