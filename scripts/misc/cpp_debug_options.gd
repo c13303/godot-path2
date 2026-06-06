@@ -31,6 +31,13 @@ extends Node
 		show_agent_state_labels = value
 		_apply_debug_settings()
 
+## Seconds between debug overlay redraws (hitboxes, labels, zones).
+## 0 = redraw every frame (in sync, full cost). Higher = more optimized, more desync.
+@export_range(0.0, 1.0, 0.0166, "or_greater") var refresh_interval: float = 0.2:
+	set(value):
+		refresh_interval = value
+		_apply_debug_settings()
+
 @export var draw_flow_field: bool = false:
 	set(value):
 		draw_flow_field = value
@@ -55,6 +62,7 @@ func _apply_debug_settings() -> void:
 		_call_if_available(steering, "set_debug_draw_bottleneck_zones", draw_bottleneck_zones)
 		_call_if_available(steering, "set_debug_disable_bottlenecks", disable_bottlenecks)
 		_call_if_available(steering, "set_debug_show_agent_state_labels", show_agent_state_labels)
+		_call_if_available(steering, "set_debug_redraw_interval", refresh_interval)
 
 	var global_config: Node = get_node_or_null("GlobalConfigNative")
 	if global_config:
@@ -66,6 +74,6 @@ func _apply_debug_settings() -> void:
 		_call_if_available(flow, "set_debug_draw", draw_flow_field)
 
 
-func _call_if_available(target: Node, method_name: StringName, value: bool) -> void:
+func _call_if_available(target: Node, method_name: StringName, value: Variant) -> void:
 	if target.has_method(method_name):
 		target.call(method_name, value)

@@ -70,6 +70,8 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_debug_draw_fight_hitbox"), &SteeringSystemNative::get_debug_draw_fight_hitbox);
     ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
     ClassDB::bind_method(D_METHOD("get_debug_show_agent_state_labels"), &SteeringSystemNative::get_debug_show_agent_state_labels);
+    ClassDB::bind_method(D_METHOD("set_debug_redraw_interval", "seconds"), &SteeringSystemNative::set_debug_redraw_interval);
+    ClassDB::bind_method(D_METHOD("get_debug_redraw_interval"), &SteeringSystemNative::get_debug_redraw_interval);
 
 }
 
@@ -182,6 +184,14 @@ void SteeringSystemNative::set_debug_show_agent_state_labels(bool enabled)
     queue_redraw();
 }
 bool SteeringSystemNative::get_debug_show_agent_state_labels() const { return ffcore::globalconfig().effective_debug_show_agent_state_labels(); }
+
+void SteeringSystemNative::set_debug_redraw_interval(double seconds)
+{
+    ffcore::globalconfig().debug_redraw_interval = seconds < 0.0 ? 0.0 : seconds;
+    ffcore::globalconfig().debug_redraw_accum = 0.0;
+    queue_redraw();
+}
+double SteeringSystemNative::get_debug_redraw_interval() const { return ffcore::globalconfig().debug_redraw_interval; }
 
 void SteeringSystemNative::apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss)
 {

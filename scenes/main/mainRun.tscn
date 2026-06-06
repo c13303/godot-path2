@@ -1277,6 +1277,9 @@ corner_radius_bottom_left = 6
 z_index = 504
 position = Vector2(1646, 1518)
 script = ExtResource("1_6cm2i")
+acceleration = 100000.0
+deceleration = 100000.0
+max_speed = 300.0
 sprite_node_path = NodePath("rosa")
 sprite_offset = Vector2(0, -36)
 
@@ -1303,7 +1306,10 @@ script = ExtResource("8_5nq50")
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
 debug_enabled = true
-draw_world_hitboxes = true
+draw_bottleneck_zones = false
+show_agent_state_labels = false
+refresh_interval = 0.0
+show_plant_zones = false
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
 flow_weight = 5.0

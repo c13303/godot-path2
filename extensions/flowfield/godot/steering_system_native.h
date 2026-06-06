@@ -86,6 +86,8 @@ namespace godot
         bool get_debug_draw_fight_hitbox() const;
         void set_debug_show_agent_state_labels(bool enabled);
         bool get_debug_show_agent_state_labels() const;
+        void set_debug_redraw_interval(double seconds);
+        double get_debug_redraw_interval() const;
 
         ffcore::SteeringSystem *get_system() { return &system; }
     };
