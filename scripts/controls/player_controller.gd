@@ -1,15 +1,16 @@
 extends Node2D
+class_name PlayerController
 
 const CONTROL_MODE_MANUAL: int = 1
 const SMASH_CLASS_PLAYER: int = 1
 
-@onready var steering: Node = $"../CPP/SteeringSystemNative"
-@onready var agent_manager: Node = $"../CPP/AgentManagerNative"
-@onready var fight_system: FightSystem = $"../fightSystem"
-@onready var game_ui: CanvasLayer = $"../GameUI"
-@onready var pause_overlay: PauseOverlay = $"../GameUI/CanvasLayer/PauseOverlay"
+@onready var steering: Node = $"../../CPP/SteeringSystemNative"
+@onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
+@onready var fight_system: FightSystem = $"../../fightSystem"
+@onready var game_ui: CanvasLayer = $"../../GameUI"
+@onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 
-@onready var camera_controller: CameraController = $"../Camera2D"
+@onready var camera_controller: CameraController = $"../../Camera2D"
 
 
 
@@ -80,7 +81,7 @@ func _update_gun_fire(delta: float) -> void:
 func _setup_player() -> void:
 	var player := _get_player_node()
 	if not player:
-		push_warning("Controls: Player node not found.")
+		push_warning("PlayerController: Player node not found.")
 		return
 
 	if agent_manager and agent_manager.has_method("spawn_agent"):
@@ -134,11 +135,10 @@ func _startup_loading_active() -> bool:
 	return false
 
 func _get_player_node() -> Node2D:
-	var scene := get_tree().get_current_scene()
-	if scene:
-		var root_player := scene.get_node_or_null("Player")
-		if root_player is Node2D:
-			return root_player
+	var parent := get_parent()
+	if parent is Node2D:
+		return parent
+	# Fallback for legacy placement (not nested under Player).
 	for node in get_tree().get_nodes_in_group("player"):
 		if node is Node2D:
 			return node

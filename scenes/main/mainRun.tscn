@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://dcjngyugck8d1" path="res://scripts/entities/player.gd" id="1_6cm2i"]
 [ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_gtwxa"]
-[ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://scripts/controls/controls.gd" id="3_mdsmv"]
+[ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://scripts/controls/player_controller.gd" id="3_mdsmv"]
 [ext_resource type="Script" uid="uid://cyemr34mbedp8" path="res://scripts/controls/camera_controller.gd" id="4_jptjp"]
 [ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://scripts/controls/tile_hover_info.gd" id="8_5nq50"]
 [ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://scripts/global/agent_listener.gd" id="9_v7qf8"]
@@ -1285,7 +1285,7 @@ position = Vector2(0, -20)
 texture = ExtResource("2_gtwxa")
 metadata/_edit_lock_ = true
 
-[node name="Controls" type="Node2D" parent="." unique_id=1943697114]
+[node name="PlayerController" type="Node2D" parent="Player" unique_id=1943697114]
 script = ExtResource("3_mdsmv")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
