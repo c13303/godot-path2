@@ -14,20 +14,15 @@ const SMASH_CLASS_PLAYER: int = 1
 @onready var fps_label: Label = $"../GameUI/CanvasLayer/Label"
 @onready var pause_overlay: PauseOverlay = $"../GameUI/CanvasLayer/PauseOverlay"
 
-@onready var camera_controller: CameraController = $CameraController
+@onready var camera_controller: CameraController = $"../Camera2D"
 @onready var selection_controller: SelectionController = $SelectionController
 @onready var spawn_controller: SpawnController = $SpawnController
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 
 
 
-@export var camera: Camera2D
-@export var speed: float = 400.0
 @export var zoom_speed: float = 0.125
-@export var min_zoom: float = 0.25
-@export var max_zoom: float = 4.0
 @export var lock_mouse_to_view: bool = true
-@export var scroll_margin_pixel: float = 100.0
 @export var enable_mouse_unit_commands: bool = false
 
 var global_config_node: Node = null
@@ -43,16 +38,6 @@ func _ready() -> void:
 		canvas.layer = 100
 		add_child(canvas)
 		ui_layer = canvas
-
-	camera_controller.setup(
-		camera,
-		speed,
-		zoom_speed,
-		min_zoom,
-		max_zoom,
-		scroll_margin_pixel,
-		lock_mouse_to_view
-	)
 
 	selection_controller.setup(ui_layer, agent_manager)
 	spawn_controller.setup(floorz, wallz, agent_manager, get_parent())
@@ -160,7 +145,7 @@ func _setup_player() -> void:
 			var sprite_size: Vector2 = sprite.texture.get_size() * sprite.scale.abs()
 			fight_half_size = sprite_size * 0.5
 			fight_offset_y = sprite.position.y
-		steering.call("set_agent_profile", player_nav_id, {
+		var profile := {
 			"crowd_push_strength": 2.0,
 			"world_radius": player_world_radius,
 			"foot_offset_y": -player_world_radius,
@@ -168,7 +153,12 @@ func _setup_player() -> void:
 			"fight_half_w": fight_half_size.x,
 			"fight_half_h": fight_half_size.y,
 			"smash_class": SMASH_CLASS_PLAYER,
-		})
+		}
+		# Player max_speed > 0 overrides the global agent_max_speed; 0 means inherit.
+		var player_max_speed := float(player.get("max_speed"))
+		if player_max_speed > 0.0:
+			profile["max_speed"] = player_max_speed
+		steering.call("set_agent_profile", player_nav_id, profile)
 
 	if player:
 		camera_controller.set_follow_target(player, true)

@@ -624,6 +624,9 @@ void SteeringSystem::set_agent_profile(int id, const AgentProfile &profile)
     AgentData &agent = agents[it->second];
     Vec2 old_foot = agent_foot_point(agent);
     agent.profile = sanitize_agent_profile(profile);
+    // A valid profile max_speed overrides the global agent_max_speed for this agent.
+    if (std::isfinite(agent.profile.max_speed) && agent.profile.max_speed > 0.0)
+        agent.max_speed = agent.profile.max_speed;
     if (grid)
         grid->update(agent.id, old_foot, agent_foot_point(agent));
     recompute_hitbox_query_extents();

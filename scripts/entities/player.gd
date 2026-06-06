@@ -4,6 +4,17 @@ class_name PlayerCharacter
 @export var acceleration: float = 900.0
 @export var deceleration: float = 1200.0
 
+## Max movement speed. 0 = inherit the global agent_max_speed from GlobalConfigNative.
+@export var max_speed: float = 0.0
+
+@export_group("Sprite")
+## Path to the visual sprite child (e.g. "rosa"). Empty = first Sprite2D child.
+@export var sprite_node_path: NodePath
+## Local offset applied to the sprite so its feet line up with the world hitbox
+## center. The hitbox center sits at (0, -world_radius) relative to this node, so
+## set y to about -world_radius - sprite_height/2.
+@export var sprite_offset: Vector2 = Vector2.ZERO
+
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
@@ -16,7 +27,7 @@ var nav_id: int = -1:
 		_nav_id = value
 
 func _ready() -> void:
-	_align_sprite_to_bottom_center()
+	_apply_sprite_offset()
 	set_physics_process(false)
 
 func _process(_delta: float) -> void:
@@ -35,16 +46,18 @@ func set_control_impaired_state(enabled: bool) -> void:
 func set_velocity_len(value: float) -> void:
 	_velocity_len = value
 
-func _align_sprite_to_bottom_center() -> void:
-	var sprite := get_node_or_null("Sprite2D") as Sprite2D
-	if not sprite or not sprite.texture:
-		return
+func get_sprite() -> Sprite2D:
+	if not sprite_node_path.is_empty():
+		return get_node_or_null(sprite_node_path) as Sprite2D
+	for child in get_children():
+		if child is Sprite2D:
+			return child
+	return null
 
-	var size: Vector2 = sprite.texture.get_size()
-	if sprite.centered:
-		sprite.position = Vector2(0.0, -size.y * abs(sprite.scale.y) * 0.5)
-	else:
-		sprite.position = Vector2(-size.x * abs(sprite.scale.x) * 0.5, -size.y * abs(sprite.scale.y))
+func _apply_sprite_offset() -> void:
+	var sprite := get_sprite()
+	if sprite:
+		sprite.position = sprite_offset
 
 func _update_sprite_tint() -> void:
 	var color: Color = Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1)

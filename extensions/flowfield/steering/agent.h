@@ -24,6 +24,7 @@ namespace ffcore
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
         double world_radius = 0.0;
+        double max_speed = std::numeric_limits<double>::quiet_NaN(); // NaN => inherit global agent_max_speed
         double foot_offset_y = std::numeric_limits<double>::quiet_NaN();
         double fight_offset_y = 0.0;
         double fight_half_w = 32.0;

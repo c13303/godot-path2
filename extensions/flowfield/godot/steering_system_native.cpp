@@ -276,6 +276,8 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
     if (profile.has("world_radius"))
         native_profile.world_radius = double(profile["world_radius"]);
+    if (profile.has("max_speed"))
+        native_profile.max_speed = double(profile["max_speed"]);
     if (profile.has("foot_offset_y"))
         native_profile.foot_offset_y = double(profile["foot_offset_y"]);
     if (profile.has("fight_offset_y"))
