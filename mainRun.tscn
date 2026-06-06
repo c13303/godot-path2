@@ -22,6 +22,7 @@
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://map_drawing/plant_manager.gd" id="22_plant"]
+[ext_resource type="Script" path="res://cpp_debug_options.gd" id="23_cpp_debug"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1317,11 +1318,12 @@ script = ExtResource("7_54rdg")
 [node name="TileHoverInfo" type="Node" parent="Controls" unique_id=445437880]
 script = ExtResource("8_5nq50")
 
-[node name="GlobalConfigNative" type="GlobalConfigNative" parent="." unique_id=583329240]
+[node name="CPP" type="Node" parent="." unique_id=304113688]
+script = ExtResource("23_cpp_debug")
+
+[node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
 flow_weight = 5.0
 center_pull = 5.0
-
-[node name="CPP" type="Node" parent="." unique_id=304113688]
 
 [node name="AgentManagerNative" type="AgentManagerNative" parent="CPP" unique_id=1027504485]
 
@@ -1416,7 +1418,7 @@ flow = NodePath("../../CPP/FlowFieldNative")
 agent_manager = NodePath("../../CPP/AgentManagerNative")
 pathfinder = NodePath("../../CPP/PathfinderNative")
 parent_for_agents = NodePath("../..")
-global_config = NodePath("../../GlobalConfigNative")
+global_config = NodePath("../../CPP/GlobalConfigNative")
 
 [node name="fightSystem" type="Node" parent="." unique_id=1631584488]
 script = ExtResource("19_gvmlv")

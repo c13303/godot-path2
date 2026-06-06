@@ -61,7 +61,7 @@ func _ready() -> void:
 
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
-		global_config_node = scene.get_node_or_null("GlobalConfigNative")
+		global_config_node = scene.get_node_or_null("CPP/GlobalConfigNative")
 
 	call_deferred("_setup_player")
 

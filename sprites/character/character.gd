@@ -5,7 +5,7 @@ const BLOOD_ENABLED: bool = false
 const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
 const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
 const BLOOD_DROP_INTERVAL: float = 0.1
-const GLOBAL_CONFIG_NODE_NAME: String = "GlobalConfigNative"
+const GLOBAL_CONFIG_NODE_NAME: String = "CPP/GlobalConfigNative"
 const STEERING_SYSTEM_NODE_PATH: String = "CPP/SteeringSystemNative"
 
 var _is_propelled: bool = false
@@ -231,7 +231,7 @@ func _get_global_config_node() -> Node:
 	if not _global_config_node:
 		var root: Node = get_tree().get_root()
 		if root:
-			_global_config_node = root.get_node_or_null(GLOBAL_CONFIG_NODE_NAME)
+			_global_config_node = root.find_child("GlobalConfigNative", true, false)
 	return _global_config_node
 
 func set_selected(enabled: bool) -> void:
