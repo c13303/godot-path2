@@ -10,7 +10,7 @@ const INVENTORY_COLUMNS: int = 8
 @onready var inventory_modal: Panel = $Modals/inventoryModal
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
-@onready var tile_hover_info: Node = $"../Controls/TileHoverInfo"
+@onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
 
 var inventory_slots: Array[String] = []
 var selected_quick_index: int = 0

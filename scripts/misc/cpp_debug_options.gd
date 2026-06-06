@@ -48,9 +48,32 @@ extends Node
 		show_plant_zones = value
 		_apply_debug_settings()
 
+@onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
+
 
 func _ready() -> void:
 	_apply_debug_settings()
+	_setup_tile_hover_info()
+
+
+func _setup_tile_hover_info() -> void:
+	if not tile_hover_info:
+		return
+	var scene: Node = get_tree().get_current_scene()
+	if not scene:
+		return
+	var floorz: TileMapLayer = scene.get_node_or_null("Map/MonTilemap/floor") as TileMapLayer
+	var steering: Node = get_node_or_null("SteeringSystemNative")
+	var flow: Node = get_node_or_null("FlowFieldNative")
+	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/Label") as Label
+	var game_ui: Node = scene.get_node_or_null("GameUI")
+	tile_hover_info.setup(floorz, steering, fps_label, flow, game_ui)
+	tile_hover_info.set_enabled(debug_enabled)
+
+
+func _process(_delta: float) -> void:
+	if tile_hover_info:
+		tile_hover_info.process()
 
 
 func _apply_debug_settings() -> void:
@@ -72,6 +95,9 @@ func _apply_debug_settings() -> void:
 	var flow: Node = get_node_or_null("FlowFieldNative")
 	if flow:
 		_call_if_available(flow, "set_debug_draw", draw_flow_field)
+
+	if tile_hover_info:
+		tile_hover_info.set_enabled(debug_enabled)
 
 
 func _call_if_available(target: Node, method_name: StringName, value: Variant) -> void:

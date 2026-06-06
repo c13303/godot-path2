@@ -4,9 +4,6 @@
 [ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_gtwxa"]
 [ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://scripts/controls/controls.gd" id="3_mdsmv"]
 [ext_resource type="Script" uid="uid://cyemr34mbedp8" path="res://scripts/controls/camera_controller.gd" id="4_jptjp"]
-[ext_resource type="Script" uid="uid://ckwrvivdsqn33" path="res://scripts/controls/selection_controller.gd" id="5_m1co4"]
-[ext_resource type="Script" uid="uid://cnwuw6yc1uspi" path="res://scripts/controls/spawn_controller.gd" id="6_ktv88"]
-[ext_resource type="Script" uid="uid://bv0f1nmtnfwi3" path="res://scripts/controls/fx_controller.gd" id="7_54rdg"]
 [ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://scripts/controls/tile_hover_info.gd" id="8_5nq50"]
 [ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://scripts/global/agent_listener.gd" id="9_v7qf8"]
 [ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://scripts/pathfinder/FlowFieldCode.gd" id="10_8g1qu"]
@@ -1291,18 +1288,6 @@ metadata/_edit_lock_ = true
 [node name="Controls" type="Node2D" parent="." unique_id=1943697114]
 script = ExtResource("3_mdsmv")
 
-[node name="SelectionController" type="Node" parent="Controls" unique_id=842562795]
-script = ExtResource("5_m1co4")
-
-[node name="SpawnController" type="Node" parent="Controls" unique_id=394729378]
-script = ExtResource("6_ktv88")
-
-[node name="FXController" type="Node" parent="Controls" unique_id=1969644934]
-script = ExtResource("7_54rdg")
-
-[node name="TileHoverInfo" type="Node" parent="Controls" unique_id=445437880]
-script = ExtResource("8_5nq50")
-
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
 debug_enabled = true
@@ -1310,6 +1295,9 @@ draw_bottleneck_zones = false
 show_agent_state_labels = false
 refresh_interval = 0.0
 show_plant_zones = false
+
+[node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
+script = ExtResource("8_5nq50")
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
 flow_weight = 5.0
