@@ -28,6 +28,7 @@ namespace ffcore
         double control_suppression = 1.0;
         double control_suppression_duration = 0.0;
         int ignored_agent_id = -1;
+        int owner_id = -1; // if valid, zone.pos tracks this agent's live position each tick
         int affected_smash_classes = 0;
         double time_left = 0.0;
         std::unordered_set<int> hit_ids;

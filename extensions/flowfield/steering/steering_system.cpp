@@ -981,6 +981,7 @@ void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, doub
     zone.control_suppression = control_suppression;
     zone.control_suppression_duration = control_suppression_duration;
     zone.ignored_agent_id = ignored_agent_id;
+    zone.owner_id = ignored_agent_id; // the swing's source agent: zone follows it while alive
     zone.affected_smash_classes = affected_smash_classes;
     zone.time_left = duration;
 
@@ -1060,6 +1061,14 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &zone : active_aoes)
     {
+        // Zone follows its owner: re-read the source agent's live position each tick so the
+        // hitbox sweeps with the player. If the owner despawned, keep the last known position.
+        if (zone.owner_id >= 0)
+        {
+            auto owner_it = id_to_index.find(zone.owner_id);
+            if (owner_it != id_to_index.end())
+                zone.pos = agents[owner_it->second].position;
+        }
         auto neighbors = grid->query_neighbors(zone.pos, zone.radius + max_fight_query_padding);
         for (int nid : neighbors)
         {

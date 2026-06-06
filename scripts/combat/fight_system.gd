@@ -23,6 +23,7 @@ func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
 	_projectiles = get_node_or_null("../CPP/ProjectileSystemNative")
 	_drawer = WeaponAOEDrawer.new()
+	_drawer.setup(_steering)
 	add_child(_drawer)
 	_rebuild_weapon_index()
 	_register_guns()
@@ -43,7 +44,7 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 
 	var facing: Vector2 = direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
 	if visualize_AOE_weapons:
-		_drawer.show_weapon_area(origin, facing, radius, angle, duration)
+		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id)
 
 	if not _steering:
 		return true
@@ -132,12 +133,17 @@ class WeaponAOEDrawer:
 	var _areas: Array[Dictionary] = []
 	var _fill := Color(1.0, 0.0, 0.0, 0.18)
 	var _stroke := Color(1.0, 0.0, 0.0, 0.85)
+	var _steering: Node
 
-	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float) -> void:
+	func setup(steering: Node) -> void:
+		_steering = steering
+
+	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, owner_id: int = -1) -> void:
 		if duration <= 0.0:
 			return
 		_areas.append({
 			"origin": origin,
+			"owner_id": owner_id,
 			"direction": direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT,
 			"radius": radius,
 			"angle": angle_degrees,
@@ -158,6 +164,11 @@ class WeaponAOEDrawer:
 	func _draw() -> void:
 		for area in _areas:
 			var origin: Vector2 = area["origin"]
+			# Follow the owning agent's live position so the cone tracks the player.
+			# Falls back to the captured origin when there is no valid owner.
+			var owner_id: int = int(area.get("owner_id", -1))
+			if owner_id >= 0 and _steering:
+				origin = _steering.get_agent_position(owner_id)
 			var radius: float = float(area["radius"])
 			var angle: float = float(area["angle"])
 			var direction: Vector2 = area["direction"]
