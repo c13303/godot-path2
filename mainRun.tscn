@@ -1286,21 +1286,21 @@ corner_radius_bottom_left = 6
 
 [sub_resource type="Theme" id="Theme_siwji"]
 
-[node name="Node2D" type="Node2D" unique_id=1481310298]
+[node name="game" type="Node2D" unique_id=1481310298]
 
 [node name="Player" type="CharacterBody2D" parent="." unique_id=1977329300 groups=["player"]]
 z_index = 504
 position = Vector2(1646, 1518)
 script = ExtResource("1_6cm2i")
 
-[node name="Sprite2D" type="Sprite2D" parent="Player" unique_id=1539923288]
+[node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
 position = Vector2(0, -28)
 texture = ExtResource("2_gtwxa")
 metadata/_edit_lock_ = true
 
 [node name="Controls" type="Node2D" parent="." unique_id=1943697114 node_paths=PackedStringArray("camera")]
 script = ExtResource("3_mdsmv")
-camera = NodePath("../UI/Camera2D")
+camera = NodePath("../Camera2D")
 
 [node name="CameraController" type="Node" parent="Controls" unique_id=1810360606]
 script = ExtResource("4_jptjp")
@@ -1342,21 +1342,8 @@ script = ExtResource("10_8g1qu")
 
 [node name="PathfinderNative" type="PathfinderNative" parent="CPP" unique_id=1185593094]
 
-[node name="UI" type="Node" parent="." unique_id=303363402]
-
-[node name="CanvasLayer" type="CanvasLayer" parent="UI" unique_id=607979633]
-
-[node name="Label" type="Label" parent="UI/CanvasLayer" unique_id=1158384981]
-offset_right = 40.0
-offset_bottom = 23.0
-script = ExtResource("11_62xsw")
-
-[node name="PauseOverlay" type="Panel" parent="UI/CanvasLayer" unique_id=1601357046]
-script = ExtResource("12_vj62y")
-
-[node name="Camera2D" type="Camera2D" parent="UI" unique_id=1494994299]
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1494994299]
 position = Vector2(1628, 1507)
-zoom = Vector2(1, 1)
 
 [node name="Map" type="Node" parent="." unique_id=214584774]
 
@@ -1648,3 +1635,13 @@ scroll_active = false
 horizontal_alignment = 1
 script = ExtResource("21_v8oxv")
 metadata/_edit_lock_ = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="GameUI" unique_id=607979633]
+
+[node name="Label" type="Label" parent="GameUI/CanvasLayer" unique_id=1158384981]
+offset_right = 40.0
+offset_bottom = 23.0
+script = ExtResource("11_62xsw")
+
+[node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
+script = ExtResource("12_vj62y")

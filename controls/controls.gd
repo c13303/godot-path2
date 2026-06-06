@@ -9,10 +9,10 @@ const SMASH_CLASS_PLAYER: int = 1
 @onready var steering: Node = $"../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../CPP/AgentManagerNative"
 @onready var fight_system: FightSystem = $"../fightSystem"
-@onready var ui_layer: CanvasLayer = $"../UI/CanvasLayer"
+@onready var ui_layer: CanvasLayer = $"../GameUI/CanvasLayer"
 @onready var game_ui: CanvasLayer = $"../GameUI"
-@onready var fps_label: Label = $"../UI/CanvasLayer/Label"
-@onready var pause_overlay: PauseOverlay = $"../UI/CanvasLayer/PauseOverlay"
+@onready var fps_label: Label = $"../GameUI/CanvasLayer/Label"
+@onready var pause_overlay: PauseOverlay = $"../GameUI/CanvasLayer/PauseOverlay"
 
 @onready var camera_controller: CameraController = $CameraController
 @onready var selection_controller: SelectionController = $SelectionController
@@ -20,8 +20,6 @@ const SMASH_CLASS_PLAYER: int = 1
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 
 
-
-@onready var marker: Node2D = preload("res://UI_elements/green_circle.tscn").instantiate()
 
 @export var camera: Camera2D
 @export var speed: float = 400.0
@@ -40,9 +38,6 @@ var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
 
 func _ready() -> void:
-	add_child(marker)
-	marker.visible = false
-
 	if not ui_layer:
 		var canvas: CanvasLayer = CanvasLayer.new()
 		canvas.layer = 100
@@ -294,8 +289,6 @@ func _on_click_set_goal() -> void:
 	var local_pos: Vector2 = floorz.to_local(mouse_pos)
 	var cell: Vector2i = floorz.local_to_map(local_pos)
 	var center: Vector2 = floorz.to_global(floorz.map_to_local(cell))
-	marker.global_position = center
-	marker.visible = false
 
 	if flow and flow.has_method("assign_flow_to_group"):
 		flow.call("assign_flow_to_group", group_id, center)
