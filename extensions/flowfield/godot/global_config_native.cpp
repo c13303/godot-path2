@@ -142,8 +142,6 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosion_falloff"), "set_explosion_falloff", "get_explosion_falloff");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_ratio"), "set_shockwave_stop_ratio", "get_shockwave_stop_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shockwave_stop_duration_ms"), "set_shockwave_stop_duration_ms", "get_shockwave_stop_duration_ms");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "draw_flow_field"), "set_draw_flow_field", "get_draw_flow_field");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_show_plant_zones"), "set_debug_show_plant_zones", "get_debug_show_plant_zones");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "debug_plantff_frame_lag_ms"), "set_debug_plantff_frame_lag_ms", "get_debug_plantff_frame_lag_ms");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "debug_plantff_ff_lag_ms"), "set_debug_plantff_ff_lag_ms", "get_debug_plantff_ff_lag_ms");
 }

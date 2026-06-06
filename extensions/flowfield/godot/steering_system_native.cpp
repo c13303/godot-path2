@@ -71,12 +71,6 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_debug_show_agent_state_labels", "enabled"), &SteeringSystemNative::set_debug_show_agent_state_labels);
     ClassDB::bind_method(D_METHOD("get_debug_show_agent_state_labels"), &SteeringSystemNative::get_debug_show_agent_state_labels);
 
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_disable_all_debug"), "set_debug_disable_all_debug", "get_debug_disable_all_debug");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_world_hitbox"), "set_debug_draw_world_hitbox", "get_debug_draw_world_hitbox");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_bottleneck_zones"), "set_debug_draw_bottleneck_zones", "get_debug_draw_bottleneck_zones");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_disable_bottlenecks"), "set_debug_disable_bottlenecks", "get_debug_disable_bottlenecks");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_draw_fight_hitbox"), "set_debug_draw_fight_hitbox", "get_debug_draw_fight_hitbox");
-    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "debug_show_agent_state_labels"), "set_debug_show_agent_state_labels", "get_debug_show_agent_state_labels");
 }
 
 SteeringSystemNative::SteeringSystemNative()

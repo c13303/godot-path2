@@ -22,7 +22,7 @@
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://map_drawing/plant_manager.gd" id="22_plant"]
-[ext_resource type="Script" path="res://cpp_debug_options.gd" id="23_cpp_debug"]
+[ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://cpp_debug_options.gd" id="23_cpp_debug"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1320,6 +1320,7 @@ script = ExtResource("8_5nq50")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+debug_enabled = true
 
 [node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
 flow_weight = 5.0
