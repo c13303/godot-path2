@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dag3l51rkdn8e"
-path="res://.godot/imported/items.png-1c6ef58b51b37adc8692f4416ad0fd02.ctex"
+path="res://.godot/imported/items.png-1a7135fef714c30bded34fa765930423.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://png/legval/items.png"
-dest_files=["res://.godot/imported/items.png-1c6ef58b51b37adc8692f4416ad0fd02.ctex"]
+source_file="res://assets/sprites/legval/items.png"
+dest_files=["res://.godot/imported/items.png-1a7135fef714c30bded34fa765930423.ctex"]
 
 [params]
 

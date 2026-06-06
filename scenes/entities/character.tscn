@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://bvd1epaxpeblw"]
 
-[ext_resource type="Script" uid="uid://b0qndyhyi5wq7" path="res://sprites/character/character.gd" id="1_3omya"]
-[ext_resource type="Texture2D" uid="uid://ch6eoqidb06ck" path="res://png/legval/monster.png" id="2_monster"]
+[ext_resource type="Script" uid="uid://b0qndyhyi5wq7" path="res://scripts/entities/character.gd" id="1_3omya"]
+[ext_resource type="Texture2D" uid="uid://ch6eoqidb06ck" path="res://assets/sprites/legval/monster.png" id="2_monster"]
 
 [sub_resource type="LabelSettings" id="LabelSettings_status"]
 font_size = 8

@@ -1,6 +1,6 @@
 extends CanvasLayer
 
-const ItemSlotScript = preload("res://ui/item_slot.gd")
+const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8

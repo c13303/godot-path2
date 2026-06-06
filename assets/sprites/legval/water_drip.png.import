@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://06ky1m645ait"
-path="res://.godot/imported/water_drip.png-436173902dfc42a18ff6d18c28629a65.ctex"
+path="res://.godot/imported/water_drip.png-24c7f6bebe12539a80ab3dc0b5e8049d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://png/legval/water_drip.png"
-dest_files=["res://.godot/imported/water_drip.png-436173902dfc42a18ff6d18c28629a65.ctex"]
+source_file="res://assets/sprites/legval/water_drip.png"
+dest_files=["res://.godot/imported/water_drip.png-24c7f6bebe12539a80ab3dc0b5e8049d.ctex"]
 
 [params]
 

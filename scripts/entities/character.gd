@@ -1,18 +1,10 @@
 extends CharacterBody2D
 class_name FlowAgent
 
-const BLOOD_ENABLED: bool = false
-const BLOOD_NODE_PATH: String = "Map/MonTilemap/BloodLayer/bloodMultiMesh2D"
-const BLOOD_NODE_NAME: String = "bloodMultiMesh2D"
-const BLOOD_DROP_INTERVAL: float = 0.1
-const GLOBAL_CONFIG_NODE_NAME: String = "CPP/GlobalConfigNative"
 const STEERING_SYSTEM_NODE_PATH: String = "CPP/SteeringSystemNative"
 
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
-var _blood_drop_timer: float = 0.0
-var _blood_layer: Node2D
-var _global_config_node: Node
 var _steering_debug_node: Node
 var _velocity_len: float = 0.0
 var _status_label: Label
@@ -50,8 +42,6 @@ func _process(delta: float) -> void:
 	z_index = int(position.y)
 	_process_eating_status(delta)
 	_process_status_label_visibility()
-	if BLOOD_ENABLED:
-		_process_blood(delta)
 
 func start_eating(seconds: float) -> void:
 	status = "eating"
@@ -161,79 +151,6 @@ func _get_steering_debug_node() -> Node:
 			_steering_debug_node = root.find_child("SteeringSystemNative", true, false)
 	return _steering_debug_node
 
-func _process_blood(delta: float) -> void:
-	if not BLOOD_ENABLED or not _is_propelled or not _should_drop_blood():
-		_blood_drop_timer = 0.0
-		return
-
-	_blood_drop_timer -= delta
-	if _blood_drop_timer > 0.0:
-		return
-
-	_blood_drop_timer = BLOOD_DROP_INTERVAL
-	_spawn_blood_drop()
-
-func _spawn_blood_drop() -> void:
-	var blood_node: Node2D = _get_blood_layer()
-	if blood_node and blood_node.has_method("spawn_blood"):
-		blood_node.spawn_blood(
-			blood_node.to_local(global_position)
-		)
-
-
-func _get_blood_layer() -> Node2D:
-	if _blood_layer:
-		return _blood_layer
-
-	var scene: Node = get_tree().get_current_scene()
-	if scene:
-		_blood_layer = scene.get_node_or_null(BLOOD_NODE_PATH)
-	if not _blood_layer:
-		_blood_layer = _find_blood_node_by_name()
-	if not _blood_layer:
-		var tree_root: Node = get_tree().get_root()
-		if tree_root:
-			_blood_layer = tree_root.get_node_or_null(BLOOD_NODE_PATH)
-	if not _blood_layer:
-		_blood_layer = _find_blood_node_by_name()
-	return _blood_layer
-
-func _find_blood_node_by_name() -> Node2D:
-	var tree = get_tree()
-	if not tree:
-		return null
-	var root: Node = tree.get_current_scene()
-	if not root:
-		root = tree.get_root()
-	if not root:
-		return null
-	return root.find_node(BLOOD_NODE_NAME, true, false) as Node2D
-
-func _should_drop_blood() -> bool:
-	var threshold: float = _movement_threshold()
-	if threshold <= 0.0:
-		return true
-	return _velocity_len >= threshold
-
-func _movement_threshold() -> float:
-	var config: Node = _get_global_config_node()
-	if config and config.has_method("get_movement_threshold"):
-		return float(config.call("get_movement_threshold"))
-	return 0.0
-
-func _get_global_config_node() -> Node:
-	if _global_config_node:
-		return _global_config_node
-
-	var scene: Node = get_tree().get_current_scene()
-	if scene:
-		_global_config_node = scene.get_node_or_null(GLOBAL_CONFIG_NODE_NAME)
-	if not _global_config_node:
-		var root: Node = get_tree().get_root()
-		if root:
-			_global_config_node = root.find_child("GlobalConfigNative", true, false)
-	return _global_config_node
-
 func set_selected(enabled: bool) -> void:
 	if _is_selected == enabled:
 		return
@@ -258,8 +175,6 @@ func set_propelled_state(enabled: bool) -> void:
 		return
 
 	_is_propelled = enabled
-	if _is_propelled:
-		_blood_drop_timer = 0.0
 
 func set_control_impaired_state(enabled: bool) -> void:
 	if _controls_impaired == enabled:

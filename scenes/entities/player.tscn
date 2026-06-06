@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://sprites/player/player.gd" id="1_player"]
-[ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://png/legval/farmer.png" id="2_farmer"]
+[ext_resource type="Script" path="res://scripts/entities/player.gd" id="1_player"]
+[ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_farmer"]
 
 [node name="Player" type="CharacterBody2D"]
 z_index = 2

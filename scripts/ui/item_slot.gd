@@ -1,7 +1,7 @@
 extends PanelContainer
 class_name ItemSlot
 
-const ITEM_TEXTURE: Texture2D = preload("res://png/legval/items.png")
+const ITEM_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 
 var game_ui: Node
 var slot_type: String = "inventory"

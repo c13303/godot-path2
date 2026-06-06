@@ -3,11 +3,11 @@ class_name FightSystem
 
 @export var visualize_AOE_weapons: bool = true
 @export var weapons: Array[WeaponData] = [
-	preload("res://weapons/bomb.tres"),
-	preload("res://weapons/sword.tres"),
+	preload("res://scripts/combat/weapons/bomb.tres"),
+	preload("res://scripts/combat/weapons/sword.tres"),
 ]
 @export var guns: Array[GunData] = [
-	preload("res://weapons/water.tres"),
+	preload("res://scripts/combat/weapons/water.tres"),
 ]
 
 var _steering: Node

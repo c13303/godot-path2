@@ -4,8 +4,8 @@ class_name BuildingManager
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 
-const AGENT_SCENE: PackedScene = preload("res://sprites/character/character.tscn")
-const BUILD_TILES_INDEX_PATH: String = "res://map_drawing/build_tiles_index.tres"
+const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
+const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const DEFAULT_SPAWN_COOLDOWN: float = 2.0
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
@@ -118,7 +118,7 @@ func _setup_zone_overlay() -> void:
 	_zone_overlay.z_index = -99
 	_zone_overlay.z_as_relative = false
 	_zone_overlay.visible = _plant_zone_debug_enabled()
-	_zone_overlay.set_script(load("res://map_drawing/plant_zone_overlay.gd"))
+	_zone_overlay.set_script(load("res://scripts/map/plant_zone_overlay.gd"))
 	_zone_overlay.set("building_manager", self)
 	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(_zone_overlay)

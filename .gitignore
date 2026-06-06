@@ -2,3 +2,12 @@
 .godot/
 /android/
 .godotdoc/
+
+# C++ GDExtension build artifacts (rebuildable)
+*.o
+*.obj
+extensions/**/*.exe
+extensions/flowfield/bin/
+extensions/.sconsign.dblite
+*.TMP
+*~RF*.TMP

@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cffsdc7sgt2fs"
-path="res://.godot/imported/farmer.png-0787b4946165d55011aba96a69363735.ctex"
+path="res://.godot/imported/farmer.png-768ce88ba2f79e031ce41337e6d3ed5e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://png/legval/farmer.png"
-dest_files=["res://.godot/imported/farmer.png-0787b4946165d55011aba96a69363735.ctex"]
+source_file="res://assets/sprites/legval/farmer.png"
+dest_files=["res://.godot/imported/farmer.png-768ce88ba2f79e031ce41337e6d3ed5e.ctex"]
 
 [params]
 

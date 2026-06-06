@@ -1,7 +1,7 @@
 extends Node
 class_name SpawnController
 
-const AGENT_SCENE := preload("res://sprites/character/character.tscn")
+const AGENT_SCENE := preload("res://scenes/entities/character.tscn")
 
 var floorz: TileMapLayer
 var wallz: TileMapLayer
