@@ -19,7 +19,7 @@
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
-[ext_resource type="Script" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
+[ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1302,7 +1302,6 @@ debug_enabled = true
 draw_bottleneck_zones = false
 show_agent_state_labels = false
 refresh_interval = 0.0
-show_plant_zones = false
 
 [node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
 script = ExtResource("8_5nq50")

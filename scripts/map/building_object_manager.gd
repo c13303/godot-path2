@@ -7,10 +7,16 @@ signal building_removed(cell: Vector2i, item_id: String)
 @export var buildings: TileMapLayer
 @export var runtime_parent: Node2D
 
+const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
+const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
+const LIGHT_ENERGY: float = 0.75
+const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap"]
+
 var _buildings_by_cell: Dictionary = {}
 var _runtime_nodes_by_cell: Dictionary = {}
 
 func _ready() -> void:
+	_connect_game_state()
 	initialize_from_layer()
 
 func initialize_from_layer() -> void:
@@ -26,19 +32,25 @@ func initialize_from_layer() -> void:
 
 func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	var item_id: String = str(item_def.get("id", ""))
-	var building_subtype: String = str(item_def.get("building_subtype", ""))
+	var placeable_category: String = str(item_def.get("category", ""))
 	var runtime_id: String = str(item_def.get("runtime_id", item_id))
+	var light_source: float = float(item_def.get("light_source", 0.0))
 	if item_id == "":
 		return
+	if runtime_id == "":
+		runtime_id = item_id
 	if _buildings_by_cell.has(cell):
 		remove_building(cell)
-	_buildings_by_cell[cell] = {
+	var building_data: Dictionary = {
 		"item_id": item_id,
+		"category": placeable_category,
 		"runtime_id": runtime_id,
-		"building_subtype": building_subtype,
 	}
-	if building_subtype == "lamp":
-		_register_lamp_runtime(cell)
+	if item_def.has("light_source"):
+		building_data["light_source"] = light_source
+	_buildings_by_cell[cell] = building_data
+	if light_source > 0.0:
+		_register_light_runtime(cell, runtime_id, light_source)
 	building_added.emit(cell, item_id)
 
 func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
@@ -65,15 +77,31 @@ func clear() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
 
-func _register_lamp_runtime(cell: Vector2i) -> void:
+func _register_light_runtime(cell: Vector2i, runtime_id: String, light_source: float) -> void:
 	var parent: Node2D = _runtime_parent()
 	if not parent:
 		return
-	var marker: Node2D = Node2D.new()
-	marker.name = "Lamp_%d_%d" % [cell.x, cell.y]
-	marker.global_position = _cell_center(cell)
-	parent.add_child(marker)
-	_runtime_nodes_by_cell[cell] = marker
+	var runtime_node: Node2D = Node2D.new()
+	runtime_node.name = "%s_Light_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.global_position = _cell_center(cell)
+
+	var radius_pixels: int = max(1, int(round(light_source * float(_tile_size_pixels()))))
+	var light: PointLight2D = PointLight2D.new()
+	light.name = "PointLight2D"
+	light.texture = _create_light_texture(radius_pixels)
+	light.color = LIGHT_COLOR
+	light.energy = LIGHT_ENERGY
+	light.shadow_enabled = false
+	light.range_item_cull_mask = 1
+	light.range_layer_min = -128
+	light.range_layer_max = 128
+	light.range_z_min = -4096
+	light.range_z_max = 4096
+	light.enabled = _is_game_state_night()
+	runtime_node.add_child(light)
+
+	parent.add_child(runtime_node)
+	_runtime_nodes_by_cell[cell] = runtime_node
 
 func _runtime_parent() -> Node2D:
 	if runtime_parent:
@@ -86,6 +114,61 @@ func _cell_center(cell: Vector2i) -> Vector2:
 	if buildings:
 		return buildings.to_global(buildings.map_to_local(cell))
 	return Vector2(float(cell.x), float(cell.y))
+
+func _tile_size_pixels() -> int:
+	if not buildings or not buildings.tile_set:
+		return LIGHT_TEXTURE_FALLBACK_TILE_SIZE
+	var tile_size: Vector2i = buildings.tile_set.tile_size
+	var size_pixels: int = max(tile_size.x, tile_size.y)
+	if size_pixels <= 0:
+		return LIGHT_TEXTURE_FALLBACK_TILE_SIZE
+	return size_pixels
+
+func _create_light_texture(radius_pixels: int) -> Texture2D:
+	var safe_radius: int = max(1, radius_pixels)
+	var diameter: int = safe_radius * 2
+	var image: Image = Image.create(diameter, diameter, false, Image.FORMAT_RGBA8)
+	var center: Vector2 = Vector2(float(safe_radius), float(safe_radius))
+	for y in range(diameter):
+		for x in range(diameter):
+			var offset: Vector2 = Vector2(float(x), float(y)) - center
+			var normalized_distance: float = offset.length() / float(safe_radius)
+			var alpha: float = clampf(1.0 - normalized_distance, 0.0, 1.0)
+			alpha = alpha * alpha
+			image.set_pixel(x, y, Color(1.0, 1.0, 1.0, alpha))
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	return texture
+
+func _connect_game_state() -> void:
+	var game_state: Node = get_node_or_null("/root/GameState")
+	if not game_state or not game_state.has_signal("mode_changed"):
+		return
+	var mode_changed_callable: Callable = Callable(self, "_on_game_mode_changed")
+	if not game_state.is_connected(&"mode_changed", mode_changed_callable):
+		game_state.connect(&"mode_changed", mode_changed_callable)
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	_set_all_runtime_lights_enabled(is_night)
+
+func _is_game_state_night() -> bool:
+	var game_state: Node = get_node_or_null("/root/GameState")
+	if not game_state:
+		return false
+	return bool(game_state.get("is_night"))
+
+func _set_all_runtime_lights_enabled(enabled: bool) -> void:
+	for raw_node in _runtime_nodes_by_cell.values():
+		var runtime_node: Node = raw_node as Node
+		if runtime_node and is_instance_valid(runtime_node):
+			_set_runtime_node_light_enabled(runtime_node, enabled)
+
+func _set_runtime_node_light_enabled(runtime_node: Node, enabled: bool) -> void:
+	var child_count: int = runtime_node.get_child_count()
+	for i in range(child_count):
+		var child: Node = runtime_node.get_child(i)
+		if child is PointLight2D:
+			var light: PointLight2D = child as PointLight2D
+			light.enabled = enabled
 
 func _remove_runtime_node(cell: Vector2i) -> void:
 	if not _runtime_nodes_by_cell.has(cell):
@@ -108,9 +191,10 @@ func _default_building_def_for_existing_tile(_cell: Vector2i) -> Dictionary:
 	var atlas: Vector2i = buildings.get_cell_atlas_coords(_cell)
 	for raw_item_def in ItemCatalog.ITEM_DEFS.values():
 		var item_def: Dictionary = raw_item_def as Dictionary
-		if str(item_def.get("item_type", "")) != "placeable":
+		if str(item_def.get("type", "")) != "placeable":
 			continue
-		if str(item_def.get("placeable_kind", "")) != "building":
+		var placeable_category: String = str(item_def.get("category", ""))
+		if not BUILDING_CATEGORIES.has(placeable_category):
 			continue
 		if str(item_def.get("target_layer", "")) != "buildings":
 			continue

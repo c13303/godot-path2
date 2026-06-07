@@ -1,368 +1,320 @@
-Task: refactor placeable item architecture and implement first building item support.
+You are working on a Godot 4 project.
 
-Context:
-- Godot 4 project.
-- Existing toolbar items include:
-  - weapon items, for example sword, bomb
-  - gun items, for example water
-  - wall item
-- Existing wall placement already works.
-- Existing plants already behave like floor-placeable objects.
-- New goal: support a new family of placeable items called buildings.
-- Buildings are placed on the floor like current plants, not like walls.
-- First building subtype to support: lamp.
-- Lamp will later create a light source.
-- Future building subtypes:
-  - edible plants
-  - defensive plants / tower-defense style plants
-  - other floor objects
+Goal:
+Clean the current placeable item architecture and add a simple generic light-source system for night-time lamps.
+
+Important constraints:
 - Do not compile.
 - Do not run tests.
-- Do not execute the project.
-- I will test manually.
+- Do not delete unrelated code.
+- Preserve current behavior: wall, rose, and lamp must still be placeable exactly as now.
+- Keep implementation simple.
+- Do not over-engineer with resources/classes unless clearly useful.
+- Avoid hardcoding "lamp" in gameplay logic except in the item definition.
+- No visual polish beyond the needed light source.
 
-Main architecture decision:
-- Do not make buildings behave like weapons or guns.
-- Do not make buildings behave as walls.
-- Introduce/standardize a generic item behavior type: placeable.
-- Walls, lamps, plants, defensive plants are all placeable items.
-- Their gameplay identity is defined by placeable metadata.
-
-Required item model:
-Use this conceptual structure:
-
-item_type:
-- weapon
-- gun
-- placeable
-
-For placeable items:
-
-placeable_kind:
-- wall
-- building
-
-For building items:
-
-building_subtype:
-- edible_plant
-- lamp
-- defensive_plant
-
-Important semantic distinction:
-- wall = terrain obstruction
-- building = floor object
-- plant = building subtype, not a wall
-- lamp = building subtype, not a wall
-
-Current wall item should become or be treated as:
-- item_type: placeable
-- placeable_kind: wall
-
-Current plants should become or be treated as:
-- item_type: placeable
-- placeable_kind: building
-- building_subtype: edible_plant
-
-New lamp item should be:
-- item_type: placeable
-- placeable_kind: building
-- building_subtype: lamp
-
-Do not break existing weapon/gun behavior.
-
-Files likely involved:
+Current relevant scripts:
 - scripts/items/item_catalog.gd
-- scripts/ui/item_slot.gd
-- scripts/ui/game_ui.gd
-- build/placement system scripts
-- plant manager scripts
-- tilemap/world scripts where wall/plant/building placement is handled
+- scripts/map/buildsystem.gd
+- scripts/map/building_object_manager.gd
+- scripts/map/plant_manager.gd
+- scripts/misc/day_night_colors.gd
+- scripts/gameState/gameState.gd
 
-First step:
-- Inspect the current item catalog.
-- Find how sword, bomb, water, wall are defined.
-- Find how current plants are defined/placed.
-- Find how toolbar buttons decide behavior.
-- Find how BuildSystem or equivalent places wall/plant/building tiles.
-- Preserve current working behavior while generalizing it.
+Current mess:
+- Placeables currently use item_type = "placeable"
+- They also use placeable_kind = "wall" / "building"
+- Some use building_subtype = "edible_plant" / "lamp"
+- This is unclear and should be replaced by a clear placeable type system.
 
-Refactor goal:
-- The toolbar/input code should not special-case “wall” as the only placeable.
-- It should ask the catalog/item definition whether an item is placeable.
-- If item_type == placeable, route it to the placement/build system.
-- The build system should use item metadata to know which layer and runtime manager to update.
+New architecture:
+Every placeable item must have:
 
-ItemCatalog requirements:
-Add or normalize metadata for placeable items.
+type = "wall" | "plant" | "furniture" | "turret" | "trap"
 
-Each placeable item definition should support:
+Meaning:
+- wall: wall-like construction, currently the existing wall item
+- plant: edible/growing plant-like item, currently rose
+- furniture: passive placed object, currently lamp
+- turret: future defensive shooting object
+- trap: future triggered damage object
+
+Keep item_type = "placeable" if the existing UI/inventory logic depends on it.
+But for placeable routing, use the new type field.
+
+Shared placeable item properties should remain simple:
 - id
-- label/name
-- frame/icon frame
-- item_type = "placeable"
-- placeable_kind
-- building_subtype optional
+- name
+- item_type
+- category
+- frame
+- type
 - target_layer
-- atlas coords or tile source data
-- occupies_cell: bool
-- blocks_movement: bool
-- blocks_projectiles: bool
-- runtime_id optional
+- atlas
+- occupies_cell
+- blocks_movement
+- blocks_projectiles
+- runtime_id if still useful
 
-Suggested shape, adapted to the existing style:
+Type-specific properties should be plain optional fields:
+- wall may later have integrity
+- plant may later have edible/growth properties
+- furniture may be passive
+- turret may later have damage/range/fire_rate
+- trap may later have trigger/damage/cooldown
+
+Optional capability properties are allowed:
+- light_source: number of tiles of light radius
+Example:
+"light_source": 3
+
+This means:
+- any placeable item with light_source > 0 emits light at night
+- this is generic and must not be tied to lamp id
+- lamp is currently the only item using it
+
+Refactor ItemCatalog:
+1. Replace placeable_kind/building_subtype usage with type.
+2. Current item definitions should become:
 
 wall:
-- id: "wall"
 - item_type: "placeable"
-- placeable_kind: "wall"
+- type: "wall"
 - target_layer: "wallz"
+- atlas: existing wall atlas
 - occupies_cell: true
 - blocks_movement: true
 - blocks_projectiles: true
-- runtime_id: ""
 
-edible_plant:
-- id: "edible_plant"
+rose:
 - item_type: "placeable"
-- placeable_kind: "building"
-- building_subtype: "edible_plant"
-- target_layer: "plantz" or existing plant layer
+- type: "plant"
+- target_layer: "plantz"
+- atlas: existing rose atlas
 - occupies_cell: true
 - blocks_movement: false
 - blocks_projectiles: false
-- runtime_id: "edible_plant"
+- runtime_id: "rose"
 
 lamp:
-- id: "lamp"
 - item_type: "placeable"
-- placeable_kind: "building"
-- building_subtype: "lamp"
+- type: "furniture"
 - target_layer: "buildings"
+- atlas: existing lamp atlas
 - occupies_cell: true
-- blocks_movement: false by default
-- blocks_projectiles: false by default
+- blocks_movement: false
+- blocks_projectiles: false
 - runtime_id: "lamp"
+- light_source: 3
 
-Do not move existing plant tiles to another layer unless the current architecture makes it trivial.
-Keeping edible plants on the current plant layer is acceptable.
-Lamps should use the existing buildings layer if available.
+3. Remove building_subtype from item definitions.
+4. Remove placeable_kind from item definitions if no longer needed.
+5. Keep backwards compatibility only if some existing code still needs it temporarily, but prefer replacing all usage now.
 
-Toolbar icon:
-- Add a lamp item icon frame in the item catalog.
-- Use the next available frame in the existing items atlas.
-- Do not edit the image asset unless required.
-- If the lamp icon graphic does not exist yet, still define the item with a safe placeholder frame and make this easy to change.
+Refactor BuildSystem:
+Current function to change:
+_after_placeable_placed(cell, placeable_def)
 
-Placement behavior:
-- Selecting wall still places wall.
-- Selecting edible plant still places plant if already available.
-- Selecting lamp places a lamp floor object on the buildings layer.
-- Building placement should use the same preview/placement interaction as wall/plant where possible.
-- Do not duplicate placement code for every subtype.
+Replace building_subtype routing with type routing.
 
-BuildSystem requirements:
-Refactor placement into generic placeable placement.
+Expected behavior:
+- type == "plant":
+    call plant_manager.add_plant(cell) if available
+- type == "furniture":
+    call building_object_manager.add_building(cell, placeable_def) if available
+- type == "turret":
+    call building_object_manager.add_building(cell, placeable_def) if available
+- type == "trap":
+    call building_object_manager.add_building(cell, placeable_def) if available
+- type == "wall":
+    no runtime object for now, just the tile placement
+- unknown type:
+    do nothing extra, but do not crash
 
-Expected flow:
-
-1. User selects item.
-2. If item_type is weapon or gun, existing behavior remains.
-3. If item_type is placeable, pass full item definition to BuildSystem.
-4. BuildSystem reads:
-   - target_layer
-   - tile source/atlas data
-   - occupies_cell
-   - placeable_kind
-   - building_subtype
-   - runtime_id
-5. BuildSystem validates placement.
-6. BuildSystem writes tile to correct TileMapLayer.
-7. BuildSystem notifies runtime managers.
-
-Placement validation:
-- Respect existing wall placement rules.
-- Respect existing plant placement rules.
-- For buildings, check that target cell is valid and not already occupied by an incompatible object.
-- Do not allow lamps to overwrite walls unless existing placement rules explicitly allow overwrite.
-- Do not allow obvious duplicate objects on the same cell.
-- If there is already a plant/building in the target cell, either reject placement or replace cleanly, depending on existing behavior.
-- Prefer preserving existing behavior.
-
-Runtime manager split:
-- Do not overload PlantManager with lamp logic.
-- Keep PlantManager for edible plant tracking.
-- Add a new manager for building objects, for example:
-  - BuildingObjectManager
-  - BuildingManager
-  - PlaceableObjectManager
-
-Preferred name:
-- BuildingObjectManager
-
-BuildingObjectManager responsibilities:
-- Track placed building objects by cell.
-- Store item_id / runtime_id / building_subtype per cell.
-- Provide add_building(cell, item_def)
-- Provide remove_building(cell)
-- Provide get_building(cell)
-- Provide has_building(cell)
-- Provide clear/reset if needed on level reload.
-- For now, handle lamp registration in a simple placeholder-safe way.
-
-Lamp runtime behavior:
-- For this refactor, lamp placement must create/register a runtime lamp object cleanly.
-- If LightSource2D already exists in the project, instantiate/add it at the lamp cell center.
-- If LightSource2D does not exist yet, create a minimal placeholder path/hook without overbuilding.
-- Do not implement complex lighting here if not already present.
-- The lamp system should be ready to connect to the fake light source component later.
-
-Recommended lamp handling:
-- On lamp placed:
-  - BuildingObjectManager stores the lamp cell.
-  - If a light scene/resource exists, create it at cell center.
-  - Parent the runtime light under a stable world node, for example a `buildingObjects` or `runtimeBuildings` node.
-- On lamp removed/replaced:
-  - remove the runtime light node.
-  - remove the cell from BuildingObjectManager.
-
-If there is no clean runtime parent:
-- Add a simple Node2D named `buildingObjects` or `runtimeBuildings` under the world/main scene.
-- Do not attach building runtime nodes under Camera2D.
-- Do not attach building runtime nodes under UI.
+Keep all current placement validation behavior:
+- Cannot place over occupied cell
+- Cannot place over existing wall/plant/building
+- Cannot place on occupied character/player/monster cell
+- Preview still works
+- Tile placement still works
+- Existing wall layer still works
+- Existing plant layer still works
+- Existing buildings layer still works
 
 Important:
-- Tile placement and runtime object registration must stay synchronized.
-- If the tile is removed, the runtime object must also be removed.
-- If placement fails, no runtime object should be created.
-- If runtime object creation fails, fail safely and avoid corrupting placement state.
+Do not make BuildSystem know about lamps or lights.
+BuildSystem should only place and route by type.
 
-Post-placement hooks:
-Refactor current plant special-casing into a generic post-placement function.
+Refactor BuildingObjectManager:
+Current issues:
+- It stores building_subtype
+- It creates lamp runtime only if building_subtype == "lamp"
+- _default_building_def_for_existing_tile searches for placeable_kind == "building"
 
-Example conceptual behavior:
-
-After successful placement:
-- If placeable_kind == "wall":
-  - update wall/path/projectile masks if existing code already does this.
-- If building_subtype == "edible_plant":
-  - PlantManager.add_plant(cell)
-- If building_subtype == "lamp":
-  - BuildingObjectManager.add_building(cell, item_def)
-- If building_subtype == "defensive_plant":
-  - BuildingObjectManager.add_building(cell, item_def), even if behavior is not implemented yet
-
-On removal/replacement:
-- If previous cell had plant:
-  - PlantManager.remove_plant(cell)
-- If previous cell had building:
-  - BuildingObjectManager.remove_building(cell)
-- If previous cell had wall:
-  - update wall/path/projectile masks if existing code already does this
-
-Do not add defensive plant behavior yet.
-Only make the data/model extensible.
-
-Layer rules:
-- wallz:
-  - walls
-  - movement blocking
-  - projectile blocking
-- plantz:
-  - edible plants if currently used
-  - probably non-blocking
-- buildings:
-  - lamps
-  - defensive plants later
-  - other floor objects later
-
-If current project already has these layers:
-- use existing names exactly.
-- do not rename layers unless necessary.
-
-If current project has different names:
-- adapt to current names.
-- keep the semantic distinction.
-
-Collision/pathfinding:
-- Do not change pathfinding behavior for lamps unless item metadata says blocks_movement.
-- Do not make lamps projectile blockers by default.
-- Do not make edible plants blockers unless already existing behavior requires it.
-- Walls remain blockers.
-- Keep wall mask/pathfinding updates separated from building placement.
-
-Data-driven future:
-Design so future placeables can be added mostly in ItemCatalog:
-- lamp
-- edible_plant
-- defensive_plant
+Change this manager so it stores generic placed non-wall objects:
+- furniture
 - turret
 - trap
-- machine
-- door
-- decoration
+Possibly also plants later, but for now plants still use PlantManager.
 
-Avoid hardcoding specific IDs everywhere.
-Some subtype branching is acceptable in manager hooks, but keep it centralized.
+Keep class name BuildingObjectManager for now unless renaming is easy and safe. Do not perform a large rename if risky.
 
-Expected minimal hardcoded branching:
-- BuildSystem generic placeable handling
-- PlantManager for edible_plant
-- BuildingObjectManager for lamp/building subtypes
+In add_building(cell, item_def):
+- Read item_id from item_def.id
+- Read type from item_def.type
+- Read runtime_id from item_def.runtime_id or item_id
+- Store:
+    item_id
+    type
+    runtime_id
+    light_source if present
+- If the item has light_source > 0, create/register a light runtime.
+- Do not check item_id == "lamp".
+- Do not check building_subtype.
 
-Avoid:
-- toolbar-specific checks like `if selected_item == "wall"`
-- duplicated lamp placement code inside UI
-- placing lamps as walls
-- putting lamp logic into PlantManager
-- putting light logic into ItemSlot or GameUI
-- creating a different placement system for each building subtype
-- changing weapon/gun behavior
-- large unrelated refactors
+Runtime node:
+- Replace current marker-only lamp runtime with a real Node2D containing a PointLight2D created in code.
+- Keep it simple; no new scene required unless it is clearly cleaner.
+- The runtime node should be positioned at the center of the tile cell.
+- Use buildings.map_to_local / to_global as currently done.
 
-Editor/data requirements:
-- Item definitions should be easy to edit.
-- Lamp should appear as a toolbar item if the toolbar is data-driven from ItemCatalog.
-- If toolbar list is hardcoded, add lamp to it cleanly.
-- Keep icon frame configurable through ItemCatalog.
+Light behavior:
+- Any placed item with light_source > 0 creates a PointLight2D.
+- Radius in pixels = light_source * tile_size.
+- Determine tile_size from the buildings TileMapLayer tile_set if possible.
+- If tile size cannot be determined safely, use a sane fallback like 16 px.
+- Use a circular gradient texture for the PointLight2D if possible.
+- If creating a gradient texture is too annoying, use a generated ImageTexture with a soft circular alpha gradient.
+- The light should be warm, simple, Stardew-like.
+- The light should be visible/enabled only at night.
+- It should sync with /root/GameState.is_night.
+- It should listen to /root/GameState.mode_changed if available.
+- It should update immediately on creation so lamps placed during night light up immediately.
 
-Save/load:
-Inspect current save/load behavior for placed walls/plants.
-- If placed objects are already saved by TileMap state, make sure lamp tile placement uses same persistence path.
-- If PlantManager data is saved separately, do not break it.
-- If BuildingObjectManager needs save/load now, add minimal support consistent with current architecture.
-- If no building save/load exists yet, at least structure the manager so save/load can be added cleanly.
-- Do not implement a huge save refactor unless necessary.
+Recommended PointLight2D setup:
+- enabled = GameState.is_night
+- color = warm yellow/orange
+- energy around 0.7 or 0.8
+- texture_scale or texture size should roughly match radius
+- shadow_enabled = false for now
 
-Manual validation I will perform:
-- Existing sword still works.
-- Existing bomb still works.
-- Existing water gun still works.
-- Existing wall placement still works.
-- Existing plant behavior still works.
-- Lamp appears in toolbar or can be selected through item system.
-- Lamp places a tile/object on the floor.
-- Lamp does not behave like a wall.
-- Lamp does not block movement unless explicitly configured.
-- Lamp does not block projectiles unless explicitly configured.
-- Removing/replacing lamp cleans runtime state.
-- No compile/test/run needed from you.
+Important:
+The current day/night system uses CanvasModulate in DayNightColors.
+The new PointLight2D should work with that. Do not modify DayNightColors unless strictly needed.
+Do not replace the day/night system.
 
-Deliverable:
-- Implement the refactor in the existing codebase.
-- Keep changes focused.
-- Add concise notes in the final response:
-  - files changed
-  - new item metadata fields
-  - how to add a new building subtype later
-  - anything I must configure manually in the editor
+Light lifecycle:
+- When a light-source item is placed:
+    create runtime light node
+- When the item is removed:
+    free the runtime node
+- When BuildingObjectManager.clear() is called:
+    free all runtime nodes
+- When initialize_from_layer() scans existing tiles:
+    recreate runtime light nodes for existing matching furniture/building tiles
 
-Do not:
-- Do not compile.
-- Do not run tests.
-- Do not launch Godot.
-- Do not execute the project.
-- Do not add normal maps.
-- Do not implement complex lighting.
-- Do not create real dynamic lights unless an existing LightSource2D system already makes this trivial.
-- Do not over-engineer resource classes unless the current project already uses them for items.
+Update _default_building_def_for_existing_tile:
+- It should no longer search placeable_kind == "building".
+- It should find placeable item definitions where:
+    item_type == "placeable"
+    type is one of ["furniture", "turret", "trap"]
+    target_layer == "buildings"
+    atlas matches the existing tile atlas coords
+- This allows lamp tiles already present on the buildings layer to be recognized after initialization.
+
+Plant behavior:
+- Rose must still go through PlantManager.
+- Do not move rose to BuildingObjectManager in this task.
+- Remove building_subtype == "edible_plant" logic and replace it with type == "plant".
+
+Wall behavior:
+- Wall must still only place the wall tile on wallz.
+- Wall does not need BuildingObjectManager.
+- Wall does not need runtime node.
+- Wall still blocks movement/projectiles according to its item definition.
+
+Target layers:
+Keep current target_layer strings:
+- wall -> "wallz"
+- rose -> "plantz"
+- lamp -> "buildings"
+
+Do not introduce new TileMapLayer exports unless necessary.
+Use existing:
+- wallz
+- plantz
+- buildings
+- previewbuild
+
+Expected resulting item definitions conceptually:
+
+wall:
+{
+    "id": "wall",
+    "name": "Wall",
+    "item_type": "placeable",
+    "category": "blocks",
+    "frame": 3,
+    "type": "wall",
+    "target_layer": "wallz",
+    "atlas": Vector2i(11, 1),
+    "occupies_cell": true,
+    "blocks_movement": true,
+    "blocks_projectiles": true,
+    "runtime_id": ""
+}
+
+rose:
+{
+    "id": "rose",
+    "name": "Rose",
+    "item_type": "placeable",
+    "category": "plants",
+    "frame": 5,
+    "type": "plant",
+    "target_layer": "plantz",
+    "atlas": Vector2i(0, 0),
+    "occupies_cell": true,
+    "blocks_movement": false,
+    "blocks_projectiles": false,
+    "runtime_id": "rose"
+}
+
+lamp:
+{
+    "id": "lamp",
+    "name": "Lamp",
+    "item_type": "placeable",
+    "category": "furniture",
+    "frame": 4,
+    "type": "furniture",
+    "target_layer": "buildings",
+    "atlas": Vector2i(1, 0),
+    "occupies_cell": true,
+    "blocks_movement": false,
+    "blocks_projectiles": false,
+    "runtime_id": "lamp",
+    "light_source": 3
+}
+
+Clean-up requirements:
+- Remove building_subtype logic from BuildSystem and BuildingObjectManager.
+- Remove placeable_kind logic where possible.
+- Keep helper methods in ItemCatalog simple and compatible.
+- Do not touch unrelated combat, UI, pathfinder, or player code unless required by this refactor.
+- Do not create a large abstract framework.
+- Keep names explicit and boring.
+
+Acceptance checklist:
+- Sword/bomb/water still remain non-placeable as before.
+- Wall still places on wallz.
+- Rose still places on plantz and registers with PlantManager.
+- Lamp still places on buildings.
+- Lamp now creates a light source with radius 3 tiles.
+- Lamp light is off during day.
+- Lamp light is on during night.
+- Lamp light reacts when GameState switches day/night.
+- Existing buildings layer lamps can be reconstructed by BuildingObjectManager.initialize_from_layer().
+- Removing/replacing a lamp frees its runtime light node.
+- No code path depends on building_subtype.
+- No gameplay code checks item_id == "lamp" to create light.

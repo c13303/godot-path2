@@ -138,12 +138,18 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 	return _is_occupied_by_group_node(cell)
 
 func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary) -> void:
-	var building_subtype: String = str(placeable_def.get("building_subtype", ""))
-	if building_subtype == "edible_plant" and plant_manager and plant_manager.has_method("add_plant"):
+	var placeable_category: String = str(placeable_def.get("category", ""))
+	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
 		plant_manager.call("add_plant", cell)
-		return
-	if building_subtype != "" and building_object_manager and building_object_manager.has_method("add_building"):
+	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
+
+func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
+	var placeable_category: String = str(placeable_def.get("category", ""))
+	var light_source: float = float(placeable_def.get("light_source", 0.0))
+	if light_source > 0.0:
+		return true
+	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap"
 
 func _is_occupied_by_group_node(cell: Vector2i) -> bool:
 	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz

@@ -507,6 +507,6 @@ class ProjectileDrawer:
 			bucket = _free_buckets.pop_back() as Bucket
 		# Center the band so a projectile at ground Y sorts against an agent whose
 		# z_index = int(agent.y): use the band's center pixel as the z_index.
-		bucket.z_index = band * BUCKET_HEIGHT_PX + (BUCKET_HEIGHT_PX / 2)
+		bucket.z_index = band * BUCKET_HEIGHT_PX + (BUCKET_HEIGHT_PX >> 1)
 		_buckets_by_band[band] = bucket
 		return bucket

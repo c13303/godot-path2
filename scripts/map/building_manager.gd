@@ -52,7 +52,7 @@ var _dirty_spawner_escapes: Dictionary = {}
 # night, so an empty scene can flip back to day only after a real night ran.
 var _spawned_this_night: bool = false
 
-# Plant zone (one-shot at start). Tiles use the floorz tilemap cell space.
+# Plant zone. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
 var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
 var _plant_zone_built: bool = false
@@ -262,14 +262,10 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 
 func _on_plant_added(_cell: Vector2i) -> void:
-	# FF goals are static (plant_zone_entry_cell), so plant changes no longer
-	# invalidate the FF layer. The plant zone itself is computed once at start
-	# and not rebuilt. Plant additions still appear in plant_manager for nearest-
-	# plant queries; that is enough.
-	pass
+	_rebuild_plant_zone_from_layer()
 
 func _on_plant_removed(_cell: Vector2i) -> void:
-	# See _on_plant_added: no FF dirty flag. Panic escape if zone is now empty.
+	_rebuild_plant_zone_from_layer()
 	if _no_plants_remaining():
 		_start_escape_for_all_monsters()
 
@@ -478,6 +474,13 @@ func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	_request_group_flow_rebuild(escape_group, escape_world)
 	route["escape_world"] = escape_world
 	_spawner_routes[spawner_cell] = route
+
+func _rebuild_all_spawner_routes() -> void:
+	if not _flow_ready or not _plant_zone_built:
+		return
+	for raw_cell in _spawners.keys():
+		var spawner_cell: Vector2i = raw_cell
+		_initialize_spawner_route(spawner_cell)
 
 func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
 	if flow and flow.has_method("request_flow_to_group"):
@@ -925,7 +928,7 @@ func _tile_layer_signature(layer: TileMapLayer) -> int:
 	return signature
 
 # ---------------------------------------------------------------------------
-# Plant zone (computed ONCE at start; never rebuilt).
+# Plant zone.
 # ---------------------------------------------------------------------------
 func _build_plant_zone() -> void:
 	if _plant_zone_built:
@@ -989,6 +992,11 @@ func _build_plant_zone() -> void:
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 	_log("plant zone built: zone_tiles=%d margin_tiles=%d" % [_plant_zone_tiles.size(), _plant_zone_margin_tiles.size()])
+
+func _rebuild_plant_zone_from_layer() -> void:
+	_plant_zone_built = false
+	_build_plant_zone()
+	_rebuild_all_spawner_routes()
 
 func get_plant_zone_tiles() -> Array:
 	return _plant_zone_tiles.keys()
