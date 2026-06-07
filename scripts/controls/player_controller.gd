@@ -73,10 +73,11 @@ func _update_gun_fire(delta: float) -> void:
 	var player := _get_player_node()
 	if not player:
 		return
-	var direction := get_global_mouse_position() - player.global_position
+	var origin := _weapon_origin(player)
+	var direction := get_global_mouse_position() - origin
 	if direction.length_squared() < 0.000001:
 		return
-	fight_system.fire_gun_held(weapon_id, player.global_position, direction, player_nav_id, delta)
+	fight_system.fire_gun_held(weapon_id, origin, direction, player_nav_id, delta)
 
 func _setup_player() -> void:
 	var player := _get_player_node()
@@ -144,6 +145,18 @@ func _get_player_node() -> Node2D:
 			return node
 	return null
 
+func _weapon_origin(player: Node2D) -> Vector2:
+	if player.has_method("get_weapon_origin"):
+		return player.call("get_weapon_origin")
+	return player.global_position
+
+# Local offset of the weapon origin relative to the player node, used so AOE
+# zones keep tracking the offset point (not the agent center) while alive.
+func _weapon_origin_offset(player: Node2D) -> Vector2:
+	if "weapon_origin" in player:
+		return player.get("weapon_origin")
+	return Vector2.ZERO
+
 func _update_player_input() -> void:
 	if not steering or player_nav_id < 0:
 		return
@@ -195,8 +208,9 @@ func _try_use_equipped_item() -> void:
 	var player := _get_player_node()
 	if not player or not fight_system:
 		return
-	var direction := get_global_mouse_position() - player.global_position
-	if bool(fight_system.use_weapon(weapon_id, player.global_position, direction, player_nav_id)):
+	var origin := _weapon_origin(player)
+	var direction := get_global_mouse_position() - origin
+	if bool(fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))):
 		get_viewport().set_input_as_handled()
 
 func _toggle_pause() -> void:

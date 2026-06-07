@@ -1,15 +1,16 @@
 [gd_resource type="Resource" script_class="GunData" format=3 uid="uid://cq43ugaiagnon"]
 
+[ext_resource type="Texture2D" uid="uid://bpg1rw3ed244l" path="res://assets/sprites/legval/tear.png" id="1_dqrmy"]
 [ext_resource type="Script" uid="uid://cojaivo3a6d7g" path="res://scripts/combat/weapons/gun_data.gd" id="1_gun_data"]
-[ext_resource type="Texture2D" uid="uid://06ky1m645ait" path="res://assets/sprites/legval/water_drip.png" id="2_water_drip"]
 
 [resource]
 script = ExtResource("1_gun_data")
 id = "water"
-fire_delay_ms = 40.0
+fire_delay_ms = 100.0
 projectile_speed = 700.0
 projectile_lifetime = 0.5
-projectile_sprite = ExtResource("2_water_drip")
+projectile_size = 32.0
+projectile_sprite = ExtResource("1_dqrmy")
 smash_force = 400.0
 smash_friction_loss = 0.6
 smash_control_suppression = 0.2

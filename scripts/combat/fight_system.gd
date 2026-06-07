@@ -32,7 +32,7 @@ func _ready() -> void:
 		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
 		add_child(_projectile_drawer)
 
-func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1) -> bool:
+func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> bool:
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
 	if not weapon:
 		return false
@@ -44,7 +44,7 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 
 	var facing: Vector2 = direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
 	if visualize_AOE_weapons:
-		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id)
+		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id, follow_offset)
 
 	if not _steering:
 		return true
@@ -66,7 +66,8 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		weapon.control_suppression,
 		weapon.control_suppression_duration,
 		source_agent_id,
-		weapon.affected_smash_classes
+		weapon.affected_smash_classes,
+		follow_offset
 	)
 	return true
 
@@ -131,19 +132,27 @@ class WeaponAOEDrawer:
 	extends Node2D
 
 	var _areas: Array[Dictionary] = []
+	# Draw above every agent. Agents set z_index from their world Y
+	# (z_index = int(position.y)), so an absolute z_index well past the world
+	# height keeps AOE visuals on top regardless of where they spawn.
+	const AOE_Z_INDEX: int = 4096
+
 	var _fill := Color(1.0, 0.0, 0.0, 0.18)
 	var _stroke := Color(1.0, 0.0, 0.0, 0.85)
 	var _steering: Node
 
 	func setup(steering: Node) -> void:
 		_steering = steering
+		z_as_relative = false
+		z_index = AOE_Z_INDEX
 
-	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, owner_id: int = -1) -> void:
+	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, owner_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> void:
 		if duration <= 0.0:
 			return
 		_areas.append({
 			"origin": origin,
 			"owner_id": owner_id,
+			"follow_offset": follow_offset,
 			"direction": direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT,
 			"radius": radius,
 			"angle": angle_degrees,
@@ -168,7 +177,7 @@ class WeaponAOEDrawer:
 			# Falls back to the captured origin when there is no valid owner.
 			var owner_id: int = int(area.get("owner_id", -1))
 			if owner_id >= 0 and _steering:
-				origin = _steering.get_agent_position(owner_id)
+				origin = _steering.get_agent_position(owner_id) + (area.get("follow_offset", Vector2.ZERO) as Vector2)
 			var radius: float = float(area["radius"])
 			var angle: float = float(area["angle"])
 			var direction: Vector2 = area["direction"]

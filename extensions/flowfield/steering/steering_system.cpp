@@ -953,13 +953,14 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
     }
 }
 
-void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
+void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset)
 {
     if (radius <= 0.0 || duration <= 0.0)
         return;
 
     ActiveAoE zone;
     zone.pos = pos;
+    zone.follow_offset = follow_offset;
     double clamped_angle = std::clamp(angle_degrees, 0.0, 360.0);
     if (clamped_angle < 360.0)
     {
@@ -1067,7 +1068,7 @@ void SteeringSystem::update_all(double delta)
         {
             auto owner_it = id_to_index.find(zone.owner_id);
             if (owner_it != id_to_index.end())
-                zone.pos = agents[owner_it->second].position;
+                zone.pos = agents[owner_it->second].position + zone.follow_offset;
         }
         auto neighbors = grid->query_neighbors(zone.pos, zone.radius + max_fight_query_padding);
         for (int nid : neighbors)

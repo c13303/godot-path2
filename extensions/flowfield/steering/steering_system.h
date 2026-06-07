@@ -29,6 +29,7 @@ namespace ffcore
         double control_suppression_duration = 0.0;
         int ignored_agent_id = -1;
         int owner_id = -1; // if valid, zone.pos tracks this agent's live position each tick
+        Vec2 follow_offset; // added to the owner's live position so the zone can sit off-center
         int affected_smash_classes = 0;
         double time_left = 0.0;
         std::unordered_set<int> hit_ids;
@@ -70,7 +71,7 @@ namespace ffcore
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
-        void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
+        void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset = Vec2(0, 0));
         void set_agent_never_rest(int id, bool value);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 

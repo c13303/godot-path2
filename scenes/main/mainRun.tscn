@@ -1279,6 +1279,7 @@ deceleration = 100000.0
 max_speed = 300.0
 sprite_node_path = NodePath("rosa")
 sprite_offset = Vector2(0, -36)
+weapon_origin = Vector2(0, -20)
 
 [node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
 position = Vector2(0, -20)

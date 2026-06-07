@@ -15,6 +15,12 @@ class_name PlayerCharacter
 ## set y to about -world_radius - sprite_height/2.
 @export var sprite_offset: Vector2 = Vector2.ZERO
 
+@export_group("Combat")
+## Local offset (relative to this node) defining where all player-originated
+## attacks emanate from: melee/AOE zones, thrown bombs, gun projectiles, and the
+## sprites/effects they spawn. Use get_weapon_origin() to read it in world space.
+@export var weapon_origin: Vector2 = Vector2.ZERO
+
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
@@ -45,6 +51,10 @@ func set_control_impaired_state(enabled: bool) -> void:
 
 func set_velocity_len(value: float) -> void:
 	_velocity_len = value
+
+## World-space point that all player-originated attacks spawn from.
+func get_weapon_origin() -> Vector2:
+	return global_position + weapon_origin
 
 func get_sprite() -> Sprite2D:
 	if not sprite_node_path.is_empty():
