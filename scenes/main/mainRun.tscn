@@ -18,14 +18,7 @@
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
-atlas = ExtResource("24_moonsun")
-region = Rect2(0, 0, 64, 64)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_moon"]
-atlas = ExtResource("24_moonsun")
-region = Rect2(64, 0, 64, 64)
+[ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1251,6 +1244,10 @@ tile_size = Vector2i(32, 32)
 navigation_layer_0/layers = 1
 sources/0 = SubResource("TileSetAtlasSource_egp0g")
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
+atlas = ExtResource("24_moonsun")
+region = Rect2(0, 0, 64, 64)
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_toolbar"]
 bg_color = Color(0.055, 0.058, 0.06, 0.86)
 border_width_left = 2
@@ -1336,6 +1333,13 @@ script = ExtResource("10_8g1qu")
 position = Vector2(1628, 1507)
 script = ExtResource("4_jptjp")
 
+[node name="dayNightColors" type="Node" parent="." unique_id=683992596]
+script = ExtResource("25_day_night_colors")
+night_color = Color(0.70980394, 0.49019608, 0.7607843, 1)
+transition_duration = 1.0
+
+[node name="CanvasModulate" type="CanvasModulate" parent="dayNightColors" unique_id=1889007787]
+
 [node name="Map" type="Node" parent="." unique_id=214584774]
 
 [node name="MonTilemap" type="Node" parent="Map" unique_id=62371074]
@@ -1406,7 +1410,7 @@ script = ExtResource("19_gvmlv")
 layer = 50
 script = ExtResource("20_hamdt")
 
-[node name="top anchor" type="Control" parent="GameUI"]
+[node name="top anchor" type="Control" parent="GameUI" unique_id=857551045]
 layout_mode = 3
 anchors_preset = 5
 anchor_left = 0.5
@@ -1418,7 +1422,7 @@ offset_bottom = 80.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="dayToggle" type="Button" parent="GameUI/top anchor"]
+[node name="dayToggle" type="Button" parent="GameUI/top anchor" unique_id=2071789185]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
