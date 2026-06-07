@@ -1308,10 +1308,14 @@ func _recompute_garden_geometry(garden_id: int) -> void:
 		dist[plant_cell] = 0
 		queue.append(plant_cell)
 
-	# Access candidates: walkable cells just outside the interior, discovered when a
-	# walkable neighbor is reached but lies beyond the bound. Stored separately so
-	# they are not treated as interior, but are still valid navigable entries.
-	var access_tiles: Dictionary = {}  # Vector2i -> true
+	# Access detection: an access transition is a walkable interior cell that has a
+	# valid step to a walkable cell *outside* the bounded interior. We record the
+	# INSIDE cell of each such transition as the entry cell, not the outside cell:
+	# the monster's flow field aims here and it must be a tile the agent can settle
+	# on (surrounded by interior), otherwise it oscillates against the wall/gap at a
+	# one-tile chokepoint and never hands off to A*. The inside cell is in
+	# zone_tiles, so A* in/out, arrival, and pathing all work without snapping.
+	var entry_inside: Dictionary = {}  # Vector2i -> true (interior cells that touch outside)
 
 	while head < queue.size():
 		var cell: Vector2i = queue[head]
@@ -1337,28 +1341,24 @@ func _recompute_garden_geometry(garden_id: int) -> void:
 					if not dist.has(neighbor) or next_dist < int(dist[neighbor]):
 						dist[neighbor] = next_dist
 						zone_tiles[neighbor] = true
-						# A cell first seen as an access tile from a farther plant is
-						# promoted to interior when a closer plant reaches it in-bound.
-						access_tiles.erase(neighbor)
 						queue.append(neighbor)
 				else:
-					# One valid walkable step beyond the interior: a true access tile.
-					# Only if it is not already interior (the early zone_tiles check
-					# above guarantees that).
-					access_tiles[neighbor] = true
+					# `cell` (interior) has a valid transition to `neighbor`, a
+					# walkable cell beyond the interior: `cell` is an access cell.
+					entry_inside[cell] = true
 
 	# margin_tiles keeps its prior meaning for the overlay/compat cache: interior
-	# tiles that are not plant cells, plus the access tiles. Access tiles are the
-	# navigable entries; entry_cells exposes them to routing/debug.
+	# tiles that are not plant cells. Entry cells are the interior access cells
+	# (cells that border the outside through a valid transition); the flow field
+	# and arrival target these.
 	var margin_tiles: Dictionary = {}
 	for raw_cell in zone_tiles.keys():
 		var zone_cell: Vector2i = raw_cell
 		if not plant_cells.has(zone_cell):
 			margin_tiles[zone_cell] = true
 	var entry_cells: Array[Vector2i] = []
-	for raw_cell in access_tiles.keys():
+	for raw_cell in entry_inside.keys():
 		var access_cell: Vector2i = raw_cell
-		margin_tiles[access_cell] = true
 		entry_cells.append(access_cell)
 
 	garden["zone_tiles"] = zone_tiles
@@ -1927,11 +1927,11 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 		zone_tiles = garden.get("zone_tiles", {}) as Dictionary
 	if zone_tiles.is_empty():
 		return PackedVector2Array()
-	# Access tiles sit one walkable step *outside* the interior, so an entry/exit
-	# endpoint (where the agent actually stands or aims) is not in zone_tiles. Add
-	# any walkable endpoint to the A* walkable set so the path runs through the real
-	# access tile instead of snapping a tile short. Use a local copy so the cached
-	# garden zone_tiles is not mutated.
+	# An agent arriving via the flow field can settle one tile *outside* the
+	# interior (FF overshoot at the entry), so its actual cell may not be in
+	# zone_tiles. Add any walkable endpoint to the A* walkable set so the path
+	# starts/ends where the agent really stands instead of snapping a tile short.
+	# Use a local copy so the cached garden zone_tiles is not mutated.
 	var path_tiles: Dictionary = zone_tiles
 	if _is_walkable(from_tile) and not zone_tiles.has(from_tile):
 		path_tiles = zone_tiles.duplicate()
