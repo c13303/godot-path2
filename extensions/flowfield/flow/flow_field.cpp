@@ -59,9 +59,16 @@ Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
     // ✅ Vérifier que la cellule est valide
     if (cell.x < 0 || cell.x >= w || cell.y < 0 || cell.y >= h)
     {
+        // size used w/h (the real members); the old log printed width/height — the
+        // accessor METHODS — which always stringify as "true". Print w/h plus the
+        // inputs so we can tell apart a garbage world_pos vs a garbage cell_origin.
         godot::UtilityFunctions::print(
-            "compute_flow_dir: cell OUT OF BOUNDS (", cell.x, ",", cell.y, ")",
-            " size=(", width, ",", height, ")");
+            "compute_flow_dir: cell OUT OF BOUNDS rel=(", cell.x, ",", cell.y, ")",
+            " size=(", w, ",", h, ")",
+            " world_pos=(", world_pos.x, ",", world_pos.y, ")",
+            " tile=", tile,
+            " cell_origin=(", cell_origin.x, ",", cell_origin.y, ")",
+            " ready=", ready);
         return Vec2();
     }
 

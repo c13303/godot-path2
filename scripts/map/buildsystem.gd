@@ -16,6 +16,7 @@ var _atlas_source_id: int = -1
 var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
+var _plant_layer_flush_queued: bool = false
 
 func _ready() -> void:
 	_resolve_atlas_source_id()
@@ -117,7 +118,7 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 		wallz.update_internals()
 	if target_layer != plantz and plantz:
 		plantz.erase_cell(cell)
-		plantz.update_internals()
+		_flush_plant_layer_visuals()
 		if plant_manager and plant_manager.has_method("remove_plant"):
 			plant_manager.call("remove_plant", cell, false)
 	if target_layer != buildings and buildings:
@@ -182,6 +183,23 @@ func _clear_hover() -> void:
 func _hovered_cell() -> Vector2i:
 	var world: Vector2 = previewbuild.get_global_mouse_position()
 	return previewbuild.local_to_map(previewbuild.to_local(world))
+
+func _flush_plant_layer_visuals() -> void:
+	if not plantz:
+		return
+	plantz.update_internals()
+	plantz.queue_redraw()
+	if _plant_layer_flush_queued:
+		return
+	_plant_layer_flush_queued = true
+	call_deferred("_flush_plant_layer_visuals_deferred")
+
+func _flush_plant_layer_visuals_deferred() -> void:
+	_plant_layer_flush_queued = false
+	if not plantz:
+		return
+	plantz.update_internals()
+	plantz.queue_redraw()
 
 func _selected_placeable_def() -> Dictionary:
 	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):

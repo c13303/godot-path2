@@ -10,20 +10,24 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 @export var bucket_size: int = 16
 
 var _plants: Dictionary = {}
+var _plant_tiles: Dictionary = {}
 var _buckets: Dictionary = {}
 var _initialized: bool = false
+var _plant_layer_flush_queued: bool = false
 
 func _ready() -> void:
 	initialize_from_layer()
 
 func initialize_from_layer() -> void:
 	_plants.clear()
+	_plant_tiles.clear()
 	_buckets.clear()
 	if not plantz:
 		_initialized = true
 		return
 	for raw_cell in plantz.get_used_cells():
 		var cell: Vector2i = raw_cell
+		_capture_tile_metadata(cell)
 		_index_cell(cell)
 	_initialized = true
 
@@ -49,6 +53,7 @@ func get_plant_cells() -> Array[Vector2i]:
 func add_plant(cell: Vector2i) -> void:
 	if _plants.has(cell):
 		return
+	_capture_tile_metadata(cell)
 	_index_cell(cell)
 	plant_added.emit(cell)
 
@@ -57,9 +62,54 @@ func remove_plant(cell: Vector2i, erase_tile: bool = true) -> void:
 		return
 	_unindex_cell(cell)
 	if erase_tile and plantz:
-		plantz.erase_cell(cell)
-		plantz.update_internals()
+		_rebuild_plant_layer_from_index()
 	plant_removed.emit(cell)
+
+func _capture_tile_metadata(cell: Vector2i) -> void:
+	if not plantz:
+		return
+	var source_id: int = plantz.get_cell_source_id(cell)
+	if source_id < 0:
+		_plant_tiles.erase(cell)
+		return
+	_plant_tiles[cell] = {
+		"source_id": source_id,
+		"atlas_coords": plantz.get_cell_atlas_coords(cell),
+		"alternative_tile": plantz.get_cell_alternative_tile(cell)
+	}
+
+func _rebuild_plant_layer_from_index() -> void:
+	if not plantz:
+		return
+	plantz.clear()
+	for raw_cell in _plants.keys():
+		var cell: Vector2i = raw_cell
+		var tile_data: Dictionary = _plant_tiles.get(cell, {}) as Dictionary
+		if tile_data.is_empty():
+			continue
+		var source_id: int = int(tile_data.get("source_id", -1))
+		var atlas_coords: Vector2i = tile_data.get("atlas_coords", Vector2i(-1, -1)) as Vector2i
+		var alternative_tile: int = int(tile_data.get("alternative_tile", 0))
+		if source_id >= 0:
+			plantz.set_cell(cell, source_id, atlas_coords, alternative_tile)
+	_flush_plant_layer_now()
+	_queue_plant_layer_flush()
+
+func _flush_plant_layer_now() -> void:
+	if not plantz:
+		return
+	plantz.update_internals()
+	plantz.queue_redraw()
+
+func _queue_plant_layer_flush() -> void:
+	if _plant_layer_flush_queued:
+		return
+	_plant_layer_flush_queued = true
+	call_deferred("_flush_plant_layer_deferred")
+
+func _flush_plant_layer_deferred() -> void:
+	_plant_layer_flush_queued = false
+	_flush_plant_layer_now()
 
 func nearest_plant_cell(from_cell: Vector2i, excluded_cell: Vector2i = INVALID_CELL) -> Vector2i:
 	if _plants.is_empty():
@@ -101,6 +151,7 @@ func _index_cell(cell: Vector2i) -> void:
 
 func _unindex_cell(cell: Vector2i) -> void:
 	_plants.erase(cell)
+	_plant_tiles.erase(cell)
 	var bucket: Vector2i = _bucket_for_cell(cell)
 	if not _buckets.has(bucket):
 		return

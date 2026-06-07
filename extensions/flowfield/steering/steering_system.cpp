@@ -137,6 +137,8 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     a.position = pos;
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow ? flow : default_flow;
+    if (a.flow)
+        a.flow->refcount++;
     a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);
     agents.push_back(a);
@@ -170,6 +172,13 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     int idx = it->second;
     if (grid)
         grid->remove(id);
+
+    FlowField *old_flow = agents[idx].flow;
+    if (old_flow)
+    {
+        old_flow->refcount--;
+        ffcore::cleanup_flow_if_unused(old_flow);
+    }
 
     int last = (int)agents.size() - 1;
     if (idx != last)
@@ -220,6 +229,8 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     a.position = pos;
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow;
+    if (a.flow)
+        a.flow->refcount++;
     a.active = flow != nullptr; // ✅ Inactif si pas de flow
     a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);

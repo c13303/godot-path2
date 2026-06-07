@@ -1,5 +1,6 @@
 #include "flow_field_manager.h"
 #include "../core/nav_services.h"
+#include "../agent_manager/agent_manager.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace ffcore
@@ -44,6 +45,11 @@ namespace ffcore
 	{
 		FlowField *f = new FlowField(width, height, tile_size);
 		FlowFieldID fid = register_existing(f);
+		if (fid == INVALID_FLOWFIELD)
+		{
+			delete f;
+			return INVALID_FLOWFIELD;
+		}
 		f->id = fid; // ← étape 2 : assignation
 
 		return fid;
@@ -54,6 +60,11 @@ namespace ffcore
 		FlowField *f = new FlowField(src.width(), src.height(), src.tile_size());
 		f->copy_from(src);
 		FlowFieldID fid = register_existing(f);
+		if (fid == INVALID_FLOWFIELD)
+		{
+			delete f;
+			return INVALID_FLOWFIELD;
+		}
 		f->id = fid;
 		return fid;
 	}
@@ -65,6 +76,15 @@ namespace ffcore
 
 		if (ff->refcount <= 0 && ff->id != INVALID_FLOWFIELD)
 		{
+			if (auto *agent_manager = get_global_agent_manager())
+			{
+				for (GroupID group = 1; group < MAX_GROUPS; group++)
+				{
+					if (agent_manager->get_group_flow(group) == ff)
+						return;
+				}
+			}
+
 			auto *fm = flowfields();
 			if (fm)
 			{

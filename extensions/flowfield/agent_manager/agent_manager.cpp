@@ -144,11 +144,11 @@ namespace ffcore
         }
 
         FlowField *old_group_flow = groups[group].flow;
-        if (old_group_flow != flow)
-            ffcore::cleanup_flow_if_unused(old_group_flow);
-
         groups[group].flow = flow;
         groups[group].has_order = true;
+
+        if (old_group_flow != flow)
+            ffcore::cleanup_flow_if_unused(old_group_flow);
 
         FlowField *ff = flow;
         if (!ff)
@@ -171,18 +171,33 @@ namespace ffcore
 
     void AgentManager::dissolve_group(GroupID group)
     {
-        if (group == GROUP_IDLE || group == INVALID_GROUP)
+        if (group == GROUP_IDLE || group == INVALID_GROUP || group >= MAX_GROUPS)
             return;
 
+        FlowField *old_group_flow = groups[group].flow;
+        groups[group].flow = nullptr;
+        SteeringSystem *steering = ffcore::get_global_steering_system();
+        bool detached_any = false;
         for (auto &a : agents)
+        {
             if (a.group == group)
+            {
+                if (steering)
+                {
+                    steering->set_agent_flow_ptr(a.id, nullptr);
+                    detached_any = true;
+                }
                 a.group = GROUP_IDLE;
+            }
+        }
+
+        if (!detached_any)
+            ffcore::cleanup_flow_if_unused(old_group_flow);
 
         /* godot::UtilityFunctions::print("Dissolution groupe ", group); */
 
         groups[group].active = false;
         groups[group].has_order = false;
-        groups[group].flow = nullptr;
     }
 
     static GroupID current_selected_group = GROUP_IDLE;

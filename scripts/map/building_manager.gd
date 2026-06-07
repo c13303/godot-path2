@@ -52,6 +52,7 @@ var _spawner_garden_routes: Dictionary = {}
 var _eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _escaping_agents: Dictionary = {}
+var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
 var _astar_out_agents: Dictionary = {}
 var _scan_timer: float = 0.0
@@ -73,7 +74,15 @@ var _exit_wall_escapes: Dictionary = {}  # Vector2i -> Dictionary
 var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
+# Garden ids are monotonic and never reused: a full rebuild keeps climbing instead
+# of resetting to 1, so an id from a previous rebuild can never collide with a new
+# garden. _gardens_epoch is bumped on every full rebuild and stamped on each garden
+# + each spawner route; a route is only current if its epoch matches, so stale
+# routes (and their flow-field goals) from a previous night/rebuild are rejected
+# even if a garden id/version happens to line up. Fixes night-2 agents flowing to a
+# deleted night-1 garden's entry tile and oscillating there.
 var _next_garden_id: int = 1
+var _gardens_epoch: int = 0
 # TEMP DEBUG (garden crash hunt): set true while iterating _gardens or
 # _spawner_garden_routes so any erase that happens mid-iteration is reported
 # before it can corrupt the iteration. Remove once the silent crash is confirmed
@@ -88,6 +97,7 @@ var _pending_empty_gardens: Dictionary = {}  # garden_id -> true
 # garden rebuild (single source flood-fill); read when deciding if a garden is
 # reachable. A sealed enclosure has no entry cell in this set, so it is ignored.
 var _spawner_reachable_cells: Dictionary = {}  # Vector2i -> true
+var _walkable_map_tiles: Dictionary = {}  # Vector2i -> true
 
 # Day/night: set true once at least one monster has spawned during the current
 # night, so an empty scene can flip back to day only after a real night ran.
@@ -280,6 +290,7 @@ func _scan_buildings() -> void:
 			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
+		_rebuild_walkable_map_cache()
 		# Walls change navigation topology: a new wall can split a garden and a
 		# removed wall can merge two. Re-cluster plants by walkable reachability
 		# from scratch (single cached rebuild), then refresh cached spawner/garden
@@ -441,8 +452,8 @@ func _drain_dirty_routes() -> void:
 			_rebuild_spawner_escape_ff(raw_cell)
 
 func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	# One-shot: compute static escape cells. Plant FFs are per garden and are
-	# created lazily when a spawner needs a target garden.
+	# One-shot: compute static escape cells. Plant entry routes use per-agent A*
+	# and are created lazily when a spawner needs a target garden.
 	if not _flow_ready or not _plant_zone_built:
 		return
 	if not agent_manager or not flow:
@@ -493,6 +504,8 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 	])
 
 func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
+	# Plant-entry routing no longer owns flow fields. Route freshness is validated
+	# through garden version/epoch and each agent gets a direct A* path to entry.
 	if not _spawner_garden_routes.has(spawner_cell):
 		return
 	var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
@@ -500,12 +513,9 @@ func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 		var garden_id: int = int(raw_garden_id)
 		var route: Dictionary = garden_routes[garden_id] as Dictionary
 		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-		var plant_group: int = int(route.get("plant_group", -1))
-		if entry_cell == INVALID_CELL or plant_group <= IDLE_GROUP:
+		if entry_cell == INVALID_CELL:
 			continue
-		var entry_world: Vector2 = _cell_center(entry_cell)
-		_request_group_flow_rebuild(plant_group, entry_world)
-		route["entry_world"] = entry_world
+		route["entry_world"] = _cell_center(entry_cell)
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
 
@@ -691,10 +701,6 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	if not bool(route.get("ready", false)):
 		_log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
 		return false
-	var plant_group: int = int(route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		_log_spawn_failure("spawner %s garden %d plant group invalid" % [spawner_cell, garden_id])
-		return false
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
 		_log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
@@ -718,48 +724,60 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 	agent.add_to_group("monsters")
 
 	if agent_manager and agent_manager.has_method("spawn_agent"):
-		var nav_id: int = int(agent_manager.call("spawn_agent", agent, plant_group))
+		var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
 		agent.set("nav_id", nav_id)
-		agent.set_meta("spawner_cell", spawner_cell)
-		agent.set_meta("garden_id", garden_id)
-		agent.set_meta("garden_entry_cell", entry_cell)
-		if agent.has_method("start_flow_in"):
-			agent.call("start_flow_in")
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
+		if not _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell):
+			if agent_manager.has_method("unregister_agent"):
+				agent_manager.call("unregister_agent", nav_id)
+			agent.remove_from_group("monsters")
+			agent.queue_free()
+			_log_spawn_failure("spawner %s garden %d entry path not ready" % [spawner_cell, garden_id])
+			return false
 		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
 			nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
 	return true
 
-# Phase 1 -> 2: agent reached its assigned garden entry via FF. Compute A* to a
-# plant target inside that garden, detach FF, attach path.
+# Phase 1 -> 2: agent reached its assigned garden entry via A*. Compute A* to a
+# plant target inside that garden and attach that path.
 func _process_astar_in_arrivals() -> void:
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D):
+	var finished: Array[int] = []
+	for raw_nav_id in _entry_path_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _entry_path_agents[nav_id] as Dictionary
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			finished.append(nav_id)
 			continue
-		var agent: Node2D = node
-		var nav_id: int = int(agent.get("nav_id"))
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
+			finished.append(nav_id)
+			continue
 		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
+			finished.append(nav_id)
 			continue
 		if _astar_in_agents.has(nav_id) or _astar_out_agents.has(nav_id):
 			continue
-		if not agent.has_meta("spawner_cell"):
+		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
 			continue
-		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-		var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
+			continue
+		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+		var garden_id: int = int(data.get("garden_id", 0))
 		if not _garden_has_edible_plants(garden_id):
+			_entry_path_agents.erase(nav_id)
 			_retarget_agent_or_escape(agent, spawner_cell)
 			continue
-		var entry_cell: Vector2i = INVALID_CELL
-		if agent.has_meta("garden_entry_cell"):
-			entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
-		if entry_cell == INVALID_CELL:
-			continue
-		if not _agent_reached_cell(agent, entry_cell):
-			continue
+		_entry_path_agents.erase(nav_id)
 		_start_astar_in(agent, spawner_cell)
+	for nav_id in finished:
+		_entry_path_agents.erase(nav_id)
+	# _garden_has_edible_plants above may have queued genuinely-empty gardens; this
+	# loop iterates monsters (not _gardens), so draining here is safe.
+	_drain_pending_empty_gardens()
 
 func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
@@ -781,6 +799,7 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_entry_path_agents.erase(nav_id)
 	_astar_in_agents[nav_id] = {
 		"node": agent,
 		"plant_cell": target_plant_cell,
@@ -831,10 +850,19 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
 		plantz.erase_cell(plant_cell)
-		plantz.update_internals()
+		_flush_plant_layer_visuals()
 	if plantz and plantz.get_cell_source_id(plant_cell) >= 0:
 		plantz.erase_cell(plant_cell)
-		plantz.update_internals()
+		_flush_plant_layer_visuals()
+		call_deferred("_flush_plant_layer_visuals")
+
+func _flush_plant_layer_visuals() -> void:
+	if not plantz:
+		return
+	if _no_plants_remaining():
+		plantz.clear()
+	plantz.update_internals()
+	plantz.queue_redraw()
 
 func _process_eating_agents(delta: float) -> void:
 	var finished: Array[int] = []
@@ -873,6 +901,7 @@ func _start_agent_eating(agent: Node2D, seconds: float) -> void:
 	}
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
+	_entry_path_agents.erase(nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", seconds)
 
@@ -919,6 +948,7 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_entry_path_agents.erase(nav_id)
 	_astar_out_agents[nav_id] = {
 		"node": agent,
 		"spawner_cell": spawner_cell,
@@ -992,6 +1022,7 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 	if agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
 	agent_manager.call("assign_agent", agent, escape_group)
+	_entry_path_agents.erase(nav_id)
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
@@ -1033,6 +1064,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager and agent_manager.has_method("unregister_agent"):
 		agent_manager.call("unregister_agent", nav_id)
+	_entry_path_agents.erase(nav_id)
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
 	agent.remove_from_group("monsters")
@@ -1101,6 +1133,15 @@ func _find_walkable_cell_near(start_cell: Vector2i, max_radius: int = 8) -> Vect
 func _is_walkable(cell: Vector2i) -> bool:
 	return _has_floor(cell) and not _has_wall(cell)
 
+func _rebuild_walkable_map_cache() -> void:
+	_walkable_map_tiles.clear()
+	if floorz == null:
+		return
+	for raw_cell in floorz.get_used_cells():
+		var cell: Vector2i = raw_cell
+		if _is_walkable(cell):
+			_walkable_map_tiles[cell] = true
+
 func _has_floor(cell: Vector2i) -> bool:
 	return floorz != null and floorz.get_cell_tile_data(cell) != null
 
@@ -1141,15 +1182,14 @@ func _rebuild_plant_zone_from_layer() -> void:
 func _build_gardens_from_plants() -> void:
 	if _gardens_iter_depth > 0:
 		push_warning("GARDEN-CRASH-GUARD: full rebuild requested mid-iteration (depth=%d)!" % _gardens_iter_depth)
-	_glog("rebuild begin: gardens=%d plants=%d" % [
-		_gardens.size(),
-		int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else -1
-	])
 	_gardens.clear()
 	_garden_by_plant_cell.clear()
 	_dirty_gardens.clear()
 	_pending_empty_gardens.clear()
-	_next_garden_id = 1
+	# Do NOT reset _next_garden_id: ids must stay monotonic across rebuilds so a new
+	# garden can never reuse a previous garden's id (which would let a stale route
+	# falsely match). Bump the epoch so every route from a prior rebuild is stale.
+	_gardens_epoch += 1
 	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
 		_rebuild_plant_zone_compatibility_cache()
 		_plant_zone_built = true
@@ -1281,10 +1321,6 @@ func _erase_garden(garden_id: int, reason: String) -> void:
 	_gardens.erase(garden_id)
 	_dirty_gardens.erase(garden_id)
 
-func _glog(message: String) -> void:
-	if _garden_debug_logs:
-		print("BuildingManager[garden]: ", message)
-
 # TEMP DEBUG (lost-agent / OUT OF BOUNDS hunt): a cell is "sane" only if it is a
 # real, finite, in-a-reasonable-range tile. A bad cell (INVALID_CELL sentinel,
 # max_cell sentinel, or anything absurd) fed to _cell_center yields a huge finite
@@ -1304,6 +1340,7 @@ func _create_garden() -> int:
 	_next_garden_id += 1
 	_gardens[garden_id] = {
 		"id": garden_id,
+		"epoch": _gardens_epoch,
 		"plant_cells": {},
 		"zone_tiles": {},
 		"margin_tiles": {},
@@ -1363,7 +1400,6 @@ func _validate_dirty_gardens() -> void:
 	_plant_zone_built = true
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
-	_glog("validate end: gardens=%d" % _gardens.size())
 
 # Garden geometry is navigation-aware, not box-geometry. A bounded walkable BFS
 # from the plant cells (same 8-conn, no-corner-cut rules as the pathfinder/cluster
@@ -1583,6 +1619,11 @@ func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
 	if not bool(garden.get("reachable", false)):
 		return false
+	# Epoch first: a route from a previous full rebuild can never be current even if
+	# its (id, version) coincidentally matches a new garden. This is what stops
+	# night-2 agents from flowing to a deleted night-1 garden's entry tile.
+	if int(route.get("garden_epoch", -1)) != int(garden.get("epoch", -2)):
+		return false
 	return int(route.get("garden_version", -1)) == int(garden.get("version", 0))
 
 func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
@@ -1723,6 +1764,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_entry_path_agents.erase(nav_id)
 	_astar_in_agents[nav_id] = {
 		"node": agent,
 		"plant_cell": plant_cell,
@@ -1734,6 +1776,41 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	agent.set_meta("spawner_cell", route_spawner_cell)
 	agent.set_meta("garden_id", garden_id)
 	agent.set_meta("garden_entry_cell", _nearest_garden_entry(garden_id, route_spawner_cell))
+	if agent.has_method("start_astar_in"):
+		agent.call("start_astar_in")
+	return true
+
+func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if entry_cell == INVALID_CELL or not _is_sane_cell(entry_cell):
+		return false
+	if agent_manager == null or not agent_manager.has_method("assign_agent_path"):
+		return false
+	var nav_id: int = int(agent.get("nav_id"))
+	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var path_cells: PackedVector2Array = _find_path_on_walkable_map(from_cell, entry_cell)
+	if path_cells.is_empty():
+		return false
+	if agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	agent_manager.call("assign_agent_path", nav_id, path_world)
+	_entry_path_agents[nav_id] = {
+		"node": agent,
+		"spawner_cell": spawner_cell,
+		"garden_id": garden_id,
+		"entry_cell": entry_cell,
+		"path_world": path_world
+	}
+	_astar_in_agents.erase(nav_id)
+	_astar_out_agents.erase(nav_id)
+	_escaping_agents.erase(nav_id)
+	agent.set_meta("spawner_cell", spawner_cell)
+	agent.set_meta("garden_id", garden_id)
+	agent.set_meta("garden_entry_cell", entry_cell)
 	if agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
 	return true
@@ -1756,31 +1833,18 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 			garden_id, entry_cell, spawner_cell
 		])
 		return {"ready": false}
-	var plant_group: int = int(existing_route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		if not agent_manager or not agent_manager.has_method("create_group"):
-			return {"ready": false}
-		plant_group = int(agent_manager.call("create_group"))
-	if plant_group <= IDLE_GROUP:
-		return {"ready": false}
 	var entry_world: Vector2 = _cell_center(entry_cell)
 	if not _is_finite_world(entry_world):
 		push_warning("LOST-AGENT-GUARD: insane entry_world %s (cell %s) for spawner %s garden %d; route refused" % [
 			entry_world, entry_cell, spawner_cell, garden_id
 		])
 		return {"ready": false}
-	if flow and flow.has_method("assign_flow_to_group"):
-		flow.call("assign_flow_to_group", plant_group, entry_world)
-	elif flow and flow.has_method("request_flow_to_group"):
-		flow.call("request_flow_to_group", plant_group, entry_world)
-	else:
-		return {"ready": false}
 	var route: Dictionary = {
-		"plant_group": plant_group,
 		"entry_cell": entry_cell,
 		"entry_world": entry_world,
 		"ready": true,
-		"garden_version": int(garden.get("version", 0))
+		"garden_version": int(garden.get("version", 0)),
+		"garden_epoch": int(garden.get("epoch", -1))
 	}
 	routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = routes
@@ -1812,28 +1876,16 @@ func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if not bool(route.get("ready", false)):
 		_assign_agent_to_escape(agent)
 		return
-	var plant_group: int = int(route.get("plant_group", -1))
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-	if plant_group <= IDLE_GROUP or entry_cell == INVALID_CELL:
+	if entry_cell == INVALID_CELL:
+		_assign_agent_to_escape(agent)
+		return
+	if not _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell):
 		_assign_agent_to_escape(agent)
 		return
 	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	if agent_manager and agent_manager.has_method("assign_agent"):
-		agent_manager.call("assign_agent", agent, plant_group)
-	else:
-		_assign_agent_to_escape(agent)
-		return
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
-	_astar_in_agents.erase(nav_id)
-	_astar_out_agents.erase(nav_id)
-	agent.set_meta("spawner_cell", spawner_cell)
-	agent.set_meta("garden_id", garden_id)
-	agent.set_meta("garden_entry_cell", entry_cell)
-	if agent.has_method("start_flow_in"):
-		agent.call("start_flow_in")
 
 func get_plant_zone_tiles() -> Array:
 	return _plant_zone_tiles.keys()
@@ -1921,6 +1973,9 @@ func get_dirty_garden_cells() -> Array:
 	return cells.keys()
 
 func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
+	if _entry_path_agents.has(nav_id):
+		var entry_data: Dictionary = _entry_path_agents[nav_id] as Dictionary
+		return entry_data.get("path_world", PackedVector2Array()) as PackedVector2Array
 	if _astar_in_agents.has(nav_id):
 		var astar_in_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
 		return astar_in_data.get("path_world", PackedVector2Array()) as PackedVector2Array
@@ -2034,8 +2089,33 @@ func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
 	return best_cell
 
 # ---------------------------------------------------------------------------
-# A* glue: find a path inside the plant zone via PathfinderNative.
+# A* glue: find paths via PathfinderNative.
 # ---------------------------------------------------------------------------
+func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
+	if pathfinder == null or not pathfinder.has_method("find_path"):
+		return PackedVector2Array()
+	if _walkable_map_tiles.is_empty():
+		_rebuild_walkable_map_cache()
+	if _walkable_map_tiles.is_empty():
+		return PackedVector2Array()
+	var path_tiles: Dictionary = _walkable_map_tiles
+	var path_tiles_copied: bool = false
+	if _is_walkable(from_tile) and not path_tiles.has(from_tile):
+		path_tiles = _walkable_map_tiles.duplicate()
+		path_tiles_copied = true
+		path_tiles[from_tile] = true
+	if _is_walkable(to_tile) and not path_tiles.has(to_tile):
+		if not path_tiles_copied:
+			path_tiles = _walkable_map_tiles.duplicate()
+			path_tiles_copied = true
+		path_tiles[to_tile] = true
+	_sync_pathfinder_zone_tiles(path_tiles)
+	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
+	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
+	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
+		return PackedVector2Array()
+	return pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
+
 func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	if pathfinder == null or not pathfinder.has_method("find_path"):
 		return PackedVector2Array()
