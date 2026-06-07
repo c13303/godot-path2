@@ -41,6 +41,12 @@ namespace godot
         int get_active_count(int type_id) const;
         int get_type_count() const;
 
+        // Build + upload the static wall mask from the wall TileMapLayer.
+        // `bounds_layer` (floor layer) supplies the used rect/origin; if null, the
+        // wall layer's own used rect is used. Call when walls change.
+        void set_wall_layer(Object *wall_layer, Object *bounds_layer);
+        void clear_walls();
+
         void set_paused(bool p) { paused = p; }
     };
 }

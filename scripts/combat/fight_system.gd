@@ -2,6 +2,10 @@ extends Node
 class_name FightSystem
 
 @export var visualize_AOE_weapons: bool = true
+# When off, projectiles are drawn in a single batched layer with no per-Y z
+# sorting against agents (cheaper). When on, projectiles bucket by ground Y so
+# they interleave correctly with agents.
+@export var z_order_projectiles: bool = false
 @export var weapons: Array[WeaponData] = [
 	preload("res://scripts/combat/weapons/bomb.tres"),
 	preload("res://scripts/combat/weapons/sword.tres"),
@@ -27,10 +31,27 @@ func _ready() -> void:
 	add_child(_drawer)
 	_rebuild_weapon_index()
 	_register_guns()
+	_upload_projectile_walls()
 	if _projectiles:
 		_projectile_drawer = ProjectileDrawer.new()
+		_projectile_drawer.z_order_enabled = z_order_projectiles
 		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
 		add_child(_projectile_drawer)
+
+# Upload the static wall mask to the projectile system so projectiles are
+# stopped by walls. Call again (refresh_projectile_walls) when walls change.
+func _upload_projectile_walls() -> void:
+	if not _projectiles or not _projectiles.has_method("set_wall_layer"):
+		return
+	var wall_layer: TileMapLayer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
+	var floor_layer: TileMapLayer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
+	if not wall_layer:
+		return
+	_projectiles.call("set_wall_layer", wall_layer, floor_layer)
+
+# Public hook: re-upload walls after the build system adds/removes wall tiles.
+func refresh_projectile_walls() -> void:
+	_upload_projectile_walls()
 
 func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> bool:
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
@@ -105,11 +126,24 @@ func _register_guns() -> void:
 			"smash_detach_flow": gun.smash_detach_flow,
 			"smash_control_suppression": gun.smash_control_suppression,
 			"smash_control_suppression_duration": gun.smash_control_suppression_duration,
+			"stopped_by_walls": gun.stopped_by_walls,
+			"end_of_life_aoe_enabled": gun.end_of_life_aoe_enabled,
+			"end_aoe_radius": gun.end_aoe_radius,
+			"end_aoe_force": gun.end_aoe_force,
+			"end_aoe_friction_loss": gun.end_aoe_friction_loss,
+			"end_aoe_falloff": gun.end_aoe_falloff,
+			"end_aoe_detach_flow": gun.end_aoe_detach_flow,
+			"end_aoe_control_suppression": gun.end_aoe_control_suppression,
+			"end_aoe_control_suppression_duration": gun.end_aoe_control_suppression_duration,
 			"pool_size": gun.pool_size,
 		}
 		var type_id: int = int(_projectiles.call("register_type", cfg))
 		_gun_type_ids[gun.id] = type_id
 		_gun_fire_timers[gun.id] = 0.0
+	# If the drawer already exists (guns re-registered at runtime), rebuild its
+	# cached per-type visual params. Otherwise _ready() builds it after this call.
+	if _projectile_drawer:
+		_projectile_drawer.rebuild_visual_cache()
 
 func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
 	var gun: GunData = _guns_by_id.get(gun_id) as GunData
@@ -204,37 +238,226 @@ class WeaponAOEDrawer:
 class ProjectileDrawer:
 	extends Node2D
 
+	# Z-ordering strategy
+	# ------------------------------------------------------------------
+	# Agents set `z_index = int(world_position.y)` (z_as_relative left at its
+	# default, i.e. absolute against siblings sharing the parent). To interleave
+	# projectiles correctly with agents we must render each projectile at a
+	# z_index derived from its GROUND Y as well.
+	#
+	# A single CanvasItem only has one z_index, so we render through a small pool
+	# of "bucket" CanvasItems. Each bucket owns a fixed z_index band and batches
+	# every projectile whose ground Y falls in that band into a single _draw().
+	# Buckets are pooled and reused frame to frame; in steady state no nodes are
+	# created and the draw loop performs no per-projectile allocation.
+	#
+	# BUCKET_HEIGHT_PX controls vertical sorting granularity vs. bucket count.
+	# 8px keeps ordering tight while keeping the active bucket set small.
+	const BUCKET_HEIGHT_PX: int = 8
+
+	# When false, all projectiles are drawn in this single CanvasItem with no
+	# per-Y sorting against agents (cheapest). When true, projectiles bucket by
+	# ground Y into ordered child CanvasItems so they interleave with agents.
+	var z_order_enabled: bool = false
+
 	var _projectile_system: Node
 	var _guns_by_id: Dictionary = {}
 	var _gun_type_ids: Dictionary = {}
-	var _textures_by_type: Dictionary = {}
-	var _half_size_by_type: Dictionary = {}
+
+	# Per-type cached visual params (built once at setup; rebuilt only when guns
+	# change). Each entry is a Dictionary so the draw loop performs no resource
+	# lookups, no texture loads and no allocations.
+	# tid -> {
+	#   tex, half_size:Vector2, sprite_offset:Vector2,
+	#   altitude:float, shadow_enabled:bool, shadow_color:Color,
+	#   shadow_size:Vector2, shadow_half:Vector2, shadow_offset:Vector2,
+	#   shadow_tex, shadow_tex_offset:Vector2
+	# }
+	var _visual_by_type: Dictionary = {}
+
+	# Pool of bucket CanvasItems. band -> Bucket (active this frame).
+	var _buckets_by_band: Dictionary = {}
+	# Free list of reusable Bucket nodes detached from any band.
+	var _free_buckets: Array = []
+
+	# Flat fast-path scratch (z_order_enabled == false): reused, never reallocated.
+	var _flat_tids: PackedInt32Array = PackedInt32Array()
+	var _flat_grounds: PackedVector2Array = PackedVector2Array()
+
+	class Bucket:
+		extends Node2D
+		# Parallel draw lists for this z band, refilled each frame. Using packed
+		# arrays (cleared, not reallocated) means the gather/draw loops perform no
+		# per-projectile heap allocation.
+		var tids: PackedInt32Array = PackedInt32Array()
+		var grounds: PackedVector2Array = PackedVector2Array()
+		var drawer_ref: Node  # back-ref to drawer for cached params
+
+		func clear_items() -> void:
+			tids.clear()
+			grounds.clear()
+
+		func is_empty() -> bool:
+			return tids.is_empty()
+
+		func push(tid: int, ground: Vector2) -> void:
+			tids.push_back(tid)
+			grounds.push_back(ground)
+
+		func _draw() -> void:
+			var drawer: ProjectileDrawer = drawer_ref as ProjectileDrawer
+			if not drawer:
+				return
+			ProjectileDrawer.paint_batch(self, drawer._visual_by_type, tids, grounds)
+
+	# Shared batched paint for one CanvasItem: shadows first (floor), then sprites
+	# lifted by altitude. Used by both the per-Y buckets and the flat fast path.
+	static func paint_batch(ci: CanvasItem, visuals: Dictionary, tids: PackedInt32Array, grounds: PackedVector2Array) -> void:
+		var n: int = tids.size()
+		# Pass 1: shadows (always on the floor, drawn first so sprites sit on top).
+		for i in range(n):
+			var v: Dictionary = visuals[tids[i]]
+			if not bool(v["shadow_enabled"]):
+				continue
+			var ground: Vector2 = grounds[i]
+			var shadow_color: Color = v["shadow_color"]
+			var shadow_tex: Texture2D = v["shadow_tex"] as Texture2D
+			if shadow_tex:
+				var stex_offset: Vector2 = v["shadow_tex_offset"]
+				ci.draw_texture(shadow_tex, ground + stex_offset, shadow_color)
+			else:
+				var shadow_offset: Vector2 = v["shadow_offset"]
+				var sh: Vector2 = v["shadow_half"]
+				_paint_oval(ci, ground + shadow_offset, sh, shadow_color)
+		# Pass 2: sprites, lifted by altitude. Ordering comes from the CanvasItem's
+		# z band (ground Y), not this lifted position.
+		for i in range(n):
+			var v2: Dictionary = visuals[tids[i]]
+			var tex: Texture2D = v2["tex"] as Texture2D
+			if not tex:
+				continue
+			var sprite_offset: Vector2 = v2["sprite_offset"]
+			var altitude: float = float(v2["altitude"])
+			var half_size: Vector2 = v2["half_size"]
+			var top_left: Vector2 = grounds[i] + sprite_offset
+			top_left.y -= altitude
+			ci.draw_texture_rect(tex, Rect2(top_left, half_size * 2.0), false)
+
+	static func _paint_oval(ci: CanvasItem, center: Vector2, half: Vector2, color: Color) -> void:
+		# Cheap procedural oval via a unit circle scaled by the shadow half-extents.
+		var pts: PackedVector2Array = PackedVector2Array()
+		var steps: int = 12
+		pts.resize(steps)
+		for i in range(steps):
+			var a: float = TAU * float(i) / float(steps)
+			pts[i] = center + Vector2(cos(a) * half.x, sin(a) * half.y)
+		ci.draw_colored_polygon(pts, color)
 
 	func setup(projectile_system: Node, guns_by_id: Dictionary, gun_type_ids: Dictionary) -> void:
 		_projectile_system = projectile_system
 		_guns_by_id = guns_by_id
 		_gun_type_ids = gun_type_ids
+		z_as_relative = false
+		rebuild_visual_cache()
+
+	# Rebuild cached visual/shadow params per projectile type. Call only when gun
+	# definitions change (registration time), never per frame.
+	func rebuild_visual_cache() -> void:
+		_visual_by_type.clear()
 		for gun_id in _gun_type_ids.keys():
 			var gun: GunData = _guns_by_id[gun_id] as GunData
+			if not gun:
+				continue
 			var tid: int = int(_gun_type_ids[gun_id])
-			if gun and gun.projectile_sprite:
-				_textures_by_type[tid] = gun.projectile_sprite
-				_half_size_by_type[tid] = gun.projectile_size * 0.5
+			var half: float = gun.projectile_size * 0.5
+			var shadow_half: Vector2 = gun.projectile_shadow_size * 0.5
+			var shadow_tex: Texture2D = gun.projectile_shadow_texture
+			var shadow_tex_offset: Vector2 = Vector2.ZERO
+			if shadow_tex:
+				shadow_tex_offset = gun.projectile_shadow_offset - shadow_tex.get_size() * 0.5
+			_visual_by_type[tid] = {
+				"tex": gun.projectile_sprite,
+				"half_size": Vector2(half, half),
+				"sprite_offset": Vector2(-half, -half),
+				"altitude": gun.projectile_altitude_px,
+				"shadow_enabled": gun.projectile_shadow_enabled,
+				"shadow_color": gun.projectile_shadow_color,
+				"shadow_size": gun.projectile_shadow_size,
+				"shadow_half": shadow_half,
+				"shadow_offset": gun.projectile_shadow_offset,
+				"shadow_tex": shadow_tex,
+				"shadow_tex_offset": shadow_tex_offset,
+			}
 
 	func _process(_delta: float) -> void:
+		if not _projectile_system:
+			return
+		if not z_order_enabled:
+			_process_flat()
+			return
+		_process_z_ordered()
+
+	# Fast path: no per-Y sorting. Gather all active projectiles into the shared
+	# scratch arrays and paint them in this single CanvasItem's _draw().
+	func _process_flat() -> void:
+		_flat_tids.clear()
+		_flat_grounds.clear()
+		for tid_key in _visual_by_type.keys():
+			var tid: int = int(tid_key)
+			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", tid)
+			for p in positions:
+				_flat_tids.push_back(tid)
+				_flat_grounds.push_back(p)
 		queue_redraw()
 
 	func _draw() -> void:
-		if not _projectile_system:
+		# Only the flat fast path draws here; z-ordered mode draws in buckets.
+		if z_order_enabled:
 			return
-		for tid_key in _textures_by_type.keys():
+		paint_batch(self, _visual_by_type, _flat_tids, _flat_grounds)
+
+	func _process_z_ordered() -> void:
+		# Clear last frame's item lists (kept, not freed, to avoid reallocation).
+		for band_key in _buckets_by_band.keys():
+			(_buckets_by_band[band_key] as Bucket).clear_items()
+
+		# Bucket every active projectile by its ground-Y band.
+		for tid_key in _visual_by_type.keys():
 			var tid: int = int(tid_key)
-			var tex: Texture2D = _textures_by_type[tid] as Texture2D
-			if not tex:
-				continue
-			var half: float = float(_half_size_by_type[tid])
 			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", tid)
-			var size: Vector2 = Vector2(half * 2.0, half * 2.0)
-			var offset: Vector2 = Vector2(-half, -half)
 			for p in positions:
-				draw_texture_rect(tex, Rect2(p + offset, size), false)
+				var band: int = int(floor(p.y / float(BUCKET_HEIGHT_PX)))
+				var bucket: Bucket = _bucket_for_band(band)
+				bucket.push(tid, p)
+
+		# Recycle buckets that ended up empty this frame; redraw the rest.
+		var empty_bands: Array = []
+		for band_key in _buckets_by_band.keys():
+			var b: Bucket = _buckets_by_band[band_key] as Bucket
+			if b.is_empty():
+				empty_bands.append(band_key)
+			else:
+				b.queue_redraw()
+		for band_key in empty_bands:
+			var freed: Bucket = _buckets_by_band[band_key] as Bucket
+			freed.queue_redraw()  # repaint empty (clears stale visuals)
+			_buckets_by_band.erase(band_key)
+			_free_buckets.append(freed)
+
+	func _bucket_for_band(band: int) -> Bucket:
+		var existing = _buckets_by_band.get(band)
+		if existing:
+			return existing as Bucket
+		var bucket: Bucket
+		if _free_buckets.is_empty():
+			bucket = Bucket.new()
+			bucket.drawer_ref = self
+			bucket.z_as_relative = false
+			add_child(bucket)
+		else:
+			bucket = _free_buckets.pop_back() as Bucket
+		# Center the band so a projectile at ground Y sorts against an agent whose
+		# z_index = int(agent.y): use the band's center pixel as the z_index.
+		bucket.z_index = band * BUCKET_HEIGHT_PX + (BUCKET_HEIGHT_PX / 2)
+		_buckets_by_band[band] = bucket
+		return bucket

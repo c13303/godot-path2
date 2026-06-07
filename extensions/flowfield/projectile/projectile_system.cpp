@@ -1,12 +1,114 @@
 #include "projectile_system.h"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include "../grid/spatial_grid.h"
 #include "../steering/steering_system.h"
 
 namespace ffcore
 {
     ProjectileSystem::ProjectileSystem() {}
+
+    void ProjectileSystem::set_wall_grid(int origin_x, int origin_y, int width, int height,
+                                         double tile_size, const std::vector<std::uint8_t> &mask)
+    {
+        walls.origin_x = origin_x;
+        walls.origin_y = origin_y;
+        walls.width = std::max(0, width);
+        walls.height = std::max(0, height);
+        walls.tile_size = tile_size > 0.0 ? tile_size : 1.0;
+        walls.mask = mask;
+    }
+
+    bool ProjectileSystem::raycast_walls(const Vec2 &from, const Vec2 &to, Vec2 &out_impact) const
+    {
+        if (!walls.ready())
+            return false;
+
+        // If the starting cell is already a wall, impact immediately at 'from'.
+        if (walls.is_wall_cell(walls.world_to_cell(from)))
+        {
+            out_impact = from;
+            return true;
+        }
+
+        // Amanatides-Woo grid traversal across the move segment from->to.
+        const double ts = walls.tile_size;
+        Vec2i cell = walls.world_to_cell(from);
+        Vec2i end_cell = walls.world_to_cell(to);
+
+        Vec2 d = to - from;
+        int step_x = d.x > 0.0 ? 1 : (d.x < 0.0 ? -1 : 0);
+        int step_y = d.y > 0.0 ? 1 : (d.y < 0.0 ? -1 : 0);
+
+        // Distance (in t, 0..1) to cross one cell along each axis.
+        double t_delta_x = (step_x != 0) ? std::abs(ts / d.x) : std::numeric_limits<double>::infinity();
+        double t_delta_y = (step_y != 0) ? std::abs(ts / d.y) : std::numeric_limits<double>::infinity();
+
+        // t to reach the first cell boundary along each axis.
+        auto next_boundary = [&](double origin, double dir, int c) -> double
+        {
+            if (dir == 0.0)
+                return std::numeric_limits<double>::infinity();
+            double cell_min = (c + (dir > 0.0 ? 1 : 0)) * ts;
+            return (cell_min - origin) / dir;
+        };
+        double t_max_x = next_boundary(from.x, d.x, cell.x);
+        double t_max_y = next_boundary(from.y, d.y, cell.y);
+
+        // Walk until we pass the destination cell. Bound the loop defensively.
+        int guard = walls.width + walls.height + 2;
+        while (guard-- > 0)
+        {
+            if (t_max_x < t_max_y)
+            {
+                if (t_max_x > 1.0)
+                    break;
+                cell.x += step_x;
+                if (walls.is_wall_cell(cell))
+                {
+                    out_impact = from + d * t_max_x;
+                    return true;
+                }
+                t_max_x += t_delta_x;
+            }
+            else
+            {
+                if (t_max_y > 1.0)
+                    break;
+                cell.y += step_y;
+                if (walls.is_wall_cell(cell))
+                {
+                    out_impact = from + d * t_max_y;
+                    return true;
+                }
+                t_max_y += t_delta_y;
+            }
+            if (cell == end_cell)
+                break;
+        }
+        return false;
+    }
+
+    void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at)
+    {
+        if (!cfg.end_of_life_aoe_enabled || !steering)
+            return;
+        Vec2 impact_dir = p.vel.normalized();
+        steering->apply_area_smash(
+            at,
+            cfg.end_aoe_radius,
+            impact_dir,
+            cfg.end_aoe_force,
+            cfg.end_aoe_friction_loss,
+            cfg.end_aoe_falloff,
+            cfg.end_aoe_detach_flow,
+            cfg.end_aoe_control_suppression,
+            cfg.end_aoe_control_suppression_duration,
+            p.owner_agent_id,
+            p.affected_smash_classes);
+    }
 
     int ProjectileSystem::register_type(const ProjectileTypeConfig &cfg)
     {
@@ -101,10 +203,29 @@ namespace ffcore
                 if (!p.active)
                     continue;
 
+                Vec2 prev_pos = p.pos;
                 p.pos += p.vel * delta;
+
+                // Wall collision (visual altitude is ignored; uses ground pos).
+                // Raycast the ground segment so fast projectiles can't tunnel
+                // through thin walls.
+                if (cfg.stopped_by_walls && walls.ready())
+                {
+                    Vec2 impact;
+                    if (raycast_walls(prev_pos, p.pos, impact))
+                    {
+                        p.pos = impact;
+                        trigger_end_aoe(cfg, p, impact);
+                        p.active = 0;
+                        tp.free_list.push_back(static_cast<std::uint16_t>(i));
+                        continue;
+                    }
+                }
+
                 p.lifetime_remaining -= delta;
                 if (p.lifetime_remaining <= 0.0)
                 {
+                    trigger_end_aoe(cfg, p, p.pos);
                     p.active = 0;
                     tp.free_list.push_back(static_cast<std::uint16_t>(i));
                     continue;

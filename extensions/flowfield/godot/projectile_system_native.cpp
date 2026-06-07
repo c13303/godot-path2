@@ -1,10 +1,18 @@
 #include "projectile_system_native.h"
 
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/tile_map_layer.hpp>
+#include <godot_cpp/classes/tile_set.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 #include "steering_system_native.h"
 #include "spatial_grid_native.h"
+#include "../core/global_config.h"
 
 using namespace godot;
 
@@ -18,6 +26,8 @@ void ProjectileSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_active_count", "type_id"), &ProjectileSystemNative::get_active_count);
     ClassDB::bind_method(D_METHOD("get_type_count"), &ProjectileSystemNative::get_type_count);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &ProjectileSystemNative::set_paused);
+    ClassDB::bind_method(D_METHOD("set_wall_layer", "wall_layer", "bounds_layer"), &ProjectileSystemNative::set_wall_layer);
+    ClassDB::bind_method(D_METHOD("clear_walls"), &ProjectileSystemNative::clear_walls);
 }
 
 ProjectileSystemNative::ProjectileSystemNative() {}
@@ -81,6 +91,15 @@ int ProjectileSystemNative::register_type(const Dictionary &cfg)
     if (cfg.has("smash_detach_flow")) c.smash_detach_flow = bool(cfg["smash_detach_flow"]);
     if (cfg.has("smash_control_suppression")) c.smash_control_suppression = double(cfg["smash_control_suppression"]);
     if (cfg.has("smash_control_suppression_duration")) c.smash_control_suppression_duration = double(cfg["smash_control_suppression_duration"]);
+    if (cfg.has("stopped_by_walls")) c.stopped_by_walls = bool(cfg["stopped_by_walls"]);
+    if (cfg.has("end_of_life_aoe_enabled")) c.end_of_life_aoe_enabled = bool(cfg["end_of_life_aoe_enabled"]);
+    if (cfg.has("end_aoe_radius")) c.end_aoe_radius = double(cfg["end_aoe_radius"]);
+    if (cfg.has("end_aoe_force")) c.end_aoe_force = double(cfg["end_aoe_force"]);
+    if (cfg.has("end_aoe_friction_loss")) c.end_aoe_friction_loss = double(cfg["end_aoe_friction_loss"]);
+    if (cfg.has("end_aoe_falloff")) c.end_aoe_falloff = double(cfg["end_aoe_falloff"]);
+    if (cfg.has("end_aoe_detach_flow")) c.end_aoe_detach_flow = bool(cfg["end_aoe_detach_flow"]);
+    if (cfg.has("end_aoe_control_suppression")) c.end_aoe_control_suppression = double(cfg["end_aoe_control_suppression"]);
+    if (cfg.has("end_aoe_control_suppression_duration")) c.end_aoe_control_suppression_duration = double(cfg["end_aoe_control_suppression_duration"]);
     if (cfg.has("pool_size")) c.pool_size = int(cfg["pool_size"]);
     return system.register_type(c);
 }
@@ -119,4 +138,72 @@ int ProjectileSystemNative::get_active_count(int type_id) const
 int ProjectileSystemNative::get_type_count() const
 {
     return static_cast<int>(system.type_count());
+}
+
+void ProjectileSystemNative::set_wall_layer(Object *wall_layer_obj, Object *bounds_layer_obj)
+{
+    auto *wall_layer = Object::cast_to<TileMapLayer>(wall_layer_obj);
+    if (!wall_layer)
+    {
+        system.clear_wall_grid();
+        return;
+    }
+    auto *bounds_layer = Object::cast_to<TileMapLayer>(bounds_layer_obj);
+    if (!bounds_layer)
+        bounds_layer = wall_layer;
+
+    // Tile size from the layer's TileSet (square tiles assumed, like FlowField).
+    double tile_size = ffcore::globalconfig().tile_size;
+    Ref<TileSet> ts = wall_layer->get_tile_set();
+    if (ts.is_valid())
+        tile_size = std::max(1.0, static_cast<double>(ts->get_tile_size().x));
+    if (tile_size <= 0.0)
+        tile_size = 1.0;
+
+    // Mark wall cells into a grid indexed in the SAME world->cell space the
+    // simulation uses: cell = floor(world_center / tile_size). Converting each
+    // wall cell to its world center via the layer transform keeps the mask
+    // aligned even if the tilemap is offset (no rotation/scale expected).
+    Array walls = wall_layer->get_used_cells();
+    const int n = static_cast<int>(walls.size());
+    if (n == 0)
+    {
+        system.clear_wall_grid();
+        return;
+    }
+
+    std::vector<int> cx(n);
+    std::vector<int> cy(n);
+    int min_x = INT32_MAX, min_y = INT32_MAX, max_x = INT32_MIN, max_y = INT32_MIN;
+    for (int i = 0; i < n; ++i)
+    {
+        Vector2i cell = walls[i];
+        Vector2 world_center = wall_layer->to_global(wall_layer->map_to_local(cell));
+        int gx = static_cast<int>(std::floor(world_center.x / tile_size));
+        int gy = static_cast<int>(std::floor(world_center.y / tile_size));
+        cx[i] = gx;
+        cy[i] = gy;
+        min_x = std::min(min_x, gx);
+        min_y = std::min(min_y, gy);
+        max_x = std::max(max_x, gx);
+        max_y = std::max(max_y, gy);
+    }
+    (void)bounds_layer; // origin derived from wall extents below
+
+    const int width = max_x - min_x + 1;
+    const int height = max_y - min_y + 1;
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(width) * height, 0);
+    for (int i = 0; i < n; ++i)
+    {
+        int lx = cx[i] - min_x;
+        int ly = cy[i] - min_y;
+        mask[static_cast<std::size_t>(ly) * width + lx] = 1;
+    }
+
+    system.set_wall_grid(min_x, min_y, width, height, tile_size, mask);
+}
+
+void ProjectileSystemNative::clear_walls()
+{
+    system.clear_wall_grid();
 }
