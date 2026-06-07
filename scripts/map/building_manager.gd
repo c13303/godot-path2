@@ -74,6 +74,16 @@ var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
 var _next_garden_id: int = 1
+# TEMP DEBUG (garden crash hunt): set true while iterating _gardens or
+# _spawner_garden_routes so any erase that happens mid-iteration is reported
+# before it can corrupt the iteration. Remove once the silent crash is confirmed
+# fixed. See _erase_garden / _warn_if_iterating.
+# Depth counter (not a bool) so nested guarded iterations don't clear the guard
+# early. Iteration is considered active while _gardens_iter_depth > 0.
+var _gardens_iter_depth: int = 0
+var _garden_debug_logs: bool = true
+# Gardens found empty during a _gardens iteration; erased after the loop ends.
+var _pending_empty_gardens: Dictionary = {}  # garden_id -> true
 # Cells reachable from any spawner over the walkable map. Recomputed once per
 # garden rebuild (single source flood-fill); read when deciding if a garden is
 # reachable. A sealed enclosure has no entry cell in this set, so it is ignored.
@@ -460,6 +470,13 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 			escape_group = int(agent_manager.call("create_group"))
 		if escape_group > IDLE_GROUP:
 			var escape_world: Vector2 = _cell_center(escape_wall_target_cell)
+			if not _is_finite_world(escape_world):
+				push_warning("LOST-AGENT-GUARD: insane escape_world %s (cell %s) for spawner %s" % [
+					escape_world, escape_wall_target_cell, spawner_cell
+				])
+				route["escape_ready"] = false
+				_spawner_routes[spawner_cell] = route
+				return
 			flow.call("assign_flow_to_group", escape_group, escape_world)
 			route["escape_group"] = escape_group
 			route["escape_world"] = escape_world
@@ -554,6 +571,12 @@ func _rebuild_exit_wall_escapes() -> void:
 			push_error("BuildingManager: could not allocate escape group for exit wall %s" % exit_cell)
 			continue
 		var escape_world: Vector2 = _cell_center(target_cell)
+		if not _is_finite_world(escape_world):
+			push_warning("LOST-AGENT-GUARD: insane exit-wall escape_world %s (cell %s) for exit %s" % [
+				escape_world, target_cell, exit_cell
+			])
+			_release_exit_wall_escape(exit_cell)
+			continue
 		# Synchronous assign so the FF (and its route-cost field) is queryable
 		# immediately; goals are static and rebuilds are rare (dirty events only).
 		if flow.has_method("assign_flow_to_group"):
@@ -596,10 +619,21 @@ func _nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
 	return best
 
 func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
+	# TEMP DEBUG (lost-agent guard): never push a non-finite / absurd goal into the
+	# flow system — that is what makes agents map out of bounds and go lost.
+	if not _is_finite_world(goal_world):
+		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
+		return
 	if flow and flow.has_method("request_flow_to_group"):
 		flow.call("request_flow_to_group", group_id, goal_world)
 	elif flow and flow.has_method("assign_flow_to_group"):
 		flow.call("assign_flow_to_group", group_id, goal_world)
+
+func _is_finite_world(p: Vector2) -> bool:
+	if not (is_finite(p.x) and is_finite(p.y)):
+		return false
+	var limit: float = float(_SANE_CELL_LIMIT) * 64.0
+	return abs(p.x) <= limit and abs(p.y) <= limit
 
 func _no_plants_remaining() -> bool:
 	if plant_manager and plant_manager.has_method("is_empty"):
@@ -666,10 +700,14 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 		_log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
 		return false
 
+	if not _is_sane_cell(entry_cell):
+		_log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
+		return false
+
 	var occupied: Array[Vector2i] = _occupied_cells()
 	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
-	if spawn_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s could not find a walkable spawn cell" % spawner_cell)
+	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
+		_log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
 		return false
 
 	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
@@ -1101,9 +1139,16 @@ func _rebuild_plant_zone_from_layer() -> void:
 	_rebuild_spawner_garden_route_cache()
 
 func _build_gardens_from_plants() -> void:
+	if _gardens_iter_depth > 0:
+		push_warning("GARDEN-CRASH-GUARD: full rebuild requested mid-iteration (depth=%d)!" % _gardens_iter_depth)
+	_glog("rebuild begin: gardens=%d plants=%d" % [
+		_gardens.size(),
+		int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else -1
+	])
 	_gardens.clear()
 	_garden_by_plant_cell.clear()
 	_dirty_gardens.clear()
+	_pending_empty_gardens.clear()
 	_next_garden_id = 1
 	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
 		_rebuild_plant_zone_compatibility_cache()
@@ -1211,14 +1256,48 @@ func _remove_plant_from_gardens(cell: Vector2i) -> void:
 		garden["edible_count"] = 0
 		garden["targetable"] = false
 		_gardens[garden_id] = garden
-		_gardens.erase(garden_id)
-		_dirty_gardens.erase(garden_id)
+		_erase_garden(garden_id, "remove_plant_empty")
 	else:
 		garden["plant_cells"] = plant_cells
-		garden["edible_count"] = max(0, int(garden.get("edible_count", plant_cells.size() + 1)) - 1)
-		garden["targetable"] = int(garden.get("edible_count", 0)) > 0 and bool(garden.get("reachable", false))
+		# edible_count kept only as a debug/display mirror of plant_cells.size();
+		# never used as truth for emptiness (see _garden_has_edible_plants).
+		garden["edible_count"] = plant_cells.size()
+		garden["targetable"] = plant_cells.size() > 0 and bool(garden.get("reachable", false))
 		_gardens[garden_id] = garden
 		_mark_garden_dirty(garden_id, false)
+
+# TEMP DEBUG (garden crash hunt) -------------------------------------------
+# Centralized garden erase: logs the lifecycle event and screams if it runs
+# while a _gardens iteration is in progress (the suspected silent-crash cause:
+# Dictionary mutated during iteration of its keys). Remove the guards once the
+# crash is confirmed fixed; keep using one erase path either way.
+func _erase_garden(garden_id: int, reason: String) -> void:
+	if _gardens_iter_depth > 0:
+		push_warning("GARDEN-CRASH-GUARD: _gardens erased during iteration! id=%d reason=%s depth=%d size_before=%d" % [
+			garden_id, reason, _gardens_iter_depth, _gardens.size()
+		])
+	if _garden_debug_logs:
+		_log("garden erase id=%d reason=%s gardens_now=%d" % [garden_id, reason, _gardens.size() - 1])
+	_gardens.erase(garden_id)
+	_dirty_gardens.erase(garden_id)
+
+func _glog(message: String) -> void:
+	if _garden_debug_logs:
+		print("BuildingManager[garden]: ", message)
+
+# TEMP DEBUG (lost-agent / OUT OF BOUNDS hunt): a cell is "sane" only if it is a
+# real, finite, in-a-reasonable-range tile. A bad cell (INVALID_CELL sentinel,
+# max_cell sentinel, or anything absurd) fed to _cell_center yields a huge finite
+# world pos; assigning that as a flow goal or an agent position makes the agent
+# map to an out-of-bounds cell and go "lost" forever. Reject + log instead.
+const _SANE_CELL_LIMIT: int = 100000
+func _is_sane_cell(cell: Vector2i) -> bool:
+	if cell == INVALID_CELL:
+		return false
+	if abs(cell.x) > _SANE_CELL_LIMIT or abs(cell.y) > _SANE_CELL_LIMIT:
+		return false
+	return true
+# --------------------------------------------------------------------------
 
 func _create_garden() -> int:
 	var garden_id: int = _next_garden_id
@@ -1264,7 +1343,7 @@ func _validate_dirty_gardens() -> void:
 		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
 		if plant_cells.is_empty():
 			_release_garden_routes(garden_id)
-			_gardens.erase(garden_id)
+			_erase_garden(garden_id, "validate_empty")
 			continue
 		_recompute_garden_geometry(garden_id)
 	# No proximity-based merge step: garden identity comes from walkable BFS
@@ -1276,22 +1355,25 @@ func _validate_dirty_gardens() -> void:
 	# enough to call it reachable. Flood from spawners once and gate every garden
 	# on whether an entry cell is reachable from a spawner.
 	_recompute_spawner_reachable_cells()
+	_gardens_iter_depth += 1
 	for raw_garden_id in _gardens.keys():
 		_apply_spawner_reachability(int(raw_garden_id))
+	_gardens_iter_depth -= 1
 	_rebuild_plant_zone_compatibility_cache()
 	_plant_zone_built = true
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
+	_glog("validate end: gardens=%d" % _gardens.size())
 
 # Garden geometry is navigation-aware, not box-geometry. A bounded walkable BFS
 # from the plant cells (same 8-conn, no-corner-cut rules as the pathfinder/cluster
 # BFS) defines the interior `zone_tiles`, so a thin wall or corner can never leak a
 # zone tile to the far side of a wall (fix: the old Chebyshev margin box only
-# skipped cells that *were* walls). Access tiles (`entry_cells`) are the walkable
-# cells one valid step *outside* that interior — a real inside<->outside transition
-# with no wall between, the only cells a monster can actually use to enter. They are
-# never reserved/exclusive and may overlap spawners, map exits, or other non-wall
-# markers; only physical non-walkability rejects them.
+# skipped cells that *were* walls). Access cells (`entry_cells`) are the INTERIOR
+# cells that border the outside through a valid no-corner-cut transition — they are
+# in zone_tiles so the monster's flow field can settle on one (an outside goal at a
+# 1-tile chokepoint makes agents oscillate, status "flow osc"). Access cells are
+# non-exclusive and may overlap spawners/exits/markers; only non-walkability rejects.
 func _recompute_garden_geometry(garden_id: int) -> void:
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
 	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
@@ -1455,18 +1537,27 @@ func _rebuild_plant_zone_compatibility_cache() -> void:
 				var plant_cell: Vector2i = raw_cell
 				_plant_zone_tiles[plant_cell] = true
 
+# Snapshot both key sets: _release_spawner_garden_route erases from `routes` (inner)
+# and can erase from _spawner_garden_routes (outer) when a spawner's routes empty.
+# Iterating live .keys() while erasing is the Dictionary-mutation-during-iteration
+# that can silently crash; .duplicate() decouples the iteration from the mutation.
 func _rebuild_spawner_garden_route_cache() -> void:
-	for raw_spawner_cell in _spawner_garden_routes.keys():
+	for raw_spawner_cell in _spawner_garden_routes.keys().duplicate():
 		var spawner_cell: Vector2i = raw_spawner_cell
+		if not _spawner_garden_routes.has(spawner_cell):
+			continue
 		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-		for raw_garden_id in routes.keys():
+		for raw_garden_id in routes.keys().duplicate():
 			var garden_id: int = int(raw_garden_id)
+			if not routes.has(garden_id):
+				continue
 			var route: Dictionary = routes[garden_id] as Dictionary
 			if not _garden_route_is_current(route, garden_id):
 				_release_spawner_garden_route(spawner_cell, garden_id)
 
 func _release_garden_routes(garden_id: int) -> void:
-	for raw_spawner_cell in _spawner_garden_routes.keys():
+	# Snapshot: _release_spawner_garden_route can erase from _spawner_garden_routes.
+	for raw_spawner_cell in _spawner_garden_routes.keys().duplicate():
 		var spawner_cell: Vector2i = raw_spawner_cell
 		_release_spawner_garden_route(spawner_cell, garden_id)
 
@@ -1497,6 +1588,7 @@ func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 	var best_garden_id: int = 0
 	var best_dist: int = 2147483647
+	_gardens_iter_depth += 1
 	for raw_garden_id in _gardens.keys():
 		var garden_id: int = int(raw_garden_id)
 		var garden: Dictionary = _gardens[garden_id] as Dictionary
@@ -1512,11 +1604,17 @@ func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 		if manhattan < best_dist:
 			best_dist = manhattan
 			best_garden_id = garden_id
+	_gardens_iter_depth -= 1
+	_drain_pending_empty_gardens()
+	# The chosen garden may have just been drained as empty; fall through to 0.
+	if best_garden_id > 0 and not _gardens.has(best_garden_id):
+		return 0
 	return best_garden_id
 
 func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
 	var best_pair: Dictionary = {}
 	var best_dist: int = 2147483647
+	_gardens_iter_depth += 1
 	for raw_spawner_cell in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell
 		if not _spawner_routes.has(spawner_cell):
@@ -1539,6 +1637,11 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
 					"spawner_cell": spawner_cell,
 					"garden_id": garden_id
 				}
+	_gardens_iter_depth -= 1
+	_drain_pending_empty_gardens()
+	# The chosen garden may have just been drained as empty; drop the stale pair.
+	if not best_pair.is_empty() and not _gardens.has(int(best_pair.get("garden_id", 0))):
+		return {}
 	return best_pair
 
 func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fallback_spawner_cell: Vector2i) -> Vector2i:
@@ -1595,6 +1698,11 @@ func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
 					"garden_id": garden_id,
 					"path_cells": path_cells
 				}
+	# _garden_has_edible_plants may have queued genuinely-empty gardens; drain now
+	# (this loop does not iterate _gardens, so erasing here is safe).
+	_drain_pending_empty_gardens()
+	if not best_target.is_empty() and not _gardens.has(int(best_target.get("garden_id", 0))):
+		return {}
 	return best_target
 
 func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell: Vector2i) -> bool:
@@ -1643,6 +1751,11 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 	var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 	if entry_cell == INVALID_CELL:
 		return {"ready": false}
+	if not _is_sane_cell(entry_cell):
+		push_warning("LOST-AGENT-GUARD: garden %d gave insane entry_cell %s for spawner %s; route refused" % [
+			garden_id, entry_cell, spawner_cell
+		])
+		return {"ready": false}
 	var plant_group: int = int(existing_route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
 		if not agent_manager or not agent_manager.has_method("create_group"):
@@ -1651,6 +1764,11 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 	if plant_group <= IDLE_GROUP:
 		return {"ready": false}
 	var entry_world: Vector2 = _cell_center(entry_cell)
+	if not _is_finite_world(entry_world):
+		push_warning("LOST-AGENT-GUARD: insane entry_world %s (cell %s) for spawner %s garden %d; route refused" % [
+			entry_world, entry_cell, spawner_cell, garden_id
+		])
+		return {"ready": false}
 	if flow and flow.has_method("assign_flow_to_group"):
 		flow.call("assign_flow_to_group", plant_group, entry_world)
 	elif flow and flow.has_method("request_flow_to_group"):
@@ -2004,14 +2122,24 @@ func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: i
 			best_cell = c
 	return best_cell
 
+# Side-effect-free predicate. Previously this called _mark_garden_empty (which
+# erases from _gardens) right in the middle of callers iterating _gardens.keys()
+# — a Dictionary-mutation-during-iteration that intermittently corrupted the
+# iteration and silently crashed under stress. Now an empty garden is only queued
+# in _pending_empty_gardens; the caller drains it AFTER its loop via
+# _drain_pending_empty_gardens.
+# Truth is plant_cells (cross-checked against the plant_manager), never the cached
+# edible_count: that counter drifts on incremental removal and was flagging
+# non-empty gardens as empty (a live plant in a garden marked empty). A garden is
+# only queued for removal if it has NO plant cell that the plant_manager still
+# confirms — i.e. genuinely empty.
 func _garden_has_edible_plants(garden_id: int) -> bool:
 	if not _gardens.has(garden_id):
 		return false
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
-	if int(garden.get("edible_count", 0)) <= 0:
-		return false
 	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
 	if plant_cells.is_empty():
+		_pending_empty_gardens[garden_id] = true
 		return false
 	if plant_manager == null or not plant_manager.has_method("has_plant"):
 		return true
@@ -2019,8 +2147,23 @@ func _garden_has_edible_plants(garden_id: int) -> bool:
 		var cell: Vector2i = raw_cell
 		if bool(plant_manager.call("has_plant", cell)):
 			return true
-	_mark_garden_empty(garden_id)
+	# plant_cells is non-empty but the plant_manager confirms none survive: stale
+	# cache, genuinely empty. Queue for removal (drained outside iteration).
+	_pending_empty_gardens[garden_id] = true
 	return false
+
+# Drain gardens flagged empty by _garden_has_edible_plants. Safe to call only when
+# NOT iterating _gardens. If a guarded iteration is somehow still active, defer.
+func _drain_pending_empty_gardens() -> void:
+	if _pending_empty_gardens.is_empty():
+		return
+	if _gardens_iter_depth > 0:
+		push_warning("GARDEN-CRASH-GUARD: drain requested mid-iteration; deferring %d" % _pending_empty_gardens.size())
+		return
+	var ids: Array = _pending_empty_gardens.keys()
+	_pending_empty_gardens.clear()
+	for raw_id in ids:
+		_mark_garden_empty(int(raw_id))
 
 func _mark_garden_empty(garden_id: int) -> void:
 	if not _gardens.has(garden_id):
@@ -2034,8 +2177,8 @@ func _mark_garden_empty(garden_id: int) -> void:
 	garden["edible_count"] = 0
 	garden["targetable"] = false
 	_gardens[garden_id] = garden
-	_gardens.erase(garden_id)
-	_dirty_gardens.erase(garden_id)
+	_release_garden_routes(garden_id)
+	_erase_garden(garden_id, "mark_empty")
 
 func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
 	if not _gardens.has(garden_id):
