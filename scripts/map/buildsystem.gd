@@ -6,6 +6,7 @@ extends Node
 @export var buildings: TileMapLayer
 @export var previewbuild: TileMapLayer
 @export var plant_manager: Node
+@export var building_object_manager: Node
 @export var game_ui: CanvasLayer
 @export var notif: Node
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
@@ -22,13 +23,13 @@ func _ready() -> void:
 	set_process_input(true)
 
 func _process(_delta: float) -> void:
-	var place_tile := _selected_place_tile()
-	if place_tile.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
 		return
 
-	var cell := _hovered_cell()
-	var atlas_coords := _atlas_coords_from_place_tile(place_tile)
+	var cell: Vector2i = _hovered_cell()
+	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
 	if atlas_coords == Vector2i(-1, -1):
 		_clear_hover()
 		return
@@ -43,24 +44,24 @@ func _process(_delta: float) -> void:
 	_draw_preview(cell, atlas_coords)
 
 func _input(event: InputEvent) -> void:
-	var place_tile := _selected_place_tile()
-	if place_tile.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
 
 	if event is InputEventMouseButton and event.pressed:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			_apply_place_tile(place_tile)
+			_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
 func _resolve_atlas_source_id() -> void:
-	var ref := previewbuild if previewbuild else wallz
+	var ref: TileMapLayer = previewbuild if previewbuild else wallz
 	if not ref or not ref.tile_set:
 		return
 
-	var ts := ref.tile_set
+	var ts: TileSet = ref.tile_set
 	for i in range(ts.get_source_count()):
-		var sid := ts.get_source_id(i)
+		var sid: int = ts.get_source_id(i)
 		if ts.get_source(sid) is TileSetAtlasSource:
 			_atlas_source_id = sid
 			return
@@ -77,23 +78,23 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i) -> void:
 	)
 	previewbuild.update_internals()
 
-func _apply_place_tile(place_tile: Dictionary) -> void:
+func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
 		return
-	var atlas_coords := _atlas_coords_from_place_tile(place_tile)
+	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
 	if atlas_coords == Vector2i(-1, -1):
 		return
 
-	var target_layer := _target_tile_layer(str(place_tile.get("layer", "wallz")))
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	if not target_layer:
 		return
 
 	_hover_cell = _hovered_cell()
-	if _is_tile_occupied(_hover_cell, target_layer):
+	if _is_placeable_occupied(_hover_cell, target_layer, placeable_def):
 		_notify("invalid construction")
 		return
 
-	_clear_other_build_layer(target_layer)
+	_clear_other_build_layer(target_layer, _hover_cell)
 	target_layer.set_cell(
 		_hover_cell,
 		_atlas_source_id,
@@ -101,8 +102,7 @@ func _apply_place_tile(place_tile: Dictionary) -> void:
 		0
 	)
 	target_layer.update_internals()
-	if target_layer == plantz and plant_manager and plant_manager.has_method("add_plant"):
-		plant_manager.call("add_plant", _hover_cell)
+	_after_placeable_placed(_hover_cell, placeable_def)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":
@@ -111,21 +111,23 @@ func _target_tile_layer(layer_name: String) -> TileMapLayer:
 		return buildings
 	return wallz
 
-func _clear_other_build_layer(target_layer: TileMapLayer) -> void:
+func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
 	if target_layer != wallz and wallz:
-		wallz.erase_cell(_hover_cell)
+		wallz.erase_cell(cell)
 		wallz.update_internals()
 	if target_layer != plantz and plantz:
-		plantz.erase_cell(_hover_cell)
+		plantz.erase_cell(cell)
 		plantz.update_internals()
 		if plant_manager and plant_manager.has_method("remove_plant"):
-			plant_manager.call("remove_plant", _hover_cell, false)
+			plant_manager.call("remove_plant", cell, false)
 	if target_layer != buildings and buildings:
-		buildings.erase_cell(_hover_cell)
+		buildings.erase_cell(cell)
 		buildings.update_internals()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
 
-func _is_tile_occupied(cell: Vector2i, target_layer: TileMapLayer) -> bool:
-	if target_layer.get_cell_source_id(cell) >= 0:
+func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0:
 		return true
 	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
 		return true
@@ -135,16 +137,24 @@ func _is_tile_occupied(cell: Vector2i, target_layer: TileMapLayer) -> bool:
 		return true
 	return _is_occupied_by_group_node(cell)
 
+func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary) -> void:
+	var building_subtype: String = str(placeable_def.get("building_subtype", ""))
+	if building_subtype == "edible_plant" and plant_manager and plant_manager.has_method("add_plant"):
+		plant_manager.call("add_plant", cell)
+		return
+	if building_subtype != "" and building_object_manager and building_object_manager.has_method("add_building"):
+		building_object_manager.call("add_building", cell, placeable_def)
+
 func _is_occupied_by_group_node(cell: Vector2i) -> bool:
-	var map_layer := previewbuild if previewbuild else wallz
+	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz
 	if not map_layer:
 		return false
 	for group_name in occupied_groups:
-		var nodes := get_tree().get_nodes_in_group(group_name)
+		var nodes: Array[Node] = get_tree().get_nodes_in_group(group_name)
 		for node in nodes:
 			if node is Node2D:
-				var occupant := node as Node2D
-				var occupant_cell := map_layer.local_to_map(map_layer.to_local(occupant.global_position))
+				var occupant: Node2D = node as Node2D
+				var occupant_cell: Vector2i = map_layer.local_to_map(map_layer.to_local(occupant.global_position))
 				if occupant_cell == cell:
 					return true
 	return false
@@ -164,19 +174,19 @@ func _clear_hover() -> void:
 	_hover_atlas_coords = Vector2i(-1, -1)
 
 func _hovered_cell() -> Vector2i:
-	var world := previewbuild.get_global_mouse_position()
+	var world: Vector2 = previewbuild.get_global_mouse_position()
 	return previewbuild.local_to_map(previewbuild.to_local(world))
 
-func _selected_place_tile() -> Dictionary:
+func _selected_placeable_def() -> Dictionary:
 	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
 		return {}
-	return ItemCatalog.get_place_tile(String(game_ui.call("get_selected_quick_item_id")))
+	return ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_quick_item_id")))
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
 
-func _atlas_coords_from_place_tile(place_tile: Dictionary) -> Vector2i:
-	var raw: Variant = place_tile.get("atlas", Vector2i(-1, -1))
+func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
+	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))
 	if raw is Vector2i:
 		return raw
 	if raw is Vector2:

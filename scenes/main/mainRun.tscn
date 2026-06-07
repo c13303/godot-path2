@@ -19,6 +19,7 @@
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
+[ext_resource type="Script" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1380,13 +1381,21 @@ metadata/_edit_lock_ = true
 script = ExtResource("22_plant")
 plantz = NodePath("../MonTilemap/plantz")
 
-[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("wallz", "plantz", "buildings", "previewbuild", "plant_manager", "game_ui", "notif")]
+[node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
+
+[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("buildings", "runtime_parent")]
+script = ExtResource("26_building_objects")
+buildings = NodePath("../MonTilemap/buildings")
+runtime_parent = NodePath("../BuildingObjects")
+
+[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("wallz", "plantz", "buildings", "previewbuild", "plant_manager", "building_object_manager", "game_ui", "notif")]
 script = ExtResource("17_k5rlw")
 wallz = NodePath("../MonTilemap/wallz")
 plantz = NodePath("../MonTilemap/plantz")
 buildings = NodePath("../MonTilemap/buildings")
 previewbuild = NodePath("../MonTilemap/previewbuild")
 plant_manager = NodePath("../PlantManager")
+building_object_manager = NodePath("../BuildingObjectManager")
 game_ui = NodePath("../../GameUI")
 notif = NodePath("../../GameUI/notif")
 

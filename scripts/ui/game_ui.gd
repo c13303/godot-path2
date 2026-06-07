@@ -126,7 +126,7 @@ func get_selected_quick_item_def() -> Dictionary:
 	return ItemCatalog.get_item_def(get_selected_quick_item_id())
 
 func selected_quick_item_places_tile() -> bool:
-	return ItemCatalog.item_places_tile(get_selected_quick_item_id())
+	return ItemCatalog.is_placeable(get_selected_quick_item_id())
 
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
@@ -136,6 +136,8 @@ func _setup_starting_inventory() -> void:
 	inventory_slots[1] = "bomb"
 	inventory_slots[2] = "water"
 	inventory_slots[3] = "wall"
+	inventory_slots[4] = "lamp"
+	inventory_slots[5] = "rose"
 
 func _show_inventory() -> void:
 	_set_inventory_open(true)
