@@ -2,6 +2,11 @@ extends Resource
 class_name WeaponData
 
 @export var id: String = ""
+
+# Spawn the AoE this many pixels from the origin along the aim direction
+# (0 = spawn exactly at origin).
+@export var throw_offset: float = 0.0
+
 @export var directional_area_angle: float = 360.0
 @export var radius: float = 0.0
 @export var aoe_duration: float = 0.0

@@ -93,8 +93,15 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		return false
 
 	var facing: Vector2 = direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
+	# The AoE zone (and its visual) re-anchor to the owner each frame as
+	# agent_pos + follow_offset, so the throw offset must live in follow_offset —
+	# baking it into the spawn position alone is overwritten on the next tick.
+	var aoe_follow_offset: Vector2 = follow_offset
+	if weapon.throw_offset != 0.0:
+		aoe_follow_offset += facing * weapon.throw_offset
+	var spawn_origin: Vector2 = origin + (aoe_follow_offset - follow_offset)
 	if visualize_AOE_weapons and weapon.aoe_visual_enabled:
-		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id, follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
+		_drawer.show_weapon_area(spawn_origin, facing, radius, angle, duration, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
 
 	if not _steering:
 		return true
@@ -104,7 +111,7 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 
 	_steering.call(
 		"spawn_aoe_zone",
-		origin,
+		spawn_origin,
 		facing,
 		radius,
 		angle,
@@ -117,7 +124,7 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		weapon.control_suppression_duration,
 		source_agent_id,
 		weapon.affected_smash_classes,
-		follow_offset
+		aoe_follow_offset
 	)
 	return true
 
@@ -185,7 +192,10 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 	if t <= 0.0:
 		var type_id: int = int(_gun_type_ids.get(gun_id, -1))
 		if type_id >= 0:
-			_projectiles.call("fire", type_id, origin, direction, source_agent_id, gun.affected_smash_classes)
+			var spawn_pos: Vector2 = origin
+			if gun.throw_offset != 0.0 and direction.length_squared() > 0.000001:
+				spawn_pos += direction.normalized() * gun.throw_offset
+			_projectiles.call("fire", type_id, spawn_pos, direction, source_agent_id, gun.affected_smash_classes)
 		t = max(0.0, gun.fire_delay_ms * 0.001)
 	_gun_fire_timers[gun_id] = t
 

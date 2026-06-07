@@ -10,6 +10,10 @@ class_name GunData
 @export var projectile_size: float = 16.0
 @export var projectile_sprite: Texture2D
 
+# Spawn the projectile this many pixels from the origin along the aim direction
+# (0 = spawn exactly at origin).
+@export var throw_offset: float = 0.0
+
 # --- Visual altitude / shadow (visual-only; does NOT affect collision or simulation) ---
 # The native projectile position is the GROUND position (single source of truth).
 # The sprite is drawn lifted by `projectile_altitude_px` along -Y, but z-ordering
