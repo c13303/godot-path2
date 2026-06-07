@@ -11,3 +11,7 @@ aoe_duration = 0.15
 smash_force = 400.0
 control_suppression = 0.35
 control_suppression_duration = 0.15
+aoe_visual_enabled = true
+aoe_fill_color = Color(1, 0, 0, 0.18)
+aoe_stroke_color = Color(1, 0, 0, 0.85)
+aoe_stroke_width = 2.0

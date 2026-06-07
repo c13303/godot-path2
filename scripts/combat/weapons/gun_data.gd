@@ -48,6 +48,20 @@ class_name GunData
 @export_range(0.0, 1.0, 0.01) var end_aoe_control_suppression: float = 0.0
 @export var end_aoe_control_suppression_duration: float = 0.0
 
+# --- Impact AoE visual (rendered by the same WeaponAOEDrawer as melee weapons) ---
+# Shown wherever a projectile AoE actually fires: wall hit, lifetime expiry, or a
+# direct agent hit. The ring radius matches the simulated AoE radius; the display
+# duration just keeps the instantaneous impulse on screen long enough to read.
+@export_group("Impact AoE Visual")
+@export var impact_visual_enabled: bool = true
+@export var impact_display_duration: float = 0.18
+@export var impact_fill_color: Color = Color(0.3, 0.6, 1.0, 0.22)
+@export var impact_stroke_color: Color = Color(0.5, 0.8, 1.0, 0.9)
+@export var impact_stroke_width: float = 2.0
+# Extra fine-tune on top of the automatic altitude lift (negative Y = up). Leave
+# at zero unless the sprite art isn't centered on its ground point.
+@export var impact_visual_offset: Vector2 = Vector2.ZERO
+
 @export var pool_size: int = 128
 
 @export_flags("Player", "MainChar", "Monster") var affected_smash_classes: int = 4

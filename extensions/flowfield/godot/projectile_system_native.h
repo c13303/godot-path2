@@ -5,6 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 
 #include "../projectile/projectile_system.h"
@@ -40,6 +41,11 @@ namespace godot
         PackedVector2Array get_active_positions(int type_id) const;
         int get_active_count(int type_id) const;
         int get_type_count() const;
+
+        // Drain this frame's projectile impact events (AoE despawns). Each entry:
+        // { pos:Vector2, dir:Vector2, radius:float, type_id:int, kind:int }.
+        // kind: 0=wall, 1=expiry, 2=agent.
+        Array get_impacts() const;
 
         // Build + upload the static wall mask from the wall TileMapLayer.
         // `bounds_layer` (floor layer) supplies the used rect/origin; if null, the

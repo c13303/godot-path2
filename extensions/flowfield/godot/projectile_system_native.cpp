@@ -25,6 +25,7 @@ void ProjectileSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_active_positions", "type_id"), &ProjectileSystemNative::get_active_positions);
     ClassDB::bind_method(D_METHOD("get_active_count", "type_id"), &ProjectileSystemNative::get_active_count);
     ClassDB::bind_method(D_METHOD("get_type_count"), &ProjectileSystemNative::get_type_count);
+    ClassDB::bind_method(D_METHOD("get_impacts"), &ProjectileSystemNative::get_impacts);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &ProjectileSystemNative::set_paused);
     ClassDB::bind_method(D_METHOD("set_wall_layer", "wall_layer", "bounds_layer"), &ProjectileSystemNative::set_wall_layer);
     ClassDB::bind_method(D_METHOD("clear_walls"), &ProjectileSystemNative::clear_walls);
@@ -58,7 +59,12 @@ void ProjectileSystemNative::_ready()
 void ProjectileSystemNative::_process(double delta)
 {
     if (paused)
+    {
+        // No update => no new impacts; drop any stale ones so GDScript doesn't
+        // re-render the same ring every paused frame.
+        system.clear_impacts();
         return;
+    }
     system.update(delta);
 }
 
@@ -138,6 +144,23 @@ int ProjectileSystemNative::get_active_count(int type_id) const
 int ProjectileSystemNative::get_type_count() const
 {
     return static_cast<int>(system.type_count());
+}
+
+Array ProjectileSystemNative::get_impacts() const
+{
+    Array out;
+    const auto &events = system.impacts();
+    for (const auto &e : events)
+    {
+        Dictionary d;
+        d["pos"] = Vector2(e.pos.x, e.pos.y);
+        d["dir"] = Vector2(e.dir.x, e.dir.y);
+        d["radius"] = e.radius;
+        d["type_id"] = e.type_id;
+        d["kind"] = e.kind;
+        out.push_back(d);
+    }
+    return out;
 }
 
 void ProjectileSystemNative::set_wall_layer(Object *wall_layer_obj, Object *bounds_layer_obj)

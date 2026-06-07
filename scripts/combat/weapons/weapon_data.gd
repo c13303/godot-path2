@@ -14,3 +14,12 @@ class_name WeaponData
 @export var radial: bool = false
 @export var detach_flow: bool = false
 @export_flags("Player", "MainChar", "Monster") var affected_smash_classes: int = 4
+
+# --- AoE visual appearance (per-weapon; rendered by WeaponAOEDrawer) ---
+# The FightSystem.visualize_AOE_weapons flag is the global on/off; aoe_visual_enabled
+# lets an individual weapon opt out without disabling the rest.
+@export_group("AoE Visual")
+@export var aoe_visual_enabled: bool = true
+@export var aoe_fill_color: Color = Color(1.0, 0.0, 0.0, 0.18)
+@export var aoe_stroke_color: Color = Color(1.0, 0.0, 0.0, 0.85)
+@export var aoe_stroke_width: float = 2.0

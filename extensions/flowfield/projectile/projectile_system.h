@@ -82,6 +82,24 @@ namespace ffcore
         std::uint64_t fire_seq = 0;
     };
 
+    // How a projectile ended, surfaced to GDScript so it can draw the AoE.
+    enum class ImpactKind : int
+    {
+        Wall = 0,
+        Expiry = 1,
+        Agent = 2,
+    };
+
+    // One despawn-with-AoE event. Buffered for one frame, drained by GDScript.
+    struct ProjectileImpact
+    {
+        Vec2 pos;
+        Vec2 dir;     // travel direction at impact (normalized)
+        double radius; // AoE radius that was applied
+        int type_id;
+        int kind; // ImpactKind
+    };
+
     class ProjectileSystem
     {
     public:
@@ -110,6 +128,10 @@ namespace ffcore
 
         const std::vector<Projectile> &pool_for(int type_id) const { return pools[type_id]; }
 
+        // Impact events recorded since the last clear (one update's worth).
+        const std::vector<ProjectileImpact> &impacts() const { return impact_events; }
+        void clear_impacts() { impact_events.clear(); }
+
     private:
         struct TypePool
         {
@@ -124,6 +146,7 @@ namespace ffcore
         SpatialGrid *grid = nullptr;
         SteeringSystem *steering = nullptr;
         WallGrid walls;
+        std::vector<ProjectileImpact> impact_events;
         std::uint64_t next_fire_seq = 1;
 
         std::uint16_t checkout_slot(int type_id);
@@ -132,7 +155,8 @@ namespace ffcore
         // true and writes the impact point if a wall is hit; false otherwise.
         bool raycast_walls(const Vec2 &from, const Vec2 &to, Vec2 &out_impact) const;
 
-        // Apply the configured end-of-life AoE smash at the given point.
-        void trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at);
+        // Apply the configured end-of-life AoE smash at the given point and
+        // record a visual impact event.
+        void trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at, ImpactKind kind);
     };
 }

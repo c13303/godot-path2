@@ -21,6 +21,7 @@ var _projectile_drawer
 var _weapons_by_id: Dictionary = {}
 var _guns_by_id: Dictionary = {}
 var _gun_type_ids: Dictionary = {}
+var _gun_by_type_id: Dictionary = {}  # type_id (int) -> GunData, for impact visuals
 var _gun_fire_timers: Dictionary = {}
 
 func _ready() -> void:
@@ -37,6 +38,34 @@ func _ready() -> void:
 		_projectile_drawer.z_order_enabled = z_order_projectiles
 		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
 		add_child(_projectile_drawer)
+
+func _process(_delta: float) -> void:
+	_drain_projectile_impacts()
+
+# Drain this frame's projectile AoE impacts (wall/expiry/agent) from the native
+# system and render each as a fading ring via the shared WeaponAOEDrawer. The
+# native buffer holds events for exactly one update, so this must run every frame.
+func _drain_projectile_impacts() -> void:
+	if not _projectiles or not _projectiles.has_method("get_impacts"):
+		return
+	var impacts: Array = _projectiles.call("get_impacts")
+	if impacts.is_empty():
+		return
+	for impact in impacts:
+		var gun: GunData = _gun_by_type_id.get(int(impact.get("type_id", -1))) as GunData
+		if not gun or not gun.impact_visual_enabled:
+			continue
+		var pos: Vector2 = impact.get("pos", Vector2.ZERO)
+		var dir: Vector2 = impact.get("dir", Vector2.RIGHT)
+		var radius: float = float(impact.get("radius", 0.0))
+		if radius <= 0.0 or gun.impact_display_duration <= 0.0:
+			continue
+		# The native impact is the GROUND point (shadow). The projectile sprite was
+		# drawn lifted by altitude, so lift the ring the same amount to center it on
+		# where the projectile visually was. impact_visual_offset is extra fine-tuning.
+		var visual_pos: Vector2 = pos - Vector2(0.0, gun.projectile_altitude_px) + gun.impact_visual_offset
+		# Impacts are world-anchored circles (owner_id = -1, angle = 360).
+		_drawer.show_weapon_area(visual_pos, dir, radius, 360.0, gun.impact_display_duration, -1, Vector2.ZERO, gun.impact_fill_color, gun.impact_stroke_color, gun.impact_stroke_width)
 
 # Upload the static wall mask to the projectile system so projectiles are
 # stopped by walls. Call again (refresh_projectile_walls) when walls change.
@@ -64,8 +93,8 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		return false
 
 	var facing: Vector2 = direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
-	if visualize_AOE_weapons:
-		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id, follow_offset)
+	if visualize_AOE_weapons and weapon.aoe_visual_enabled:
+		_drawer.show_weapon_area(origin, facing, radius, angle, duration, source_agent_id, follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
 
 	if not _steering:
 		return true
@@ -109,6 +138,7 @@ func is_gun(item_id: String) -> bool:
 func _register_guns() -> void:
 	_guns_by_id.clear()
 	_gun_type_ids.clear()
+	_gun_by_type_id.clear()
 	if not _projectiles:
 		return
 	for gun in guns:
@@ -139,6 +169,7 @@ func _register_guns() -> void:
 		}
 		var type_id: int = int(_projectiles.call("register_type", cfg))
 		_gun_type_ids[gun.id] = type_id
+		_gun_by_type_id[type_id] = gun
 		_gun_fire_timers[gun.id] = 0.0
 	# If the drawer already exists (guns re-registered at runtime), rebuild its
 	# cached per-type visual params. Otherwise _ready() builds it after this call.
@@ -171,8 +202,10 @@ class WeaponAOEDrawer:
 	# height keeps AOE visuals on top regardless of where they spawn.
 	const AOE_Z_INDEX: int = 4096
 
-	var _fill := Color(1.0, 0.0, 0.0, 0.18)
-	var _stroke := Color(1.0, 0.0, 0.0, 0.85)
+	# Fallback appearance, used only if a weapon supplies no visual override.
+	const DEFAULT_FILL := Color(1.0, 0.0, 0.0, 0.18)
+	const DEFAULT_STROKE := Color(1.0, 0.0, 0.0, 0.85)
+	const DEFAULT_STROKE_WIDTH := 2.0
 	var _steering: Node
 
 	func setup(steering: Node) -> void:
@@ -180,7 +213,7 @@ class WeaponAOEDrawer:
 		z_as_relative = false
 		z_index = AOE_Z_INDEX
 
-	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, owner_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> void:
+	func show_weapon_area(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, owner_id: int = -1, follow_offset: Vector2 = Vector2.ZERO, fill_color: Color = DEFAULT_FILL, stroke_color: Color = DEFAULT_STROKE, stroke_width: float = DEFAULT_STROKE_WIDTH) -> void:
 		if duration <= 0.0:
 			return
 		_areas.append({
@@ -191,6 +224,9 @@ class WeaponAOEDrawer:
 			"radius": radius,
 			"angle": angle_degrees,
 			"time_left": duration,
+			"fill": fill_color,
+			"stroke": stroke_color,
+			"stroke_width": stroke_width,
 		})
 		queue_redraw()
 
@@ -215,13 +251,16 @@ class WeaponAOEDrawer:
 			var radius: float = float(area["radius"])
 			var angle: float = float(area["angle"])
 			var direction: Vector2 = area["direction"]
+			var fill: Color = area.get("fill", DEFAULT_FILL)
+			var stroke: Color = area.get("stroke", DEFAULT_STROKE)
+			var stroke_width: float = float(area.get("stroke_width", DEFAULT_STROKE_WIDTH))
 			if angle >= 359.9:
-				draw_circle(origin, radius, _fill)
-				draw_arc(origin, radius, 0.0, TAU, 64, _stroke, 2.0)
+				draw_circle(origin, radius, fill)
+				draw_arc(origin, radius, 0.0, TAU, 64, stroke, stroke_width)
 			else:
-				_draw_cone(origin, direction, radius, angle)
+				_draw_cone(origin, direction, radius, angle, fill, stroke, stroke_width)
 
-	func _draw_cone(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float) -> void:
+	func _draw_cone(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, fill: Color, stroke: Color, stroke_width: float) -> void:
 		var points: PackedVector2Array = PackedVector2Array()
 		points.append(origin)
 		var base_angle: float = direction.angle()
@@ -231,9 +270,9 @@ class WeaponAOEDrawer:
 			var t: float = float(i) / float(steps)
 			var a: float = base_angle - half_angle + half_angle * 2.0 * t
 			points.append(origin + Vector2(cos(a), sin(a)) * radius)
-		draw_colored_polygon(points, _fill)
+		draw_colored_polygon(points, fill)
 		for i in range(points.size()):
-			draw_line(points[i], points[(i + 1) % points.size()], _stroke, 2.0)
+			draw_line(points[i], points[(i + 1) % points.size()], stroke, stroke_width)
 
 class ProjectileDrawer:
 	extends Node2D

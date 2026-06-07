@@ -91,23 +91,30 @@ namespace ffcore
         return false;
     }
 
-    void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at)
+    void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at, ImpactKind kind)
     {
-        if (!cfg.end_of_life_aoe_enabled || !steering)
+        if (!cfg.end_of_life_aoe_enabled)
             return;
         Vec2 impact_dir = p.vel.normalized();
-        steering->apply_area_smash(
-            at,
-            cfg.end_aoe_radius,
-            impact_dir,
-            cfg.end_aoe_force,
-            cfg.end_aoe_friction_loss,
-            cfg.end_aoe_falloff,
-            cfg.end_aoe_detach_flow,
-            cfg.end_aoe_control_suppression,
-            cfg.end_aoe_control_suppression_duration,
-            p.owner_agent_id,
-            p.affected_smash_classes);
+        if (steering)
+        {
+            steering->apply_area_smash(
+                at,
+                cfg.end_aoe_radius,
+                impact_dir,
+                cfg.end_aoe_force,
+                cfg.end_aoe_friction_loss,
+                cfg.end_aoe_falloff,
+                cfg.end_aoe_detach_flow,
+                cfg.end_aoe_control_suppression,
+                cfg.end_aoe_control_suppression_duration,
+                p.owner_agent_id,
+                p.affected_smash_classes);
+        }
+        // Surface the AoE so GDScript can render it (one-frame event buffer).
+        impact_events.push_back(ProjectileImpact{
+            at, impact_dir, cfg.end_aoe_radius,
+            static_cast<int>(p.type_id), static_cast<int>(kind)});
     }
 
     int ProjectileSystem::register_type(const ProjectileTypeConfig &cfg)
@@ -191,6 +198,9 @@ namespace ffcore
         if (!grid || delta <= 0.0)
             return;
 
+        // Impact events live for exactly one update; GDScript drains them after.
+        impact_events.clear();
+
         for (std::size_t t = 0; t < pools.size(); ++t)
         {
             const ProjectileTypeConfig &cfg = types[t];
@@ -215,7 +225,7 @@ namespace ffcore
                     if (raycast_walls(prev_pos, p.pos, impact))
                     {
                         p.pos = impact;
-                        trigger_end_aoe(cfg, p, impact);
+                        trigger_end_aoe(cfg, p, impact, ImpactKind::Wall);
                         p.active = 0;
                         tp.free_list.push_back(static_cast<std::uint16_t>(i));
                         continue;
@@ -225,7 +235,7 @@ namespace ffcore
                 p.lifetime_remaining -= delta;
                 if (p.lifetime_remaining <= 0.0)
                 {
-                    trigger_end_aoe(cfg, p, p.pos);
+                    trigger_end_aoe(cfg, p, p.pos, ImpactKind::Expiry);
                     p.active = 0;
                     tp.free_list.push_back(static_cast<std::uint16_t>(i));
                     continue;
@@ -274,6 +284,10 @@ namespace ffcore
                         cfg.smash_control_suppression_duration,
                         p.owner_agent_id,
                         p.affected_smash_classes);
+
+                    impact_events.push_back(ProjectileImpact{
+                        p.pos, impact_dir, cfg.aoe_radius,
+                        static_cast<int>(p.type_id), static_cast<int>(ImpactKind::Agent)});
 
                     p.active = 0;
                     tp.free_list.push_back(static_cast<std::uint16_t>(i));
