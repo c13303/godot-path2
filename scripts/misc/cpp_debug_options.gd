@@ -54,7 +54,37 @@ extends Node
 		show_monsters_path = value
 		_apply_debug_settings()
 
+@export var show_enters_exits: bool = false:
+	set(value):
+		show_enters_exits = value
+		_apply_debug_settings()
+
+@export_group("Monsters")
+## Seconds a monster spends eating a plant before leaving the garden.
+@export_range(0.0, 60.0, 0.1, "or_greater") var monster_eating_time: float = 5.0:
+	set(value):
+		monster_eating_time = value
+		_apply_debug_settings()
+
+## Global speed multiplier applied at startup. 1.0 = no change.
+## Scales monster movement speed and player speed (x mult), and the
+## eating delay (/ mult, so >1 eats faster). Weapons are unaffected.
+## Read once when the scene starts; only affects monsters spawned afterwards.
+@export_range(0.1, 10.0, 0.1, "or_greater") var speed_multiplier: float = 1.0:
+	set(value):
+		speed_multiplier = value
+		_apply_debug_settings()
+
+@export_group("Pathfinding Garden")
+@export_range(0, 32, 1, "or_greater") var empty_garden_local_retarget_radius: int = 5:
+	set(value):
+		empty_garden_local_retarget_radius = value
+		_apply_debug_settings()
+
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
+var _building_manager: Node
+## Unmultiplied agent_max_speed, captured once before the multiplier is applied.
+var _base_agent_max_speed: float = -1.0
 
 
 func _ready() -> void:
@@ -74,6 +104,7 @@ func _setup_tile_hover_info() -> void:
 	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/Label") as Label
 	var game_ui: Node = scene.get_node_or_null("GameUI")
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
+	_building_manager = building_manager
 	tile_hover_info.setup(floorz, steering, fps_label, flow, game_ui, building_manager)
 	tile_hover_info.set_enabled(debug_enabled)
 	tile_hover_info.set_show_monster_paths(show_monsters_path)
@@ -99,6 +130,7 @@ func _apply_debug_settings() -> void:
 	if global_config:
 		_call_if_available(global_config, "set_draw_flow_field", draw_flow_field)
 		_call_if_available(global_config, "set_debug_show_plant_zones", show_gardens)
+		_apply_speed_multiplier(global_config)
 
 	var flow: Node = get_node_or_null("FlowFieldNative")
 	if flow:
@@ -107,6 +139,33 @@ func _apply_debug_settings() -> void:
 	if tile_hover_info:
 		tile_hover_info.set_enabled(debug_enabled)
 		tile_hover_info.set_show_monster_paths(show_monsters_path)
+
+	if _building_manager == null:
+		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
+		if scene:
+			_building_manager = scene.get_node_or_null("Map/BuildingManager")
+	if _building_manager:
+		_call_if_available(_building_manager, "set_show_enters_exits", show_enters_exits)
+		_call_if_available(_building_manager, "set_empty_garden_local_retarget_radius", empty_garden_local_retarget_radius)
+		# Eating delay is divided by the multiplier so >1 means "eats faster".
+		var mult: float = maxf(0.0001, speed_multiplier)
+		_call_if_available(_building_manager, "set_eating_time", monster_eating_time / mult)
+
+
+## Pushes agent_max_speed = base * speed_multiplier to the native global config.
+## Captures the unmultiplied base the first time so re-applies don't compound.
+func _apply_speed_multiplier(global_config: Node) -> void:
+	if not global_config.has_method("get_agent_max_speed") or not global_config.has_method("set_agent_max_speed"):
+		return
+	if _base_agent_max_speed < 0.0:
+		_base_agent_max_speed = float(global_config.call("get_agent_max_speed"))
+	global_config.call("set_agent_max_speed", _base_agent_max_speed * maxf(0.0001, speed_multiplier))
+
+
+## Effective speed multiplier, read by other systems (e.g. the player) so they
+## can scale their own speed consistently with the monsters.
+func get_speed_multiplier() -> float:
+	return maxf(0.0001, speed_multiplier)
 
 
 func _call_if_available(target: Node, method_name: StringName, value: Variant) -> void:

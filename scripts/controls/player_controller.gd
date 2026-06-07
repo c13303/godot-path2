@@ -119,9 +119,13 @@ func _setup_player() -> void:
 			"smash_class": SMASH_CLASS_PLAYER,
 		}
 		# Player max_speed > 0 overrides the global agent_max_speed; 0 means inherit.
+		# We resolve the effective speed and multiply it explicitly so the player
+		# scales with the CPP > Debug speed_multiplier without double-counting the
+		# already-multiplied global agent_max_speed.
 		var player_max_speed := float(player.get("max_speed"))
-		if player_max_speed > 0.0:
-			profile["max_speed"] = player_max_speed
+		var base_speed := player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
+		if base_speed > 0.0:
+			profile["max_speed"] = base_speed * _speed_multiplier()
 		steering.call("set_agent_profile", player_nav_id, profile)
 
 	if player:
@@ -131,6 +135,22 @@ func _agent_world_radius() -> float:
 	if global_config_node and global_config_node.has_method("get_agent_world_radius"):
 		return float(global_config_node.call("get_agent_world_radius"))
 	return 12.0
+
+## CPP > Debug speed multiplier (1.0 if the debug node is unavailable).
+func _speed_multiplier() -> float:
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		var debug_node: Node = scene.get_node_or_null("CPP")
+		if debug_node and debug_node.has_method("get_speed_multiplier"):
+			return float(debug_node.call("get_speed_multiplier"))
+	return 1.0
+
+## Unmultiplied global agent_max_speed. The native global already holds
+## base * multiplier (the debug node applies it first), so divide it back out.
+func _base_agent_max_speed() -> float:
+	if global_config_node and global_config_node.has_method("get_agent_max_speed"):
+		return float(global_config_node.call("get_agent_max_speed")) / _speed_multiplier()
+	return 0.0
 
 func _startup_loading_active() -> bool:
 	if game_ui and game_ui.has_method("is_startup_loading"):

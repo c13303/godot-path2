@@ -10,6 +10,8 @@ const ZONE_COLOR: Color = Color(1.0, 0.5, 0.0, 0.3)
 const ROUTE_COLOR: Color = Color(1.0, 0.5, 0.0, 1.0)
 const UNREACHABLE_COLOR: Color = Color(0.9, 0.1, 0.1, 0.55)
 const DIRTY_COLOR: Color = Color(0.95, 0.85, 0.15, 0.65)
+const ENTER_COLOR: Color = Color(1.0, 0.9, 0.1, 0.9)
+const EXIT_COLOR: Color = Color(0.1, 0.85, 0.2, 0.9)
 
 func _draw() -> void:
 	if not visible:
@@ -58,6 +60,28 @@ func _draw() -> void:
 		var c: Vector2i = raw_cell
 		var center_local: Vector2 = _cell_center_local(floorz, c)
 		draw_rect(Rect2(center_local - half, half * 2.0), DIRTY_COLOR, true)
+
+	# Enter (yellow) / exit (green) garden border tiles. Exit drawn on top so it
+	# wins when a tile serves as both.
+	var show_enters_exits: bool = false
+	if building_manager.has_method("get_show_enters_exits"):
+		show_enters_exits = bool(building_manager.call("get_show_enters_exits"))
+	if show_enters_exits:
+		var enter_cells: Array = []
+		if building_manager.has_method("get_garden_enter_tiles"):
+			enter_cells = building_manager.call("get_garden_enter_tiles") as Array
+		for raw_cell in enter_cells:
+			var c: Vector2i = raw_cell
+			var center_local: Vector2 = _cell_center_local(floorz, c)
+			draw_rect(Rect2(center_local - half, half * 2.0), ENTER_COLOR, true)
+
+		var exit_cells: Array = []
+		if building_manager.has_method("get_garden_exit_tiles"):
+			exit_cells = building_manager.call("get_garden_exit_tiles") as Array
+		for raw_cell in exit_cells:
+			var c: Vector2i = raw_cell
+			var center_local: Vector2 = _cell_center_local(floorz, c)
+			draw_rect(Rect2(center_local - half, half * 2.0), EXIT_COLOR, true)
 
 func _cell_center_local(floorz: TileMapLayer, cell: Vector2i) -> Vector2:
 	if get_parent() == floorz:

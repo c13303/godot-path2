@@ -1302,6 +1302,8 @@ debug_enabled = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
 show_monsters_path = true
+show_enters_exits = true
+speed_multiplier = 2.0
 
 [node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
 script = ExtResource("8_5nq50")
