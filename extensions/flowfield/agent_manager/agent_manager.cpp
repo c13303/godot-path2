@@ -128,6 +128,13 @@ namespace ffcore
         return &agents[it->second];
     }
 
+    FlowField *AgentManager::get_group_flow(GroupID group) const
+    {
+        if (group == INVALID_GROUP || group >= MAX_GROUPS)
+            return nullptr;
+        return groups[group].flow;
+    }
+
     void AgentManager::set_group_flow(GroupID group, FlowField *flow)
     {
         if (group == INVALID_GROUP || group >= MAX_GROUPS)

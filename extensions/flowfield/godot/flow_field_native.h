@@ -141,6 +141,11 @@ namespace godot
 
         void assign_flow_to_group(int group_id, Vector2 goal);
 
+        // Walkable cost-to-goal for a group's flow field at a world position.
+        // Returns +INF if the group has no flow or the cell is unreachable.
+        // Used to pick the nearest reachable escape exit per monster cheaply.
+        double group_route_cost_at_world(int group_id, Vector2 world_pos) const;
+
         void adjust_wall_tangents(const Rect2i &used,
                                   const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                   int radius = 1);

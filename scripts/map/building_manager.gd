@@ -63,6 +63,13 @@ var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
+# One escape flow field per exit-wall tile, shared by all monsters. Keyed by the
+# exit-wall cell. Each value: { "escape_group": int, "escape_target_cell":
+# Vector2i, "escape_world": Vector2, "ready": bool }. A finishing monster picks
+# the exit with the lowest route cost from its position (FlowFieldNative.
+# group_route_cost_at_world), so it leaves through the nearest reachable wall
+# exit. Rebuilt only on dirty events (level load / walls changed).
+var _exit_wall_escapes: Dictionary = {}  # Vector2i -> Dictionary
 var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
@@ -273,6 +280,8 @@ func _scan_buildings() -> void:
 		for raw_spawner_cell in _spawners.keys():
 			_rebuild_spawner_plant_ff(raw_spawner_cell)
 			_dirty_spawner_escapes[raw_spawner_cell] = true
+		# Exit walls may have been added/removed: refresh per-exit escape FFs.
+		_rebuild_exit_wall_escapes()
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
@@ -289,6 +298,8 @@ func _sync_runtime_state() -> void:
 		var progress: float = 0.75 + (float(index) / float(total_count)) * 0.23
 		startup_loading_progress.emit(progress, "Preparing routes")
 		await get_tree().process_frame
+	# Per-exit-wall escape FFs (shared by all monsters); built once at startup.
+	_rebuild_exit_wall_escapes()
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -501,6 +512,88 @@ func _rebuild_all_spawner_routes() -> void:
 	for raw_cell in _spawners.keys():
 		var spawner_cell: Vector2i = raw_cell
 		_initialize_spawner_route(spawner_cell)
+
+# Build/refresh one escape flow field per exit-wall tile. Each is a per-group FF
+# whose goal is the floor tile adjacent to that exit wall. Runs only on dirty
+# events; at runtime a monster reads each group's route cost to pick the nearest
+# reachable exit. Stale exits (walls removed) are released.
+func _rebuild_exit_wall_escapes() -> void:
+	if not _flow_ready:
+		return
+	if not agent_manager or not agent_manager.has_method("create_group"):
+		return
+	if not flow:
+		return
+
+	var current_exits: Dictionary = {}  # Vector2i -> true
+	if wallz:
+		for raw_cell in wallz.get_used_cells():
+			var c: Vector2i = raw_cell
+			if wallz.get_cell_atlas_coords(c) == EXIT_WALL_ATLAS:
+				current_exits[c] = true
+
+	# Release escapes whose exit wall no longer exists.
+	for raw_exit_cell in _exit_wall_escapes.keys():
+		var exit_cell: Vector2i = raw_exit_cell
+		if not current_exits.has(exit_cell):
+			_release_exit_wall_escape(exit_cell)
+
+	# Create/refresh an escape FF for every current exit wall.
+	for raw_exit_cell in current_exits.keys():
+		var exit_cell: Vector2i = raw_exit_cell
+		var target_cell: Vector2i = _nearest_walkable_adjacent(exit_cell)
+		if target_cell == INVALID_CELL:
+			# No walkable tile next to this exit wall: drop any stale escape.
+			_release_exit_wall_escape(exit_cell)
+			continue
+		var escape: Dictionary = _exit_wall_escapes.get(exit_cell, {}) as Dictionary
+		var escape_group: int = int(escape.get("escape_group", -1))
+		if escape_group <= IDLE_GROUP:
+			escape_group = int(agent_manager.call("create_group"))
+		if escape_group <= IDLE_GROUP:
+			push_error("BuildingManager: could not allocate escape group for exit wall %s" % exit_cell)
+			continue
+		var escape_world: Vector2 = _cell_center(target_cell)
+		# Synchronous assign so the FF (and its route-cost field) is queryable
+		# immediately; goals are static and rebuilds are rare (dirty events only).
+		if flow.has_method("assign_flow_to_group"):
+			flow.call("assign_flow_to_group", escape_group, escape_world)
+		else:
+			_request_group_flow_rebuild(escape_group, escape_world)
+		escape["escape_group"] = escape_group
+		escape["escape_target_cell"] = target_cell
+		escape["escape_world"] = escape_world
+		escape["ready"] = true
+		_exit_wall_escapes[exit_cell] = escape
+
+func _release_exit_wall_escape(exit_cell: Vector2i) -> void:
+	if not _exit_wall_escapes.has(exit_cell):
+		return
+	var escape: Dictionary = _exit_wall_escapes[exit_cell] as Dictionary
+	var escape_group: int = int(escape.get("escape_group", -1))
+	if escape_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
+		agent_manager.call("dissolve_group", escape_group)
+	_exit_wall_escapes.erase(exit_cell)
+
+# Pick the exit-wall escape with the lowest walkable route cost from world_pos.
+# Returns {} if none is reachable (caller falls back to the per-spawner escape).
+func _nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
+	if not flow or not flow.has_method("group_route_cost_at_world"):
+		return {}
+	var best: Dictionary = {}
+	var best_cost: float = INF
+	for raw_exit_cell in _exit_wall_escapes.keys():
+		var escape: Dictionary = _exit_wall_escapes[raw_exit_cell] as Dictionary
+		if not bool(escape.get("ready", false)):
+			continue
+		var escape_group: int = int(escape.get("escape_group", -1))
+		if escape_group <= IDLE_GROUP:
+			continue
+		var cost: float = float(flow.call("group_route_cost_at_world", escape_group, world_pos))
+		if cost < best_cost:
+			best_cost = cost
+			best = escape
+	return best
 
 func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
 	if flow and flow.has_method("request_flow_to_group"):
@@ -763,7 +856,17 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
 		return
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	var exit_cell: Vector2i = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
+	# Aim the in-garden A* at the border tile nearest the exit the monster will
+	# actually use: the nearest reachable wall exit by route cost. Fall back to
+	# the spawner's exit when no per-exit escape applies.
+	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
+	var exit_cell: Vector2i = INVALID_CELL
+	if not exit_escape.is_empty():
+		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
+		if exit_target != INVALID_CELL:
+			exit_cell = _nearest_garden_entry(garden_id, exit_target)
+	if exit_cell == INVALID_CELL:
+		exit_cell = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
 	if exit_cell == INVALID_CELL:
 		_assign_agent_to_escape(agent)
 		return
@@ -815,6 +918,17 @@ func _process_astar_out_arrivals() -> void:
 func _assign_agent_to_escape(agent: Node2D) -> void:
 	if not agent_manager or not agent_manager.has_method("assign_agent"):
 		return
+	# Prefer the nearest reachable per-exit-wall escape (chosen by walkable route
+	# cost from the monster), so monsters leave through the closest wall exit.
+	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
+	if not exit_escape.is_empty():
+		var exit_group: int = int(exit_escape.get("escape_group", -1))
+		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
+		if exit_group > IDLE_GROUP and exit_target != INVALID_CELL:
+			_attach_agent_to_escape(agent, exit_group, exit_target)
+			return
+
+	# Fallback: the per-spawner escape (single shared exit for that spawner).
 	var spawner_cell: Vector2i = INVALID_CELL
 	if agent.has_meta("spawner_cell"):
 		var pre_linked: Vector2i = agent.get_meta("spawner_cell") as Vector2i
@@ -831,6 +945,10 @@ func _assign_agent_to_escape(agent: Node2D) -> void:
 	var escape_group: int = int(route.get("escape_group", -1))
 	if escape_group <= IDLE_GROUP:
 		return
+	var escape_target_cell: Vector2i = route.get("escape_wall_target_cell", spawner_cell) as Vector2i
+	_attach_agent_to_escape(agent, escape_group, escape_target_cell, spawner_cell)
+
+func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell: Vector2i, spawner_cell: Vector2i = INVALID_CELL) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	# Ensure path-follow is cleared before switching to FF group.
 	if agent_manager.has_method("detach_agent_path"):
@@ -839,8 +957,8 @@ func _assign_agent_to_escape(agent: Node2D) -> void:
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
-	agent.set_meta("spawner_cell", spawner_cell)
-	var escape_target_cell: Vector2i = route.get("escape_wall_target_cell", spawner_cell) as Vector2i
+	if spawner_cell != INVALID_CELL:
+		agent.set_meta("spawner_cell", spawner_cell)
 	_escaping_agents[nav_id] = {
 		"node": agent,
 		"target_cell": escape_target_cell,
@@ -1165,31 +1283,89 @@ func _validate_dirty_gardens() -> void:
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 
+# Garden geometry is navigation-aware, not box-geometry. A bounded walkable BFS
+# from the plant cells (same 8-conn, no-corner-cut rules as the pathfinder/cluster
+# BFS) defines the interior `zone_tiles`, so a thin wall or corner can never leak a
+# zone tile to the far side of a wall (fix: the old Chebyshev margin box only
+# skipped cells that *were* walls). Access tiles (`entry_cells`) are the walkable
+# cells one valid step *outside* that interior — a real inside<->outside transition
+# with no wall between, the only cells a monster can actually use to enter. They are
+# never reserved/exclusive and may overlap spawners, map exits, or other non-wall
+# markers; only physical non-walkability rejects them.
 func _recompute_garden_geometry(garden_id: int) -> void:
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
 	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-	var zone_tiles: Dictionary = {}
-	var margin_tiles: Dictionary = {}
-	var entry_cells: Array[Vector2i] = []
+
+	# Interior: walkable cells reachable from any plant within PLANT_ZONE_MARGIN
+	# walkable steps. Plant cells seed the BFS and are always part of the interior.
+	var zone_tiles: Dictionary = {}  # Vector2i -> true (interior, incl. plant cells)
+	var dist: Dictionary = {}  # Vector2i -> walkable steps from nearest plant
+	var queue: Array[Vector2i] = []
+	var head: int = 0
 	for raw_cell in plant_cells.keys():
 		var plant_cell: Vector2i = raw_cell
-		for dy in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
-			for dx in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
-				var cell: Vector2i = plant_cell + Vector2i(dx, dy)
-				if _has_wall(cell):
+		zone_tiles[plant_cell] = true
+		dist[plant_cell] = 0
+		queue.append(plant_cell)
+
+	# Access candidates: walkable cells just outside the interior, discovered when a
+	# walkable neighbor is reached but lies beyond the bound. Stored separately so
+	# they are not treated as interior, but are still valid navigable entries.
+	var access_tiles: Dictionary = {}  # Vector2i -> true
+
+	while head < queue.size():
+		var cell: Vector2i = queue[head]
+		head += 1
+		var cell_dist: int = int(dist[cell])
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				if dx == 0 and dy == 0:
 					continue
-				zone_tiles[cell] = true
-				if not plant_cells.has(cell):
-					margin_tiles[cell] = true
-	for raw_cell in margin_tiles.keys():
-		var margin_cell: Vector2i = raw_cell
-		if _is_walkable(margin_cell):
-			entry_cells.append(margin_cell)
+				var neighbor: Vector2i = cell + Vector2i(dx, dy)
+				if not _is_walkable(neighbor):
+					continue
+				# No diagonal corner-cutting through walls (matches the pathfinder),
+				# so a transition is only valid when a monster could really take it.
+				if dx != 0 and dy != 0:
+					if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+						continue
+				if zone_tiles.has(neighbor):
+					continue
+				var next_dist: int = cell_dist + 1
+				if next_dist <= PLANT_ZONE_MARGIN:
+					# Still inside the bounded interior.
+					if not dist.has(neighbor) or next_dist < int(dist[neighbor]):
+						dist[neighbor] = next_dist
+						zone_tiles[neighbor] = true
+						# A cell first seen as an access tile from a farther plant is
+						# promoted to interior when a closer plant reaches it in-bound.
+						access_tiles.erase(neighbor)
+						queue.append(neighbor)
+				else:
+					# One valid walkable step beyond the interior: a true access tile.
+					# Only if it is not already interior (the early zone_tiles check
+					# above guarantees that).
+					access_tiles[neighbor] = true
+
+	# margin_tiles keeps its prior meaning for the overlay/compat cache: interior
+	# tiles that are not plant cells, plus the access tiles. Access tiles are the
+	# navigable entries; entry_cells exposes them to routing/debug.
+	var margin_tiles: Dictionary = {}
+	for raw_cell in zone_tiles.keys():
+		var zone_cell: Vector2i = raw_cell
+		if not plant_cells.has(zone_cell):
+			margin_tiles[zone_cell] = true
+	var entry_cells: Array[Vector2i] = []
+	for raw_cell in access_tiles.keys():
+		var access_cell: Vector2i = raw_cell
+		margin_tiles[access_cell] = true
+		entry_cells.append(access_cell)
+
 	garden["zone_tiles"] = zone_tiles
 	garden["margin_tiles"] = margin_tiles
 	garden["entry_cells"] = entry_cells
 	# Provisional: refined by _apply_spawner_reachability once the spawner flood
-	# is available. A garden with no walkable entry cell can never be reachable.
+	# is available. A garden with no walkable access tile can never be reachable.
 	garden["reachable"] = not entry_cells.is_empty()
 	garden["edible_count"] = plant_cells.size()
 	garden["targetable"] = plant_cells.size() > 0 and not entry_cells.is_empty()
@@ -1751,10 +1927,23 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 		zone_tiles = garden.get("zone_tiles", {}) as Dictionary
 	if zone_tiles.is_empty():
 		return PackedVector2Array()
-	_sync_pathfinder_zone_tiles(zone_tiles)
-	# Snap endpoints to zone tiles if needed.
-	var start_tile: Vector2i = from_tile if zone_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, zone_tiles)
-	var end_tile: Vector2i = to_tile if zone_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, zone_tiles)
+	# Access tiles sit one walkable step *outside* the interior, so an entry/exit
+	# endpoint (where the agent actually stands or aims) is not in zone_tiles. Add
+	# any walkable endpoint to the A* walkable set so the path runs through the real
+	# access tile instead of snapping a tile short. Use a local copy so the cached
+	# garden zone_tiles is not mutated.
+	var path_tiles: Dictionary = zone_tiles
+	if _is_walkable(from_tile) and not zone_tiles.has(from_tile):
+		path_tiles = zone_tiles.duplicate()
+		path_tiles[from_tile] = true
+	if _is_walkable(to_tile) and not path_tiles.has(to_tile):
+		if path_tiles == zone_tiles:
+			path_tiles = zone_tiles.duplicate()
+		path_tiles[to_tile] = true
+	_sync_pathfinder_zone_tiles(path_tiles)
+	# Snap endpoints to walkable tiles if needed (non-walkable endpoints only).
+	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
+	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
 	return pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array

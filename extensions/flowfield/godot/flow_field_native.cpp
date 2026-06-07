@@ -63,6 +63,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal"), &FlowFieldNative::request_flow_to_group);
     ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal"), &FlowFieldNative::assign_flow_to_group);
+    ClassDB::bind_method(D_METHOD("group_route_cost_at_world", "group_id", "world_pos"), &FlowFieldNative::group_route_cost_at_world);
     ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
     ClassDB::bind_method(D_METHOD("get_debug_draw"), &FlowFieldNative::get_debug_draw);
     ClassDB::bind_method(D_METHOD("set_floor_layer", "node"), &FlowFieldNative::set_floor_layer);
@@ -1312,4 +1313,19 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
         "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size()); */
     new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(group_id, new_flow);
+}
+
+double FlowFieldNative::group_route_cost_at_world(int group_id, Vector2 world_pos) const
+{
+    if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
+        return std::numeric_limits<double>::infinity();
+    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+    if (!mgr)
+        return std::numeric_limits<double>::infinity();
+    const ffcore::FlowField *ff = mgr->get_group_flow(group_id);
+    if (!ff || !ff->is_ready())
+        return std::numeric_limits<double>::infinity();
+    // The group's field stores its own cell_origin/tile, so convert against it.
+    ffcore::Vec2i cell = ff->world_to_cell(ffcore::Vec2(world_pos.x, world_pos.y));
+    return ff->route_cost_at_cell(cell);
 }
