@@ -1300,8 +1300,8 @@ script = ExtResource("3_mdsmv")
 script = ExtResource("23_cpp_debug")
 debug_enabled = true
 draw_bottleneck_zones = false
-show_agent_state_labels = false
 refresh_interval = 0.0
+show_monsters_path = true
 
 [node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
 script = ExtResource("8_5nq50")

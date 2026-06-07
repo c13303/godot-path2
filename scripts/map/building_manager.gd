@@ -12,6 +12,7 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const PLANT_ZONE_MARGIN: int = 2
+const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
@@ -35,6 +36,7 @@ var _tile_defs_by_atlas: Dictionary = {}
 var _spawners: Dictionary = {}
 var _spawn_timers: Dictionary = {}
 var _spawner_routes: Dictionary = {}
+var _spawner_garden_routes: Dictionary = {}
 var _eating_agents: Dictionary = {}
 var _escaping_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
@@ -43,16 +45,21 @@ var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
+var _last_spawn_failure_at_ms: Dictionary = {}
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
+var _gardens: Dictionary = {}
+var _garden_by_plant_cell: Dictionary = {}
+var _dirty_gardens: Dictionary = {}
+var _next_garden_id: int = 1
 
 # Day/night: set true once at least one monster has spawned during the current
 # night, so an empty scene can flip back to day only after a real night ran.
 var _spawned_this_night: bool = false
 
-# Plant zone. Tiles use the floorz tilemap cell space.
+# Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
 var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
 var _plant_zone_built: bool = false
@@ -84,6 +91,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if not is_night:
 		return
 	# Entering night: start fresh so monsters spawn promptly.
+	_validate_dirty_gardens()
+	_rebuild_spawner_garden_route_cache()
 	_spawned_this_night = false
 	for cell in _spawn_timers.keys():
 		_spawn_timers[cell] = 0.0
@@ -119,7 +128,8 @@ func _run_startup_after_flow_ready() -> void:
 	startup_loading_progress.emit(0.55, "Building plant zone")
 	await get_tree().process_frame
 
-	_build_plant_zone()
+	_build_gardens_from_plants()
+	_validate_dirty_gardens()
 	startup_loading_progress.emit(0.70, "Finding spawner routes")
 	await get_tree().process_frame
 
@@ -229,8 +239,11 @@ func _scan_buildings() -> void:
 			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
-		# Walls reshape the FF cost field; rebuild every spawner's plant + escape FFs
-		# using their CACHED static goals (no goal re-derivation).
+		# Walls reshape garden entries and FF cost fields. Revalidate gardens
+		# and rebuild cached spawner/garden FFs using their current entries.
+		_mark_all_gardens_dirty()
+		_validate_dirty_gardens()
+		_rebuild_spawner_garden_route_cache()
 		for raw_spawner_cell in _spawners.keys():
 			_rebuild_spawner_plant_ff(raw_spawner_cell)
 			_dirty_spawner_escapes[raw_spawner_cell] = true
@@ -262,10 +275,14 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 
 func _on_plant_added(_cell: Vector2i) -> void:
-	_rebuild_plant_zone_from_layer()
+	_add_plant_to_gardens(_cell)
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
 
 func _on_plant_removed(_cell: Vector2i) -> void:
-	_rebuild_plant_zone_from_layer()
+	_remove_plant_from_gardens(_cell)
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
 	if _no_plants_remaining():
 		_start_escape_for_all_monsters()
 
@@ -346,17 +363,20 @@ func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 		_initialize_spawner_route(cell)
 
 func _release_spawner_route(spawner_cell: Vector2i) -> void:
-	if not _spawner_routes.has(spawner_cell):
-		return
-	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
-	var plant_group: int = int(route.get("plant_group", -1))
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
 	var escape_group: int = int(route.get("escape_group", -1))
 	if agent_manager and agent_manager.has_method("dissolve_group"):
-		if plant_group > IDLE_GROUP:
-			agent_manager.call("dissolve_group", plant_group)
 		if escape_group > IDLE_GROUP:
 			agent_manager.call("dissolve_group", escape_group)
+		if _spawner_garden_routes.has(spawner_cell):
+			var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+			for raw_route in garden_routes.values():
+				var garden_route: Dictionary = raw_route as Dictionary
+				var plant_group: int = int(garden_route.get("plant_group", -1))
+				if plant_group > IDLE_GROUP:
+					agent_manager.call("dissolve_group", plant_group)
 	_spawner_routes.erase(spawner_cell)
+	_spawner_garden_routes.erase(spawner_cell)
 
 func _drain_dirty_routes() -> void:
 	if not _flow_ready:
@@ -374,8 +394,8 @@ func _drain_dirty_routes() -> void:
 			_rebuild_spawner_escape_ff(raw_cell)
 
 func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	# One-shot: compute all 4 static cells (exit_wall, escape_wall_target,
-	# plant_zone_entry, plant_zone_exit) and assign plant + escape FFs.
+	# One-shot: compute static escape cells. Plant FFs are per garden and are
+	# created lazily when a spawner needs a target garden.
 	if not _flow_ready or not _plant_zone_built:
 		return
 	if not agent_manager or not flow:
@@ -396,35 +416,6 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
 	route["escape_wall_target_cell"] = escape_wall_target_cell
 
-	# Entry into plant zone (nearest margin tile to spawner).
-	var entry_cell: Vector2i = _nearest_margin_tile(spawner_cell)
-	route["plant_zone_entry_cell"] = entry_cell
-
-	# Exit out of plant zone (nearest margin tile to exit wall).
-	var exit_cell: Vector2i = INVALID_CELL
-	if exit_wall_cell != INVALID_CELL:
-		exit_cell = _nearest_margin_tile(exit_wall_cell)
-	if exit_cell == INVALID_CELL:
-		exit_cell = entry_cell
-	route["plant_zone_exit_cell"] = exit_cell
-
-	# Plant FF: goal = entry margin tile (static).
-	if entry_cell != INVALID_CELL:
-		var plant_group: int = int(route.get("plant_group", -1))
-		if plant_group <= IDLE_GROUP:
-			plant_group = int(agent_manager.call("create_group"))
-		if plant_group > IDLE_GROUP:
-			var entry_world: Vector2 = _cell_center(entry_cell)
-			flow.call("assign_flow_to_group", plant_group, entry_world)
-			route["plant_group"] = plant_group
-			route["plant_world"] = entry_world
-			route["plant_ready"] = true
-		else:
-			push_error("BuildingManager: spawner %s could not allocate plant group" % spawner_cell)
-			route["plant_ready"] = false
-	else:
-		route["plant_ready"] = false
-
 	# Escape FF: goal = floor tile adjacent to exit wall (static).
 	if escape_wall_target_cell != INVALID_CELL:
 		var escape_group: int = int(route.get("escape_group", -1))
@@ -443,23 +434,26 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 		route["escape_ready"] = false
 
 	_spawner_routes[spawner_cell] = route
-	_log("initialized spawner=%s exit_wall=%s escape_target=%s entry=%s exit=%s" % [
-		spawner_cell, exit_wall_cell, escape_wall_target_cell, entry_cell, exit_cell
+	_log("initialized spawner=%s exit_wall=%s escape_target=%s" % [
+		spawner_cell, exit_wall_cell, escape_wall_target_cell
 	])
 
 func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
-	# Re-run plant FF after walls change. Goal is the cached entry cell.
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
-	if entry_cell == INVALID_CELL:
+	if not _spawner_garden_routes.has(spawner_cell):
 		return
-	var plant_group: int = int(route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		return
-	var entry_world: Vector2 = _cell_center(entry_cell)
-	_request_group_flow_rebuild(plant_group, entry_world)
-	route["plant_world"] = entry_world
-	_spawner_routes[spawner_cell] = route
+	var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+	for raw_garden_id in garden_routes.keys():
+		var garden_id: int = int(raw_garden_id)
+		var route: Dictionary = garden_routes[garden_id] as Dictionary
+		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
+		var plant_group: int = int(route.get("plant_group", -1))
+		if entry_cell == INVALID_CELL or plant_group <= IDLE_GROUP:
+			continue
+		var entry_world: Vector2 = _cell_center(entry_cell)
+		_request_group_flow_rebuild(plant_group, entry_world)
+		route["entry_world"] = entry_world
+		garden_routes[garden_id] = route
+	_spawner_garden_routes[spawner_cell] = garden_routes
 
 func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	# Re-run escape FF after walls change. Goal is the cached escape_wall_target_cell.
@@ -536,17 +530,21 @@ func _process_spawners(delta: float) -> void:
 			_spawn_timers[cell] = 0.25
 
 func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	if not bool(route.get("plant_ready", false)):
-		_log_spawn_failure("spawner %s plant route not ready" % spawner_cell)
+	var garden_id: int = _select_garden_for_spawner(spawner_cell)
+	if garden_id <= 0:
+		_log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
+		return false
+	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+	if not bool(route.get("ready", false)):
+		_log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
 		return false
 	var plant_group: int = int(route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
-		_log_spawn_failure("spawner %s plant group invalid" % spawner_cell)
+		_log_spawn_failure("spawner %s garden %d plant group invalid" % [spawner_cell, garden_id])
 		return false
-	var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s has no plant zone entry cell" % spawner_cell)
+		_log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
 		return false
 
 	var occupied: Array[Vector2i] = _occupied_cells()
@@ -566,18 +564,20 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 		var nav_id: int = int(agent_manager.call("spawn_agent", agent, plant_group))
 		agent.set("nav_id", nav_id)
 		agent.set_meta("spawner_cell", spawner_cell)
+		agent.set_meta("garden_id", garden_id)
+		agent.set_meta("garden_entry_cell", entry_cell)
 		if agent.has_method("start_flow_in"):
 			agent.call("start_flow_in")
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
-		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s" % [
-			nav_id, spawn_cell, entry_cell, spawner_cell
+		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
+			nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
 	return true
 
-# Phase 1 -> 2: agent reached its plant_zone_entry_cell via FF. Compute A* to a
-# plant target, detach FF, attach path.
+# Phase 1 -> 2: agent reached its assigned garden entry via FF. Compute A* to a
+# plant target inside that garden, detach FF, attach path.
 func _process_astar_in_arrivals() -> void:
 	for node in get_tree().get_nodes_in_group("monsters"):
 		if not (node is Node2D):
@@ -591,8 +591,9 @@ func _process_astar_in_arrivals() -> void:
 		if not agent.has_meta("spawner_cell"):
 			continue
 		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-		var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-		var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
+		var entry_cell: Vector2i = INVALID_CELL
+		if agent.has_meta("garden_entry_cell"):
+			entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
 		if entry_cell == INVALID_CELL:
 			continue
 		if not _agent_reached_cell(agent, entry_cell):
@@ -602,12 +603,17 @@ func _process_astar_in_arrivals() -> void:
 func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent(agent_cell)
-	if target_plant_cell == INVALID_CELL:
-		# No reachable plant in the zone; let panic-escape path take over later.
+	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	if not _garden_has_edible_plants(garden_id):
+		_assign_agent_to_escape(agent)
 		return
-	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, target_plant_cell)
+	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent_in_garden(agent_cell, garden_id)
+	if target_plant_cell == INVALID_CELL:
+		_assign_agent_to_escape(agent)
+		return
+	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, target_plant_cell, garden_id)
 	if path_cells.is_empty():
+		_assign_agent_to_escape(agent)
 		return
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
@@ -617,7 +623,9 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	_astar_in_agents[nav_id] = {
 		"node": agent,
 		"plant_cell": target_plant_cell,
-		"spawner_cell": spawner_cell
+		"spawner_cell": spawner_cell,
+		"garden_id": garden_id,
+		"path_world": path_world
 	}
 	if agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
@@ -648,7 +656,6 @@ func _process_plant_arrivals() -> void:
 		if plant_cell == INVALID_CELL:
 			continue
 		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
-			# Plant disappeared while in transit; try to start astar_out toward exit.
 			_start_astar_out(agent, spawner_cell)
 			continue
 		_consume_plant(agent, spawner_cell, plant_cell)
@@ -723,13 +730,13 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 		spawner_cell = _nearest_spawner_cell(from_cell)
 	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
 		return
-	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
-	var exit_cell: Vector2i = route.get("plant_zone_exit_cell", INVALID_CELL) as Vector2i
+	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	var exit_cell: Vector2i = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
 	if exit_cell == INVALID_CELL:
 		_assign_agent_to_escape(agent)
 		return
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, exit_cell)
+	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, exit_cell, garden_id)
 	if path_cells.is_empty():
 		_assign_agent_to_escape(agent)
 		return
@@ -742,7 +749,9 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	_astar_out_agents[nav_id] = {
 		"node": agent,
 		"spawner_cell": spawner_cell,
-		"exit_cell": exit_cell
+		"garden_id": garden_id,
+		"exit_cell": exit_cell,
+		"path_world": path_world
 	}
 	if agent.has_method("start_astar_out"):
 		agent.call("start_astar_out")
@@ -933,70 +942,308 @@ func _tile_layer_signature(layer: TileMapLayer) -> int:
 func _build_plant_zone() -> void:
 	if _plant_zone_built:
 		return
-	_plant_zone_tiles.clear()
-	_plant_zone_margin_tiles.clear()
+	_build_gardens_from_plants()
+	_validate_dirty_gardens()
 
-	if not plantz:
+func _rebuild_plant_zone_from_layer() -> void:
+	_build_gardens_from_plants()
+	_validate_dirty_gardens()
+	_rebuild_spawner_garden_route_cache()
+
+func _build_gardens_from_plants() -> void:
+	_gardens.clear()
+	_garden_by_plant_cell.clear()
+	_dirty_gardens.clear()
+	_next_garden_id = 1
+	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
+		_rebuild_plant_zone_compatibility_cache()
 		_plant_zone_built = true
 		return
+	var plant_cells_from_manager: Array = plant_manager.call("get_plant_cells") as Array
+	for raw_cell in plant_cells_from_manager:
+		var cell: Vector2i = raw_cell
+		_add_plant_to_gardens(cell)
+	_plant_zone_built = true
 
-	# Seed = used cells on plantz.
-	var seed_tiles: Dictionary = {}
-	for raw_cell in plantz.get_used_cells():
-		var c: Vector2i = raw_cell
-		seed_tiles[c] = true
+func _add_plant_to_gardens(cell: Vector2i) -> void:
+	if _garden_by_plant_cell.has(cell):
+		return
+	var matching_ids: Array[int] = _garden_ids_near_plant(cell)
+	var garden_id: int = 0
+	if matching_ids.is_empty():
+		garden_id = _create_garden()
+	else:
+		garden_id = matching_ids[0]
+		if matching_ids.size() > 1:
+			garden_id = _merge_gardens(matching_ids)
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	plant_cells[cell] = true
+	garden["plant_cells"] = plant_cells
+	_gardens[garden_id] = garden
+	_garden_by_plant_cell[cell] = garden_id
+	_mark_garden_dirty(garden_id, false)
+	_plant_zone_tiles[cell] = true
 
-	# Dilate by PLANT_ZONE_MARGIN (Chebyshev), exclude wall tiles.
-	var dilated: Dictionary = {}
-	for raw_cell in seed_tiles.keys():
-		var c: Vector2i = raw_cell
-		for dy in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
-			for dx in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
-				var n: Vector2i = c + Vector2i(dx, dy)
-				if _has_wall(n):
-					continue
-				dilated[n] = true
+func _remove_plant_from_gardens(cell: Vector2i) -> void:
+	if not _garden_by_plant_cell.has(cell):
+		return
+	var garden_id: int = int(_garden_by_plant_cell[cell])
+	_garden_by_plant_cell.erase(cell)
+	if not _gardens.has(garden_id):
+		return
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	plant_cells.erase(cell)
+	if plant_cells.is_empty():
+		_release_garden_routes(garden_id)
+		_gardens.erase(garden_id)
+		_dirty_gardens.erase(garden_id)
+	else:
+		garden["plant_cells"] = plant_cells
+		_gardens[garden_id] = garden
+		_mark_garden_dirty(garden_id, false)
 
-	# zone_tiles = (seed ∪ dilated) − walls.
-	for raw_cell in seed_tiles.keys():
-		var c: Vector2i = raw_cell
-		if _has_wall(c):
+func _create_garden() -> int:
+	var garden_id: int = _next_garden_id
+	_next_garden_id += 1
+	_gardens[garden_id] = {
+		"id": garden_id,
+		"plant_cells": {},
+		"zone_tiles": {},
+		"margin_tiles": {},
+		"entry_cells": [],
+		"dirty": true,
+		"reachable": false,
+		"version": 0
+	}
+	_dirty_gardens[garden_id] = true
+	return garden_id
+
+func _garden_ids_near_plant(cell: Vector2i) -> Array[int]:
+	var ids: Array[int] = []
+	for raw_garden_id in _gardens.keys():
+		var garden_id: int = int(raw_garden_id)
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+		if _cell_near_set(cell, plant_cells) or _cell_near_set(cell, zone_tiles):
+			ids.append(garden_id)
+	ids.sort()
+	return ids
+
+func _cell_near_set(cell: Vector2i, cells: Dictionary) -> bool:
+	var connection_distance: int = PLANT_ZONE_MARGIN * 2
+	for raw_cell in cells.keys():
+		var other: Vector2i = raw_cell
+		var delta: Vector2i = other - cell
+		if abs(delta.x) <= connection_distance and abs(delta.y) <= connection_distance:
+			return true
+	return false
+
+func _merge_gardens(garden_ids: Array[int]) -> int:
+	garden_ids.sort()
+	var target_id: int = garden_ids[0]
+	var target: Dictionary = _gardens[target_id] as Dictionary
+	var target_plants: Dictionary = target.get("plant_cells", {}) as Dictionary
+	for i in range(1, garden_ids.size()):
+		var source_id: int = garden_ids[i]
+		if not _gardens.has(source_id):
 			continue
-		_plant_zone_tiles[c] = true
-	for raw_cell in dilated.keys():
-		var c: Vector2i = raw_cell
-		_plant_zone_tiles[c] = true
+		var source: Dictionary = _gardens[source_id] as Dictionary
+		var source_plants: Dictionary = source.get("plant_cells", {}) as Dictionary
+		for raw_cell in source_plants.keys():
+			var cell: Vector2i = raw_cell
+			target_plants[cell] = true
+			_garden_by_plant_cell[cell] = target_id
+		_release_garden_routes(source_id)
+		_gardens.erase(source_id)
+		_dirty_gardens.erase(source_id)
+	target["plant_cells"] = target_plants
+	_gardens[target_id] = target
+	_mark_garden_dirty(target_id, false)
+	return target_id
 
-	# margin_tiles = dilated − seed (entry/exit candidates).
-	for raw_cell in dilated.keys():
-		var c: Vector2i = raw_cell
-		if seed_tiles.has(c):
+func _mark_garden_dirty(garden_id: int, invalidate_routes: bool) -> void:
+	if not _gardens.has(garden_id):
+		return
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	garden["dirty"] = true
+	if invalidate_routes:
+		garden["reachable"] = false
+		garden["version"] = int(garden.get("version", 0)) + 1
+	_gardens[garden_id] = garden
+	_dirty_gardens[garden_id] = true
+
+func _mark_all_gardens_dirty() -> void:
+	for raw_garden_id in _gardens.keys():
+		var garden_id: int = int(raw_garden_id)
+		_mark_garden_dirty(garden_id, true)
+
+func _validate_dirty_gardens() -> void:
+	if _dirty_gardens.is_empty():
+		_rebuild_plant_zone_compatibility_cache()
+		return
+	var dirty_ids: Array = _dirty_gardens.keys()
+	_dirty_gardens.clear()
+	for raw_garden_id in dirty_ids:
+		var garden_id: int = int(raw_garden_id)
+		if not _gardens.has(garden_id):
 			continue
-		_plant_zone_margin_tiles[c] = true
-
-	# Push to native pathfinder.
-	if pathfinder:
-		var zone_arr: PackedVector2Array = PackedVector2Array()
-		zone_arr.resize(_plant_zone_tiles.size())
-		var i: int = 0
-		for raw_cell in _plant_zone_tiles.keys():
-			var c: Vector2i = raw_cell
-			zone_arr[i] = Vector2(float(c.x), float(c.y))
-			i += 1
-		if pathfinder.has_method("set_walkable_tiles"):
-			pathfinder.call("set_walkable_tiles", zone_arr)
-		if pathfinder.has_method("set_blockers"):
-			pathfinder.call("set_blockers", _wall_blockers_for_zone_bounds())
-
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		if plant_cells.is_empty():
+			_release_garden_routes(garden_id)
+			_gardens.erase(garden_id)
+			continue
+		_recompute_garden_geometry(garden_id)
+	_rebuild_plant_zone_compatibility_cache()
 	_plant_zone_built = true
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
-	_log("plant zone built: zone_tiles=%d margin_tiles=%d" % [_plant_zone_tiles.size(), _plant_zone_margin_tiles.size()])
 
-func _rebuild_plant_zone_from_layer() -> void:
-	_plant_zone_built = false
-	_build_plant_zone()
-	_rebuild_all_spawner_routes()
+func _recompute_garden_geometry(garden_id: int) -> void:
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	var zone_tiles: Dictionary = {}
+	var margin_tiles: Dictionary = {}
+	var entry_cells: Array[Vector2i] = []
+	for raw_cell in plant_cells.keys():
+		var plant_cell: Vector2i = raw_cell
+		for dy in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
+			for dx in range(-PLANT_ZONE_MARGIN, PLANT_ZONE_MARGIN + 1):
+				var cell: Vector2i = plant_cell + Vector2i(dx, dy)
+				if _has_wall(cell):
+					continue
+				zone_tiles[cell] = true
+				if not plant_cells.has(cell):
+					margin_tiles[cell] = true
+	for raw_cell in margin_tiles.keys():
+		var margin_cell: Vector2i = raw_cell
+		if _is_walkable(margin_cell):
+			entry_cells.append(margin_cell)
+	garden["zone_tiles"] = zone_tiles
+	garden["margin_tiles"] = margin_tiles
+	garden["entry_cells"] = entry_cells
+	garden["reachable"] = not entry_cells.is_empty()
+	garden["dirty"] = false
+	_gardens[garden_id] = garden
+
+func _rebuild_plant_zone_compatibility_cache() -> void:
+	_plant_zone_tiles.clear()
+	_plant_zone_margin_tiles.clear()
+	for raw_garden in _gardens.values():
+		var garden: Dictionary = raw_garden as Dictionary
+		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+		var margin_tiles: Dictionary = garden.get("margin_tiles", {}) as Dictionary
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		for raw_cell in zone_tiles.keys():
+			var zone_cell: Vector2i = raw_cell
+			_plant_zone_tiles[zone_cell] = true
+		for raw_cell in margin_tiles.keys():
+			var margin_cell: Vector2i = raw_cell
+			_plant_zone_margin_tiles[margin_cell] = true
+		if bool(garden.get("dirty", false)):
+			for raw_cell in plant_cells.keys():
+				var plant_cell: Vector2i = raw_cell
+				_plant_zone_tiles[plant_cell] = true
+
+func _rebuild_spawner_garden_route_cache() -> void:
+	for raw_spawner_cell in _spawner_garden_routes.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell
+		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+		for raw_garden_id in routes.keys():
+			var garden_id: int = int(raw_garden_id)
+			var route: Dictionary = routes[garden_id] as Dictionary
+			if not _garden_route_is_current(route, garden_id):
+				_release_spawner_garden_route(spawner_cell, garden_id)
+
+func _release_garden_routes(garden_id: int) -> void:
+	for raw_spawner_cell in _spawner_garden_routes.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell
+		_release_spawner_garden_route(spawner_cell, garden_id)
+
+func _release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> void:
+	if not _spawner_garden_routes.has(spawner_cell):
+		return
+	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+	if not routes.has(garden_id):
+		return
+	var route: Dictionary = routes[garden_id] as Dictionary
+	var plant_group: int = int(route.get("plant_group", -1))
+	if plant_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
+		agent_manager.call("dissolve_group", plant_group)
+	routes.erase(garden_id)
+	if routes.is_empty():
+		_spawner_garden_routes.erase(spawner_cell)
+	else:
+		_spawner_garden_routes[spawner_cell] = routes
+
+func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
+	if not _gardens.has(garden_id):
+		return false
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	if not bool(garden.get("reachable", false)):
+		return false
+	return int(route.get("garden_version", -1)) == int(garden.get("version", 0))
+
+func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
+	var best_garden_id: int = 0
+	var best_dist: int = 2147483647
+	for raw_garden_id in _gardens.keys():
+		var garden_id: int = int(raw_garden_id)
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		if not bool(garden.get("reachable", false)):
+			continue
+		if not _garden_has_edible_plants(garden_id):
+			continue
+		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
+		if entry_cell == INVALID_CELL:
+			continue
+		var delta: Vector2i = entry_cell - spawner_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_garden_id = garden_id
+	return best_garden_id
+
+func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
+	if not _spawner_garden_routes.has(spawner_cell):
+		_spawner_garden_routes[spawner_cell] = {}
+	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+	var existing_route: Dictionary = routes.get(garden_id, {}) as Dictionary
+	if bool(existing_route.get("ready", false)) and _garden_route_is_current(existing_route, garden_id):
+		return existing_route
+	if not _gardens.has(garden_id):
+		return {"ready": false}
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
+	if entry_cell == INVALID_CELL:
+		return {"ready": false}
+	var plant_group: int = int(existing_route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		if not agent_manager or not agent_manager.has_method("create_group"):
+			return {"ready": false}
+		plant_group = int(agent_manager.call("create_group"))
+	if plant_group <= IDLE_GROUP:
+		return {"ready": false}
+	var entry_world: Vector2 = _cell_center(entry_cell)
+	if flow and flow.has_method("assign_flow_to_group"):
+		flow.call("assign_flow_to_group", plant_group, entry_world)
+	elif flow and flow.has_method("request_flow_to_group"):
+		flow.call("request_flow_to_group", plant_group, entry_world)
+	else:
+		return {"ready": false}
+	var route: Dictionary = {
+		"plant_group": plant_group,
+		"entry_cell": entry_cell,
+		"entry_world": entry_world,
+		"ready": true,
+		"garden_version": int(garden.get("version", 0))
+	}
+	routes[garden_id] = route
+	_spawner_garden_routes[spawner_cell] = routes
+	return route
 
 func get_plant_zone_tiles() -> Array:
 	return _plant_zone_tiles.keys()
@@ -1006,27 +1253,98 @@ func get_plant_zone_margin_tiles() -> Array:
 
 func get_plant_zone_route_tiles() -> Array:
 	var route_tiles: Dictionary = {}
-	for raw_route in _spawner_routes.values():
-		var route: Dictionary = raw_route
-		var entry_cell: Vector2i = route.get("plant_zone_entry_cell", INVALID_CELL) as Vector2i
-		if entry_cell != INVALID_CELL:
+	for raw_garden in _gardens.values():
+		var garden: Dictionary = raw_garden as Dictionary
+		var entry_cells: Array = garden.get("entry_cells", []) as Array
+		for raw_entry_cell in entry_cells:
+			var entry_cell: Vector2i = raw_entry_cell
 			route_tiles[entry_cell] = true
-		var exit_cell: Vector2i = route.get("plant_zone_exit_cell", INVALID_CELL) as Vector2i
-		if exit_cell != INVALID_CELL:
-			route_tiles[exit_cell] = true
 	return route_tiles.keys()
+
+func get_garden_entry_cells() -> Array:
+	return get_plant_zone_route_tiles()
+
+func get_unreachable_garden_cells() -> Array:
+	var cells: Dictionary = {}
+	for raw_garden in _gardens.values():
+		var garden: Dictionary = raw_garden as Dictionary
+		if bool(garden.get("reachable", false)):
+			continue
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+		for raw_cell in zone_tiles.keys():
+			var zone_cell: Vector2i = raw_cell
+			cells[zone_cell] = true
+		for raw_cell in plant_cells.keys():
+			var plant_cell: Vector2i = raw_cell
+			cells[plant_cell] = true
+	return cells.keys()
+
+func get_dirty_garden_cells() -> Array:
+	var cells: Dictionary = {}
+	for raw_garden in _gardens.values():
+		var garden: Dictionary = raw_garden as Dictionary
+		if not bool(garden.get("dirty", false)):
+			continue
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+		for raw_cell in zone_tiles.keys():
+			var zone_cell: Vector2i = raw_cell
+			cells[zone_cell] = true
+		for raw_cell in plant_cells.keys():
+			var plant_cell: Vector2i = raw_cell
+			cells[plant_cell] = true
+	return cells.keys()
+
+func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
+	if _astar_in_agents.has(nav_id):
+		var astar_in_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		return astar_in_data.get("path_world", PackedVector2Array()) as PackedVector2Array
+	if _astar_out_agents.has(nav_id):
+		var astar_out_data: Dictionary = _astar_out_agents[nav_id] as Dictionary
+		return astar_out_data.get("path_world", PackedVector2Array()) as PackedVector2Array
+	if _escaping_agents.has(nav_id):
+		var escape_data: Dictionary = _escaping_agents[nav_id] as Dictionary
+		var escape_target: Vector2i = escape_data.get("target_cell", INVALID_CELL) as Vector2i
+		return _debug_path_to_cell(escape_target)
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D):
+			continue
+		var agent: Node2D = node
+		if int(agent.get("nav_id")) != nav_id:
+			continue
+		var status: String = str(agent.get("status"))
+		if status == "eating" and agent.has_meta("garden_id") and agent.has_meta("spawner_cell"):
+			var garden_id: int = int(agent.get_meta("garden_id"))
+			var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
+			var exit_cell: Vector2i = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
+			return _debug_path_to_cell(exit_cell)
+		if agent.has_meta("garden_entry_cell"):
+			var entry_cell: Vector2i = agent.get_meta("garden_entry_cell") as Vector2i
+			return _debug_path_to_cell(entry_cell)
+		break
+	return PackedVector2Array()
+
+func _debug_path_to_cell(cell: Vector2i) -> PackedVector2Array:
+	var path: PackedVector2Array = PackedVector2Array()
+	if cell == INVALID_CELL:
+		return path
+	path.append(_cell_center(cell))
+	return path
 
 func get_floorz() -> TileMapLayer:
 	return floorz
 
 func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
-	var blockers: PackedVector2Array = PackedVector2Array()
-	if not wallz or _plant_zone_tiles.is_empty():
-		return blockers
+	return _wall_blockers_for_cells(_plant_zone_tiles)
 
+func _wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
+	var blockers: PackedVector2Array = PackedVector2Array()
+	if not wallz or cells.is_empty():
+		return blockers
 	var min_cell: Vector2i = INVALID_CELL
 	var max_cell: Vector2i = Vector2i(-2147483648, -2147483648)
-	for raw_cell in _plant_zone_tiles.keys():
+	for raw_cell in cells.keys():
 		var c: Vector2i = raw_cell
 		if min_cell == INVALID_CELL:
 			min_cell = c
@@ -1094,20 +1412,42 @@ func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
 # ---------------------------------------------------------------------------
 # A* glue: find a path inside the plant zone via PathfinderNative.
 # ---------------------------------------------------------------------------
-func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
+func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	if pathfinder == null or not pathfinder.has_method("find_path"):
 		return PackedVector2Array()
+	var zone_tiles: Dictionary = _plant_zone_tiles
+	if garden_id > 0 and _gardens.has(garden_id):
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		zone_tiles = garden.get("zone_tiles", {}) as Dictionary
+	if zone_tiles.is_empty():
+		return PackedVector2Array()
+	_sync_pathfinder_zone_tiles(zone_tiles)
 	# Snap endpoints to zone tiles if needed.
-	var start_tile: Vector2i = from_tile if _plant_zone_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile)
-	var end_tile: Vector2i = to_tile if _plant_zone_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile)
+	var start_tile: Vector2i = from_tile if zone_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, zone_tiles)
+	var end_tile: Vector2i = to_tile if zone_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, zone_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
-	return pathfinder.call("find_path", start_tile, end_tile)
+	return pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
 
-func _nearest_zone_tile_to(cell: Vector2i) -> Vector2i:
+func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
+	if pathfinder == null:
+		return
+	var zone_arr: PackedVector2Array = PackedVector2Array()
+	zone_arr.resize(zone_tiles.size())
+	var i: int = 0
+	for raw_cell in zone_tiles.keys():
+		var cell: Vector2i = raw_cell
+		zone_arr[i] = Vector2(float(cell.x), float(cell.y))
+		i += 1
+	if pathfinder.has_method("set_walkable_tiles"):
+		pathfinder.call("set_walkable_tiles", zone_arr)
+	if pathfinder.has_method("set_blockers"):
+		pathfinder.call("set_blockers", _wall_blockers_for_cells(zone_tiles))
+
+func _nearest_zone_tile_to(cell: Vector2i, zone_tiles: Dictionary) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL
 	var best_dist: int = 2147483647
-	for raw_cell in _plant_zone_tiles.keys():
+	for raw_cell in zone_tiles.keys():
 		var c: Vector2i = raw_cell
 		var d: Vector2i = c - cell
 		var manhattan: int = abs(d.x) + abs(d.y)
@@ -1124,17 +1464,19 @@ func _path_cells_to_world(path_cells: PackedVector2Array) -> PackedVector2Array:
 		out[i] = _cell_center(Vector2i(int(v.x), int(v.y)))
 	return out
 
-func _resolve_plant_target_for_agent(from_cell: Vector2i) -> Vector2i:
-	# Nearest plant cell to the agent's current cell, restricted to plants
-	# present inside the (static) plant zone. Plants outside the zone are
-	# ignored because we cannot A* to them.
-	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
+func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int) -> Vector2i:
+	if not _gardens.has(garden_id):
 		return INVALID_CELL
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
 	var best_cell: Vector2i = INVALID_CELL
 	var best_dist: int = 2147483647
-	for raw_cell in plant_manager.call("get_plant_cells"):
+	for raw_cell in plant_cells.keys():
 		var c: Vector2i = raw_cell
-		if not _plant_zone_tiles.has(c):
+		if not zone_tiles.has(c):
+			continue
+		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", c)):
 			continue
 		var d: Vector2i = c - from_cell
 		var manhattan: int = abs(d.x) + abs(d.y)
@@ -1143,14 +1485,58 @@ func _resolve_plant_target_for_agent(from_cell: Vector2i) -> Vector2i:
 			best_cell = c
 	return best_cell
 
+func _garden_has_edible_plants(garden_id: int) -> bool:
+	if not _gardens.has(garden_id):
+		return false
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	if plant_cells.is_empty():
+		return false
+	if plant_manager == null or not plant_manager.has_method("has_plant"):
+		return true
+	for raw_cell in plant_cells.keys():
+		var cell: Vector2i = raw_cell
+		if bool(plant_manager.call("has_plant", cell)):
+			return true
+	return false
+
+func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
+	if not _gardens.has(garden_id):
+		return INVALID_CELL
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var entry_cells: Array = garden.get("entry_cells", []) as Array
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in entry_cells:
+		var cell: Vector2i = raw_cell
+		if not _is_walkable(cell):
+			continue
+		var delta: Vector2i = cell - from_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = cell
+	return best_cell
+
+func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
+	var exit_wall_cell: Vector2i = INVALID_CELL
+	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
+	if exit_wall_cell == INVALID_CELL:
+		return _nearest_garden_entry(garden_id, spawner_cell)
+	return _nearest_garden_entry(garden_id, exit_wall_cell)
+
 func _log(message: String) -> void:
 	if debug_logs:
 		print("BuildingManager: ", message)
 
 func _log_spawn_failure(message: String) -> void:
-	if message == _last_spawn_failure:
+	var now_ms: int = Time.get_ticks_msec()
+	var last_ms: int = int(_last_spawn_failure_at_ms.get(message, -SPAWN_FAILURE_WARN_INTERVAL_MS))
+	if now_ms - last_ms < SPAWN_FAILURE_WARN_INTERVAL_MS:
 		return
 	_last_spawn_failure = message
+	_last_spawn_failure_at_ms[message] = now_ms
 	push_warning("BuildingManager: " + message)
 
 func _log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:

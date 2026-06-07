@@ -67,7 +67,9 @@ func _update_gun_fire(delta: float) -> void:
 		return
 	if get_viewport().gui_get_hovered_control() != null:
 		return
-	var weapon_id := _selected_item_id()
+	var weapon_id: String = _selected_item_id()
+	if _selected_item_disabled_for_placement(weapon_id):
+		return
 	if weapon_id == "" or not fight_system.is_gun(weapon_id):
 		return
 	var player := _get_player_node()
@@ -199,10 +201,15 @@ func _selected_item_id() -> String:
 func _selected_item_places_tile() -> bool:
 	return game_ui and game_ui.has_method("selected_quick_item_places_tile") and bool(game_ui.call("selected_quick_item_places_tile"))
 
+func _selected_item_disabled_for_placement(item_id: String) -> bool:
+	return game_ui and game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id))
+
 func _try_use_equipped_item() -> void:
 	if get_viewport().gui_get_hovered_control() != null:
 		return
-	var weapon_id := _selected_item_id()
+	var weapon_id: String = _selected_item_id()
+	if _selected_item_disabled_for_placement(weapon_id):
+		return
 	if weapon_id == "":
 		return
 	var player := _get_player_node()

@@ -43,9 +43,15 @@ extends Node
 		draw_flow_field = value
 		_apply_debug_settings()
 
-@export var show_plant_zones: bool = true:
+@export_group("Gardens")
+@export var show_gardens: bool = true:
 	set(value):
-		show_plant_zones = value
+		show_gardens = value
+		_apply_debug_settings()
+
+@export var show_monsters_path: bool = false:
+	set(value):
+		show_monsters_path = value
 		_apply_debug_settings()
 
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
@@ -67,8 +73,10 @@ func _setup_tile_hover_info() -> void:
 	var flow: Node = get_node_or_null("FlowFieldNative")
 	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/Label") as Label
 	var game_ui: Node = scene.get_node_or_null("GameUI")
-	tile_hover_info.setup(floorz, steering, fps_label, flow, game_ui)
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
+	tile_hover_info.setup(floorz, steering, fps_label, flow, game_ui, building_manager)
 	tile_hover_info.set_enabled(debug_enabled)
+	tile_hover_info.set_show_monster_paths(show_monsters_path)
 
 
 func _process(_delta: float) -> void:
@@ -90,7 +98,7 @@ func _apply_debug_settings() -> void:
 	var global_config: Node = get_node_or_null("GlobalConfigNative")
 	if global_config:
 		_call_if_available(global_config, "set_draw_flow_field", draw_flow_field)
-		_call_if_available(global_config, "set_debug_show_plant_zones", show_plant_zones)
+		_call_if_available(global_config, "set_debug_show_plant_zones", show_gardens)
 
 	var flow: Node = get_node_or_null("FlowFieldNative")
 	if flow:
@@ -98,6 +106,7 @@ func _apply_debug_settings() -> void:
 
 	if tile_hover_info:
 		tile_hover_info.set_enabled(debug_enabled)
+		tile_hover_info.set_show_monster_paths(show_monsters_path)
 
 
 func _call_if_available(target: Node, method_name: StringName, value: Variant) -> void:

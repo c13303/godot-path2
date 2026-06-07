@@ -8,6 +8,7 @@ var slot_type: String = "inventory"
 var slot_index: int = -1
 var item_data: Dictionary = {}
 var selected: bool = false
+var disabled: bool = false
 
 var _icon: TextureRect
 var _key_label: Label
@@ -25,6 +26,10 @@ func set_item(data: Dictionary) -> void:
 
 func set_selected(value: bool) -> void:
 	selected = value
+	_refresh()
+
+func set_disabled(value: bool) -> void:
+	disabled = value
 	_refresh()
 
 func _build() -> void:
@@ -79,6 +84,7 @@ func _refresh() -> void:
 	else:
 		_icon.texture = _atlas_for_frame(int(item_data.get("frame", 0)))
 		tooltip_text = str(item_data.get("name", ""))
+	_icon.modulate = Color(0.45, 0.45, 0.45, 0.55) if disabled else Color(1.0, 1.0, 1.0, 1.0)
 
 	if slot_index >= 0 and slot_index < 8:
 		_key_label.text = str(slot_index + 1)
@@ -103,6 +109,9 @@ func _refresh() -> void:
 		style.border_width_right = 4
 		style.border_width_bottom = 4
 		style.border_color = Color(0.92, 0.78, 0.34)
+	if disabled:
+		style.bg_color = Color(0.055, 0.06, 0.065, 0.88)
+		style.border_color = Color(0.15, 0.16, 0.17, 0.9)
 	add_theme_stylebox_override("panel", style)
 
 func _atlas_for_frame(frame: int) -> AtlasTexture:
@@ -112,7 +121,7 @@ func _atlas_for_frame(frame: int) -> AtlasTexture:
 	return atlas
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if item_data.is_empty():
+	if item_data.is_empty() or disabled:
 		return null
 
 	var preview := TextureRect.new()
@@ -147,6 +156,9 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed:
+			if disabled:
+				accept_event()
+				return
 			if slot_index >= 0 and slot_index < 8 and game_ui and game_ui.has_method("select_quick_slot"):
 				game_ui.call("select_quick_slot", slot_index)
 				accept_event()

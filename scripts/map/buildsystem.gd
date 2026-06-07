@@ -24,7 +24,7 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()
-	if placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
 		return
 
@@ -45,7 +45,7 @@ func _process(_delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()
-	if placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
 
 	if event is InputEventMouseButton and event.pressed:
@@ -186,10 +186,15 @@ func _hovered_cell() -> Vector2i:
 func _selected_placeable_def() -> Dictionary:
 	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
 		return {}
+	if _placement_disabled():
+		return {}
 	return ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_quick_item_id")))
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
+
+func _placement_disabled() -> bool:
+	return GameState.is_night
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))

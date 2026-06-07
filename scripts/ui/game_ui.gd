@@ -57,6 +57,7 @@ func _on_day_toggle_pressed() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
+	_refresh_all_slots()
 
 func _update_day_toggle_icon(is_night: bool) -> void:
 	# Icon reflects the current mode: sun during day, moon during night.
@@ -126,7 +127,11 @@ func get_selected_quick_item_def() -> Dictionary:
 	return ItemCatalog.get_item_def(get_selected_quick_item_id())
 
 func selected_quick_item_places_tile() -> bool:
-	return ItemCatalog.is_placeable(get_selected_quick_item_id())
+	var item_id: String = get_selected_quick_item_id()
+	return ItemCatalog.is_placeable(item_id) and not is_item_disabled_for_placement(item_id)
+
+func is_item_disabled_for_placement(item_id: String) -> bool:
+	return GameState.is_night and ItemCatalog.is_placeable(item_id)
 
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
@@ -319,12 +324,13 @@ func _refresh_all_slots() -> void:
 		_apply_slot_item(_inventory_slot_nodes[i], i)
 
 func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
-	var item_id := inventory_slots[slot_index]
-	var item_def := ItemCatalog.get_item_def(item_id)
+	var item_id: String = inventory_slots[slot_index]
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if not item_def.is_empty():
 		slot.set_item(item_def)
 	else:
 		slot.set_item({})
+	slot.set_disabled(is_item_disabled_for_placement(item_id))
 	slot.set_selected(slot_index == selected_quick_index)
 
 func _clear_container(container: Container) -> void:
