@@ -1187,6 +1187,13 @@ void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
 {
+    if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y))
+    {
+        UtilityFunctions::printerr(
+            "FlowFieldNative.compute_flow_dir: non-finite world_pos (", world_pos.x, ",", world_pos.y, ")");
+        return Vector2(0, 0);
+    }
+
     if (!floor_layer || field.width() == 0 || field.height() == 0)
         return Vector2(0, 0);
 

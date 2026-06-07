@@ -41,6 +41,13 @@ Vec2 FlowField::sample_dir_cell(int x, int y) const
 
 Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 {
+    if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "compute_flow_dir: non-finite world_pos (", world_pos.x, ",", world_pos.y, ")");
+        return Vec2();
+    }
+
     if (!ready)
     {
         godot::UtilityFunctions::print("compute_flow_dir: FlowField NOT READY");
@@ -65,6 +72,13 @@ Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 
 Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const
 {
+    if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y) || tile <= 0.0)
+    {
+        godot::UtilityFunctions::printerr(
+            "world_to_cell: invalid input world_pos=(", world_pos.x, ",", world_pos.y, ") tile=", tile);
+        return Vec2i(-1, -1);
+    }
+
     int gx = static_cast<int>(std::floor(world_pos.x / tile));
     int gy = static_cast<int>(std::floor(world_pos.y / tile));
     return Vec2i(gx - cell_origin.x, gy - cell_origin.y);

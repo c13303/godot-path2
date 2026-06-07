@@ -24,16 +24,20 @@ SteeringSystem::SteeringSystem()
 
 static inline Vec2 safe_normalize(const Vec2 &v) // Normalise un vecteur, évite la division par zéro
 {
+    if (!std::isfinite(v.x) || !std::isfinite(v.y))
+        return Vec2(0, 0);
     double l = v.length();
-    if (l < 1e-6)
+    if (!std::isfinite(l) || l < 1e-6)
         return Vec2(0, 0);
     return v * (1.0 / l);
 }
 
 static inline double safe_len(const Vec2 &v) // Renvoie la longueur d’un vecteur, évite les très petites valeurs
 {
+    if (!std::isfinite(v.x) || !std::isfinite(v.y))
+        return 0.0;
     double l = v.length();
-    return (l < 1e-6) ? 0.0 : l;
+    return (!std::isfinite(l) || l < 1e-6) ? 0.0 : l;
 }
 
 static inline Vec2 move_toward_vec(const Vec2 &current, const Vec2 &target, double max_delta)
@@ -93,13 +97,15 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
     AgentProfile sanitized = profile;
     const auto &cfg = globalconfig();
 
-    sanitized.crowd_push_strength = std::max(0.0, sanitized.crowd_push_strength);
-    sanitized.crowd_resist_strength = std::max(0.001, sanitized.crowd_resist_strength);
-    sanitized.world_radius = sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
-    sanitized.foot_offset_y = std::isnan(sanitized.foot_offset_y) ? cfg.agent_offset_y : sanitized.foot_offset_y;
+    sanitized.crowd_push_strength = std::isfinite(sanitized.crowd_push_strength) ? std::max(0.0, sanitized.crowd_push_strength) : 1.0;
+    sanitized.crowd_resist_strength = std::isfinite(sanitized.crowd_resist_strength) ? std::max(0.001, sanitized.crowd_resist_strength) : 1.0;
+    sanitized.world_radius = std::isfinite(sanitized.world_radius) && sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
+    sanitized.foot_offset_y = std::isfinite(sanitized.foot_offset_y) ? sanitized.foot_offset_y : cfg.agent_offset_y;
+    if (!std::isfinite(sanitized.foot_offset_y))
+        sanitized.foot_offset_y = 0.0;
     sanitized.fight_offset_y = std::isfinite(sanitized.fight_offset_y) ? sanitized.fight_offset_y : 0.0;
-    sanitized.fight_half_w = std::max(0.0, sanitized.fight_half_w);
-    sanitized.fight_half_h = std::max(0.0, sanitized.fight_half_h);
+    sanitized.fight_half_w = std::isfinite(sanitized.fight_half_w) ? std::max(0.0, sanitized.fight_half_w) : 0.0;
+    sanitized.fight_half_h = std::isfinite(sanitized.fight_half_h) ? std::max(0.0, sanitized.fight_half_h) : 0.0;
     if (sanitized.smash_class < 0)
         sanitized.smash_class = 0;
 
@@ -119,6 +125,13 @@ void SteeringSystem::recompute_hitbox_query_extents()
 
 int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField *flow) // Enregistre un agent
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "register_agent: non-finite spawn position (", pos.x, ",", pos.y, ")");
+        return -1;
+    }
+
     AgentData a;
     a.id = next_id++;
     a.position = pos;
@@ -194,6 +207,14 @@ void SteeringSystem::set_agent_group(int id, GroupID group)
 
 int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow)
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "register_agent_with_id: non-finite spawn position agent=", fixed_id,
+            " pos=(", pos.x, ",", pos.y, ")");
+        return -1;
+    }
+
     AgentData a;
     a.id = fixed_id;
     a.position = pos;
@@ -352,6 +373,15 @@ static Vec2 slide_step_against_wall(const Vec2 &step, const Vec2 &wall_normal)
 
 Vec2 SteeringSystem::apply_walk_with_walls(const AgentData &agent, const Vec2 &step, FlowField *ff)
 {
+    if (!std::isfinite(agent.position.x) || !std::isfinite(agent.position.y) || !std::isfinite(step.x) || !std::isfinite(step.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "apply_walk_with_walls: non-finite movement agent=", agent.id,
+            " pos=(", agent.position.x, ",", agent.position.y, ")",
+            " step=(", step.x, ",", step.y, ")");
+        return agent.position;
+    }
+
     if (!ff || (step.x == 0.0 && step.y == 0.0))
         return agent.position + step;
 
@@ -796,6 +826,13 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     AgentData &agent = agents[it->second];
     if (agent.profile.weapon_immune)
         return;
+    if (!std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(force))
+    {
+        godot::UtilityFunctions::printerr(
+            "apply_smash_impulse: invalid input agent=", id,
+            " direction=(", direction.x, ",", direction.y, ") force=", force);
+        return;
+    }
     Vec2 dir = safe_normalize(direction.is_zero() ? hashed_unit_dir(agent.id) : direction);
     Vec2 smash = dir * std::max(0.0, force);
 
@@ -824,6 +861,12 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
 
 void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(radius) || !std::isfinite(force))
+    {
+        godot::UtilityFunctions::printerr(
+            "apply_area_smash: invalid input pos=(", pos.x, ",", pos.y, ") radius=", radius, " force=", force);
+        return;
+    }
     if (radius <= 0.0 || !grid)
         return;
 
@@ -860,6 +903,13 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
 
 void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(radius) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(force))
+    {
+        godot::UtilityFunctions::printerr(
+            "apply_cone_smash: invalid input pos=(", pos.x, ",", pos.y, ")",
+            " direction=(", direction.x, ",", direction.y, ") radius=", radius, " force=", force);
+        return;
+    }
     if (radius <= 0.0 || !grid)
         return;
 
@@ -917,6 +967,12 @@ void SteeringSystem::apply_explosion(const Vec2 &pos, double radius, double inte
 
 void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes)
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(radius) || !std::isfinite(intensity))
+    {
+        godot::UtilityFunctions::printerr(
+            "apply_explosion_filtered: invalid input pos=(", pos.x, ",", pos.y, ") radius=", radius, " intensity=", intensity);
+        return;
+    }
     if (radius <= 0.0 || !grid)
         return;
 
@@ -955,6 +1011,15 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
 
 void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset)
 {
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(radius) || !std::isfinite(duration) || !std::isfinite(force) || !std::isfinite(follow_offset.x) || !std::isfinite(follow_offset.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "spawn_aoe_zone: invalid input pos=(", pos.x, ",", pos.y, ")",
+            " direction=(", direction.x, ",", direction.y, ")",
+            " radius=", radius, " duration=", duration, " force=", force,
+            " follow_offset=(", follow_offset.x, ",", follow_offset.y, ")");
+        return;
+    }
     if (radius <= 0.0 || duration <= 0.0)
         return;
 
@@ -1431,7 +1496,22 @@ void SteeringSystem::update_all(double delta)
             }
         }
 
-        Vec2i rel_cell = ff->world_to_cell(a.position + offset);
+        Vec2 sample_pos = a.position + offset;
+        if (!std::isfinite(sample_pos.x) || !std::isfinite(sample_pos.y))
+        {
+            godot::UtilityFunctions::printerr(
+                "SteeringSystem::update_all: non-finite flow sample agent=", a.id,
+                " group=", a.group,
+                " pos=(", a.position.x, ",", a.position.y, ")",
+                " offset=(", offset.x, ",", offset.y, ")",
+                " velocity=(", a.velocity.x, ",", a.velocity.y, ")",
+                " flow=", ff != nullptr);
+            a.velocity = Vec2(0, 0);
+            a.update_motion_state(delta, cfg, true);
+            continue;
+        }
+
+        Vec2i rel_cell = ff->world_to_cell(sample_pos);
         Vec2i map_cell(rel_cell.x + ff->get_cell_origin().x, rel_cell.y + ff->get_cell_origin().y);
         a.debug_bottleneck_core = ff->bottleneck_core_at_cell(rel_cell);
         a.debug_bottleneck_zone = ff->bottleneck_zone_at_cell(rel_cell);
@@ -1440,7 +1520,7 @@ void SteeringSystem::update_all(double delta)
         {
             a.last_logged_tile = map_cell;
         }
-        Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(a.position + offset));
+        Vec2 flow_dir = safe_normalize(ff->compute_flow_dir(sample_pos));
         const double lost_goal_margin = std::max(ff->tile_size() * 0.5, target_radius);
         if (flow_dir.is_zero() && dist_to_target > lost_goal_margin)
         {
