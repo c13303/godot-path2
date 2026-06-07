@@ -36,6 +36,9 @@ const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
+@export_group("CPP > Gardens")
+@export var dont_shrink_gardens: bool = true
+@export_group("")
 @export_range(0, 32, 1, "or_greater") var empty_garden_local_retarget_radius: int = 5
 @export var debug_show_plantzone: bool = true:
 	set(value):
@@ -334,11 +337,13 @@ func _setup_plant_manager() -> void:
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	_add_plant_to_gardens(_cell)
+	_retarget_agents_for_garden_topology_change(_cell)
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 
 func _on_plant_removed(_cell: Vector2i) -> void:
 	_remove_plant_from_gardens(_cell)
+	_retarget_agents_for_garden_topology_change(_cell)
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 	if _no_plants_remaining():
@@ -745,8 +750,11 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 # plant target inside that garden and attach that path.
 func _process_astar_in_arrivals() -> void:
 	var finished: Array[int] = []
-	for raw_nav_id in _entry_path_agents.keys():
+	var entry_ids: Array = _entry_path_agents.keys()
+	for raw_nav_id in entry_ids:
 		var nav_id: int = int(raw_nav_id)
+		if not _entry_path_agents.has(nav_id):
+			continue
 		var data: Dictionary = _entry_path_agents[nav_id] as Dictionary
 		var raw_agent: Variant = data.get("node", null)
 		if not is_instance_valid(raw_agent):
@@ -775,8 +783,8 @@ func _process_astar_in_arrivals() -> void:
 		_start_astar_in(agent, spawner_cell)
 	for nav_id in finished:
 		_entry_path_agents.erase(nav_id)
-	# _garden_has_edible_plants above may have queued genuinely-empty gardens; this
-	# loop iterates monsters (not _gardens), so draining here is safe.
+	# _garden_has_edible_plants may have queued stale-empty gardens; this loop
+	# iterates monsters, not _gardens, so draining here is safe.
 	_drain_pending_empty_gardens()
 
 func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
@@ -813,8 +821,11 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 # Phase 2 -> 3: astar_in path complete. Verify plant still exists; consume it.
 func _process_plant_arrivals() -> void:
 	var finished: Array[int] = []
-	for raw_nav_id in _astar_in_agents.keys():
+	var astar_ids: Array = _astar_in_agents.keys()
+	for raw_nav_id in astar_ids:
 		var nav_id: int = int(raw_nav_id)
+		if not _astar_in_agents.has(nav_id):
+			continue
 		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
 		var raw_agent: Variant = data.get("node", null)
 		if not is_instance_valid(raw_agent):
@@ -839,10 +850,60 @@ func _process_plant_arrivals() -> void:
 			_astar_in_agents.erase(nav_id)
 			_retarget_agent_or_escape(agent, spawner_cell)
 			continue
-		finished.append(nav_id)
+		_astar_in_agents.erase(nav_id)
 		_consume_plant(agent, spawner_cell, plant_cell)
 	for nav_id in finished:
 		_astar_in_agents.erase(nav_id)
+
+func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
+	var astar_ids: Array = _astar_in_agents.keys()
+	for raw_nav_id in astar_ids:
+		var nav_id: int = int(raw_nav_id)
+		if not _astar_in_agents.has(nav_id):
+			continue
+		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
+		var garden_id: int = int(data.get("garden_id", 0))
+		if plant_cell != changed_cell and not _garden_target_is_stale(garden_id):
+			continue
+		_clear_stale_garden_path(nav_id, data)
+
+	var entry_ids: Array = _entry_path_agents.keys()
+	for raw_nav_id in entry_ids:
+		var nav_id: int = int(raw_nav_id)
+		if not _entry_path_agents.has(nav_id):
+			continue
+		var data: Dictionary = _entry_path_agents[nav_id] as Dictionary
+		var garden_id: int = int(data.get("garden_id", 0))
+		if not _garden_target_is_stale(garden_id):
+			continue
+		_clear_stale_garden_path(nav_id, data)
+	_drain_pending_empty_gardens()
+
+func _garden_target_is_stale(garden_id: int) -> bool:
+	if garden_id <= 0:
+		return true
+	if not _gardens.has(garden_id):
+		return true
+	return not _garden_has_edible_plants(garden_id)
+
+func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
+	_entry_path_agents.erase(nav_id)
+	_astar_in_agents.erase(nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	var raw_agent: Variant = data.get("node", null)
+	if not is_instance_valid(raw_agent):
+		return
+	var agent: Node2D = raw_agent as Node2D
+	if agent == null:
+		return
+	if agent.has_method("stop_astar_in"):
+		agent.call("stop_astar_in")
+	var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	_retarget_agent_or_escape(agent, spawner_cell)
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	_start_agent_eating(eater, _eating_time)
@@ -866,8 +927,11 @@ func _flush_plant_layer_visuals() -> void:
 
 func _process_eating_agents(delta: float) -> void:
 	var finished: Array[int] = []
-	for raw_nav_id in _eating_agents.keys():
+	var eating_ids: Array = _eating_agents.keys()
+	for raw_nav_id in eating_ids:
 		var nav_id: int = int(raw_nav_id)
+		if not _eating_agents.has(nav_id):
+			continue
 		var data: Dictionary = _eating_agents[nav_id] as Dictionary
 		var timer: float = float(data.get("timer", 0.0)) - delta
 		data["timer"] = timer
@@ -901,7 +965,11 @@ func _start_agent_eating(agent: Node2D, seconds: float) -> void:
 	}
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
 	_entry_path_agents.erase(nav_id)
+	_astar_in_agents.erase(nav_id)
+	_astar_out_agents.erase(nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", seconds)
 
@@ -961,8 +1029,11 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 
 func _process_astar_out_arrivals() -> void:
 	var finished: Array[int] = []
-	for raw_nav_id in _astar_out_agents.keys():
+	var astar_out_ids: Array = _astar_out_agents.keys()
+	for raw_nav_id in astar_out_ids:
 		var nav_id: int = int(raw_nav_id)
+		if not _astar_out_agents.has(nav_id):
+			continue
 		var data: Dictionary = _astar_out_agents[nav_id] as Dictionary
 		var raw_agent: Variant = data.get("node", null)
 		if not is_instance_valid(raw_agent):
@@ -1023,6 +1094,8 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 		agent_manager.call("detach_agent_path", nav_id)
 	agent_manager.call("assign_agent", agent, escape_group)
 	_entry_path_agents.erase(nav_id)
+	_astar_in_agents.erase(nav_id)
+	_astar_out_agents.erase(nav_id)
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
@@ -1040,8 +1113,11 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 
 func _process_escape_arrivals() -> void:
 	var arrived: Array[int] = []
-	for raw_nav_id in _escaping_agents.keys():
+	var escaping_ids: Array = _escaping_agents.keys()
+	for raw_nav_id in escaping_ids:
 		var nav_id: int = int(raw_nav_id)
+		if not _escaping_agents.has(nav_id):
+			continue
 		var data: Dictionary = _escaping_agents[nav_id] as Dictionary
 		var raw_agent: Variant = data.get("node", null)
 		if not is_instance_valid(raw_agent):
@@ -1282,6 +1358,17 @@ func _add_plant_to_gardens(cell: Vector2i) -> void:
 	_rebuild_plant_zone_from_layer()
 
 func _remove_plant_from_gardens(cell: Vector2i) -> void:
+	if dont_shrink_gardens:
+		_remove_plant_from_gardens_without_shrink(cell)
+		return
+	# Removal can split a garden when the eaten plant was the bridge between two
+	# bounded walkable clusters. Incremental shrink keeps the old garden id alive
+	# and leaves agents with semantically stale A* targets, so rebuild the same way
+	# additions do. Garden ids are monotonic; every old route/agent assignment is
+	# revalidated against the new topology by the caller.
+	_rebuild_plant_zone_from_layer()
+
+func _remove_plant_from_gardens_without_shrink(cell: Vector2i) -> void:
 	if not _garden_by_plant_cell.has(cell):
 		return
 	var garden_id: int = int(_garden_by_plant_cell[cell])
@@ -1296,30 +1383,30 @@ func _remove_plant_from_gardens(cell: Vector2i) -> void:
 		garden["edible_count"] = 0
 		garden["targetable"] = false
 		_gardens[garden_id] = garden
-		_erase_garden(garden_id, "remove_plant_empty")
-	else:
-		garden["plant_cells"] = plant_cells
-		# edible_count kept only as a debug/display mirror of plant_cells.size();
-		# never used as truth for emptiness (see _garden_has_edible_plants).
-		garden["edible_count"] = plant_cells.size()
-		garden["targetable"] = plant_cells.size() > 0 and bool(garden.get("reachable", false))
-		_gardens[garden_id] = garden
-		_mark_garden_dirty(garden_id, false)
+		_mark_garden_empty(garden_id)
+		return
+	garden["plant_cells"] = plant_cells
+	garden["edible_count"] = plant_cells.size()
+	garden["targetable"] = bool(garden.get("reachable", false))
+	_gardens[garden_id] = garden
 
 # TEMP DEBUG (garden crash hunt) -------------------------------------------
-# Centralized garden erase: logs the lifecycle event and screams if it runs
-# while a _gardens iteration is in progress (the suspected silent-crash cause:
-# Dictionary mutated during iteration of its keys). Remove the guards once the
-# crash is confirmed fixed; keep using one erase path either way.
+# Centralized garden erase. Empty gardens are allowed to disappear immediately;
+# other mid-iteration erases still log because they are harder to reason about.
 func _erase_garden(garden_id: int, reason: String) -> void:
-	if _gardens_iter_depth > 0:
+	if _gardens_iter_depth > 0 and reason != "mark_empty":
 		push_warning("GARDEN-CRASH-GUARD: _gardens erased during iteration! id=%d reason=%s depth=%d size_before=%d" % [
 			garden_id, reason, _gardens_iter_depth, _gardens.size()
 		])
 	if _garden_debug_logs:
 		_log("garden erase id=%d reason=%s gardens_now=%d" % [garden_id, reason, _gardens.size() - 1])
+	_pending_empty_gardens.erase(garden_id)
 	_gardens.erase(garden_id)
 	_dirty_gardens.erase(garden_id)
+	if _plant_zone_built:
+		_rebuild_plant_zone_compatibility_cache()
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
 
 # TEMP DEBUG (lost-agent / OUT OF BOUNDS hunt): a cell is "sane" only if it is a
 # real, finite, in-a-reasonable-range tile. A bad cell (INVALID_CELL sentinel,
@@ -1739,8 +1826,8 @@ func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
 					"garden_id": garden_id,
 					"path_cells": path_cells
 				}
-	# _garden_has_edible_plants may have queued genuinely-empty gardens; drain now
-	# (this loop does not iterate _gardens, so erasing here is safe).
+	# _garden_has_edible_plants may have queued stale-empty gardens; this search
+	# does not iterate _gardens, so draining here is safe.
 	_drain_pending_empty_gardens()
 	if not best_target.is_empty() and not _gardens.has(int(best_target.get("garden_id", 0))):
 		return {}
@@ -2202,17 +2289,10 @@ func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: i
 			best_cell = c
 	return best_cell
 
-# Side-effect-free predicate. Previously this called _mark_garden_empty (which
-# erases from _gardens) right in the middle of callers iterating _gardens.keys()
-# — a Dictionary-mutation-during-iteration that intermittently corrupted the
-# iteration and silently crashed under stress. Now an empty garden is only queued
-# in _pending_empty_gardens; the caller drains it AFTER its loop via
-# _drain_pending_empty_gardens.
 # Truth is plant_cells (cross-checked against the plant_manager), never the cached
 # edible_count: that counter drifts on incremental removal and was flagging
-# non-empty gardens as empty (a live plant in a garden marked empty). A garden is
-# only queued for removal if it has NO plant cell that the plant_manager still
-# confirms — i.e. genuinely empty.
+# non-empty gardens as empty. This predicate may be called while iterating
+# _gardens, so it only queues stale-empty gardens; callers drain after scans.
 func _garden_has_edible_plants(garden_id: int) -> bool:
 	if not _gardens.has(garden_id):
 		return false
@@ -2228,12 +2308,13 @@ func _garden_has_edible_plants(garden_id: int) -> bool:
 		if bool(plant_manager.call("has_plant", cell)):
 			return true
 	# plant_cells is non-empty but the plant_manager confirms none survive: stale
-	# cache, genuinely empty. Queue for removal (drained outside iteration).
+	# cache, genuinely empty. Queue for removal outside any garden iteration.
 	_pending_empty_gardens[garden_id] = true
 	return false
 
-# Drain gardens flagged empty by _garden_has_edible_plants. Safe to call only when
-# NOT iterating _gardens. If a guarded iteration is somehow still active, defer.
+# Drain gardens flagged empty by _garden_has_edible_plants. Plant removal still
+# removes its own empty garden immediately; this catches stale caches found by
+# route/retarget scans without mutating _gardens mid-iteration.
 func _drain_pending_empty_gardens() -> void:
 	if _pending_empty_gardens.is_empty():
 		return
@@ -2257,6 +2338,7 @@ func _mark_garden_empty(garden_id: int) -> void:
 	garden["edible_count"] = 0
 	garden["targetable"] = false
 	_gardens[garden_id] = garden
+	_pending_empty_gardens.erase(garden_id)
 	_release_garden_routes(garden_id)
 	_erase_garden(garden_id, "mark_empty")
 
