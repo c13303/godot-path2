@@ -12,6 +12,12 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const PLANT_ZONE_MARGIN: int = 2
+# Max walkable path length (in cells) allowed between two plants for them to share
+# a garden. Matches the old Chebyshev proximity reach (PLANT_ZONE_MARGIN * 2) but
+# is now measured through walkable cells so walls split gardens. BFS from a seed
+# plant is bounded by this radius and re-seeded from each plant it absorbs, so a
+# chain of plants each within this distance forms one connected garden.
+const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 
 @export var floorz: TileMapLayer
@@ -56,6 +62,10 @@ var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
 var _next_garden_id: int = 1
+# Cells reachable from any spawner over the walkable map. Recomputed once per
+# garden rebuild (single source flood-fill); read when deciding if a garden is
+# reachable. A sealed enclosure has no entry cell in this set, so it is ignored.
+var _spawner_reachable_cells: Dictionary = {}  # Vector2i -> true
 
 # Day/night: set true once at least one monster has spawned during the current
 # night, so an empty scene can flip back to day only after a real night ran.
@@ -248,10 +258,12 @@ func _scan_buildings() -> void:
 			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
-		# Walls reshape garden entries and FF cost fields. Revalidate gardens
-		# and rebuild cached spawner/garden FFs using their current entries.
-		_mark_all_gardens_dirty()
-		_validate_dirty_gardens()
+		# Walls change navigation topology: a new wall can split a garden and a
+		# removed wall can merge two. Re-cluster plants by walkable reachability
+		# from scratch (single cached rebuild), then refresh cached spawner/garden
+		# FFs against the new entries.
+		if _plant_zone_built:
+			_rebuild_plant_zone_from_layer()
 		_rebuild_spawner_garden_route_cache()
 		for raw_spawner_cell in _spawners.keys():
 			_rebuild_spawner_plant_ff(raw_spawner_cell)
@@ -975,32 +987,91 @@ func _build_gardens_from_plants() -> void:
 		_plant_zone_built = true
 		return
 	var plant_cells_from_manager: Array = plant_manager.call("get_plant_cells") as Array
-	for raw_cell in plant_cells_from_manager:
-		var cell: Vector2i = raw_cell
-		_add_plant_to_gardens(cell)
+	_cluster_plants_by_walkable_reachability(plant_cells_from_manager)
 	_plant_zone_built = true
 
+# Wall-aware clustering. Plants share a garden only if they are walkably
+# connected within GARDEN_LINK_DISTANCE. A bounded BFS over walkable cells runs
+# once per unassigned seed plant; plants it reaches join the seed's garden and
+# are themselves re-seeded so a chain of close, walkably-connected plants forms
+# one garden. Walls (non-walkable cells) are never traversed, so they split
+# gardens automatically. This is the single cached rebuild used on dirty events.
+func _cluster_plants_by_walkable_reachability(plant_cells_from_manager: Array) -> void:
+	var unassigned: Dictionary = {}  # Vector2i -> true
+	for raw_cell in plant_cells_from_manager:
+		var cell: Vector2i = raw_cell
+		unassigned[cell] = true
+
+	while not unassigned.is_empty():
+		var seed_cell: Vector2i = unassigned.keys()[0] as Vector2i
+		var garden_id: int = _create_garden()
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+
+		# Plants pending re-seed (BFS bound is measured from each of these).
+		var frontier_plants: Array[Vector2i] = [seed_cell]
+		unassigned.erase(seed_cell)
+		plant_cells[seed_cell] = true
+		_garden_by_plant_cell[seed_cell] = garden_id
+
+		while not frontier_plants.is_empty():
+			var from_plant: Vector2i = frontier_plants.pop_back()
+			var reached: Array[Vector2i] = _bounded_walkable_plant_search(from_plant, unassigned)
+			for reached_cell in reached:
+				unassigned.erase(reached_cell)
+				plant_cells[reached_cell] = true
+				_garden_by_plant_cell[reached_cell] = garden_id
+				frontier_plants.append(reached_cell)
+
+		garden["plant_cells"] = plant_cells
+		garden["edible_count"] = plant_cells.size()
+		garden["targetable"] = false
+		_gardens[garden_id] = garden
+		_mark_garden_dirty(garden_id, false)
+
+# Bounded BFS through walkable cells from a seed plant cell. Returns every cell in
+# `unassigned` reachable within GARDEN_LINK_DISTANCE walkable steps. The seed cell
+# itself is treated as the start even though plant cells must be walkable to be
+# eaten; only walkable cells are expanded so walls cannot be crossed.
+func _bounded_walkable_plant_search(seed_cell: Vector2i, unassigned: Dictionary) -> Array[Vector2i]:
+	var found: Array[Vector2i] = []
+	var visited: Dictionary = {seed_cell: 0}
+	var queue: Array[Vector2i] = [seed_cell]
+	var head: int = 0
+	while head < queue.size():
+		var cell: Vector2i = queue[head]
+		head += 1
+		var dist: int = int(visited[cell])
+		if dist >= GARDEN_LINK_DISTANCE:
+			continue
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var neighbor: Vector2i = cell + Vector2i(dx, dy)
+				if visited.has(neighbor):
+					continue
+				if not _is_walkable(neighbor):
+					continue
+				# Match the pathfinder: no diagonal corner-cutting through walls.
+				# A diagonal step is only valid if both orthogonal neighbors are
+				# walkable, otherwise two plants tucked behind a wall corner would
+				# look connected here but be unreachable to a monster.
+				if dx != 0 and dy != 0:
+					if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+						continue
+				visited[neighbor] = dist + 1
+				queue.append(neighbor)
+				if unassigned.has(neighbor):
+					found.append(neighbor)
+	return found
+
+# A new plant invalidates clustering near it (it may bridge or seed a garden).
+# Plant counts are small, so a single cached rebuild is the clean, correct path.
 func _add_plant_to_gardens(cell: Vector2i) -> void:
 	if _garden_by_plant_cell.has(cell):
 		return
-	var matching_ids: Array[int] = _garden_ids_near_plant(cell)
-	var garden_id: int = 0
-	if matching_ids.is_empty():
-		garden_id = _create_garden()
-	else:
-		garden_id = matching_ids[0]
-		if matching_ids.size() > 1:
-			garden_id = _merge_gardens(matching_ids)
-	var garden: Dictionary = _gardens[garden_id] as Dictionary
-	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-	plant_cells[cell] = true
-	garden["plant_cells"] = plant_cells
-	garden["edible_count"] = int(garden.get("edible_count", 0)) + 1
-	garden["targetable"] = bool(garden.get("reachable", false))
-	_gardens[garden_id] = garden
-	_garden_by_plant_cell[cell] = garden_id
-	_mark_garden_dirty(garden_id, false)
-	_plant_zone_tiles[cell] = true
+	_rebuild_plant_zone_from_layer()
 
 func _remove_plant_from_gardens(cell: Vector2i) -> void:
 	if not _garden_by_plant_cell.has(cell):
@@ -1044,52 +1115,6 @@ func _create_garden() -> int:
 	_dirty_gardens[garden_id] = true
 	return garden_id
 
-func _garden_ids_near_plant(cell: Vector2i) -> Array[int]:
-	var ids: Array[int] = []
-	for raw_garden_id in _gardens.keys():
-		var garden_id: int = int(raw_garden_id)
-		var garden: Dictionary = _gardens[garden_id] as Dictionary
-		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
-		if _cell_near_set(cell, plant_cells) or _cell_near_set(cell, zone_tiles):
-			ids.append(garden_id)
-	ids.sort()
-	return ids
-
-func _cell_near_set(cell: Vector2i, cells: Dictionary) -> bool:
-	var connection_distance: int = PLANT_ZONE_MARGIN * 2
-	for raw_cell in cells.keys():
-		var other: Vector2i = raw_cell
-		var delta: Vector2i = other - cell
-		if abs(delta.x) <= connection_distance and abs(delta.y) <= connection_distance:
-			return true
-	return false
-
-func _merge_gardens(garden_ids: Array[int]) -> int:
-	garden_ids.sort()
-	var target_id: int = garden_ids[0]
-	var target: Dictionary = _gardens[target_id] as Dictionary
-	var target_plants: Dictionary = target.get("plant_cells", {}) as Dictionary
-	for i in range(1, garden_ids.size()):
-		var source_id: int = garden_ids[i]
-		if not _gardens.has(source_id):
-			continue
-		var source: Dictionary = _gardens[source_id] as Dictionary
-		var source_plants: Dictionary = source.get("plant_cells", {}) as Dictionary
-		for raw_cell in source_plants.keys():
-			var cell: Vector2i = raw_cell
-			target_plants[cell] = true
-			_garden_by_plant_cell[cell] = target_id
-		_release_garden_routes(source_id)
-		_gardens.erase(source_id)
-		_dirty_gardens.erase(source_id)
-	target["plant_cells"] = target_plants
-	target["edible_count"] = target_plants.size()
-	target["targetable"] = target_plants.size() > 0 and bool(target.get("reachable", false))
-	_gardens[target_id] = target
-	_mark_garden_dirty(target_id, false)
-	return target_id
-
 func _mark_garden_dirty(garden_id: int, invalidate_routes: bool) -> void:
 	if not _gardens.has(garden_id):
 		return
@@ -1101,11 +1126,6 @@ func _mark_garden_dirty(garden_id: int, invalidate_routes: bool) -> void:
 		garden["version"] = int(garden.get("version", 0)) + 1
 	_gardens[garden_id] = garden
 	_dirty_gardens[garden_id] = true
-
-func _mark_all_gardens_dirty() -> void:
-	for raw_garden_id in _gardens.keys():
-		var garden_id: int = int(raw_garden_id)
-		_mark_garden_dirty(garden_id, true)
 
 func _validate_dirty_gardens() -> void:
 	if _dirty_gardens.is_empty():
@@ -1124,7 +1144,17 @@ func _validate_dirty_gardens() -> void:
 			_gardens.erase(garden_id)
 			continue
 		_recompute_garden_geometry(garden_id)
-	_merge_touching_gardens()
+	# No proximity-based merge step: garden identity comes from walkable BFS
+	# clustering in _build_gardens_from_plants. Merging by margin/zone-tile
+	# adjacency here would re-join gardens separated by a thin wall (their
+	# wall-skipping margin tiles can meet around a corner), which is exactly the
+	# bug this change fixes. Geometry below is per-cluster only.
+	# A sealed enclosure has walkable interior tiles, so entry_cells alone is not
+	# enough to call it reachable. Flood from spawners once and gate every garden
+	# on whether an entry cell is reachable from a spawner.
+	_recompute_spawner_reachable_cells()
+	for raw_garden_id in _gardens.keys():
+		_apply_spawner_reachability(int(raw_garden_id))
 	_rebuild_plant_zone_compatibility_cache()
 	_plant_zone_built = true
 	if _zone_overlay:
@@ -1153,76 +1183,77 @@ func _recompute_garden_geometry(garden_id: int) -> void:
 	garden["zone_tiles"] = zone_tiles
 	garden["margin_tiles"] = margin_tiles
 	garden["entry_cells"] = entry_cells
+	# Provisional: refined by _apply_spawner_reachability once the spawner flood
+	# is available. A garden with no walkable entry cell can never be reachable.
 	garden["reachable"] = not entry_cells.is_empty()
 	garden["edible_count"] = plant_cells.size()
 	garden["targetable"] = plant_cells.size() > 0 and not entry_cells.is_empty()
 	garden["dirty"] = false
 	_gardens[garden_id] = garden
 
-func _merge_touching_gardens() -> void:
-	var graph: Dictionary = {}
-	var zone_owner_by_cell: Dictionary = {}
-	for raw_garden_id in _gardens.keys():
-		var garden_id: int = int(raw_garden_id)
-		var garden: Dictionary = _gardens[garden_id] as Dictionary
-		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
-		if zone_tiles.is_empty():
-			continue
-		if not graph.has(garden_id):
-			graph[garden_id] = {}
-		for raw_cell in zone_tiles.keys():
-			var cell: Vector2i = raw_cell
-			_connect_touching_garden_cell(graph, zone_owner_by_cell, garden_id, cell)
+# Single source flood-fill from every spawner cell over the walkable map (same
+# walkability + diagonal corner rules as the pathfinder). Bounded by the floor
+# tilemap because expansion requires _has_floor. Runs once per garden rebuild.
+func _recompute_spawner_reachable_cells() -> void:
+	_spawner_reachable_cells.clear()
+	if _spawners.is_empty():
+		return
+	var queue: Array[Vector2i] = []
+	var head: int = 0
+	for raw_spawner_cell in _spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell
+		# Start from the spawner's walkable footprint; spawners may sit on a
+		# non-walkable special tile, so seed from walkable neighbors too.
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var seed: Vector2i = spawner_cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(seed):
+					continue
+				if not _is_walkable(seed):
+					continue
+				_spawner_reachable_cells[seed] = true
+				queue.append(seed)
+	while head < queue.size():
+		var cell: Vector2i = queue[head]
+		head += 1
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var neighbor: Vector2i = cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(neighbor):
+					continue
+				if not _is_walkable(neighbor):
+					continue
+				if dx != 0 and dy != 0:
+					if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+						continue
+				_spawner_reachable_cells[neighbor] = true
+				queue.append(neighbor)
 
-	var visited: Dictionary = {}
-	for raw_garden_id in graph.keys():
-		var garden_id: int = int(raw_garden_id)
-		if visited.has(garden_id):
-			continue
-		var component: Array[int] = _garden_touch_component(garden_id, graph, visited)
-		if component.size() <= 1:
-			continue
-		var merged_id: int = _merge_gardens(component)
-		if _gardens.has(merged_id):
-			_recompute_garden_geometry(merged_id)
-			_dirty_gardens.erase(merged_id)
-
-func _connect_touching_garden_cell(graph: Dictionary, zone_owner_by_cell: Dictionary, garden_id: int, cell: Vector2i) -> void:
-	for dy in range(-1, 2):
-		for dx in range(-1, 2):
-			var neighbor: Vector2i = cell + Vector2i(dx, dy)
-			if not zone_owner_by_cell.has(neighbor):
-				continue
-			var other_garden_id: int = int(zone_owner_by_cell[neighbor])
-			if other_garden_id == garden_id:
-				continue
-			var links: Dictionary = graph[garden_id] as Dictionary
-			links[other_garden_id] = true
-			graph[garden_id] = links
-			if not graph.has(other_garden_id):
-				graph[other_garden_id] = {}
-			var other_links: Dictionary = graph[other_garden_id] as Dictionary
-			other_links[garden_id] = true
-			graph[other_garden_id] = other_links
-	zone_owner_by_cell[cell] = garden_id
-
-func _garden_touch_component(start_garden_id: int, graph: Dictionary, visited: Dictionary) -> Array[int]:
-	var component: Array[int] = []
-	var stack: Array[int] = []
-	stack.append(start_garden_id)
-	while not stack.is_empty():
-		var garden_id: int = stack.pop_back()
-		if visited.has(garden_id):
-			continue
-		visited[garden_id] = true
-		component.append(garden_id)
-		var links: Dictionary = graph.get(garden_id, {}) as Dictionary
-		for raw_neighbor_id in links.keys():
-			var neighbor_id: int = int(raw_neighbor_id)
-			if not visited.has(neighbor_id):
-				stack.append(neighbor_id)
-	component.sort()
-	return component
+# A garden is reachable only if one of its walkable entry cells is in the spawner
+# flood. Sealed enclosures (no entry cell connects out to a spawner) become
+# unreachable and non-targetable, so outside monsters ignore them.
+func _apply_spawner_reachability(garden_id: int) -> void:
+	if not _gardens.has(garden_id):
+		return
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var entry_cells: Array = garden.get("entry_cells", []) as Array
+	# With no spawners, fall back to "has entry cell" so editor/preview still
+	# shows gardens instead of marking everything unreachable.
+	var reachable: bool = false
+	if _spawners.is_empty():
+		reachable = not entry_cells.is_empty()
+	else:
+		for raw_cell in entry_cells:
+			var entry_cell: Vector2i = raw_cell
+			if _spawner_reachable_cells.has(entry_cell):
+				reachable = true
+				break
+	garden["reachable"] = reachable
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	garden["targetable"] = reachable and plant_cells.size() > 0
+	_gardens[garden_id] = garden
 
 func _rebuild_plant_zone_compatibility_cache() -> void:
 	_plant_zone_tiles.clear()
