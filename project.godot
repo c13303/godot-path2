@@ -22,6 +22,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 Utils="*res://scripts/global/utils.gd"
+GameState="*res://scripts/gameState/gameState.gd"
 
 [display]
 

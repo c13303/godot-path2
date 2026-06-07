@@ -11,6 +11,12 @@ const INVENTORY_COLUMNS: int = 8
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
+@onready var day_toggle: Button = $"top anchor/dayToggle"
+
+const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.png")
+const MOONSUN_TILE_SIZE: int = 64
+var _sun_icon: AtlasTexture
+var _moon_icon: AtlasTexture
 
 var inventory_slots: Array[String] = []
 var selected_quick_index: int = 0
@@ -27,11 +33,34 @@ func _ready() -> void:
 	_create_startup_loading_overlay()
 	_setup_starting_inventory()
 	close_button.pressed.connect(_hide_inventory)
+	_setup_day_toggle()
 	_build_toolbar()
 	_build_inventory()
 	_refresh_all_slots()
 	_set_inventory_open(false)
 	call_deferred("_connect_startup_loading_signals")
+
+func _setup_day_toggle() -> void:
+	_sun_icon = AtlasTexture.new()
+	_sun_icon.atlas = MOONSUN_TEXTURE
+	_sun_icon.region = Rect2(0, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
+	_moon_icon = AtlasTexture.new()
+	_moon_icon.atlas = MOONSUN_TEXTURE
+	_moon_icon.region = Rect2(MOONSUN_TILE_SIZE, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
+
+	day_toggle.pressed.connect(_on_day_toggle_pressed)
+	GameState.mode_changed.connect(_on_game_mode_changed)
+	_update_day_toggle_icon(GameState.is_night)
+
+func _on_day_toggle_pressed() -> void:
+	GameState.toggle()
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	_update_day_toggle_icon(is_night)
+
+func _update_day_toggle_icon(is_night: bool) -> void:
+	# Icon reflects the current mode: sun during day, moon during night.
+	day_toggle.icon = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:

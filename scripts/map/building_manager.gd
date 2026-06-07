@@ -48,6 +48,10 @@ var _startup_loading_started: bool = false
 var _startup_ready: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
 
+# Day/night: set true once at least one monster has spawned during the current
+# night, so an empty scene can flip back to day only after a real night ran.
+var _spawned_this_night: bool = false
+
 # Plant zone (one-shot at start). Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
 var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
@@ -74,6 +78,18 @@ func _ready() -> void:
 	_setup_plant_manager()
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
+	GameState.mode_changed.connect(_on_game_mode_changed)
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	if not is_night:
+		return
+	# Entering night: start fresh so monsters spawn promptly.
+	_spawned_this_night = false
+	for cell in _spawn_timers.keys():
+		_spawn_timers[cell] = 0.0
+
+func _monster_count() -> int:
+	return get_tree().get_nodes_in_group("monsters").size()
 
 func _wait_for_flow_ready() -> void:
 	var code_node: Node = null
@@ -489,6 +505,14 @@ func _resolve_walkable_goal(cell: Vector2i, purpose: String) -> Vector2i:
 	return fallback
 
 func _process_spawners(delta: float) -> void:
+	# Day/night gating: monsters only spawn at night. When the last monster of
+	# the night is gone, automatically flip back to day.
+	if not GameState.is_night:
+		return
+	if _monster_count() == 0 and _spawned_this_night:
+		GameState.start_day()
+		return
+
 	if _no_plants_remaining():
 		if not _spawners.is_empty():
 			_log_spawn_failure("no plants remaining for %d spawner(s)" % _spawners.size())
@@ -502,6 +526,7 @@ func _process_spawners(delta: float) -> void:
 			continue
 
 		if _spawn_monster_from(cell):
+			_spawned_this_night = true
 			var spawner: Dictionary = _spawners[cell] as Dictionary
 			_spawn_timers[cell] = float(spawner.get("cooldown", DEFAULT_SPAWN_COOLDOWN))
 		else:

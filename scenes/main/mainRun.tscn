@@ -17,6 +17,15 @@
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
+[ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
+atlas = ExtResource("24_moonsun")
+region = Rect2(0, 0, 64, 64)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_moon"]
+atlas = ExtResource("24_moonsun")
+region = Rect2(64, 0, 64, 64)
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1396,6 +1405,30 @@ script = ExtResource("19_gvmlv")
 [node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
 layer = 50
 script = ExtResource("20_hamdt")
+
+[node name="top anchor" type="Control" parent="GameUI"]
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -32.0
+offset_top = 16.0
+offset_right = 32.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="dayToggle" type="Button" parent="GameUI/top anchor"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+tooltip_text = "Toggle day / night"
+icon = SubResource("AtlasTexture_sun")
+icon_alignment = 1
+expand_icon = true
 
 [node name="bottom anchor" type="Control" parent="GameUI" unique_id=904977731]
 layout_mode = 3
