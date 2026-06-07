@@ -13,11 +13,16 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const PLANT_ZONE_MARGIN: int = 2
 # Max walkable path length (in cells) allowed between two plants for them to share
-# a garden. Matches the old Chebyshev proximity reach (PLANT_ZONE_MARGIN * 2) but
-# is now measured through walkable cells so walls split gardens. BFS from a seed
-# plant is bounded by this radius and re-seeded from each plant it absorbs, so a
-# chain of plants each within this distance forms one connected garden.
-const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2
+# a garden, measured through walkable cells so walls split gardens. BFS from a
+# seed plant is bounded by this radius and re-seeded from each plant it absorbs,
+# so a chain of plants each within this distance forms one connected garden.
+#
+# Matches the OLD effective merge reach: gardens used to merge when their
+# PLANT_ZONE_MARGIN-radius (2) zone boxes were 8-adjacent, i.e. when two plants
+# were within Chebyshev distance 2 + 2 + 1 = 5. In open floor a BFS step (incl.
+# diagonals) advances Chebyshev distance by 1, so a bound of 5 reproduces that
+# reach while remaining wall-aware.
+const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 
 @export var floorz: TileMapLayer
