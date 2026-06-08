@@ -136,8 +136,12 @@ var _astar_in_agents: Dictionary = {}
 # Reverse index: target plant cell -> { nav_id -> true }, plus nav_id -> target cell.
 # Lets plant removal find the (usually 0-2) agents heading for that exact plant in
 # O(agents_targeting_this_plant) instead of scanning every _astar_in_agents entry.
-# Maintained exclusively by _set_astar_in_agent / _erase_astar_in_agent so it can
-# never drift from _astar_in_agents.
+# Maintained exclusively by _set_astar_in_agent / _erase_astar_in_agent (which call
+# _register_/_unregister_astar_in_target). _register ALWAYS unregisters the nav_id
+# from its previous bucket first, so a nav_id is in at most one bucket and the two
+# dictionaries can never disagree. The plant-removal retarget additionally validates
+# every bucket entry against the live record and scrubs any that don't match, so even
+# a stale entry that slipped in can never be double-counted across removals.
 var _astar_in_agents_by_target_plant: Dictionary = {}  # Vector2i -> { nav_id -> true }
 var _astar_in_target_by_nav_id: Dictionary = {}        # nav_id -> Vector2i
 # When true, _retarget_agents_targeting_removed_plant_only also runs the old full
@@ -147,8 +151,12 @@ var _debug_check_retarget_index: bool = false
 # Side-channel counts from the last _retarget_agents_targeting_removed_plant_only
 # call, so the caller's lag warning can report what the index touched without the
 # function having to return anything.
-var _last_plant_retarget_affected: int = 0
-var _last_plant_retarget_stale: int = 0
+var _last_plant_retarget_astar_in: int = 0       # _astar_in_agents.size() at entry
+var _last_plant_retarget_bucket: int = 0         # raw bucket entries for the cell
+var _last_plant_retarget_affected: int = 0       # valid agents actually retargeted
+var _last_plant_retarget_queued: int = 0         # of those, deferred to the queue
+var _last_plant_retarget_stale: int = 0          # bucket entries dropped as invalid
+var _last_plant_retarget_already_queued: int = 0 # valid but already in retarget queue
 var _astar_out_agents: Dictionary = {}
 # Budgeted retargeting after a garden topology rebuild. When a rebuild invalidates
 # the garden an agent was targeting/eating-in, we cannot afford to re-path every
@@ -660,10 +668,11 @@ func _on_plant_removed(cell: Vector2i) -> void:
 		var rt_us: int = Time.get_ticks_usec()
 		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
 		_warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
-			"garden=%d plant=%s astar_in=%d affected=%d indexed_targets=%d stale=%d retarget_queue=%d" % [
-				garden_id, str(cell), _astar_in_agents.size(),
-				_last_plant_retarget_affected, _astar_in_agents_by_target_plant.size(),
-				_last_plant_retarget_stale, _garden_retarget_queue.size()])
+			"garden=%d plant=%s astar_in=%d bucket_size=%d valid_affected=%d queued=%d already_queued=%d stale=%d indexed_targets=%d" % [
+				garden_id, str(cell), _last_plant_retarget_astar_in,
+				_last_plant_retarget_bucket, _last_plant_retarget_affected,
+				_last_plant_retarget_queued, _last_plant_retarget_already_queued,
+				_last_plant_retarget_stale, _astar_in_agents_by_target_plant.size()])
 
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
@@ -1414,8 +1423,12 @@ func _unregister_astar_in_target(nav_id: int) -> void:
 # _handle_garden_became_empty). The eater that just consumed the plant is already
 # in _eating_agents (not _astar_in_agents), so it is never disturbed here.
 func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
+	_last_plant_retarget_astar_in = _astar_in_agents.size()
+	_last_plant_retarget_bucket = 0
 	_last_plant_retarget_affected = 0
+	_last_plant_retarget_queued = 0
 	_last_plant_retarget_stale = 0
+	_last_plant_retarget_already_queued = 0
 	var garden_still_edible: bool = garden_id > 0 and _garden_has_edible_plants(garden_id)
 	# Reverse index lookup: only the agents heading for THIS exact plant, not a scan
 	# over every A*-in agent. Usually 0-2 entries. Snapshot the bucket keys first
@@ -1423,34 +1436,52 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 	if _astar_in_agents_by_target_plant.has(cell):
 		var bucket: Dictionary = _astar_in_agents_by_target_plant[cell] as Dictionary
 		var nav_ids: Array = bucket.keys()
+		_last_plant_retarget_bucket = nav_ids.size()
 		for raw_nav_id in nav_ids:
 			var nav_id: int = int(raw_nav_id)
+			# --- Strict validation. A bucket entry is only "affected" if the live
+			# record agrees on every axis. Any disagreement is stale: unregister it so
+			# the same dirty entry can never be counted twice across removals. ---
 			if not _astar_in_agents.has(nav_id):
-				# Index pointed at an agent no longer in A*-in: drop the stale link and
-				# move on. (Should not happen now that all mutations funnel through the
-				# set/erase helpers, but stay self-healing.)
+				# No longer in A*-in (already retargeted/ate/escaped/freed elsewhere).
 				_unregister_astar_in_target(nav_id)
+				_last_plant_retarget_stale += 1
+				continue
+			if (_astar_in_target_by_nav_id.get(nav_id, INVALID_CELL) as Vector2i) != cell:
+				# Reverse map no longer points this nav_id at `cell` — the bucket entry
+				# is a leftover. Drop it; the nav_id (if still A*-in) is correctly
+				# bucketed under its real target by _astar_in_target_by_nav_id.
+				bucket.erase(nav_id)
+				if bucket.is_empty():
+					_astar_in_agents_by_target_plant.erase(cell)
 				_last_plant_retarget_stale += 1
 				continue
 			var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
 			var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
 			if plant_cell != cell:
-				# Index disagrees with the live record: trust the record, re-sync index.
+				# Live record disagrees with the index: trust the record, re-sync the
+				# index to it, and treat this bucket entry as stale.
 				_register_astar_in_target(nav_id, plant_cell)
 				_last_plant_retarget_stale += 1
 				continue
-			_last_plant_retarget_affected += 1
 			var raw_agent: Variant = data.get("node", null)
+			if not is_instance_valid(raw_agent):
+				# Agent freed without going through the funnel: scrub and skip.
+				_erase_astar_in_agent(nav_id)
+				_last_plant_retarget_stale += 1
+				continue
+			var agent: Node2D = raw_agent as Node2D
+			if agent == null:
+				_erase_astar_in_agent(nav_id)
+				_last_plant_retarget_stale += 1
+				continue
+			# Validated: this agent is genuinely A*-in toward the removed plant.
+			_last_plant_retarget_affected += 1
 			var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
 			# Detach the stale A*-in path and forget the phase before reassigning.
 			if agent_manager and agent_manager.has_method("detach_agent_path"):
 				agent_manager.call("detach_agent_path", nav_id)
 			_erase_astar_in_agent(nav_id)
-			if not is_instance_valid(raw_agent):
-				continue
-			var agent: Node2D = raw_agent as Node2D
-			if agent == null:
-				continue
 			if agent.has_method("stop_astar_in"):
 				agent.call("stop_astar_in")
 			if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
@@ -1462,7 +1493,10 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 			else:
 				# Garden has no edible plants left (but wasn't flagged empty for the queue
 				# path): defer through the budgeted queue so we don't spike this frame.
-				_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
+				if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id):
+					_last_plant_retarget_queued += 1
+				else:
+					_last_plant_retarget_already_queued += 1
 	# Optional consistency check: replay the old full scan and warn on any mismatch.
 	# OFF by default — it reintroduces the very O(all A*-in) cost the index removes.
 	if _debug_check_retarget_index:
@@ -3046,11 +3080,14 @@ func _agent_referenced_garden_id(nav_id: int, agent: Node2D) -> int:
 # path/flow is computed here — that is deferred to _process_garden_retarget_queue.
 # Dedups on _garden_retarget_queued so an agent is never enqueued twice. Keeping
 # this in one place guarantees identical queue behaviour across every caller.
-func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String, spawner_cell: Vector2i, garden_id: int) -> void:
+# Returns true if the agent was newly enqueued this call, false if it was already
+# queued or could not be queued (invalid nav_id/agent). Callers use this to keep
+# accurate queued-vs-already-queued bookkeeping.
+func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String, spawner_cell: Vector2i, garden_id: int) -> bool:
 	if nav_id < 0 or not is_instance_valid(agent):
-		return
+		return false
 	if _garden_retarget_queued.has(nav_id):
-		return
+		return false
 	# Cheaply detach stale path/flow so the agent stops following an invalid route
 	# immediately. The real re-route happens later in the budgeted queue.
 	if agent_manager and agent_manager.has_method("detach_agent_path"):
@@ -3074,6 +3111,7 @@ func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String
 		"garden_id": garden_id
 	})
 	_garden_retarget_queued[nav_id] = true
+	return true
 
 # One-shot scan after a FULL garden rebuild. Cheap checks only: detect agents whose
 # garden reference is now stale, enqueue each via the shared helper. The expensive
