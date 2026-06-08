@@ -171,6 +171,76 @@ func _ff_lag_threshold_ms() -> float:
 		return float(global_config.call("get_debug_plantff_ff_lag_ms"))
 	return DEBUG_PLANTFF_FF_LAG_MS_FALLBACK
 
+# ---------------------------------------------------------------------------
+# Granular garden/navigation lag instrumentation. The total-frame detector in
+# _process() only says "the frame was slow"; these per-task detectors say WHICH
+# garden/nav task spiked. Threshold comes from CppDebugOptions.debug_gardens_lag_ms
+# (read directly off the node; not pushed to C++). 0 disables per-task warnings.
+#
+# Overhead discipline: time with get_ticks_usec() and ONLY build the (potentially
+# large) context string when the elapsed time is over threshold. Never construct
+# context inside hot per-agent loops unless the individual op itself is over.
+# ---------------------------------------------------------------------------
+const DEBUG_GARDENS_LAG_MS_FALLBACK: float = 15.0
+
+func _find_cpp_debug_options() -> Node:
+	# The node is "CPP" in the current scene (same path _is_verbose() uses).
+	if not is_inside_tree():
+		return null
+	var scene: Node = get_tree().get_current_scene()
+	if scene == null:
+		return null
+	var node: Node = scene.get_node_or_null("CPP")
+	if node:
+		return node
+	node = scene.get_node_or_null("CppDebugOptions")
+	if node:
+		return node
+	node = scene.find_child("CppDebugOptions", true, false)
+	if node:
+		return node
+	return null
+
+func _garden_lag_threshold_ms() -> float:
+	if _cpp_debug_options == null:
+		_cpp_debug_options = _find_cpp_debug_options()
+	if _cpp_debug_options and "debug_gardens_lag_ms" in _cpp_debug_options:
+		return float(_cpp_debug_options.get("debug_gardens_lag_ms"))
+	return DEBUG_GARDENS_LAG_MS_FALLBACK
+
+# Warn when a timed block exceeds the per-task threshold. `elapsed_us` is in
+# microseconds (timed with get_ticks_usec()); output is reported in ms. `extra` is
+# pre-built context — callers must build it cheaply (it is unconditional here, so
+# only pass strings that are cheap to construct, or use the threshold check at the
+# call site to gate expensive context). Use _over_garden_threshold_us() to gate
+# heavy context construction before calling this.
+func _warn_garden_task_lag_us(task_name: String, elapsed_us: int, extra: String = "") -> void:
+	var threshold_ms: float = _garden_lag_threshold_ms()
+	if threshold_ms <= 0.0:
+		return
+	var elapsed_ms: float = float(elapsed_us) / 1000.0
+	if elapsed_ms <= threshold_ms:
+		return
+	var suffix: String = ""
+	if extra != "":
+		suffix = " " + extra
+	push_warning("debug_garden_lag:%s %dms (threshold=%dms)%s" % [
+		task_name,
+		int(round(elapsed_ms)),
+		int(threshold_ms),
+		suffix
+	])
+
+# True when `elapsed_us` is over the per-task threshold. Lets a call site decide
+# whether to spend cycles building an expensive context string before calling
+# _warn_garden_task_lag_us(); returns false (and skips) when the detector is
+# disabled (threshold <= 0).
+func _over_garden_threshold_us(elapsed_us: int) -> bool:
+	var threshold_ms: float = _garden_lag_threshold_ms()
+	if threshold_ms <= 0.0:
+		return false
+	return (float(elapsed_us) / 1000.0) > threshold_ms
+
 func set_empty_garden_local_retarget_radius(value: int) -> void:
 	empty_garden_local_retarget_radius = maxi(0, value)
 
@@ -267,32 +337,85 @@ func _sync_plant_zone_debug_visibility() -> void:
 func _process(delta: float) -> void:
 	if not _flow_ready or not _startup_ready:
 		return
-	var frame_start_ms: int = Time.get_ticks_msec()
+	var frame_start_us: int = Time.get_ticks_usec()
+	var t: int = 0
 	_scan_timer -= delta
 	if _scan_timer <= 0.0:
 		_scan_timer = 0.25
+		t = Time.get_ticks_usec()
 		_scan_buildings()
+		_warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,
+			"spawners=%d" % _spawners.size())
 
 	if not _dirty_spawner_escapes.is_empty():
+		# Capture the count before the call: _drain_dirty_routes clears the dict.
+		var dirty_escapes_before: int = _dirty_spawner_escapes.size()
+		t = Time.get_ticks_usec()
 		_drain_dirty_routes()
+		_warn_garden_task_lag_us("_drain_dirty_routes", Time.get_ticks_usec() - t,
+			"dirty_escapes=%d" % dirty_escapes_before)
 
+	# Per-frame tasks: gate context construction on _over_garden_threshold_us so the
+	# (string-formatting) context is only built on a real spike, never every frame.
+	t = Time.get_ticks_usec()
 	_process_eating_agents(delta)
-	_process_astar_in_arrivals()
-	_process_plant_arrivals()
-	_process_astar_out_arrivals()
-	_process_escape_arrivals()
-	_process_garden_retarget_queue()
-	_process_spawners(delta)
-	_sync_plant_zone_debug_visibility()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
+			"eating=%d astar_in=%d astar_out=%d escaping=%d" % [
+				_eating_agents.size(), _astar_in_agents.size(),
+				_astar_out_agents.size(), _escaping_agents.size()])
 
-	var frame_ms: int = Time.get_ticks_msec() - frame_start_ms
+	t = Time.get_ticks_usec()
+	_process_astar_in_arrivals()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_astar_in_arrivals", Time.get_ticks_usec() - t,
+			"entry=%d astar_in=%d" % [_entry_path_agents.size(), _astar_in_agents.size()])
+
+	t = Time.get_ticks_usec()
+	_process_plant_arrivals()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_plant_arrivals", Time.get_ticks_usec() - t,
+			"astar_in=%d eating=%d" % [_astar_in_agents.size(), _eating_agents.size()])
+
+	t = Time.get_ticks_usec()
+	_process_astar_out_arrivals()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_astar_out_arrivals", Time.get_ticks_usec() - t,
+			"astar_out=%d escaping=%d" % [_astar_out_agents.size(), _escaping_agents.size()])
+
+	t = Time.get_ticks_usec()
+	_process_escape_arrivals()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_escape_arrivals", Time.get_ticks_usec() - t,
+			"escaping=%d" % _escaping_agents.size())
+
+	t = Time.get_ticks_usec()
+	_process_garden_retarget_queue()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_garden_retarget_queue", Time.get_ticks_usec() - t,
+			"retarget_queue=%d budget=%d" % [_garden_retarget_queue.size(), garden_retarget_budget_per_frame])
+
+	t = Time.get_ticks_usec()
+	_process_spawners(delta)
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
+			"spawners=%d" % _spawners.size())
+
+	t = Time.get_ticks_usec()
+	_sync_plant_zone_debug_visibility()
+	_warn_garden_task_lag_us("_sync_plant_zone_debug_visibility", Time.get_ticks_usec() - t)
+
+	var frame_us: int = Time.get_ticks_usec() - frame_start_us
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()
-	if float(frame_ms) > frame_threshold_ms:
-		push_warning("debug_nav_frame_lag: %dms (threshold=%dms) eating=%d escaping=%d spawners=%d" % [
-			frame_ms,
+	if (float(frame_us) / 1000.0) > frame_threshold_ms:
+		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d astar_out=%d escaping=%d retarget_queue=%d spawners=%d" % [
+			int(round(float(frame_us) / 1000.0)),
 			int(frame_threshold_ms),
 			_eating_agents.size(),
+			_astar_in_agents.size(),
+			_astar_out_agents.size(),
 			_escaping_agents.size(),
+			_garden_retarget_queue.size(),
 			_spawners.size()
 		])
 
@@ -321,15 +444,24 @@ func _scan_buildings() -> void:
 	if not buildings:
 		return
 
+	var t: int = Time.get_ticks_usec()
 	var migrated: bool = _migrate_special_tiles_from_wallz()
+	_warn_garden_task_lag_us("_migrate_special_tiles_from_wallz", Time.get_ticks_usec() - t,
+		"migrated=%s" % str(migrated))
 
+	t = Time.get_ticks_usec()
 	var wall_signature: int = _tile_layer_signature(wallz)
+	_warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
+		"wall_cells=%d" % (wallz.get_used_cells().size() if wallz else 0))
 	var walls_changed: bool = wall_signature != _last_wall_signature or migrated
 	_last_wall_signature = wall_signature
 
 	var seen_spawners: Dictionary = {}
+	t = Time.get_ticks_usec()
 	_scan_special_layer(buildings, seen_spawners)
 	_scan_special_layer(wallz, seen_spawners)
+	_warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
+		"seen_spawners=%d" % seen_spawners.size())
 	_log_scan_summary(seen_spawners, migrated, walls_changed)
 
 	for raw_spawner_cell in _spawners.keys():
@@ -353,7 +485,10 @@ func _scan_buildings() -> void:
 			_rebuild_spawner_plant_ff(raw_spawner_cell)
 			_dirty_spawner_escapes[raw_spawner_cell] = true
 		# Exit walls may have been added/removed: refresh per-exit escape FFs.
+		var exits_us: int = Time.get_ticks_usec()
 		_rebuild_exit_wall_escapes()
+		_warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
+			"exits=%d" % _exit_wall_escapes.size())
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
@@ -396,6 +531,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
+	var removed_us: int = Time.get_ticks_usec()
 	var result := _remove_plant_from_garden_content_only(cell)
 	if not bool(result.get("was_removed", false)):
 		return
@@ -404,15 +540,23 @@ func _on_plant_removed(cell: Vector2i) -> void:
 	var became_empty := bool(result.get("became_empty", false))
 
 	if became_empty and garden_id > 0:
+		var empty_us: int = Time.get_ticks_usec()
 		_handle_garden_became_empty(garden_id)
+		_warn_garden_task_lag_us("_handle_garden_became_empty", Time.get_ticks_usec() - empty_us,
+			"garden=%d retarget_queue=%d" % [garden_id, _garden_retarget_queue.size()])
 	else:
+		var rt_us: int = Time.get_ticks_usec()
 		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
+		_warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
+			"garden=%d astar_in=%d retarget_queue=%d" % [garden_id, _astar_in_agents.size(), _garden_retarget_queue.size()])
 
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 
 	if _no_plants_remaining():
 		_queue_escape_for_all_monsters_budgeted()
+	_warn_garden_task_lag_us("_on_plant_removed", Time.get_ticks_usec() - removed_us,
+		"garden=%d empty=%s" % [garden_id, str(became_empty)])
 
 func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void:
 	if not layer:
@@ -1016,9 +1160,16 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 	_drain_pending_empty_gardens()
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
+	var consume_us: int = Time.get_ticks_usec()
 	_start_agent_eating(eater, _eating_time, plant_cell)
+	# plant_manager.remove_plant() fires _on_plant_removed synchronously (garden
+	# content update + narrow retarget / empty handling), so it is the prime suspect
+	# for an eat-triggered spike. Time it on its own.
 	if plant_manager and plant_manager.has_method("remove_plant"):
+		var remove_us: int = Time.get_ticks_usec()
 		plant_manager.call("remove_plant", plant_cell, true)
+		_warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
+			"plant=%s" % str(plant_cell))
 	elif plantz:
 		plantz.erase_cell(plant_cell)
 		_flush_plant_layer_visuals()
@@ -1026,6 +1177,8 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 		plantz.erase_cell(plant_cell)
 		_flush_plant_layer_visuals()
 		call_deferred("_flush_plant_layer_visuals")
+	_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+		"plant=%s" % str(plant_cell))
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
@@ -1103,6 +1256,17 @@ func _start_escape_for_all_monsters() -> void:
 func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if not is_instance_valid(agent):
 		return
+	var astar_out_us: int = Time.get_ticks_usec()
+	var nav_id_dbg: int = int(agent.get("nav_id"))
+	_start_astar_out_impl(agent, spawner_cell)
+	if _over_garden_threshold_us(Time.get_ticks_usec() - astar_out_us):
+		var gid_dbg: int = int(agent.get_meta("garden_id")) if is_instance_valid(agent) and agent.has_meta("garden_id") else 0
+		_warn_garden_task_lag_us("_start_astar_out", Time.get_ticks_usec() - astar_out_us,
+			"nav_id=%d garden=%d" % [nav_id_dbg, gid_dbg])
+
+func _start_astar_out_impl(agent: Node2D, spawner_cell: Vector2i) -> void:
+	if not is_instance_valid(agent):
+		return
 	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
 		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 		spawner_cell = _nearest_spawner_cell(from_cell)
@@ -1118,7 +1282,10 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	# actually use: the nearest reachable wall exit by route cost. Fall back to
 	# the spawner's exit when no per-exit escape applies. In both cases prefer a
 	# tile different from the one the monster entered through.
+	var exit_escape_us: int = Time.get_ticks_usec()
 	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
+	_warn_garden_task_lag_us("_nearest_reachable_exit_escape", Time.get_ticks_usec() - exit_escape_us,
+		"exits=%d" % _exit_wall_escapes.size())
 	var exit_cell: Vector2i = INVALID_CELL
 	if not exit_escape.is_empty():
 		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
@@ -1126,9 +1293,15 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 		if exit_target != INVALID_CELL:
 			# Exit-after-eating: score with the real escape flow so the chosen
 			# access cell leads toward the map exit, not just nearest by Manhattan.
+			var scored_us: int = Time.get_ticks_usec()
 			exit_cell = _select_scored_garden_entry(garden_id, exit_target, "exit", original_entry_cell, escape_group)
+			_warn_garden_task_lag_us("_select_scored_garden_entry", Time.get_ticks_usec() - scored_us,
+				"garden=%d mode=exit" % garden_id)
 	if exit_cell == INVALID_CELL:
+		var excl_us: int = Time.get_ticks_usec()
 		exit_cell = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, original_entry_cell)
+		_warn_garden_task_lag_us("_nearest_garden_entry_to_exit_excluding", Time.get_ticks_usec() - excl_us,
+			"garden=%d" % garden_id)
 	if exit_cell == INVALID_CELL:
 		# No distinct garden exit exists. Safest fallback: skip the internal
 		# garden-exit path entirely and route the monster straight to its escape /
@@ -1390,13 +1563,30 @@ func _build_plant_zone() -> void:
 	_validate_dirty_gardens()
 
 func _rebuild_plant_zone_from_layer() -> void:
+	# Full topology rebuild (plant added, walls changed, etc.). Each phase is timed
+	# separately so a rebuild spike points at clustering vs geometry vs route cache.
+	var rebuild_us: int = Time.get_ticks_usec()
+	var t: int = Time.get_ticks_usec()
 	_build_gardens_from_plants()
+	_warn_garden_task_lag_us("_build_gardens_from_plants", Time.get_ticks_usec() - t,
+		"gardens=%d" % _gardens.size())
+	t = Time.get_ticks_usec()
 	_validate_dirty_gardens()
+	_warn_garden_task_lag_us("_validate_dirty_gardens", Time.get_ticks_usec() - t,
+		"gardens=%d" % _gardens.size())
+	t = Time.get_ticks_usec()
 	_rebuild_spawner_garden_route_cache()
+	_warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
+		"spawners=%d" % _spawner_garden_routes.size())
 	# Garden ids/topology just changed: cheaply detect agents now pointing at a
 	# deleted/empty garden, park them in "waiting_new_status", and queue them for
 	# budgeted retargeting over the next frames. No pathfinding happens here.
+	t = Time.get_ticks_usec()
 	_queue_agents_after_garden_rebuild()
+	_warn_garden_task_lag_us("_queue_agents_after_garden_rebuild", Time.get_ticks_usec() - t,
+		"retarget_queue=%d" % _garden_retarget_queue.size())
+	_warn_garden_task_lag_us("_rebuild_plant_zone_from_layer", Time.get_ticks_usec() - rebuild_us,
+		"gardens=%d" % _gardens.size())
 
 func _build_gardens_from_plants() -> void:
 	if _gardens_iter_depth > 0:
@@ -1965,6 +2155,10 @@ func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
 		return {}
 	if plant_manager == null or not plant_manager.has_method("has_plant"):
 		return {}
+	# This scans a radius around from_cell and runs _find_path_in_zone per candidate,
+	# so it can spike when the radius is large or many candidates path. Time the whole
+	# search; per-candidate find_path lag is reported separately inside _find_path_in_zone.
+	var local_us: int = Time.get_ticks_usec()
 	var radius: int = maxi(0, empty_garden_local_retarget_radius)
 	var best_target: Dictionary = {}
 	var best_path_len: int = 2147483647
@@ -1997,6 +2191,8 @@ func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
 	# _garden_has_edible_plants may have queued stale-empty gardens; this search
 	# does not iterate _gardens, so draining here is safe.
 	_drain_pending_empty_gardens()
+	_warn_garden_task_lag_us("_find_local_retarget_plant", Time.get_ticks_usec() - local_us,
+		"radius=%d from=%s found=%s" % [radius, str(from_cell), str(not best_target.is_empty())])
 	if not best_target.is_empty() and not _gardens.has(int(best_target.get("garden_id", 0))):
 		return {}
 	return best_target
@@ -2118,10 +2314,25 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
 	if not is_instance_valid(agent):
 		return false
+	var retarget_us: int = Time.get_ticks_usec()
+	var nav_id_dbg: int = int(agent.get("nav_id"))
+	var assigned: bool = _retarget_agent_or_escape_impl(agent, spawner_cell)
+	if _over_garden_threshold_us(Time.get_ticks_usec() - retarget_us):
+		_warn_garden_task_lag_us("_retarget_agent_or_escape", Time.get_ticks_usec() - retarget_us,
+			"nav_id=%d assigned=%s" % [nav_id_dbg, str(assigned)])
+	return assigned
+
+func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bool:
+	if not is_instance_valid(agent):
+		return false
 	if _no_plants_remaining():
 		return _assign_agent_to_escape(agent)
 	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	if _try_local_retarget_agent(agent, from_cell, spawner_cell):
+	var local_us: int = Time.get_ticks_usec()
+	var local_ok: bool = _try_local_retarget_agent(agent, from_cell, spawner_cell)
+	_warn_garden_task_lag_us("_try_local_retarget_agent", Time.get_ticks_usec() - local_us,
+		"from=%s ok=%s" % [str(from_cell), str(local_ok)])
+	if local_ok:
 		return true
 	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell)
 	if pair.is_empty():
@@ -2413,6 +2624,7 @@ func _process_garden_retarget_queue() -> void:
 func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary) -> void:
 	if not is_instance_valid(agent):
 		return
+	var single_us: int = Time.get_ticks_usec()
 	var intent: String = str(item.get("intent", "retarget"))
 	var spawner_cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
 
@@ -2421,6 +2633,8 @@ func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary
 		assigned = _assign_agent_to_escape(agent)
 	else:
 		assigned = _retarget_agent_or_escape(agent, spawner_cell)
+	_warn_garden_task_lag_us("_retarget_single_waiting_agent", Time.get_ticks_usec() - single_us,
+		"nav_id=%d intent=%s assigned=%s" % [nav_id, intent, str(assigned)])
 
 	if assigned:
 		if agent.has_method("stop_waiting_new_status"):
@@ -2724,6 +2938,12 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 	# zone_tiles. Add any walkable endpoint to the A* walkable set so the path
 	# starts/ends where the agent really stands instead of snapping a tile short.
 	# Use a local copy so the cached garden zone_tiles is not mutated.
+	# .prep: endpoint handling + zone duplicate cost (the duplicate can be the cost
+	# when a garden's zone_tiles dictionary is large and both endpoints are outside).
+	# Sub-warnings are gated on _over_garden_threshold_us so the context string is
+	# built only on a real spike — _find_path_in_zone is called in tight retarget
+	# loops, so unconditional formatting here would be the wrong kind of overhead.
+	var prep_us: int = Time.get_ticks_usec()
 	var path_tiles: Dictionary = zone_tiles
 	if _is_walkable(from_tile) and not zone_tiles.has(from_tile):
 		path_tiles = zone_tiles.duplicate()
@@ -2732,13 +2952,27 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 		if path_tiles == zone_tiles:
 			path_tiles = zone_tiles.duplicate()
 		path_tiles[to_tile] = true
+	if _over_garden_threshold_us(Time.get_ticks_usec() - prep_us):
+		_warn_garden_task_lag_us("_find_path_in_zone.prep", Time.get_ticks_usec() - prep_us,
+			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, zone_tiles.size(), str(from_tile), str(to_tile)])
+	# .sync_zone: pushes the walkable set + wall blockers into the pathfinder.
+	var sync_us: int = Time.get_ticks_usec()
 	_sync_pathfinder_zone_tiles(path_tiles)
+	if _over_garden_threshold_us(Time.get_ticks_usec() - sync_us):
+		_warn_garden_task_lag_us("_find_path_in_zone.sync_zone", Time.get_ticks_usec() - sync_us,
+			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, path_tiles.size(), str(from_tile), str(to_tile)])
 	# Snap endpoints to walkable tiles if needed (non-walkable endpoints only).
 	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
 	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
-	return pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
+	# .find_path: the pathfinder A* itself.
+	var find_us: int = Time.get_ticks_usec()
+	var result: PackedVector2Array = pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
+	if _over_garden_threshold_us(Time.get_ticks_usec() - find_us):
+		_warn_garden_task_lag_us("_find_path_in_zone.find_path", Time.get_ticks_usec() - find_us,
+			"garden=%d from=%s to=%s len=%d" % [garden_id, str(start_tile), str(end_tile), result.size()])
+	return result
 
 func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 	if pathfinder == null:
@@ -2753,7 +2987,15 @@ func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 	if pathfinder.has_method("set_walkable_tiles"):
 		pathfinder.call("set_walkable_tiles", zone_arr)
 	if pathfinder.has_method("set_blockers"):
-		pathfinder.call("set_blockers", _wall_blockers_for_cells(zone_tiles))
+		# _wall_blockers_for_cells scans every wall tile against the zone bbox; time it
+		# separately since it can dominate sync on a large wall layer. Gated so context
+		# is built only on a spike (this runs once per path query).
+		var blockers_us: int = Time.get_ticks_usec()
+		var blockers: PackedVector2Array = _wall_blockers_for_cells(zone_tiles)
+		if _over_garden_threshold_us(Time.get_ticks_usec() - blockers_us):
+			_warn_garden_task_lag_us("_wall_blockers_for_cells", Time.get_ticks_usec() - blockers_us,
+				"zone_tiles=%d blockers=%d" % [zone_tiles.size(), blockers.size()])
+		pathfinder.call("set_blockers", blockers)
 
 func _nearest_zone_tile_to(cell: Vector2i, zone_tiles: Dictionary) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL

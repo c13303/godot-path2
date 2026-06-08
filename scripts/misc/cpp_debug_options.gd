@@ -89,14 +89,30 @@ extends Node
 		_apply_debug_settings()
 
 @export_group("Navigation Debug")
-@export_range(0.0, 1000.0, 1.0, "or_greater") var debug_nav_frame_lag_ms: float = 35.0:
+## Threshold (ms) for the TOTAL BuildingManager navigation/gameplay frame cost.
+## If BuildingManager._process() exceeds this duration, a "debug_nav_total_frame_lag"
+## warning is pushed. This is the broad whole-frame detector — it tells you the frame
+## was slow, not which task caused it (use debug_gardens_lag_ms for that).
+@export_range(0.0, 1000.0, 1.0, "or_greater") var lag_detect_fps_threshold_ms: float = 35.0:
 	set(value):
-		debug_nav_frame_lag_ms = value
+		lag_detect_fps_threshold_ms = value
 		_apply_debug_settings()
 
 @export_range(0.0, 1000.0, 1.0, "or_greater") var debug_flowfield_rebuild_lag_ms: float = 35.0:
 	set(value):
 		debug_flowfield_rebuild_lag_ms = value
+		_apply_debug_settings()
+
+@export_group("Garden Lag Debug")
+## Threshold (ms) for an INDIVIDUAL garden/navigation task inside BuildingManager
+## (eating, plant removal, retargeting, A* out, pathfinder zone sync, find_path,
+## scan buildings, route rebuilds, etc.). When one of those blocks exceeds this, a
+## granular "debug_garden_lag:<task>" warning identifies the exact expensive task.
+## BuildingManager reads this value directly off this node. 0 disables the per-task
+## warnings. Read directly (not pushed to C++).
+@export_range(0.0, 1000.0, 1.0, "or_greater") var debug_gardens_lag_ms: float = 15.0:
+	set(value):
+		debug_gardens_lag_ms = value
 		_apply_debug_settings()
 
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
@@ -170,10 +186,12 @@ func _apply_debug_settings() -> void:
 			&"set_debug_show_plant_zones"
 		], eff_gardens)
 		# Lag thresholds are tuning, not visuals: applied regardless of debug_enabled.
+		# The native method names are kept (set_debug_nav_frame_lag_ms) for compat;
+		# only the exported variable was renamed to lag_detect_fps_threshold_ms.
 		_call_first_available(global_config, [
 			&"set_debug_nav_frame_lag_ms",
 			&"set_debug_plantff_frame_lag_ms"
-		], debug_nav_frame_lag_ms)
+		], lag_detect_fps_threshold_ms)
 		_call_first_available(global_config, [
 			&"set_debug_flowfield_rebuild_lag_ms",
 			&"set_debug_plantff_ff_lag_ms"
