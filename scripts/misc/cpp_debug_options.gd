@@ -43,6 +43,13 @@ extends Node
 		draw_flow_field = value
 		_apply_debug_settings()
 
+## When on, BuildingManager prints "x gardens recomputed with y entry points"
+## every time gardens (and their entry points) are recomputed.
+@export var verbose: bool = false:
+	set(value):
+		verbose = value
+		_apply_debug_settings()
+
 @export_group("Gardens")
 @export var show_gardens: bool = true:
 	set(value):
@@ -168,6 +175,7 @@ func _apply_debug_settings() -> void:
 			_building_manager = scene.get_node_or_null("Map/BuildingManager")
 	if _building_manager:
 		_call_if_available(_building_manager, "set_show_enters_exits", show_enters_exits)
+		_call_if_available(_building_manager, "set_verbose", verbose)
 		_call_if_available(_building_manager, "set_empty_garden_local_retarget_radius", empty_garden_local_retarget_radius)
 		# Eating delay is divided by the multiplier so >1 means "eats faster".
 		var mult: float = maxf(0.0001, speed_multiplier)

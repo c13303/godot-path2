@@ -145,6 +145,14 @@ var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit ca
 var _plant_zone_built: bool = false
 var _zone_overlay: Node2D
 var _show_enters_exits: bool = false
+# When on, prints "x gardens recomputed with y entry points" every time gardens
+# (and their entry points) are recomputed. Pushed from CppDebugOptions.verbose;
+# _verbose_pushed flips true once that push has happened. Until then _is_verbose()
+# pulls the value straight off the CPP node so the startup recompute is logged
+# even if it runs before CppDebugOptions._ready().
+var _verbose: bool = false
+var _verbose_pushed: bool = false
+var _cpp_debug_options: Node = null
 
 const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
@@ -381,13 +389,30 @@ func _on_plant_added(_cell: Vector2i) -> void:
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
 
-func _on_plant_removed(_cell: Vector2i) -> void:
-	_remove_plant_from_gardens(_cell)
-	_retarget_agents_for_garden_topology_change(_cell)
+# Runtime plant removal (an agent ate a plant, or a plant was removed at runtime).
+# This is CONTENT-ONLY: it never recomputes garden entry/access points and never
+# triggers a full topology rebuild. We only narrow-retarget the agents that were
+# specifically targeting the removed plant, and only fall back to the budgeted
+# queue when the garden actually became empty. Full rebuilds are reserved for real
+# topology changes (plant addition, walls/buildings, level load, manual rebuild).
+func _on_plant_removed(cell: Vector2i) -> void:
+	var result := _remove_plant_from_garden_content_only(cell)
+	if not bool(result.get("was_removed", false)):
+		return
+
+	var garden_id := int(result.get("garden_id", 0))
+	var became_empty := bool(result.get("became_empty", false))
+
+	if became_empty and garden_id > 0:
+		_handle_garden_became_empty(garden_id)
+	else:
+		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
+
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
+
 	if _no_plants_remaining():
-		_start_escape_for_all_monsters()
+		_queue_escape_for_all_monsters_budgeted()
 
 func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void:
 	if not layer:
@@ -945,8 +970,53 @@ func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 	_retarget_agent_or_escape(agent, spawner_cell)
 
+# NARROW retarget for content-only plant removal. Only handles agents whose A*-in
+# target was the exact removed plant; it does NOT broad-retarget the garden, does
+# NOT rebuild routes, and does NOT recompute entry points. _entry_path_agents and
+# _astar_out_agents are deliberately left alone (their garden is still alive with
+# other plants, or it became empty — and the empty case is handled separately by
+# _handle_garden_became_empty). The eater that just consumed the plant is already
+# in _eating_agents (not _astar_in_agents), so it is never disturbed here.
+func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
+	var garden_still_edible: bool = garden_id > 0 and _garden_has_edible_plants(garden_id)
+	# Snapshot keys: _retarget_agent_or_escape / queueing mutate _astar_in_agents.
+	for raw_nav_id in _astar_in_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _astar_in_agents.has(nav_id):
+			continue
+		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
+		if plant_cell != cell:
+			continue
+		var raw_agent: Variant = data.get("node", null)
+		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+		# Detach the stale A*-in path and forget the phase before reassigning.
+		if agent_manager and agent_manager.has_method("detach_agent_path"):
+			agent_manager.call("detach_agent_path", nav_id)
+		_astar_in_agents.erase(nav_id)
+		if not is_instance_valid(raw_agent):
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
+			continue
+		if agent.has_method("stop_astar_in"):
+			agent.call("stop_astar_in")
+		if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+		if garden_still_edible:
+			# Cheap, synchronous: the garden still has plants, so this agent can pick a
+			# fresh in-garden target (or escape if none is reachable) right now.
+			_retarget_agent_or_escape(agent, spawner_cell)
+		else:
+			# Garden has no edible plants left (but wasn't flagged empty for the queue
+			# path): defer through the budgeted queue so we don't spike this frame.
+			_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
+	# A stale-empty garden may have been flagged by _garden_has_edible_plants above;
+	# this function does not iterate _gardens, so draining now is safe.
+	_drain_pending_empty_gardens()
+
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
-	_start_agent_eating(eater, _eating_time)
+	_start_agent_eating(eater, _eating_time, plant_cell)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
@@ -997,11 +1067,19 @@ func _process_eating_agents(delta: float) -> void:
 func _erase_eating_agent(nav_id: int) -> void:
 	_eating_agents.erase(nav_id)
 
-func _start_agent_eating(agent: Node2D, seconds: float) -> void:
+func _start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = INVALID_CELL) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
+	# Carry the garden/spawner/plant context so an empty-garden event can find this
+	# eater and queue it for escape without a full rebuild (see _agent_referenced_
+	# garden_id / _handle_garden_became_empty).
+	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 	_eating_agents[nav_id] = {
 		"node": agent,
-		"timer": seconds
+		"timer": seconds,
+		"garden_id": garden_id,
+		"spawner_cell": spawner_cell,
+		"plant_cell": plant_cell
 	}
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
@@ -1107,9 +1185,13 @@ func _process_astar_out_arrivals() -> void:
 	for nav_id in finished:
 		_astar_out_agents.erase(nav_id)
 
-func _assign_agent_to_escape(agent: Node2D) -> void:
+# Returns true only when an escape group/path was actually assigned (i.e.
+# _attach_agent_to_escape ran). Every early return is a failure (false) so the
+# budgeted queue can keep the agent in "waiting_new_status" and requeue it instead
+# of stranding it with no nav state.
+func _assign_agent_to_escape(agent: Node2D) -> bool:
 	if not agent_manager or not agent_manager.has_method("assign_agent"):
-		return
+		return false
 	# Prefer the nearest reachable per-exit-wall escape (chosen by walkable route
 	# cost from the monster), so monsters leave through the closest wall exit.
 	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
@@ -1117,8 +1199,7 @@ func _assign_agent_to_escape(agent: Node2D) -> void:
 		var exit_group: int = int(exit_escape.get("escape_group", -1))
 		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
 		if exit_group > IDLE_GROUP and exit_target != INVALID_CELL:
-			_attach_agent_to_escape(agent, exit_group, exit_target)
-			return
+			return _attach_agent_to_escape(agent, exit_group, exit_target)
 
 	# Fallback: the per-spawner escape (single shared exit for that spawner).
 	var spawner_cell: Vector2i = INVALID_CELL
@@ -1130,17 +1211,21 @@ func _assign_agent_to_escape(agent: Node2D) -> void:
 		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 		spawner_cell = _nearest_spawner_cell(from_cell)
 	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
-		return
+		return false
 	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
 	if not bool(route.get("escape_ready", false)):
-		return
+		return false
 	var escape_group: int = int(route.get("escape_group", -1))
 	if escape_group <= IDLE_GROUP:
-		return
+		return false
 	var escape_target_cell: Vector2i = route.get("escape_wall_target_cell", spawner_cell) as Vector2i
-	_attach_agent_to_escape(agent, escape_group, escape_target_cell, spawner_cell)
+	return _attach_agent_to_escape(agent, escape_group, escape_target_cell, spawner_cell)
 
-func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell: Vector2i, spawner_cell: Vector2i = INVALID_CELL) -> void:
+# Returns true once the agent has been switched to the escape flow group. Only
+# fails (false) if agent_manager is missing assign_agent — i.e. nav is unusable.
+func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell: Vector2i, spawner_cell: Vector2i = INVALID_CELL) -> bool:
+	if not agent_manager or not agent_manager.has_method("assign_agent"):
+		return false
 	var nav_id: int = int(agent.get("nav_id"))
 	# Ensure path-follow is cleared before switching to FF group.
 	if agent_manager.has_method("detach_agent_path"):
@@ -1163,6 +1248,7 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 		agent.call("stop_eating")
 	if agent.has_method("start_escape"):
 		agent.call("start_escape")
+	return true
 
 func _process_escape_arrivals() -> void:
 	var arrived: Array[int] = []
@@ -1414,38 +1500,58 @@ func _add_plant_to_gardens(cell: Vector2i) -> void:
 		return
 	_rebuild_plant_zone_from_layer()
 
-func _remove_plant_from_gardens(cell: Vector2i) -> void:
-	if dont_shrink_gardens:
-		_remove_plant_from_gardens_without_shrink(cell)
-		return
-	# Removal can split a garden when the eaten plant was the bridge between two
-	# bounded walkable clusters. Incremental shrink keeps the old garden id alive
-	# and leaves agents with semantically stale A* targets, so rebuild the same way
-	# additions do. Garden ids are monotonic; every old route/agent assignment is
-	# revalidated against the new topology by the caller.
-	_rebuild_plant_zone_from_layer()
-
-func _remove_plant_from_gardens_without_shrink(cell: Vector2i) -> void:
+# Canonical runtime plant-removal mutation. CONTENT-ONLY: it edits the garden's
+# plant set and derived counts and nothing else. It deliberately does NOT touch
+# zone_tiles / margin_tiles / entry_cells / reachable, and never triggers a full
+# rebuild, geometry recompute, or dirty-garden validation. Garden doors stay
+# stable while monsters eat plants. Returns a small status dictionary so the
+# caller can decide how (and whether) to retarget agents — see _on_plant_removed.
+#
+# Accepted compromise: removing a plant never splits a garden. If the removed
+# plant was the bridge between two walkable clusters, the survivors stay in the
+# same historical garden (same id, same entry cells) until the next FULL topology
+# rebuild. This is intentional: stable entry points + no per-eat rebuild cost.
+func _remove_plant_from_garden_content_only(cell: Vector2i) -> Dictionary:
 	if not _garden_by_plant_cell.has(cell):
-		return
+		return {
+			"garden_id": 0,
+			"was_removed": false,
+			"became_empty": false,
+			"remaining_count": 0
+		}
 	var garden_id: int = int(_garden_by_plant_cell[cell])
 	_garden_by_plant_cell.erase(cell)
 	if not _gardens.has(garden_id):
-		return
+		# Mapping pointed at a garden that no longer exists. Treat it as removed and
+		# empty so the caller still gives bound agents a fresh target.
+		return {
+			"garden_id": garden_id,
+			"was_removed": true,
+			"became_empty": true,
+			"remaining_count": 0
+		}
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
 	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
 	plant_cells.erase(cell)
-	if plant_cells.is_empty():
-		garden["plant_cells"] = plant_cells
-		garden["edible_count"] = 0
-		garden["targetable"] = false
-		_gardens[garden_id] = garden
-		_mark_garden_empty(garden_id)
-		return
+	var remaining_count: int = plant_cells.size()
+	# Content-only updates. zone_tiles / margin_tiles / entry_cells / reachable are
+	# intentionally left untouched so the garden keeps its stable doors.
 	garden["plant_cells"] = plant_cells
-	garden["edible_count"] = plant_cells.size()
-	garden["targetable"] = bool(garden.get("reachable", false))
+	garden["edible_count"] = remaining_count
+	if remaining_count == 0:
+		garden["targetable"] = false
+	else:
+		garden["targetable"] = bool(garden.get("reachable", false))
 	_gardens[garden_id] = garden
+	# When the garden just went empty we DON'T erase it here: the caller must first
+	# queue the agents bound to it (it still needs the garden's data) and then call
+	# _handle_garden_became_empty(), which releases routes and erases the garden.
+	return {
+		"garden_id": garden_id,
+		"was_removed": true,
+		"became_empty": remaining_count == 0,
+		"remaining_count": remaining_count
+	}
 
 # TEMP DEBUG (garden crash hunt) -------------------------------------------
 # Centralized garden erase. Empty gardens are allowed to disappear immediately;
@@ -1537,13 +1643,18 @@ func _validate_dirty_gardens() -> void:
 	# on whether an entry cell is reachable from a spawner.
 	_recompute_spawner_reachable_cells()
 	_gardens_iter_depth += 1
+	var total_entry_points: int = 0
 	for raw_garden_id in _gardens.keys():
-		_apply_spawner_reachability(int(raw_garden_id))
+		var gid: int = int(raw_garden_id)
+		_apply_spawner_reachability(gid)
+		total_entry_points += (_gardens[gid] as Dictionary).get("entry_cells", []).size()
 	_gardens_iter_depth -= 1
 	_rebuild_plant_zone_compatibility_cache()
 	_plant_zone_built = true
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
+	if _is_verbose():
+		print("BuildingManager: %d gardens recomputed with %d entry points" % [_gardens.size(), total_entry_points])
 
 # Garden geometry is navigation-aware, not box-geometry. A bounded walkable BFS
 # from the plant cells (same 8-conn, no-corner-cut rules as the pathfinder/cluster
@@ -2000,42 +2111,41 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 	_spawner_garden_routes[spawner_cell] = routes
 	return route
 
-func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> void:
+# Returns true once the agent has a real new nav state (a garden entry path, or a
+# successfully assigned escape). Returns false only when neither a garden route nor
+# an escape could be assigned, so the budgeted queue can requeue it. Every escape
+# fallback below propagates _assign_agent_to_escape's own success/failure.
+func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
 	if not is_instance_valid(agent):
-		return
+		return false
 	if _no_plants_remaining():
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 	if _try_local_retarget_agent(agent, from_cell, spawner_cell):
-		return
+		return true
 	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell)
 	if pair.is_empty():
 		if spawner_cell == INVALID_CELL:
 			spawner_cell = _nearest_spawner_cell(from_cell)
 		if spawner_cell != INVALID_CELL and _spawner_routes.has(spawner_cell):
 			agent.set_meta("spawner_cell", spawner_cell)
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	spawner_cell = pair.get("spawner_cell", INVALID_CELL) as Vector2i
 	var garden_id: int = int(pair.get("garden_id", 0))
 	if garden_id <= 0:
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	if not bool(route.get("ready", false)):
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	if not _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell):
-		_assign_agent_to_escape(agent)
-		return
+		return _assign_agent_to_escape(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
+	return true
 
 # ---------------------------------------------------------------------------
 # Budgeted retargeting after a garden topology rebuild.
@@ -2083,17 +2193,53 @@ func _agent_referenced_garden_id(nav_id: int, agent: Node2D) -> int:
 	if _astar_out_agents.has(nav_id):
 		return int((_astar_out_agents[nav_id] as Dictionary).get("garden_id", 0))
 	if _eating_agents.has(nav_id):
-		# _eating_agents does not carry garden_id; fall through to the meta below.
-		pass
+		var eat_garden: int = int((_eating_agents[nav_id] as Dictionary).get("garden_id", 0))
+		if eat_garden > 0:
+			return eat_garden
+		# garden_id missing/0 on the eating entry: fall through to the meta below.
 	if is_instance_valid(agent) and agent.has_meta("garden_id"):
 		return int(agent.get_meta("garden_id"))
 	return 0
 
-# One-shot scan after a garden rebuild. Only cheap checks: detect stale garden
-# references, detach stale nav state, park the agent in "waiting_new_status", and
-# queue it. No new path/flow is computed here (that is deferred to the budgeted
-# queue). Iterates a snapshot of the monsters group so the per-agent erases below
-# never mutate a live iteration.
+# Shared enqueue path for ALL budgeted retargeting (full rebuild, empty-garden,
+# escape-all). Cheaply detaches the agent's stale path/flow, forgets its current
+# phase, parks it in "waiting_new_status", and appends one queue item. NO new
+# path/flow is computed here — that is deferred to _process_garden_retarget_queue.
+# Dedups on _garden_retarget_queued so an agent is never enqueued twice. Keeping
+# this in one place guarantees identical queue behaviour across every caller.
+func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String, spawner_cell: Vector2i, garden_id: int) -> void:
+	if nav_id < 0 or not is_instance_valid(agent):
+		return
+	if _garden_retarget_queued.has(nav_id):
+		return
+	# Cheaply detach stale path/flow so the agent stops following an invalid route
+	# immediately. The real re-route happens later in the budgeted queue.
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	_entry_path_agents.erase(nav_id)
+	_astar_in_agents.erase(nav_id)
+	_astar_out_agents.erase(nav_id)
+	_escaping_agents.erase(nav_id)
+	if _eating_agents.has(nav_id):
+		_erase_eating_agent(nav_id)
+		if agent.has_method("stop_eating"):
+			agent.call("stop_eating")
+	if agent.has_method("start_waiting_new_status"):
+		agent.call("start_waiting_new_status")
+	_garden_retarget_queue.append({
+		"nav_id": nav_id,
+		"intent": intent,
+		"spawner_cell": spawner_cell,
+		"garden_id": garden_id
+	})
+	_garden_retarget_queued[nav_id] = true
+
+# One-shot scan after a FULL garden rebuild. Cheap checks only: detect agents whose
+# garden reference is now stale, enqueue each via the shared helper. The expensive
+# re-path/escape is deferred to the budgeted queue. Iterates a snapshot of the
+# monsters group so the helper's per-agent erases never mutate a live iteration.
 func _queue_agents_after_garden_rebuild() -> void:
 	for node in get_tree().get_nodes_in_group("monsters"):
 		if not (node is Node2D):
@@ -2107,40 +2253,131 @@ func _queue_agents_after_garden_rebuild() -> void:
 		var garden_id: int = _agent_referenced_garden_id(nav_id, agent)
 		if not _garden_assignment_is_stale(garden_id):
 			continue
-		# Decide intent BEFORE we clear the agent's phase dictionaries: agents that
-		# were leaving or eating should head for the exit, everyone else retargets.
+		# Decide intent BEFORE the helper clears the agent's phase dictionaries:
+		# agents that were leaving or eating should head for the exit, everyone else
+		# retargets.
 		var intent: String = "retarget"
 		if _astar_out_agents.has(nav_id) or _eating_agents.has(nav_id):
 			intent = "escape"
 		var spawner_cell: Vector2i = INVALID_CELL
 		if agent.has_meta("spawner_cell"):
 			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-		# Cheaply detach stale path/flow and forget the old phase so the agent stops
-		# following an invalid route immediately. New routing is deferred.
-		if agent_manager and agent_manager.has_method("detach_agent_path"):
-			agent_manager.call("detach_agent_path", nav_id)
-		if agent_manager and agent_manager.has_method("detach_agent_flow"):
-			agent_manager.call("detach_agent_flow", nav_id)
-		_entry_path_agents.erase(nav_id)
-		_astar_in_agents.erase(nav_id)
-		_astar_out_agents.erase(nav_id)
-		_escaping_agents.erase(nav_id)
-		if _eating_agents.has(nav_id):
-			_erase_eating_agent(nav_id)
-			if agent.has_method("stop_eating"):
-				agent.call("stop_eating")
-		if agent.has_method("start_waiting_new_status"):
-			agent.call("start_waiting_new_status")
-		_garden_retarget_queue.append({
-			"nav_id": nav_id,
-			"intent": intent,
-			"spawner_cell": spawner_cell
-		})
-		_garden_retarget_queued[nav_id] = true
+		_queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
 	# _garden_has_edible_plants (via _garden_assignment_is_stale) may have queued
 	# stale-empty gardens; this loop iterates monsters, not _gardens, so draining
 	# here is safe.
 	_drain_pending_empty_gardens()
+
+# Content-only removal emptied a garden. Queue every agent bound to it through the
+# existing budgeted queue, then release the garden's routes and erase it. We must
+# queue the agents FIRST (or at least before _erase_garden runs), because the
+# queue helper reads the agent's phase, and because the affected-agent scan relies
+# on the live phase dictionaries that still carry this garden_id. No new path/flow
+# is computed here — that is the budgeted queue's job. We do NOT rebuild gardens
+# and do NOT recompute entry cells.
+func _handle_garden_became_empty(garden_id: int) -> void:
+	if garden_id <= 0:
+		return
+	# Intent per phase: agents heading in (entry/astar_in) look for another garden
+	# (retarget); agents already inside leaving/eating head for the exit (escape).
+	for raw_nav_id in _entry_path_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _entry_path_agents.has(nav_id):
+			continue
+		if int((_entry_path_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
+			continue
+		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
+	for raw_nav_id in _astar_in_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _astar_in_agents.has(nav_id):
+			continue
+		if int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
+			continue
+		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
+	for raw_nav_id in _astar_out_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _astar_out_agents.has(nav_id):
+			continue
+		if int((_astar_out_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
+			continue
+		_queue_affected_empty_garden_agent(nav_id, "escape", garden_id)
+	for raw_nav_id in _eating_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _eating_agents.has(nav_id):
+			continue
+		if int((_eating_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
+			continue
+		_queue_affected_empty_garden_agent(nav_id, "escape", garden_id)
+	# Meta-only fallback: agents that lost their phase entry but still carry this
+	# garden in meta (e.g. mid-transition). Scan the monsters group once.
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D):
+			continue
+		var agent: Node2D = node
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
+			continue
+		if not agent.has_meta("garden_id"):
+			continue
+		if int(agent.get_meta("garden_id")) != garden_id:
+			continue
+		var spawner_cell: Vector2i = INVALID_CELL
+		if agent.has_meta("spawner_cell"):
+			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+		_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
+	# Now that affected agents are parked/queued, release routes and erase the
+	# garden. _mark_garden_empty clears plant_cells, releases routes, and erases.
+	_mark_garden_empty(garden_id)
+
+# Helper for _handle_garden_became_empty: resolve the agent node + spawner_cell
+# for a queued nav_id and hand it to the shared queue helper. Reads spawner_cell
+# from the phase entry if present, else from meta.
+func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: int) -> void:
+	if _garden_retarget_queued.has(nav_id):
+		return
+	var agent: Node2D = _agent_from_nav_id(nav_id)
+	if not is_instance_valid(agent):
+		# Agent is gone; still drop its stale phase entries so nothing dangles.
+		_entry_path_agents.erase(nav_id)
+		_astar_in_agents.erase(nav_id)
+		_astar_out_agents.erase(nav_id)
+		_erase_eating_agent(nav_id)
+		return
+	var spawner_cell: Vector2i = INVALID_CELL
+	if _entry_path_agents.has(nav_id):
+		spawner_cell = (_entry_path_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
+	elif _astar_in_agents.has(nav_id):
+		spawner_cell = (_astar_in_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
+	elif _astar_out_agents.has(nav_id):
+		spawner_cell = (_astar_out_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
+	elif _eating_agents.has(nav_id):
+		spawner_cell = (_eating_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	_queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
+
+# Budgeted "everyone escape" for the no-plants-left case. One scan of the monsters
+# group enqueues each valid agent (intent="escape") through the shared queue, so
+# the actual escape assignment is spread across frames by the budgeted queue
+# instead of being applied synchronously in a single frame.
+func _queue_escape_for_all_monsters_budgeted() -> void:
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D):
+			continue
+		var agent: Node2D = node
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
+			continue
+		# Already escaping (and not eating): leave it alone, it has a valid exit route.
+		if _escaping_agents.has(nav_id) and not _eating_agents.has(nav_id):
+			continue
+		var spawner_cell: Vector2i = INVALID_CELL
+		if agent.has_meta("spawner_cell"):
+			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+		var garden_id: int = 0
+		if agent.has_meta("garden_id"):
+			garden_id = int(agent.get_meta("garden_id"))
+		_queue_agent_for_garden_retarget(nav_id, agent, "escape", spawner_cell, garden_id)
 
 # Budgeted: re-assign at most garden_retarget_budget_per_frame queued agents per
 # frame. The expensive A*/escape work lives in _retarget_single_waiting_agent.
@@ -2166,19 +2403,56 @@ func _process_garden_retarget_queue() -> void:
 		_retarget_single_waiting_agent(nav_id, agent, item)
 
 # Re-assign one parked agent. intent "escape" routes it to a map exit; intent
-# "retarget" finds a new valid garden if one exists, otherwise escapes. Both clear
-# the temporary "waiting_new_status" before handing off to the real phase.
+# "retarget" finds a new valid garden if one exists, otherwise escapes.
+#
+# CRITICAL: "waiting_new_status" is only cleared AFTER the assignment actually
+# succeeds. The assignment functions return bool now, so on failure we keep the
+# agent waiting and requeue it (bounded retries) instead of stranding it with no
+# nav state. This fixes the old bug where stop_waiting_new_status() ran first and
+# a silently-failing assignment left the agent in a dead empty status.
 func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary) -> void:
 	if not is_instance_valid(agent):
 		return
-	if agent.has_method("stop_waiting_new_status"):
-		agent.call("stop_waiting_new_status")
 	var intent: String = str(item.get("intent", "retarget"))
 	var spawner_cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
+
+	var assigned: bool = false
 	if intent == "escape":
-		_assign_agent_to_escape(agent)
+		assigned = _assign_agent_to_escape(agent)
+	else:
+		assigned = _retarget_agent_or_escape(agent, spawner_cell)
+
+	if assigned:
+		if agent.has_method("stop_waiting_new_status"):
+			agent.call("stop_waiting_new_status")
 		return
-	_retarget_agent_or_escape(agent, spawner_cell)
+	# Assignment failed (no escape route / garden route ready yet). Keep the agent
+	# parked in waiting_new_status and requeue it for a later frame.
+	_requeue_waiting_agent(item)
+
+# Max times a single agent is retried through the budgeted queue before we give
+# up. Prevents an unroutable agent (e.g. no escape ready at all) from being
+# requeued forever every frame. After the cap we clear waiting so it falls back to
+# the normal idle/arrival logic rather than spinning.
+const _GARDEN_RETARGET_MAX_RETRIES: int = 30
+
+func _requeue_waiting_agent(item: Dictionary) -> void:
+	var nav_id: int = int(item.get("nav_id", -1))
+	if nav_id < 0:
+		return
+	var retries: int = int(item.get("retries", 0)) + 1
+	if retries > _GARDEN_RETARGET_MAX_RETRIES:
+		# Give up requeuing; let the agent leave waiting so other systems can act on
+		# it. It keeps whatever (empty) status it has; arrival/idle logic recovers it.
+		var agent: Node2D = _agent_from_nav_id(nav_id)
+		if is_instance_valid(agent) and agent.has_method("stop_waiting_new_status"):
+			agent.call("stop_waiting_new_status")
+		return
+	if _garden_retarget_queued.has(nav_id):
+		return
+	item["retries"] = retries
+	_garden_retarget_queue.append(item)
+	_garden_retarget_queued[nav_id] = true
 
 func get_plant_zone_tiles() -> Array:
 	return _plant_zone_tiles.keys()
@@ -2206,6 +2480,25 @@ func set_show_enters_exits(value: bool) -> void:
 
 func get_show_enters_exits() -> bool:
 	return _show_enters_exits
+
+func set_verbose(value: bool) -> void:
+	_verbose = value
+	_verbose_pushed = true
+
+# True when verbose garden logging is on. Once CppDebugOptions has pushed a value
+# via set_verbose() we trust that; before then (e.g. the startup recompute, which
+# can run before CppDebugOptions._ready()) we pull the current inspector value
+# straight from the CPP node so the very first recompute is logged too.
+func _is_verbose() -> bool:
+	if _verbose_pushed:
+		return _verbose
+	if _cpp_debug_options == null and is_inside_tree():
+		var scene: Node = get_tree().get_current_scene()
+		if scene:
+			_cpp_debug_options = scene.get_node_or_null("CPP")
+	if _cpp_debug_options and "verbose" in _cpp_debug_options:
+		return bool(_cpp_debug_options.get("verbose"))
+	return _verbose
 
 # Garden border tiles a monster crosses to ENTER: per spawner, the garden
 # entry cell nearest that spawner. Aggregated across all spawners/gardens.
