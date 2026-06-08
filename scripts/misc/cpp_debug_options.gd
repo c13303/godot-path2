@@ -88,6 +88,22 @@ extends Node
 		empty_garden_local_retarget_radius = value
 		_apply_debug_settings()
 
+@export_group("Movement Tuning")
+@export_range(0.0, 1.0, 0.01, "or_greater") var bottleneck_backward_push_ratio: float = 0.15:
+	set(value):
+		bottleneck_backward_push_ratio = value
+		_apply_debug_settings()
+
+@export_range(0.0, 3.0, 0.05, "or_greater") var bottleneck_lateral_push_ratio: float = 1.0:
+	set(value):
+		bottleneck_lateral_push_ratio = value
+		_apply_debug_settings()
+
+@export_range(0.0, 1.0, 0.01, "or_greater") var priority_separation_bias: float = 0.30:
+	set(value):
+		priority_separation_bias = value
+		_apply_debug_settings()
+
 @export_group("Navigation Debug")
 ## Threshold (ms) for the TOTAL BuildingManager navigation/gameplay frame cost.
 ## If BuildingManager._process() exceeds this duration, a "debug_nav_total_frame_lag"
@@ -160,7 +176,7 @@ func _apply_debug_settings() -> void:
 	var eff_world_hitboxes: bool = draw_world_hitboxes and dbg
 	var eff_combat_hitboxes: bool = draw_combat_hitboxes and dbg
 	var eff_bottleneck_zones: bool = draw_bottleneck_zones and dbg
-	var eff_disable_bottlenecks: bool = disable_bottlenecks and dbg
+	var eff_disable_bottlenecks: bool = disable_bottlenecks
 	var eff_agent_labels: bool = show_agent_state_labels and dbg
 	var eff_flow_field: bool = draw_flow_field and dbg
 	var eff_gardens: bool = show_gardens and dbg
@@ -196,6 +212,9 @@ func _apply_debug_settings() -> void:
 			&"set_debug_flowfield_rebuild_lag_ms",
 			&"set_debug_plantff_ff_lag_ms"
 		], debug_flowfield_rebuild_lag_ms)
+		_call_if_available(global_config, "set_bottleneck_backward_push_ratio", bottleneck_backward_push_ratio)
+		_call_if_available(global_config, "set_bottleneck_lateral_push_ratio", bottleneck_lateral_push_ratio)
+		_call_if_available(global_config, "set_priority_separation_bias", priority_separation_bias)
 		_apply_speed_multiplier(global_config)
 
 	var flow: Node = get_node_or_null("FlowFieldNative")

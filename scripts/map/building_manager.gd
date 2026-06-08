@@ -1315,7 +1315,7 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 		return
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents.erase(nav_id)
@@ -2628,7 +2628,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents.erase(nav_id)
@@ -2688,7 +2688,7 @@ func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, g
 		agent_manager.call("detach_agent_flow", nav_id)
 	if agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
 	agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents[nav_id] = {
 		"node": agent,
@@ -3639,13 +3639,43 @@ func _nearest_zone_tile_to(cell: Vector2i, zone_tiles: Dictionary) -> Vector2i:
 			best_cell = c
 	return best_cell
 
-func _path_cells_to_world(path_cells: PackedVector2Array) -> PackedVector2Array:
+func _path_cells_to_world(path_cells: PackedVector2Array, nav_id: int = -1, disperse_endpoint: bool = false) -> PackedVector2Array:
 	var out: PackedVector2Array = PackedVector2Array()
 	out.resize(path_cells.size())
+	var last_index: int = path_cells.size() - 1
 	for i in range(path_cells.size()):
 		var v: Vector2 = path_cells[i]
-		out[i] = _cell_center(Vector2i(int(v.x), int(v.y)))
+		var cell: Vector2i = Vector2i(int(v.x), int(v.y))
+		if disperse_endpoint and i == last_index and nav_id >= 0:
+			out[i] = _cell_center_with_local_offset(cell, _path_endpoint_local_offset(cell, nav_id))
+		else:
+			out[i] = _cell_center(cell)
 	return out
+
+func _cell_center_with_local_offset(cell: Vector2i, local_offset: Vector2) -> Vector2:
+	return floorz.to_global(floorz.map_to_local(cell) + local_offset)
+
+func _path_endpoint_local_offset(cell: Vector2i, nav_id: int) -> Vector2:
+	var tile_size: Vector2 = _tile_size()
+	var radius: float = min(tile_size.x, tile_size.y) * 0.28
+	var h: int = nav_id * 1103515245 + cell.x * 73856093 + cell.y * 19349663
+	var slot: int = _positive_mod(h, 12)
+	var ring: int = _positive_mod(int(h / 12), 2)
+	var angle: float = (PI * 2.0 * float(slot)) / 12.0
+	var scale: float = 0.65 + 0.35 * float(ring)
+	return Vector2(cos(angle), sin(angle)) * radius * scale
+
+func _positive_mod(value: int, divisor: int) -> int:
+	var r: int = value % divisor
+	if r < 0:
+		r += divisor
+	return r
+
+func _tile_size() -> Vector2:
+	if floorz and floorz.tile_set:
+		var raw_tile_size: Vector2i = floorz.tile_set.get_tile_size()
+		return Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
+	return Vector2(32, 32)
 
 func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int) -> Vector2i:
 	if not _gardens.has(garden_id):

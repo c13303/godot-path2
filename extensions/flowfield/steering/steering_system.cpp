@@ -557,6 +557,19 @@ Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
     return safe_normalize(r) * cfg.wall_repel_strength;
 }
 
+double SteeringSystem::movement_priority(const AgentData &agent) const
+{
+    Vec2 intent = safe_normalize(agent.debug_desired_dir);
+    if (intent.is_zero())
+        intent = safe_normalize(agent.debug_nav_dir);
+    if (intent.is_zero())
+        intent = safe_normalize(agent.velocity);
+    Vec2 velocity_dir = safe_normalize(agent.velocity);
+    if (intent.is_zero() || velocity_dir.is_zero())
+        return 0.0;
+    return std::clamp(velocity_dir.dot(intent), 0.0, 1.0);
+}
+
 Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 {
     const auto &cfg = globalconfig();
@@ -604,6 +617,9 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
     Vec2 separation_force(0, 0);
     int count = 0;
+    double self_priority = movement_priority(agent);
+    double priority_bias = std::clamp(cfg.priority_separation_bias, 0.0, 1.0);
+    double priority_scale_sum = 0.0;
 
     for (int i = 0; i < limit; ++i)
     {
@@ -625,7 +641,13 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         double resist = std::max(0.001, agent.profile.crowd_resist_strength);
         weight *= std::max(0.0, n.profile.crowd_push_strength) / resist;
 
+        double neighbor_priority = movement_priority(n);
+        double priority_delta = self_priority - neighbor_priority;
+        double yield_multiplier = std::clamp(1.0 - priority_delta * priority_bias, 0.65, 1.35);
+        weight *= yield_multiplier;
+
         separation_force = separation_force + (diff * (1.0 / dist)) * falloff * weight;
+        priority_scale_sum += yield_multiplier;
         count++;
     }
 
@@ -633,7 +655,10 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
         separation_force = separation_force * (1.0 / (double)count);
 
     if (!separation_force.is_zero())
-        separation_force = safe_normalize(separation_force) * cfg.separation_strength;
+    {
+        double priority_scale = count > 0 ? std::clamp(priority_scale_sum / (double)count, 0.65, 1.35) : 1.0;
+        separation_force = safe_normalize(separation_force) * cfg.separation_strength * priority_scale;
+    }
 
     return separation_force;
 }
@@ -926,11 +951,12 @@ Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField
         double forward = correction.dot(nav);
         Vec2 lateral = correction - nav * forward;
 
-        if (forward < 0.0)
-            forward = 0.0;
+        double min_forward = -cfg.flow_weight * std::clamp(cfg.bottleneck_backward_push_ratio, 0.0, 1.0);
+        if (forward < min_forward)
+            forward = min_forward;
 
         double max_forward = cfg.flow_weight;
-        double max_lateral = cfg.flow_weight * 0.6;
+        double max_lateral = cfg.flow_weight * std::max(0.0, cfg.bottleneck_lateral_push_ratio);
 
         if (forward > max_forward)
             forward = max_forward;

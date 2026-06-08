@@ -72,6 +72,12 @@ namespace godot
         void set_bottleneck_wait_speed_ratio(double v);
         double get_bottleneck_backoff_strength() const;
         void set_bottleneck_backoff_strength(double v);
+        double get_bottleneck_backward_push_ratio() const;
+        void set_bottleneck_backward_push_ratio(double v);
+        double get_bottleneck_lateral_push_ratio() const;
+        void set_bottleneck_lateral_push_ratio(double v);
+        double get_priority_separation_bias() const;
+        void set_priority_separation_bias(double v);
 
         double get_separation_strength() const;
         void set_separation_strength(double v);

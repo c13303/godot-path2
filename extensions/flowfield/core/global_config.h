@@ -66,13 +66,16 @@ namespace ffcore
         double target_T2_param_speed_ratio = 0.6;          // fraction de la vitesse max visée dans T2
         double target_T2_param_speed_lerp = 0.05;          // bigger = less inertia
 
-        double agent_world_diameter_ratio = 0.75;
+        double agent_world_diameter_ratio = 0.9;
         int bottleneck_zone_radius_tiles = 2;
         double bottleneck_reservation_seconds = 1.0;
         double bottleneck_wait_speed_ratio = 0.05;
         double bottleneck_backoff_strength = 0.35;
+        double bottleneck_backward_push_ratio = 0.15;
+        double bottleneck_lateral_push_ratio = 1.25;
+        double priority_separation_bias = 0.30;
         double separation_radius = tile_size;
-        double separation_strength = 400.0;
+        double separation_strength = 600.0;
         int max_neighbors = 16;
 
         // Generic static circular obstacle repulsion (reusable: not tied to any game concept).

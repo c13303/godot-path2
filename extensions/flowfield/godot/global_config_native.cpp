@@ -69,6 +69,12 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_bottleneck_wait_speed_ratio", "value"), &GlobalConfigNative::set_bottleneck_wait_speed_ratio);
     ClassDB::bind_method(D_METHOD("get_bottleneck_backoff_strength"), &GlobalConfigNative::get_bottleneck_backoff_strength);
     ClassDB::bind_method(D_METHOD("set_bottleneck_backoff_strength", "value"), &GlobalConfigNative::set_bottleneck_backoff_strength);
+    ClassDB::bind_method(D_METHOD("get_bottleneck_backward_push_ratio"), &GlobalConfigNative::get_bottleneck_backward_push_ratio);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_backward_push_ratio", "value"), &GlobalConfigNative::set_bottleneck_backward_push_ratio);
+    ClassDB::bind_method(D_METHOD("get_bottleneck_lateral_push_ratio"), &GlobalConfigNative::get_bottleneck_lateral_push_ratio);
+    ClassDB::bind_method(D_METHOD("set_bottleneck_lateral_push_ratio", "value"), &GlobalConfigNative::set_bottleneck_lateral_push_ratio);
+    ClassDB::bind_method(D_METHOD("get_priority_separation_bias"), &GlobalConfigNative::get_priority_separation_bias);
+    ClassDB::bind_method(D_METHOD("set_priority_separation_bias", "value"), &GlobalConfigNative::set_priority_separation_bias);
 
     ClassDB::bind_method(D_METHOD("get_separation_strength"), &GlobalConfigNative::get_separation_strength);
     ClassDB::bind_method(D_METHOD("set_separation_strength", "value"), &GlobalConfigNative::set_separation_strength);
@@ -139,6 +145,9 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_reservation_seconds"), "set_bottleneck_reservation_seconds", "get_bottleneck_reservation_seconds");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_wait_speed_ratio"), "set_bottleneck_wait_speed_ratio", "get_bottleneck_wait_speed_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_backoff_strength"), "set_bottleneck_backoff_strength", "get_bottleneck_backoff_strength");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_backward_push_ratio"), "set_bottleneck_backward_push_ratio", "get_bottleneck_backward_push_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_lateral_push_ratio"), "set_bottleneck_lateral_push_ratio", "get_bottleneck_lateral_push_ratio");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "priority_separation_bias"), "set_priority_separation_bias", "get_priority_separation_bias");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
@@ -225,6 +234,12 @@ double GlobalConfigNative::get_bottleneck_wait_speed_ratio() const { return cfg(
 void GlobalConfigNative::set_bottleneck_wait_speed_ratio(double v) { cfg().bottleneck_wait_speed_ratio = std::clamp(v, 0.0, 1.0); }
 double GlobalConfigNative::get_bottleneck_backoff_strength() const { return cfg().bottleneck_backoff_strength; }
 void GlobalConfigNative::set_bottleneck_backoff_strength(double v) { cfg().bottleneck_backoff_strength = std::clamp(v, 0.0, 1.0); }
+double GlobalConfigNative::get_bottleneck_backward_push_ratio() const { return cfg().bottleneck_backward_push_ratio; }
+void GlobalConfigNative::set_bottleneck_backward_push_ratio(double v) { cfg().bottleneck_backward_push_ratio = std::clamp(v, 0.0, 1.0); }
+double GlobalConfigNative::get_bottleneck_lateral_push_ratio() const { return cfg().bottleneck_lateral_push_ratio; }
+void GlobalConfigNative::set_bottleneck_lateral_push_ratio(double v) { cfg().bottleneck_lateral_push_ratio = std::clamp(v, 0.0, 3.0); }
+double GlobalConfigNative::get_priority_separation_bias() const { return cfg().priority_separation_bias; }
+void GlobalConfigNative::set_priority_separation_bias(double v) { cfg().priority_separation_bias = std::clamp(v, 0.0, 1.0); }
 
 double GlobalConfigNative::get_separation_strength() const { return cfg().separation_strength; }
 void GlobalConfigNative::set_separation_strength(double v) { cfg().separation_strength = std::max(0.0, v); }
