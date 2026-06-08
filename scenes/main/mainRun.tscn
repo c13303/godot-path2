@@ -1305,7 +1305,6 @@ script = ExtResource("23_cpp_debug")
 debug_enabled = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
-show_monsters_path = true
 show_enters_exits = true
 monster_eating_time = 1.0
 
