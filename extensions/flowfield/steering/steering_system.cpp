@@ -784,11 +784,6 @@ Vec2 SteeringSystem::static_obstacle_repulsion_force(const AgentData &agent)
     return result;
 }
 
-Vec2 SteeringSystem::local_avoidance_force(const AgentData &agent)
-{
-    return force_voisine(agent) + static_obstacle_repulsion_force(agent);
-}
-
 void SteeringSystem::resolve_static_obstacle_overlap(AgentData &agent)
 {
     if (static_obstacles.empty())
@@ -907,17 +902,21 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
     return;
 }
 
-Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &separation, double target_speed) const
+Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &agent_separation, const Vec2 &static_obstacle_repel, double target_speed) const
 {
     const auto &cfg = globalconfig();
+    // Local avoidance = pure crowd separation + static obstacle repulsion. Both shape
+    // the desired velocity, but they are kept as distinct inputs so callers can use
+    // pure agent_separation for crowd-vs-wall comparisons.
+    Vec2 local_avoidance = agent_separation + static_obstacle_repel;
     Vec2 nav = safe_normalize(nav_dir);
     if (nav.is_zero())
     {
-        Vec2 fallback = safe_normalize(wall_repel + separation);
+        Vec2 fallback = safe_normalize(wall_repel + local_avoidance);
         return fallback * target_speed;
     }
 
-    Vec2 correction = wall_repel + separation;
+    Vec2 correction = wall_repel + local_avoidance;
     Vec2i cell = ff ? ff->world_to_cell(agent_foot_point(agent)) : Vec2i(-1, -1);
     bool in_bottleneck_area = !cfg.effective_debug_disable_bottlenecks() &&
                               ff && (ff->bottleneck_core_at_cell(cell) >= 0 || ff->bottleneck_zone_at_cell(cell) >= 0);
@@ -1505,12 +1504,15 @@ void SteeringSystem::update_all(double delta)
         if (nav)
             wall_repel = wall_repulsion_force(a, nav);
 
-        // Shared local-avoidance term: neighbor separation + static obstacle repulsion.
-        // Computed once and threaded through every branch as `separation`, so flow,
-        // path-follow, manual and inactive agents all get the same soft avoidance. A
-        // hard depenetration pass (resolve_static_obstacle_overlap) runs after each
-        // branch's integration to guarantee blocking even when this soft term is damped.
-        Vec2 separation = local_avoidance_force(a);
+        // Pure agent-agent crowd separation. Kept distinct from static obstacle repulsion
+        // so downstream crowd logic (wall-stuck detector, debug_separation) stays clean.
+        Vec2 agent_separation = force_voisine(a);
+        // Soft static obstacle repulsion (turrets etc. register as generic obstacles).
+        Vec2 static_obstacle_repel = static_obstacle_repulsion_force(a);
+        // Combined soft local avoidance used by branches that just want "push me out of
+        // everything local". Hard depenetration passes after integration guarantee
+        // blocking even when these soft terms are damped by lerp/momentum.
+        Vec2 local_avoidance = agent_separation + static_obstacle_repel;
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, a.profile.foot_offset_y);
@@ -1548,7 +1550,7 @@ void SteeringSystem::update_all(double delta)
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
                 resolve_static_obstacle_overlap(a);
-            grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg);
                 continue;
             }
@@ -1556,14 +1558,14 @@ void SteeringSystem::update_all(double delta)
             Vec2 to_wp = a.path_waypoints[a.path_index] - foot;
             Vec2 nav_dir = safe_normalize(to_wp);
 
-            Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, wall_repel, separation, a.max_speed);
+            Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, wall_repel, agent_separation, static_obstacle_repel, a.max_speed);
             Vec2 desired_dir = safe_normalize(target_velocity);
             if (desired_dir.is_zero())
                 desired_dir = nav_dir;
 
             a.debug_nav_dir = nav_dir;
             a.debug_wall_repel = wall_repel;
-            a.debug_separation = separation;
+            a.debug_separation = agent_separation;
             a.debug_desired_dir = desired_dir;
             a.debug_target_velocity = target_velocity;
 
@@ -1592,7 +1594,7 @@ void SteeringSystem::update_all(double delta)
             if (a.control_mode == AgentControlMode::Manual)
             {
                 Vec2 manual_dir = safe_normalize(a.manual_input_dir);
-                Vec2 correction = separation;
+                Vec2 correction = local_avoidance;
                 Vec2 target_velocity = manual_dir.is_zero()
                                            ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                            : manual_dir * a.max_speed + correction;
@@ -1619,14 +1621,14 @@ void SteeringSystem::update_all(double delta)
                     ultimate_wall_correction(a, nav, delta);
 
                 resolve_static_obstacle_overlap(a);
-            grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg);
                 continue;
             }
 
             if (!a.is_propelled)
             {
-                Vec2 combined = wall_repel + separation;
+                Vec2 combined = wall_repel + local_avoidance;
 
                 Vec2 local_dir = safe_normalize(combined);
                 if (local_dir.is_zero())
@@ -1659,7 +1661,7 @@ void SteeringSystem::update_all(double delta)
         if (a.control_mode == AgentControlMode::Manual)
         {
             Vec2 manual_dir = safe_normalize(a.manual_input_dir);
-            Vec2 correction = separation;
+            Vec2 correction = local_avoidance;
             Vec2 target_velocity = manual_dir.is_zero()
                                        ? safe_normalize(correction) * a.max_speed * cfg.min_speed_fraction
                                        : manual_dir * a.max_speed + correction;
@@ -1871,7 +1873,7 @@ void SteeringSystem::update_all(double delta)
                 else
                     target_speed = t2_speed_target;
             }
-            target_velocity = desired_velocity_for_flow(a, ff, nav_dir, wall_repel, separation, target_speed);
+            target_velocity = desired_velocity_for_flow(a, ff, nav_dir, wall_repel, agent_separation, static_obstacle_repel, target_speed);
             desired_dir = safe_normalize(target_velocity);
             if (desired_dir.is_zero() && dist_to_target > 0.0)
                 desired_dir = safe_normalize(to_goal);
@@ -1879,16 +1881,18 @@ void SteeringSystem::update_all(double delta)
 
         a.debug_nav_dir = nav_dir;
         a.debug_wall_repel = wall_repel;
-        a.debug_separation = separation;
+        a.debug_separation = agent_separation;
         a.debug_desired_dir = desired_dir;
         a.debug_target_velocity = target_velocity;
 
         // Wall-stuck detector: wants to move into geometry it can't traverse.
         // Crowd-throttled agents (separation dominates) are intentionally ignored.
+        // Compares walls vs PURE crowd separation only — static obstacle repulsion must
+        // not be folded in here, or a nearby turret could mask/distort the detector.
         if (!a.is_propelled && !desired_dir.is_zero() && cfg.wall_stuck_detect_seconds > 0.0)
         {
             double wall_mag = safe_len(wall_repel);
-            double sep_mag = safe_len(separation);
+            double sep_mag = safe_len(agent_separation);
             double v_along = a.velocity.x * desired_dir.x + a.velocity.y * desired_dir.y;
             bool not_progressing = v_along < a.max_speed * cfg.wall_stuck_velocity_ratio;
             bool wall_dominates = wall_mag > cfg.wall_stuck_wall_vs_sep_ratio * sep_mag && wall_mag > 1e-3;
