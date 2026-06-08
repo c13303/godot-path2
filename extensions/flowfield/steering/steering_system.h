@@ -190,6 +190,13 @@ namespace ffcore
 
         Vec2 force_voisine(const AgentData &agent);
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);
+        // Shared local-avoidance term (neighbor separation + static obstacle repulsion)
+        // used by every moving-agent branch so the behavior can never diverge per branch.
+        Vec2 local_avoidance_force(const AgentData &agent);
+        // Hard depenetration: pushes an agent's foot point out of any overlapping static
+        // obstacle after integration. Guarantees blocking even when soft steering is
+        // damped by lerp/momentum. Generic: applies to any moving agent.
+        void resolve_static_obstacle_overlap(AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta);
         Vec2 desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &separation, double target_speed) const;

@@ -710,6 +710,10 @@ Vec2 SteeringSystem::static_obstacle_repulsion_force(const AgentData &agent)
 
     Vec2 force(0, 0);
     double resist = std::max(0.001, agent.profile.crowd_resist_strength);
+    int contact_count = 0;
+    int first_contact_id = -1;
+    double first_contact_dist = 0.0;
+    double first_contact_sum_radius = 0.0;
 
     for (int oid : nearby)
     {
@@ -742,12 +746,115 @@ Vec2 SteeringSystem::static_obstacle_repulsion_force(const AgentData &agent)
         double falloff = penetration_ratio * penetration_ratio;
         double weight = std::max(0.0, obs.push_strength) / resist;
         force = force + dir * falloff * weight;
+
+        if (contact_count == 0)
+        {
+            first_contact_id = obs.id;
+            first_contact_dist = dist;
+            first_contact_sum_radius = sum_radius;
+        }
+        contact_count++;
     }
 
-    if (force.is_zero())
-        return Vec2(0, 0);
+    Vec2 result = force.is_zero() ? Vec2(0, 0) : safe_normalize(force) * cfg.static_obstacle_repulsion_strength;
 
-    return safe_normalize(force) * cfg.static_obstacle_repulsion_strength;
+    // Throttled debug: only when the flag is on, only on actual contact, and at most
+    // once every couple seconds per agent. Never spams per tick.
+    if (cfg.debug_static_obstacles && contact_count > 0)
+    {
+        static std::unordered_map<int, double> last_log_time;
+        static double log_clock = 0.0;
+        log_clock += 1.0; // coarse frame counter; gate on a frame interval
+        double &last = last_log_time[agent.id];
+        if (log_clock - last >= 120.0) // ~2s at 60fps
+        {
+            last = log_clock;
+            godot::UtilityFunctions::print(
+                "[static_obstacle] agent=", agent.id,
+                " radius=", agent.profile.world_radius,
+                " queried=", (int)nearby.size(),
+                " contacts=", contact_count,
+                " first_obs=", first_contact_id,
+                " dist=", first_contact_dist,
+                " sum_radius=", first_contact_sum_radius,
+                " force_len=", safe_len(result));
+        }
+    }
+
+    return result;
+}
+
+Vec2 SteeringSystem::local_avoidance_force(const AgentData &agent)
+{
+    return force_voisine(agent) + static_obstacle_repulsion_force(agent);
+}
+
+void SteeringSystem::resolve_static_obstacle_overlap(AgentData &agent)
+{
+    if (static_obstacles.empty())
+        return;
+
+    Vec2 agent_foot = agent_foot_point(agent);
+    const auto &cfg = globalconfig();
+    double query_radius = agent.profile.world_radius + max_static_obstacle_radius + std::max(0.0, cfg.static_obstacle_query_padding);
+
+    static std::vector<int> nearby; // reused scratch buffer; query() clears it
+    static_obstacle_grid.query(agent_foot, query_radius, nearby);
+    if (nearby.empty())
+        return;
+
+    // Push the foot point out of every overlapping static circle. A couple of relaxation
+    // passes resolve the (rare) case of overlapping multiple obstacles at once. This is a
+    // hard positional guarantee — the agent cannot end the frame inside an obstacle — and
+    // is what makes flow-driven agents (monsters) blocked, not just softly nudged.
+    const int relaxation_passes = 2;
+    for (int pass = 0; pass < relaxation_passes; ++pass)
+    {
+        bool moved = false;
+        for (int oid : nearby)
+        {
+            auto it = static_obstacles.find(oid);
+            if (it == static_obstacles.end())
+                continue;
+            const StaticObstacle &obs = it->second;
+
+            double sum_radius = agent.profile.world_radius + obs.radius;
+            if (sum_radius <= 0.0)
+                continue;
+
+            Vec2 diff = agent_foot - obs.position;
+            double dist = diff.length();
+            if (dist >= sum_radius)
+                continue;
+
+            Vec2 dir = (dist < 0.001) ? hashed_unit_dir(agent.id) : diff * (1.0 / dist);
+            double push = sum_radius - dist; // depth to clear
+            agent_foot = agent_foot + dir * push;
+            moved = true;
+        }
+        if (!moved)
+            break;
+    }
+
+    // Convert the corrected foot point back into the agent body position (foot offset).
+    agent.position = agent_foot - Vec2(0, agent.profile.foot_offset_y);
+    // Kill inward velocity component so the agent doesn't keep ramming the obstacle next
+    // frame; sliding velocity (tangential) is preserved by the soft steering force.
+    for (int oid : nearby)
+    {
+        auto it = static_obstacles.find(oid);
+        if (it == static_obstacles.end())
+            continue;
+        const StaticObstacle &obs = it->second;
+        Vec2 diff = agent_foot_point(agent) - obs.position;
+        double dist = diff.length();
+        if (dist >= agent.profile.world_radius + obs.radius || dist < 0.001)
+            continue;
+        Vec2 normal = diff * (1.0 / dist);
+        double into = agent.velocity.dot(normal);
+        if (into < 0.0)
+            agent.velocity = agent.velocity - normal * into;
+    }
 }
 
 void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta)
@@ -1398,12 +1505,12 @@ void SteeringSystem::update_all(double delta)
         if (nav)
             wall_repel = wall_repulsion_force(a, nav);
 
-        Vec2 separation = force_voisine(a);
-
-        // Generic static obstacles act as a local blocker. Fold the repulsion into the
-        // separation term so it flows through every movement branch (flow / path /
-        // manual / inactive) without a heavy refactor of desired_velocity_for_flow.
-        separation = separation + static_obstacle_repulsion_force(a);
+        // Shared local-avoidance term: neighbor separation + static obstacle repulsion.
+        // Computed once and threaded through every branch as `separation`, so flow,
+        // path-follow, manual and inactive agents all get the same soft avoidance. A
+        // hard depenetration pass (resolve_static_obstacle_overlap) runs after each
+        // branch's integration to guarantee blocking even when this soft term is damped.
+        Vec2 separation = local_avoidance_force(a);
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, a.profile.foot_offset_y);
@@ -1440,7 +1547,8 @@ void SteeringSystem::update_all(double delta)
                 a.position = apply_walk_with_walls(a, step, nav);
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
-                grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                resolve_static_obstacle_overlap(a);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg);
                 continue;
             }
@@ -1473,6 +1581,7 @@ void SteeringSystem::update_all(double delta)
             a.position = apply_walk_with_walls(a, step, nav);
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
+            resolve_static_obstacle_overlap(a);
             grid->update(a.id, old_pos + offset, agent_foot_point(a));
             a.update_motion_state(delta, cfg);
             continue;
@@ -1509,7 +1618,8 @@ void SteeringSystem::update_all(double delta)
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
 
-                grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                resolve_static_obstacle_overlap(a);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg);
                 continue;
             }
@@ -1540,6 +1650,7 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
+            resolve_static_obstacle_overlap(a);
             grid->update(a.id, old_pos + offset, agent_foot_point(a));
             a.update_motion_state(delta, cfg);
             continue;
@@ -1574,6 +1685,7 @@ void SteeringSystem::update_all(double delta)
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
 
+            resolve_static_obstacle_overlap(a);
             grid->update(a.id, old_pos + offset, agent_foot_point(a));
             a.update_motion_state(delta, cfg);
             continue;
@@ -1825,6 +1937,7 @@ void SteeringSystem::update_all(double delta)
 
         ultimate_wall_correction(a, ff, delta);
 
+        resolve_static_obstacle_overlap(a);
         grid->update(a.id, old_pos + offset, agent_foot_point(a));
 
         a.update_motion_state(delta, cfg, force_motion_state);

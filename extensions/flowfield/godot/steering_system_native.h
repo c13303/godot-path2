@@ -102,6 +102,8 @@ namespace godot
         bool get_debug_show_agent_state_labels() const;
         void set_debug_redraw_interval(double seconds);
         double get_debug_redraw_interval() const;
+        void set_debug_static_obstacles(bool enabled);
+        bool get_debug_static_obstacles() const;
 
         ffcore::SteeringSystem *get_system() { return &system; }
     };

@@ -15,6 +15,7 @@ namespace ffcore
         bool debug_show_agent_state_labels = true;
         bool debug_show_zones = true;
         bool draw_flow_field = false;                  // debug: draw flow field arrows
+        bool debug_static_obstacles = false;           // log static-obstacle queries/contacts (throttled)
         double debug_redraw_interval = 0.2;
         double debug_redraw_accum = 0.0;
         double debug_label_time = 0.0;
