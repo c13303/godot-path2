@@ -131,6 +131,10 @@ void SteeringSystemNative::unregister_node_mapping(int agent_id)
         else
             ++it;
     }
+    // Full per-agent cleanup: label caches plus the state-tracking maps.
+    agent_last_flow.erase(agent_id);
+    agent_last_active.erase(agent_id);
+    agent_last_phase.erase(agent_id);
     _reset_agent_cache(agent_id);
 }
 
@@ -316,7 +320,9 @@ Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
 
 void SteeringSystemNative::_reset_agent_cache(int agent_id)
 {
-    agent_last_flow.erase(agent_id);
+    // Clears only the label caches. The per-agent state maps (flow/active/phase) are
+    // owned by _process(), which re-stores them on the same transition that triggers
+    // this reset; full removal of those happens in unregister_node_mapping().
     debug_agent_label_cache.erase(agent_id);
     debug_agent_label_next_refresh.erase(agent_id);
 }
@@ -393,9 +399,25 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
     if (a->control_mode == ffcore::AgentControlMode::Manual)
         return velocity_len > 1.0 ? "manual moving" : "manual idle";
     if (!a->active)
+    {
+        if (a->phase == ffcore::AgentPhase::Eating)
+            return "eating idle";
+        if (a->path_arrived)
+            return "path arrived";
         return a->flow ? "inactive" : "inactive / no flow";
+    }
     if (!a->flow)
+    {
+        // No flow pointer is normal during A* path-follow states; don't report it as
+        // broken. Prefer the path-follow state, then fall back to a phase-aware hint.
+        if (a->path_active)
+            return "path";
+        if (a->path_arrived)
+            return "path arrived";
+        if (a->phase != ffcore::AgentPhase::None)
+            return "no flow ptr";
         return "no flow";
+    }
     if (!a->flow->is_ready())
         return "flow not ready";
     if (a->lost_timer > 0.0)
@@ -453,16 +475,27 @@ void SteeringSystemNative::_process(double delta)
             continue;
 
         const ffcore::FlowField *flow_ptr = a->flow;
+
         auto it_last_flow = agent_last_flow.find(id);
         bool flow_changed = (it_last_flow == agent_last_flow.end()) || (it_last_flow->second != flow_ptr);
-        if (flow_changed || !a->active)
+
+        auto it_last_active = agent_last_active.find(id);
+        bool active_changed = (it_last_active == agent_last_active.end()) || (it_last_active->second != a->active);
+
+        auto it_last_phase = agent_last_phase.find(id);
+        bool phase_changed = (it_last_phase == agent_last_phase.end()) || (it_last_phase->second != a->phase);
+
+        // Only reset the label cache on an actual state transition. Eating agents are
+        // inactive with a nullptr flow every frame; resetting on raw !active (or on an
+        // uncached nullptr flow) wiped the label cache before it could be drawn. By
+        // caching active and phase too, an inactive/eating agent is a stable state and
+        // its labels survive between refreshes.
+        if (flow_changed || active_changed || phase_changed)
         {
             _reset_agent_cache(id);
-            // Store flow_ptr unconditionally (nullptr included). During A* path-follow
-            // states agents have no flow; skipping nullptr left flow_changed true every
-            // frame, which reset the label cache every frame so phase labels never
-            // survived long enough to draw until a non-null escape flow appeared.
-            agent_last_flow[id] = flow_ptr;
+            agent_last_flow[id] = flow_ptr; // store nullptr too
+            agent_last_active[id] = a->active;
+            agent_last_phase[id] = a->phase;
         }
 
         auto it_propelled_state = agent_propelled_states.find(id);

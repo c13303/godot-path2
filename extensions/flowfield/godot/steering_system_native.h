@@ -32,6 +32,8 @@ namespace godot
 
         std::unordered_map<Node2D *, int> agent_map;
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
+        std::unordered_map<int, bool> agent_last_active;
+        std::unordered_map<int, ffcore::AgentPhase> agent_last_phase;
         std::unordered_map<int, bool> agent_propelled_states;
         std::unordered_map<int, bool> agent_control_impaired_states;
         struct DebugAgentLabels
