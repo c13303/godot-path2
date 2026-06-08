@@ -2486,9 +2486,10 @@ func set_verbose(value: bool) -> void:
 	_verbose_pushed = true
 
 # True when verbose garden logging is on. Once CppDebugOptions has pushed a value
-# via set_verbose() we trust that; before then (e.g. the startup recompute, which
-# can run before CppDebugOptions._ready()) we pull the current inspector value
-# straight from the CPP node so the very first recompute is logged too.
+# via set_verbose() we trust that (it is already gated by debug_enabled there);
+# before that push (e.g. the startup recompute, which can run before
+# CppDebugOptions._ready()) we pull the value straight from the CPP node AND its
+# debug_enabled flag, so the master debug gate holds even for the first recompute.
 func _is_verbose() -> bool:
 	if _verbose_pushed:
 		return _verbose
@@ -2496,8 +2497,8 @@ func _is_verbose() -> bool:
 		var scene: Node = get_tree().get_current_scene()
 		if scene:
 			_cpp_debug_options = scene.get_node_or_null("CPP")
-	if _cpp_debug_options and "verbose" in _cpp_debug_options:
-		return bool(_cpp_debug_options.get("verbose"))
+	if _cpp_debug_options and "verbose" in _cpp_debug_options and "debug_enabled" in _cpp_debug_options:
+		return bool(_cpp_debug_options.get("verbose")) and bool(_cpp_debug_options.get("debug_enabled"))
 	return _verbose
 
 # Garden border tiles a monster crosses to ENTER: per spawner, the garden

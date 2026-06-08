@@ -134,23 +134,42 @@ func _process(_delta: float) -> void:
 
 
 func _apply_debug_settings() -> void:
+	# Master gate: when debug_enabled is OFF, every debug DRAW / overlay / console
+	# option in every section is forced off, regardless of its own value. Only
+	# pure gameplay/AI tuning (eating time, speed multiplier, retarget radius, lag
+	# thresholds, refresh interval) is left untouched so disabling debug never
+	# changes how the game actually plays. Compute the effective (gated) value of
+	# each debug-only flag once, here.
+	var dbg: bool = debug_enabled
+	var eff_world_hitboxes: bool = draw_world_hitboxes and dbg
+	var eff_combat_hitboxes: bool = draw_combat_hitboxes and dbg
+	var eff_bottleneck_zones: bool = draw_bottleneck_zones and dbg
+	var eff_disable_bottlenecks: bool = disable_bottlenecks and dbg
+	var eff_agent_labels: bool = show_agent_state_labels and dbg
+	var eff_flow_field: bool = draw_flow_field and dbg
+	var eff_gardens: bool = show_gardens and dbg
+	var eff_monsters_path: bool = show_monsters_path and dbg
+	var eff_enters_exits: bool = show_enters_exits and dbg
+	var eff_verbose: bool = verbose and dbg
+
 	var steering: Node = get_node_or_null("SteeringSystemNative")
 	if steering:
-		_call_if_available(steering, "set_debug_disable_all_debug", not debug_enabled)
-		_call_if_available(steering, "set_debug_draw_world_hitbox", draw_world_hitboxes)
-		_call_if_available(steering, "set_debug_draw_fight_hitbox", draw_combat_hitboxes)
-		_call_if_available(steering, "set_debug_draw_bottleneck_zones", draw_bottleneck_zones)
-		_call_if_available(steering, "set_debug_disable_bottlenecks", disable_bottlenecks)
-		_call_if_available(steering, "set_debug_show_agent_state_labels", show_agent_state_labels)
+		_call_if_available(steering, "set_debug_disable_all_debug", not dbg)
+		_call_if_available(steering, "set_debug_draw_world_hitbox", eff_world_hitboxes)
+		_call_if_available(steering, "set_debug_draw_fight_hitbox", eff_combat_hitboxes)
+		_call_if_available(steering, "set_debug_draw_bottleneck_zones", eff_bottleneck_zones)
+		_call_if_available(steering, "set_debug_disable_bottlenecks", eff_disable_bottlenecks)
+		_call_if_available(steering, "set_debug_show_agent_state_labels", eff_agent_labels)
 		_call_if_available(steering, "set_debug_redraw_interval", refresh_interval)
 
 	var global_config: Node = get_node_or_null("GlobalConfigNative")
 	if global_config:
-		_call_if_available(global_config, "set_draw_flow_field", draw_flow_field)
+		_call_if_available(global_config, "set_draw_flow_field", eff_flow_field)
 		_call_first_available(global_config, [
 			&"set_debug_show_zones",
 			&"set_debug_show_plant_zones"
-		], show_gardens)
+		], eff_gardens)
+		# Lag thresholds are tuning, not visuals: applied regardless of debug_enabled.
 		_call_first_available(global_config, [
 			&"set_debug_nav_frame_lag_ms",
 			&"set_debug_plantff_frame_lag_ms"
@@ -163,19 +182,20 @@ func _apply_debug_settings() -> void:
 
 	var flow: Node = get_node_or_null("FlowFieldNative")
 	if flow:
-		_call_if_available(flow, "set_debug_draw", draw_flow_field)
+		_call_if_available(flow, "set_debug_draw", eff_flow_field)
 
 	if tile_hover_info:
-		tile_hover_info.set_enabled(debug_enabled)
-		tile_hover_info.set_show_monster_paths(show_monsters_path)
+		tile_hover_info.set_enabled(dbg)
+		tile_hover_info.set_show_monster_paths(eff_monsters_path)
 
 	if _building_manager == null:
 		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
 		if scene:
 			_building_manager = scene.get_node_or_null("Map/BuildingManager")
 	if _building_manager:
-		_call_if_available(_building_manager, "set_show_enters_exits", show_enters_exits)
-		_call_if_available(_building_manager, "set_verbose", verbose)
+		_call_if_available(_building_manager, "set_show_enters_exits", eff_enters_exits)
+		_call_if_available(_building_manager, "set_verbose", eff_verbose)
+		# Gameplay/AI tuning: applied regardless of debug_enabled.
 		_call_if_available(_building_manager, "set_empty_garden_local_retarget_radius", empty_garden_local_retarget_radius)
 		# Eating delay is divided by the multiplier so >1 means "eats faster".
 		var mult: float = maxf(0.0001, speed_multiplier)
