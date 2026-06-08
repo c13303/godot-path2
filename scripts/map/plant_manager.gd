@@ -62,7 +62,8 @@ func remove_plant(cell: Vector2i, erase_tile: bool = true) -> void:
 		return
 	_unindex_cell(cell)
 	if erase_tile and plantz:
-		_rebuild_plant_layer_from_index()
+		plantz.erase_cell(cell)
+		_queue_plant_layer_flush()
 	plant_removed.emit(cell)
 
 func _capture_tile_metadata(cell: Vector2i) -> void:
