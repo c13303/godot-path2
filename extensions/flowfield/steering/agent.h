@@ -15,6 +15,18 @@ namespace ffcore
         Manual = 1,
     };
 
+    // High-level mission phase, pushed from GDScript (building_manager / character).
+    // State-derived in C++ for the debug overlay so it never desyncs from gameplay.
+    enum class AgentPhase
+    {
+        None = 0,
+        FlowIn = 1,   // spawned, on the flow field, heading toward a garden
+        AstarIn = 2,  // entered a garden, A* toward the plant
+        Eating = 3,   // at the plant, eating (eating_seconds counts down)
+        AstarOut = 4, // finished eating, A* out of the garden
+        FlowOut = 5,  // left the garden, on the flow field toward the exit
+    };
+
     constexpr int SMASH_CLASS_PLAYER = 1 << 0;
     constexpr int SMASH_CLASS_MAIN_CHAR = 1 << 1;
     constexpr int SMASH_CLASS_MONSTER = 1 << 2;
@@ -70,6 +82,8 @@ namespace ffcore
         int dir_code = -1;
         int micro_osc = 0;
         double micro_osc_timer = 0.0;
+        AgentPhase phase = AgentPhase::None;
+        float eating_seconds = 0.0f;
         Vec3 debug_color{};
         Vec2 debug_nav_dir{};
         Vec2 debug_wall_repel{};

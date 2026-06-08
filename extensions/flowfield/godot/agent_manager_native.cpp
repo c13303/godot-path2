@@ -77,6 +77,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("unregister_agent", "agent_id"), &AgentManagerNative::unregister_agent);
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
     ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
+    ClassDB::bind_method(D_METHOD("set_agent_phase", "agent_id", "phase", "eating_seconds"), &AgentManagerNative::set_agent_phase);
     ClassDB::bind_method(D_METHOD("detach_agent_flow", "agent_id"), &AgentManagerNative::detach_agent_flow);
     ClassDB::bind_method(D_METHOD("assign_agent_path", "agent_id", "waypoints_world"), &AgentManagerNative::assign_agent_path);
     ClassDB::bind_method(D_METHOD("detach_agent_path", "agent_id"), &AgentManagerNative::detach_agent_path);
@@ -257,6 +258,13 @@ void AgentManagerNative::set_agent_never_rest(int agent_id, bool value)
     if (!steering)
         return;
     steering->set_agent_never_rest(agent_id, value);
+}
+
+void AgentManagerNative::set_agent_phase(int agent_id, int phase, float eating_seconds)
+{
+    if (!steering)
+        return;
+    steering->set_agent_phase(agent_id, static_cast<ffcore::AgentPhase>(phase), eating_seconds);
 }
 
 void AgentManagerNative::detach_agent_flow(int agent_id)

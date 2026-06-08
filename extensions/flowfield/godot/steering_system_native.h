@@ -34,14 +34,20 @@ namespace godot
         std::unordered_map<int, const ffcore::FlowField *> agent_last_flow;
         std::unordered_map<int, bool> agent_propelled_states;
         std::unordered_map<int, bool> agent_control_impaired_states;
-        std::unordered_map<int, String> debug_agent_label_cache;
+        struct DebugAgentLabels
+        {
+            String physics;
+            String phase;
+        };
+        std::unordered_map<int, DebugAgentLabels> debug_agent_label_cache;
         std::unordered_map<int, double> debug_agent_label_next_refresh;
 
         int _direction_code(const Vector2 &v) const;
         Vector2 _goal_position_for_agent(const ffcore::AgentData *a) const;
         void _reset_agent_cache(int agent_id);
         Dictionary _agent_summary(const ffcore::AgentData *a) const;
-        String _agent_debug_state_label(const ffcore::AgentData *a) const;
+        String _agent_physics_label(const ffcore::AgentData *a) const;
+        String _agent_phase_label(const ffcore::AgentData *a) const;
 
     public:
         static void _bind_methods();

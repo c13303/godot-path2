@@ -1,13 +1,7 @@
-[gd_scene load_steps=4 format=3 uid="uid://bvd1epaxpeblw"]
+[gd_scene load_steps=3 format=3 uid="uid://bvd1epaxpeblw"]
 
 [ext_resource type="Script" uid="uid://b0qndyhyi5wq7" path="res://scripts/entities/character.gd" id="1_3omya"]
 [ext_resource type="Texture2D" uid="uid://ch6eoqidb06ck" path="res://assets/sprites/legval/monster.png" id="2_monster"]
-
-[sub_resource type="LabelSettings" id="LabelSettings_status"]
-font_size = 8
-font_color = Color(1, 1, 1, 1)
-outline_size = 2
-outline_color = Color(0, 0, 0, 1)
 
 [node name="MainChar" type="CharacterBody2D"]
 z_index = 2
@@ -17,13 +11,3 @@ script = ExtResource("1_3omya")
 position = Vector2(0, -16)
 scale = Vector2(0.75, 0.75)
 texture = ExtResource("2_monster")
-
-[node name="StatusLabel" type="Label" parent="."]
-visible = false
-offset_left = -28.0
-offset_top = -40.0
-offset_right = 28.0
-offset_bottom = -28.0
-text = "eating 5s"
-label_settings = SubResource("LabelSettings_status")
-horizontal_alignment = 1

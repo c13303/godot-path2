@@ -1073,6 +1073,16 @@ void SteeringSystem::set_agent_never_rest(int id, bool value)
     agents[it->second].never_rest = value;
 }
 
+void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seconds)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    AgentData &a = agents[it->second];
+    a.phase = phase;
+    a.eating_seconds = eating_seconds;
+}
+
 void SteeringSystem::set_agent_path(int id, const std::vector<Vec2> &waypoints_world)
 {
     auto it = id_to_index.find(id);

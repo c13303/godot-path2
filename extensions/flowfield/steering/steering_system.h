@@ -73,6 +73,7 @@ namespace ffcore
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset = Vec2(0, 0));
         void set_agent_never_rest(int id, bool value);
+        void set_agent_phase(int id, AgentPhase phase, float eating_seconds);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 
         // Path-follow API. Agent keeps its flow pointer (for wall-repel / bottleneck

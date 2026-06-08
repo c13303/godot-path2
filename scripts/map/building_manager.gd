@@ -1918,8 +1918,10 @@ func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, g
 	agent.set_meta("spawner_cell", spawner_cell)
 	agent.set_meta("garden_id", garden_id)
 	agent.set_meta("garden_entry_cell", entry_cell)
-	if agent.has_method("start_astar_in"):
-		agent.call("start_astar_in")
+	# Heading toward the garden, not yet eaten: "flow in". The inside-garden A* leg
+	# transitions to "astar in" in _start_astar_in once the entry is reached.
+	if agent.has_method("start_flow_in"):
+		agent.call("start_flow_in")
 	return true
 
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:

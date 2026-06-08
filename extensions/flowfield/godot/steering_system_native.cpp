@@ -356,7 +356,29 @@ Dictionary SteeringSystemNative::_agent_summary(const ffcore::AgentData *a) cons
     return d;
 }
 
-String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a) const
+String SteeringSystemNative::_agent_phase_label(const ffcore::AgentData *a) const
+{
+    if (!a)
+        return String();
+    switch (a->phase)
+    {
+    case ffcore::AgentPhase::FlowIn:
+        return "flow in";
+    case ffcore::AgentPhase::AstarIn:
+        return "astar in";
+    case ffcore::AgentPhase::Eating:
+        return String("eating ") + String::num_int64((int64_t)a->eating_seconds) + "s";
+    case ffcore::AgentPhase::AstarOut:
+        return "astar out";
+    case ffcore::AgentPhase::FlowOut:
+        return "flow out";
+    case ffcore::AgentPhase::None:
+    default:
+        return String();
+    }
+}
+
+String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) const
 {
     if (!a)
         return "missing";
@@ -436,8 +458,11 @@ void SteeringSystemNative::_process(double delta)
         if (flow_changed || !a->active)
         {
             _reset_agent_cache(id);
-            if (flow_ptr)
-                agent_last_flow[id] = flow_ptr;
+            // Store flow_ptr unconditionally (nullptr included). During A* path-follow
+            // states agents have no flow; skipping nullptr left flow_changed true every
+            // frame, which reset the label cache every frame so phase labels never
+            // survived long enough to draw until a non-null escape flow appeared.
+            agent_last_flow[id] = flow_ptr;
         }
 
         auto it_propelled_state = agent_propelled_states.find(id);
@@ -494,8 +519,11 @@ void SteeringSystemNative::_draw()
     const Color sep_color(1.0, 0.0, 1.0, 0.95);
     const Color desired_color(1.0, 1.0, 1.0, 0.95);
     const Color fight_color(1.0, 0.25, 0.1, 0.8);
-    const Color label_color(1.0, 1.0, 1.0, 0.95);
+    const Color label_color(1.0, 1.0, 1.0, 0.95);        // physics line (white)
+    const Color phase_label_color(0.45, 0.85, 1.0, 0.95); // phase line (cyan)
     const Color label_shadow_color(0.0, 0.0, 0.0, 0.8);
+    const int label_font_size = 16;                       // both lines, same "big" size
+    const double label_line_height = 17.0;                // vertical gap so lines never overlap
     Ref<Font> debug_font;
     if (cfg.effective_debug_show_agent_state_labels() && ThemeDB::get_singleton())
     {
@@ -592,7 +620,9 @@ void SteeringSystemNative::_draw()
 
             if (cfg.debug_label_time >= debug_agent_label_next_refresh[id])
             {
-                debug_agent_label_cache[id] = _agent_debug_state_label(a);
+                DebugAgentLabels &slot = debug_agent_label_cache[id];
+                slot.physics = _agent_physics_label(a);
+                slot.phase = _agent_phase_label(a);
                 debug_agent_label_next_refresh[id] = cfg.debug_label_time + refresh + stagger;
             }
 
@@ -600,10 +630,21 @@ void SteeringSystemNative::_draw()
             if (label_it == debug_agent_label_cache.end())
                 continue;
 
-            const String &label = label_it->second;
-            Vector2 label_pos = to_local(Vector2(a->position.x - a->profile.fight_half_w, a->position.y + a->profile.fight_offset_y - a->profile.fight_half_h - 8.0));
-            draw_string(debug_font, label_pos + Vector2(1.0, 1.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_shadow_color);
-            draw_string(debug_font, label_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, label_color);
+            const DebugAgentLabels &labels = label_it->second;
+            // Anchor above the fight box; phase line on top, physics line below it.
+            Vector2 base_pos = to_local(Vector2(a->position.x - a->profile.fight_half_w, a->position.y + a->profile.fight_offset_y - a->profile.fight_half_h - 8.0));
+
+            // Phase line (top). Skipped only when the agent has no active phase.
+            if (!labels.phase.is_empty())
+            {
+                Vector2 phase_pos = base_pos - Vector2(0.0, label_line_height);
+                draw_string(debug_font, phase_pos + Vector2(1.0, 1.0), labels.phase, HORIZONTAL_ALIGNMENT_LEFT, -1.0, label_font_size, label_shadow_color);
+                draw_string(debug_font, phase_pos, labels.phase, HORIZONTAL_ALIGNMENT_LEFT, -1.0, label_font_size, phase_label_color);
+            }
+
+            // Physics line (bottom). Always present.
+            draw_string(debug_font, base_pos + Vector2(1.0, 1.0), labels.physics, HORIZONTAL_ALIGNMENT_LEFT, -1.0, label_font_size, label_shadow_color);
+            draw_string(debug_font, base_pos, labels.physics, HORIZONTAL_ALIGNMENT_LEFT, -1.0, label_font_size, label_color);
         }
     }
 }
