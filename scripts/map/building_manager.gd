@@ -117,11 +117,15 @@ const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
 
 func _frame_lag_threshold_ms() -> float:
+	if global_config and global_config.has_method("get_debug_nav_frame_lag_ms"):
+		return float(global_config.call("get_debug_nav_frame_lag_ms"))
 	if global_config and global_config.has_method("get_debug_plantff_frame_lag_ms"):
 		return float(global_config.call("get_debug_plantff_frame_lag_ms"))
 	return DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK
 
 func _ff_lag_threshold_ms() -> float:
+	if global_config and global_config.has_method("get_debug_flowfield_rebuild_lag_ms"):
+		return float(global_config.call("get_debug_flowfield_rebuild_lag_ms"))
 	if global_config and global_config.has_method("get_debug_plantff_ff_lag_ms"):
 		return float(global_config.call("get_debug_plantff_ff_lag_ms"))
 	return DEBUG_PLANTFF_FF_LAG_MS_FALLBACK
@@ -204,6 +208,8 @@ func _setup_zone_overlay() -> void:
 	overlay_parent.add_child(_zone_overlay)
 
 func _plant_zone_debug_enabled() -> bool:
+	if global_config and global_config.has_method("get_debug_show_zones"):
+		return bool(global_config.call("get_debug_show_zones"))
 	if global_config and global_config.has_method("get_debug_show_plant_zones"):
 		return bool(global_config.call("get_debug_show_plant_zones"))
 	return debug_show_plantzone
@@ -240,7 +246,7 @@ func _process(delta: float) -> void:
 	var frame_ms: int = Time.get_ticks_msec() - frame_start_ms
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()
 	if float(frame_ms) > frame_threshold_ms:
-		push_warning("debug_plantff_frame_lag: %dms (threshold=%dms) eating=%d escaping=%d spawners=%d" % [
+		push_warning("debug_nav_frame_lag: %dms (threshold=%dms) eating=%d escaping=%d spawners=%d" % [
 			frame_ms,
 			int(frame_threshold_ms),
 			_eating_agents.size(),
@@ -1602,13 +1608,13 @@ func _recompute_spawner_reachable_cells() -> void:
 		# non-walkable special tile, so seed from walkable neighbors too.
 		for dy in range(-1, 2):
 			for dx in range(-1, 2):
-				var seed: Vector2i = spawner_cell + Vector2i(dx, dy)
-				if _spawner_reachable_cells.has(seed):
+				var myseed: Vector2i = spawner_cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(myseed):
 					continue
-				if not _is_walkable(seed):
+				if not _is_walkable(myseed):
 					continue
-				_spawner_reachable_cells[seed] = true
-				queue.append(seed)
+				_spawner_reachable_cells[myseed] = true
+				queue.append(myseed)
 	while head < queue.size():
 		var cell: Vector2i = queue[head]
 		head += 1

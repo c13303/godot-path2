@@ -114,9 +114,17 @@ namespace godot
 
         bool get_draw_flow_field() const;
         void set_draw_flow_field(bool v);
+        bool get_debug_show_zones() const;
+        void set_debug_show_zones(bool v);
+
+        double get_debug_nav_frame_lag_ms() const;
+        void set_debug_nav_frame_lag_ms(double v);
+        double get_debug_flowfield_rebuild_lag_ms() const;
+        void set_debug_flowfield_rebuild_lag_ms(double v);
+
+        // Backward-compatible aliases (deprecated; forward to the generic names).
         bool get_debug_show_plant_zones() const;
         void set_debug_show_plant_zones(bool v);
-
         double get_debug_plantff_frame_lag_ms() const;
         void set_debug_plantff_frame_lag_ms(double v);
         double get_debug_plantff_ff_lag_ms() const;

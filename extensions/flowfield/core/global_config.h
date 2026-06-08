@@ -13,7 +13,7 @@ namespace ffcore
         bool debug_draw_bottleneck_zones = true;
         bool debug_draw_fight_hitbox = false;
         bool debug_show_agent_state_labels = true;
-        bool debug_show_plant_zones = true;
+        bool debug_show_zones = true;
         bool draw_flow_field = false;                  // debug: draw flow field arrows
         double debug_redraw_interval = 0.2;
         double debug_redraw_accum = 0.0;
@@ -24,7 +24,7 @@ namespace ffcore
         bool effective_debug_draw_bottleneck_zones() const { return !debug_disable_all_debug && debug_draw_bottleneck_zones; }
         bool effective_debug_draw_fight_hitbox() const { return !debug_disable_all_debug && debug_draw_fight_hitbox; }
         bool effective_debug_show_agent_state_labels() const { return !debug_disable_all_debug && debug_show_agent_state_labels; }
-        bool effective_debug_show_plant_zones() const { return !debug_disable_all_debug && debug_show_plant_zones; }
+        bool effective_debug_show_zones() const { return !debug_disable_all_debug && debug_show_zones; }
         bool effective_draw_flow_field() const { return !debug_disable_all_debug && draw_flow_field; }
         bool effective_steering_debug_draw_enabled() const
         {
@@ -35,8 +35,8 @@ namespace ffcore
         }
 
         // Lag detector sensitivities (used by BuildingManager via GlobalConfigNative bindings)
-        double debug_plantff_frame_lag_ms = 35.0;     // warn if a BuildingManager frame exceeds this
-        double debug_plantff_ff_lag_ms = 35.0;         // warn if a single plant/escape FF rebuild exceeds this
+        double debug_nav_frame_lag_ms = 35.0;          // warn if one navigation/gameplay routing frame exceeds this
+        double debug_flowfield_rebuild_lag_ms = 35.0;  // warn if one flowfield rebuild exceeds this
 
         // Runtime control (not strictly debug)
         bool paused = false;

@@ -81,6 +81,17 @@ extends Node
 		empty_garden_local_retarget_radius = value
 		_apply_debug_settings()
 
+@export_group("Navigation Debug")
+@export_range(0.0, 1000.0, 1.0, "or_greater") var debug_nav_frame_lag_ms: float = 35.0:
+	set(value):
+		debug_nav_frame_lag_ms = value
+		_apply_debug_settings()
+
+@export_range(0.0, 1000.0, 1.0, "or_greater") var debug_flowfield_rebuild_lag_ms: float = 35.0:
+	set(value):
+		debug_flowfield_rebuild_lag_ms = value
+		_apply_debug_settings()
+
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 var _building_manager: Node
 ## Unmultiplied agent_max_speed, captured once before the multiplier is applied.
@@ -129,7 +140,18 @@ func _apply_debug_settings() -> void:
 	var global_config: Node = get_node_or_null("GlobalConfigNative")
 	if global_config:
 		_call_if_available(global_config, "set_draw_flow_field", draw_flow_field)
-		_call_if_available(global_config, "set_debug_show_plant_zones", show_gardens)
+		_call_first_available(global_config, [
+			&"set_debug_show_zones",
+			&"set_debug_show_plant_zones"
+		], show_gardens)
+		_call_first_available(global_config, [
+			&"set_debug_nav_frame_lag_ms",
+			&"set_debug_plantff_frame_lag_ms"
+		], debug_nav_frame_lag_ms)
+		_call_first_available(global_config, [
+			&"set_debug_flowfield_rebuild_lag_ms",
+			&"set_debug_plantff_ff_lag_ms"
+		], debug_flowfield_rebuild_lag_ms)
 		_apply_speed_multiplier(global_config)
 
 	var flow: Node = get_node_or_null("FlowFieldNative")
@@ -171,3 +193,10 @@ func get_speed_multiplier() -> float:
 func _call_if_available(target: Node, method_name: StringName, value: Variant) -> void:
 	if target.has_method(method_name):
 		target.call(method_name, value)
+
+
+func _call_first_available(target: Node, method_names: Array[StringName], value: Variant) -> void:
+	for method_name in method_names:
+		if target.has_method(method_name):
+			target.call(method_name, value)
+			return
