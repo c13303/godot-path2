@@ -1302,8 +1302,7 @@ script = ExtResource("3_mdsmv")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
-draw_bottleneck_zones = false
-show_agent_state_labels = false
+disable_bottlenecks = true
 refresh_interval = 0.0
 verbose = true
 show_gardens = false

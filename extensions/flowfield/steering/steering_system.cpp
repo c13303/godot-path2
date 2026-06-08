@@ -1541,9 +1541,18 @@ void SteeringSystem::update_all(double delta)
                 a.path_arrived = true;
                 if (!a.is_propelled)
                 {
-                    Vec2 target_velocity = Vec2(0, 0);
+                    // Arrived agents must keep yielding to neighbors / static obstacles,
+                    // otherwise several monsters reaching the same final A* cell (e.g. the
+                    // same plant) stack on top of each other. When there's local pressure
+                    // drift softly away at min speed; only settle to a full stop once the
+                    // area is clear.
+                    Vec2 arrival_avoidance = agent_separation + static_obstacle_repel;
+                    Vec2 target_velocity = arrival_avoidance.is_zero()
+                                               ? Vec2(0, 0)
+                                               : safe_normalize(arrival_avoidance) * a.max_speed * cfg.min_speed_fraction;
                     a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
                 }
+                a.debug_separation = agent_separation;
                 Vec2 old_pos = a.position;
                 Vec2 step = a.velocity * delta;
                 a.position = apply_walk_with_walls(a, step, nav);
