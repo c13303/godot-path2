@@ -7,6 +7,11 @@ signal building_removed(cell: Vector2i, item_id: String)
 @export var traversable_buildings: TileMapLayer
 @export var blocking_buildings: TileMapLayer
 @export var runtime_parent: Node2D
+# Generic static-obstacle steering system (CPP/SteeringSystemNative). Blocking buildings
+# register a circular static obstacle here so agents are locally pushed around them.
+@export var steering_system: Node
+# Tile is visually square but a round collision favors sliding; keep it < 0.5.
+@export var blocking_building_obstacle_radius_ratio: float = 0.45
 
 const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
@@ -15,6 +20,9 @@ const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap"]
 
 var _buildings_by_cell: Dictionary = {}
 var _runtime_nodes_by_cell: Dictionary = {}
+# cell -> static obstacle id we registered with the steering system. Only blocking
+# buildings appear here; lamps / traversable buildings never do.
+var _static_obstacle_ids_by_cell: Dictionary = {}
 
 func _ready() -> void:
 	_connect_game_state()
@@ -23,6 +31,7 @@ func _ready() -> void:
 func initialize_from_layer() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
+	_clear_static_obstacles()
 	_initialize_from_one_layer(traversable_buildings)
 	_initialize_from_one_layer(blocking_buildings)
 
@@ -56,6 +65,7 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	_buildings_by_cell[cell] = building_data
 	if light_source > 0.0:
 		_register_light_runtime(cell, runtime_id, light_source)
+	_register_blocking_obstacle(cell, item_def)
 	building_added.emit(cell, item_id)
 
 func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
@@ -65,6 +75,7 @@ func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
 	var item_id: String = str(data.get("item_id", ""))
 	_buildings_by_cell.erase(cell)
 	_remove_runtime_node(cell)
+	_unregister_blocking_obstacle(cell)
 	if erase_tile:
 		for layer in [traversable_buildings, blocking_buildings]:
 			if layer and layer.get_cell_source_id(cell) >= 0:
@@ -83,6 +94,75 @@ func has_building(cell: Vector2i) -> bool:
 func clear() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
+	_clear_static_obstacles()
+
+# --- Generic static obstacles (blocking buildings) -----------------------------
+
+# Static obstacle ids live in a high, dense range that cannot collide with moving
+# agent ids (which start at 1 and grow slowly). The id is a stable function of the
+# cell so the same tile always maps to the same obstacle.
+const _STATIC_OBSTACLE_ID_BASE: int = 1_000_000_000
+const _STATIC_OBSTACLE_ID_STRIDE: int = 100_000
+
+func _blocking_obstacle_id_for_cell(cell: Vector2i) -> int:
+	# Map signed cell coords into a non-negative grid so distinct cells stay distinct.
+	var gx: int = cell.x + (_STATIC_OBSTACLE_ID_STRIDE / 2)
+	var gy: int = cell.y + (_STATIC_OBSTACLE_ID_STRIDE / 2)
+	return _STATIC_OBSTACLE_ID_BASE + gy * _STATIC_OBSTACLE_ID_STRIDE + gx
+
+func _def_blocks_movement(item_def: Dictionary) -> bool:
+	# Only tiles that explicitly block movement (turret1-style) become obstacles.
+	if bool(item_def.get("blocks_movement", false)):
+		return true
+	return bool(item_def.get("isWall", false))
+
+func _def_targets_blocking_layer(item_def: Dictionary) -> bool:
+	return str(item_def.get("target_layer", "")) == "blocking_buildings"
+
+func _blocking_obstacle_radius() -> float:
+	return float(_tile_size_pixels()) * blocking_building_obstacle_radius_ratio
+
+func _register_blocking_obstacle(cell: Vector2i, item_def: Dictionary) -> void:
+	if not steering_system:
+		return
+	if not _def_blocks_movement(item_def) or not _def_targets_blocking_layer(item_def):
+		return
+	if not steering_system.has_method("register_static_obstacle"):
+		return
+	# Center on the blocking_buildings tile in world space.
+	var layer: TileMapLayer = blocking_buildings if blocking_buildings else _reference_layer()
+	if not layer:
+		return
+	var world_center: Vector2 = layer.to_global(layer.map_to_local(cell))
+	var obstacle_id: int = _blocking_obstacle_id_for_cell(cell)
+	steering_system.call("register_static_obstacle", obstacle_id, world_center, _blocking_obstacle_radius(), 1.0)
+	_static_obstacle_ids_by_cell[cell] = obstacle_id
+
+func _unregister_blocking_obstacle(cell: Vector2i) -> void:
+	if not _static_obstacle_ids_by_cell.has(cell):
+		return
+	var obstacle_id: int = int(_static_obstacle_ids_by_cell[cell])
+	_static_obstacle_ids_by_cell.erase(cell)
+	if steering_system and steering_system.has_method("unregister_static_obstacle"):
+		steering_system.call("unregister_static_obstacle", obstacle_id)
+
+func _clear_static_obstacles() -> void:
+	# Unregister only the obstacles this manager owns; do not nuke obstacles other
+	# systems may have registered with the shared steering system.
+	if steering_system and steering_system.has_method("unregister_static_obstacle"):
+		for raw_id in _static_obstacle_ids_by_cell.values():
+			steering_system.call("unregister_static_obstacle", int(raw_id))
+	_static_obstacle_ids_by_cell.clear()
+
+func rebuild_blocking_obstacles_from_layer() -> void:
+	_clear_static_obstacles()
+	if not blocking_buildings:
+		return
+	for raw_cell in blocking_buildings.get_used_cells():
+		var cell: Vector2i = raw_cell
+		var item_def: Dictionary = _default_building_def_for_existing_tile(blocking_buildings, cell)
+		if not item_def.is_empty():
+			_register_blocking_obstacle(cell, item_def)
 
 func _register_light_runtime(cell: Vector2i, runtime_id: String, light_source: float) -> void:
 	var parent: Node2D = _runtime_parent()

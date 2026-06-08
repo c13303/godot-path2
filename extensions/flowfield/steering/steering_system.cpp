@@ -638,6 +638,118 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     return separation_force;
 }
 
+void SteeringSystem::register_static_obstacle(int id, const Vec2 &position, double radius, double push_strength)
+{
+    if (id < 0)
+        return;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y))
+    {
+        godot::UtilityFunctions::printerr(
+            "register_static_obstacle: non-finite position id=", id,
+            " pos=(", position.x, ",", position.y, ")");
+        return;
+    }
+    if (!std::isfinite(radius) || radius <= 0.0)
+        radius = 1e-3; // clamp to a safe positive minimum rather than rejecting
+
+    // Replace/update: drop any existing grid entry first so we never duplicate ids.
+    auto existing = static_obstacles.find(id);
+    if (existing != static_obstacles.end())
+        static_obstacle_grid.remove(id);
+
+    StaticObstacle obs;
+    obs.id = id;
+    obs.position = position;
+    obs.radius = radius;
+    obs.push_strength = (std::isfinite(push_strength) && push_strength >= 0.0) ? push_strength : 1.0;
+
+    static_obstacles[id] = obs;
+    static_obstacle_grid.insert(id, position);
+    max_static_obstacle_radius = std::max(max_static_obstacle_radius, radius);
+}
+
+void SteeringSystem::unregister_static_obstacle(int id)
+{
+    auto it = static_obstacles.find(id);
+    if (it == static_obstacles.end())
+        return;
+    static_obstacles.erase(it);
+    static_obstacle_grid.remove(id);
+
+    // Recompute the cached max radius from whatever remains.
+    max_static_obstacle_radius = 0.0;
+    for (const auto &entry : static_obstacles)
+        max_static_obstacle_radius = std::max(max_static_obstacle_radius, entry.second.radius);
+}
+
+void SteeringSystem::clear_static_obstacles()
+{
+    static_obstacles.clear();
+    static_obstacle_grid.clear();
+    max_static_obstacle_radius = 0.0;
+}
+
+bool SteeringSystem::has_static_obstacle(int id) const
+{
+    return static_obstacles.find(id) != static_obstacles.end();
+}
+
+Vec2 SteeringSystem::static_obstacle_repulsion_force(const AgentData &agent)
+{
+    if (static_obstacles.empty())
+        return Vec2(0, 0);
+
+    const auto &cfg = globalconfig();
+    Vec2 agent_foot = agent_foot_point(agent);
+    double query_radius = agent.profile.world_radius + max_static_obstacle_radius + std::max(0.0, cfg.static_obstacle_query_padding);
+
+    static std::vector<int> nearby; // reused scratch buffer; query() clears it
+    static_obstacle_grid.query(agent_foot, query_radius, nearby);
+    if (nearby.empty())
+        return Vec2(0, 0);
+
+    Vec2 force(0, 0);
+    double resist = std::max(0.001, agent.profile.crowd_resist_strength);
+
+    for (int oid : nearby)
+    {
+        auto it = static_obstacles.find(oid);
+        if (it == static_obstacles.end())
+            continue;
+        const StaticObstacle &obs = it->second;
+
+        double sum_radius = agent.profile.world_radius + obs.radius;
+        if (sum_radius <= 0.0)
+            continue;
+
+        Vec2 diff = agent_foot - obs.position;
+        double dist = diff.length();
+        Vec2 dir;
+        if (dist < 0.001)
+        {
+            dir = hashed_unit_dir(agent.id);
+            dist = 0.001;
+        }
+        else
+        {
+            dir = diff * (1.0 / dist);
+        }
+
+        if (dist >= sum_radius)
+            continue;
+
+        double penetration_ratio = std::clamp(1.0 - dist / sum_radius, 0.0, 1.0);
+        double falloff = penetration_ratio * penetration_ratio;
+        double weight = std::max(0.0, obs.push_strength) / resist;
+        force = force + dir * falloff * weight;
+    }
+
+    if (force.is_zero())
+        return Vec2(0, 0);
+
+    return safe_normalize(force) * cfg.static_obstacle_repulsion_strength;
+}
+
 void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta)
 {
     (void)target_velocity;
@@ -1287,6 +1399,11 @@ void SteeringSystem::update_all(double delta)
             wall_repel = wall_repulsion_force(a, nav);
 
         Vec2 separation = force_voisine(a);
+
+        // Generic static obstacles act as a local blocker. Fold the repulsion into the
+        // separation term so it flows through every movement branch (flow / path /
+        // manual / inactive) without a heavy refactor of desired_velocity_for_flow.
+        separation = separation + static_obstacle_repulsion_force(a);
 
         const auto &cfg = globalconfig();
         Vec2 offset(0, a.profile.foot_offset_y);

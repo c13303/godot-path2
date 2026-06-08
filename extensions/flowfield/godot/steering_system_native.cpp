@@ -57,6 +57,10 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("apply_explosion_filtered", "position", "radius", "intensity", "friction_loss", "falloff", "ignored_agent_id", "control_suppression", "control_suppression_duration", "affected_smash_classes"), &SteeringSystemNative::apply_explosion_filtered);
     ClassDB::bind_method(D_METHOD("spawn_aoe_zone", "position", "direction", "radius", "angle_degrees", "duration", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes", "follow_offset"), &SteeringSystemNative::spawn_aoe_zone, DEFVAL(Vector2(0, 0)));
+    ClassDB::bind_method(D_METHOD("register_static_obstacle", "obstacle_id", "position", "radius", "push_strength"), &SteeringSystemNative::register_static_obstacle, DEFVAL(1.0));
+    ClassDB::bind_method(D_METHOD("unregister_static_obstacle", "obstacle_id"), &SteeringSystemNative::unregister_static_obstacle);
+    ClassDB::bind_method(D_METHOD("clear_static_obstacles"), &SteeringSystemNative::clear_static_obstacles);
+    ClassDB::bind_method(D_METHOD("get_static_obstacle_count"), &SteeringSystemNative::get_static_obstacle_count);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
     ClassDB::bind_method(D_METHOD("set_debug_disable_all_debug", "enabled"), &SteeringSystemNative::set_debug_disable_all_debug);
@@ -438,6 +442,26 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
         return "flow idle";
 
     return "flow";
+}
+
+void SteeringSystemNative::register_static_obstacle(int obstacle_id, const Vector2 &position, double radius, double push_strength)
+{
+    system.register_static_obstacle(obstacle_id, ffcore::Vec2(position.x, position.y), radius, push_strength);
+}
+
+void SteeringSystemNative::unregister_static_obstacle(int obstacle_id)
+{
+    system.unregister_static_obstacle(obstacle_id);
+}
+
+void SteeringSystemNative::clear_static_obstacles()
+{
+    system.clear_static_obstacles();
+}
+
+int SteeringSystemNative::get_static_obstacle_count() const
+{
+    return system.get_static_obstacle_count();
 }
 
 Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const

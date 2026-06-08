@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 namespace ffcore
 {
@@ -39,6 +41,18 @@ namespace ffcore
     {
         int owner_id = -1;
         double time_left = 0.0;
+    };
+
+    // Generic static circular obstacle. The C++ core knows nothing about what it
+    // represents game-side (turret, prop, ...): it is only a position + radius that
+    // moving agents are repelled from. Never registered as an agent, never updated
+    // per tick, never iterated by AoE/fight/flowfield systems.
+    struct StaticObstacle
+    {
+        int id = -1;
+        Vec2 position;
+        double radius = 0.0;
+        double push_strength = 1.0;
     };
 
     class SteeringSystem
@@ -82,7 +96,80 @@ namespace ffcore
         void clear_agent_path(int id);
         bool agent_path_arrived(int id) const;
 
+        // Generic static circular obstacle registry. Game-side decides which world
+        // positions become obstacles; the core only stores/queries them so moving
+        // agents are locally pushed around them. These are NOT agents.
+        void register_static_obstacle(int id, const Vec2 &position, double radius, double push_strength = 1.0);
+        void unregister_static_obstacle(int id);
+        void clear_static_obstacles();
+        bool has_static_obstacle(int id) const;
+        int get_static_obstacle_count() const { return (int)static_obstacles.size(); }
+
     private:
+        // Dedicated spatial index for static obstacles. Kept separate from the moving-agent
+        // SpatialGrid so obstacle ids can never leak into id_to_index / agent iteration.
+        struct StaticObstacleGrid
+        {
+            double cell_size = 32.0;
+            std::unordered_map<long long, std::vector<int>> cells;
+            std::unordered_map<int, long long> id_cell;
+
+            long long key(int cx, int cy) const
+            {
+                return (static_cast<long long>(cx) << 32) ^ static_cast<unsigned int>(cy);
+            }
+            long long key_for(const Vec2 &p) const
+            {
+                int cx = (int)std::floor(p.x / cell_size);
+                int cy = (int)std::floor(p.y / cell_size);
+                return key(cx, cy);
+            }
+            void insert(int id, const Vec2 &p)
+            {
+                long long k = key_for(p);
+                cells[k].push_back(id);
+                id_cell[id] = k;
+            }
+            void remove(int id)
+            {
+                auto it = id_cell.find(id);
+                if (it == id_cell.end())
+                    return;
+                auto cell_it = cells.find(it->second);
+                if (cell_it != cells.end())
+                {
+                    auto &list = cell_it->second;
+                    list.erase(std::remove(list.begin(), list.end(), id), list.end());
+                    if (list.empty())
+                        cells.erase(cell_it);
+                }
+                id_cell.erase(it);
+            }
+            void clear()
+            {
+                cells.clear();
+                id_cell.clear();
+            }
+            void query(const Vec2 &p, double radius, std::vector<int> &out) const
+            {
+                out.clear();
+                if (cells.empty())
+                    return;
+                int r = (int)std::ceil(radius / cell_size);
+                int cx = (int)std::floor(p.x / cell_size);
+                int cy = (int)std::floor(p.y / cell_size);
+                for (int dy = -r; dy <= r; ++dy)
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        auto it = cells.find(key(cx + dx, cy + dy));
+                        if (it == cells.end())
+                            continue;
+                        for (int id : it->second)
+                            out.push_back(id);
+                    }
+            }
+        };
+
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
@@ -91,12 +178,18 @@ namespace ffcore
         double max_fight_query_padding = 0.0;
         double max_world_radius = 0.0;
 
+        // Static obstacle storage. Touched only on register/unregister/clear, never per tick.
+        std::unordered_map<int, StaticObstacle> static_obstacles;
+        StaticObstacleGrid static_obstacle_grid;
+        double max_static_obstacle_radius = 0.0;
+
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
 
         AgentManager *agent_manager = nullptr;
 
         Vec2 force_voisine(const AgentData &agent);
+        Vec2 static_obstacle_repulsion_force(const AgentData &agent);
         Vec2 wall_repulsion_force(const AgentData &a, FlowField *ff);
         void apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta);
         Vec2 desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &separation, double target_speed) const;

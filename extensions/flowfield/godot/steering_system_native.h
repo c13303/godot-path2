@@ -80,6 +80,12 @@ namespace godot
         void apply_explosion_filtered(const Vector2 &position, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vector2 &follow_offset = Vector2(0, 0));
 
+        // Generic static circular obstacle API (names stay game-agnostic on purpose).
+        void register_static_obstacle(int obstacle_id, const Vector2 &position, double radius, double push_strength);
+        void unregister_static_obstacle(int obstacle_id);
+        void clear_static_obstacles();
+        int get_static_obstacle_count() const;
+
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         void set_paused(bool p);
         void set_debug_disable_all_debug(bool enabled);

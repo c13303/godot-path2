@@ -1394,11 +1394,12 @@ plantz = NodePath("../MonTilemap/plantz")
 
 [node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
 
-[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("traversable_buildings", "blocking_buildings", "runtime_parent")]
+[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("traversable_buildings", "blocking_buildings", "runtime_parent", "steering_system")]
 script = ExtResource("26_building_objects")
 traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 runtime_parent = NodePath("../BuildingObjects")
+steering_system = NodePath("../../CPP/SteeringSystemNative")
 
 [node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("floorz", "wallz", "plantz", "traversable_buildings", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "game_ui", "notif")]
 script = ExtResource("17_k5rlw")

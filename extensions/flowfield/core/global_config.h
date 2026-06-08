@@ -74,6 +74,12 @@ namespace ffcore
         double separation_strength = 400.0;
         int max_neighbors = 16;
 
+        // Generic static circular obstacle repulsion (reusable: not tied to any game concept).
+        // Moving agents query nearby static obstacles during steering and get pushed out,
+        // sliding around them because the obstacles are circular.
+        double static_obstacle_repulsion_strength = 400.0;
+        double static_obstacle_query_padding = tile_size; // extra query radius around the agent
+
         double lerp_general = 0.02;
 
         /* target radius = flow field stop system */
