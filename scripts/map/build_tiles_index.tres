@@ -11,6 +11,6 @@ data = {
 "atlas": [14.0, 0.0],
 "cooldown": 2.0,
 "kind": "spawner",
-"layer": "buildings"
+"layer": "traversable_buildings"
 }
 }

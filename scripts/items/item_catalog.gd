@@ -55,13 +55,31 @@ const ITEM_DEFS: Dictionary = {
 		"type": "placeable",
 		"category": "furniture",
 		"frame": 4,
-		"target_layer": "buildings",
+		"target_layer": "traversable_buildings",
 		"atlas": Vector2i(1, 0),
 		"occupies_cell": true,
 		"blocks_movement": false,
 		"blocks_projectiles": false,
 		"runtime_id": "lamp",
 		"light_source": 3,
+	},
+	"turret1": {
+		"id": "turret1",
+		"name": "Turret",
+		"type": "placeable",
+		"category": "turret",
+		"frame": 6,
+		"target_layer": "blocking_buildings",
+		"atlas": Vector2i(2, 0),
+		"occupies_cell": true,
+		# Breakable dynamic obstacle: blocks local agent movement, but is NOT static
+		# wall topology — it must never feed wall signatures / flowfield rebuilds.
+		"isWall": true,
+		"blocks_movement": true,
+		"blocks_projectiles": false,
+		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
+		"requires_walkable_floor": true,
+		"runtime_id": "turret1",
 	},
 }
 

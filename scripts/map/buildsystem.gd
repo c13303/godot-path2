@@ -1,9 +1,11 @@
 extends Node
 
 
+@export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer
-@export var buildings: TileMapLayer
+@export var traversable_buildings: TileMapLayer
+@export var blocking_buildings: TileMapLayer
 @export var previewbuild: TileMapLayer
 @export var plant_manager: Node
 @export var building_object_manager: Node
@@ -91,6 +93,9 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		return
 
 	_hover_cell = _hovered_cell()
+	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(_hover_cell):
+		_notify("invalid construction")
+		return
 	if _is_placeable_occupied(_hover_cell, target_layer, placeable_def):
 		_notify("invalid construction")
 		return
@@ -108,8 +113,13 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":
 		return plantz
+	if layer_name == "traversable_buildings":
+		return traversable_buildings
+	if layer_name == "blocking_buildings":
+		return blocking_buildings
+	# Backward compatibility: old "buildings" target maps to traversable_buildings.
 	if layer_name == "buildings":
-		return buildings
+		return traversable_buildings
 	return wallz
 
 func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
@@ -121,11 +131,26 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 		_flush_plant_layer_visuals()
 		if plant_manager and plant_manager.has_method("remove_plant"):
 			plant_manager.call("remove_plant", cell, false)
-	if target_layer != buildings and buildings:
-		buildings.erase_cell(cell)
-		buildings.update_internals()
+	if target_layer != traversable_buildings and traversable_buildings:
+		traversable_buildings.erase_cell(cell)
+		traversable_buildings.update_internals()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
+	if target_layer != blocking_buildings and blocking_buildings:
+		blocking_buildings.erase_cell(cell)
+		blocking_buildings.update_internals()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
+
+# True only when `cell` is a real floor tile with no blocking wall on it. Used by
+# placeables (e.g. turret1) that may only be built on free walkable ground. This is
+# a placement-time guard; it does not affect navigation/flowfields.
+func _is_free_walkable_cell(cell: Vector2i) -> bool:
+	if floorz and floorz.get_cell_source_id(cell) < 0:
+		return false
+	if wallz and wallz.get_cell_source_id(cell) >= 0:
+		return false
+	return true
 
 func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
 	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0:
@@ -134,7 +159,9 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 		return true
 	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0:
 		return true
-	if buildings and buildings != target_layer and buildings.get_cell_source_id(cell) >= 0:
+	if traversable_buildings and traversable_buildings != target_layer and traversable_buildings.get_cell_source_id(cell) >= 0:
+		return true
+	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
 		return true
 	return _is_occupied_by_group_node(cell)
 

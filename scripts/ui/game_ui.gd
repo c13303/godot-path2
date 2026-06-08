@@ -143,6 +143,7 @@ func _setup_starting_inventory() -> void:
 	inventory_slots[3] = "wall"
 	inventory_slots[4] = "lamp"
 	inventory_slots[5] = "rose"
+	inventory_slots[6] = "turret1"
 
 func _show_inventory() -> void:
 	_set_inventory_open(true)

@@ -47,7 +47,14 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer
-@export var buildings: TileMapLayer
+# Decorative / passive / walkable placeables (lamps, spawners). Spawner and other
+# special tiles are scanned here. Does NOT block agents or affect flowfields.
+@export var traversable_buildings: TileMapLayer
+# Breakable / obstructing / non-walkable placeables (turret1). Deliberately NOT
+# part of wall topology / wall signatures / flowfield rebuilds: global FF still
+# routes monsters THROUGH these cells; only local movement (later) treats them as
+# soft round blockers. Queried via is_blocking_building_cell().
+@export var blocking_buildings: TileMapLayer
 @export var plant_manager: Node
 @export var flow: Node
 @export var agent_manager: Node
@@ -257,7 +264,19 @@ var _cpp_debug_options: Node = null
 const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
 
+# Master gate shared by every lag detector: when "Debug Enabled" is off on the
+# CPP node, all lag warnings are suppressed (mirrors _is_verbose()). Returns true
+# only when the CPP node exists AND its debug_enabled flag is explicitly false.
+func _debug_master_disabled() -> bool:
+	if _cpp_debug_options == null:
+		_cpp_debug_options = _find_cpp_debug_options()
+	if _cpp_debug_options and "debug_enabled" in _cpp_debug_options:
+		return not bool(_cpp_debug_options.get("debug_enabled"))
+	return false
+
 func _frame_lag_threshold_ms() -> float:
+	if _debug_master_disabled():
+		return 0.0
 	if global_config and global_config.has_method("get_debug_nav_frame_lag_ms"):
 		return float(global_config.call("get_debug_nav_frame_lag_ms"))
 	if global_config and global_config.has_method("get_debug_plantff_frame_lag_ms"):
@@ -265,6 +284,8 @@ func _frame_lag_threshold_ms() -> float:
 	return DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK
 
 func _ff_lag_threshold_ms() -> float:
+	if _debug_master_disabled():
+		return 0.0
 	if global_config and global_config.has_method("get_debug_flowfield_rebuild_lag_ms"):
 		return float(global_config.call("get_debug_flowfield_rebuild_lag_ms"))
 	if global_config and global_config.has_method("get_debug_plantff_ff_lag_ms"):
@@ -302,6 +323,10 @@ func _find_cpp_debug_options() -> Node:
 	return null
 
 func _garden_lag_threshold_ms() -> float:
+	# Master gate: when "Debug Enabled" is off on the CPP node, suppress the
+	# per-task garden-lag warnings entirely (0 = detector disabled).
+	if _debug_master_disabled():
+		return 0.0
 	if _cpp_debug_options == null:
 		_cpp_debug_options = _find_cpp_debug_options()
 	if _cpp_debug_options and "debug_gardens_lag_ms" in _cpp_debug_options:
@@ -521,7 +546,7 @@ func _process(delta: float) -> void:
 
 	var frame_us: int = Time.get_ticks_usec() - frame_start_us
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()
-	if (float(frame_us) / 1000.0) > frame_threshold_ms:
+	if frame_threshold_ms > 0.0 and (float(frame_us) / 1000.0) > frame_threshold_ms:
 		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_failed=%d" % [
 			int(round(float(frame_us) / 1000.0)),
 			int(frame_threshold_ms),
@@ -556,7 +581,7 @@ func _load_tile_definitions() -> void:
 		}
 
 func _scan_buildings() -> void:
-	if not buildings:
+	if not traversable_buildings:
 		return
 
 	var t: int = Time.get_ticks_usec()
@@ -573,7 +598,10 @@ func _scan_buildings() -> void:
 
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
-	_scan_special_layer(buildings, seen_spawners)
+	# Only the traversable layer carries spawners / special tiles. blocking_buildings
+	# (turret1) is deliberately NOT scanned here: it must not register spawners or
+	# otherwise feed garden / flowfield topology.
+	_scan_special_layer(traversable_buildings, seen_spawners)
 	_scan_special_layer(wallz, seen_spawners)
 	_warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
 		"seen_spawners=%d" % seen_spawners.size())
@@ -701,7 +729,7 @@ func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void
 			_register_spawner(map_cell, float(definition.get("cooldown", DEFAULT_SPAWN_COOLDOWN)))
 
 func _migrate_special_tiles_from_wallz() -> bool:
-	if not wallz or not buildings:
+	if not wallz or not traversable_buildings:
 		return false
 
 	var migrated: bool = false
@@ -712,7 +740,7 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		if kind == "" or kind == "wall":
 			continue
 
-		var target_layer: TileMapLayer = plantz if kind == "plantsToTarget" else buildings
+		var target_layer: TileMapLayer = plantz if kind == "plantsToTarget" else traversable_buildings
 		if not target_layer:
 			continue
 		target_layer.set_cell(
@@ -731,14 +759,22 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		])
 
 	if migrated:
-		buildings.update_internals()
+		traversable_buildings.update_internals()
 		if plantz:
 			plantz.update_internals()
 		wallz.update_internals()
 	return migrated
 
 func _definition_for_cell(cell: Vector2i) -> Dictionary:
-	return _definition_for_layer_cell(buildings, cell)
+	return _definition_for_layer_cell(traversable_buildings, cell)
+
+# Cheap local-obstacle query for later monster local movement / combat. Returns true
+# when `cell` holds a breakable blocking building (e.g. turret1). This is intentionally
+# decoupled from walls and flowfields: global pathfinding still routes through these
+# cells; only local agent movement should treat them as soft round blockers. Placement
+# of a blocking building never triggers a wall/FF topology rebuild.
+func is_blocking_building_cell(cell: Vector2i) -> bool:
+	return blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0
 
 func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictionary:
 	if not layer:

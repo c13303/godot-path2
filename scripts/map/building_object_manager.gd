@@ -4,7 +4,8 @@ class_name BuildingObjectManager
 signal building_added(cell: Vector2i, item_id: String)
 signal building_removed(cell: Vector2i, item_id: String)
 
-@export var buildings: TileMapLayer
+@export var traversable_buildings: TileMapLayer
+@export var blocking_buildings: TileMapLayer
 @export var runtime_parent: Node2D
 
 const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
@@ -22,11 +23,15 @@ func _ready() -> void:
 func initialize_from_layer() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
-	if not buildings:
+	_initialize_from_one_layer(traversable_buildings)
+	_initialize_from_one_layer(blocking_buildings)
+
+func _initialize_from_one_layer(layer: TileMapLayer) -> void:
+	if not layer:
 		return
-	for raw_cell in buildings.get_used_cells():
+	for raw_cell in layer.get_used_cells():
 		var cell: Vector2i = raw_cell
-		var item_def: Dictionary = _default_building_def_for_existing_tile(cell)
+		var item_def: Dictionary = _default_building_def_for_existing_tile(layer, cell)
 		if not item_def.is_empty():
 			add_building(cell, item_def)
 
@@ -60,9 +65,11 @@ func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
 	var item_id: String = str(data.get("item_id", ""))
 	_buildings_by_cell.erase(cell)
 	_remove_runtime_node(cell)
-	if erase_tile and buildings:
-		buildings.erase_cell(cell)
-		buildings.update_internals()
+	if erase_tile:
+		for layer in [traversable_buildings, blocking_buildings]:
+			if layer and layer.get_cell_source_id(cell) >= 0:
+				layer.erase_cell(cell)
+				layer.update_internals()
 	building_removed.emit(cell, item_id)
 
 func get_building(cell: Vector2i) -> Dictionary:
@@ -110,15 +117,22 @@ func _runtime_parent() -> Node2D:
 		return get_parent() as Node2D
 	return null
 
+func _reference_layer() -> TileMapLayer:
+	if traversable_buildings:
+		return traversable_buildings
+	return blocking_buildings
+
 func _cell_center(cell: Vector2i) -> Vector2:
-	if buildings:
-		return buildings.to_global(buildings.map_to_local(cell))
+	var layer: TileMapLayer = _reference_layer()
+	if layer:
+		return layer.to_global(layer.map_to_local(cell))
 	return Vector2(float(cell.x), float(cell.y))
 
 func _tile_size_pixels() -> int:
-	if not buildings or not buildings.tile_set:
+	var layer: TileMapLayer = _reference_layer()
+	if not layer or not layer.tile_set:
 		return LIGHT_TEXTURE_FALLBACK_TILE_SIZE
-	var tile_size: Vector2i = buildings.tile_set.tile_size
+	var tile_size: Vector2i = layer.tile_set.tile_size
 	var size_pixels: int = max(tile_size.x, tile_size.y)
 	if size_pixels <= 0:
 		return LIGHT_TEXTURE_FALLBACK_TILE_SIZE
@@ -185,10 +199,11 @@ func _clear_runtime_nodes() -> void:
 			node.queue_free()
 	_runtime_nodes_by_cell.clear()
 
-func _default_building_def_for_existing_tile(_cell: Vector2i) -> Dictionary:
-	if not buildings:
+func _default_building_def_for_existing_tile(layer: TileMapLayer, _cell: Vector2i) -> Dictionary:
+	if not layer:
 		return {}
-	var atlas: Vector2i = buildings.get_cell_atlas_coords(_cell)
+	var layer_name: String = layer.name
+	var atlas: Vector2i = layer.get_cell_atlas_coords(_cell)
 	for raw_item_def in ItemCatalog.ITEM_DEFS.values():
 		var item_def: Dictionary = raw_item_def as Dictionary
 		if str(item_def.get("type", "")) != "placeable":
@@ -196,7 +211,12 @@ func _default_building_def_for_existing_tile(_cell: Vector2i) -> Dictionary:
 		var placeable_category: String = str(item_def.get("category", ""))
 		if not BUILDING_CATEGORIES.has(placeable_category):
 			continue
-		if str(item_def.get("target_layer", "")) != "buildings":
+		var target_layer: String = str(item_def.get("target_layer", ""))
+		# Match the def's target layer to the layer the tile actually lives on.
+		# Old saves/scenes that still say "buildings" map to traversable_buildings.
+		if target_layer == "buildings":
+			target_layer = "traversable_buildings"
+		if target_layer != layer_name:
 			continue
 		var item_atlas: Vector2i = _atlas_coords_from_item_def(item_def)
 		if item_atlas == atlas:
