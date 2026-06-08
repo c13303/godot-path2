@@ -8,6 +8,11 @@ const PHASE_ASTAR_IN: int = 2
 const PHASE_EATING: int = 3
 const PHASE_ASTAR_OUT: int = 4
 const PHASE_FLOW_OUT: int = 5
+# Temporary holding phase: the agent's garden assignment became invalid (garden
+# deleted/rebuilt) and building_manager queued it for budgeted retargeting. Not
+# gameplay behavior — just a visible debug label while the agent waits a few
+# frames for a new navigation state. Mirrors ffcore::AgentPhase::WaitingNewStatus.
+const PHASE_WAITING_NEW_STATUS: int = 6
 
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
@@ -100,6 +105,20 @@ func start_astar_out() -> void:
 
 func stop_astar_out() -> void:
 	if status == "astar_out":
+		status = ""
+	_set_phase(PHASE_NONE)
+
+# Temporary holding state used by building_manager when this agent's garden was
+# deleted/rebuilt and it is queued for retargeting. Sets the visible native phase
+# to "waiting new status" so debugging is clear; the agent should not be following
+# a stale path/flow while in this state (the manager detaches those before calling).
+func start_waiting_new_status() -> void:
+	status = "waiting_new_status"
+	_eating_timer = 0.0
+	_set_phase(PHASE_WAITING_NEW_STATUS)
+
+func stop_waiting_new_status() -> void:
+	if status == "waiting_new_status":
 		status = ""
 	_set_phase(PHASE_NONE)
 

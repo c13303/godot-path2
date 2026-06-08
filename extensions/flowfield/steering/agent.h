@@ -25,6 +25,11 @@ namespace ffcore
         Eating = 3,   // at the plant, eating (eating_seconds counts down)
         AstarOut = 4, // finished eating, A* out of the garden
         FlowOut = 5,  // left the garden, on the flow field toward the exit
+        // Temporary holding state: the agent's garden assignment became invalid
+        // (garden deleted/rebuilt) and it is queued for budgeted retargeting by
+        // building_manager. Not gameplay behavior; the agent follows no path/flow
+        // while in this state. Kept last so existing phase codes are unchanged.
+        WaitingNewStatus = 6,
     };
 
     constexpr int SMASH_CLASS_PLAYER = 1 << 0;

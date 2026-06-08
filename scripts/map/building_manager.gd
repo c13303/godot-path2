@@ -25,6 +25,25 @@ const PLANT_ZONE_MARGIN: int = 2
 const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 
+# Garden access-cell scoring penalties. Distance / escape cost stays the main
+# driver; these only nudge selection away from obviously bad local geometry (a
+# wall-pocket exit that forces an immediate reversal, a dead-ended outside tile).
+# They are deliberately conservative and additive: a valid access cell is never
+# rejected outright for being near walls, only ranked slightly lower when its
+# continuation geometry is also poor. Tune as needed.
+const ACCESS_NO_OUTSIDE_PENALTY: float = 1000.0
+const ACCESS_EXIT_WORSE_PENALTY: float = 100.0
+const ACCESS_EXIT_FLAT_PENALTY: float = 10.0
+const ACCESS_DEAD_CONTINUATION_PENALTY: float = 100.0
+const ACCESS_NARROW_CONTINUATION_PENALTY: float = 20.0
+const ACCESS_REVERSAL_PENALTY: float = 100.0
+const ACCESS_TURN_PENALTY: float = 5.0
+const ACCESS_BLOCKED_CARDINAL_PENALTY: float = 2.0
+# Enter mode uses softer continuation penalties (the agent is heading inward, so
+# outside continuation matters less than for exits).
+const ACCESS_ENTER_DEAD_CONTINUATION_PENALTY: float = 30.0
+const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
+
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer
@@ -40,6 +59,10 @@ const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 @export var dont_shrink_gardens: bool = true
 @export_group("")
 @export_range(0, 32, 1, "or_greater") var empty_garden_local_retarget_radius: int = 5
+# How many queued agents are retargeted per frame after a garden rebuild. Keeps the
+# rebuild frame cheap by spreading the (expensive) re-path/escape work over several
+# frames. Raise if reassignment feels too slow, lower if it causes frame spikes.
+@export_range(1, 64, 1, "or_greater") var garden_retarget_budget_per_frame: int = 8
 @export var debug_show_plantzone: bool = true:
 	set(value):
 		debug_show_plantzone = value
@@ -58,6 +81,16 @@ var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
 var _astar_out_agents: Dictionary = {}
+# Budgeted retargeting after a garden topology rebuild. When a rebuild invalidates
+# the garden an agent was targeting/eating-in, we cannot afford to re-path every
+# affected agent in the same frame (potential large spike). Instead each affected
+# agent is detached from its stale path/flow cheaply, parked in "waiting_new_status",
+# and queued here; _process_garden_retarget_queue() then re-assigns a bounded number
+# of them per frame. Queue items are Dictionaries:
+#   { "nav_id": int, "intent": String ("escape"|"retarget"), "spawner_cell": Vector2i }
+# _garden_retarget_queued mirrors the queued nav_ids so we never double-enqueue.
+var _garden_retarget_queue: Array[Dictionary] = []
+var _garden_retarget_queued: Dictionary = {}  # nav_id -> true
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _last_scan_summary: String = ""
@@ -240,6 +273,7 @@ func _process(delta: float) -> void:
 	_process_plant_arrivals()
 	_process_astar_out_arrivals()
 	_process_escape_arrivals()
+	_process_garden_retarget_queue()
 	_process_spawners(delta)
 	_sync_plant_zone_debug_visibility()
 
@@ -1010,8 +1044,11 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var exit_cell: Vector2i = INVALID_CELL
 	if not exit_escape.is_empty():
 		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
+		var escape_group: int = int(exit_escape.get("escape_group", -1))
 		if exit_target != INVALID_CELL:
-			exit_cell = _nearest_garden_entry_excluding(garden_id, exit_target, original_entry_cell)
+			# Exit-after-eating: score with the real escape flow so the chosen
+			# access cell leads toward the map exit, not just nearest by Manhattan.
+			exit_cell = _select_scored_garden_entry(garden_id, exit_target, "exit", original_entry_cell, escape_group)
 	if exit_cell == INVALID_CELL:
 		exit_cell = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, original_entry_cell)
 	if exit_cell == INVALID_CELL:
@@ -1270,6 +1307,10 @@ func _rebuild_plant_zone_from_layer() -> void:
 	_build_gardens_from_plants()
 	_validate_dirty_gardens()
 	_rebuild_spawner_garden_route_cache()
+	# Garden ids/topology just changed: cheaply detect agents now pointing at a
+	# deleted/empty garden, park them in "waiting_new_status", and queue them for
+	# budgeted retargeting over the next frames. No pathfinding happens here.
+	_queue_agents_after_garden_rebuild()
 
 func _build_gardens_from_plants() -> void:
 	if _gardens_iter_depth > 0:
@@ -1996,6 +2037,149 @@ func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
 
+# ---------------------------------------------------------------------------
+# Budgeted retargeting after a garden topology rebuild.
+#
+# A rebuild clears _gardens and bumps the epoch, so any agent still holding a
+# garden_id from before can be referencing a deleted/empty garden. Re-pathing all
+# of them in the rebuild frame risks a large spike, so we split the work:
+#   1. _queue_agents_after_garden_rebuild() — one-shot, cheap. Detects affected
+#      agents, detaches their stale path/flow, parks them in "waiting_new_status",
+#      and queues them. NO pathfinding here.
+#   2. _process_garden_retarget_queue() — runs each frame, capped at
+#      garden_retarget_budget_per_frame, doing the expensive re-path/escape.
+# ---------------------------------------------------------------------------
+
+# Resolve the agent node for a nav_id without scanning the monsters group.
+# AgentManagerNative keeps an id -> node map, so find_node_by_agent is O(1).
+func _agent_from_nav_id(nav_id: int) -> Node2D:
+	if agent_manager and agent_manager.has_method("find_node_by_agent"):
+		var node: Variant = agent_manager.call("find_node_by_agent", nav_id)
+		if is_instance_valid(node) and node is Node2D:
+			return node as Node2D
+	return null
+
+# A garden assignment is stale (needs retargeting) when:
+#   - the garden no longer exists in _gardens, or
+#   - it exists but has no edible plants (matches the route-validity logic used
+#     elsewhere). garden_id <= 0 means "no garden assigned" and is never stale.
+func _garden_assignment_is_stale(garden_id: int) -> bool:
+	if garden_id <= 0:
+		return false
+	if not _gardens.has(garden_id):
+		return true
+	if not _garden_has_edible_plants(garden_id):
+		return true
+	return false
+
+# Cheapest available view of which garden an agent is currently bound to, checked
+# in phase priority order (the dictionaries reflect the agent's live phase, the
+# meta is the last-known fallback). Returns 0 when no garden is referenced.
+func _agent_referenced_garden_id(nav_id: int, agent: Node2D) -> int:
+	if _entry_path_agents.has(nav_id):
+		return int((_entry_path_agents[nav_id] as Dictionary).get("garden_id", 0))
+	if _astar_in_agents.has(nav_id):
+		return int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0))
+	if _astar_out_agents.has(nav_id):
+		return int((_astar_out_agents[nav_id] as Dictionary).get("garden_id", 0))
+	if _eating_agents.has(nav_id):
+		# _eating_agents does not carry garden_id; fall through to the meta below.
+		pass
+	if is_instance_valid(agent) and agent.has_meta("garden_id"):
+		return int(agent.get_meta("garden_id"))
+	return 0
+
+# One-shot scan after a garden rebuild. Only cheap checks: detect stale garden
+# references, detach stale nav state, park the agent in "waiting_new_status", and
+# queue it. No new path/flow is computed here (that is deferred to the budgeted
+# queue). Iterates a snapshot of the monsters group so the per-agent erases below
+# never mutate a live iteration.
+func _queue_agents_after_garden_rebuild() -> void:
+	for node in get_tree().get_nodes_in_group("monsters"):
+		if not (node is Node2D):
+			continue
+		var agent: Node2D = node
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0:
+			continue
+		if _garden_retarget_queued.has(nav_id):
+			continue
+		var garden_id: int = _agent_referenced_garden_id(nav_id, agent)
+		if not _garden_assignment_is_stale(garden_id):
+			continue
+		# Decide intent BEFORE we clear the agent's phase dictionaries: agents that
+		# were leaving or eating should head for the exit, everyone else retargets.
+		var intent: String = "retarget"
+		if _astar_out_agents.has(nav_id) or _eating_agents.has(nav_id):
+			intent = "escape"
+		var spawner_cell: Vector2i = INVALID_CELL
+		if agent.has_meta("spawner_cell"):
+			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+		# Cheaply detach stale path/flow and forget the old phase so the agent stops
+		# following an invalid route immediately. New routing is deferred.
+		if agent_manager and agent_manager.has_method("detach_agent_path"):
+			agent_manager.call("detach_agent_path", nav_id)
+		if agent_manager and agent_manager.has_method("detach_agent_flow"):
+			agent_manager.call("detach_agent_flow", nav_id)
+		_entry_path_agents.erase(nav_id)
+		_astar_in_agents.erase(nav_id)
+		_astar_out_agents.erase(nav_id)
+		_escaping_agents.erase(nav_id)
+		if _eating_agents.has(nav_id):
+			_erase_eating_agent(nav_id)
+			if agent.has_method("stop_eating"):
+				agent.call("stop_eating")
+		if agent.has_method("start_waiting_new_status"):
+			agent.call("start_waiting_new_status")
+		_garden_retarget_queue.append({
+			"nav_id": nav_id,
+			"intent": intent,
+			"spawner_cell": spawner_cell
+		})
+		_garden_retarget_queued[nav_id] = true
+	# _garden_has_edible_plants (via _garden_assignment_is_stale) may have queued
+	# stale-empty gardens; this loop iterates monsters, not _gardens, so draining
+	# here is safe.
+	_drain_pending_empty_gardens()
+
+# Budgeted: re-assign at most garden_retarget_budget_per_frame queued agents per
+# frame. The expensive A*/escape work lives in _retarget_single_waiting_agent.
+func _process_garden_retarget_queue() -> void:
+	if _garden_retarget_queue.is_empty():
+		return
+	var budget: int = garden_retarget_budget_per_frame
+	while budget > 0 and not _garden_retarget_queue.is_empty():
+		var item: Dictionary = _garden_retarget_queue.pop_front() as Dictionary
+		var nav_id: int = int(item.get("nav_id", -1))
+		_garden_retarget_queued.erase(nav_id)
+		budget -= 1
+		if nav_id < 0:
+			continue
+		var agent: Node2D = _agent_from_nav_id(nav_id)
+		if not is_instance_valid(agent):
+			# Agent was freed before we got to it: nothing to do.
+			continue
+		# If the agent already received a newer valid state (e.g. another path was
+		# re-issued by other logic), it is no longer waiting — don't override it.
+		if str(agent.get("status")) != "waiting_new_status":
+			continue
+		_retarget_single_waiting_agent(nav_id, agent, item)
+
+# Re-assign one parked agent. intent "escape" routes it to a map exit; intent
+# "retarget" finds a new valid garden if one exists, otherwise escapes. Both clear
+# the temporary "waiting_new_status" before handing off to the real phase.
+func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary) -> void:
+	if not is_instance_valid(agent):
+		return
+	if agent.has_method("stop_waiting_new_status"):
+		agent.call("stop_waiting_new_status")
+	var intent: String = str(item.get("intent", "retarget"))
+	var spawner_cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
+	if intent == "escape":
+		_assign_agent_to_escape(agent)
+		return
+	_retarget_agent_or_escape(agent, spawner_cell)
+
 func get_plant_zone_tiles() -> Array:
 	return _plant_zone_tiles.keys()
 
@@ -2371,37 +2555,236 @@ func _mark_garden_empty(garden_id: int) -> void:
 	_release_garden_routes(garden_id)
 	_erase_garden(garden_id, "mark_empty")
 
-func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
+func _manhattan_cell(a: Vector2i, b: Vector2i) -> int:
+	var delta: Vector2i = a - b
+	return abs(delta.x) + abs(delta.y)
+
+# Walkable cells *outside* the garden that a monster could actually step to from
+# this interior access cell. "Outside" = not in zone_tiles. Uses the same
+# walkability + diagonal no-corner-cut rules as _recompute_garden_geometry(), so
+# the neighbors returned mirror the transitions that made access_cell an access
+# cell in the first place.
+func _garden_access_outside_neighbors(garden: Dictionary, access_cell: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var neighbor: Vector2i = access_cell + Vector2i(dx, dy)
+			if not _is_walkable(neighbor):
+				continue
+			if zone_tiles.has(neighbor):
+				continue
+			if dx != 0 and dy != 0:
+				if not _is_walkable(access_cell + Vector2i(dx, 0)) or not _is_walkable(access_cell + Vector2i(0, dy)):
+					continue
+			out.append(neighbor)
+	return out
+
+# Walkable neighbors of a cell using the same no-corner-cut rule. Pure local
+# geometry (no zone awareness): used to gauge whether an outside tile is cramped
+# or dead-ended for continuation scoring.
+func _valid_walkable_neighbors_no_corner_cut(cell: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			var neighbor: Vector2i = cell + Vector2i(dx, dy)
+			if not _is_walkable(neighbor):
+				continue
+			if dx != 0 and dy != 0:
+				if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+					continue
+			out.append(neighbor)
+	return out
+
+# Route cost for a group at a cell center, or INF when flow / the group is not
+# available. Wraps the optional flow.group_route_cost_at_world cache so callers
+# can compare inside vs outside cost along the real escape flow.
+func _group_route_cost_at_cell(escape_group: int, cell: Vector2i) -> float:
+	if escape_group <= IDLE_GROUP:
+		return INF
+	if not flow or not flow.has_method("group_route_cost_at_world"):
+		return INF
+	return float(flow.call("group_route_cost_at_world", escape_group, _cell_center(cell)))
+
+# Low-cost score for a garden access (entry/exit) cell. Lower is better. The base
+# is Manhattan distance to target_cell so behavior stays close to the old
+# nearest-entry selection; penalties are purely additive and only discourage
+# obviously bad local geometry. Wall proximity alone is never enough to reject a
+# cell — it only adds a small cramped penalty, which doors naturally incur.
+func _score_garden_access_cell(
+	garden_id: int,
+	access_cell: Vector2i,
+	target_cell: Vector2i,
+	mode: String,
+	forbidden_cell: Vector2i = INVALID_CELL,
+	escape_group: int = -1
+) -> float:
+	if not _gardens.has(garden_id):
+		return INF
+	if access_cell == forbidden_cell:
+		return INF
+	if not _is_walkable(access_cell):
+		return INF
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+
+	var score: float = float(_manhattan_cell(access_cell, target_cell))
+
+	var outside_neighbors: Array[Vector2i] = _garden_access_outside_neighbors(garden, access_cell)
+	if outside_neighbors.is_empty():
+		# Degenerate: an access cell with no reachable outside step. Penalize
+		# heavily but never crash — the cell may still be the only option.
+		return score + ACCESS_NO_OUTSIDE_PENALTY
+
+	# Pick the outside neighbor that best follows the target / escape flow.
+	var use_flow: bool = escape_group > IDLE_GROUP and flow and flow.has_method("group_route_cost_at_world")
+	var outside_neighbor: Vector2i = outside_neighbors[0]
+	var best_outside_metric: float = INF
+	for candidate in outside_neighbors:
+		var metric: float
+		if use_flow:
+			metric = _group_route_cost_at_cell(escape_group, candidate)
+			if not is_finite(metric):
+				metric = float(_manhattan_cell(candidate, target_cell))
+		else:
+			metric = float(_manhattan_cell(candidate, target_cell))
+		if metric < best_outside_metric:
+			best_outside_metric = metric
+			outside_neighbor = candidate
+
+	if mode == "exit":
+		# Stepping outside should not lose progress toward the target. Prefer the
+		# real escape flow when available, fall back to Manhattan otherwise.
+		var compared: bool = false
+		if use_flow:
+			var inside_cost: float = _group_route_cost_at_cell(escape_group, access_cell)
+			var outside_cost: float = _group_route_cost_at_cell(escape_group, outside_neighbor)
+			if is_finite(inside_cost) and is_finite(outside_cost):
+				compared = true
+				if outside_cost > inside_cost:
+					score += ACCESS_EXIT_WORSE_PENALTY
+				elif outside_cost == inside_cost:
+					score += ACCESS_EXIT_FLAT_PENALTY
+		if not compared:
+			var inside_dist: int = _manhattan_cell(access_cell, target_cell)
+			var outside_dist: int = _manhattan_cell(outside_neighbor, target_cell)
+			if outside_dist > inside_dist:
+				score += ACCESS_EXIT_WORSE_PENALTY
+			elif outside_dist == inside_dist:
+				score += ACCESS_EXIT_FLAT_PENALTY
+
+		# Continuation: how many ways out of the outside tile, excluding stepping
+		# straight back inside. A dead end forces an immediate reversal.
+		var continuations: Array[Vector2i] = []
+		for cont in _valid_walkable_neighbors_no_corner_cut(outside_neighbor):
+			if cont == access_cell:
+				continue
+			continuations.append(cont)
+		if continuations.is_empty():
+			score += ACCESS_DEAD_CONTINUATION_PENALTY
+		elif continuations.size() == 1:
+			score += ACCESS_NARROW_CONTINUATION_PENALTY
+
+		# Immediate reversal: if the best next step from the outside tile heads
+		# back the way we came, the exit geometry is awkward (wall pocket).
+		if not continuations.is_empty():
+			var best_next: Vector2i = continuations[0]
+			var best_next_metric: float = INF
+			for cont in continuations:
+				var cont_metric: float
+				if use_flow:
+					cont_metric = _group_route_cost_at_cell(escape_group, cont)
+					if not is_finite(cont_metric):
+						cont_metric = float(_manhattan_cell(cont, target_cell))
+				else:
+					cont_metric = float(_manhattan_cell(cont, target_cell))
+				if cont_metric < best_next_metric:
+					best_next_metric = cont_metric
+					best_next = cont
+			var exit_dir: Vector2i = outside_neighbor - access_cell
+			var best_dir: Vector2i = best_next - outside_neighbor
+			var dot: int = signi(exit_dir.x) * signi(best_dir.x) + signi(exit_dir.y) * signi(best_dir.y)
+			if dot < 0:
+				score += ACCESS_REVERSAL_PENALTY
+			elif dot == 0:
+				score += ACCESS_TURN_PENALTY
+
+		# Small cramped penalty: blocked cardinal tiles around the outside cell.
+		# Kept tiny so it can never dominate a real door's distance advantage.
+		score += float(_blocked_cardinal_count(outside_neighbor)) * ACCESS_BLOCKED_CARDINAL_PENALTY
+	else:
+		# Enter mode: agent heads inward, so outside continuation matters less and
+		# we do not penalize "outside farther than inside" (direction is reversed).
+		var enter_continuations: int = 0
+		for cont in _valid_walkable_neighbors_no_corner_cut(outside_neighbor):
+			if cont == access_cell:
+				continue
+			enter_continuations += 1
+		if enter_continuations == 0:
+			score += ACCESS_ENTER_DEAD_CONTINUATION_PENALTY
+		elif enter_continuations == 1:
+			score += ACCESS_ENTER_NARROW_CONTINUATION_PENALTY
+		score += float(_blocked_cardinal_count(outside_neighbor)) * ACCESS_BLOCKED_CARDINAL_PENALTY
+
+	return score
+
+# Count of the 4 cardinal neighbors of `cell` that are not walkable.
+func _blocked_cardinal_count(cell: Vector2i) -> int:
+	var blocked: int = 0
+	if not _is_walkable(cell + Vector2i(1, 0)):
+		blocked += 1
+	if not _is_walkable(cell + Vector2i(-1, 0)):
+		blocked += 1
+	if not _is_walkable(cell + Vector2i(0, 1)):
+		blocked += 1
+	if not _is_walkable(cell + Vector2i(0, -1)):
+		blocked += 1
+	return blocked
+
+# Shared scored selector for garden access cells. Loops entry_cells, scores each
+# candidate, and returns the lowest-scoring one, tie-broken by old Manhattan
+# distance to target_cell for predictable behavior. If every candidate scores INF
+# (or scoring finds nothing usable), falls back to the old pure-Manhattan logic.
+func _select_scored_garden_entry(
+	garden_id: int,
+	target_cell: Vector2i,
+	mode: String,
+	forbidden_cell: Vector2i = INVALID_CELL,
+	escape_group: int = -1
+) -> Vector2i:
 	if not _gardens.has(garden_id):
 		return INVALID_CELL
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
 	var entry_cells: Array = garden.get("entry_cells", []) as Array
 	var best_cell: Vector2i = INVALID_CELL
-	var best_dist: int = 2147483647
+	var best_score: float = INF
+	var best_tiebreak: int = 2147483647
 	for raw_cell in entry_cells:
 		var cell: Vector2i = raw_cell
-		if not _is_walkable(cell):
+		var score: float = _score_garden_access_cell(garden_id, cell, target_cell, mode, forbidden_cell, escape_group)
+		if not is_finite(score):
 			continue
-		var delta: Vector2i = cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
+		var tiebreak: int = _manhattan_cell(cell, target_cell)
+		if score < best_score or (score == best_score and tiebreak < best_tiebreak):
+			best_score = score
+			best_tiebreak = tiebreak
 			best_cell = cell
-	return best_cell
+	if best_cell != INVALID_CELL:
+		# Gated on the opt-in export (defaults off) so the debug overlay's
+		# per-frame path queries can't spam this; selection itself is rare.
+		if debug_logs:
+			print("BuildingManager: garden %d %s access %s score=%.1f target=%s" % [garden_id, mode, str(best_cell), best_score, str(target_cell)])
+		return best_cell
+	# Nothing scored finite: fall back to the old Manhattan nearest logic so
+	# behavior is never worse than before.
+	return _nearest_garden_entry_manhattan(garden_id, target_cell, forbidden_cell)
 
-func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
-	var exit_wall_cell: Vector2i = INVALID_CELL
-	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
-	if exit_wall_cell == INVALID_CELL:
-		return _nearest_garden_entry(garden_id, spawner_cell)
-	return _nearest_garden_entry(garden_id, exit_wall_cell)
-
-# Like _nearest_garden_entry, but never returns forbidden_cell. Used so a route's
-# garden exit tile differs from the tile the monster entered through, whenever a
-# different valid entry exists. Returns INVALID_CELL if the only option is the
-# forbidden tile (or none are valid).
-func _nearest_garden_entry_excluding(garden_id: int, from_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
+# Old pure-Manhattan nearest-entry selection, preserved as the fallback for the
+# scored selector. Honors forbidden_cell (pass INVALID_CELL to disable).
+func _nearest_garden_entry_manhattan(garden_id: int, from_cell: Vector2i, forbidden_cell: Vector2i = INVALID_CELL) -> Vector2i:
 	if not _gardens.has(garden_id):
 		return INVALID_CELL
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
@@ -2414,12 +2797,30 @@ func _nearest_garden_entry_excluding(garden_id: int, from_cell: Vector2i, forbid
 			continue
 		if not _is_walkable(cell):
 			continue
-		var delta: Vector2i = cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
+		var manhattan: int = _manhattan_cell(cell, from_cell)
 		if manhattan < best_dist:
 			best_dist = manhattan
 			best_cell = cell
 	return best_cell
+
+func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
+	return _select_scored_garden_entry(garden_id, from_cell, "enter")
+
+func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
+	var exit_wall_cell: Vector2i = INVALID_CELL
+	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
+	var escape_group: int = int(spawner_route.get("escape_group", -1))
+	if exit_wall_cell == INVALID_CELL:
+		return _select_scored_garden_entry(garden_id, spawner_cell, "exit", INVALID_CELL, escape_group)
+	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", INVALID_CELL, escape_group)
+
+# Like _nearest_garden_entry, but never returns forbidden_cell. Used so a route's
+# garden exit tile differs from the tile the monster entered through, whenever a
+# different valid entry exists. Returns INVALID_CELL if the only option is the
+# forbidden tile (or none are valid).
+func _nearest_garden_entry_excluding(garden_id: int, from_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
+	return _select_scored_garden_entry(garden_id, from_cell, "enter", forbidden_cell)
 
 # Like _nearest_garden_entry_to_exit, but never returns forbidden_cell. Prefers
 # the garden entry closest to the spawner's wall-exit target. Returns
@@ -2428,9 +2829,10 @@ func _nearest_garden_entry_to_exit_excluding(garden_id: int, spawner_cell: Vecto
 	var exit_wall_cell: Vector2i = INVALID_CELL
 	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
 	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
+	var escape_group: int = int(spawner_route.get("escape_group", -1))
 	if exit_wall_cell == INVALID_CELL:
-		return _nearest_garden_entry_excluding(garden_id, spawner_cell, forbidden_cell)
-	return _nearest_garden_entry_excluding(garden_id, exit_wall_cell, forbidden_cell)
+		return _select_scored_garden_entry(garden_id, spawner_cell, "exit", forbidden_cell, escape_group)
+	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", forbidden_cell, escape_group)
 
 func _log(message: String) -> void:
 	if debug_logs:
