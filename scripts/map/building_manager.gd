@@ -204,6 +204,11 @@ var _gardens_epoch: int = 0
 # early. Iteration is considered active while _gardens_iter_depth > 0.
 var _gardens_iter_depth: int = 0
 var _garden_debug_logs: bool = true
+# Eat-exit transition counters: monsters finishing eating now try to attach
+# directly to the existing per-exit-wall escape FF (skipping garden-exit selection
+# and the per-agent astar_out path). astar_out remains a temporary fallback.
+var eat_exit_direct_ff_success: int = 0
+var eat_exit_direct_ff_fallback_astar: int = 0
 # Gardens found empty during a _gardens iteration; erased after the loop ends.
 var _pending_empty_gardens: Dictionary = {}  # garden_id -> true
 # Memoizes the expensive scored garden-entry selection (_nearest_garden_entry =
@@ -524,7 +529,7 @@ func _process(delta: float) -> void:
 	var frame_us: int = Time.get_ticks_usec() - frame_start_us
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()
 	if (float(frame_us) / 1000.0) > frame_threshold_ms:
-		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d astar_out=%d escaping=%d retarget_queue=%d spawners=%d" % [
+		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d astar_out=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_fallback=%d" % [
 			int(round(float(frame_us) / 1000.0)),
 			int(frame_threshold_ms),
 			_eating_agents.size(),
@@ -532,7 +537,9 @@ func _process(delta: float) -> void:
 			_astar_out_agents.size(),
 			_escaping_agents.size(),
 			_garden_retarget_queue.size(),
-			_spawners.size()
+			_spawners.size(),
+			eat_exit_direct_ff_success,
+			eat_exit_direct_ff_fallback_astar
 		])
 
 func _load_tile_definitions() -> void:
@@ -1429,7 +1436,12 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 	_last_plant_retarget_queued = 0
 	_last_plant_retarget_stale = 0
 	_last_plant_retarget_already_queued = 0
-	var garden_still_edible: bool = garden_id > 0 and _garden_has_edible_plants(garden_id)
+	# Side-effect call: _garden_has_edible_plants flags a now-empty garden into the
+	# pending-empty set, which _drain_pending_empty_gardens() (at the end of this func)
+	# acts on. The boolean result is no longer needed for branching — every affected
+	# agent is deferred to the budgeted queue regardless — but the call must stay.
+	if garden_id > 0:
+		_garden_has_edible_plants(garden_id)
 	# Reverse index lookup: only the agents heading for THIS exact plant, not a scan
 	# over every A*-in agent. Usually 0-2 entries. Snapshot the bucket keys first
 	# because _retarget_agent_or_escape / queueing mutate the index underneath us.
@@ -1486,17 +1498,18 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 				agent.call("stop_astar_in")
 			if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
 				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-			if garden_still_edible:
-				# Cheap, synchronous: the garden still has plants, so this agent can pick a
-				# fresh in-garden target (or escape if none is reachable) right now.
-				_retarget_agent_or_escape(agent, spawner_cell)
+			# Always defer through the budgeted queue. Per-agent retarget is "cheap" only
+			# in isolation: _retarget_agent_or_escape runs a radius scan + per-candidate
+			# path validation (~ms each). When a single plant removal frees a whole bucket
+			# (e.g. 5 agents all heading for the same plant), retargeting them all
+			# synchronously here spikes the frame to 15-20ms. The budgeted queue spreads
+			# that same work across frames at garden_retarget_budget_ms/frame. Whether the
+			# garden still has edible plants only affects what the queued retarget resolves
+			# to (a fresh plant vs. an escape) — not whether it must run this frame.
+			if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id):
+				_last_plant_retarget_queued += 1
 			else:
-				# Garden has no edible plants left (but wasn't flagged empty for the queue
-				# path): defer through the budgeted queue so we don't spike this frame.
-				if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id):
-					_last_plant_retarget_queued += 1
-				else:
-					_last_plant_retarget_already_queued += 1
+				_last_plant_retarget_already_queued += 1
 	# Optional consistency check: replay the old full scan and warn on any mismatch.
 	# OFF by default — it reintroduces the very O(all A*-in) cost the index removes.
 	if _debug_check_retarget_index:
@@ -1575,7 +1588,19 @@ func _process_eating_agents(delta: float) -> void:
 			var spawner_cell: Vector2i = INVALID_CELL
 			if agent.has_meta("spawner_cell"):
 				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-			_start_astar_out(agent, spawner_cell)
+			# Direct wallexit-FF escape: every real exit wall already has a flow field
+			# covering the whole walkable map (floor minus walls; plant/garden cells are
+			# normal walkable cells), so a finished eater can attach straight to the
+			# nearest reachable escape FF — no garden-exit selection, no per-agent
+			# astar_out. Fall back to the old astar_out only if no FF covers this cell.
+			if _assign_agent_to_escape(agent):
+				eat_exit_direct_ff_success += 1
+			else:
+				eat_exit_direct_ff_fallback_astar += 1
+				if _garden_debug_logs:
+					var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
+					push_warning("eat_exit_direct_ff_failed nav_id=%d cell=%s fallback_astar=true" % [nav_id, fb_cell])
+				_start_astar_out(agent, spawner_cell)
 
 func _erase_eating_agent(nav_id: int) -> void:
 	_eating_agents.erase(nav_id)
