@@ -6,6 +6,10 @@ const PHASE_NONE: int = 0
 const PHASE_FLOW_IN: int = 1
 const PHASE_ASTAR_IN: int = 2
 const PHASE_EATING: int = 3
+# Retained only to keep the enum numbering aligned with ffcore::AgentPhase in
+# agent.h (FlowOut=5, WaitingNewStatus=6 depend on it). The old plant→garden-exit
+# A*-out phase is gone — finished eaters attach straight to the wall-exit FF — so
+# nothing in GDScript sets this phase anymore.
 const PHASE_ASTAR_OUT: int = 4
 const PHASE_FLOW_OUT: int = 5
 # Temporary holding phase: the agent's garden assignment became invalid (garden
@@ -95,16 +99,6 @@ func start_astar_in() -> void:
 
 func stop_astar_in() -> void:
 	if status == "astar_in":
-		status = ""
-	_set_phase(PHASE_NONE)
-
-func start_astar_out() -> void:
-	status = "astar_out"
-	_eating_timer = 0.0
-	_set_phase(PHASE_ASTAR_OUT)
-
-func stop_astar_out() -> void:
-	if status == "astar_out":
 		status = ""
 	_set_phase(PHASE_NONE)
 

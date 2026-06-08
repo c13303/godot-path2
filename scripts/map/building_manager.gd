@@ -157,7 +157,6 @@ var _last_plant_retarget_affected: int = 0       # valid agents actually retarge
 var _last_plant_retarget_queued: int = 0         # of those, deferred to the queue
 var _last_plant_retarget_stale: int = 0          # bucket entries dropped as invalid
 var _last_plant_retarget_already_queued: int = 0 # valid but already in retarget queue
-var _astar_out_agents: Dictionary = {}
 # Budgeted retargeting after a garden topology rebuild. When a rebuild invalidates
 # the garden an agent was targeting/eating-in, we cannot afford to re-path every
 # affected agent in the same frame (potential large spike). Instead each affected
@@ -204,11 +203,11 @@ var _gardens_epoch: int = 0
 # early. Iteration is considered active while _gardens_iter_depth > 0.
 var _gardens_iter_depth: int = 0
 var _garden_debug_logs: bool = true
-# Eat-exit transition counters: monsters finishing eating now try to attach
-# directly to the existing per-exit-wall escape FF (skipping garden-exit selection
-# and the per-agent astar_out path). astar_out remains a temporary fallback.
+# Eat-exit transition counters: monsters finishing eating attach directly to the
+# existing per-exit-wall escape FF (no garden-exit selection, no per-agent A* out).
+# A failure is expected to be rare and indicates an FF coverage/walkability bug.
 var eat_exit_direct_ff_success: int = 0
-var eat_exit_direct_ff_fallback_astar: int = 0
+var eat_exit_direct_ff_failed: int = 0
 # Gardens found empty during a _gardens iteration; erased after the loop ends.
 var _pending_empty_gardens: Dictionary = {}  # garden_id -> true
 # Memoizes the expensive scored garden-entry selection (_nearest_garden_entry =
@@ -462,9 +461,9 @@ func _process(delta: float) -> void:
 	_process_eating_agents(delta)
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
-			"eating=%d astar_in=%d astar_out=%d escaping=%d" % [
+			"eating=%d astar_in=%d escaping=%d" % [
 				_eating_agents.size(), _astar_in_agents.size(),
-				_astar_out_agents.size(), _escaping_agents.size()])
+				_escaping_agents.size()])
 
 	t = Time.get_ticks_usec()
 	_process_astar_in_arrivals()
@@ -477,12 +476,6 @@ func _process(delta: float) -> void:
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_plant_arrivals", Time.get_ticks_usec() - t,
 			"astar_in=%d eating=%d" % [_astar_in_agents.size(), _eating_agents.size()])
-
-	t = Time.get_ticks_usec()
-	_process_astar_out_arrivals()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_astar_out_arrivals", Time.get_ticks_usec() - t,
-			"astar_out=%d escaping=%d" % [_astar_out_agents.size(), _escaping_agents.size()])
 
 	t = Time.get_ticks_usec()
 	_process_escape_arrivals()
@@ -529,17 +522,16 @@ func _process(delta: float) -> void:
 	var frame_us: int = Time.get_ticks_usec() - frame_start_us
 	var frame_threshold_ms: float = _frame_lag_threshold_ms()
 	if (float(frame_us) / 1000.0) > frame_threshold_ms:
-		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d astar_out=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_fallback=%d" % [
+		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_failed=%d" % [
 			int(round(float(frame_us) / 1000.0)),
 			int(frame_threshold_ms),
 			_eating_agents.size(),
 			_astar_in_agents.size(),
-			_astar_out_agents.size(),
 			_escaping_agents.size(),
 			_garden_retarget_queue.size(),
 			_spawners.size(),
 			eat_exit_direct_ff_success,
-			eat_exit_direct_ff_fallback_astar
+			eat_exit_direct_ff_failed
 		])
 
 func _load_tile_definitions() -> void:
@@ -1250,7 +1242,7 @@ func _process_astar_in_arrivals() -> void:
 		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
 			finished.append(nav_id)
 			continue
-		if _astar_in_agents.has(nav_id) or _astar_out_agents.has(nav_id):
+		if _astar_in_agents.has(nav_id):
 			continue
 		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
 			continue
@@ -1424,9 +1416,9 @@ func _unregister_astar_in_target(nav_id: int) -> void:
 
 # NARROW retarget for content-only plant removal. Only handles agents whose A*-in
 # target was the exact removed plant; it does NOT broad-retarget the garden, does
-# NOT rebuild routes, and does NOT recompute entry points. _entry_path_agents and
-# _astar_out_agents are deliberately left alone (their garden is still alive with
-# other plants, or it became empty — and the empty case is handled separately by
+# NOT rebuild routes, and does NOT recompute entry points. _entry_path_agents is
+# deliberately left alone (the garden is still alive with other plants, or it
+# became empty — and the empty case is handled separately by
 # _handle_garden_became_empty). The eater that just consumed the plant is already
 # in _eating_agents (not _astar_in_agents), so it is never disturbed here.
 func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
@@ -1585,22 +1577,24 @@ func _process_eating_agents(delta: float) -> void:
 				continue
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
-			var spawner_cell: Vector2i = INVALID_CELL
-			if agent.has_meta("spawner_cell"):
-				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-			# Direct wallexit-FF escape: every real exit wall already has a flow field
-			# covering the whole walkable map (floor minus walls; plant/garden cells are
-			# normal walkable cells), so a finished eater can attach straight to the
-			# nearest reachable escape FF — no garden-exit selection, no per-agent
-			# astar_out. Fall back to the old astar_out only if no FF covers this cell.
+			# Direct wallexit-FF escape is the ONLY post-eating escape path. Every real
+			# exit wall already has a flow field covering the whole walkable map (floor
+			# minus walls; plant/garden cells are normal walkable cells), so a finished
+			# eater attaches straight to the nearest reachable escape FF — no garden-exit
+			# selection, no per-agent A* out of the garden.
 			if _assign_agent_to_escape(agent):
 				eat_exit_direct_ff_success += 1
 			else:
-				eat_exit_direct_ff_fallback_astar += 1
-				if _garden_debug_logs:
-					var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
-					push_warning("eat_exit_direct_ff_failed nav_id=%d cell=%s fallback_astar=true" % [nav_id, fb_cell])
-				_start_astar_out(agent, spawner_cell)
+				eat_exit_direct_ff_failed += 1
+				# Should be rare: a walkable plant cell with no covering exit-wall FF
+				# means FF coverage/walkability is wrong and must be fixed there, not
+				# papered over with an A*-out fallback. Park the agent safely (queue
+				# helper detaches stale nav and sets waiting_new_status) and warn.
+				var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
+				push_warning("direct_wallexit_ff_escape_failed nav_id=%d cell=%s" % [nav_id, fb_cell])
+				var fb_spawner: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+				var fb_garden: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+				_queue_agent_for_garden_retarget(nav_id, agent, "escape", fb_spawner, fb_garden)
 
 func _erase_eating_agent(nav_id: int) -> void:
 	_eating_agents.erase(nav_id)
@@ -1625,7 +1619,6 @@ func _start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = I
 		agent_manager.call("detach_agent_path", nav_id)
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
-	_astar_out_agents.erase(nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", seconds)
 
@@ -1637,111 +1630,6 @@ func _start_escape_for_all_monsters() -> void:
 			if _escaping_agents.has(nav_id) or _eating_agents.has(nav_id):
 				continue
 			_assign_agent_to_escape(agent)
-
-func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
-	if not is_instance_valid(agent):
-		return
-	var astar_out_us: int = Time.get_ticks_usec()
-	var nav_id_dbg: int = int(agent.get("nav_id"))
-	_start_astar_out_impl(agent, spawner_cell)
-	if _over_garden_threshold_us(Time.get_ticks_usec() - astar_out_us):
-		var gid_dbg: int = int(agent.get_meta("garden_id")) if is_instance_valid(agent) and agent.has_meta("garden_id") else 0
-		_warn_garden_task_lag_us("_start_astar_out", Time.get_ticks_usec() - astar_out_us,
-			"nav_id=%d garden=%d" % [nav_id_dbg, gid_dbg])
-
-func _start_astar_out_impl(agent: Node2D, spawner_cell: Vector2i) -> void:
-	if not is_instance_valid(agent):
-		return
-	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
-		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-		spawner_cell = _nearest_spawner_cell(from_cell)
-	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
-		return
-	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	# The tile this monster entered through; we avoid reusing it as the exit tile
-	# so entering and exiting agents don't fight over the same border cell.
-	var original_entry_cell: Vector2i = INVALID_CELL
-	if agent.has_meta("garden_entry_cell"):
-		original_entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
-	# Aim the in-garden A* at the border tile nearest the exit the monster will
-	# actually use: the nearest reachable wall exit by route cost. Fall back to
-	# the spawner's exit when no per-exit escape applies. In both cases prefer a
-	# tile different from the one the monster entered through.
-	var exit_escape_us: int = Time.get_ticks_usec()
-	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
-	_warn_garden_task_lag_us("_nearest_reachable_exit_escape", Time.get_ticks_usec() - exit_escape_us,
-		"exits=%d" % _exit_wall_escapes.size())
-	var exit_cell: Vector2i = INVALID_CELL
-	if not exit_escape.is_empty():
-		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
-		var escape_group: int = int(exit_escape.get("escape_group", -1))
-		if exit_target != INVALID_CELL:
-			# Exit-after-eating: score with the real escape flow so the chosen
-			# access cell leads toward the map exit, not just nearest by Manhattan.
-			var scored_us: int = Time.get_ticks_usec()
-			exit_cell = _select_scored_garden_entry(garden_id, exit_target, "exit", original_entry_cell, escape_group)
-			_warn_garden_task_lag_us("_select_scored_garden_entry", Time.get_ticks_usec() - scored_us,
-				"garden=%d mode=exit" % garden_id)
-	if exit_cell == INVALID_CELL:
-		var excl_us: int = Time.get_ticks_usec()
-		exit_cell = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, original_entry_cell)
-		_warn_garden_task_lag_us("_nearest_garden_entry_to_exit_excluding", Time.get_ticks_usec() - excl_us,
-			"garden=%d" % garden_id)
-	if exit_cell == INVALID_CELL:
-		# No distinct garden exit exists. Safest fallback: skip the internal
-		# garden-exit path entirely and route the monster straight to its escape /
-		# map-exit target via the existing escape behavior. (No same-tile reuse,
-		# no rebuild, no desync.)
-		_assign_agent_to_escape(agent)
-		return
-	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, exit_cell, garden_id)
-	if path_cells.is_empty():
-		_assign_agent_to_escape(agent)
-		return
-	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells)
-	if agent_manager and agent_manager.has_method("assign_agent_path"):
-		agent_manager.call("assign_agent_path", nav_id, path_world)
-	_entry_path_agents.erase(nav_id)
-	_astar_out_agents[nav_id] = {
-		"node": agent,
-		"spawner_cell": spawner_cell,
-		"garden_id": garden_id,
-		"exit_cell": exit_cell,
-		"path_world": path_world
-	}
-	if agent.has_method("start_astar_out"):
-		agent.call("start_astar_out")
-
-func _process_astar_out_arrivals() -> void:
-	var finished: Array[int] = []
-	var astar_out_ids: Array = _astar_out_agents.keys()
-	for raw_nav_id in astar_out_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_out_agents.has(nav_id):
-			continue
-		var data: Dictionary = _astar_out_agents[nav_id] as Dictionary
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			finished.append(nav_id)
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			finished.append(nav_id)
-			continue
-		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
-			continue
-		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
-			continue
-		finished.append(nav_id)
-		if agent.has_method("stop_astar_out"):
-			agent.call("stop_astar_out")
-		_assign_agent_to_escape(agent)
-	for nav_id in finished:
-		_astar_out_agents.erase(nav_id)
 
 # Returns true only when an escape group/path was actually assigned (i.e.
 # _attach_agent_to_escape ran). Every early return is a failure (false) so the
@@ -1791,7 +1679,6 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 	agent_manager.call("assign_agent", agent, escape_group)
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
-	_astar_out_agents.erase(nav_id)
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
@@ -2716,11 +2603,9 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 		"garden_id": garden_id,
 		"path_world": path_world
 	})
-	_astar_out_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", route_spawner_cell)
 	agent.set_meta("garden_id", garden_id)
-	# Only record the entry tile once it is known valid, so the later exit-tile
-	# exclusion in _start_astar_out has a trustworthy reference.
+	# Record the entry tile once it is known valid so the in-garden entry is tracked.
 	var in_entry_cell: Vector2i = _nearest_garden_entry(garden_id, route_spawner_cell)
 	if in_entry_cell != INVALID_CELL:
 		agent.set_meta("garden_entry_cell", in_entry_cell)
@@ -2777,7 +2662,6 @@ func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, g
 		"path_world": path_world
 	}
 	_erase_astar_in_agent(nav_id)
-	_astar_out_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", spawner_cell)
 	agent.set_meta("garden_id", garden_id)
@@ -3088,8 +2972,6 @@ func _agent_referenced_garden_id(nav_id: int, agent: Node2D) -> int:
 		return int((_entry_path_agents[nav_id] as Dictionary).get("garden_id", 0))
 	if _astar_in_agents.has(nav_id):
 		return int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0))
-	if _astar_out_agents.has(nav_id):
-		return int((_astar_out_agents[nav_id] as Dictionary).get("garden_id", 0))
 	if _eating_agents.has(nav_id):
 		var eat_garden: int = int((_eating_agents[nav_id] as Dictionary).get("garden_id", 0))
 		if eat_garden > 0:
@@ -3121,7 +3003,6 @@ func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String
 		agent_manager.call("detach_agent_flow", nav_id)
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
-	_astar_out_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	if _eating_agents.has(nav_id):
 		_erase_eating_agent(nav_id)
@@ -3156,10 +3037,9 @@ func _queue_agents_after_garden_rebuild() -> void:
 		if not _garden_assignment_is_stale(garden_id):
 			continue
 		# Decide intent BEFORE the helper clears the agent's phase dictionaries:
-		# agents that were leaving or eating should head for the exit, everyone else
-		# retargets.
+		# agents that were eating should head for the exit, everyone else retargets.
 		var intent: String = "retarget"
-		if _astar_out_agents.has(nav_id) or _eating_agents.has(nav_id):
+		if _eating_agents.has(nav_id):
 			intent = "escape"
 		var spawner_cell: Vector2i = INVALID_CELL
 		if agent.has_meta("spawner_cell"):
@@ -3196,13 +3076,6 @@ func _handle_garden_became_empty(garden_id: int) -> void:
 		if int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
 			continue
 		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
-	for raw_nav_id in _astar_out_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_out_agents.has(nav_id):
-			continue
-		if int((_astar_out_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
-			continue
-		_queue_affected_empty_garden_agent(nav_id, "escape", garden_id)
 	for raw_nav_id in _eating_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		if not _eating_agents.has(nav_id):
@@ -3242,7 +3115,6 @@ func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: 
 		# Agent is gone; still drop its stale phase entries so nothing dangles.
 		_entry_path_agents.erase(nav_id)
 		_erase_astar_in_agent(nav_id)
-		_astar_out_agents.erase(nav_id)
 		_erase_eating_agent(nav_id)
 		return
 	var spawner_cell: Vector2i = INVALID_CELL
@@ -3250,8 +3122,6 @@ func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: 
 		spawner_cell = (_entry_path_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
 	elif _astar_in_agents.has(nav_id):
 		spawner_cell = (_astar_in_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
-	elif _astar_out_agents.has(nav_id):
-		spawner_cell = (_astar_out_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
 	elif _eating_agents.has(nav_id):
 		spawner_cell = (_eating_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
 	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
@@ -3492,9 +3362,6 @@ func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
 	if _astar_in_agents.has(nav_id):
 		var astar_in_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
 		return astar_in_data.get("path_world", PackedVector2Array()) as PackedVector2Array
-	if _astar_out_agents.has(nav_id):
-		var astar_out_data: Dictionary = _astar_out_agents[nav_id] as Dictionary
-		return astar_out_data.get("path_world", PackedVector2Array()) as PackedVector2Array
 	if _escaping_agents.has(nav_id):
 		var escape_data: Dictionary = _escaping_agents[nav_id] as Dictionary
 		var escape_target: Vector2i = escape_data.get("target_cell", INVALID_CELL) as Vector2i
@@ -3505,19 +3372,6 @@ func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
 		var agent: Node2D = node
 		if int(agent.get("nav_id")) != nav_id:
 			continue
-		var status: String = str(agent.get("status"))
-		if status == "eating" and agent.has_meta("garden_id") and agent.has_meta("spawner_cell"):
-			var garden_id: int = int(agent.get_meta("garden_id"))
-			var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-			# Mirror _start_astar_out: exclude the entered tile so the debug path
-			# does not misleadingly show the same entry/exit when an alternative exists.
-			var dbg_entry_cell: Vector2i = INVALID_CELL
-			if agent.has_meta("garden_entry_cell"):
-				dbg_entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
-			var exit_cell: Vector2i = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, dbg_entry_cell)
-			if exit_cell == INVALID_CELL:
-				exit_cell = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
-			return _debug_path_to_cell(exit_cell)
 		if agent.has_meta("garden_entry_cell"):
 			var entry_cell: Vector2i = agent.get_meta("garden_entry_cell") as Vector2i
 			return _debug_path_to_cell(entry_cell)
@@ -4125,25 +3979,6 @@ func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Ve
 	if exit_wall_cell == INVALID_CELL:
 		return _select_scored_garden_entry(garden_id, spawner_cell, "exit", INVALID_CELL, escape_group)
 	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", INVALID_CELL, escape_group)
-
-# Like _nearest_garden_entry, but never returns forbidden_cell. Used so a route's
-# garden exit tile differs from the tile the monster entered through, whenever a
-# different valid entry exists. Returns INVALID_CELL if the only option is the
-# forbidden tile (or none are valid).
-func _nearest_garden_entry_excluding(garden_id: int, from_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
-	return _select_scored_garden_entry(garden_id, from_cell, "enter", forbidden_cell)
-
-# Like _nearest_garden_entry_to_exit, but never returns forbidden_cell. Prefers
-# the garden entry closest to the spawner's wall-exit target. Returns
-# INVALID_CELL when no valid entry other than forbidden_cell exists.
-func _nearest_garden_entry_to_exit_excluding(garden_id: int, spawner_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
-	var exit_wall_cell: Vector2i = INVALID_CELL
-	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
-	var escape_group: int = int(spawner_route.get("escape_group", -1))
-	if exit_wall_cell == INVALID_CELL:
-		return _select_scored_garden_entry(garden_id, spawner_cell, "exit", forbidden_cell, escape_group)
-	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", forbidden_cell, escape_group)
 
 func _log(message: String) -> void:
 	if debug_logs:
