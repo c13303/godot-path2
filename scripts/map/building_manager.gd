@@ -59,10 +59,19 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 @export var dont_shrink_gardens: bool = true
 @export_group("")
 @export_range(0, 32, 1, "or_greater") var empty_garden_local_retarget_radius: int = 5
-# How many queued agents are retargeted per frame after a garden rebuild. Keeps the
-# rebuild frame cheap by spreading the (expensive) re-path/escape work over several
-# frames. Raise if reassignment feels too slow, lower if it causes frame spikes.
+# Hard upper bound on queued agents retargeted per frame after a garden rebuild.
+# This is now a safety cap only — the *primary* limiter is garden_retarget_budget_ms
+# below. Keeps the rebuild frame cheap by spreading the (expensive) re-path/escape
+# work over several frames. Raise if reassignment feels too slow, lower if it causes
+# frame spikes.
 @export_range(1, 64, 1, "or_greater") var garden_retarget_budget_per_frame: int = 8
+# Primary limiter: max intended time spent processing the garden retarget queue per
+# frame. A single retarget can cost 15-20ms, so a count-based budget alone lets
+# several expensive retargets stack into one big spike. With a time budget we always
+# do at least one item (so the queue drains), then stop once we've spent this long —
+# spreading a burst of waiting agents across several smaller frames instead of one.
+# 0 falls back to one item per frame (the safest non-spiking behavior).
+@export_range(0.0, 100.0, 0.5, "or_greater") var garden_retarget_budget_ms: float = 4.0
 @export var debug_show_plantzone: bool = true:
 	set(value):
 		debug_show_plantzone = value
@@ -390,10 +399,16 @@ func _process(delta: float) -> void:
 			"escaping=%d" % _escaping_agents.size())
 
 	t = Time.get_ticks_usec()
-	_process_garden_retarget_queue()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_garden_retarget_queue", Time.get_ticks_usec() - t,
-			"retarget_queue=%d budget=%d" % [_garden_retarget_queue.size(), garden_retarget_budget_per_frame])
+	var retarget_processed: int = _process_garden_retarget_queue()
+	var retarget_elapsed_us: int = Time.get_ticks_usec() - t
+	if _over_garden_threshold_us(retarget_elapsed_us):
+		_warn_garden_task_lag_us("_process_garden_retarget_queue", retarget_elapsed_us,
+			"processed=%d remaining=%d budget=%dms elapsed=%.1fms" % [
+				retarget_processed,
+				_garden_retarget_queue.size(),
+				int(garden_retarget_budget_ms),
+				float(retarget_elapsed_us) / 1000.0,
+			])
 
 	t = Time.get_ticks_usec()
 	_process_spawners(delta)
@@ -2367,8 +2382,9 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 #   1. _queue_agents_after_garden_rebuild() — one-shot, cheap. Detects affected
 #      agents, detaches their stale path/flow, parks them in "waiting_new_status",
 #      and queues them. NO pathfinding here.
-#   2. _process_garden_retarget_queue() — runs each frame, capped at
-#      garden_retarget_budget_per_frame, doing the expensive re-path/escape.
+#   2. _process_garden_retarget_queue() — runs each frame, time-budgeted by
+#      garden_retarget_budget_ms (with garden_retarget_budget_per_frame as a hard
+#      count cap), doing the expensive re-path/escape.
 # ---------------------------------------------------------------------------
 
 # Resolve the agent node for a nav_id without scanning the monsters group.
@@ -2590,17 +2606,36 @@ func _queue_escape_for_all_monsters_budgeted() -> void:
 			garden_id = int(agent.get_meta("garden_id"))
 		_queue_agent_for_garden_retarget(nav_id, agent, "escape", spawner_cell, garden_id)
 
-# Budgeted: re-assign at most garden_retarget_budget_per_frame queued agents per
-# frame. The expensive A*/escape work lives in _retarget_single_waiting_agent.
-func _process_garden_retarget_queue() -> void:
+# Time-budgeted: spend at most garden_retarget_budget_ms per frame on the expensive
+# A*/escape work (in _retarget_single_waiting_agent), falling back on the count cap
+# garden_retarget_budget_per_frame as a hard upper bound. Because a single retarget
+# can exceed the whole time budget by itself, we always do at least one *expensive*
+# retarget per frame (so the queue keeps draining) and then stop once the elapsed
+# time crosses the budget. Cheap skips (invalid/freed/stale agents) do NOT count
+# against either budget so they can't stall the queue. Returns the number of agents
+# actually retargeted (expensive work done) for debug context.
+func _process_garden_retarget_queue() -> int:
 	if _garden_retarget_queue.is_empty():
-		return
-	var budget: int = garden_retarget_budget_per_frame
-	while budget > 0 and not _garden_retarget_queue.is_empty():
+		return 0
+	var start_us: int = Time.get_ticks_usec()
+	var budget_us: int = int(garden_retarget_budget_ms * 1000.0)
+	var count_cap: int = garden_retarget_budget_per_frame
+	var processed: int = 0
+	while not _garden_retarget_queue.is_empty():
+		# Hard upper bound on expensive retargets per frame.
+		if processed >= count_cap:
+			break
+		# Time budget is the primary limiter: once we've done at least one expensive
+		# retarget and spent the budget, stop. When budget_us <= 0 this collapses to
+		# "one expensive retarget per frame" — the safest non-spiking fallback.
+		if processed > 0:
+			if budget_us <= 0:
+				break
+			if Time.get_ticks_usec() - start_us >= budget_us:
+				break
 		var item: Dictionary = _garden_retarget_queue.pop_front() as Dictionary
 		var nav_id: int = int(item.get("nav_id", -1))
 		_garden_retarget_queued.erase(nav_id)
-		budget -= 1
 		if nav_id < 0:
 			continue
 		var agent: Node2D = _agent_from_nav_id(nav_id)
@@ -2612,6 +2647,8 @@ func _process_garden_retarget_queue() -> void:
 		if str(agent.get("status")) != "waiting_new_status":
 			continue
 		_retarget_single_waiting_agent(nav_id, agent, item)
+		processed += 1
+	return processed
 
 # Re-assign one parked agent. intent "escape" routes it to a map exit; intent
 # "retarget" finds a new valid garden if one exists, otherwise escapes.
