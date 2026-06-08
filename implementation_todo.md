@@ -1,4 +1,3 @@
-we need a max size for garden, or big garden dont have enough doors
+- Player should be able to bounce off monster at collision, not always monster winning
 
-garden entries and exits must be different tiles otherwise everyone collides
-
+- Monsters seem to overlap, maybe in astar situation ? 
