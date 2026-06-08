@@ -84,6 +84,15 @@ var _spawners: Dictionary = {}
 var _spawn_timers: Dictionary = {}
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
+# Route-cache hit/miss counters (lifetime-of-process), bumped in
+# _get_or_create_spawner_garden_route. Used by the _process_spawners lag detector
+# to attribute time to cache misses vs. hits.
+var _route_cache_hits: int = 0
+var _route_cache_misses: int = 0
+# Per-pass count summary for the _process_spawners lag detector. Filled in during
+# _process_spawners() and read by the parent warning at the call site. Pure
+# instrumentation; never affects spawn behavior.
+var _spawn_pass_stats: Dictionary = {}
 var _eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _escaping_agents: Dictionary = {}
@@ -413,8 +422,18 @@ func _process(delta: float) -> void:
 	t = Time.get_ticks_usec()
 	_process_spawners(delta)
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		# Context (incl. the per-pass count summary) only built when over threshold.
 		_warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
-			"spawners=%d" % _spawners.size())
+			"spawners=%d processed=%d spawned=%d assigned=%d skipped=%d active_monsters=%d route_cache_hits=%d route_cache_misses=%d" % [
+				_spawners.size(),
+				int(_spawn_pass_stats.get("processed_spawners", 0)),
+				int(_spawn_pass_stats.get("spawned_count", 0)),
+				int(_spawn_pass_stats.get("assigned_count", 0)),
+				int(_spawn_pass_stats.get("skipped_count", 0)),
+				int(_spawn_pass_stats.get("active_monsters", -1)),
+				_route_cache_hits,
+				_route_cache_misses,
+			])
 
 	t = Time.get_ticks_usec()
 	_sync_plant_zone_debug_visibility()
@@ -894,39 +913,91 @@ func _resolve_walkable_goal(cell: Vector2i, purpose: String) -> Vector2i:
 	return fallback
 
 func _process_spawners(delta: float) -> void:
+	# Reset the per-pass count summary consumed by the parent lag warning. Cheap;
+	# always done so the caller never reads a stale dictionary.
+	_spawn_pass_stats = {
+		"processed_spawners": 0,
+		"spawned_count": 0,
+		"assigned_count": 0,
+		"skipped_count": 0,
+		"active_monsters": -1,
+	}
+
 	# Day/night gating: monsters only spawn at night. When the last monster of
-	# the night is gone, automatically flip back to day.
+	# the night is gone, automatically flip back to day. _monster_count() scans a
+	# scene group (get_nodes_in_group), so time it as a potential offender.
 	if not GameState.is_night:
 		return
-	if _monster_count() == 0 and _spawned_this_night:
+	var t_mc: int = Time.get_ticks_usec()
+	var mc: int = _monster_count()
+	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
+	_spawn_pass_stats["active_monsters"] = mc
+	if mc == 0 and _spawned_this_night:
 		GameState.start_day()
 		return
 
-	if _no_plants_remaining():
+	# Plant-state query (plant_manager.is_empty); cheap normally but time it in case
+	# the plant manager scans on this call.
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = _no_plants_remaining()
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
 		if debug_logs and not _spawners.is_empty():
 			_log("no plants remaining for %d spawner(s)" % _spawners.size())
 		return
 
 	for raw_cell in _spawners.keys():
 		var cell: Vector2i = raw_cell
+		var spawner_us: int = Time.get_ticks_usec()
+		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
+
+		# Cooldown/timer update. Trivial arithmetic, but time it so a slow pass can
+		# be definitively ruled out here rather than guessed at.
+		var t_cd: int = Time.get_ticks_usec()
 		var timer: float = float(_spawn_timers.get(cell, 0.0)) - delta
-		if timer > 0.0:
+		var on_cooldown: bool = timer > 0.0
+		_warn_garden_task_lag_us("_process_spawners.cooldown_update", Time.get_ticks_usec() - t_cd)
+		if on_cooldown:
 			_spawn_timers[cell] = timer
+			_spawn_pass_stats["skipped_count"] = int(_spawn_pass_stats["skipped_count"]) + 1
 			continue
 
-		if _spawn_monster_from(cell):
+		var spawned: bool = _spawn_monster_from(cell)
+		if spawned:
 			_spawned_this_night = true
+			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
 			var spawner: Dictionary = _spawners[cell] as Dictionary
 			_spawn_timers[cell] = float(spawner.get("cooldown", DEFAULT_SPAWN_COOLDOWN))
 		else:
 			_spawn_timers[cell] = 0.25
 
+		# Whole spawner iteration. Build the (small) context only when over threshold.
+		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
+		if _over_garden_threshold_us(spawner_elapsed_us):
+			_warn_garden_task_lag_us("_process_spawners.spawner_total", spawner_elapsed_us,
+				"spawner_cell=%s spawned=%s" % [str(cell), str(spawned)])
+
 func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
+	# Select target garden: iterates all gardens, checks targetable / edible plants,
+	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
+	var t_sel: int = Time.get_ticks_usec()
 	var garden_id: int = _select_garden_for_spawner(spawner_cell)
+	var sel_us: int = Time.get_ticks_usec() - t_sel
+	if _over_garden_threshold_us(sel_us):
+		_warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
+			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _gardens.size(), garden_id])
 	if garden_id <= 0:
 		_log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
 		return false
+
+	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute
+	# the nearest garden entry. Hit/miss counters live in the called function.
+	var t_route: int = Time.get_ticks_usec()
 	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+	var route_us: int = Time.get_ticks_usec() - t_route
+	if _over_garden_threshold_us(route_us):
+		_warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
+			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
 	if not bool(route.get("ready", false)):
 		_log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
 		return false
@@ -939,31 +1010,70 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 		_log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
 		return false
 
+	# Occupied-cell scan: walks the main_chars/monsters/player scene groups every
+	# spawn. Grows with active unit count.
+	var t_occ: int = Time.get_ticks_usec()
 	var occupied: Array[Vector2i] = _occupied_cells()
+	var occ_us: int = Time.get_ticks_usec() - t_occ
+	if _over_garden_threshold_us(occ_us):
+		_warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
+			"spawner_cell=%s occupied=%d" % [str(spawner_cell), occupied.size()])
+
+	# Free-cell search: spirals out from the spawner doing per-cell walkable/wall
+	# (TileMap) lookups until a free cell is found. Can spike when the spawner is
+	# boxed in.
+	var t_free: int = Time.get_ticks_usec()
 	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
+	var free_us: int = Time.get_ticks_usec() - t_free
+	if _over_garden_threshold_us(free_us):
+		_warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
+			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
 		_log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
 		return false
 
+	# Instantiate + add_child + group registration of the agent scene.
+	var t_inst: int = Time.get_ticks_usec()
 	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
 	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
 	parent.add_child(agent)
 	agent.global_position = _cell_center(spawn_cell)
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group("monsters")
+	var inst_us: int = Time.get_ticks_usec() - t_inst
+	if _over_garden_threshold_us(inst_us):
+		_warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
+			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 
 	if agent_manager and agent_manager.has_method("spawn_agent"):
+		# Register the agent with the nav/agent manager (flowfield/pathfinder side).
+		var t_reg: int = Time.get_ticks_usec()
 		var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
 		agent.set("nav_id", nav_id)
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
-		if not _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell):
+		var reg_us: int = Time.get_ticks_usec() - t_reg
+		if _over_garden_threshold_us(reg_us):
+			_warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
+				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
+
+		# Assign the garden-entry route: runs A* on the walkable map and pushes the
+		# resulting path into the agent/flow manager. Usually the heaviest leg.
+		var t_assign: int = Time.get_ticks_usec()
+		var assigned: bool = _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell)
+		var assign_us: int = Time.get_ticks_usec() - t_assign
+		if _over_garden_threshold_us(assign_us):
+			_warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
+				"spawner_cell=%s garden=%d entry=%s assigned=%s" % [
+					str(spawner_cell), garden_id, str(entry_cell), str(assigned)])
+		if not assigned:
 			if agent_manager.has_method("unregister_agent"):
 				agent_manager.call("unregister_agent", nav_id)
 			agent.remove_from_group("monsters")
 			agent.queue_free()
 			_log_spawn_failure("spawner %s garden %d entry path not ready" % [spawner_cell, garden_id])
 			return false
+		_spawn_pass_stats["assigned_count"] = int(_spawn_pass_stats.get("assigned_count", 0)) + 1
 		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
 			nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
@@ -2293,7 +2403,10 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
 	var existing_route: Dictionary = routes.get(garden_id, {}) as Dictionary
 	if bool(existing_route.get("ready", false)) and _garden_route_is_current(existing_route, garden_id):
+		_route_cache_hits += 1
 		return existing_route
+	# Cache miss: recompute the route (nearest garden entry + sanity checks) below.
+	_route_cache_misses += 1
 	if not _gardens.has(garden_id):
 		return {"ready": false}
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
