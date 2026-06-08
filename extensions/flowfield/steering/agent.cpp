@@ -15,6 +15,16 @@ namespace
             return v.x >= 0.0 ? 0 : 1; // E/W
         return v.y >= 0.0 ? 2 : 3;     // S/N
     }
+
+    // True only when 'a' and 'b' are opposite cardinal codes (E<->W or N<->S).
+    // A mere change of bucket (e.g. E->S while turning a corner) is NOT a reversal,
+    // so smooth/curving travel does not count as oscillation.
+    inline bool is_reversal(int a, int b)
+    {
+        if (a < 0 || b < 0)
+            return false;
+        return (a ^ b) == 1; // 0<->1 and 2<->3 differ only in the low bit
+    }
 } // namespace
 
 namespace ffcore
@@ -70,28 +80,20 @@ void AgentData::reset()
 
         if (!force_motion_state)
         {
-            if (micro_osc > 0)
+            // Only a genuine reversal (E<->W / N<->S) within the window counts as
+            // oscillation. Turning a corner, curving, or starting/stopping motion is
+            // normal path-following and must never raise micro_osc (false positives).
+            if (is_reversal(dir_code, new_dir))
             {
-                // If we were idle and start moving, allow the update despite cooldown
-                if (!(moving == false && new_moving == true))
+                micro_osc += 1;
+                micro_osc_timer = cfg.micro_osc_win_time;
+                if (micro_osc >= cfg.micro_osc_limit_before_cancel)
                 {
-                    micro_osc += 1;
-                    if (micro_osc >= cfg.micro_osc_limit_before_cancel)
-                    {
-                        godot::UtilityFunctions::print("Micro osc overlow", id);
-                        reset();
-                    }
-
+                    godot::UtilityFunctions::print("Micro osc overflow", id);
+                    reset();
                     return;
                 }
-                // reset cooldown when leaving idle
-                micro_osc = 0;
-                micro_osc_timer = 0.0;
             }
-
-            // First change after cooldown: start window
-            micro_osc += 1;
-            micro_osc_timer = cfg.micro_osc_win_time;
         }
         else
         {

@@ -16,6 +16,7 @@
 #include "../core/global_config.h"
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 using namespace godot;
 
@@ -385,7 +386,7 @@ String SteeringSystemNative::_agent_debug_state_label(const ffcore::AgentData *a
         return "stuck in wall";
     if (a->target_radius_timer > 0.0)
         return "target wait";
-    if (a->micro_osc > 0)
+    if (a->micro_osc >= ffcore::globalconfig().micro_osc_label_min)
         return "flow osc";
     if (velocity_len <= 1.0)
         return "flow idle";
@@ -579,18 +580,20 @@ void SteeringSystemNative::_draw()
 
         if (cfg.effective_debug_show_agent_state_labels() && debug_font.is_valid())
         {
+            // Refresh cadence: spread agents across the interval with a per-id stagger so
+            // the string rebuild cost is amortized across frames, while keeping each label
+            // fresh enough (default 0.2s) to stay in sync with the agent's real state.
+            const double refresh = std::max(0.0, cfg.debug_label_refresh_interval);
+            const double stagger = refresh * (double((id * 37) % 100) * 0.01);
+
             auto next_label_it = debug_agent_label_next_refresh.find(id);
             if (next_label_it == debug_agent_label_next_refresh.end())
-            {
-                double stagger = double((id * 37) % 100) * 0.01;
                 debug_agent_label_next_refresh[id] = cfg.debug_label_time + stagger;
-            }
 
             if (cfg.debug_label_time >= debug_agent_label_next_refresh[id])
             {
-                double stagger = double((id * 37) % 100) * 0.01;
                 debug_agent_label_cache[id] = _agent_debug_state_label(a);
-                debug_agent_label_next_refresh[id] = cfg.debug_label_time + 1.0 + stagger;
+                debug_agent_label_next_refresh[id] = cfg.debug_label_time + refresh + stagger;
             }
 
             auto label_it = debug_agent_label_cache.find(id);

@@ -106,6 +106,8 @@ namespace ffcore
 
         double micro_osc_win_time = 1;                // seconds window before micro-osc counter resets
         int micro_osc_limit_before_cancel = 50000000; // threshold to cancel agent when oscillating
+        int micro_osc_label_min = 2;                  // min reversals before the "flow osc" debug label shows
+        double debug_label_refresh_interval = 0.2;    // seconds between debug state-label refreshes
 
         void recompute_from_tile();
     };
