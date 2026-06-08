@@ -991,18 +991,28 @@ func _start_astar_out(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
 		return
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	# The tile this monster entered through; we avoid reusing it as the exit tile
+	# so entering and exiting agents don't fight over the same border cell.
+	var original_entry_cell: Vector2i = INVALID_CELL
+	if agent.has_meta("garden_entry_cell"):
+		original_entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
 	# Aim the in-garden A* at the border tile nearest the exit the monster will
 	# actually use: the nearest reachable wall exit by route cost. Fall back to
-	# the spawner's exit when no per-exit escape applies.
+	# the spawner's exit when no per-exit escape applies. In both cases prefer a
+	# tile different from the one the monster entered through.
 	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
 	var exit_cell: Vector2i = INVALID_CELL
 	if not exit_escape.is_empty():
 		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
 		if exit_target != INVALID_CELL:
-			exit_cell = _nearest_garden_entry(garden_id, exit_target)
+			exit_cell = _nearest_garden_entry_excluding(garden_id, exit_target, original_entry_cell)
 	if exit_cell == INVALID_CELL:
-		exit_cell = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
+		exit_cell = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, original_entry_cell)
 	if exit_cell == INVALID_CELL:
+		# No distinct garden exit exists. Safest fallback: skip the internal
+		# garden-exit path entirely and route the monster straight to its escape /
+		# map-exit target via the existing escape behavior. (No same-tile reuse,
+		# no rebuild, no desync.)
 		_assign_agent_to_escape(agent)
 		return
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
@@ -1862,7 +1872,11 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	_astar_out_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", route_spawner_cell)
 	agent.set_meta("garden_id", garden_id)
-	agent.set_meta("garden_entry_cell", _nearest_garden_entry(garden_id, route_spawner_cell))
+	# Only record the entry tile once it is known valid, so the later exit-tile
+	# exclusion in _start_astar_out has a trustworthy reference.
+	var in_entry_cell: Vector2i = _nearest_garden_entry(garden_id, route_spawner_cell)
+	if in_entry_cell != INVALID_CELL:
+		agent.set_meta("garden_entry_cell", in_entry_cell)
 	if agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
 	return true
@@ -2083,7 +2097,14 @@ func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
 		if status == "eating" and agent.has_meta("garden_id") and agent.has_meta("spawner_cell"):
 			var garden_id: int = int(agent.get_meta("garden_id"))
 			var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-			var exit_cell: Vector2i = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
+			# Mirror _start_astar_out: exclude the entered tile so the debug path
+			# does not misleadingly show the same entry/exit when an alternative exists.
+			var dbg_entry_cell: Vector2i = INVALID_CELL
+			if agent.has_meta("garden_entry_cell"):
+				dbg_entry_cell = agent.get_meta("garden_entry_cell") as Vector2i
+			var exit_cell: Vector2i = _nearest_garden_entry_to_exit_excluding(garden_id, spawner_cell, dbg_entry_cell)
+			if exit_cell == INVALID_CELL:
+				exit_cell = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
 			return _debug_path_to_cell(exit_cell)
 		if agent.has_meta("garden_entry_cell"):
 			var entry_cell: Vector2i = agent.get_meta("garden_entry_cell") as Vector2i
@@ -2367,6 +2388,41 @@ func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Ve
 	if exit_wall_cell == INVALID_CELL:
 		return _nearest_garden_entry(garden_id, spawner_cell)
 	return _nearest_garden_entry(garden_id, exit_wall_cell)
+
+# Like _nearest_garden_entry, but never returns forbidden_cell. Used so a route's
+# garden exit tile differs from the tile the monster entered through, whenever a
+# different valid entry exists. Returns INVALID_CELL if the only option is the
+# forbidden tile (or none are valid).
+func _nearest_garden_entry_excluding(garden_id: int, from_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
+	if not _gardens.has(garden_id):
+		return INVALID_CELL
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var entry_cells: Array = garden.get("entry_cells", []) as Array
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell in entry_cells:
+		var cell: Vector2i = raw_cell
+		if cell == forbidden_cell:
+			continue
+		if not _is_walkable(cell):
+			continue
+		var delta: Vector2i = cell - from_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = cell
+	return best_cell
+
+# Like _nearest_garden_entry_to_exit, but never returns forbidden_cell. Prefers
+# the garden entry closest to the spawner's wall-exit target. Returns
+# INVALID_CELL when no valid entry other than forbidden_cell exists.
+func _nearest_garden_entry_to_exit_excluding(garden_id: int, spawner_cell: Vector2i, forbidden_cell: Vector2i) -> Vector2i:
+	var exit_wall_cell: Vector2i = INVALID_CELL
+	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
+	if exit_wall_cell == INVALID_CELL:
+		return _nearest_garden_entry_excluding(garden_id, spawner_cell, forbidden_cell)
+	return _nearest_garden_entry_excluding(garden_id, exit_wall_cell, forbidden_cell)
 
 func _log(message: String) -> void:
 	if debug_logs:
