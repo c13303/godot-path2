@@ -133,6 +133,22 @@ var _eating_time: float = EATING_COOLDOWN
 var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
+# Reverse index: target plant cell -> { nav_id -> true }, plus nav_id -> target cell.
+# Lets plant removal find the (usually 0-2) agents heading for that exact plant in
+# O(agents_targeting_this_plant) instead of scanning every _astar_in_agents entry.
+# Maintained exclusively by _set_astar_in_agent / _erase_astar_in_agent so it can
+# never drift from _astar_in_agents.
+var _astar_in_agents_by_target_plant: Dictionary = {}  # Vector2i -> { nav_id -> true }
+var _astar_in_target_by_nav_id: Dictionary = {}        # nav_id -> Vector2i
+# When true, _retarget_agents_targeting_removed_plant_only also runs the old full
+# scan and warns on any mismatch with the index. OFF by default (reintroduces the
+# very scan cost the index removes); flip on only to debug index consistency.
+var _debug_check_retarget_index: bool = false
+# Side-channel counts from the last _retarget_agents_targeting_removed_plant_only
+# call, so the caller's lag warning can report what the index touched without the
+# function having to return anything.
+var _last_plant_retarget_affected: int = 0
+var _last_plant_retarget_stale: int = 0
 var _astar_out_agents: Dictionary = {}
 # Budgeted retargeting after a garden topology rebuild. When a rebuild invalidates
 # the garden an agent was targeting/eating-in, we cannot afford to re-path every
@@ -644,7 +660,10 @@ func _on_plant_removed(cell: Vector2i) -> void:
 		var rt_us: int = Time.get_ticks_usec()
 		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
 		_warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
-			"garden=%d astar_in=%d retarget_queue=%d" % [garden_id, _astar_in_agents.size(), _garden_retarget_queue.size()])
+			"garden=%d plant=%s astar_in=%d affected=%d indexed_targets=%d stale=%d retarget_queue=%d" % [
+				garden_id, str(cell), _astar_in_agents.size(),
+				_last_plant_retarget_affected, _astar_in_agents_by_target_plant.size(),
+				_last_plant_retarget_stale, _garden_retarget_queue.size()])
 
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
@@ -1256,13 +1275,13 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents[nav_id] = {
+	_set_astar_in_agent(nav_id, {
 		"node": agent,
 		"plant_cell": target_plant_cell,
 		"spawner_cell": spawner_cell,
 		"garden_id": garden_id,
 		"path_world": path_world
-	}
+	})
 	if agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
 
@@ -1295,13 +1314,13 @@ func _process_plant_arrivals() -> void:
 			finished.append(nav_id)
 			continue
 		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
-			_astar_in_agents.erase(nav_id)
+			_erase_astar_in_agent(nav_id)
 			_retarget_agent_or_escape(agent, spawner_cell)
 			continue
-		_astar_in_agents.erase(nav_id)
+		_erase_astar_in_agent(nav_id)
 		_consume_plant(agent, spawner_cell, plant_cell)
 	for nav_id in finished:
-		_astar_in_agents.erase(nav_id)
+		_erase_astar_in_agent(nav_id)
 
 func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
 	var astar_ids: Array = _astar_in_agents.keys()
@@ -1337,7 +1356,7 @@ func _garden_target_is_stale(garden_id: int) -> bool:
 
 func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
 	if agent_manager and agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
 	var raw_agent: Variant = data.get("node", null)
@@ -1353,6 +1372,40 @@ func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 	_retarget_agent_or_escape(agent, spawner_cell)
 
+# --- _astar_in_agents mutation funnel + target-plant reverse index --------------
+# All inserts into / erasures from _astar_in_agents go through these two helpers so
+# _astar_in_agents_by_target_plant and _astar_in_target_by_nav_id stay in lock-step.
+func _set_astar_in_agent(nav_id: int, data: Dictionary) -> void:
+	_astar_in_agents[nav_id] = data
+	var target_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
+	_register_astar_in_target(nav_id, target_cell)
+
+func _erase_astar_in_agent(nav_id: int) -> void:
+	_astar_in_agents.erase(nav_id)
+	_unregister_astar_in_target(nav_id)
+
+func _register_astar_in_target(nav_id: int, target_cell: Vector2i) -> void:
+	_unregister_astar_in_target(nav_id)
+	if target_cell == INVALID_CELL:
+		return
+	_astar_in_target_by_nav_id[nav_id] = target_cell
+	if not _astar_in_agents_by_target_plant.has(target_cell):
+		_astar_in_agents_by_target_plant[target_cell] = {}
+	var bucket: Dictionary = _astar_in_agents_by_target_plant[target_cell] as Dictionary
+	bucket[nav_id] = true
+
+func _unregister_astar_in_target(nav_id: int) -> void:
+	if not _astar_in_target_by_nav_id.has(nav_id):
+		return
+	var target_cell: Vector2i = _astar_in_target_by_nav_id[nav_id] as Vector2i
+	_astar_in_target_by_nav_id.erase(nav_id)
+	if not _astar_in_agents_by_target_plant.has(target_cell):
+		return
+	var bucket: Dictionary = _astar_in_agents_by_target_plant[target_cell] as Dictionary
+	bucket.erase(nav_id)
+	if bucket.is_empty():
+		_astar_in_agents_by_target_plant.erase(target_cell)
+
 # NARROW retarget for content-only plant removal. Only handles agents whose A*-in
 # target was the exact removed plant; it does NOT broad-retarget the garden, does
 # NOT rebuild routes, and does NOT recompute entry points. _entry_path_agents and
@@ -1361,42 +1414,76 @@ func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
 # _handle_garden_became_empty). The eater that just consumed the plant is already
 # in _eating_agents (not _astar_in_agents), so it is never disturbed here.
 func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
+	_last_plant_retarget_affected = 0
+	_last_plant_retarget_stale = 0
 	var garden_still_edible: bool = garden_id > 0 and _garden_has_edible_plants(garden_id)
-	# Snapshot keys: _retarget_agent_or_escape / queueing mutate _astar_in_agents.
-	for raw_nav_id in _astar_in_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_in_agents.has(nav_id):
-			continue
-		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
-		if plant_cell != cell:
-			continue
-		var raw_agent: Variant = data.get("node", null)
-		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-		# Detach the stale A*-in path and forget the phase before reassigning.
-		if agent_manager and agent_manager.has_method("detach_agent_path"):
-			agent_manager.call("detach_agent_path", nav_id)
-		_astar_in_agents.erase(nav_id)
-		if not is_instance_valid(raw_agent):
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			continue
-		if agent.has_method("stop_astar_in"):
-			agent.call("stop_astar_in")
-		if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-		if garden_still_edible:
-			# Cheap, synchronous: the garden still has plants, so this agent can pick a
-			# fresh in-garden target (or escape if none is reachable) right now.
-			_retarget_agent_or_escape(agent, spawner_cell)
-		else:
-			# Garden has no edible plants left (but wasn't flagged empty for the queue
-			# path): defer through the budgeted queue so we don't spike this frame.
-			_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
+	# Reverse index lookup: only the agents heading for THIS exact plant, not a scan
+	# over every A*-in agent. Usually 0-2 entries. Snapshot the bucket keys first
+	# because _retarget_agent_or_escape / queueing mutate the index underneath us.
+	if _astar_in_agents_by_target_plant.has(cell):
+		var bucket: Dictionary = _astar_in_agents_by_target_plant[cell] as Dictionary
+		var nav_ids: Array = bucket.keys()
+		for raw_nav_id in nav_ids:
+			var nav_id: int = int(raw_nav_id)
+			if not _astar_in_agents.has(nav_id):
+				# Index pointed at an agent no longer in A*-in: drop the stale link and
+				# move on. (Should not happen now that all mutations funnel through the
+				# set/erase helpers, but stay self-healing.)
+				_unregister_astar_in_target(nav_id)
+				_last_plant_retarget_stale += 1
+				continue
+			var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+			var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
+			if plant_cell != cell:
+				# Index disagrees with the live record: trust the record, re-sync index.
+				_register_astar_in_target(nav_id, plant_cell)
+				_last_plant_retarget_stale += 1
+				continue
+			_last_plant_retarget_affected += 1
+			var raw_agent: Variant = data.get("node", null)
+			var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+			# Detach the stale A*-in path and forget the phase before reassigning.
+			if agent_manager and agent_manager.has_method("detach_agent_path"):
+				agent_manager.call("detach_agent_path", nav_id)
+			_erase_astar_in_agent(nav_id)
+			if not is_instance_valid(raw_agent):
+				continue
+			var agent: Node2D = raw_agent as Node2D
+			if agent == null:
+				continue
+			if agent.has_method("stop_astar_in"):
+				agent.call("stop_astar_in")
+			if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+			if garden_still_edible:
+				# Cheap, synchronous: the garden still has plants, so this agent can pick a
+				# fresh in-garden target (or escape if none is reachable) right now.
+				_retarget_agent_or_escape(agent, spawner_cell)
+			else:
+				# Garden has no edible plants left (but wasn't flagged empty for the queue
+				# path): defer through the budgeted queue so we don't spike this frame.
+				_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
+	# Optional consistency check: replay the old full scan and warn on any mismatch.
+	# OFF by default — it reintroduces the very O(all A*-in) cost the index removes.
+	if _debug_check_retarget_index:
+		_assert_retarget_index_matches_scan(cell)
 	# A stale-empty garden may have been flagged by _garden_has_edible_plants above;
 	# this function does not iterate _gardens, so draining now is safe.
 	_drain_pending_empty_gardens()
+
+# Debug-only: confirm the reverse index would have found exactly the agents the old
+# full scan would have. Runs only when _debug_check_retarget_index is set. NOTE: this
+# is called AFTER the affected agents have already been erased, so the live scan
+# should find none of them; we instead verify no A*-in agent still claims `cell`.
+func _assert_retarget_index_matches_scan(cell: Vector2i) -> void:
+	var leftover: int = 0
+	for raw_nav_id in _astar_in_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		if (data.get("plant_cell", INVALID_CELL) as Vector2i) == cell:
+			leftover += 1
+	if leftover > 0:
+		push_warning("debug_garden_lag:retarget_index_mismatch plant=%s leftover_astar_in_targeting_cell=%d (index missed them)" % [str(cell), leftover])
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	var consume_us: int = Time.get_ticks_usec()
@@ -1478,7 +1565,7 @@ func _start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = I
 	if agent_manager and agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
 	_astar_out_agents.erase(nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", seconds)
@@ -1644,7 +1731,7 @@ func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cel
 		agent_manager.call("detach_agent_path", nav_id)
 	agent_manager.call("assign_agent", agent, escape_group)
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
 	_astar_out_agents.erase(nav_id)
 	_erase_eating_agent(nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
@@ -2563,13 +2650,13 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents[nav_id] = {
+	_set_astar_in_agent(nav_id, {
 		"node": agent,
 		"plant_cell": plant_cell,
 		"spawner_cell": route_spawner_cell,
 		"garden_id": garden_id,
 		"path_world": path_world
-	}
+	})
 	_astar_out_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", route_spawner_cell)
 	agent.set_meta("garden_id", garden_id)
@@ -2630,7 +2717,7 @@ func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, g
 		"entry_cell": entry_cell,
 		"path_world": path_world
 	}
-	_astar_in_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
 	_astar_out_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", spawner_cell)
@@ -2971,7 +3058,7 @@ func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
 	_entry_path_agents.erase(nav_id)
-	_astar_in_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
 	_astar_out_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	if _eating_agents.has(nav_id):
@@ -3091,7 +3178,7 @@ func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: 
 	if not is_instance_valid(agent):
 		# Agent is gone; still drop its stale phase entries so nothing dangles.
 		_entry_path_agents.erase(nav_id)
-		_astar_in_agents.erase(nav_id)
+		_erase_astar_in_agent(nav_id)
 		_astar_out_agents.erase(nav_id)
 		_erase_eating_agent(nav_id)
 		return
