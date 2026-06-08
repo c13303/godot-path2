@@ -879,7 +879,6 @@ void SteeringSystem::resolve_static_obstacle_overlap(AgentData &agent)
 
 void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, Vec2 &target_velocity, double delta)
 {
-    (void)target_velocity;
     (void)delta;
 
     if (!ff)
@@ -897,34 +896,44 @@ void SteeringSystem::apply_bottleneck_traffic(AgentData &agent, FlowField *ff, V
 
     Vec2 foot = agent_foot_point(agent);
     Vec2i cell = ff->world_to_cell(foot);
-
     int core_index = ff->bottleneck_core_at_cell(cell);
+    int zone_index = ff->bottleneck_zone_at_cell(cell);
+
+    // Tile-based bottleneck gating:
+    // RB = bottleneck core tile, BZ = surrounding bottleneck zone.
+    // Agents inside RB own the passage by position, not by a fragile reservation owner.
+    // Agents that already crossed the RB ignore the rest of that BZ until they leave it.
     if (core_index >= 0)
     {
-        BottleneckReservation &reservation = bottleneck_reservations[ff][core_index];
-        reservation.owner_id = agent.id;
-        reservation.time_left = cfg.bottleneck_reservation_seconds;
+        agent.completed_bottleneck = core_index;
+        agent.debug_bottleneck_wait = false;
         return;
     }
 
-    if (agent.active_bottleneck >= 0)
+    if (agent.completed_bottleneck >= 0)
     {
-        auto field_it = bottleneck_reservations.find(ff);
-        if (field_it != bottleneck_reservations.end())
+        if (zone_index == agent.completed_bottleneck)
         {
-            auto reservation_it = field_it->second.find(agent.active_bottleneck);
-            if (reservation_it != field_it->second.end())
-            {
-                const BottleneckReservation &reservation = reservation_it->second;
-                agent.debug_bottleneck_wait = reservation.owner_id >= 0 && reservation.owner_id != agent.id;
-            }
+            agent.debug_bottleneck_wait = false;
+            return;
         }
+        agent.completed_bottleneck = -1;
     }
 
-    // Zone-level yielding is intentionally disabled until the reservation model
-    // can choose the front-most entrant reliably. Bottleneck zones remain useful
-    // for debug and later traffic-rule tuning, but must not block entry.
-    return;
+    agent.debug_bottleneck_wait = false;
+    if (zone_index < 0)
+        return;
+
+    auto field_it = bottleneck_core_occupancy.find(ff);
+    if (field_it == bottleneck_core_occupancy.end())
+        return;
+
+    auto core_it = field_it->second.find(zone_index);
+    if (core_it == field_it->second.end() || core_it->second <= 0)
+        return;
+
+    agent.debug_bottleneck_wait = true;
+    target_velocity = target_velocity * std::clamp(cfg.bottleneck_wait_speed_ratio, 0.0, 1.0);
 }
 
 Vec2 SteeringSystem::desired_velocity_for_flow(const AgentData &agent, FlowField *ff, const Vec2 &nav_dir, const Vec2 &wall_repel, const Vec2 &agent_separation, const Vec2 &static_obstacle_repel, double target_speed) const
@@ -1517,6 +1526,21 @@ void SteeringSystem::update_all(double delta)
         }
     }
 
+    bottleneck_core_occupancy.clear();
+    if (!cfg.effective_debug_disable_bottlenecks())
+    {
+        for (const auto &a : agents)
+        {
+            FlowField *ff = a.flow ? a.flow : default_flow;
+            if (!ff || !ff->is_ready())
+                continue;
+            Vec2i cell = ff->world_to_cell(agent_foot_point(a));
+            int core_index = ff->bottleneck_core_at_cell(cell);
+            if (core_index >= 0)
+                bottleneck_core_occupancy[ff][core_index] += 1;
+        }
+    }
+
     for (auto &a : agents)
     {
         const bool is_manual = a.control_mode == AgentControlMode::Manual;
@@ -1595,6 +1619,11 @@ void SteeringSystem::update_all(double delta)
 
             Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, wall_repel, agent_separation, static_obstacle_repel, a.max_speed);
             Vec2 desired_dir = safe_normalize(target_velocity);
+            if (desired_dir.is_zero())
+                desired_dir = nav_dir;
+
+            apply_bottleneck_traffic(a, nav, target_velocity, delta);
+            desired_dir = safe_normalize(target_velocity);
             if (desired_dir.is_zero())
                 desired_dir = nav_dir;
 
@@ -1840,8 +1869,12 @@ void SteeringSystem::update_all(double delta)
         }
         else
         {
+            int current_core = ff->bottleneck_core_at_cell(rel_cell);
+            int current_zone = ff->bottleneck_zone_at_cell(rel_cell);
             int next_bottleneck = ff->next_bottleneck_at_cell(rel_cell);
-            if (next_bottleneck != a.completed_bottleneck)
+            if (current_core >= 0)
+                a.completed_bottleneck = current_core;
+            else if (a.completed_bottleneck >= 0 && current_zone != a.completed_bottleneck)
                 a.completed_bottleneck = -1;
 
             if (a.active_bottleneck >= 0)
@@ -1954,6 +1987,11 @@ void SteeringSystem::update_all(double delta)
         }
 
         apply_bottleneck_traffic(a, ff, target_velocity, delta);
+        desired_dir = safe_normalize(target_velocity);
+        if (desired_dir.is_zero() && dist_to_target > 0.0)
+            desired_dir = safe_normalize(to_goal);
+        a.debug_desired_dir = desired_dir;
+        a.debug_target_velocity = target_velocity;
 
         if (!a.is_propelled)
         {

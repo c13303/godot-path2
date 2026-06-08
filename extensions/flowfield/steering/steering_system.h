@@ -175,6 +175,7 @@ namespace ffcore
         int next_id = 1;
         std::vector<ActiveAoE> active_aoes;
         std::unordered_map<FlowField *, std::unordered_map<int, BottleneckReservation>> bottleneck_reservations;
+        std::unordered_map<FlowField *, std::unordered_map<int, int>> bottleneck_core_occupancy;
         double max_fight_query_padding = 0.0;
         double max_world_radius = 0.0;
 

@@ -89,6 +89,11 @@ extends Node
 		_apply_debug_settings()
 
 @export_group("Movement Tuning")
+@export_range(0.0, 1.0, 0.01, "or_greater") var bottleneck_wait_speed_ratio: float = 0.05:
+	set(value):
+		bottleneck_wait_speed_ratio = value
+		_apply_debug_settings()
+
 @export_range(0.0, 1.0, 0.01, "or_greater") var bottleneck_backward_push_ratio: float = 0.15:
 	set(value):
 		bottleneck_backward_push_ratio = value
@@ -212,6 +217,7 @@ func _apply_debug_settings() -> void:
 			&"set_debug_flowfield_rebuild_lag_ms",
 			&"set_debug_plantff_ff_lag_ms"
 		], debug_flowfield_rebuild_lag_ms)
+		_call_if_available(global_config, "set_bottleneck_wait_speed_ratio", bottleneck_wait_speed_ratio)
 		_call_if_available(global_config, "set_bottleneck_backward_push_ratio", bottleneck_backward_push_ratio)
 		_call_if_available(global_config, "set_bottleneck_lateral_push_ratio", bottleneck_lateral_push_ratio)
 		_call_if_available(global_config, "set_priority_separation_bias", priority_separation_bias)
