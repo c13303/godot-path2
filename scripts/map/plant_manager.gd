@@ -4,10 +4,12 @@ class_name PlantManager
 signal plant_added(cell: Vector2i)
 signal plant_removed(cell: Vector2i)
 signal plant_state_changed(cell: Vector2i, atlas_coords: Vector2i)
+signal day_seed_harvest_finished
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 1)
+const SPAWNING_SEEDS_DELAY: int = 3000
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
@@ -31,7 +33,17 @@ func _connect_day_started() -> void:
 			progression_node.connect("day_started", callback)
 
 func _on_day_started(_day_number: int) -> void:
+	var delay_seconds: float = float(SPAWNING_SEEDS_DELAY) / 1000.0
+	await get_tree().create_timer(delay_seconds).timeout
 	dry_all_roses()
+	var scene: Node = get_tree().current_scene
+	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
+	if seed_icon != null and seed_icon.has_method("has_active_harvest_animations"):
+		var has_active_animations: bool = bool(seed_icon.call("has_active_harvest_animations"))
+		if has_active_animations:
+			var animations_finished: Signal = Signal(seed_icon, &"harvest_animations_finished")
+			await animations_finished
+	day_seed_harvest_finished.emit()
 
 func initialize_from_layer() -> void:
 	_plants.clear()

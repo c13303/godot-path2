@@ -334,6 +334,9 @@ func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary) -> void:
 	var placeable_category: String = str(placeable_def.get("category", ""))
 	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
 		plant_manager.call("add_plant", cell)
+	var placeable_id: String = str(placeable_def.get("id", ""))
+	if placeable_id == "rose":
+		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
 

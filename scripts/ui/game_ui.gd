@@ -205,6 +205,7 @@ func add_inventory(item_id: String, quantity: int = 1) -> bool:
 		remaining -= new_stack_quantity
 
 	_refresh_all_slots()
+	Sfx.play_sound(&"bag")
 	return true
 
 func can_add_inventory(item_id: String, quantity: int = 1) -> bool:
@@ -229,8 +230,9 @@ func _first_free_slot() -> int:
 	return -1
 
 # Like add_inventory, but the item visually flies from source_global_position
-# (e.g. the clicked shop icon) along a curve to the center of the quick-slot
-# toolbar. The actual increment + a white slot flash happen on arrival.
+# (e.g. the clicked shop icon) along a curve to its visible quick-slot. Items
+# landing outside the visible quick-slots use the toolbar center as a fallback.
+# The actual increment + a white slot flash happen on arrival.
 # Capacity is validated up front so the deferred add cannot silently fail.
 func add_inventory_animated(item_id: String, quantity: int, source_global_position: Vector2) -> bool:
 	if item_id == "" or quantity <= 0:
@@ -242,9 +244,22 @@ func add_inventory_animated(item_id: String, quantity: int, source_global_positi
 		# No icon to fly with; fall back to an instant add.
 		return add_inventory(item_id, quantity)
 	var start_position: Vector2 = source_global_position
-	var end_position: Vector2 = toolbar_slots.get_global_rect().get_center()
+	var end_position: Vector2 = _purchase_flight_target(item_id)
 	_spawn_purchase_flight(int(item_def.get("frame", 0)), start_position, end_position, item_id, quantity)
 	return true
+
+func _purchase_flight_target(item_id: String) -> Vector2:
+	var landing_slot: int = _predict_landing_slot(item_id)
+	if (
+		toolbar_anchor.visible
+		and landing_slot >= 0
+		and landing_slot < QUICK_SLOT_COUNT
+		and landing_slot < _toolbar_slot_nodes.size()
+	):
+		var slot_node: ItemSlot = _toolbar_slot_nodes[landing_slot]
+		if is_instance_valid(slot_node) and slot_node.is_visible_in_tree():
+			return slot_node.get_global_rect().get_center()
+	return toolbar_slots.get_global_rect().get_center()
 
 # Predicts which slot add_inventory would fill first: an existing stack with
 # room, otherwise the first free slot. Used to flash the landing slot.

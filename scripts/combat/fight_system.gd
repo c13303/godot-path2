@@ -81,6 +81,7 @@ func _drain_damage_events() -> void:
 		var number_position: Vector2 = event.get("position", enemy.global_position) as Vector2
 		_damage_number_drawer.show_damage(number_position, damage)
 		var died: bool = bool(enemy.call("take_damage", damage))
+		Sfx.play_random_scream()
 		if died:
 			_remove_dead_enemy(enemy, agent_id)
 
@@ -96,6 +97,7 @@ func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
 
 
 func _spawn_gem_harvest(world_position: Vector2) -> void:
+	Sfx.play_sound(&"gem")
 	var scene: Node = get_tree().current_scene
 	var gem_icon: Node = scene.get_node_or_null("GameUI/top right/gemIcon") if scene != null else null
 	if gem_icon != null and gem_icon.has_method("animate_gem_harvest"):
@@ -177,6 +179,8 @@ func _drain_projectile_impacts() -> void:
 	for impact_variant: Variant in impacts:
 		var impact: Dictionary = impact_variant as Dictionary
 		var gun: GunData = _gun_by_type_id.get(int(impact.get("type_id", -1))) as GunData
+		if gun != null and gun.id == "water":
+			Sfx.play_sound(&"splash")
 		_handle_static_projectile_impact(impact, gun)
 		if not gun or not gun.impact_visual_enabled:
 			continue
@@ -374,7 +378,9 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 			if gun.throw_offset != 0.0 and direction.length_squared() > 0.000001:
 				spawn_pos += direction.normalized() * gun.throw_offset
 			_projectiles.call("fire", type_id, spawn_pos, direction, source_agent_id, gun.affected_smash_classes)
-		t = max(0.0, gun.fire_delay_ms * 0.001)
+			if gun.id == "water":
+				Sfx.play_sound(&"bubble1")
+			t = max(0.0, gun.fire_delay_ms * 0.001)
 	_gun_fire_timers[gun_id] = t
 
 func reset_gun_cooldown(gun_id: String) -> void:

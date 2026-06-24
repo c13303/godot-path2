@@ -26,6 +26,7 @@ const ITEM_DEFS: Dictionary = {
 	"wall": {
 		"id": "wall",
 		"name": "Wall",
+		"currency": &"gem",
 		"type": "placeable",
 		"category": "wall",
 		"frame": 3,
@@ -40,6 +41,7 @@ const ITEM_DEFS: Dictionary = {
 	"rose": {
 		"id": "rose",
 		"name": "Rose",
+		"currency": &"seed",
 		"type": "placeable",
 		"category": "plant",
 		"frame": 5,
@@ -71,6 +73,7 @@ const ITEM_DEFS: Dictionary = {
 	"turret1": {
 		"id": "turret1",
 		"name": "Turret",
+		"currency": &"gem",
 		"type": "placeable",
 		"category": "turret",
 		"frame": 6,
@@ -105,6 +108,9 @@ static func is_placeable(item_id: String) -> bool:
 
 static func get_max_stack(item_id: String) -> int:
 	return maxi(1, int(get_item_def(item_id).get("max_stack", 1)))
+
+static func get_currency(item_id: String) -> StringName:
+	return StringName(get_item_def(item_id).get("currency", &""))
 
 static func is_stackable(item_id: String) -> bool:
 	return get_max_stack(item_id) > 1

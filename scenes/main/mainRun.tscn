@@ -23,6 +23,7 @@
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
+[ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
@@ -1897,12 +1898,12 @@ alignment = 1
 [node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem/Price" unique_id=2095674811]
 layout_mode = 2
 
-[node name="Seed" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem/Price" unique_id=1066191394]
+[node name="Gem" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem/Price" unique_id=1066191394]
 texture_filter = 1
 custom_minimum_size = Vector2(16, 16)
 layout_mode = 2
 size_flags_vertical = 4
-texture = SubResource("AtlasTexture_seed_icon")
+texture = SubResource("AtlasTexture_gem_icon")
 expand_mode = 1
 stretch_mode = 5
 
@@ -1929,14 +1930,17 @@ alignment = 1
 [node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem/Price" unique_id=1795573404]
 layout_mode = 2
 
-[node name="Seed" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem/Price" unique_id=25244716]
+[node name="Gem" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem/Price" unique_id=25244716]
 texture_filter = 1
 custom_minimum_size = Vector2(16, 16)
 layout_mode = 2
 size_flags_vertical = 4
-texture = SubResource("AtlasTexture_seed_icon")
+texture = SubResource("AtlasTexture_gem_icon")
 expand_mode = 1
 stretch_mode = 5
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")
+
+[node name="sfx" type="Node" parent="." unique_id=1937632267]
+script = ExtResource("27_vhv61")

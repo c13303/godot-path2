@@ -1,5 +1,7 @@
 extends TextureRect
 
+signal harvest_animations_finished
+
 const SEED_FLIGHT_SIZE: Vector2 = Vector2(28.0, 28.0)
 const BASE_FLIGHT_DURATION: float = 0.72
 
@@ -8,12 +10,15 @@ const BASE_FLIGHT_DURATION: float = 0.72
 @export_range(0.1, 5.0, 0.05, "or_greater", "suffix:x") var animation_speed: float = 1.0
 @export_range(0.0, 5.0, 0.05, "or_greater", "suffix:x") var curve_strength: float = 1.0
 
+var _active_harvest_animation_count: int = 0
+
 func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0) -> bool:
 	if texture == null:
 		return false
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
 	if game_ui == null:
 		return false
+	_active_harvest_animation_count += 1
 	var start_delay: float = float(sequence_index) * delay_between_seeds
 	if start_delay <= 0.0:
 		_start_seed_flight(world_position)
@@ -24,9 +29,11 @@ func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0) -> b
 	return true
 
 func _start_seed_flight(world_position: Vector2) -> void:
+	Sfx.play_random_pop()
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
 	if game_ui == null or texture == null:
 		_credit_seed()
+		_complete_harvest_animation()
 		return
 	var seed_sprite: TextureRect = TextureRect.new()
 	seed_sprite.texture = texture
@@ -81,9 +88,19 @@ func _finish_seed_flight(seed_sprite: TextureRect) -> void:
 	if is_instance_valid(seed_sprite):
 		seed_sprite.queue_free()
 	_credit_seed()
+	_complete_harvest_animation()
+
+func has_active_harvest_animations() -> bool:
+	return _active_harvest_animation_count > 0
+
+func _complete_harvest_animation() -> void:
+	_active_harvest_animation_count = maxi(0, _active_harvest_animation_count - 1)
+	if _active_harvest_animation_count == 0:
+		harvest_animations_finished.emit()
 
 func _credit_seed() -> void:
 	var scene: Node = get_tree().current_scene
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
 	if progression_node != null and progression_node.has_method("update_seeds"):
 		progression_node.call("update_seeds", 1)
+		Sfx.play_sound(&"bag")

@@ -92,3 +92,4 @@ func _credit_gem() -> void:
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
 	if progression_node != null and progression_node.has_method("update_gems"):
 		progression_node.call("update_gems", 1)
+		Sfx.play_sound(&"bag")

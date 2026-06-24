@@ -190,13 +190,13 @@ func _update_player_input() -> void:
 
 	var dir: Vector2 = Vector2.ZERO
 	if not _paused:
-		if _is_any_key_pressed([KEY_Z, KEY_W]):
+		if _is_any_key_pressed([KEY_Z, KEY_W, KEY_UP]):
 			dir.y -= 1.0
-		if _is_any_key_pressed([KEY_S]):
+		if _is_any_key_pressed([KEY_S, KEY_DOWN]):
 			dir.y += 1.0
-		if _is_any_key_pressed([KEY_Q, KEY_A]):
+		if _is_any_key_pressed([KEY_Q, KEY_A, KEY_LEFT]):
 			dir.x -= 1.0
-		if _is_any_key_pressed([KEY_D]):
+		if _is_any_key_pressed([KEY_D, KEY_RIGHT]):
 			dir.x += 1.0
 
 	if dir.length_squared() > 1.0:

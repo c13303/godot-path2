@@ -1619,6 +1619,7 @@ func _assert_retarget_index_matches_scan(cell: Vector2i) -> void:
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	var consume_us: int = Time.get_ticks_usec()
 	_start_agent_eating(eater, _eating_time, plant_cell)
+	Sfx.play_sound(&"crunsh")
 	# plant_manager.remove_plant() fires _on_plant_removed synchronously (garden
 	# content update + narrow retarget / empty handling), so it is the prime suspect
 	# for an eat-triggered spike. Time it on its own.
