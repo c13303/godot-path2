@@ -58,6 +58,16 @@ func is_empty() -> bool:
 func size() -> int:
 	return _plants.size()
 
+func rose_count() -> int:
+	if not plantz:
+		return 0
+	var count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if is_rose_cell(cell):
+			count += 1
+	return count
+
 func is_rose_cell(cell: Vector2i) -> bool:
 	if not plantz or not _plants.has(cell):
 		return false
@@ -90,7 +100,7 @@ func dry_all_roses() -> int:
 
 func _spawn_seed_harvest(cell: Vector2i, sequence_index: int) -> void:
 	var scene: Node = get_tree().current_scene
-	var seed_icon: Node = scene.get_node_or_null("GameUI/top left anchor/seedIcon") if scene != null else null
+	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
 	var world_position: Vector2 = plantz.to_global(plantz.map_to_local(cell))
 	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
 		var animation_started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, sequence_index))

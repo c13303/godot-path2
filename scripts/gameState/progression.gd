@@ -36,7 +36,8 @@ class ProgressionProp:
 class Progression:
 	var props: Array[ProgressionProp] = [
 		ProgressionProp.new(&"nDays", "Day", 1),
-		ProgressionProp.new(&"monster_per_day", "Monster per day", 2),
+		ProgressionProp.new(&"monster_per_day", "Monster per day", 1),
+		ProgressionProp.new(&"monster_per_rose", "Monster per rose", 1),
 		ProgressionProp.new(&"seeds", "Seeds", 5),
 	]
 
@@ -139,7 +140,7 @@ func _get_seed_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top left anchor/seedIcon/seedQT") as RichTextLabel
+	return scene.get_node_or_null("GameUI/top right/seedIcon/seedQT") as RichTextLabel
 
 
 ## Render every progression prop, one per line: "<display name>: <value>".

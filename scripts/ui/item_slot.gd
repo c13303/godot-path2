@@ -35,6 +35,16 @@ func set_disabled(value: bool) -> void:
 	disabled = value
 	_refresh()
 
+## White flash + scale punch, played when an item lands in this slot.
+func flash() -> void:
+	pivot_offset = size * 0.5
+	modulate = Color(2.6, 2.6, 2.6, 1.0)
+	scale = Vector2(1.25, 1.25)
+	var tween: Tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(self, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
 func _build() -> void:
 	custom_minimum_size = Vector2(56, 56)
 	size_flags_horizontal = Control.SIZE_SHRINK_CENTER

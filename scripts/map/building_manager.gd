@@ -247,8 +247,8 @@ var _walkable_map_tiles: Dictionary = {}  # Vector2i -> true
 const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
 var _spawned_this_night: bool = false
 var _empty_night_elapsed: float = 0.0
-# Per-night spawn quota: monster_per_day * nDays (read from the progression node
-# at the start of each night). _spawn_limit <= 0 means "no cap". Once
+# Per-night spawn quota: nDays * monster_per_day + roses * monster_per_rose
+# (read at the start of each night). _spawn_limit <= 0 means "no cap". Once
 # _spawned_count reaches the limit, no new monsters spawn; the night still ends
 # normally once the already-spawned monsters are gone.
 var _spawned_count_this_night: int = 0
@@ -401,20 +401,24 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_spawned_count_this_night = 0
 	_spawn_limit_this_night = _compute_spawn_limit()
 	if debug_logs:
-		_log("Night spawn limit: %d (monster_per_day * nDays)" % _spawn_limit_this_night)
+		_log("Night spawn limit: %d (days + roses)" % _spawn_limit_this_night)
 	for cell in _spawn_timers.keys():
 		_spawn_timers[cell] = 0.0
 
-# This night's monster quota = monster_per_day * nDays, read from the progression
-# node. Returns 0 ("no cap") if progression is unavailable, so a missing node can
-# never soft-lock the night by suppressing all spawns.
+# This night's monster quota = nDays * monster_per_day + roses * monster_per_rose.
+# Returns 0 ("no cap") if progression is unavailable, so a missing node can never
+# soft-lock the night by suppressing all spawns.
 func _compute_spawn_limit() -> int:
 	var prog: Node = _get_progression()
 	if prog == null:
 		return 0
 	var per_day: int = int(prog.call("get_value", &"monster_per_day"))
 	var n_days: int = int(prog.call("get_value", &"nDays"))
-	return per_day * n_days
+	var per_rose: int = int(prog.call("get_value", &"monster_per_rose"))
+	var roses: int = 0
+	if plant_manager != null and plant_manager.has_method("rose_count"):
+		roses = int(plant_manager.call("rose_count"))
+	return n_days * per_day + roses * per_rose
 
 func _get_progression() -> Node:
 	if _progression != null and is_instance_valid(_progression):

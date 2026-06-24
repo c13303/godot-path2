@@ -1,9 +1,13 @@
 extends CanvasLayer
 
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
+const ITEM_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
+
+const PURCHASE_FLIGHT_SIZE: Vector2 = Vector2(40.0, 40.0)
+const PURCHASE_FLIGHT_DURATION: float = 0.55
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
 @onready var toolbar_anchor: Control = $"bottom anchor"
@@ -165,10 +169,10 @@ func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
 		inventory_slots[i] = _empty_slot()
-	add_inventory("sword", 1)
+	#add_inventory("sword", 1)
 	add_inventory("water", 1)
-	add_inventory("rose", 5)
-	add_inventory("turret1", 1)
+	#add_inventory("rose", 5)
+	#add_inventory("turret1", 1)
 
 # Generic inventory add, reusable for purchases, pickups, and rewards.
 # Existing stacks are filled before new slots are used. The operation is
@@ -223,6 +227,110 @@ func _first_free_slot() -> int:
 		if _slot_item_id(inventory_slots[i]) == "":
 			return i
 	return -1
+
+# Like add_inventory, but the item visually flies from source_global_position
+# (e.g. the clicked shop icon) along a curve to the center of the quick-slot
+# toolbar. The actual increment + a white slot flash happen on arrival.
+# Capacity is validated up front so the deferred add cannot silently fail.
+func add_inventory_animated(item_id: String, quantity: int, source_global_position: Vector2) -> bool:
+	if item_id == "" or quantity <= 0:
+		return false
+	if not can_add_inventory(item_id, quantity):
+		return false
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if item_def.is_empty():
+		# No icon to fly with; fall back to an instant add.
+		return add_inventory(item_id, quantity)
+	var start_position: Vector2 = source_global_position
+	var end_position: Vector2 = toolbar_slots.get_global_rect().get_center()
+	_spawn_purchase_flight(int(item_def.get("frame", 0)), start_position, end_position, item_id, quantity)
+	return true
+
+# Predicts which slot add_inventory would fill first: an existing stack with
+# room, otherwise the first free slot. Used to flash the landing slot.
+func _predict_landing_slot(item_id: String) -> int:
+	var max_stack: int = ItemCatalog.get_max_stack(item_id)
+	for i in range(inventory_slots.size()):
+		var slot_data: Dictionary = inventory_slots[i]
+		if _slot_item_id(slot_data) == item_id and _slot_quantity(slot_data) < max_stack:
+			return i
+	return _first_free_slot()
+
+func _spawn_purchase_flight(frame: int, start_position: Vector2, end_position: Vector2, item_id: String, quantity: int) -> void:
+	var sprite: TextureRect = TextureRect.new()
+	sprite.texture = _atlas_for_frame(frame)
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sprite.custom_minimum_size = PURCHASE_FLIGHT_SIZE
+	sprite.size = PURCHASE_FLIGHT_SIZE
+	sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
+	sprite.z_index = 100
+	add_child(sprite)
+	sprite.position = start_position - PURCHASE_FLIGHT_SIZE * 0.5
+	sprite.scale = Vector2(0.6, 0.6)
+
+	var distance: float = start_position.distance_to(end_position)
+	var arc_height: float = clampf(distance * 0.3, 80.0, 220.0)
+	var curve_position: Vector2 = (start_position + end_position) * 0.5 + Vector2(0.0, -arc_height)
+
+	var tween: Tween = create_tween()
+	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	tween.tween_method(
+		Callable(self, "_update_purchase_flight").bind(sprite, start_position, curve_position, end_position),
+		0.0,
+		1.0,
+		PURCHASE_FLIGHT_DURATION
+	)
+	tween.parallel().tween_property(sprite, "scale", Vector2.ONE, PURCHASE_FLIGHT_DURATION * 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(sprite, "rotation", TAU, PURCHASE_FLIGHT_DURATION)
+	tween.tween_callback(Callable(self, "_finish_purchase_flight").bind(sprite, item_id, quantity))
+
+func _update_purchase_flight(
+	progress: float,
+	sprite: TextureRect,
+	start_position: Vector2,
+	curve_position: Vector2,
+	end_position: Vector2
+) -> void:
+	if not is_instance_valid(sprite):
+		return
+	var inverse_progress: float = 1.0 - progress
+	var curved_position: Vector2 = (
+		inverse_progress * inverse_progress * start_position
+		+ 2.0 * inverse_progress * progress * curve_position
+		+ progress * progress * end_position
+	)
+	sprite.position = curved_position - PURCHASE_FLIGHT_SIZE * 0.5
+
+func _finish_purchase_flight(sprite: TextureRect, item_id: String, quantity: int) -> void:
+	if is_instance_valid(sprite):
+		sprite.queue_free()
+	# Resolve the landing slot before mutating, then add and flash it.
+	var target_index: int = _predict_landing_slot(item_id)
+	add_inventory(item_id, quantity)
+	_flash_slot(target_index)
+
+# Flashes the slot at slot_index, but only if it is currently on-screen: a
+# quick slot when the toolbar is shown, or a grid slot when the modal is open.
+func _flash_slot(slot_index: int) -> void:
+	if slot_index < 0:
+		return
+	var slot_node: ItemSlot = null
+	if slot_index < QUICK_SLOT_COUNT:
+		if toolbar_anchor.visible and slot_index < _toolbar_slot_nodes.size():
+			slot_node = _toolbar_slot_nodes[slot_index]
+	elif inventory_modal.visible and slot_index < _inventory_slot_nodes.size():
+		slot_node = _inventory_slot_nodes[slot_index]
+	if slot_node != null and is_instance_valid(slot_node):
+		slot_node.flash()
+
+func _atlas_for_frame(frame: int) -> AtlasTexture:
+	var atlas: AtlasTexture = AtlasTexture.new()
+	atlas.atlas = ITEM_TEXTURE
+	atlas.region = Rect2(frame * 32, 0, 32, 32)
+	return atlas
 
 
 func _make_slot(item_id: String, quantity: int) -> Dictionary:
