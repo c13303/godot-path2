@@ -36,9 +36,11 @@ namespace ffcore
         int damage = 0;
         double time_left = 0.0;
         int continuous_id = -1;
-        double hit_frequency = 0.0;
+        double damage_frequency = 0.0;
+        double repulse_frequency = 0.0;
         std::unordered_set<int> hit_ids;
-        std::unordered_map<int, double> hit_cooldowns;
+        std::unordered_map<int, double> damage_cooldowns;
+        std::unordered_map<int, double> repulse_cooldowns;
     };
 
     struct DamageEvent
@@ -97,7 +99,7 @@ namespace ffcore
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage);
-        int start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double hit_frequency);
+        int start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double damage_frequency, double repulse_frequency);
         bool update_continuous_aoe(int continuous_id, const Vec2 &direction, const Vec2 &follow_offset);
         void stop_continuous_aoe(int continuous_id);
         void apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage);

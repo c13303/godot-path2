@@ -521,7 +521,8 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 			weapon.affected_smash_classes,
 			aoe_follow_offset,
 			weapon.damage,
-			weapon.hit_frequency
+			weapon.damage_frequency,
+			weapon.repulse_frequency
 		))
 		if started_id < 0:
 			_refund_reserve(weapon.reserve_id, weapon.reserve_cost)
@@ -550,7 +551,7 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
 	if weapon.id == "spray":
 		_start_spray_audio()
-		_update_spray_particles(spawn_origin, facing)
+		_update_spray_particles(spawn_origin, collision_facing)
 
 func _stop_continuous_weapon() -> void:
 	if _continuous_aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
@@ -594,8 +595,8 @@ func _setup_spray_particles() -> void:
 	add_child(_spray_particle_effect)
 	_spray_particles = _spray_particle_effect.get_node_or_null("CPUParticles2D") as CPUParticles2D
 	if _spray_particles != null:
-		# Emit in world space so turning only redirects newly emitted particles.
-		# Particles already in flight keep their original position and direction.
+		# The spray is an attached cone, not a set of persistent projectiles.
+		# Keeping particles local makes the visible surface follow the same cone.
 		_spray_particles.local_coords = false
 		_spray_particles.emitting = false
 

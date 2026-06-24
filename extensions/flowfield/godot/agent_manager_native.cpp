@@ -46,11 +46,17 @@ static void apply_sprite_fight_hitbox(Node2D *node, ffcore::AgentProfile &profil
     if (texture.is_null())
         return;
 
-    Vector2 texture_size = texture->get_size();
+    Vector2 frame_size = texture->get_size();
+    int hframes = sprite->get_hframes();
+    int vframes = sprite->get_vframes();
+    if (hframes > 1)
+        frame_size.x /= static_cast<double>(hframes);
+    if (vframes > 1)
+        frame_size.y /= static_cast<double>(vframes);
     Vector2 scale = sprite->get_scale();
     Vector2 half_size(
-        texture_size.x * std::abs(scale.x) * 0.5,
-        texture_size.y * std::abs(scale.y) * 0.5);
+        frame_size.x * std::abs(scale.x) * 0.5,
+        frame_size.y * std::abs(scale.y) * 0.5);
 
     Vector2 center = sprite->get_position();
     if (!sprite->is_centered())

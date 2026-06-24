@@ -36,7 +36,8 @@ func _apply_hardcore_preset() -> void:
 	_spray.detach_flow = false
 	_spray.affected_smash_classes = 4
 	_spray.continuous = true
-	_spray.hit_frequency = 0.2
+	_spray.damage_frequency = 0.1
+	_spray.repulse_frequency = 0.03
 	_spray.reserve_id = &"water"
 	_spray.reserve_cost = 1
 	_spray.reserve_cost_interval = 0.5

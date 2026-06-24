@@ -1319,11 +1319,11 @@ void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, doub
     active_aoes.push_back(std::move(zone));
 }
 
-int SteeringSystem::start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double hit_frequency)
+int SteeringSystem::start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double damage_frequency, double repulse_frequency)
 {
-    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(radius) || !std::isfinite(force) || !std::isfinite(follow_offset.x) || !std::isfinite(follow_offset.y) || !std::isfinite(hit_frequency))
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(radius) || !std::isfinite(force) || !std::isfinite(follow_offset.x) || !std::isfinite(follow_offset.y) || !std::isfinite(damage_frequency) || !std::isfinite(repulse_frequency))
         return -1;
-    if (radius <= 0.0 || hit_frequency <= 0.0)
+    if (radius <= 0.0 || damage_frequency <= 0.0 || repulse_frequency <= 0.0)
         return -1;
 
     Vec2 facing = safe_normalize(direction);
@@ -1349,7 +1349,8 @@ int SteeringSystem::start_continuous_aoe(const Vec2 &pos, const Vec2 &direction,
     zone.damage = std::max(0, damage);
     zone.time_left = 1.0;
     zone.continuous_id = next_continuous_aoe_id++;
-    zone.hit_frequency = hit_frequency;
+    zone.damage_frequency = damage_frequency;
+    zone.repulse_frequency = repulse_frequency;
     active_aoes.push_back(std::move(zone));
     return active_aoes.back().continuous_id;
 }
@@ -1495,10 +1496,14 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &zone : active_aoes)
     {
-        std::unordered_set<int> overlapping_ids;
+        // Authoritative per-frame cone membership for continuous weapons.
+        // Cooldown entries exist only while that agent remains inside.
+        std::unordered_set<int> current_inside_ids;
         if (zone.continuous_id >= 0)
         {
-            for (auto &cooldown : zone.hit_cooldowns)
+            for (auto &cooldown : zone.damage_cooldowns)
+                cooldown.second -= delta;
+            for (auto &cooldown : zone.repulse_cooldowns)
                 cooldown.second -= delta;
         }
         // Zone follows its owner: re-read the source agent's live position each tick so the
@@ -1555,32 +1560,56 @@ void SteeringSystem::update_all(double delta)
 
             if (zone.continuous_id >= 0)
             {
-                overlapping_ids.insert(nid);
-                auto cooldown_it = zone.hit_cooldowns.find(nid);
-                if (cooldown_it != zone.hit_cooldowns.end() && cooldown_it->second > 0.0)
-                    continue;
+                current_inside_ids.insert(nid);
             }
 
-            double base = std::max(0.0, 1.0 - dist / zone.radius);
-            double attenuation = std::pow(base, zone.falloff);
-
-            apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
-            if (zone.damage > 0)
-                damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
             if (zone.continuous_id >= 0)
-                zone.hit_cooldowns[nid] = zone.hit_frequency;
+            {
+                auto repulse_it = zone.repulse_cooldowns.find(nid);
+                bool repulse_ready = repulse_it == zone.repulse_cooldowns.end() || repulse_it->second <= 0.0;
+                if (repulse_ready)
+                {
+                    double base = std::max(0.0, 1.0 - dist / zone.radius);
+                    double attenuation = std::pow(base, zone.falloff);
+                    apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
+                    zone.repulse_cooldowns[nid] = zone.repulse_frequency;
+                }
+
+                auto damage_it = zone.damage_cooldowns.find(nid);
+                bool damage_ready = damage_it == zone.damage_cooldowns.end() || damage_it->second <= 0.0;
+                if (damage_ready)
+                {
+                    if (zone.damage > 0)
+                        damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
+                    zone.damage_cooldowns[nid] = zone.damage_frequency;
+                }
+            }
             else
+            {
+                double base = std::max(0.0, 1.0 - dist / zone.radius);
+                double attenuation = std::pow(base, zone.falloff);
+                apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
+                if (zone.damage > 0)
+                    damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
                 zone.hit_ids.insert(nid);
+            }
         }
 
         if (zone.continuous_id >= 0)
         {
-            // Cooldowns only throttle repeated hits during one uninterrupted overlap.
-            // Leaving the surface makes the next entry eligible for an immediate hit.
-            for (auto cooldown_it = zone.hit_cooldowns.begin(); cooldown_it != zone.hit_cooldowns.end();)
+            // Each effect is throttled independently during one uninterrupted overlap.
+            // Leaving the cone clears both, so the next entry applies both immediately.
+            for (auto cooldown_it = zone.damage_cooldowns.begin(); cooldown_it != zone.damage_cooldowns.end();)
             {
-                if (overlapping_ids.count(cooldown_it->first) == 0)
-                    cooldown_it = zone.hit_cooldowns.erase(cooldown_it);
+                if (current_inside_ids.count(cooldown_it->first) == 0)
+                    cooldown_it = zone.damage_cooldowns.erase(cooldown_it);
+                else
+                    ++cooldown_it;
+            }
+            for (auto cooldown_it = zone.repulse_cooldowns.begin(); cooldown_it != zone.repulse_cooldowns.end();)
+            {
+                if (current_inside_ids.count(cooldown_it->first) == 0)
+                    cooldown_it = zone.repulse_cooldowns.erase(cooldown_it);
                 else
                     ++cooldown_it;
             }

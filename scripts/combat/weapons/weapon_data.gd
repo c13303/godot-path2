@@ -23,9 +23,10 @@ class_name WeaponData
 @export_group("Continuous Use")
 @export var continuous: bool = false
 # Rotation response time in seconds for the collision cone. Zero follows the
-# aim immediately. The particle emitter is intentionally not affected.
+# aim immediately.
 @export_range(0.0, 2.0, 0.001, "or_greater") var aim_inertia: float = 0.0
-@export var hit_frequency: float = 0.0
+@export var damage_frequency: float = 0.0
+@export var repulse_frequency: float = 0.0
 @export var reserve_id: StringName = &""
 @export var reserve_cost: int = 0
 @export var reserve_cost_interval: float = 0.0
