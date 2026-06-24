@@ -25,6 +25,7 @@ Utils="*res://scripts/global/utils.gd"
 GameState="*res://scripts/gameState/gameState.gd"
 Sfx="*res://scripts/sfx/sfx.gd"
 Difficulty="*res://scripts/gameState/difficulty.gd"
+CustomCursor="*res://scripts/ui/custom_cursor.gd"
 
 [display]
 

@@ -295,6 +295,7 @@ func _draw_rose_drag_preview(placeable_def: Dictionary, available_roses: int) ->
 	)
 	for cell: Vector2i in valid_cells:
 		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+	previewbuild.modulate.a = 0.5
 	_preview_cells = valid_cells
 	_hover_active = not _preview_cells.is_empty()
 	_hover_atlas_coords = atlas_coords
@@ -495,6 +496,7 @@ func _notify(message: String) -> void:
 		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
+	previewbuild.modulate.a = 1.0
 	if not _hover_active and _preview_cells.is_empty():
 		return
 	for cell: Vector2i in _preview_cells:
