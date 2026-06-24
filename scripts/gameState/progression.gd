@@ -198,6 +198,13 @@ func _get_gem_label() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/top right/gemIcon/gemQT") as RichTextLabel
 
 
+func _get_water_reserve_bar() -> ProgressBar:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/bottom left anchor/waterReserve") as ProgressBar
+
+
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
 func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false) -> void:
@@ -213,6 +220,12 @@ func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label:
 			_animate_gem_label(gem_label)
 
 	_update_day_label(progression.get_value(&"nDays"))
+	var water_reserve_bar: ProgressBar = _get_water_reserve_bar()
+	if water_reserve_bar != null:
+		var water_maximum: int = maxi(1, progression.get_value(&"water_reserve_max"))
+		var water_current: int = clampi(progression.get_value(WATER_RESERVE_KEY), 0, water_maximum)
+		water_reserve_bar.max_value = float(water_maximum)
+		water_reserve_bar.value = float(water_current)
 
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:

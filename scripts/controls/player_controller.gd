@@ -3,6 +3,7 @@ class_name PlayerController
 
 const CONTROL_MODE_MANUAL: int = 1
 const SMASH_CLASS_PLAYER: int = 1
+const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
@@ -20,6 +21,12 @@ const SMASH_CLASS_PLAYER: int = 1
 @export var gamepad_cursor_speed: float = 900.0
 @export var gamepad_trigger_threshold: float = 0.5
 
+@export_group("Rush", "rush_")
+@export var rush_duration: float = 0.1
+@export var rush_speed_mult: float = 3.0
+@export var rush_allow_direction: bool = false
+@export_group("")
+
 var global_config_node: Node = null
 var _paused: bool = false
 var _mouse_was_locked_before_pause: bool = false
@@ -29,6 +36,12 @@ var _active_gamepad_device: int = -1
 var _left_trigger_pressed: bool = false
 var _right_trigger_pressed: bool = false
 var _emulated_mouse_button_mask: int = 0
+var _rush_active: bool = false
+var _rush_shift_was_pressed: bool = false
+var _rush_time_left: float = 0.0
+var _rush_direction: Vector2 = Vector2.ZERO
+var _rush_sample_position: Vector2 = Vector2.ZERO
+var _last_move_direction: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
 	var scene: Node = get_tree().get_current_scene()
@@ -79,7 +92,7 @@ func _process(delta: float) -> void:
 
 	_update_gamepad_cursor(delta)
 	_update_gamepad_slot_input()
-	_update_player_input()
+	_update_player_input(delta)
 	_update_gun_fire(delta)
 	camera_controller.process(delta, _paused)
 
@@ -257,7 +270,7 @@ func _weapon_origin_offset(player: Node2D) -> Vector2:
 		return player.get("weapon_origin")
 	return Vector2.ZERO
 
-func _update_player_input() -> void:
+func _update_player_input(delta: float) -> void:
 	if not steering or player_nav_id < 0:
 		return
 	if not steering.has_method("set_agent_input"):
@@ -281,7 +294,73 @@ func _update_player_input() -> void:
 	if dir.length_squared() > 1.0:
 		dir = dir.normalized()
 
+	var shift_pressed: bool = _is_any_key_pressed([KEY_SHIFT])
+	var rush_started: bool = false
+	if _paused:
+		_stop_rush()
+	elif shift_pressed and not _rush_shift_was_pressed and not _rush_active:
+		var start_direction: Vector2 = dir if dir.length_squared() > 0.0 else _last_move_direction
+		if start_direction.length_squared() > 0.0:
+			_start_rush(start_direction.normalized())
+			rush_started = true
+	_rush_shift_was_pressed = shift_pressed
+
+	if _rush_active and not rush_started:
+		var player: Node2D = _get_player_node()
+		if not player or _rush_is_blocked(player.global_position):
+			_stop_rush()
+		else:
+			_rush_time_left = maxf(_rush_time_left - delta, 0.0)
+			if _rush_time_left <= 0.0:
+				_stop_rush()
+
+	if _rush_active:
+		if rush_allow_direction and dir.length_squared() > 0.0:
+			_rush_direction = dir.normalized()
+		dir = _rush_direction
+		var rush_player: Node2D = _get_player_node()
+		if rush_player:
+			_rush_sample_position = rush_player.global_position
+	else:
+		if dir.length_squared() > 0.0:
+			_last_move_direction = dir.normalized()
+
 	steering.call("set_agent_input", player_nav_id, dir)
+
+func _start_rush(direction: Vector2) -> void:
+	_rush_active = true
+	_rush_time_left = maxf(rush_duration, 0.0)
+	_rush_direction = direction
+	var player: Node2D = _get_player_node()
+	if player:
+		_rush_sample_position = player.global_position
+	_set_rush_speed(true)
+
+func _stop_rush() -> void:
+	if not _rush_active:
+		return
+	_rush_active = false
+	_rush_time_left = 0.0
+	_set_rush_speed(false)
+
+func _rush_is_blocked(current_position: Vector2) -> bool:
+	var displacement: Vector2 = current_position - _rush_sample_position
+	var forward_progress: float = displacement.dot(_rush_direction)
+	return forward_progress <= RUSH_BLOCKED_PROGRESS_EPSILON
+
+func _set_rush_speed(enabled: bool) -> void:
+	if not steering or player_nav_id < 0 or not steering.has_method("set_agent_profile"):
+		return
+	var player: Node2D = _get_player_node()
+	if not player:
+		return
+	var player_max_speed: float = float(player.get("max_speed"))
+	var base_speed: float = player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
+	if base_speed <= 0.0:
+		return
+	var multiplier: float = maxf(rush_speed_mult, 0.0) if enabled else 1.0
+	var profile: Dictionary = {"max_speed": base_speed * _speed_multiplier() * multiplier}
+	steering.call("set_agent_profile", player_nav_id, profile)
 
 func _is_any_key_pressed(keys: Array[int]) -> bool:
 	for key in keys:

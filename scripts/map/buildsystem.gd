@@ -1,6 +1,6 @@
 extends Node
 
-const REMOVE_HOLD_SECONDS: float = 2.0
+const REMOVE_HOLD_SECONDS: float = 1.0
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 
@@ -21,6 +21,11 @@ var _atlas_source_id: int = -1
 var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
+var _preview_cells: Array[Vector2i] = []
+var _rose_drag_active: bool = false
+var _rose_drag_start_cell: Vector2i = Vector2i.ZERO
+var _rose_drag_end_cell: Vector2i = Vector2i.ZERO
+var _rose_drag_preview_limit: int = 0
 var _plant_layer_flush_queued: bool = false
 var _remove_active: bool = false
 var _remove_cell: Vector2i = Vector2i.ZERO
@@ -41,6 +46,16 @@ func _process(delta: float) -> void:
 		return
 
 	var placeable_def: Dictionary = _selected_placeable_def()
+	if _rose_drag_active:
+		if _placement_disabled() or _is_inventory_open() or str(placeable_def.get("id", "")) != "rose":
+			_cancel_rose_drag()
+			return
+		var drag_cell: Vector2i = _hovered_cell()
+		var available_roses: int = _inventory_item_quantity("rose")
+		if drag_cell != _rose_drag_end_cell or available_roses != _rose_drag_preview_limit:
+			_rose_drag_end_cell = drag_cell
+			_draw_rose_drag_preview(placeable_def, available_roses)
+		return
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
 		return
@@ -73,6 +88,13 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			return
 
+	if event is InputEventMouseButton:
+		var drag_mouse_event: InputEventMouseButton = event as InputEventMouseButton
+		if drag_mouse_event.button_index == MOUSE_BUTTON_LEFT and not drag_mouse_event.pressed and _rose_drag_active:
+			_finish_rose_drag()
+			get_viewport().set_input_as_handled()
+			return
+
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
@@ -80,7 +102,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			_apply_placeable(placeable_def)
+			if str(placeable_def.get("id", "")) == "rose":
+				_start_rose_drag(placeable_def)
+			else:
+				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
 func _try_start_removal() -> void:
@@ -241,7 +266,104 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i) -> void:
 		atlas_coords,
 		0
 	)
+	_preview_cells.append(cell)
 	previewbuild.update_internals()
+
+func _start_rose_drag(placeable_def: Dictionary) -> void:
+	if _inventory_item_quantity("rose") <= 0:
+		return
+	_rose_drag_active = true
+	_rose_drag_start_cell = _hovered_cell()
+	_rose_drag_end_cell = _rose_drag_start_cell
+	_draw_rose_drag_preview(placeable_def, _inventory_item_quantity("rose"))
+
+func _draw_rose_drag_preview(placeable_def: Dictionary, available_roses: int) -> void:
+	_clear_hover()
+	_rose_drag_preview_limit = available_roses
+	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
+	if atlas_coords == Vector2i(-1, -1) or available_roses <= 0:
+		return
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "plantz")))
+	if not target_layer:
+		return
+	var valid_cells: Array[Vector2i] = _rose_rectangle_cells(
+		_rose_drag_start_cell,
+		_rose_drag_end_cell,
+		target_layer,
+		placeable_def,
+		available_roses
+	)
+	for cell: Vector2i in valid_cells:
+		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+	_preview_cells = valid_cells
+	_hover_active = not _preview_cells.is_empty()
+	_hover_atlas_coords = atlas_coords
+	previewbuild.update_internals()
+
+func _rose_rectangle_cells(
+	start_cell: Vector2i,
+	end_cell: Vector2i,
+	target_layer: TileMapLayer,
+	placeable_def: Dictionary,
+	limit: int
+) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if limit <= 0:
+		return cells
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if _is_valid_placeable_cell(cell, target_layer, placeable_def):
+				cells.append(cell)
+				if cells.size() >= limit:
+					return cells
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return cells
+
+func _finish_rose_drag() -> void:
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if _placement_disabled() or str(placeable_def.get("id", "")) != "rose":
+		_cancel_rose_drag()
+		return
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "plantz")))
+	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
+	var available_roses: int = _inventory_item_quantity("rose")
+	var cells: Array[Vector2i] = []
+	_rose_drag_end_cell = _hovered_cell()
+	if target_layer and atlas_coords != Vector2i(-1, -1):
+		cells = _rose_rectangle_cells(_rose_drag_start_cell, _rose_drag_end_cell, target_layer, placeable_def, available_roses)
+	_clear_hover()
+	_rose_drag_active = false
+	if cells.is_empty():
+		return
+	if not game_ui or not game_ui.has_method("consume_inventory_item"):
+		return
+	if not bool(game_ui.call("consume_inventory_item", "rose", cells.size())):
+		return
+	for cell: Vector2i in cells:
+		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+		_after_placeable_placed(cell, placeable_def, false)
+	target_layer.update_internals()
+	_flush_plant_layer_visuals()
+	Sfx.play_sound(&"plant")
+
+func _cancel_rose_drag() -> void:
+	_rose_drag_active = false
+	_clear_hover()
+
+func _inventory_item_quantity(item_id: String) -> int:
+	if not game_ui or not game_ui.has_method("get_inventory_item_quantity"):
+		return 0
+	return int(game_ui.call("get_inventory_item_quantity", item_id))
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
@@ -255,10 +377,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		return
 
 	_hover_cell = _hovered_cell()
-	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(_hover_cell):
-		_notify("invalid construction")
-		return
-	if _is_placeable_occupied(_hover_cell, target_layer, placeable_def):
+	if not _is_valid_placeable_cell(_hover_cell, target_layer, placeable_def):
 		_notify("invalid construction")
 		return
 
@@ -333,12 +452,17 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 		return true
 	return _is_occupied_by_group_node(cell)
 
-func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary) -> void:
+func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(cell):
+		return false
+	return not _is_placeable_occupied(cell, target_layer, placeable_def)
+
+func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_placement_sound: bool = true) -> void:
 	var placeable_category: String = str(placeable_def.get("category", ""))
 	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
 		plant_manager.call("add_plant", cell)
 	var placeable_id: String = str(placeable_def.get("id", ""))
-	if placeable_id == "rose":
+	if placeable_id == "rose" and play_placement_sound:
 		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
@@ -371,9 +495,11 @@ func _notify(message: String) -> void:
 		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
-	if not _hover_active:
+	if not _hover_active and _preview_cells.is_empty():
 		return
-	previewbuild.erase_cell(_hover_cell)
+	for cell: Vector2i in _preview_cells:
+		previewbuild.erase_cell(cell)
+	_preview_cells.clear()
 	previewbuild.update_internals()
 	_hover_active = false
 	_hover_atlas_coords = Vector2i(-1, -1)

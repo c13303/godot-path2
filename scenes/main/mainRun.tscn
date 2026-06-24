@@ -14,6 +14,7 @@
 [ext_resource type="Script" uid="uid://itkewskbri68" path="res://scripts/map/buildsystem.gd" id="17_k5rlw"]
 [ext_resource type="Script" uid="uid://cv7jp6vpx4hh8" path="res://scripts/map/building_manager.gd" id="18_vt3yt"]
 [ext_resource type="Script" uid="uid://d3edhdcktbvkw" path="res://scripts/combat/fight_system.gd" id="19_gvmlv"]
+[ext_resource type="Script" uid="uid://b1e22fwbyfhns" path="res://scripts/combat/turret_system.gd" id="19_turret"]
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
@@ -24,6 +25,7 @@
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
 [ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
+[ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
@@ -1276,6 +1278,20 @@ corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_water_reserve_background"]
+bg_color = Color(0, 0, 0, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_water_reserve_fill"]
+bg_color = Color(0.3, 0.75, 1, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_modal"]
 bg_color = Color(0.075, 0.078, 0.08, 0.96)
 border_width_left = 2
@@ -1321,10 +1337,6 @@ region = Rect2(192, 0, 32, 32)
 atlas = ExtResource("27_shop_items")
 region = Rect2(96, 0, 32, 32)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_shop_sword"]
-atlas = ExtResource("27_shop_items")
-region = Rect2(0, 0, 32, 32)
-
 [node name="game" type="Node2D" unique_id=1481310298]
 
 [node name="lagMonitor" type="Node" parent="." unique_id=160659281]
@@ -1349,6 +1361,8 @@ metadata/_edit_lock_ = true
 
 [node name="PlayerController" type="Node2D" parent="Player" unique_id=1943697114]
 script = ExtResource("3_mdsmv")
+rush_duration = 0.2
+rush_speed_mult = 2.0
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
@@ -1480,7 +1494,8 @@ global_config = NodePath("../../CPP/GlobalConfigNative")
 [node name="fightSystem" type="Node" parent="." unique_id=1631584488]
 script = ExtResource("19_gvmlv")
 
-[node name="turretSystem" type="Node" parent="fightSystem" unique_id=936456910]
+[node name="turretSystem" type="Node2D" parent="fightSystem" unique_id=936456910]
+script = ExtResource("19_turret")
 
 [node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
 layer = 50
@@ -1675,6 +1690,34 @@ custom_minimum_size = Vector2(56, 56)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
 
+[node name="bottom left anchor" type="Control" parent="GameUI" unique_id=1873448854]
+layout_mode = 3
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -52.0
+offset_right = 224.0
+offset_bottom = -24.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="waterReserve" type="ProgressBar" parent="GameUI/bottom left anchor" unique_id=1896415017]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_water_reserve_background")
+theme_override_styles/fill = SubResource("StyleBoxFlat_water_reserve_fill")
+value = 100.0
+show_percentage = false
+
 [node name="Modals" type="Control" parent="GameUI" unique_id=966875778]
 visible = false
 layout_mode = 3
@@ -1866,38 +1909,6 @@ layout_mode = 2
 theme_override_constants/separation = 12
 alignment = 1
 
-[node name="SwordItem" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=1768142112]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Sword" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/SwordItem" unique_id=215278854]
-texture_filter = 1
-custom_minimum_size = Vector2(48, 48)
-layout_mode = 2
-tooltip_text = "Sword"
-theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
-theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
-icon = SubResource("AtlasTexture_shop_sword")
-expand_icon = true
-
-[node name="Price" type="HBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/SwordItem" unique_id=1150831314]
-layout_mode = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/SwordItem/Price" unique_id=658534224]
-layout_mode = 2
-
-[node name="Gem" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/SwordItem/Price" unique_id=2020582601]
-texture_filter = 1
-custom_minimum_size = Vector2(16, 16)
-layout_mode = 2
-size_flags_vertical = 4
-texture = SubResource("AtlasTexture_gem_icon")
-expand_mode = 1
-stretch_mode = 5
-
 [node name="RoseItem" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=1768142111]
 layout_mode = 2
 theme_override_constants/separation = 4
@@ -1996,6 +2007,9 @@ stretch_mode = 5
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")
+
+[node name="difficulty" type="Node" parent="." unique_id=922878044]
+script = ExtResource("28_g12xc")
 
 [node name="sfx" type="Node" parent="." unique_id=1937632267]
 script = ExtResource("27_vhv61")

@@ -10,7 +10,8 @@ const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
 const WATER_REFILL_AMOUNT_KEY: StringName = &"water_refill_amount"
 const WATER_REFILL_INTERVAL_MS_KEY: StringName = &"water_refill_interval_ms"
 const SPRAY_PARTICLE_SCENE: PackedScene = preload("res://scenes/particles/particle.tscn")
-const SPRAY_PARTICLE_Z_INDEX: int = 4097
+const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
+const SPRAY_PARTICLE_Z_INDEX: int = 4096
 
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
@@ -46,11 +47,13 @@ var _gun_fire_timers: Dictionary = {}
 var _water_refill_elapsed: float = 0.0
 var _continuous_aoe_id: int = -1
 var _continuous_weapon_id: String = ""
+var _continuous_facing: Vector2 = Vector2.RIGHT
 var _continuous_cost_time_left: float = 0.0
 var _continuous_sound_id: StringName = &""
 var _spray_particle_effect: Node2D
 var _spray_particles: CPUParticles2D
 var _spray_particles_waiting_for_position: bool = false
+var _spray_audio_player: AudioStreamPlayer
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -68,6 +71,7 @@ func _ready() -> void:
 	_drawer.setup(_steering)
 	add_child(_drawer)
 	_setup_spray_particles()
+	_setup_spray_audio()
 	_damage_number_drawer = DamageNumberDrawer.new()
 	add_child(_damage_number_drawer)
 	_rebuild_weapon_index()
@@ -423,6 +427,14 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 		_stop_continuous_weapon()
 
 	var facing: Vector2 = direction.normalized()
+	var collision_facing: Vector2 = facing
+	if _continuous_aoe_id < 0 or weapon.aim_inertia <= 0.0:
+		_continuous_facing = facing
+	else:
+		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.aim_inertia)
+		var collision_angle: float = lerp_angle(_continuous_facing.angle(), facing.angle(), response)
+		_continuous_facing = Vector2.from_angle(collision_angle)
+		collision_facing = _continuous_facing
 	var aoe_follow_offset: Vector2 = follow_offset + facing * weapon.throw_offset
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
 	if _continuous_aoe_id < 0:
@@ -431,7 +443,7 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 		var started_id: int = int(_steering.call(
 			"start_continuous_aoe",
 			spawn_origin,
-			facing,
+			collision_facing,
 			weapon.radius,
 			weapon.directional_area_angle,
 			weapon.smash_force,
@@ -462,16 +474,17 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 				_stop_continuous_weapon()
 				return
 			_continuous_cost_time_left += maxf(weapon.reserve_cost_interval, 0.001)
-		var updated: bool = bool(_steering.call("update_continuous_aoe", _continuous_aoe_id, facing, aoe_follow_offset))
+		var updated: bool = bool(_steering.call("update_continuous_aoe", _continuous_aoe_id, collision_facing, aoe_follow_offset))
 		if not updated:
 			_stop_continuous_weapon()
 			return
 
 	if visualize_AOE_weapons and weapon.aoe_visual_enabled:
-		_drawer.set_persistent_weapon_area(weapon.id, spawn_origin, facing, weapon.radius, weapon.directional_area_angle, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
+		_drawer.set_persistent_weapon_area(weapon.id, spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
 	if weapon.waters_reactive_plants:
-		_water_plants_in_cone(spawn_origin, facing, weapon.radius, weapon.directional_area_angle)
+		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
 	if weapon.id == "spray":
+		_start_spray_audio()
 		_update_spray_particles(spawn_origin, facing)
 
 func _stop_continuous_weapon() -> void:
@@ -481,11 +494,27 @@ func _stop_continuous_weapon() -> void:
 		_drawer.clear_persistent_weapon_area(_continuous_weapon_id)
 	if _continuous_sound_id != &"" and Sfx.has_method("stop_sound"):
 		Sfx.stop_sound(_continuous_sound_id)
+	_stop_spray_audio()
 	_stop_spray_particles()
 	_continuous_aoe_id = -1
 	_continuous_weapon_id = ""
+	_continuous_facing = Vector2.RIGHT
 	_continuous_cost_time_left = 0.0
 	_continuous_sound_id = &""
+
+func _setup_spray_audio() -> void:
+	_spray_audio_player = AudioStreamPlayer.new()
+	_spray_audio_player.name = "SprayAudio"
+	_spray_audio_player.stream = SPRAY_SOUND
+	add_child(_spray_audio_player)
+
+func _start_spray_audio() -> void:
+	if _spray_audio_player != null and not _spray_audio_player.playing:
+		_spray_audio_player.play()
+
+func _stop_spray_audio() -> void:
+	if _spray_audio_player != null:
+		_spray_audio_player.stop()
 
 func _setup_spray_particles() -> void:
 	var effect_node: Node = SPRAY_PARTICLE_SCENE.instantiate()
@@ -500,7 +529,9 @@ func _setup_spray_particles() -> void:
 	add_child(_spray_particle_effect)
 	_spray_particles = _spray_particle_effect.get_node_or_null("CPUParticles2D") as CPUParticles2D
 	if _spray_particles != null:
-		_spray_particles.local_coords = true
+		# Emit in world space so turning only redirects newly emitted particles.
+		# Particles already in flight keep their original position and direction.
+		_spray_particles.local_coords = false
 		_spray_particles.emitting = false
 
 func _update_spray_particles(origin: Vector2, facing: Vector2) -> void:
@@ -603,6 +634,20 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 				Sfx.play_sound(&"bubble1")
 			t = max(0.0, gun.fire_delay_ms * 0.001)
 	_gun_fire_timers[gun_id] = t
+
+func fire_gun_once(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1) -> bool:
+	var gun: GunData = _guns_by_id.get(gun_id) as GunData
+	if gun == null or not _projectiles or direction.length_squared() <= 0.000001:
+		return false
+	var type_id: int = int(_gun_type_ids.get(gun_id, -1))
+	if type_id < 0:
+		return false
+	var facing: Vector2 = direction.normalized()
+	var spawn_position: Vector2 = origin + facing * gun.throw_offset
+	var fired: bool = bool(_projectiles.call("fire", type_id, spawn_position, facing, source_agent_id, gun.affected_smash_classes))
+	if fired and gun.id == "water":
+		Sfx.play_sound(&"bubble1")
+	return fired
 
 func reset_gun_cooldown(gun_id: String) -> void:
 	if _gun_fire_timers.has(gun_id):

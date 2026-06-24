@@ -91,6 +91,12 @@ func get_building(cell: Vector2i) -> Dictionary:
 func has_building(cell: Vector2i) -> bool:
 	return _buildings_by_cell.has(cell)
 
+func get_building_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for raw_cell: Variant in _buildings_by_cell.keys():
+		cells.append(raw_cell as Vector2i)
+	return cells
+
 func clear() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()

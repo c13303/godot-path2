@@ -98,14 +98,18 @@ const ITEM_DEFS: Dictionary = {
 		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(2, 0),
 		"occupies_cell": true,
-		# Breakable dynamic obstacle: blocks local agent movement, but is NOT static
-		# wall topology — it must never feed wall signatures / flowfield rebuilds.
+		# Breakable dynamic obstacle. It participates in navigation like a wall; the
+		# accumulated daytime topology is applied when night starts.
 		"isWall": true,
 		"blocks_movement": true,
 		"blocks_projectiles": false,
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
+		"shoot_frequency": 3.0,
+		"weapon": "water",
+		# Matches water's default throw offset + projectile travel distance.
+		"range": 382.0,
 		"max_stack": 99,
 	},
 }

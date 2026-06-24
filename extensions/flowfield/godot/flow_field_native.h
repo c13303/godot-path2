@@ -39,6 +39,7 @@ namespace godot
 
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
+        TileMapLayer *blocking_layer = nullptr;
 
         struct AsyncFlowSnapshot
         {
@@ -128,6 +129,9 @@ namespace godot
 
         void set_wall_layer(Object *node);
         Object *get_wall_layer() const;
+
+        void set_blocking_layer(Object *node);
+        Object *get_blocking_layer() const;
 
         bool rebuild_async(Vector2 goal);
         void request_flow_to_group(int group_id, Vector2 goal);

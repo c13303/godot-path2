@@ -11,7 +11,6 @@ const MONSTER_VOLUME : float = 0.6
 const SOUNDS: Dictionary = {
 	&"bubble1": {"stream": preload("res://assets/sfx/bubble1.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"splash": {"stream": preload("res://assets/sfx/splash.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
-	&"spray": {"stream": preload("res://assets/sfx/spray.wav"), "overlap": 0, "volume": DEFAULT_VOLUME},
 	&"buy": {"stream": preload("res://assets/sfx/buy.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"pop1": {"stream": preload("res://assets/sfx/pop1.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"pop2": {"stream": preload("res://assets/sfx/pop2.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
@@ -30,6 +29,29 @@ const SOUNDS: Dictionary = {
 const POP_SOUNDS: Array[StringName] = [&"pop1", &"pop2", &"pop3", &"pop4"]
 const SCREAM_SOUNDS: Array[StringName] = [&"scream1", &"scream2", &"scream3", &"scream4"]
 const THEME: AudioStream = preload("res://assets/music/theme1.wav")
+
+## If false, music is never played.
+@export var music_enable: bool = false:
+	set(value):
+		music_enable = value
+		if _music_player == null:
+			return
+		if music_enable:
+			if not _music_player.playing:
+				_music_player.play()
+		else:
+			_music_player.stop()
+## Music volume. 1.0 = full volume; matches the previous default of 0.3.
+@export_range(0.0, 1.0) var music_volume: float = MUSIC_VOLUME:
+	set(value):
+		music_volume = clampf(value, 0.0, 1.0)
+		_apply_music_volume()
+## General sfx multiplier applied on top of each sound's own volume.
+## 1.0 = current game default volume.
+@export_range(0.0, 1.0) var sfx_general_volume: float = 1.0:
+	set(value):
+		sfx_general_volume = clampf(value, 0.0, 1.0)
+		_apply_sfx_volume()
 
 var _players: Dictionary = {}
 var _next_player: Dictionary = {}
@@ -95,7 +117,8 @@ func _build_player_pools() -> void:
 			var player: AudioStreamPlayer = AudioStreamPlayer.new()
 			player.name = "%s_%d" % [String(sound_id), player_index]
 			player.stream = stream
-			player.volume_db = linear_to_db(volume) if volume > 0.0 else -80.0
+			player.set_meta(&"base_volume", volume)
+			player.volume_db = _linear_to_volume_db(volume * sfx_general_volume)
 			add_child(player)
 			pool.append(player)
 		_players[sound_id] = pool
@@ -106,11 +129,32 @@ func _start_music() -> void:
 	_music_player = AudioStreamPlayer.new()
 	_music_player.name = "Theme1"
 	_music_player.stream = THEME
-	_music_player.volume_db = linear_to_db(MUSIC_VOLUME) if MUSIC_VOLUME > 0.0 else -80.0
+	_music_player.volume_db = _linear_to_volume_db(music_volume)
 	_music_player.finished.connect(_on_music_finished)
 	add_child(_music_player)
-	_music_player.play()
+	if music_enable:
+		_music_player.play()
 
 
 func _on_music_finished() -> void:
-	_music_player.play()
+	if music_enable:
+		_music_player.play()
+
+
+func _apply_music_volume() -> void:
+	if _music_player != null:
+		_music_player.volume_db = _linear_to_volume_db(music_volume)
+
+
+func _apply_sfx_volume() -> void:
+	for pool_variant: Variant in _players.values():
+		for player_variant: Variant in pool_variant as Array:
+			var player: AudioStreamPlayer = player_variant as AudioStreamPlayer
+			if player == null:
+				continue
+			var base_volume: float = float(player.get_meta(&"base_volume", DEFAULT_VOLUME))
+			player.volume_db = _linear_to_volume_db(base_volume * sfx_general_volume)
+
+
+func _linear_to_volume_db(volume: float) -> float:
+	return linear_to_db(volume) if volume > 0.0 else -80.0

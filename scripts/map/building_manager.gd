@@ -51,10 +51,9 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 # Decorative / passive / walkable placeables (lamps, spawners). Spawner and other
 # special tiles are scanned here. Does NOT block agents or affect flowfields.
 @export var traversable_buildings: TileMapLayer
-# Breakable / obstructing / non-walkable placeables (turret1). Deliberately NOT
-# part of wall topology / wall signatures / flowfield rebuilds: global FF still
-# routes monsters THROUGH these cells; only local movement (later) treats them as
-# soft round blockers. Queried via is_blocking_building_cell().
+# Breakable / obstructing / non-walkable placeables (turret1). These are navigation
+# blockers like walls. Their flow-field topology is applied once when night starts,
+# never while the player is building during the day.
 @export var blocking_buildings: TileMapLayer
 @export var plant_manager: Node
 @export var flow: Node
@@ -177,6 +176,8 @@ var _garden_retarget_queue: Array[Dictionary] = []
 var _garden_retarget_queued: Dictionary = {}  # nav_id -> true
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
+var _last_blocking_signature: int = 0
+var _navigation_topology_dirty: bool = true
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _last_spawn_failure_at_ms: Dictionary = {}
@@ -395,9 +396,12 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	if not is_night:
 		return
+	# Building is a daytime operation. Apply every accumulated wall/turret change
+	# once here, before any monsters spawn or routes are selected.
+	_scan_buildings()
+	_apply_navigation_topology_rebuild()
 	# Entering night: start fresh so monsters spawn promptly.
 	_validate_dirty_gardens()
-	_rebuild_spawner_garden_route_cache()
 	_spawned_this_night = false
 	_spawned_count_this_night = 0
 	_spawn_limit_this_night = _compute_spawn_limit()
@@ -629,16 +633,21 @@ func _scan_buildings() -> void:
 
 	t = Time.get_ticks_usec()
 	var wall_signature: int = _tile_layer_signature(wallz)
+	var blocking_signature: int = _tile_layer_signature(blocking_buildings)
 	_warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
 		"wall_cells=%d" % (wallz.get_used_cells().size() if wallz else 0))
-	var walls_changed: bool = wall_signature != _last_wall_signature or migrated
+	var walls_changed: bool = (
+		wall_signature != _last_wall_signature
+		or blocking_signature != _last_blocking_signature
+		or migrated
+	)
 	_last_wall_signature = wall_signature
+	_last_blocking_signature = blocking_signature
 
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
-	# Only the traversable layer carries spawners / special tiles. blocking_buildings
-	# (turret1) is deliberately NOT scanned here: it must not register spawners or
-	# otherwise feed garden / flowfield topology.
+	# Only the traversable layer carries spawners / special tiles. Turrets affect
+	# navigation through their layer signature above, but are not special tiles.
 	_scan_special_layer(traversable_buildings, seen_spawners)
 	_scan_special_layer(wallz, seen_spawners)
 	_warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
@@ -658,25 +667,28 @@ func _scan_buildings() -> void:
 			_dirty_spawner_escapes.erase(cell)
 
 	if walls_changed:
-		_rebuild_walkable_map_cache()
-		# Walls change navigation topology: a new wall can split a garden and a
-		# removed wall can merge two. Re-cluster plants by walkable reachability
-		# from scratch (single cached rebuild), then refresh cached spawner/garden
-		# FFs against the new entries.
-		if _plant_zone_built:
-			_rebuild_plant_zone_from_layer()
-		_rebuild_spawner_garden_route_cache()
-		for raw_spawner_cell in _spawners.keys():
-			_rebuild_spawner_plant_ff(raw_spawner_cell)
-			_dirty_spawner_escapes[raw_spawner_cell] = true
-		# Exit walls may have been added/removed: refresh per-exit escape FFs.
-		var exits_us: int = Time.get_ticks_usec()
-		_rebuild_exit_wall_escapes()
-		_warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
-			"exits=%d" % _exit_wall_escapes.size())
+		_navigation_topology_dirty = true
+
+func _apply_navigation_topology_rebuild() -> void:
+	if not _navigation_topology_dirty:
+		return
+	_navigation_topology_dirty = false
+	_rebuild_walkable_map_cache()
+	if _plant_zone_built:
+		_rebuild_plant_zone_from_layer()
+	_rebuild_spawner_garden_route_cache()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		_rebuild_spawner_plant_ff(spawner_cell)
+		_dirty_spawner_escapes[spawner_cell] = true
+	var exits_us: int = Time.get_ticks_usec()
+	_rebuild_exit_wall_escapes()
+	_warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
+		"exits=%d" % _exit_wall_escapes.size())
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
+	_apply_navigation_topology_rebuild()
 	var spawner_cells: Array = _spawners.keys()
 	var total_count: int = spawner_cells.size()
 	if total_count == 0:
@@ -1852,6 +1864,9 @@ func _spawn_monster_corpse(agent: Node2D) -> void:
 		return
 	parent.add_child(corpse)
 	corpse.global_position = agent.global_position
+	var corpse_sprite: Sprite2D = corpse.get_node_or_null("Sprite2D") as Sprite2D
+	if corpse_sprite:
+		corpse_sprite.rotation = randf() * TAU
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL
@@ -1929,7 +1944,9 @@ func _has_floor(cell: Vector2i) -> bool:
 	return floorz != null and floorz.get_cell_tile_data(cell) != null
 
 func _has_wall(cell: Vector2i) -> bool:
-	return wallz != null and wallz.get_cell_tile_data(cell) != null
+	if wallz != null and wallz.get_cell_tile_data(cell) != null:
+		return true
+	return blocking_buildings != null and blocking_buildings.get_cell_tile_data(cell) != null
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))
@@ -3523,7 +3540,7 @@ func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
 
 func _wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
 	var blockers: PackedVector2Array = PackedVector2Array()
-	if not wallz or cells.is_empty():
+	if cells.is_empty():
 		return blockers
 	var min_cell: Vector2i = INVALID_CELL
 	var max_cell: Vector2i = Vector2i(-2147483648, -2147483648)
@@ -3538,11 +3555,15 @@ func _wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
 			max_cell.x = maxi(max_cell.x, c.x)
 			max_cell.y = maxi(max_cell.y, c.y)
 
-	for raw_cell in wallz.get_used_cells():
-		var c: Vector2i = raw_cell
-		if c.x < min_cell.x or c.x > max_cell.x or c.y < min_cell.y or c.y > max_cell.y:
+	var blocker_layers: Array[TileMapLayer] = [wallz, blocking_buildings]
+	for layer: TileMapLayer in blocker_layers:
+		if layer == null:
 			continue
-		blockers.append(Vector2(float(c.x), float(c.y)))
+		for raw_cell: Variant in layer.get_used_cells():
+			var c: Vector2i = raw_cell as Vector2i
+			if c.x < min_cell.x or c.x > max_cell.x or c.y < min_cell.y or c.y > max_cell.y:
+				continue
+			blockers.append(Vector2(float(c.x), float(c.y)))
 	return blockers
 
 # ---------------------------------------------------------------------------

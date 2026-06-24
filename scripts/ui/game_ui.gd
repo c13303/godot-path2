@@ -11,6 +11,7 @@ const PURCHASE_FLIGHT_DURATION: float = 0.55
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
 @onready var toolbar_anchor: Control = $"bottom anchor"
+@onready var modals_root: Control = $Modals
 @onready var inventory_modal: Panel = $Modals/inventoryModal
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
@@ -91,7 +92,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if key_event.keycode == KEY_I or key_event.keycode == KEY_E:
+	if key_event.keycode == KEY_I:
 		_set_inventory_open(not inventory_modal.visible)
 		if inventory_modal.visible:
 			_refresh_all_slots()
@@ -133,13 +134,80 @@ func move_inventory_item(from_slot: int, to_slot: int) -> void:
 func select_quick_slot(index: int) -> void:
 	if index < 0 or index >= QUICK_SLOT_COUNT:
 		return
+	# If the chosen quick slot is empty, fall back to the nearest non-empty one.
+	# If every quick slot is empty (shouldn't happen, "spray" is non-removable),
+	# leave the selection on the requested slot.
+	if _is_quick_slot_empty(index):
+		var fallback: int = _nearest_valid_quick_slot(index)
+		if fallback >= 0:
+			index = fallback
 	selected_quick_index = index
 	_refresh_all_slots()
+
+# Re-selects the nearest non-empty quick slot when the current selection is empty
+# (e.g. after consuming the last item in the selected stack). Leaves the selection
+# untouched if every quick slot is empty.
+func _ensure_valid_quick_selection() -> void:
+	if not _is_quick_slot_empty(selected_quick_index):
+		return
+	var fallback: int = _nearest_valid_quick_slot(selected_quick_index)
+	if fallback >= 0:
+		selected_quick_index = fallback
+
+func _is_quick_slot_empty(index: int) -> bool:
+	if index < 0 or index >= inventory_slots.size():
+		return true
+	return _slot_item_id(inventory_slots[index]) == ""
+
+func _nearest_valid_quick_slot(index: int) -> int:
+	var limit: int = mini(QUICK_SLOT_COUNT, inventory_slots.size())
+	for distance: int in range(1, limit):
+		var left: int = index - distance
+		if left >= 0 and not _is_quick_slot_empty(left):
+			return left
+		var right: int = index + distance
+		if right < limit and not _is_quick_slot_empty(right):
+			return right
+	return -1
 
 func get_selected_quick_item_id() -> String:
 	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
 		return ""
 	return _slot_item_id(inventory_slots[selected_quick_index])
+
+func get_inventory_item_quantity(item_id: String) -> int:
+	var total: int = 0
+	for slot_data: Dictionary in inventory_slots:
+		if _slot_item_id(slot_data) == item_id:
+			total += _slot_quantity(slot_data)
+	return total
+
+func consume_inventory_item(item_id: String, quantity: int) -> bool:
+	if item_id == "" or quantity <= 0 or get_inventory_item_quantity(item_id) < quantity:
+		return false
+	var remaining: int = quantity
+	# Empty the selected stack first so bulk placement behaves consistently with
+	# normal single-item placement, then continue through any other stacks.
+	var slot_order: Array[int] = []
+	if selected_quick_index >= 0 and selected_quick_index < inventory_slots.size():
+		slot_order.append(selected_quick_index)
+	for i: int in range(inventory_slots.size()):
+		if i != selected_quick_index:
+			slot_order.append(i)
+	for slot_index: int in slot_order:
+		var slot_data: Dictionary = inventory_slots[slot_index]
+		if _slot_item_id(slot_data) != item_id:
+			continue
+		var current_quantity: int = _slot_quantity(slot_data)
+		var consumed_quantity: int = mini(current_quantity, remaining)
+		var new_quantity: int = current_quantity - consumed_quantity
+		inventory_slots[slot_index] = _make_slot(item_id, new_quantity) if new_quantity > 0 else _empty_slot()
+		remaining -= consumed_quantity
+		if remaining == 0:
+			break
+	_ensure_valid_quick_selection()
+	_refresh_all_slots()
+	return true
 
 func consume_selected_quick_item(expected_item_id: String) -> bool:
 	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
@@ -152,6 +220,7 @@ func consume_selected_quick_item(expected_item_id: String) -> bool:
 		return false
 	quantity -= 1
 	inventory_slots[selected_quick_index] = _make_slot(expected_item_id, quantity) if quantity > 0 else _empty_slot()
+	_ensure_valid_quick_selection()
 	_refresh_all_slots()
 	return true
 
@@ -382,8 +451,12 @@ func is_startup_loading() -> bool:
 	return _startup_loading_overlay != null
 
 func _set_inventory_open(is_open: bool) -> void:
+	# The modal lives under the Modals Control, which is hidden by default; a child
+	# only renders when every ancestor is visible, so the parent must toggle too.
+	modals_root.visible = is_open
 	inventory_modal.visible = is_open
-	toolbar_anchor.visible = not is_open
+	# Quick slots stay visible at all times so they are always available.
+	toolbar_anchor.visible = true
 	if tile_hover_info and tile_hover_info.has_method("set_enabled"):
 		tile_hover_info.call("set_enabled", not is_open)
 
