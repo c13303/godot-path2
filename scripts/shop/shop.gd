@@ -9,15 +9,18 @@ const GEM_CURRENCY: StringName = &"gem"
 ## currency is defined in ItemCatalog.
 const PRICES: Dictionary = {
 	"rose": 1,
+	"sword": 5,
 	"turret1": 10,
 	"wall": 100,
 }
 
 @onready var title_label: Label = $MarginContainer/Content/Title
 @onready var rose_button: Button = $MarginContainer/Content/Items/RoseItem/Rose
+@onready var sword_button: Button = $MarginContainer/Content/Items/SwordItem/Sword
 @onready var turret_button: Button = $MarginContainer/Content/Items/TurretItem/Turret
 @onready var wall_button: Button = $MarginContainer/Content/Items/WallItem/Wall
 @onready var rose_price_label: Label = $MarginContainer/Content/Items/RoseItem/Price/Amount
+@onready var sword_price_label: Label = $MarginContainer/Content/Items/SwordItem/Price/Amount
 @onready var turret_price_label: Label = $MarginContainer/Content/Items/TurretItem/Price/Amount
 @onready var wall_price_label: Label = $MarginContainer/Content/Items/WallItem/Price/Amount
 
@@ -31,10 +34,12 @@ func _ready() -> void:
 	progression_node = scene.get_node_or_null("progression") if scene != null else null
 	game_ui = scene.get_node_or_null("GameUI") if scene != null else null
 	rose_button.pressed.connect(_on_item_pressed.bind("rose", rose_button))
+	sword_button.pressed.connect(_on_item_pressed.bind("sword", sword_button))
 	turret_button.pressed.connect(_on_item_pressed.bind("turret1", turret_button))
 	wall_button.pressed.connect(_on_item_pressed.bind("wall", wall_button))
 
 	rose_price_label.text = str(int(PRICES["rose"]))
+	sword_price_label.text = str(int(PRICES["sword"]))
 	turret_price_label.text = str(int(PRICES["turret1"]))
 	wall_price_label.text = str(int(PRICES["wall"]))
 

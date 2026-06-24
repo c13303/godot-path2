@@ -5,6 +5,7 @@ signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
+const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const DEFAULT_SPAWN_COOLDOWN: float = 2.0
 const EATING_COOLDOWN: float = 5.0
@@ -1620,29 +1621,25 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 	var consume_us: int = Time.get_ticks_usec()
 	_start_agent_eating(eater, _eating_time, plant_cell)
 	Sfx.play_sound(&"crunsh")
-	# plant_manager.remove_plant() fires _on_plant_removed synchronously (garden
+	# plant_manager.consume_plant() fires _on_plant_removed synchronously (garden
 	# content update + narrow retarget / empty handling), so it is the prime suspect
 	# for an eat-triggered spike. Time it on its own.
-	if plant_manager and plant_manager.has_method("remove_plant"):
+	if plant_manager and plant_manager.has_method("consume_plant"):
 		var remove_us: int = Time.get_ticks_usec()
-		plant_manager.call("remove_plant", plant_cell, true)
+		plant_manager.call("consume_plant", plant_cell)
 		_warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
 			"plant=%s" % str(plant_cell))
 	elif plantz:
-		plantz.erase_cell(plant_cell)
+		var source_id: int = plantz.get_cell_source_id(plant_cell)
+		var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
+		plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 		_flush_plant_layer_visuals()
-	if plantz and plantz.get_cell_source_id(plant_cell) >= 0:
-		plantz.erase_cell(plant_cell)
-		_flush_plant_layer_visuals()
-		call_deferred("_flush_plant_layer_visuals")
 	_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
 		return
-	if _no_plants_remaining():
-		plantz.clear()
 	plantz.update_internals()
 	plantz.queue_redraw()
 
@@ -1829,6 +1826,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 func remove_dead_monster(agent: Node2D) -> void:
 	if not is_instance_valid(agent):
 		return
+	_spawn_monster_corpse(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
@@ -1843,6 +1841,18 @@ func remove_dead_monster(agent: Node2D) -> void:
 		agent_manager.call("unregister_agent", nav_id)
 	agent.remove_from_group("monsters")
 	agent.queue_free()
+
+func _spawn_monster_corpse(agent: Node2D) -> void:
+	var corpse: Node2D = MONSTER_CORPSE_SCENE.instantiate() as Node2D
+	if corpse == null:
+		return
+	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
+	if parent == null:
+		corpse.queue_free()
+		return
+	parent.add_child(corpse)
+	corpse.global_position = agent.global_position
+	corpse.z_index = int(corpse.global_position.y)
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL

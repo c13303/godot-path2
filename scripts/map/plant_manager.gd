@@ -9,6 +9,7 @@ signal day_seed_harvest_finished
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 1)
+const DEBRIS_ATLAS: Vector2i = Vector2i(1, 1)
 const SPAWNING_SEEDS_DELAY: int = 3000
 
 @export var plantz: TileMapLayer
@@ -54,6 +55,8 @@ func initialize_from_layer() -> void:
 		return
 	for raw_cell in plantz.get_used_cells():
 		var cell: Vector2i = raw_cell
+		if not _is_rose_atlas(plantz.get_cell_atlas_coords(cell)):
+			continue
 		_capture_tile_metadata(cell)
 		_index_cell(cell)
 	_initialized = true
@@ -84,6 +87,9 @@ func is_rose_cell(cell: Vector2i) -> bool:
 	if not plantz or not _plants.has(cell):
 		return false
 	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	return _is_rose_atlas(atlas_coords)
+
+func _is_rose_atlas(atlas_coords: Vector2i) -> bool:
 	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_WET_ATLAS
 
 func wet_rose(cell: Vector2i) -> bool:
@@ -161,6 +167,18 @@ func remove_plant(cell: Vector2i, erase_tile: bool = true) -> void:
 		_queue_plant_layer_flush()
 	plant_removed.emit(cell)
 
+func consume_plant(cell: Vector2i) -> void:
+	if not plantz or not _plants.has(cell):
+		return
+	var source_id: int = plantz.get_cell_source_id(cell)
+	var alternative_tile: int = plantz.get_cell_alternative_tile(cell)
+	_unindex_cell(cell)
+	if source_id >= 0:
+		plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
+		_flush_plant_layer_now()
+		_queue_plant_layer_flush()
+	plant_removed.emit(cell)
+
 func _capture_tile_metadata(cell: Vector2i) -> void:
 	if not plantz:
 		return
@@ -177,7 +195,11 @@ func _capture_tile_metadata(cell: Vector2i) -> void:
 func _rebuild_plant_layer_from_index() -> void:
 	if not plantz:
 		return
-	plantz.clear()
+	# Rebuild only edible plants; non-plant occupants such as debris must remain.
+	for raw_used_cell: Variant in plantz.get_used_cells():
+		var used_cell: Vector2i = raw_used_cell as Vector2i
+		if _is_rose_atlas(plantz.get_cell_atlas_coords(used_cell)):
+			plantz.erase_cell(used_cell)
 	for raw_cell in _plants.keys():
 		var cell: Vector2i = raw_cell
 		var tile_data: Dictionary = _plant_tiles.get(cell, {}) as Dictionary

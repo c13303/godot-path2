@@ -5,6 +5,7 @@ const ITEM_DEFS: Dictionary = {
 	"sword": {
 		"id": "sword",
 		"name": "Sword",
+		"currency": &"gem",
 		"type": "weapon",
 		"category": "tools",
 		"frame": 0,
@@ -54,6 +55,16 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "rose",
 		"max_stack": 99,
+	},
+	"debris": {
+		"id": "debris",
+		"name": "Debris",
+		"type": "world_item",
+		"category": "debris",
+		"target_layer": "plantz",
+		"atlas": Vector2i(1, 1),
+		"removable": true,
+		"return_to_inventory": false,
 	},
 	"lamp": {
 		"id": "lamp",
@@ -130,7 +141,7 @@ static func get_placeable_id_for_tile(target_layer: String, atlas_coords: Vector
 		if not (raw_item_def is Dictionary):
 			continue
 		var item_def: Dictionary = raw_item_def as Dictionary
-		if str(item_def.get("type", "")) != "placeable":
+		if str(item_def.get("type", "")) != "placeable" and not bool(item_def.get("removable", false)):
 			continue
 		var item_layer: String = str(item_def.get("target_layer", "wallz"))
 		if item_layer == "buildings":
@@ -145,6 +156,9 @@ static func get_placeable_id_for_tile(target_layer: String, atlas_coords: Vector
 		if _atlas_coords_from_variant(item_def.get("atlas", Vector2i(-1, -1))) == atlas_coords:
 			return str(item_def.get("id", ""))
 	return ""
+
+static func removed_item_returns_to_inventory(item_id: String) -> bool:
+	return bool(get_item_def(item_id).get("return_to_inventory", true))
 
 static func _atlas_coords_from_variant(raw_atlas: Variant) -> Vector2i:
 	if raw_atlas is Vector2i:

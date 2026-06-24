@@ -16,12 +16,19 @@ const SMASH_CLASS_PLAYER: int = 1
 
 @export var zoom_speed: float = 0.125
 @export var lock_mouse_to_view: bool = true
+@export var gamepad_stick_deadzone: float = 0.2
+@export var gamepad_cursor_speed: float = 900.0
+@export var gamepad_trigger_threshold: float = 0.5
 
 var global_config_node: Node = null
 var _paused: bool = false
 var _mouse_was_locked_before_pause: bool = false
 var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
+var _active_gamepad_device: int = -1
+var _left_trigger_pressed: bool = false
+var _right_trigger_pressed: bool = false
+var _emulated_mouse_button_mask: int = 0
 
 func _ready() -> void:
 	var scene: Node = get_tree().get_current_scene()
@@ -34,6 +41,21 @@ func _input(event: InputEvent) -> void:
 	if _startup_loading_active():
 		get_viewport().set_input_as_handled()
 		return
+
+	if event is InputEventJoypadButton:
+		var joy_button_event: InputEventJoypadButton = event
+		_active_gamepad_device = joy_button_event.device
+		if joy_button_event.button_index == JOY_BUTTON_A:
+			_emulate_mouse_button(MOUSE_BUTTON_LEFT, joy_button_event.pressed)
+			get_viewport().set_input_as_handled()
+		elif joy_button_event.button_index == JOY_BUTTON_B:
+			_emulate_mouse_button(MOUSE_BUTTON_RIGHT, joy_button_event.pressed)
+			get_viewport().set_input_as_handled()
+		return
+
+	if event is InputEventJoypadMotion:
+		var joy_motion_event: InputEventJoypadMotion = event
+		_active_gamepad_device = joy_motion_event.device
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
@@ -54,9 +76,69 @@ func _process(delta: float) -> void:
 	if _startup_loading_active():
 		return
 
+	_update_gamepad_cursor(delta)
+	_update_gamepad_slot_input()
 	_update_player_input()
 	_update_gun_fire(delta)
 	camera_controller.process(delta, _paused)
+
+func _emulate_mouse_button(button_index: MouseButton, pressed: bool) -> void:
+	var button_mask: int = MOUSE_BUTTON_MASK_LEFT if button_index == MOUSE_BUTTON_LEFT else MOUSE_BUTTON_MASK_RIGHT
+	if pressed:
+		_emulated_mouse_button_mask |= button_mask
+	else:
+		_emulated_mouse_button_mask &= ~button_mask
+
+	var mouse_event: InputEventMouseButton = InputEventMouseButton.new()
+	var cursor_position: Vector2 = get_viewport().get_mouse_position()
+	mouse_event.button_index = button_index
+	mouse_event.pressed = pressed
+	mouse_event.button_mask = _emulated_mouse_button_mask
+	mouse_event.position = cursor_position
+	mouse_event.global_position = cursor_position
+	Input.parse_input_event(mouse_event)
+
+func _update_gamepad_cursor(delta: float) -> void:
+	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
+	if stick == Vector2.ZERO:
+		return
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var max_position: Vector2 = Vector2(maxf(viewport_size.x - 1.0, 0.0), maxf(viewport_size.y - 1.0, 0.0))
+	var cursor_position: Vector2 = get_viewport().get_mouse_position() + stick * gamepad_cursor_speed * delta
+	cursor_position = cursor_position.clamp(Vector2.ZERO, max_position)
+	Input.warp_mouse(cursor_position)
+
+func _update_gamepad_slot_input() -> void:
+	if _active_gamepad_device < 0:
+		_left_trigger_pressed = false
+		_right_trigger_pressed = false
+		return
+
+	var left_pressed: bool = Input.get_joy_axis(_active_gamepad_device, JOY_AXIS_TRIGGER_LEFT) >= gamepad_trigger_threshold
+	var right_pressed: bool = Input.get_joy_axis(_active_gamepad_device, JOY_AXIS_TRIGGER_RIGHT) >= gamepad_trigger_threshold
+	if left_pressed and not _left_trigger_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
+		game_ui.call("step_selected_quick_slot", -1)
+	if right_pressed and not _right_trigger_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
+		game_ui.call("step_selected_quick_slot", 1)
+	_left_trigger_pressed = left_pressed
+	_right_trigger_pressed = right_pressed
+
+func _gamepad_stick_vector(x_axis: JoyAxis, y_axis: JoyAxis) -> Vector2:
+	if _active_gamepad_device < 0:
+		return Vector2.ZERO
+	var stick: Vector2 = Vector2(
+		Input.get_joy_axis(_active_gamepad_device, x_axis),
+		Input.get_joy_axis(_active_gamepad_device, y_axis)
+	)
+	var magnitude: float = stick.length()
+	if magnitude <= gamepad_stick_deadzone:
+		return Vector2.ZERO
+	var scaled_magnitude: float = clampf(
+		(magnitude - gamepad_stick_deadzone) / maxf(1.0 - gamepad_stick_deadzone, 0.001),
+		0.0,
+		1.0
+	)
+	return stick.normalized() * scaled_magnitude
 
 func _update_gun_fire(delta: float) -> void:
 	if _paused or _is_inventory_open():
@@ -198,6 +280,7 @@ func _update_player_input() -> void:
 			dir.x -= 1.0
 		if _is_any_key_pressed([KEY_D, KEY_RIGHT]):
 			dir.x += 1.0
+		dir += _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
 
 	if dir.length_squared() > 1.0:
 		dir = dir.normalized()

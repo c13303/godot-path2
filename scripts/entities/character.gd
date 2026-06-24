@@ -55,7 +55,8 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
-# monster.png is a 2-frame horizontal spritesheet: frame 0 = idle, frame 1 = eating.
+# monster.png is a 3-frame horizontal spritesheet. Live monsters only use frame 0
+# (idle) and frame 1 (eating); the separate corpse scene uses frame 2.
 const MONSTER_FRAME_IDLE: int = 0
 const MONSTER_FRAME_EATING: int = 1
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D

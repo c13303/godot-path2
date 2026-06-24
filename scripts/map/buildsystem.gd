@@ -1,6 +1,6 @@
 extends Node
 
-const REMOVE_HOLD_SECONDS: float = 3.0
+const REMOVE_HOLD_SECONDS: float = 2.0
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 
@@ -139,7 +139,8 @@ func _finish_removal() -> void:
 	var removed_layer: TileMapLayer = _remove_layer
 	_cancel_removal()
 	_remove_tile(removed_layer, removed_cell)
-	game_ui.call("add_inventory", removed_item_id, 1)
+	if ItemCatalog.removed_item_returns_to_inventory(removed_item_id):
+		game_ui.call("add_inventory", removed_item_id, 1)
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
@@ -170,6 +171,8 @@ func _removable_at_cell(cell: Vector2i) -> Dictionary:
 	return {}
 
 func _can_return_to_inventory(item_id: String) -> bool:
+	if not ItemCatalog.removed_item_returns_to_inventory(item_id):
+		return item_id != ""
 	return item_id != "" and game_ui and game_ui.has_method("can_add_inventory") and bool(game_ui.call("can_add_inventory", item_id, 1))
 
 func _create_remove_progress() -> void:

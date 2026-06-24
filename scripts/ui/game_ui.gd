@@ -72,10 +72,10 @@ func _input(event: InputEvent) -> void:
 		var mouse_event: InputEventMouseButton = event
 		if not inventory_modal.visible and mouse_event.pressed and not mouse_event.ctrl_pressed:
 			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				_step_selected_quick_slot(-1)
+				step_selected_quick_slot(-1)
 				get_viewport().set_input_as_handled()
 			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				_step_selected_quick_slot(1)
+				step_selected_quick_slot(1)
 				get_viewport().set_input_as_handled()
 		return
 
@@ -564,7 +564,7 @@ func _clear_container(container: Container) -> void:
 		container.remove_child(child)
 		child.queue_free()
 
-func _step_selected_quick_slot(direction: int) -> void:
+func step_selected_quick_slot(direction: int) -> void:
 	var next_index := selected_quick_index + direction
 	if next_index < 0:
 		next_index = QUICK_SLOT_COUNT - 1
