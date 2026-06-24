@@ -4,6 +4,7 @@ signal day_started(day_number: int)
 
 const SAVE_PATH: String = "user://progression_save.json"
 const SAVE_VERSION: int = 2
+const SEED_KEY: StringName = &"seeds"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
 	"floor",
@@ -76,6 +77,30 @@ func get_value(key: StringName) -> int:
 	return progression.get_value(key)
 
 
+## Spend a positive amount of a progression prop and refresh its UI.
+## Returns false without changing the value when there is not enough available.
+func spend(key: StringName, amount: int) -> bool:
+	if amount <= 0 or progression.get_value(key) < amount:
+		return false
+	progression.add(key, -amount)
+	_update_progression_ui()
+	return true
+
+
+## Single entry point for changing the seed count. Pass a positive `delta` to
+## grant seeds, a negative `delta` to spend them. Spending more seeds than the
+## player owns fails and leaves the count untouched. Refreshes the seed UI on
+## any successful change (event-driven; do NOT poll this every frame).
+## Use this everywhere seeds are added or removed.
+func update_seeds(delta: int) -> bool:
+	if delta < 0 and progression.get_value(SEED_KEY) < -delta:
+		return false
+	if delta != 0:
+		progression.add(SEED_KEY, delta)
+		_update_progression_ui()
+	return true
+
+
 func _ready() -> void:
 	# GameState is an autoload, so reconnect every time a fresh scene loads.
 	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
@@ -109,9 +134,20 @@ func _get_progression_ui() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/top left anchor/progressionUI") as RichTextLabel
 
 
+func _get_seed_label() -> Label:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top left anchor/seedIcon/seedQT") as Label
+
+
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
 func _update_progression_ui() -> void:
+	var seed_label: Label = _get_seed_label()
+	if seed_label != null:
+		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
+
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:
 		return

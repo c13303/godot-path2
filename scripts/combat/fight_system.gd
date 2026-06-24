@@ -118,9 +118,9 @@ class DamageNumberDrawer:
 	func _process(delta: float) -> void:
 		var had_numbers: bool = not _positions.is_empty()
 		for index: int in range(_positions.size() - 1, -1, -1):
-			var position: Vector2 = _positions[index]
-			position.y -= RISE_SPEED * delta
-			_positions[index] = position
+			var number_position: Vector2 = _positions[index]
+			number_position.y -= RISE_SPEED * delta
+			_positions[index] = number_position
 			_times_left[index] = _times_left[index] - delta
 			if _times_left[index] <= 0.0:
 				_remove_number_at(index)
@@ -143,9 +143,9 @@ class DamageNumberDrawer:
 		var font: Font = ThemeDB.fallback_font
 		for index: int in range(_positions.size()):
 			var text_value: String = str(_damages[index])
-			var position: Vector2 = _positions[index]
+			var number_position: Vector2 = _positions[index]
 			var text_size: Vector2 = font.get_string_size(text_value, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE)
-			var draw_position: Vector2 = position - Vector2(text_size.x * 0.5, 0.0)
+			var draw_position: Vector2 = number_position - Vector2(text_size.x * 0.5, 0.0)
 			var alpha: float = min(1.0, _times_left[index] / 0.18)
 			var outline_color: Color = Color(0.0, 0.0, 0.0, alpha)
 			for offset: Vector2 in [Vector2(-1.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, -1.0), Vector2(0.0, 1.0)]:

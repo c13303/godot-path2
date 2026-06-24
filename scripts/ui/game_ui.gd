@@ -170,25 +170,51 @@ func _setup_starting_inventory() -> void:
 	add_inventory("rose", 5)
 	add_inventory("turret1", 1)
 
-# Generic inventory add, reusable for pickups/rewards later.
-# For now its only behaviour is auto-slotting: if the item is not already
-# placed in a slot and a free slot exists, it drops into the first free slot.
-# Returns true if the item ended up slotted.
+# Generic inventory add, reusable for purchases, pickups, and rewards.
+# Existing stacks are filled before new slots are used. The operation is
+# all-or-nothing when there is insufficient inventory capacity.
 func add_inventory(item_id: String, quantity: int = 1) -> bool:
 	if item_id == "" or quantity <= 0:
 		return false
-	if _is_item_slotted(item_id):
+	if not can_add_inventory(item_id, quantity):
 		return false
-	var free_index: int = _first_free_slot()
-	if free_index < 0:
-		return false
-	inventory_slots[free_index] = _make_slot(item_id, quantity)
+
+	var remaining: int = quantity
+	var max_stack: int = ItemCatalog.get_max_stack(item_id)
+	for i: int in range(inventory_slots.size()):
+		var slot_data: Dictionary = inventory_slots[i]
+		if _slot_item_id(slot_data) != item_id:
+			continue
+		var current_quantity: int = _slot_quantity(slot_data)
+		var added_quantity: int = mini(remaining, max_stack - current_quantity)
+		if added_quantity <= 0:
+			continue
+		inventory_slots[i] = _make_slot(item_id, current_quantity + added_quantity)
+		remaining -= added_quantity
+		if remaining == 0:
+			break
+
+	while remaining > 0:
+		var free_index: int = _first_free_slot()
+		var new_stack_quantity: int = mini(remaining, max_stack)
+		inventory_slots[free_index] = _make_slot(item_id, new_stack_quantity)
+		remaining -= new_stack_quantity
+
 	_refresh_all_slots()
 	return true
 
-func _is_item_slotted(item_id: String) -> bool:
-	for slot_data in inventory_slots:
-		if _slot_item_id(slot_data) == item_id:
+func can_add_inventory(item_id: String, quantity: int = 1) -> bool:
+	if item_id == "" or quantity <= 0:
+		return false
+	var capacity: int = 0
+	var max_stack: int = ItemCatalog.get_max_stack(item_id)
+	for slot_data: Dictionary in inventory_slots:
+		var slotted_item_id: String = _slot_item_id(slot_data)
+		if slotted_item_id == item_id:
+			capacity += max_stack - _slot_quantity(slot_data)
+		elif slotted_item_id == "":
+			capacity += max_stack
+		if capacity >= quantity:
 			return true
 	return false
 

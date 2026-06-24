@@ -22,6 +22,8 @@
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
+[ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
+[ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1247,6 +1249,10 @@ tile_size = Vector2i(32, 32)
 navigation_layer_0/layers = 1
 sources/0 = SubResource("TileSetAtlasSource_egp0g")
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_seed_icon"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(226, 0, 32, 32)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
 atlas = ExtResource("24_moonsun")
 region = Rect2(0, 0, 64, 64)
@@ -1276,6 +1282,37 @@ corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
 [sub_resource type="Theme" id="Theme_siwji"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shop"]
+bg_color = Color(0, 0, 0, 0.94)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shop_item"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0, 0, 0, 0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shop_item_hover"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.2, 0.9, 0.25, 1)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_shop_rose"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(160, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_shop_turret"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(192, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_shop_wall"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(96, 0, 32, 32)
 
 [node name="game" type="Node2D" unique_id=1481310298]
 
@@ -1443,6 +1480,24 @@ layout_mode = 3
 anchors_preset = 0
 offset_right = 40.0
 offset_bottom = 40.0
+mouse_filter = 2
+
+[node name="seedIcon" type="TextureRect" parent="GameUI/top left anchor" unique_id=1153248331]
+layout_mode = 0
+offset_left = 777.0
+offset_top = 108.0
+offset_right = 817.0
+offset_bottom = 148.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_seed_icon")
+
+[node name="seedQT" type="Label" parent="GameUI/top left anchor/seedIcon" unique_id=618629205]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 11.0
+offset_right = 81.0
+offset_bottom = 34.0
+text = "x 999"
 
 [node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
 layout_mode = 0
@@ -1475,6 +1530,15 @@ tooltip_text = "Toggle day / night"
 icon = SubResource("AtlasTexture_sun")
 icon_alignment = 1
 expand_icon = true
+
+[node name="top right" type="Control" parent="GameUI" unique_id=401142736]
+layout_mode = 3
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -40.0
+offset_bottom = 40.0
+grow_horizontal = 0
 
 [node name="bottom anchor" type="Control" parent="GameUI" unique_id=904977731]
 layout_mode = 3
@@ -1699,10 +1763,83 @@ script = ExtResource("12_vj62y")
 
 [node name="right anchor" type="Control" parent="GameUI" unique_id=722604844]
 layout_mode = 3
-anchors_preset = 0
-offset_right = 40.0
-offset_bottom = 40.0
-size_flags_horizontal = 8
+anchor_left = 0.85
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 0
+grow_vertical = 2
+
+[node name="Shop" type="Panel" parent="GameUI/right anchor" unique_id=1347609121]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_shop")
+script = ExtResource("28_shop")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/right anchor/Shop" unique_id=547436022]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="Content" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer" unique_id=304500496]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content" unique_id=1135021942]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "Shop"
+horizontal_alignment = 1
+
+[node name="Items" type="GridContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content" unique_id=1655392915]
+layout_mode = 2
+theme_override_constants/h_separation = 12
+theme_override_constants/v_separation = 12
+columns = 3
+
+[node name="Rose" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=215278853]
+texture_filter = 1
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+tooltip_text = "Rose"
+theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
+icon = SubResource("AtlasTexture_shop_rose")
+expand_icon = true
+
+[node name="Turret" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=1023829755]
+texture_filter = 1
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+tooltip_text = "Turret"
+theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
+icon = SubResource("AtlasTexture_shop_turret")
+expand_icon = true
+
+[node name="Wall" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=2101666100]
+texture_filter = 1
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+tooltip_text = "Wall"
+theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
+theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
+icon = SubResource("AtlasTexture_shop_wall")
+expand_icon = true
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")

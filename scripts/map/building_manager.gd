@@ -3740,7 +3740,8 @@ func _path_endpoint_local_offset(cell: Vector2i, nav_id: int) -> Vector2:
 	var radius: float = min(tile_size.x, tile_size.y) * 0.28
 	var h: int = nav_id * 1103515245 + cell.x * 73856093 + cell.y * 19349663
 	var slot: int = _positive_mod(h, 12)
-	var ring: int = _positive_mod(int(h / 12), 2)
+	@warning_ignore("integer_division")
+	var ring: int = _positive_mod(h / 12, 2)
 	var angle: float = (PI * 2.0 * float(slot)) / 12.0
 	var scale: float = 0.65 + 0.35 * float(ring)
 	return Vector2(cos(angle), sin(angle)) * radius * scale

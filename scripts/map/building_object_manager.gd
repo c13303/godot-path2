@@ -106,7 +106,9 @@ const _STATIC_OBSTACLE_ID_STRIDE: int = 100_000
 
 func _blocking_obstacle_id_for_cell(cell: Vector2i) -> int:
 	# Map signed cell coords into a non-negative grid so distinct cells stay distinct.
+	@warning_ignore("integer_division")
 	var gx: int = cell.x + (_STATIC_OBSTACLE_ID_STRIDE / 2)
+	@warning_ignore("integer_division")
 	var gy: int = cell.y + (_STATIC_OBSTACLE_ID_STRIDE / 2)
 	return _STATIC_OBSTACLE_ID_BASE + gy * _STATIC_OBSTACLE_ID_STRIDE + gx
 
