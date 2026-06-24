@@ -38,6 +38,15 @@ func _ready() -> void:
 	_resolve_atlas_source_id()
 	set_process(true)
 	set_process_input(true)
+	GameState.mode_changed.connect(_on_game_mode_changed)
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	if not is_night:
+		return
+	# Removal is forbidden at night. Cancel immediately rather than waiting for
+	# the next process tick to clear a hold that began during the day.
+	_cancel_removal()
+	_cancel_rose_drag()
 
 func _process(delta: float) -> void:
 	_process_removal(delta)

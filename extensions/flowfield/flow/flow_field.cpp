@@ -20,6 +20,8 @@ void FlowField::resize(int width, int height)
     w = width;
     h = height;
     dirs.assign(w * h, Vec2());
+    explicit_navigability = false;
+    navigable_cells.assign(w * h, 0);
     distance_field.assign(w * h, 0.0f);
     route_cost_field.assign(w * h, 0.0);
     clear_bottlenecks();
@@ -107,6 +109,8 @@ void FlowField::clear()
     ff_target_radius = 0.0;
     ready = false;
     goal_cell = Vec2i(-1, -1);
+    explicit_navigability = false;
+    std::fill(navigable_cells.begin(), navigable_cells.end(), 0);
 }
 
 void FlowField::set_dir(int x, int y, const Vec2 &dir)
@@ -138,13 +142,29 @@ bool FlowField::is_cell_navigable(const Vec2i &cell) const
     if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
         return false;
 
+    const int idx = cell.y * w + cell.x;
+    if (explicit_navigability)
+        return idx < static_cast<int>(navigable_cells.size()) && navigable_cells[idx] != 0;
+
     // Si la cellule est le but et que le champ est prêt, on la considère toujours navigable
     if (cell == goal_cell && ready)
         return true;
 
-    int idx = cell.y * w + cell.x;
     const Vec2 &d = dirs[idx];
     return !(std::abs(d.x) < 1e-6 && std::abs(d.y) < 1e-6);
+}
+
+void FlowField::enable_explicit_navigability()
+{
+    explicit_navigability = true;
+    navigable_cells.assign(w * h, 0);
+}
+
+void FlowField::set_cell_navigable(const Vec2i &cell, bool navigable)
+{
+    if (!explicit_navigability || cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return;
+    navigable_cells[cell.y * w + cell.x] = navigable ? 1 : 0;
 }
 
 Vec2i FlowField::find_nearest_navigable(Vec2i start) const
@@ -285,6 +305,8 @@ void FlowField::copy_from(const FlowField &src)
     goal_cell = src.goal_cell;
     ready = src.ready;
     dirs = src.dirs;
+    explicit_navigability = src.explicit_navigability;
+    navigable_cells = src.navigable_cells;
     ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
     route_cost_field = src.route_cost_field;

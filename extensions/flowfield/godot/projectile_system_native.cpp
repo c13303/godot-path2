@@ -31,6 +31,7 @@ void ProjectileSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_wall_layer", "wall_layer", "bounds_layer"), &ProjectileSystemNative::set_wall_layer);
     ClassDB::bind_method(D_METHOD("clear_walls"), &ProjectileSystemNative::clear_walls);
     ClassDB::bind_method(D_METHOD("set_static_collision_layers", "configs", "bounds_layer"), &ProjectileSystemNative::set_static_collision_layers);
+    ClassDB::bind_method(D_METHOD("set_static_collision_cells", "cells", "channels", "tile_size"), &ProjectileSystemNative::set_static_collision_cells);
     ClassDB::bind_method(D_METHOD("clear_static_collisions"), &ProjectileSystemNative::clear_static_collisions);
 }
 
@@ -290,6 +291,42 @@ void ProjectileSystemNative::set_static_collision_layers(const Array &configs, O
     }
 
     system.set_static_collision_grid(min_x, min_y, width, height, tile_size, mask);
+}
+
+void ProjectileSystemNative::set_static_collision_cells(const PackedVector2Array &cells,
+                                                        const PackedInt32Array &channels,
+                                                        double tile_size)
+{
+    const int count = std::min(cells.size(), channels.size());
+    if (count <= 0)
+    {
+        system.clear_static_collision_grid();
+        return;
+    }
+
+    int min_x = INT32_MAX, min_y = INT32_MAX, max_x = INT32_MIN, max_y = INT32_MIN;
+    for (int i = 0; i < count; ++i)
+    {
+        const Vector2 cell = cells[i];
+        const int x = static_cast<int>(cell.x);
+        const int y = static_cast<int>(cell.y);
+        min_x = std::min(min_x, x);
+        min_y = std::min(min_y, y);
+        max_x = std::max(max_x, x);
+        max_y = std::max(max_y, y);
+    }
+
+    const int width = max_x - min_x + 1;
+    const int height = max_y - min_y + 1;
+    std::vector<std::uint32_t> mask(static_cast<std::size_t>(width) * height, 0);
+    for (int i = 0; i < count; ++i)
+    {
+        const Vector2 cell = cells[i];
+        const int x = static_cast<int>(cell.x) - min_x;
+        const int y = static_cast<int>(cell.y) - min_y;
+        mask[static_cast<std::size_t>(y) * width + x] |= static_cast<std::uint32_t>(channels[i]);
+    }
+    system.set_static_collision_grid(min_x, min_y, width, height, std::max(1.0, tile_size), mask);
 }
 
 void ProjectileSystemNative::clear_walls()

@@ -1495,6 +1495,7 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &zone : active_aoes)
     {
+        std::unordered_set<int> overlapping_ids;
         if (zone.continuous_id >= 0)
         {
             for (auto &cooldown : zone.hit_cooldowns)
@@ -1513,13 +1514,7 @@ void SteeringSystem::update_all(double delta)
         {
             if (nid == zone.ignored_agent_id)
                 continue;
-            if (zone.continuous_id >= 0)
-            {
-                auto cooldown_it = zone.hit_cooldowns.find(nid);
-                if (cooldown_it != zone.hit_cooldowns.end() && cooldown_it->second > 0.0)
-                    continue;
-            }
-            else if (zone.hit_ids.count(nid) != 0)
+            if (zone.continuous_id < 0 && zone.hit_ids.count(nid) != 0)
             {
                 continue;
             }
@@ -1558,6 +1553,14 @@ void SteeringSystem::update_all(double delta)
                 impulse_dir = zone.direction;
             }
 
+            if (zone.continuous_id >= 0)
+            {
+                overlapping_ids.insert(nid);
+                auto cooldown_it = zone.hit_cooldowns.find(nid);
+                if (cooldown_it != zone.hit_cooldowns.end() && cooldown_it->second > 0.0)
+                    continue;
+            }
+
             double base = std::max(0.0, 1.0 - dist / zone.radius);
             double attenuation = std::pow(base, zone.falloff);
 
@@ -1568,6 +1571,19 @@ void SteeringSystem::update_all(double delta)
                 zone.hit_cooldowns[nid] = zone.hit_frequency;
             else
                 zone.hit_ids.insert(nid);
+        }
+
+        if (zone.continuous_id >= 0)
+        {
+            // Cooldowns only throttle repeated hits during one uninterrupted overlap.
+            // Leaving the surface makes the next entry eligible for an immediate hit.
+            for (auto cooldown_it = zone.hit_cooldowns.begin(); cooldown_it != zone.hit_cooldowns.end();)
+            {
+                if (overlapping_ids.count(cooldown_it->first) == 0)
+                    cooldown_it = zone.hit_cooldowns.erase(cooldown_it);
+                else
+                    ++cooldown_it;
+            }
         }
 
         if (zone.continuous_id < 0)

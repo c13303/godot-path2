@@ -62,6 +62,8 @@ void FlowFieldNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal"), &FlowFieldNative::request_flow_to_group);
+    ClassDB::bind_method(D_METHOD("are_async_flows_idle"), &FlowFieldNative::are_async_flows_idle);
+    ClassDB::bind_method(D_METHOD("is_group_flow_request_ready", "group_id"), &FlowFieldNative::is_group_flow_request_ready);
     ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal"), &FlowFieldNative::assign_flow_to_group);
     ClassDB::bind_method(D_METHOD("group_route_cost_at_world", "group_id", "world_pos"), &FlowFieldNative::group_route_cost_at_world);
     ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
@@ -223,6 +225,17 @@ void FlowFieldNative::compute_distance_field_global()
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
 
     build_sets(wall_set, walkable_set);
+
+    // This field exists to provide wall distance/collision data before any goal
+    // flow is built. Its directions are intentionally all zero, so preserve the
+    // actual floor topology in an explicit mask instead of treating every cell as
+    // blocked via FlowField's direction-derived fallback.
+    field.enable_explicit_navigability();
+    for (const Vector2i &cell : walkable_set)
+    {
+        const Vector2i relative = cell - used.position;
+        field.set_cell_navigable(ffcore::Vec2i(relative.x, relative.y), true);
+    }
 
     compute_distance_field(used, wall_set);
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
@@ -757,6 +770,7 @@ void FlowFieldNative::worker_loop()
                 return;
             request = pending_requests.front();
             pending_requests.pop_front();
+            ++active_worker_requests;
         }
 
         AsyncFlowResult result = compute_async_request(request);
@@ -764,6 +778,7 @@ void FlowFieldNative::worker_loop()
         {
             std::lock_guard<std::mutex> lock(async_mutex);
             completed_results.push_back(result);
+            --active_worker_requests;
         }
     }
 }
@@ -1125,19 +1140,22 @@ void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal)
         return;
     }
 
-    AsyncFlowSnapshot snapshot;
-    if (!build_async_snapshot(goal, snapshot))
-        return;
-
     AsyncFlowRequest request;
     request.group_id = group_id;
-    request.snapshot = snapshot;
 
     {
         std::lock_guard<std::mutex> lock(async_mutex);
         request.serial = next_request_serial++;
         latest_request_serial_by_group[group_id] = request.serial;
+    }
 
+    // Stamp the request before snapshot construction. If the snapshot is invalid,
+    // readiness remains false instead of accidentally accepting an older field.
+    if (!build_async_snapshot(goal, request.snapshot))
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(async_mutex);
         for (auto it = pending_requests.begin(); it != pending_requests.end();)
         {
             if (it->group_id == group_id)
@@ -1149,6 +1167,22 @@ void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal)
         pending_requests.push_back(request);
     }
     async_cv.notify_one();
+}
+
+bool FlowFieldNative::are_async_flows_idle() const
+{
+    std::lock_guard<std::mutex> lock(async_mutex);
+    return pending_requests.empty() && completed_results.empty() && active_worker_requests == 0;
+}
+
+bool FlowFieldNative::is_group_flow_request_ready(int group_id) const
+{
+    std::lock_guard<std::mutex> lock(async_mutex);
+    const auto requested = latest_request_serial_by_group.find(group_id);
+    const auto applied = latest_applied_serial_by_group.find(group_id);
+    return requested != latest_request_serial_by_group.end() &&
+           applied != latest_applied_serial_by_group.end() &&
+           requested->second == applied->second;
 }
 
 void FlowFieldNative::process_async_results()
@@ -1200,6 +1234,11 @@ void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
     double world_radius = (target_radius + 1) * new_flow->tile_size();
     new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(result.group_id, new_flow);
+
+    {
+        std::lock_guard<std::mutex> lock(async_mutex);
+        latest_applied_serial_by_group[result.group_id] = result.serial;
+    }
 
     field.copy_from(result.field);
     current_group_id = result.group_id;

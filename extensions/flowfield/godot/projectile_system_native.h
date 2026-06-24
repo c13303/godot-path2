@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 
 #include "../projectile/projectile_system.h"
 
@@ -55,6 +56,7 @@ namespace godot
         // Build one static-collider grid from generic TileMapLayer configs:
         // { layer:Object, channel:int, atlas_coords:Array[Vector2i] (optional) }.
         void set_static_collision_layers(const Array &configs, Object *bounds_layer);
+        void set_static_collision_cells(const PackedVector2Array &cells, const PackedInt32Array &channels, double tile_size);
         void clear_static_collisions();
 
         void set_paused(bool p) { paused = p; }

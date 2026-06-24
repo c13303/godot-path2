@@ -54,6 +54,8 @@ var _spray_particle_effect: Node2D
 var _spray_particles: CPUParticles2D
 var _spray_particles_waiting_for_position: bool = false
 var _spray_audio_player: AudioStreamPlayer
+var _static_colliders_dirty: bool = true
+var _static_collider_prepare_generation: int = 0
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -77,12 +79,20 @@ func _ready() -> void:
 	_rebuild_weapon_index()
 	_register_guns()
 	_connect_static_collider_updates()
-	_upload_static_projectile_colliders()
+	GameState.mode_changed.connect(_on_game_mode_changed)
 	if _projectiles:
 		_projectile_drawer = ProjectileDrawer.new()
 		_projectile_drawer.z_order_enabled = z_order_projectiles
 		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
 		add_child(_projectile_drawer)
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	if is_night:
+		return
+	# Cancel a partially collected snapshot. A later night will restart from the
+	# final daytime layers instead of publishing stale cells.
+	_static_collider_prepare_generation += 1
+	_static_colliders_dirty = true
 
 func _process(_delta: float) -> void:
 	_drain_projectile_impacts()
@@ -278,11 +288,66 @@ func _connect_static_collider_updates() -> void:
 		_plant_manager.connect("plant_removed", refresh_callback)
 
 func _on_plant_collision_cells_changed(_cell: Vector2i) -> void:
+	# Daytime edits are accumulated. BuildingManager uploads the final snapshot
+	# once during capped night preparation instead of once per placed rose.
+	_static_colliders_dirty = true
+
+func prepare_night_static_colliders() -> void:
+	if not _static_colliders_dirty:
+		return
 	_upload_static_projectile_colliders()
+	_static_colliders_dirty = false
+
+func prepare_night_static_colliders_budgeted(budget_ms: float) -> bool:
+	# Always snapshot at night start: walls do not emit PlantManager signals, so
+	# `_static_colliders_dirty` alone cannot prove the wall channel is current.
+	if not _projectiles or not _projectiles.has_method("set_static_collision_cells"):
+		push_error("FightSystem: rebuilt ProjectileSystemNative is required for capped night preparation")
+		return false
+	_static_collider_prepare_generation += 1
+	var generation: int = _static_collider_prepare_generation
+	var budget_us: int = maxi(500, int(budget_ms * 1000.0))
+	var slice_started_us: int = Time.get_ticks_usec()
+	var tile_size: float = 1.0
+	if _floor_layer and _floor_layer.tile_set:
+		tile_size = maxf(1.0, float(_floor_layer.tile_set.tile_size.x))
+	var cells: PackedVector2Array = PackedVector2Array()
+	var channels: PackedInt32Array = PackedInt32Array()
+
+	if _wall_layer:
+		for wall_cell: Vector2i in _wall_layer.get_used_cells():
+			if generation != _static_collider_prepare_generation:
+				return false
+			var wall_world: Vector2 = _wall_layer.to_global(_wall_layer.map_to_local(wall_cell))
+			cells.append(Vector2(floorf(wall_world.x / tile_size), floorf(wall_world.y / tile_size)))
+			channels.append(STATIC_COLLISION_TERRAIN)
+			if Time.get_ticks_usec() - slice_started_us >= budget_us:
+				await get_tree().process_frame
+				slice_started_us = Time.get_ticks_usec()
+
+	if _plant_layer:
+		for plant_cell: Vector2i in _plant_layer.get_used_cells():
+			if generation != _static_collider_prepare_generation:
+				return false
+			var atlas: Vector2i = _plant_layer.get_cell_atlas_coords(plant_cell)
+			if atlas != PlantManager.ROSE_DRY_ATLAS and atlas != PlantManager.ROSE_WET_ATLAS:
+				continue
+			var plant_world: Vector2 = _plant_layer.to_global(_plant_layer.map_to_local(plant_cell))
+			cells.append(Vector2(floorf(plant_world.x / tile_size), floorf(plant_world.y / tile_size)))
+			channels.append(STATIC_COLLISION_REACTIVE_PLANT)
+			if Time.get_ticks_usec() - slice_started_us >= budget_us:
+				await get_tree().process_frame
+				slice_started_us = Time.get_ticks_usec()
+
+	_projectiles.call("set_static_collision_cells", cells, channels, tile_size)
+	_static_colliders_dirty = false
+	return true
 
 # Public hook: re-upload walls after the build system adds/removes wall tiles.
 func refresh_projectile_walls() -> void:
-	_upload_static_projectile_colliders()
+	_static_colliders_dirty = true
+	if GameState.is_night:
+		prepare_night_static_colliders()
 
 func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> bool:
 	var weapon: WeaponData = _weapon_by_id(weapon_id)

@@ -5,20 +5,19 @@
 [resource]
 script = ExtResource("1_weapon_data")
 id = "spray"
-throw_offset = 16.0
-directional_area_angle = 40.0
-radius = 120.0
+throw_offset = 4.0
+directional_area_angle = 20.0
+radius = 200.0
 smash_force = 400.0
 control_suppression = 0.35
 control_suppression_duration = 0.15
-damage = 50
+damage = 40
 continuous = true
-aim_inertia = 0.135
-hit_frequency = 0.2
+aim_inertia = 0.1
+hit_frequency = 0.1
 reserve_id = &"water"
 reserve_cost = 1
 reserve_cost_interval = 0.5
 waters_reactive_plants = true
-aoe_visual_enabled = false
 aoe_fill_color = Color(0.12, 0.48, 1, 0.22)
 aoe_stroke_color = Color(0.35, 0.72, 1, 0.95)

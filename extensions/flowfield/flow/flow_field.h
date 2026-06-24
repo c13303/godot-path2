@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <vector>
 #include <cmath>
 #include "../core/types.h"
@@ -62,6 +63,8 @@ namespace ffcore
         Vec2 goal_center_world() const { return cell_to_world(goal_cell); }
 
         bool is_cell_navigable(const Vec2i &cell) const;
+        void enable_explicit_navigability();
+        void set_cell_navigable(const Vec2i &cell, bool navigable);
         Vec2i find_nearest_navigable(Vec2i start) const;
         void clear_bottlenecks();
         int add_bottleneck(const Vec2i &cell, int axis, double route_cost = 0.0);
@@ -94,6 +97,11 @@ namespace ffcore
 
         Vec2i cell_origin = Vec2i(0, 0);
         std::vector<Vec2> dirs;
+        // Distance-only fields have no flow directions, so direction == zero cannot
+        // be used to distinguish floors from walls. Goal-based fields keep the
+        // legacy direction-derived behavior unless this mask is explicitly enabled.
+        bool explicit_navigability = false;
+        std::vector<std::uint8_t> navigable_cells;
         std::vector<float> distance_field;
         std::vector<double> route_cost_field;
         std::vector<BottleneckInfo> bottlenecks;

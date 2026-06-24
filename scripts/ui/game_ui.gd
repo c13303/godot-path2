@@ -547,7 +547,7 @@ func _connect_startup_loading_signals() -> void:
 		if flow_code.has_signal("loading_progress"):
 			flow_code.connect("loading_progress", Callable(self, "_on_startup_loading_progress"))
 		if bool(flow_code.get("is_ready")):
-			_on_startup_loading_progress(0.45, "Flow field ready")
+			_on_startup_loading_progress(0.45, "Navigation service ready")
 
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
 	if building_manager:

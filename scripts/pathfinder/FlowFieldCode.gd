@@ -37,14 +37,12 @@ func _ready() -> void:
 
 	await get_tree().process_frame
 
-	loading_progress.emit(0.25, "Computing flow field")
+	# The default field is required immediately by manual player steering for hard
+	# wall collision and wall correction. Monster group flow fields remain lazy and
+	# are prepared separately by BuildingManager when night starts.
+	loading_progress.emit(0.25, "Computing wall collisions")
 	await get_tree().process_frame
-
 	ff.compute_distance_field_global()
-	var _d = ff.compute_flow_dir(global_position)
-	#print("Direction lue après rebuild:", _d)
-
-
 	is_ready = true
 	loading_progress.emit(0.45, "Flow field ready")
 	flow_field_ready.emit()

@@ -74,6 +74,8 @@ namespace godot
         std::deque<AsyncFlowRequest> pending_requests;
         std::deque<AsyncFlowResult> completed_results;
         std::unordered_map<int, uint64_t> latest_request_serial_by_group;
+        std::unordered_map<int, uint64_t> latest_applied_serial_by_group;
+        int active_worker_requests = 0;
         bool worker_stop = false;
         uint64_t next_request_serial = 1;
 
@@ -135,6 +137,8 @@ namespace godot
 
         bool rebuild_async(Vector2 goal);
         void request_flow_to_group(int group_id, Vector2 goal);
+        bool are_async_flows_idle() const;
+        bool is_group_flow_request_ready(int group_id) const;
         void _draw() override;
         static double move_cost_for_dir(int dir_index);
 

@@ -79,6 +79,9 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 # spreading a burst of waiting agents across several smaller frames instead of one.
 # 0 falls back to one item per frame (the safest non-spiking behavior).
 @export_range(0.0, 100.0, 0.5, "or_greater") var garden_retarget_budget_ms: float = 4.0
+# Main-thread budget used while preparing a night. Garden clustering, geometry,
+# reachability, and route request submission yield when this slice is exhausted.
+@export_range(0.5, 16.0, 0.5, "or_greater") var night_preparation_budget_ms: float = 3.0
 # Spawner processing budget. Previously every ready spawner was spawned+assigned in
 # the same frame; with 4 spawners firing together that stacked 4 (individually
 # sub-threshold) spawn passes into one 30-40ms hitch. Ready spawners are now queued
@@ -184,6 +187,9 @@ var _last_spawn_failure_at_ms: Dictionary = {}
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
+var _night_preparing: bool = false
+var _night_preparation_ready: bool = false
+var _night_preparation_token: int = 0
 var _dirty_spawner_escapes: Dictionary = {}
 # One escape flow field per exit-wall tile, shared by all monsters. Keyed by the
 # exit-wall cell. Each value: { "escape_group": int, "escape_target_cell":
@@ -395,13 +401,12 @@ func _ready() -> void:
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	if not is_night:
+		_night_preparation_token += 1
+		_night_preparing = false
+		_night_preparation_ready = false
 		return
-	# Building is a daytime operation. Apply every accumulated wall/turret change
-	# once here, before any monsters spawn or routes are selected.
-	_scan_buildings()
-	_apply_navigation_topology_rebuild()
-	# Entering night: start fresh so monsters spawn promptly.
-	_validate_dirty_gardens()
+	# Night visuals/build lock become active immediately, but spawning remains gated
+	# while all daytime topology is consumed by the capped preparation coroutine.
 	_spawned_this_night = false
 	_spawned_count_this_night = 0
 	_spawn_limit_this_night = _compute_spawn_limit()
@@ -409,6 +414,12 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_log("Night spawn limit: %d (days + roses)" % _spawn_limit_this_night)
 	for cell in _spawn_timers.keys():
 		_spawn_timers[cell] = 0.0
+	_ready_spawner_queue.clear()
+	_ready_spawner_queue_set.clear()
+	_night_preparation_token += 1
+	_night_preparing = true
+	_night_preparation_ready = false
+	call_deferred("_run_night_preparation", _night_preparation_token)
 
 # This night's monster quota = nDays * monster_per_day + roses * monster_per_rose.
 # Returns 0 ("no cap") if progression is unavailable, so a missing node can never
@@ -461,18 +472,418 @@ func _run_startup_after_flow_ready() -> void:
 	if _startup_loading_started or _startup_ready:
 		return
 	_startup_loading_started = true
-	startup_loading_progress.emit(0.55, "Building plant zone")
+	startup_loading_progress.emit(0.55, "Reading map")
 	await get_tree().process_frame
-
-	_build_gardens_from_plants()
-	_validate_dirty_gardens()
-	startup_loading_progress.emit(0.70, "Finding spawner routes")
-	await get_tree().process_frame
-
-	await _sync_runtime_state()
+	# Gardens and monster flow fields intentionally remain dirty during the day.
+	# They are prepared from the final built map only when night begins.
+	_scan_buildings()
 	_startup_ready = true
 	startup_loading_progress.emit(1.0, "Ready")
 	startup_loading_finished.emit()
+
+func _night_preparation_is_current(token: int) -> bool:
+	return token == _night_preparation_token and GameState.is_night
+
+func _night_preparation_budget_us() -> int:
+	return maxi(500, int(night_preparation_budget_ms * 1000.0))
+
+func _run_night_preparation(token: int) -> void:
+	# Start on a clean frame; the mode-change input frame performs no navigation.
+	await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+
+	_scan_buildings()
+	_navigation_topology_dirty = false
+	await get_tree().process_frame
+	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
+	if not bool(prep_result):
+		return
+	prep_result = await _build_gardens_from_plants_budgeted(token)
+	if not bool(prep_result):
+		return
+	prep_result = await _validate_gardens_budgeted(token)
+	if not bool(prep_result):
+		return
+
+	_rebuild_spawner_garden_route_cache()
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		if not _night_preparation_is_current(token):
+			return
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		_initialize_spawner_route(spawner_cell)
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+
+	# Exit fields also use the native worker during preparation.
+	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
+	if not bool(prep_result):
+		return
+	await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+
+	var scene: Node = get_tree().current_scene
+	var fight_system: Node = scene.get_node_or_null("fightSystem") if scene else null
+	if fight_system and fight_system.has_method("prepare_night_static_colliders_budgeted"):
+		prep_result = await fight_system.call("prepare_night_static_colliders_budgeted", night_preparation_budget_ms)
+		if not bool(prep_result):
+			return
+	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
+		fight_system.call("prepare_night_static_colliders")
+
+	# Do not open the spawn gate until the worker has finished and the native
+	# node's process callback has applied every completed field to its group.
+	if not flow or not flow.has_method("are_async_flows_idle"):
+		push_error("BuildingManager: rebuilt FlowFieldNative is required for safe night preparation")
+		return
+	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+		await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+	if not _night_flow_fields_are_ready():
+		push_error("BuildingManager: night flow-field preparation completed with an unusable route")
+		return
+
+	_night_preparing = false
+	_night_preparation_ready = true
+	print("ff & gardens computed, monster night starts now")
+
+func _night_flow_fields_are_ready() -> bool:
+	if not flow or not flow.has_method("group_route_cost_at_world") or not flow.has_method("is_group_flow_request_ready"):
+		return false
+	for raw_spawner_cell: Variant in _spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if not _spawner_routes.has(spawner_cell):
+			return false
+		var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+		if not bool(route.get("escape_ready", false)):
+			return false
+		var group_id: int = int(route.get("escape_group", -1))
+		var goal_world: Vector2 = route.get("escape_world", Vector2.ZERO) as Vector2
+		if group_id <= IDLE_GROUP or not bool(flow.call("is_group_flow_request_ready", group_id)):
+			return false
+		var cost: float = float(flow.call("group_route_cost_at_world", group_id, goal_world))
+		if not is_finite(cost):
+			return false
+	for raw_escape: Variant in _exit_wall_escapes.values():
+		var escape: Dictionary = raw_escape as Dictionary
+		var exit_group_id: int = int(escape.get("escape_group", -1))
+		var exit_goal_world: Vector2 = escape.get("escape_world", Vector2.ZERO) as Vector2
+		if exit_group_id > IDLE_GROUP:
+			if not bool(flow.call("is_group_flow_request_ready", exit_group_id)):
+				return false
+			var exit_cost: float = float(flow.call("group_route_cost_at_world", exit_group_id, exit_goal_world))
+			if not is_finite(exit_cost):
+				return false
+	return true
+
+func _rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
+	if not _flow_ready or not agent_manager or not flow:
+		return true
+	if not agent_manager.has_method("create_group"):
+		return true
+	_clear_garden_entry_resolve_cache("night_prepare_exit_escapes")
+	var current_exits: Dictionary = {}
+	if wallz:
+		for raw_cell: Variant in wallz.get_used_cells():
+			var wall_cell: Vector2i = raw_cell as Vector2i
+			if wallz.get_cell_atlas_coords(wall_cell) == EXIT_WALL_ATLAS:
+				current_exits[wall_cell] = true
+	for raw_exit_cell: Variant in _exit_wall_escapes.keys().duplicate():
+		var old_exit_cell: Vector2i = raw_exit_cell as Vector2i
+		if not current_exits.has(old_exit_cell):
+			_release_exit_wall_escape(old_exit_cell)
+
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_exit_cell: Variant in current_exits.keys():
+		if not _night_preparation_is_current(token):
+			return false
+		var exit_cell: Vector2i = raw_exit_cell as Vector2i
+		var target_cell: Vector2i = _nearest_walkable_adjacent(exit_cell)
+		if target_cell == INVALID_CELL:
+			_release_exit_wall_escape(exit_cell)
+			continue
+		var escape: Dictionary = _exit_wall_escapes.get(exit_cell, {}) as Dictionary
+		var escape_group: int = int(escape.get("escape_group", -1))
+		if escape_group <= IDLE_GROUP:
+			escape_group = int(agent_manager.call("create_group"))
+		if escape_group <= IDLE_GROUP:
+			push_error("BuildingManager: could not allocate escape group for exit wall %s" % exit_cell)
+			continue
+		var escape_world: Vector2 = _cell_center(target_cell)
+		if not _is_finite_world(escape_world):
+			_release_exit_wall_escape(exit_cell)
+			continue
+		_request_group_flow_rebuild(escape_group, escape_world)
+		escape["escape_group"] = escape_group
+		escape["escape_target_cell"] = target_cell
+		escape["escape_world"] = escape_world
+		escape["ready"] = true
+		_exit_wall_escapes[exit_cell] = escape
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	return true
+
+func _rebuild_walkable_map_cache_budgeted(token: int) -> bool:
+	_walkable_map_tiles.clear()
+	if floorz == null:
+		return true
+	var slice_started_us: int = Time.get_ticks_usec()
+	var floor_cells: Array[Vector2i] = floorz.get_used_cells()
+	for cell: Vector2i in floor_cells:
+		if not _night_preparation_is_current(token):
+			return false
+		if _is_walkable(cell):
+			_walkable_map_tiles[cell] = true
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	return true
+
+func _build_gardens_from_plants_budgeted(token: int) -> bool:
+	_gardens.clear()
+	_garden_by_plant_cell.clear()
+	_dirty_gardens.clear()
+	_pending_empty_gardens.clear()
+	_clear_garden_entry_resolve_cache("night_prepare_gardens")
+	_gardens_epoch += 1
+	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
+		_plant_zone_built = true
+		return true
+
+	var unassigned: Dictionary = {}
+	var source_cells: Array = plant_manager.call("get_plant_cells") as Array
+	for raw_cell: Variant in source_cells:
+		var source_cell: Vector2i = raw_cell as Vector2i
+		unassigned[source_cell] = true
+
+	var slice_started_us: int = Time.get_ticks_usec()
+	while not unassigned.is_empty():
+		if not _night_preparation_is_current(token):
+			return false
+		var seed_cell: Vector2i = unassigned.keys()[0] as Vector2i
+		var garden_id: int = _create_garden()
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		var garden_plants: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		var frontier_plants: Array[Vector2i] = [seed_cell]
+		unassigned.erase(seed_cell)
+		garden_plants[seed_cell] = true
+		_garden_by_plant_cell[seed_cell] = garden_id
+
+		while not frontier_plants.is_empty():
+			var from_plant: Vector2i = frontier_plants.pop_back()
+			var visited: Dictionary = {from_plant: 0}
+			var queue: Array[Vector2i] = [from_plant]
+			var head: int = 0
+			while head < queue.size():
+				if not _night_preparation_is_current(token):
+					return false
+				var cell: Vector2i = queue[head]
+				head += 1
+				var distance: int = int(visited[cell])
+				if distance < GARDEN_LINK_DISTANCE:
+					for dy: int in range(-1, 2):
+						for dx: int in range(-1, 2):
+							if dx == 0 and dy == 0:
+								continue
+							var neighbor: Vector2i = cell + Vector2i(dx, dy)
+							if visited.has(neighbor) or not _is_walkable(neighbor):
+								continue
+							if dx != 0 and dy != 0:
+								if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+									continue
+							visited[neighbor] = distance + 1
+							queue.append(neighbor)
+							if unassigned.has(neighbor):
+								unassigned.erase(neighbor)
+								garden_plants[neighbor] = true
+								_garden_by_plant_cell[neighbor] = garden_id
+								frontier_plants.append(neighbor)
+				if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+					await get_tree().process_frame
+					slice_started_us = Time.get_ticks_usec()
+
+		garden["plant_cells"] = garden_plants
+		garden["edible_count"] = garden_plants.size()
+		garden["targetable"] = false
+		_gardens[garden_id] = garden
+		_mark_garden_dirty(garden_id, false)
+	_plant_zone_built = true
+	return true
+
+func _validate_gardens_budgeted(token: int) -> bool:
+	var dirty_ids: Array = _dirty_gardens.keys()
+	_dirty_gardens.clear()
+	_clear_garden_entry_resolve_cache("night_prepare_validate")
+	for raw_garden_id: Variant in dirty_ids:
+		if not _night_preparation_is_current(token):
+			return false
+		var garden_id: int = int(raw_garden_id)
+		if not _gardens.has(garden_id):
+			continue
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+		if plant_cells.is_empty():
+			_release_garden_routes(garden_id)
+			_erase_garden(garden_id, "night_prepare_empty")
+			continue
+		var geometry_result: Variant = await _recompute_garden_geometry_budgeted(garden_id, token)
+		if not bool(geometry_result):
+			return false
+
+	var reachable_result: Variant = await _recompute_spawner_reachable_cells_budgeted(token)
+	if not bool(reachable_result):
+		return false
+	_gardens_iter_depth += 1
+	var total_entry_points: int = 0
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_garden_id: Variant in _gardens.keys():
+		if not _night_preparation_is_current(token):
+			_gardens_iter_depth -= 1
+			return false
+		var garden_id: int = int(raw_garden_id)
+		_apply_spawner_reachability(garden_id)
+		total_entry_points += (_gardens[garden_id] as Dictionary).get("entry_cells", []).size()
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	_gardens_iter_depth -= 1
+	var cache_result: Variant = await _rebuild_plant_zone_compatibility_cache_budgeted(token)
+	if not bool(cache_result):
+		return false
+	_plant_zone_built = true
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
+	if _is_verbose():
+		print("BuildingManager: %d gardens recomputed with %d entry points" % [_gardens.size(), total_entry_points])
+	return true
+
+func _recompute_garden_geometry_budgeted(garden_id: int, token: int) -> bool:
+	if not _gardens.has(garden_id):
+		return true
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	var zone_tiles: Dictionary = {}
+	var distances: Dictionary = {}
+	var queue: Array[Vector2i] = []
+	var head: int = 0
+	for raw_cell: Variant in plant_cells.keys():
+		var plant_cell: Vector2i = raw_cell as Vector2i
+		zone_tiles[plant_cell] = true
+		distances[plant_cell] = 0
+		queue.append(plant_cell)
+	var entry_inside: Dictionary = {}
+	var slice_started_us: int = Time.get_ticks_usec()
+	while head < queue.size():
+		if not _night_preparation_is_current(token):
+			return false
+		var cell: Vector2i = queue[head]
+		head += 1
+		var cell_distance: int = int(distances[cell])
+		for dy: int in range(-1, 2):
+			for dx: int in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var neighbor: Vector2i = cell + Vector2i(dx, dy)
+				if not _is_walkable(neighbor):
+					continue
+				if dx != 0 and dy != 0:
+					if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+						continue
+				if zone_tiles.has(neighbor):
+					continue
+				var next_distance: int = cell_distance + 1
+				if next_distance <= PLANT_ZONE_MARGIN:
+					if not distances.has(neighbor) or next_distance < int(distances[neighbor]):
+						distances[neighbor] = next_distance
+						zone_tiles[neighbor] = true
+						queue.append(neighbor)
+				else:
+					entry_inside[cell] = true
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+
+	var margin_tiles: Dictionary = {}
+	for raw_cell: Variant in zone_tiles.keys():
+		var zone_cell: Vector2i = raw_cell as Vector2i
+		if not plant_cells.has(zone_cell):
+			margin_tiles[zone_cell] = true
+	var entry_cells: Array[Vector2i] = []
+	for raw_cell: Variant in entry_inside.keys():
+		entry_cells.append(raw_cell as Vector2i)
+	garden["zone_tiles"] = zone_tiles
+	garden["margin_tiles"] = margin_tiles
+	garden["entry_cells"] = entry_cells
+	garden["reachable"] = not entry_cells.is_empty()
+	garden["edible_count"] = plant_cells.size()
+	garden["targetable"] = plant_cells.size() > 0 and not entry_cells.is_empty()
+	garden["dirty"] = false
+	_gardens[garden_id] = garden
+	return true
+
+func _recompute_spawner_reachable_cells_budgeted(token: int) -> bool:
+	_spawner_reachable_cells.clear()
+	if _spawners.is_empty():
+		return true
+	var queue: Array[Vector2i] = []
+	var head: int = 0
+	for raw_spawner_cell: Variant in _spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		for dy: int in range(-1, 2):
+			for dx: int in range(-1, 2):
+				var seed: Vector2i = spawner_cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(seed) or not _is_walkable(seed):
+					continue
+				_spawner_reachable_cells[seed] = true
+				queue.append(seed)
+	var slice_started_us: int = Time.get_ticks_usec()
+	while head < queue.size():
+		if not _night_preparation_is_current(token):
+			return false
+		var cell: Vector2i = queue[head]
+		head += 1
+		for dy: int in range(-1, 2):
+			for dx: int in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var neighbor: Vector2i = cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(neighbor) or not _is_walkable(neighbor):
+					continue
+				if dx != 0 and dy != 0:
+					if not _is_walkable(cell + Vector2i(dx, 0)) or not _is_walkable(cell + Vector2i(0, dy)):
+						continue
+				_spawner_reachable_cells[neighbor] = true
+				queue.append(neighbor)
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	return true
+
+func _rebuild_plant_zone_compatibility_cache_budgeted(token: int) -> bool:
+	_plant_zone_tiles.clear()
+	_plant_zone_margin_tiles.clear()
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_garden: Variant in _gardens.values():
+		if not _night_preparation_is_current(token):
+			return false
+		var garden: Dictionary = raw_garden as Dictionary
+		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+		var margin_tiles: Dictionary = garden.get("margin_tiles", {}) as Dictionary
+		for raw_cell: Variant in zone_tiles.keys():
+			var zone_cell: Vector2i = raw_cell as Vector2i
+			_plant_zone_tiles[zone_cell] = true
+		for raw_cell: Variant in margin_tiles.keys():
+			var margin_cell: Vector2i = raw_cell as Vector2i
+			_plant_zone_margin_tiles[margin_cell] = true
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	return true
 
 func _setup_zone_overlay() -> void:
 	_zone_overlay = Node2D.new()
@@ -503,6 +914,9 @@ func _sync_plant_zone_debug_visibility() -> void:
 
 func _process(delta: float) -> void:
 	if not _flow_ready or not _startup_ready:
+		return
+	if _night_preparing:
+		_sync_plant_zone_debug_visibility()
 		return
 	var frame_start_us: int = Time.get_ticks_usec()
 	var t: int = 0
@@ -716,6 +1130,14 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 
 func _on_plant_added(_cell: Vector2i) -> void:
+	if not GameState.is_night:
+		# Daytime placement only dirties the next night's snapshot. In particular,
+		# rectangle placement must not rebuild every existing garden per rose.
+		_plant_zone_built = false
+		_navigation_topology_dirty = true
+		if _zone_overlay:
+			_zone_overlay.queue_redraw()
+		return
 	_add_plant_to_gardens(_cell)
 	_retarget_agents_for_garden_topology_change(_cell)
 	if _zone_overlay:
@@ -728,6 +1150,12 @@ func _on_plant_added(_cell: Vector2i) -> void:
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
+	if not GameState.is_night:
+		_plant_zone_built = false
+		_navigation_topology_dirty = true
+		if _zone_overlay:
+			_zone_overlay.queue_redraw()
+		return
 	var removed_us: int = Time.get_ticks_usec()
 	var result := _remove_plant_from_garden_content_only(cell)
 	if not bool(result.get("was_removed", false)):
@@ -840,7 +1268,7 @@ func _register_spawner(cell: Vector2i, cooldown: float) -> void:
 	}
 	if not _spawn_timers.has(cell):
 		_spawn_timers[cell] = 0.0
-	if is_new and _flow_ready and _plant_zone_built and _startup_ready:
+	if is_new and GameState.is_night and _night_preparation_ready and _flow_ready and _plant_zone_built and _startup_ready:
 		_initialize_spawner_route(cell)
 
 func _release_spawner_route(spawner_cell: Vector2i) -> void:
@@ -911,7 +1339,7 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 				route["escape_ready"] = false
 				_spawner_routes[spawner_cell] = route
 				return
-			flow.call("assign_flow_to_group", escape_group, escape_world)
+			_request_group_flow_rebuild(escape_group, escape_world)
 			route["escape_group"] = escape_group
 			route["escape_world"] = escape_world
 			route["escape_ready"] = true
@@ -967,7 +1395,7 @@ func _rebuild_all_spawner_routes() -> void:
 # whose goal is the floor tile adjacent to that exit wall. Runs only on dirty
 # events; at runtime a monster reads each group's route cost to pick the nearest
 # reachable exit. Stale exits (walls removed) are released.
-func _rebuild_exit_wall_escapes() -> void:
+func _rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
 	if not _flow_ready:
 		return
 	if not agent_manager or not agent_manager.has_method("create_group"):
@@ -1013,9 +1441,12 @@ func _rebuild_exit_wall_escapes() -> void:
 			])
 			_release_exit_wall_escape(exit_cell)
 			continue
-		# Synchronous assign so the FF (and its route-cost field) is queryable
-		# immediately; goals are static and rebuilds are rare (dirty events only).
-		if flow.has_method("assign_flow_to_group"):
+		# Night preparation submits these to the native worker and holds spawning
+		# until every result is applied. Runtime fallback keeps the prior synchronous
+		# behavior for callers that explicitly need an immediately queryable field.
+		if use_async_requests:
+			_request_group_flow_rebuild(escape_group, escape_world)
+		elif flow.has_method("assign_flow_to_group"):
 			flow.call("assign_flow_to_group", escape_group, escape_world)
 		else:
 			_request_group_flow_rebuild(escape_group, escape_world)
@@ -1107,6 +1538,8 @@ func _process_spawners(delta: float) -> void:
 	# the night is gone, automatically flip back to day. _monster_count() scans a
 	# scene group (get_nodes_in_group), so time it as a potential offender.
 	if not GameState.is_night:
+		return
+	if not _night_preparation_ready:
 		return
 	var t_mc: int = Time.get_ticks_usec()
 	var mc: int = _monster_count()
