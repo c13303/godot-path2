@@ -5,6 +5,7 @@ signal day_started(day_number: int)
 const SAVE_PATH: String = "user://progression_save.json"
 const SAVE_VERSION: int = 2
 const SEED_KEY: StringName = &"seeds"
+const GEM_KEY: StringName = &"gems"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
 	"floor",
@@ -39,6 +40,7 @@ class Progression:
 		ProgressionProp.new(&"monster_per_day", "Monster per day", 1),
 		ProgressionProp.new(&"monster_per_rose", "Monster per rose", 1),
 		ProgressionProp.new(&"seeds", "Seeds", 5),
+		ProgressionProp.new(&"gems", "Gems", 0),
 	]
 
 	func get_prop(key: StringName) -> ProgressionProp:
@@ -71,6 +73,7 @@ class Progression:
 
 var progression: Progression = Progression.new()
 var _seed_label_tween: Tween
+var _gem_label_tween: Tween
 
 
 ## Public accessor so other systems (e.g. the monster spawner) can read a
@@ -85,7 +88,7 @@ func spend(key: StringName, amount: int) -> bool:
 	if amount <= 0 or progression.get_value(key) < amount:
 		return false
 	progression.add(key, -amount)
-	_update_progression_ui(key == SEED_KEY)
+	_update_progression_ui(key == SEED_KEY, key == GEM_KEY)
 	return true
 
 
@@ -100,6 +103,17 @@ func update_seeds(delta: int) -> bool:
 	if delta != 0:
 		progression.add(SEED_KEY, delta)
 		_update_progression_ui(true)
+	return true
+
+
+## Single entry point for changing the gem count. Gems are credited when their
+## monster-drop animation reaches the HUD icon.
+func update_gems(delta: int) -> bool:
+	if delta < 0 and progression.get_value(GEM_KEY) < -delta:
+		return false
+	if delta != 0:
+		progression.add(GEM_KEY, delta)
+		_update_progression_ui(false, true)
 	return true
 
 
@@ -143,14 +157,26 @@ func _get_seed_label() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/top right/seedIcon/seedQT") as RichTextLabel
 
 
+func _get_gem_label() -> RichTextLabel:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top right/gemIcon/gemQT") as RichTextLabel
+
+
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
-func _update_progression_ui(animate_seed_label: bool = false) -> void:
+func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false) -> void:
 	var seed_label: RichTextLabel = _get_seed_label()
 	if seed_label != null:
 		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
 		if animate_seed_label:
 			_animate_seed_label(seed_label)
+	var gem_label: RichTextLabel = _get_gem_label()
+	if gem_label != null:
+		gem_label.text = "x %d" % progression.get_value(GEM_KEY)
+		if animate_gem_label:
+			_animate_gem_label(gem_label)
 
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:
@@ -171,6 +197,18 @@ func _animate_seed_label(seed_label: RichTextLabel) -> void:
 	_seed_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_seed_label_tween.tween_property(seed_label, "scale", Vector2.ONE, 0.42)
 	_seed_label_tween.tween_property(seed_label, "modulate", Color.WHITE, 0.5)
+
+
+func _animate_gem_label(gem_label: RichTextLabel) -> void:
+	if _gem_label_tween != null and _gem_label_tween.is_valid():
+		_gem_label_tween.kill()
+	gem_label.pivot_offset = gem_label.size * 0.5
+	gem_label.scale = Vector2(1.55, 1.55)
+	gem_label.modulate = Color(0.35, 0.75, 1.0, 1.0)
+	_gem_label_tween = create_tween().set_parallel(true)
+	_gem_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_gem_label_tween.tween_property(gem_label, "scale", Vector2.ONE, 0.42)
+	_gem_label_tween.tween_property(gem_label, "modulate", Color.WHITE, 0.5)
 
 
 func _unhandled_input(event: InputEvent) -> void:
