@@ -1510,11 +1510,12 @@ mouse_filter = 2
 
 [node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
 layout_mode = 0
-offset_left = 72.0
-offset_top = 98.0
-offset_right = 932.0
-offset_bottom = 640.0
+offset_left = 15.0
+offset_top = 15.0
+offset_right = 875.0
+offset_bottom = 557.0
 mouse_filter = 2
+theme_override_font_sizes/normal_font_size = 8
 
 [node name="top anchor" type="Control" parent="GameUI" unique_id=857551045]
 layout_mode = 3
