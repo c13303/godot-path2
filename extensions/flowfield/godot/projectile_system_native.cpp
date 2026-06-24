@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "steering_system_native.h"
@@ -29,6 +30,8 @@ void ProjectileSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &ProjectileSystemNative::set_paused);
     ClassDB::bind_method(D_METHOD("set_wall_layer", "wall_layer", "bounds_layer"), &ProjectileSystemNative::set_wall_layer);
     ClassDB::bind_method(D_METHOD("clear_walls"), &ProjectileSystemNative::clear_walls);
+    ClassDB::bind_method(D_METHOD("set_static_collision_layers", "configs", "bounds_layer"), &ProjectileSystemNative::set_static_collision_layers);
+    ClassDB::bind_method(D_METHOD("clear_static_collisions"), &ProjectileSystemNative::clear_static_collisions);
 }
 
 ProjectileSystemNative::ProjectileSystemNative() {}
@@ -98,7 +101,10 @@ int ProjectileSystemNative::register_type(const Dictionary &cfg)
     if (cfg.has("smash_control_suppression")) c.smash_control_suppression = double(cfg["smash_control_suppression"]);
     if (cfg.has("smash_control_suppression_duration")) c.smash_control_suppression_duration = double(cfg["smash_control_suppression_duration"]);
     if (cfg.has("damage")) c.damage = int(cfg["damage"]);
-    if (cfg.has("stopped_by_walls")) c.stopped_by_walls = bool(cfg["stopped_by_walls"]);
+    if (cfg.has("static_collision_mask"))
+        c.static_collision_mask = static_cast<std::uint32_t>(int64_t(cfg["static_collision_mask"]));
+    else if (cfg.has("stopped_by_walls"))
+        c.static_collision_mask = bool(cfg["stopped_by_walls"]) ? 1u : 0u;
     if (cfg.has("end_of_life_aoe_enabled")) c.end_of_life_aoe_enabled = bool(cfg["end_of_life_aoe_enabled"]);
     if (cfg.has("end_aoe_radius")) c.end_aoe_radius = double(cfg["end_aoe_radius"]);
     if (cfg.has("end_aoe_force")) c.end_aoe_force = double(cfg["end_aoe_force"]);
@@ -159,6 +165,8 @@ Array ProjectileSystemNative::get_impacts() const
         d["radius"] = e.radius;
         d["type_id"] = e.type_id;
         d["kind"] = e.kind;
+        d["collider_mask"] = static_cast<int64_t>(e.collider_mask);
+        d["collider_cell"] = Vector2i(e.collider_cell.x, e.collider_cell.y);
         out.push_back(d);
     }
     return out;
@@ -169,65 +177,127 @@ void ProjectileSystemNative::set_wall_layer(Object *wall_layer_obj, Object *boun
     auto *wall_layer = Object::cast_to<TileMapLayer>(wall_layer_obj);
     if (!wall_layer)
     {
-        system.clear_wall_grid();
+        system.clear_static_collision_grid();
         return;
     }
-    auto *bounds_layer = Object::cast_to<TileMapLayer>(bounds_layer_obj);
-    if (!bounds_layer)
-        bounds_layer = wall_layer;
 
-    // Tile size from the layer's TileSet (square tiles assumed, like FlowField).
+    Dictionary config;
+    config["layer"] = wall_layer;
+    config["channel"] = 1;
+    Array configs;
+    configs.push_back(config);
+    set_static_collision_layers(configs, bounds_layer_obj);
+}
+
+void ProjectileSystemNative::set_static_collision_layers(const Array &configs, Object *bounds_layer_obj)
+{
+    auto *bounds_layer = Object::cast_to<TileMapLayer>(bounds_layer_obj);
+    TileMapLayer *tile_size_layer = bounds_layer;
+    if (!tile_size_layer)
+    {
+        for (int i = 0; i < configs.size(); ++i)
+        {
+            Dictionary config = configs[i];
+            Object *layer_obj = config.get("layer", Variant());
+            tile_size_layer = Object::cast_to<TileMapLayer>(layer_obj);
+            if (tile_size_layer)
+                break;
+        }
+    }
+
+    // Tile size from the bounds/first layer (square tiles assumed, like FlowField).
     double tile_size = ffcore::globalconfig().tile_size;
-    Ref<TileSet> ts = wall_layer->get_tile_set();
-    if (ts.is_valid())
-        tile_size = std::max(1.0, static_cast<double>(ts->get_tile_size().x));
+    if (tile_size_layer)
+    {
+        Ref<TileSet> ts = tile_size_layer->get_tile_set();
+        if (ts.is_valid())
+            tile_size = std::max(1.0, static_cast<double>(ts->get_tile_size().x));
+    }
     if (tile_size <= 0.0)
         tile_size = 1.0;
 
-    // Mark wall cells into a grid indexed in the SAME world->cell space the
-    // simulation uses: cell = floor(world_center / tile_size). Converting each
-    // wall cell to its world center via the layer transform keeps the mask
-    // aligned even if the tilemap is offset (no rotation/scale expected).
-    Array walls = wall_layer->get_used_cells();
-    const int n = static_cast<int>(walls.size());
-    if (n == 0)
+    struct UploadedCell
     {
-        system.clear_wall_grid();
+        int x;
+        int y;
+        std::uint32_t channel;
+    };
+    std::vector<UploadedCell> uploaded_cells;
+    int min_x = INT32_MAX, min_y = INT32_MAX, max_x = INT32_MIN, max_y = INT32_MIN;
+
+    // Mark collider cells into the SAME world->cell space the
+    // simulation uses: cell = floor(world_center / tile_size). Converting each
+    // layer cell to its world center via the layer transform keeps the mask
+    // aligned even if the tilemap is offset (no rotation/scale expected).
+    for (int config_index = 0; config_index < configs.size(); ++config_index)
+    {
+        Dictionary config = configs[config_index];
+        Object *layer_obj = config.get("layer", Variant());
+        auto *layer = Object::cast_to<TileMapLayer>(layer_obj);
+        const int64_t channel_value = int64_t(config.get("channel", 0));
+        if (!layer || channel_value <= 0 ||
+            channel_value > static_cast<int64_t>(std::numeric_limits<std::uint32_t>::max()))
+            continue;
+        const std::uint32_t channel = static_cast<std::uint32_t>(channel_value);
+
+        Array atlas_filter = config.get("atlas_coords", Array());
+        Array cells = layer->get_used_cells();
+        for (int cell_index = 0; cell_index < cells.size(); ++cell_index)
+        {
+            Vector2i cell = cells[cell_index];
+            if (!atlas_filter.is_empty())
+            {
+                const Vector2i atlas = layer->get_cell_atlas_coords(cell);
+                bool accepted = false;
+                for (int atlas_index = 0; atlas_index < atlas_filter.size(); ++atlas_index)
+                {
+                    const Vector2i allowed_atlas = atlas_filter[atlas_index];
+                    if (atlas == allowed_atlas)
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+                if (!accepted)
+                    continue;
+            }
+
+            Vector2 world_center = layer->to_global(layer->map_to_local(cell));
+            int gx = static_cast<int>(std::floor(world_center.x / tile_size));
+            int gy = static_cast<int>(std::floor(world_center.y / tile_size));
+            uploaded_cells.push_back(UploadedCell{gx, gy, channel});
+            min_x = std::min(min_x, gx);
+            min_y = std::min(min_y, gy);
+            max_x = std::max(max_x, gx);
+            max_y = std::max(max_y, gy);
+        }
+    }
+
+    if (uploaded_cells.empty())
+    {
+        system.clear_static_collision_grid();
         return;
     }
 
-    std::vector<int> cx(n);
-    std::vector<int> cy(n);
-    int min_x = INT32_MAX, min_y = INT32_MAX, max_x = INT32_MIN, max_y = INT32_MIN;
-    for (int i = 0; i < n; ++i)
-    {
-        Vector2i cell = walls[i];
-        Vector2 world_center = wall_layer->to_global(wall_layer->map_to_local(cell));
-        int gx = static_cast<int>(std::floor(world_center.x / tile_size));
-        int gy = static_cast<int>(std::floor(world_center.y / tile_size));
-        cx[i] = gx;
-        cy[i] = gy;
-        min_x = std::min(min_x, gx);
-        min_y = std::min(min_y, gy);
-        max_x = std::max(max_x, gx);
-        max_y = std::max(max_y, gy);
-    }
-    (void)bounds_layer; // origin derived from wall extents below
-
     const int width = max_x - min_x + 1;
     const int height = max_y - min_y + 1;
-    std::vector<std::uint8_t> mask(static_cast<std::size_t>(width) * height, 0);
-    for (int i = 0; i < n; ++i)
+    std::vector<std::uint32_t> mask(static_cast<std::size_t>(width) * height, 0);
+    for (const UploadedCell &cell : uploaded_cells)
     {
-        int lx = cx[i] - min_x;
-        int ly = cy[i] - min_y;
-        mask[static_cast<std::size_t>(ly) * width + lx] = 1;
+        int lx = cell.x - min_x;
+        int ly = cell.y - min_y;
+        mask[static_cast<std::size_t>(ly) * width + lx] |= cell.channel;
     }
 
-    system.set_wall_grid(min_x, min_y, width, height, tile_size, mask);
+    system.set_static_collision_grid(min_x, min_y, width, height, tile_size, mask);
 }
 
 void ProjectileSystemNative::clear_walls()
 {
-    system.clear_wall_grid();
+    system.clear_static_collision_grid();
+}
+
+void ProjectileSystemNative::clear_static_collisions()
+{
+    system.clear_static_collision_grid();
 }

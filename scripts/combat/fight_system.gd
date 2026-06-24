@@ -1,6 +1,10 @@
 extends Node
 class_name FightSystem
 
+const STATIC_COLLISION_TERRAIN: int = 1 << 0
+const STATIC_COLLISION_REACTIVE_PLANT: int = 1 << 1
+const STATIC_IMPACT_KIND: int = 0
+
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
 # sorting against agents (cheaper). When on, projectiles bucket by ground Y so
@@ -18,6 +22,10 @@ var _steering: Node
 var _projectiles: Node
 var _agent_manager: Node
 var _building_manager: Node
+var _plant_manager: Node
+var _plant_layer: TileMapLayer
+var _wall_layer: TileMapLayer
+var _floor_layer: TileMapLayer
 var _drawer
 var _projectile_drawer
 var _damage_number_drawer: DamageNumberDrawer
@@ -32,6 +40,10 @@ func _ready() -> void:
 	_projectiles = get_node_or_null("../CPP/ProjectileSystemNative")
 	_agent_manager = get_node_or_null("../CPP/AgentManagerNative")
 	_building_manager = get_node_or_null("../Map/BuildingManager")
+	_plant_manager = get_node_or_null("../Map/PlantManager")
+	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
+	_wall_layer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
+	_floor_layer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
 	if _steering and not _steering.has_method("take_damage_events"):
 		push_error("FightSystem: native damage API is unavailable. Rebuild the GDExtension and restart Godot.")
 	_drawer = WeaponAOEDrawer.new()
@@ -41,7 +53,8 @@ func _ready() -> void:
 	add_child(_damage_number_drawer)
 	_rebuild_weapon_index()
 	_register_guns()
-	_upload_projectile_walls()
+	_connect_static_collider_updates()
+	_upload_static_projectile_colliders()
 	if _projectiles:
 		_projectile_drawer = ProjectileDrawer.new()
 		_projectile_drawer.z_order_enabled = z_order_projectiles
@@ -145,15 +158,17 @@ class DamageNumberDrawer:
 func _drain_projectile_impacts() -> void:
 	if not _projectiles or not _projectiles.has_method("get_impacts"):
 		return
-	var impacts: Array = _projectiles.call("get_impacts")
+	var impacts: Array = _projectiles.call("get_impacts") as Array
 	if impacts.is_empty():
 		return
-	for impact in impacts:
+	for impact_variant: Variant in impacts:
+		var impact: Dictionary = impact_variant as Dictionary
 		var gun: GunData = _gun_by_type_id.get(int(impact.get("type_id", -1))) as GunData
+		_handle_static_projectile_impact(impact, gun)
 		if not gun or not gun.impact_visual_enabled:
 			continue
-		var pos: Vector2 = impact.get("pos", Vector2.ZERO)
-		var dir: Vector2 = impact.get("dir", Vector2.RIGHT)
+		var pos: Vector2 = impact.get("pos", Vector2.ZERO) as Vector2
+		var dir: Vector2 = impact.get("dir", Vector2.RIGHT) as Vector2
 		var radius: float = float(impact.get("radius", 0.0))
 		if radius <= 0.0 or gun.impact_display_duration <= 0.0:
 			continue
@@ -164,20 +179,70 @@ func _drain_projectile_impacts() -> void:
 		# Impacts are world-anchored circles (owner_id = -1, angle = 360).
 		_drawer.show_weapon_area(visual_pos, dir, radius, 360.0, gun.impact_display_duration, -1, Vector2.ZERO, gun.impact_fill_color, gun.impact_stroke_color, gun.impact_stroke_width)
 
-# Upload the static wall mask to the projectile system so projectiles are
-# stopped by walls. Call again (refresh_projectile_walls) when walls change.
-func _upload_projectile_walls() -> void:
-	if not _projectiles or not _projectiles.has_method("set_wall_layer"):
+func _handle_static_projectile_impact(impact: Dictionary, gun: GunData) -> void:
+	if not gun or gun.id != "water" or not _plant_manager or not _plant_layer:
 		return
-	var wall_layer: TileMapLayer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
-	var floor_layer: TileMapLayer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
-	if not wall_layer:
+	if int(impact.get("kind", -1)) != STATIC_IMPACT_KIND:
 		return
-	_projectiles.call("set_wall_layer", wall_layer, floor_layer)
+	var collider_mask: int = int(impact.get("collider_mask", 0))
+	if (collider_mask & STATIC_COLLISION_REACTIVE_PLANT) == 0:
+		return
+	var raw_collision_cell: Variant = impact.get("collider_cell", Vector2i.ZERO)
+	if not raw_collision_cell is Vector2i:
+		return
+	var collision_cell: Vector2i = raw_collision_cell as Vector2i
+	var rose_cell: Vector2i = _static_grid_cell_to_layer_cell(collision_cell, _plant_layer)
+	if _plant_manager.has_method("is_rose_cell") and not bool(_plant_manager.call("is_rose_cell", rose_cell)):
+		return
+	if _plant_manager.has_method("wet_rose"):
+		_plant_manager.call("wet_rose", rose_cell)
+
+func _static_grid_cell_to_layer_cell(collision_cell: Vector2i, layer: TileMapLayer) -> Vector2i:
+	var tile_size: float = 1.0
+	if layer.tile_set:
+		tile_size = maxf(1.0, float(layer.tile_set.tile_size.x))
+	var world_center: Vector2 = Vector2(
+		(float(collision_cell.x) + 0.5) * tile_size,
+		(float(collision_cell.y) + 0.5) * tile_size
+	)
+	return layer.local_to_map(layer.to_local(world_center))
+
+# Upload generic static collider channels. Atlas filtering keeps future non-rose
+# plants out of the water-reactive channel.
+func _upload_static_projectile_colliders() -> void:
+	if not _projectiles or not _projectiles.has_method("set_static_collision_layers"):
+		return
+	if not _wall_layer:
+		return
+	var collider_configs: Array[Dictionary] = [
+		{
+			"layer": _wall_layer,
+			"channel": STATIC_COLLISION_TERRAIN,
+		},
+	]
+	if _plant_layer:
+		collider_configs.append({
+			"layer": _plant_layer,
+			"channel": STATIC_COLLISION_REACTIVE_PLANT,
+			"atlas_coords": [PlantManager.ROSE_DRY_ATLAS, PlantManager.ROSE_WET_ATLAS],
+		})
+	_projectiles.call("set_static_collision_layers", collider_configs, _floor_layer)
+
+func _connect_static_collider_updates() -> void:
+	if not _plant_manager:
+		return
+	var refresh_callback: Callable = Callable(self, "_on_plant_collision_cells_changed")
+	if _plant_manager.has_signal("plant_added") and not _plant_manager.is_connected("plant_added", refresh_callback):
+		_plant_manager.connect("plant_added", refresh_callback)
+	if _plant_manager.has_signal("plant_removed") and not _plant_manager.is_connected("plant_removed", refresh_callback):
+		_plant_manager.connect("plant_removed", refresh_callback)
+
+func _on_plant_collision_cells_changed(_cell: Vector2i) -> void:
+	_upload_static_projectile_colliders()
 
 # Public hook: re-upload walls after the build system adds/removes wall tiles.
 func refresh_projectile_walls() -> void:
-	_upload_projectile_walls()
+	_upload_static_projectile_colliders()
 
 func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1, follow_offset: Vector2 = Vector2.ZERO) -> bool:
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
@@ -263,6 +328,7 @@ func _register_guns() -> void:
 			"smash_control_suppression_duration": gun.smash_control_suppression_duration,
 			"damage": gun.damage,
 			"stopped_by_walls": gun.stopped_by_walls,
+			"static_collision_mask": gun.static_collision_mask,
 			"end_of_life_aoe_enabled": gun.end_of_life_aoe_enabled,
 			"end_aoe_radius": gun.end_aoe_radius,
 			"end_aoe_force": gun.end_aoe_force,

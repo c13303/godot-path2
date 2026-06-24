@@ -19,6 +19,7 @@ smash_force = 400.0
 smash_friction_loss = 0.6
 smash_control_suppression = 0.2
 smash_control_suppression_duration = 0.05
+static_collision_mask = 3
 end_of_life_aoe_enabled = true
 end_aoe_force = 250.0
 end_aoe_friction_loss = 0.6

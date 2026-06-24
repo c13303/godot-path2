@@ -24,12 +24,12 @@ namespace ffcore
         double smash_control_suppression_duration = 0.0;
         int damage = 0;
 
-        // Projectiles are stopped by walls (visual altitude is NOT physical;
-        // collision uses the ground position p.pos only).
-        bool stopped_by_walls = true;
+        // Bitmask of static-collider channels that stop this projectile.
+        // Channel meanings are owned by the Godot gameplay layer.
+        std::uint32_t static_collision_mask = 1;
 
         // End-of-life AoE: fired when the projectile despawns *without* hitting
-        // an agent (lifetime expiry, or wall impact). An agent hit still uses the
+        // an agent (lifetime expiry, or static impact). An agent hit still uses the
         // normal smash params above. When disabled, despawn is silent.
         bool end_of_life_aoe_enabled = false;
         double end_aoe_radius = 16.0;
@@ -43,15 +43,15 @@ namespace ffcore
         int pool_size = 128;
     };
 
-    // Static wall mask in cell space (1 = wall). World->cell uses origin + tile.
-    struct WallGrid
+    // Static collider-channel masks in cell space. World->cell uses origin + tile.
+    struct StaticCollisionGrid
     {
         int origin_x = 0;
         int origin_y = 0;
         int width = 0;
         int height = 0;
         double tile_size = 1.0;
-        std::vector<std::uint8_t> mask; // size = width * height, 1 = wall
+        std::vector<std::uint32_t> mask; // size = width * height, channel bits
 
         bool ready() const { return width > 0 && height > 0 && tile_size > 0.0; }
 
@@ -61,13 +61,13 @@ namespace ffcore
                          static_cast<int>(std::floor(p.y / tile_size)));
         }
 
-        bool is_wall_cell(const Vec2i &c) const
+        std::uint32_t channels_at(const Vec2i &c) const
         {
             int lx = c.x - origin_x;
             int ly = c.y - origin_y;
             if (lx < 0 || ly < 0 || lx >= width || ly >= height)
-                return false; // outside the known map = not a wall
-            return mask[static_cast<std::size_t>(ly) * width + lx] != 0;
+                return 0; // outside the known map = no static collider
+            return mask[static_cast<std::size_t>(ly) * width + lx];
         }
     };
 
@@ -91,7 +91,7 @@ namespace ffcore
         Agent = 2,
     };
 
-    // One despawn-with-AoE event. Buffered for one frame, drained by GDScript.
+    // One projectile end event. Buffered for one frame, read by GDScript.
     struct ProjectileImpact
     {
         Vec2 pos;
@@ -99,6 +99,8 @@ namespace ffcore
         double radius; // AoE radius that was applied
         int type_id;
         int kind; // ImpactKind
+        std::uint32_t collider_mask = 0;
+        Vec2i collider_cell;
     };
 
     class ProjectileSystem
@@ -109,10 +111,18 @@ namespace ffcore
         void set_grid(SpatialGrid *g) { grid = g; }
         void set_steering(SteeringSystem *s) { steering = s; }
 
-        // Upload/refresh the static wall mask. Call when walls change (build/destroy).
+        // Upload/refresh the static collider channels. Call when collider cells change.
+        void set_static_collision_grid(int origin_x, int origin_y, int width, int height,
+                                       double tile_size, const std::vector<std::uint32_t> &mask);
+        void clear_static_collision_grid() { static_colliders = StaticCollisionGrid{}; }
+
+        // Compatibility aliases for existing callers while the public Godot API migrates.
         void set_wall_grid(int origin_x, int origin_y, int width, int height,
-                           double tile_size, const std::vector<std::uint8_t> &mask);
-        void clear_wall_grid() { walls = WallGrid{}; }
+                           double tile_size, const std::vector<std::uint32_t> &mask)
+        {
+            set_static_collision_grid(origin_x, origin_y, width, height, tile_size, mask);
+        }
+        void clear_wall_grid() { clear_static_collision_grid(); }
 
         int register_type(const ProjectileTypeConfig &cfg);
 
@@ -146,18 +156,22 @@ namespace ffcore
 
         SpatialGrid *grid = nullptr;
         SteeringSystem *steering = nullptr;
-        WallGrid walls;
+        StaticCollisionGrid static_colliders;
         std::vector<ProjectileImpact> impact_events;
         std::uint64_t next_fire_seq = 1;
 
         std::uint16_t checkout_slot(int type_id);
 
-        // Raycast the projectile's ground path old->new across wall cells. Returns
-        // true and writes the impact point if a wall is hit; false otherwise.
-        bool raycast_walls(const Vec2 &from, const Vec2 &to, Vec2 &out_impact) const;
+        // Raycast the projectile's ground path across matching static collider cells.
+        bool raycast_static_colliders(const Vec2 &from, const Vec2 &to,
+                                      std::uint32_t projectile_mask,
+                                      Vec2 &out_impact, Vec2i &out_cell,
+                                      std::uint32_t &out_collider_mask) const;
 
-        // Apply the configured end-of-life AoE smash at the given point and
-        // record a visual impact event.
-        void trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at, ImpactKind kind);
+        // Apply the configured end-of-life AoE and record a generic end event.
+        void trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p,
+                             const Vec2 &at, ImpactKind kind,
+                             std::uint32_t collider_mask = 0,
+                             const Vec2i &collider_cell = Vec2i{});
     };
 }

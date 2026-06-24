@@ -10,33 +10,40 @@ namespace ffcore
 {
     ProjectileSystem::ProjectileSystem() {}
 
-    void ProjectileSystem::set_wall_grid(int origin_x, int origin_y, int width, int height,
-                                         double tile_size, const std::vector<std::uint8_t> &mask)
+    void ProjectileSystem::set_static_collision_grid(int origin_x, int origin_y, int width, int height,
+                                                     double tile_size, const std::vector<std::uint32_t> &mask)
     {
-        walls.origin_x = origin_x;
-        walls.origin_y = origin_y;
-        walls.width = std::max(0, width);
-        walls.height = std::max(0, height);
-        walls.tile_size = tile_size > 0.0 ? tile_size : 1.0;
-        walls.mask = mask;
+        static_colliders.origin_x = origin_x;
+        static_colliders.origin_y = origin_y;
+        static_colliders.width = std::max(0, width);
+        static_colliders.height = std::max(0, height);
+        static_colliders.tile_size = tile_size > 0.0 ? tile_size : 1.0;
+        static_colliders.mask = mask;
     }
 
-    bool ProjectileSystem::raycast_walls(const Vec2 &from, const Vec2 &to, Vec2 &out_impact) const
+    bool ProjectileSystem::raycast_static_colliders(const Vec2 &from, const Vec2 &to,
+                                                    std::uint32_t projectile_mask,
+                                                    Vec2 &out_impact, Vec2i &out_cell,
+                                                    std::uint32_t &out_collider_mask) const
     {
-        if (!walls.ready())
+        if (!static_colliders.ready() || projectile_mask == 0)
             return false;
 
-        // If the starting cell is already a wall, impact immediately at 'from'.
-        if (walls.is_wall_cell(walls.world_to_cell(from)))
+        // If the starting cell already matches, impact immediately at 'from'.
+        Vec2i start_cell = static_colliders.world_to_cell(from);
+        std::uint32_t start_match = static_colliders.channels_at(start_cell) & projectile_mask;
+        if (start_match != 0)
         {
             out_impact = from;
+            out_cell = start_cell;
+            out_collider_mask = start_match;
             return true;
         }
 
         // Amanatides-Woo grid traversal across the move segment from->to.
-        const double ts = walls.tile_size;
-        Vec2i cell = walls.world_to_cell(from);
-        Vec2i end_cell = walls.world_to_cell(to);
+        const double ts = static_colliders.tile_size;
+        Vec2i cell = start_cell;
+        Vec2i end_cell = static_colliders.world_to_cell(to);
 
         Vec2 d = to - from;
         int step_x = d.x > 0.0 ? 1 : (d.x < 0.0 ? -1 : 0);
@@ -58,7 +65,7 @@ namespace ffcore
         double t_max_y = next_boundary(from.y, d.y, cell.y);
 
         // Walk until we pass the destination cell. Bound the loop defensively.
-        int guard = walls.width + walls.height + 2;
+        int guard = static_colliders.width + static_colliders.height + 2;
         while (guard-- > 0)
         {
             if (t_max_x < t_max_y)
@@ -66,9 +73,12 @@ namespace ffcore
                 if (t_max_x > 1.0)
                     break;
                 cell.x += step_x;
-                if (walls.is_wall_cell(cell))
+                std::uint32_t matched = static_colliders.channels_at(cell) & projectile_mask;
+                if (matched != 0)
                 {
                     out_impact = from + d * t_max_x;
+                    out_cell = cell;
+                    out_collider_mask = matched;
                     return true;
                 }
                 t_max_x += t_delta_x;
@@ -78,9 +88,12 @@ namespace ffcore
                 if (t_max_y > 1.0)
                     break;
                 cell.y += step_y;
-                if (walls.is_wall_cell(cell))
+                std::uint32_t matched = static_colliders.channels_at(cell) & projectile_mask;
+                if (matched != 0)
                 {
                     out_impact = from + d * t_max_y;
+                    out_cell = cell;
+                    out_collider_mask = matched;
                     return true;
                 }
                 t_max_y += t_delta_y;
@@ -91,12 +104,13 @@ namespace ffcore
         return false;
     }
 
-    void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &at, ImpactKind kind)
+    void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p,
+                                           const Vec2 &at, ImpactKind kind,
+                                           std::uint32_t collider_mask,
+                                           const Vec2i &collider_cell)
     {
-        if (!cfg.end_of_life_aoe_enabled)
-            return;
         Vec2 impact_dir = p.vel.normalized();
-        if (steering)
+        if (cfg.end_of_life_aoe_enabled && steering)
         {
             steering->apply_area_smash(
                 at,
@@ -117,10 +131,12 @@ namespace ffcore
                 p.affected_smash_classes,
                 cfg.damage);
         }
-        // Surface the AoE so GDScript can render it (one-frame event buffer).
+        // Surface every end event so gameplay can react to generic static
+        // collision channels even when this projectile has no end-of-life AoE.
         impact_events.push_back(ProjectileImpact{
-            at, impact_dir, cfg.end_aoe_radius,
-            static_cast<int>(p.type_id), static_cast<int>(kind)});
+            at, impact_dir, cfg.end_of_life_aoe_enabled ? cfg.end_aoe_radius : 0.0,
+            static_cast<int>(p.type_id), static_cast<int>(kind),
+            collider_mask, collider_cell});
     }
 
     int ProjectileSystem::register_type(const ProjectileTypeConfig &cfg)
@@ -222,16 +238,20 @@ namespace ffcore
                 Vec2 prev_pos = p.pos;
                 p.pos += p.vel * delta;
 
-                // Wall collision (visual altitude is ignored; uses ground pos).
+                // Static collision (visual altitude is ignored; uses ground pos).
                 // Raycast the ground segment so fast projectiles can't tunnel
                 // through thin walls.
-                if (cfg.stopped_by_walls && walls.ready())
+                if (cfg.static_collision_mask != 0 && static_colliders.ready())
                 {
                     Vec2 impact;
-                    if (raycast_walls(prev_pos, p.pos, impact))
+                    Vec2i collider_cell;
+                    std::uint32_t collider_mask = 0;
+                    if (raycast_static_colliders(prev_pos, p.pos, cfg.static_collision_mask,
+                                                 impact, collider_cell, collider_mask))
                     {
                         p.pos = impact;
-                        trigger_end_aoe(cfg, p, impact, ImpactKind::Wall);
+                        trigger_end_aoe(cfg, p, impact, ImpactKind::Wall,
+                                        collider_mask, collider_cell);
                         p.active = 0;
                         tp.free_list.push_back(static_cast<std::uint16_t>(i));
                         continue;

@@ -1,5 +1,7 @@
 extends Node
 
+signal day_started(day_number: int)
+
 const SAVE_PATH: String = "user://progression_save.json"
 const SAVE_VERSION: int = 2
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
@@ -93,7 +95,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
 		return
 	progression.add(&"nDays", 1)
-	_log("New day started: Day %d" % progression.get_value(&"nDays"))
+	var day_number: int = progression.get_value(&"nDays")
+	day_started.emit(day_number)
+	_log("New day started: Day %d" % day_number)
 	_update_progression_ui()
 
 
@@ -377,6 +381,11 @@ func _reindex_loaded_layers(scene: Node) -> void:
 	if building_object_manager and building_object_manager.has_method("initialize_from_layer"):
 		building_object_manager.call("initialize_from_layer")
 		_log("Building object manager re-indexed")
+
+	var fight_system: Node = scene.get_node_or_null("fightSystem")
+	if fight_system and fight_system.has_method("refresh_projectile_walls"):
+		fight_system.call("refresh_projectile_walls")
+		_log("Projectile static colliders refreshed")
 
 
 func _validate_save(data: Dictionary) -> String:

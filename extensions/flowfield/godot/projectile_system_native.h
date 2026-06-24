@@ -43,15 +43,19 @@ namespace godot
         int get_type_count() const;
 
         // Drain this frame's projectile impact events (AoE despawns). Each entry:
-        // { pos:Vector2, dir:Vector2, radius:float, type_id:int, kind:int }.
+        // { pos, dir, radius, type_id, kind, collider_mask, collider_cell }.
         // kind: 0=wall, 1=expiry, 2=agent.
         Array get_impacts() const;
 
-        // Build + upload the static wall mask from the wall TileMapLayer.
-        // `bounds_layer` (floor layer) supplies the used rect/origin; if null, the
-        // wall layer's own used rect is used. Call when walls change.
+        // Compatibility wrapper: upload one TileMapLayer as channel bit 0.
+        // `bounds_layer` supplies the tile size when available.
         void set_wall_layer(Object *wall_layer, Object *bounds_layer);
         void clear_walls();
+
+        // Build one static-collider grid from generic TileMapLayer configs:
+        // { layer:Object, channel:int, atlas_coords:Array[Vector2i] (optional) }.
+        void set_static_collision_layers(const Array &configs, Object *bounds_layer);
+        void clear_static_collisions();
 
         void set_paused(bool p) { paused = p; }
     };

@@ -40,6 +40,10 @@ class_name GunData
 # visual altitude is never physical).
 @export var stopped_by_walls: bool = true
 
+# Generic native static-collider channels. Channel meanings are assigned by the
+# gameplay layer; zero disables static collision for this projectile type.
+@export_flags("Terrain", "Reactive Plant") var static_collision_mask: int = 1
+
 # End-of-life AoE: a smash applied when the projectile despawns *without* hitting
 # an agent — i.e. on wall impact or lifetime expiry. A direct agent hit still
 # uses the smash_* params above. Leave disabled for a silent fizzle.

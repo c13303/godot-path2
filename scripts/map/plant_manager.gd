@@ -3,8 +3,11 @@ class_name PlantManager
 
 signal plant_added(cell: Vector2i)
 signal plant_removed(cell: Vector2i)
+signal plant_state_changed(cell: Vector2i, atlas_coords: Vector2i)
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
+const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 1)
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
@@ -17,6 +20,18 @@ var _plant_layer_flush_queued: bool = false
 
 func _ready() -> void:
 	initialize_from_layer()
+	_connect_day_started()
+
+func _connect_day_started() -> void:
+	var scene: Node = get_tree().current_scene
+	var progression_node: Node = scene.get_node_or_null("progression") if scene else null
+	if progression_node and progression_node.has_signal("day_started"):
+		var callback: Callable = Callable(self, "_on_day_started")
+		if not progression_node.is_connected("day_started", callback):
+			progression_node.connect("day_started", callback)
+
+func _on_day_started(_day_number: int) -> void:
+	dry_all_roses()
 
 func initialize_from_layer() -> void:
 	_plants.clear()
@@ -42,6 +57,47 @@ func is_empty() -> bool:
 
 func size() -> int:
 	return _plants.size()
+
+func is_rose_cell(cell: Vector2i) -> bool:
+	if not plantz or not _plants.has(cell):
+		return false
+	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_WET_ATLAS
+
+func wet_rose(cell: Vector2i) -> bool:
+	if not plantz or not _plants.has(cell):
+		return false
+	if plantz.get_cell_atlas_coords(cell) != ROSE_DRY_ATLAS:
+		return false
+	_set_rose_atlas(cell, ROSE_WET_ATLAS)
+	return true
+
+func dry_all_roses() -> int:
+	if not plantz:
+		return 0
+	var dried_count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
+			continue
+		_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
+		dried_count += 1
+	if dried_count > 0:
+		_flush_plant_layer_now()
+		_queue_plant_layer_flush()
+	return dried_count
+
+func _set_rose_atlas(cell: Vector2i, atlas_coords: Vector2i, flush_visuals: bool = true) -> void:
+	var source_id: int = plantz.get_cell_source_id(cell)
+	if source_id < 0:
+		return
+	var alternative_tile: int = plantz.get_cell_alternative_tile(cell)
+	plantz.set_cell(cell, source_id, atlas_coords, alternative_tile)
+	_capture_tile_metadata(cell)
+	if flush_visuals:
+		_flush_plant_layer_now()
+		_queue_plant_layer_flush()
+	plant_state_changed.emit(cell, atlas_coords)
 
 func get_plant_cells() -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
