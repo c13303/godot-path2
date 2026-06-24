@@ -1852,7 +1852,6 @@ func _spawn_monster_corpse(agent: Node2D) -> void:
 		return
 	parent.add_child(corpse)
 	corpse.global_position = agent.global_position
-	corpse.z_index = int(corpse.global_position.y)
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL

@@ -4,6 +4,8 @@
 [ext_resource type="Texture2D" uid="uid://ch6eoqidb06ck" path="res://assets/sprites/legval/monster.png" id="2_monster"]
 
 [node name="MonsterCorpse" type="Node2D"]
+z_index = -4096
+z_as_relative = false
 script = ExtResource("1_corpse")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
