@@ -1296,6 +1296,7 @@ weapon_origin = Vector2(0, -20)
 [node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
 position = Vector2(0, -20)
 texture = ExtResource("2_gtwxa")
+hframes = 2
 metadata/_edit_lock_ = true
 
 [node name="PlayerController" type="Node2D" parent="Player" unique_id=1943697114]
@@ -1436,6 +1437,20 @@ script = ExtResource("19_gvmlv")
 [node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
 layer = 50
 script = ExtResource("20_hamdt")
+
+[node name="top left anchor" type="Control" parent="GameUI" unique_id=1417670402]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
+layout_mode = 0
+offset_left = 72.0
+offset_top = 98.0
+offset_right = 932.0
+offset_bottom = 640.0
+mouse_filter = 2
 
 [node name="top anchor" type="Control" parent="GameUI" unique_id=857551045]
 layout_mode = 3
@@ -1674,7 +1689,7 @@ metadata/_edit_lock_ = true
 
 [node name="CanvasLayer" type="CanvasLayer" parent="GameUI" unique_id=607979633]
 
-[node name="Label" type="Label" parent="GameUI/CanvasLayer" unique_id=1158384981]
+[node name="CPP_Debug_Label" type="Label" parent="GameUI/CanvasLayer" unique_id=1158384981]
 offset_right = 40.0
 offset_bottom = 23.0
 script = ExtResource("11_62xsw")

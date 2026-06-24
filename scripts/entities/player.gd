@@ -34,6 +34,8 @@ var nav_id: int = -1:
 
 func _ready() -> void:
 	_apply_sprite_offset()
+	_update_day_night_frame(GameState.is_night)
+	GameState.mode_changed.connect(_on_game_mode_changed)
 	set_physics_process(false)
 
 func _process(_delta: float) -> void:
@@ -65,9 +67,17 @@ func get_sprite() -> Sprite2D:
 	return null
 
 func _apply_sprite_offset() -> void:
-	var sprite := get_sprite()
+	var sprite: Sprite2D = get_sprite()
 	if sprite:
 		sprite.position = sprite_offset
+
+func _on_game_mode_changed(is_night: bool) -> void:
+	_update_day_night_frame(is_night)
+
+func _update_day_night_frame(is_night: bool) -> void:
+	var sprite: Sprite2D = get_sprite()
+	if sprite:
+		sprite.frame = 1 if is_night else 0
 
 func _update_sprite_tint() -> void:
 	var color: Color = Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1)

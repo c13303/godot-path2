@@ -21,6 +21,10 @@ func start_day() -> void:
 
 ## Toggle between day and night.
 func toggle() -> void:
+	# Manual toggles cannot end the night while monsters remain on the map.
+	# The building manager calls start_day() separately once the group is empty.
+	if is_night and get_tree().get_first_node_in_group(&"monsters") != null:
+		return
 	set_night(not is_night)
 
 

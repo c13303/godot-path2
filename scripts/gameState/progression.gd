@@ -12,15 +12,102 @@ const LAYER_NAMES: Array[String] = [
 ]
 
 
+## A single "progression prop": one tracked global value plus the metadata
+## needed to save it (`key`) and to show it in the UI (`display_name`).
+class ProgressionProp:
+	var key: StringName        # stable id used as the save-file field name
+	var display_name: String   # human-readable label shown in the progression label
+	var value: int
+
+	func _init(p_key: StringName, p_display_name: String, p_default: int) -> void:
+		key = p_key
+		display_name = p_display_name
+		value = p_default
+
+
+## Global player progression: the ordered list of progression props.
+##
+## To add a new tracked value, add ONE ProgressionProp entry to `props` below.
+## It is then automatically saved, reloaded, and shown in the progression label
+## with no other code changes required.
+class Progression:
+	var props: Array[ProgressionProp] = [
+		ProgressionProp.new(&"nDays", "Day", 1),
+		ProgressionProp.new(&"monster_per_day", "Monster per day", 2),
+	]
+
+	func get_prop(key: StringName) -> ProgressionProp:
+		for prop: ProgressionProp in props:
+			if prop.key == key:
+				return prop
+		return null
+
+	func get_value(key: StringName) -> int:
+		var prop: ProgressionProp = get_prop(key)
+		return prop.value if prop != null else 0
+
+	func add(key: StringName, amount: int) -> void:
+		var prop: ProgressionProp = get_prop(key)
+		if prop != null:
+			prop.value += amount
+
+	## Serialize every prop to a plain dict (key -> value) for the save file.
+	func to_dict() -> Dictionary:
+		var data: Dictionary = {}
+		for prop: ProgressionProp in props:
+			data[String(prop.key)] = prop.value
+		return data
+
+	## Restore prop values from a saved dict; missing keys keep their default.
+	func from_dict(data: Dictionary) -> void:
+		for prop: ProgressionProp in props:
+			prop.value = int(data.get(String(prop.key), prop.value))
+
+
+var progression: Progression = Progression.new()
+
+
 func _ready() -> void:
-	if not GameState.has_meta(PENDING_LOAD_META):
+	# GameState is an autoload, so reconnect every time a fresh scene loads.
+	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
+		GameState.mode_changed.connect(_on_game_mode_changed)
+
+	if GameState.has_meta(PENDING_LOAD_META):
+		GameState.remove_meta(PENDING_LOAD_META)
+		_log("Fresh scene ready; applying pending save before native player setup")
+		var data: Dictionary = _read_save_data()
+		if not data.is_empty():
+			_apply_save_to_fresh_scene(data)
+
+	_update_progression_ui()
+
+
+## A night->day transition means a new day has begun.
+func _on_game_mode_changed(is_night: bool) -> void:
+	if is_night:
 		return
-	GameState.remove_meta(PENDING_LOAD_META)
-	_log("Fresh scene ready; applying pending save before native player setup")
-	var data: Dictionary = _read_save_data()
-	if data.is_empty():
+	progression.add(&"nDays", 1)
+	_log("New day started: Day %d" % progression.get_value(&"nDays"))
+	_update_progression_ui()
+
+
+func _get_progression_ui() -> RichTextLabel:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top left anchor/progressionUI") as RichTextLabel
+
+
+## Render every progression prop, one per line: "<display name>: <value>".
+## Adding a prop to Progression.props makes it appear here automatically.
+func _update_progression_ui() -> void:
+	var label: RichTextLabel = _get_progression_ui()
+	if label == null:
 		return
-	_apply_save_to_fresh_scene(data)
+	var lines: PackedStringArray = PackedStringArray()
+	for prop: ProgressionProp in progression.props:
+		lines.append("%s: %d" % [prop.display_name, prop.value])
+	label.text = "\n".join(lines)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -62,6 +149,7 @@ func save_progression() -> void:
 
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
+		"progression": progression.to_dict(),
 		"layers": layer_data,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
@@ -151,6 +239,10 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	if layers.size() != LAYER_NAMES.size() or player == null or game_ui == null:
 		_fail("Load failed: required game nodes are missing after scene reload")
 		return
+
+	var progression_data: Dictionary = data.get("progression", {}) as Dictionary
+	progression.from_dict(progression_data)
+	_log("Progression restored: %s" % str(progression.to_dict()))
 
 	var saved_layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:

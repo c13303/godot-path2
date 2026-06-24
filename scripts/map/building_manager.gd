@@ -242,9 +242,11 @@ var _garden_entry_resolve_misses: int = 0
 var _spawner_reachable_cells: Dictionary = {}  # Vector2i -> true
 var _walkable_map_tiles: Dictionary = {}  # Vector2i -> true
 
-# Day/night: set true once at least one monster has spawned during the current
-# night, so an empty scene can flip back to day only after a real night ran.
+# Day/night state. A completed wave returns to day immediately; a night that
+# cannot start because there are no plants remains visible briefly before ending.
+const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
 var _spawned_this_night: bool = false
+var _empty_night_elapsed: float = 0.0
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
@@ -382,6 +384,7 @@ func _ready() -> void:
 	GameState.mode_changed.connect(_on_game_mode_changed)
 
 func _on_game_mode_changed(is_night: bool) -> void:
+	_empty_night_elapsed = 0.0
 	if not is_night:
 		return
 	# Entering night: start fresh so monsters spawn promptly.
@@ -1072,9 +1075,17 @@ func _process_spawners(delta: float) -> void:
 	var no_plants: bool = _no_plants_remaining()
 	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
 	if no_plants:
+		if mc == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				GameState.start_day()
+				return
+		else:
+			_empty_night_elapsed = 0.0
 		if debug_logs and not _spawners.is_empty():
 			_log("no plants remaining for %d spawner(s)" % _spawners.size())
 		return
+	_empty_night_elapsed = 0.0
 
 	# Two phases so multiple ready spawners don't all spawn+assign in one frame:
 	#   1. advance every spawner's cooldown timer (cheap) and enqueue the ones that
@@ -3097,7 +3108,8 @@ func _handle_garden_became_empty(garden_id: int) -> void:
 	if garden_id <= 0:
 		return
 	# Intent per phase: agents heading in (entry/astar_in) look for another garden
-	# (retarget); agents already inside leaving/eating head for the exit (escape).
+	# (retarget). Agents mid-eat are intentionally left untouched (see below) so they
+	# finish their eating delay before self-escaping.
 	for raw_nav_id in _entry_path_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		if not _entry_path_agents.has(nav_id):
@@ -3112,13 +3124,12 @@ func _handle_garden_became_empty(garden_id: int) -> void:
 		if int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
 			continue
 		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
-	for raw_nav_id in _eating_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _eating_agents.has(nav_id):
-			continue
-		if int((_eating_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
-			continue
-		_queue_affected_empty_garden_agent(nav_id, "escape", garden_id)
+	# Agents mid-eat are deliberately NOT touched here. A garden empties precisely
+	# because an eater consumed its last plant (see _consume_plant: start_eating runs,
+	# then remove_plant fires this synchronously while the eater sits in _eating_agents).
+	# Pulling them out now would abort the eating delay and make the final eater leave
+	# instantly. Instead they finish their timer and self-escape via _process_eating_
+	# agents, whose exit-wall FF escape does not depend on the garden still existing.
 	# Meta-only fallback: agents that lost their phase entry but still carry this
 	# garden in meta (e.g. mid-transition). Scan the monsters group once.
 	for node in get_tree().get_nodes_in_group("monsters"):
@@ -3127,6 +3138,9 @@ func _handle_garden_became_empty(garden_id: int) -> void:
 		var agent: Node2D = node
 		var nav_id: int = int(agent.get("nav_id"))
 		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
+			continue
+		# Same rule as above: never disturb an agent that is currently eating.
+		if _eating_agents.has(nav_id):
 			continue
 		if not agent.has_meta("garden_id"):
 			continue
@@ -3176,8 +3190,12 @@ func _queue_escape_for_all_monsters_budgeted() -> void:
 		var nav_id: int = int(agent.get("nav_id"))
 		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
 			continue
+		# Eating agents finish their delay and self-escape via _process_eating_agents;
+		# queueing them here would abort the eating timer (the last-plant case).
+		if _eating_agents.has(nav_id):
+			continue
 		# Already escaping (and not eating): leave it alone, it has a valid exit route.
-		if _escaping_agents.has(nav_id) and not _eating_agents.has(nav_id):
+		if _escaping_agents.has(nav_id):
 			continue
 		var spawner_cell: Vector2i = INVALID_CELL
 		if agent.has_meta("spawner_cell"):

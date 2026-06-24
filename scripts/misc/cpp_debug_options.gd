@@ -138,6 +138,8 @@ extends Node
 
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 var _building_manager: Node
+## The top-left FPS/agent-count debug label, gated by debug_enabled.
+var _fps_label: Label
 ## Unmultiplied agent_max_speed, captured once before the multiplier is applied.
 var _base_agent_max_speed: float = -1.0
 
@@ -156,7 +158,8 @@ func _setup_tile_hover_info() -> void:
 	var floorz: TileMapLayer = scene.get_node_or_null("Map/MonTilemap/floor") as TileMapLayer
 	var steering: Node = get_node_or_null("SteeringSystemNative")
 	var flow: Node = get_node_or_null("FlowFieldNative")
-	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/Label") as Label
+	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/CPP_Debug_Label") as Label
+	_fps_label = fps_label
 	var game_ui: Node = scene.get_node_or_null("GameUI")
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
 	_building_manager = building_manager
@@ -230,6 +233,13 @@ func _apply_debug_settings() -> void:
 	if tile_hover_info:
 		tile_hover_info.set_enabled(dbg)
 		tile_hover_info.set_show_monster_paths(eff_monsters_path)
+
+	if _fps_label == null:
+		var label_scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
+		if label_scene:
+			_fps_label = label_scene.get_node_or_null("GameUI/CanvasLayer/CPP_Debug_Label") as Label
+	if _fps_label:
+		_fps_label.set_enabled(dbg)
 
 	if _building_manager == null:
 		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null

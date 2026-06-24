@@ -13,3 +13,4 @@ sprite_offset = Vector2(0, -31.5)
 [node name="Sprite2D" type="Sprite2D" parent="."]
 position = Vector2(0, -31.5)
 texture = ExtResource("2_farmer")
+hframes = 2
