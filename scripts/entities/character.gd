@@ -44,6 +44,11 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
+# monster.png is a 2-frame horizontal spritesheet: frame 0 = idle, frame 1 = eating.
+const MONSTER_FRAME_IDLE: int = 0
+const MONSTER_FRAME_EATING: int = 1
+@onready var _monster_sprite: Sprite2D = $MonsterSprite2D
+
 
 func _ready() -> void:
 	if use_native_steering:
@@ -52,6 +57,15 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	z_index = int(position.y)
 	_process_eating_status(delta)
+	_update_monster_frame()
+
+# Drive the spritesheet frame purely from the eating status so it can never desync.
+func _update_monster_frame() -> void:
+	if not is_instance_valid(_monster_sprite):
+		return
+	var frame: int = MONSTER_FRAME_EATING if status == "eating" else MONSTER_FRAME_IDLE
+	if _monster_sprite.frame != frame:
+		_monster_sprite.frame = frame
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the
