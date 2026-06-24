@@ -9,6 +9,8 @@ const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
 const WATER_REFILL_AMOUNT_KEY: StringName = &"water_refill_amount"
 const WATER_REFILL_INTERVAL_MS_KEY: StringName = &"water_refill_interval_ms"
+const SPRAY_PARTICLE_SCENE: PackedScene = preload("res://scenes/particles/particle.tscn")
+const SPRAY_PARTICLE_Z_INDEX: int = 4097
 
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
@@ -46,6 +48,9 @@ var _continuous_aoe_id: int = -1
 var _continuous_weapon_id: String = ""
 var _continuous_cost_time_left: float = 0.0
 var _continuous_sound_id: StringName = &""
+var _spray_particle_effect: Node2D
+var _spray_particles: CPUParticles2D
+var _spray_particles_waiting_for_position: bool = false
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -62,6 +67,7 @@ func _ready() -> void:
 	_drawer = WeaponAOEDrawer.new()
 	_drawer.setup(_steering)
 	add_child(_drawer)
+	_setup_spray_particles()
 	_damage_number_drawer = DamageNumberDrawer.new()
 	add_child(_damage_number_drawer)
 	_rebuild_weapon_index()
@@ -465,6 +471,8 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 		_drawer.set_persistent_weapon_area(weapon.id, spawn_origin, facing, weapon.radius, weapon.directional_area_angle, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
 	if weapon.waters_reactive_plants:
 		_water_plants_in_cone(spawn_origin, facing, weapon.radius, weapon.directional_area_angle)
+	if weapon.id == "spray":
+		_update_spray_particles(spawn_origin, facing)
 
 func _stop_continuous_weapon() -> void:
 	if _continuous_aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
@@ -473,10 +481,52 @@ func _stop_continuous_weapon() -> void:
 		_drawer.clear_persistent_weapon_area(_continuous_weapon_id)
 	if _continuous_sound_id != &"" and Sfx.has_method("stop_sound"):
 		Sfx.stop_sound(_continuous_sound_id)
+	_stop_spray_particles()
 	_continuous_aoe_id = -1
 	_continuous_weapon_id = ""
 	_continuous_cost_time_left = 0.0
 	_continuous_sound_id = &""
+
+func _setup_spray_particles() -> void:
+	var effect_node: Node = SPRAY_PARTICLE_SCENE.instantiate()
+	_spray_particle_effect = effect_node as Node2D
+	if _spray_particle_effect == null:
+		effect_node.queue_free()
+		return
+	_spray_particle_effect.name = "SprayParticles"
+	_spray_particle_effect.z_as_relative = false
+	_spray_particle_effect.z_index = SPRAY_PARTICLE_Z_INDEX
+	_spray_particle_effect.visible = false
+	add_child(_spray_particle_effect)
+	_spray_particles = _spray_particle_effect.get_node_or_null("CPUParticles2D") as CPUParticles2D
+	if _spray_particles != null:
+		_spray_particles.local_coords = true
+		_spray_particles.emitting = false
+
+func _update_spray_particles(origin: Vector2, facing: Vector2) -> void:
+	if _spray_particle_effect == null or _spray_particles == null:
+		return
+	_spray_particle_effect.global_position = origin
+	_spray_particle_effect.rotation = facing.angle()
+	if not _spray_particles.emitting:
+		# Clear the previous emission buffer only after the emitter has its new
+		# transform. Keep it hidden for this frame so stale particles can never
+		# flash at the last spray position when emission restarts.
+		_spray_particle_effect.visible = false
+		_spray_particles.restart()
+		_spray_particles.emitting = true
+		_spray_particles_waiting_for_position = true
+		return
+	if _spray_particles_waiting_for_position:
+		_spray_particles_waiting_for_position = false
+	_spray_particle_effect.visible = true
+
+func _stop_spray_particles() -> void:
+	if _spray_particles != null:
+		_spray_particles.emitting = false
+	_spray_particles_waiting_for_position = false
+	if _spray_particle_effect != null:
+		_spray_particle_effect.visible = false
 
 func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id == &"" or amount <= 0:

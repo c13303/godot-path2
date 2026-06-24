@@ -19,5 +19,6 @@ reserve_cost = 1
 reserve_cost_interval = 0.5
 waters_reactive_plants = true
 continuous_sound = &"spray"
+aoe_visual_enabled = false
 aoe_fill_color = Color(0.12, 0.48, 1, 0.22)
 aoe_stroke_color = Color(0.35, 0.72, 1, 0.95)
