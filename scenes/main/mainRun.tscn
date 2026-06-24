@@ -24,6 +24,7 @@
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
+[ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1490,14 +1491,19 @@ offset_right = 817.0
 offset_bottom = 148.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_seed_icon")
+script = ExtResource("29_seed_icon")
+delay_between_seeds = 0.2
+animation_speed = 0.5
 
-[node name="seedQT" type="Label" parent="GameUI/top left anchor/seedIcon" unique_id=618629205]
+[node name="seedQT" type="RichTextLabel" parent="GameUI/top left anchor/seedIcon" unique_id=618629205]
 layout_mode = 0
 offset_left = 40.0
-offset_top = 11.0
-offset_right = 81.0
-offset_bottom = 34.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
 text = "x 999"
+fit_content = true
 
 [node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
 layout_mode = 0

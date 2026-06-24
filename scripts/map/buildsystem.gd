@@ -1,5 +1,8 @@
 extends Node
 
+const REMOVE_HOLD_SECONDS: float = 3.0
+const REMOVE_PROGRESS_WIDTH: float = 6.0
+const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
@@ -19,13 +22,24 @@ var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
 var _plant_layer_flush_queued: bool = false
+var _remove_active: bool = false
+var _remove_cell: Vector2i = Vector2i.ZERO
+var _remove_item_id: String = ""
+var _remove_layer: TileMapLayer
+var _remove_elapsed: float = 0.0
+var _remove_progress: ProgressBar
 
 func _ready() -> void:
 	_resolve_atlas_source_id()
 	set_process(true)
 	set_process_input(true)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_process_removal(delta)
+	if _remove_active:
+		_clear_hover()
+		return
+
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
@@ -47,6 +61,18 @@ func _process(_delta: float) -> void:
 	_draw_preview(cell, atlas_coords)
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var removal_mouse_event: InputEventMouseButton = event as InputEventMouseButton
+		if removal_mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+			var was_removing: bool = _remove_active
+			if removal_mouse_event.pressed:
+				_try_start_removal()
+			else:
+				_cancel_removal()
+			if was_removing or _remove_active:
+				get_viewport().set_input_as_handled()
+			return
+
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
@@ -56,6 +82,139 @@ func _input(event: InputEvent) -> void:
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
 			_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
+
+func _try_start_removal() -> void:
+	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+		return
+	var cell: Vector2i = _hovered_cell()
+	var removal: Dictionary = _removable_at_cell(cell)
+	if removal.is_empty():
+		return
+	var item_id: String = str(removal.get("item_id", ""))
+	if not _can_return_to_inventory(item_id):
+		_notify("inventory full")
+		return
+	_remove_active = true
+	_remove_cell = cell
+	_remove_item_id = item_id
+	_remove_layer = removal.get("layer") as TileMapLayer
+	_remove_elapsed = 0.0
+	_clear_hover()
+	_create_remove_progress()
+
+func _process_removal(delta: float) -> void:
+	if not _remove_active:
+		return
+	if GameState.is_night or _is_inventory_open() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		_cancel_removal()
+		return
+	if _hovered_cell() != _remove_cell:
+		_cancel_removal()
+		return
+	var current_removal: Dictionary = _removable_at_cell(_remove_cell)
+	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != _remove_item_id:
+		_cancel_removal()
+		return
+	_remove_elapsed = minf(_remove_elapsed + delta, REMOVE_HOLD_SECONDS)
+	if _remove_progress:
+		_remove_progress.value = (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0
+	if _remove_elapsed >= REMOVE_HOLD_SECONDS:
+		_finish_removal()
+
+func _finish_removal() -> void:
+	if not _remove_active or GameState.is_night:
+		_cancel_removal()
+		return
+	var current_removal: Dictionary = _removable_at_cell(_remove_cell)
+	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != _remove_item_id:
+		_cancel_removal()
+		return
+	if not _can_return_to_inventory(_remove_item_id):
+		_notify("inventory full")
+		_cancel_removal()
+		return
+
+	var removed_cell: Vector2i = _remove_cell
+	var removed_item_id: String = _remove_item_id
+	var removed_layer: TileMapLayer = _remove_layer
+	_cancel_removal()
+	_remove_tile(removed_layer, removed_cell)
+	game_ui.call("add_inventory", removed_item_id, 1)
+
+func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
+	if layer == plantz:
+		if plant_manager and plant_manager.has_method("remove_plant"):
+			plant_manager.call("remove_plant", cell, true)
+		if plantz.get_cell_source_id(cell) >= 0:
+			plantz.erase_cell(cell)
+			_flush_plant_layer_visuals()
+		return
+	if layer == traversable_buildings or layer == blocking_buildings:
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, true)
+		if layer.get_cell_source_id(cell) >= 0:
+			layer.erase_cell(cell)
+			layer.update_internals()
+		return
+	layer.erase_cell(cell)
+	layer.update_internals()
+
+func _removable_at_cell(cell: Vector2i) -> Dictionary:
+	var layers: Array[TileMapLayer] = [blocking_buildings, traversable_buildings, plantz, wallz]
+	for layer: TileMapLayer in layers:
+		if not layer or layer.get_cell_source_id(cell) < 0:
+			continue
+		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+		if item_id != "":
+			return {"item_id": item_id, "layer": layer}
+	return {}
+
+func _can_return_to_inventory(item_id: String) -> bool:
+	return item_id != "" and game_ui and game_ui.has_method("can_add_inventory") and bool(game_ui.call("can_add_inventory", item_id, 1))
+
+func _create_remove_progress() -> void:
+	_free_remove_progress()
+	if not previewbuild or not previewbuild.tile_set:
+		return
+	var tile_size: Vector2i = previewbuild.tile_set.tile_size
+	var progress_height: float = float(tile_size.y) * REMOVE_PROGRESS_HEIGHT_RATIO
+	_remove_progress = ProgressBar.new()
+	_remove_progress.name = "BuildingRemovalProgress"
+	_remove_progress.min_value = 0.0
+	_remove_progress.max_value = 100.0
+	_remove_progress.value = 0.0
+	_remove_progress.show_percentage = false
+	_remove_progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
+	_remove_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_remove_progress.z_index = 100
+	_remove_progress.size = Vector2(REMOVE_PROGRESS_WIDTH, progress_height)
+	var cell_center: Vector2 = previewbuild.map_to_local(_remove_cell)
+	_remove_progress.position = cell_center - Vector2(REMOVE_PROGRESS_WIDTH * 0.5, progress_height * 0.5)
+
+	var background: StyleBoxFlat = StyleBoxFlat.new()
+	background.bg_color = Color(0.05, 0.05, 0.05, 0.8)
+	background.border_width_left = 1
+	background.border_width_top = 1
+	background.border_width_right = 1
+	background.border_width_bottom = 1
+	background.border_color = Color(0.9, 0.9, 0.9, 0.9)
+	var fill: StyleBoxFlat = StyleBoxFlat.new()
+	fill.bg_color = Color(0.85, 0.75, 0.25, 1.0)
+	_remove_progress.add_theme_stylebox_override("background", background)
+	_remove_progress.add_theme_stylebox_override("fill", fill)
+	previewbuild.add_child(_remove_progress)
+
+func _cancel_removal() -> void:
+	_remove_active = false
+	_remove_elapsed = 0.0
+	_remove_item_id = ""
+	_remove_layer = null
+	_free_remove_progress()
+
+func _free_remove_progress() -> void:
+	if _remove_progress:
+		_remove_progress.queue_free()
+		_remove_progress = null
 
 func _resolve_atlas_source_id() -> void:
 	var ref: TileMapLayer = previewbuild if previewbuild else wallz

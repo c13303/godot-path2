@@ -81,11 +81,28 @@ func dry_all_roses() -> int:
 		if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
 			continue
 		_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
+		_spawn_seed_harvest(cell, dried_count)
 		dried_count += 1
 	if dried_count > 0:
 		_flush_plant_layer_now()
 		_queue_plant_layer_flush()
 	return dried_count
+
+func _spawn_seed_harvest(cell: Vector2i, sequence_index: int) -> void:
+	var scene: Node = get_tree().current_scene
+	var seed_icon: Node = scene.get_node_or_null("GameUI/top left anchor/seedIcon") if scene != null else null
+	var world_position: Vector2 = plantz.to_global(plantz.map_to_local(cell))
+	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
+		var animation_started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, sequence_index))
+		if animation_started:
+			return
+	_credit_seed_immediately()
+
+func _credit_seed_immediately() -> void:
+	var scene: Node = get_tree().current_scene
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node != null and progression_node.has_method("update_seeds"):
+		progression_node.call("update_seeds", 1)
 
 func _set_rose_atlas(cell: Vector2i, atlas_coords: Vector2i, flush_visuals: bool = true) -> void:
 	var source_id: int = plantz.get_cell_source_id(cell)

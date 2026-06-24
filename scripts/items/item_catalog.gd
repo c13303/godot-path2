@@ -45,6 +45,8 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 5,
 		"target_layer": "plantz",
 		"atlas": Vector2i(0, 0),
+		# A watered rose is still the same inventory item when picked back up.
+		"tile_atlases": [Vector2i(0, 0), Vector2i(0, 1)],
 		"occupies_cell": true,
 		"blocks_movement": false,
 		"blocks_projectiles": false,
@@ -115,3 +117,35 @@ static func get_placeable_def(item_id: String) -> Dictionary:
 	if raw is Dictionary:
 		return raw
 	return {}
+
+static func get_placeable_id_for_tile(target_layer: String, atlas_coords: Vector2i) -> String:
+	var normalized_layer: String = "traversable_buildings" if target_layer == "buildings" else target_layer
+	for raw_item_def: Variant in ITEM_DEFS.values():
+		if not (raw_item_def is Dictionary):
+			continue
+		var item_def: Dictionary = raw_item_def as Dictionary
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		var item_layer: String = str(item_def.get("target_layer", "wallz"))
+		if item_layer == "buildings":
+			item_layer = "traversable_buildings"
+		if item_layer != normalized_layer:
+			continue
+		var raw_atlases: Variant = item_def.get("tile_atlases", [])
+		if raw_atlases is Array:
+			for raw_atlas: Variant in raw_atlases:
+				if _atlas_coords_from_variant(raw_atlas) == atlas_coords:
+					return str(item_def.get("id", ""))
+		if _atlas_coords_from_variant(item_def.get("atlas", Vector2i(-1, -1))) == atlas_coords:
+			return str(item_def.get("id", ""))
+	return ""
+
+static func _atlas_coords_from_variant(raw_atlas: Variant) -> Vector2i:
+	if raw_atlas is Vector2i:
+		return raw_atlas as Vector2i
+	if raw_atlas is Vector2:
+		var vector_atlas: Vector2 = raw_atlas as Vector2
+		return Vector2i(int(vector_atlas.x), int(vector_atlas.y))
+	if raw_atlas is Array and raw_atlas.size() == 2:
+		return Vector2i(int(raw_atlas[0]), int(raw_atlas[1]))
+	return Vector2i(-1, -1)

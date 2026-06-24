@@ -69,6 +69,7 @@ class Progression:
 
 
 var progression: Progression = Progression.new()
+var _seed_label_tween: Tween
 
 
 ## Public accessor so other systems (e.g. the monster spawner) can read a
@@ -83,7 +84,7 @@ func spend(key: StringName, amount: int) -> bool:
 	if amount <= 0 or progression.get_value(key) < amount:
 		return false
 	progression.add(key, -amount)
-	_update_progression_ui()
+	_update_progression_ui(key == SEED_KEY)
 	return true
 
 
@@ -97,7 +98,7 @@ func update_seeds(delta: int) -> bool:
 		return false
 	if delta != 0:
 		progression.add(SEED_KEY, delta)
-		_update_progression_ui()
+		_update_progression_ui(true)
 	return true
 
 
@@ -134,19 +135,21 @@ func _get_progression_ui() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/top left anchor/progressionUI") as RichTextLabel
 
 
-func _get_seed_label() -> Label:
+func _get_seed_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top left anchor/seedIcon/seedQT") as Label
+	return scene.get_node_or_null("GameUI/top left anchor/seedIcon/seedQT") as RichTextLabel
 
 
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
-func _update_progression_ui() -> void:
-	var seed_label: Label = _get_seed_label()
+func _update_progression_ui(animate_seed_label: bool = false) -> void:
+	var seed_label: RichTextLabel = _get_seed_label()
 	if seed_label != null:
 		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
+		if animate_seed_label:
+			_animate_seed_label(seed_label)
 
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:
@@ -155,6 +158,18 @@ func _update_progression_ui() -> void:
 	for prop: ProgressionProp in progression.props:
 		lines.append("%s: %d" % [prop.display_name, prop.value])
 	label.text = "\n".join(lines)
+
+
+func _animate_seed_label(seed_label: RichTextLabel) -> void:
+	if _seed_label_tween != null and _seed_label_tween.is_valid():
+		_seed_label_tween.kill()
+	seed_label.pivot_offset = seed_label.size * 0.5
+	seed_label.scale = Vector2(1.55, 1.55)
+	seed_label.modulate = Color(0.35, 1.0, 0.3, 1.0)
+	_seed_label_tween = create_tween().set_parallel(true)
+	_seed_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_seed_label_tween.tween_property(seed_label, "scale", Vector2.ONE, 0.42)
+	_seed_label_tween.tween_property(seed_label, "modulate", Color.WHITE, 0.5)
 
 
 func _unhandled_input(event: InputEvent) -> void:
