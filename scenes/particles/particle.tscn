@@ -1,10 +1,12 @@
-[gd_scene format=3 uid="uid://b6wggeesgr4ke"]
+[gd_scene load_steps=3 format=3 uid="uid://b6wggeesgr4ke"]
 
 [ext_resource type="Texture2D" uid="uid://bpg1rw3ed244l" path="res://assets/sprites/legval/tear.png" id="1_80o68"]
+[ext_resource type="Script" path="res://scripts/combat/spray_particle_2d_cpu.gd" id="2_velocity_adaptation"]
 
 [node name="Particle" type="Node2D" unique_id=1410269606]
 
-[node name="CPUParticles2D" type="CPUParticles2D" parent="." unique_id=416537657]
+[node name="sprayParticle2DCPU" type="CPUParticles2D" parent="." unique_id=416537657]
+script = ExtResource("2_velocity_adaptation")
 amount = 128
 texture = ExtResource("1_80o68")
 lifetime = 0.27

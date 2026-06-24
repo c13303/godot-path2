@@ -53,6 +53,8 @@ var _continuous_sound_id: StringName = &""
 var _spray_particle_effect: Node2D
 var _spray_particles: CPUParticles2D
 var _spray_particles_waiting_for_position: bool = false
+var _spray_last_origin: Vector2 = Vector2.ZERO
+var _spray_has_last_origin: bool = false
 var _spray_audio_player: AudioStreamPlayer
 var _static_colliders_dirty: bool = true
 var _static_collider_prepare_generation: int = 0
@@ -551,7 +553,7 @@ func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: V
 		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
 	if weapon.id == "spray":
 		_start_spray_audio()
-		_update_spray_particles(spawn_origin, collision_facing)
+		_update_spray_particles(spawn_origin, collision_facing, delta)
 
 func _stop_continuous_weapon() -> void:
 	if _continuous_aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
@@ -593,18 +595,23 @@ func _setup_spray_particles() -> void:
 	_spray_particle_effect.z_index = SPRAY_PARTICLE_Z_INDEX
 	_spray_particle_effect.visible = false
 	add_child(_spray_particle_effect)
-	_spray_particles = _spray_particle_effect.get_node_or_null("CPUParticles2D") as CPUParticles2D
+	_spray_particles = _spray_particle_effect.get_node_or_null("sprayParticle2DCPU") as CPUParticles2D
 	if _spray_particles != null:
-		# The spray is an attached cone, not a set of persistent projectiles.
-		# Keeping particles local makes the visible surface follow the same cone.
 		_spray_particles.local_coords = false
 		_spray_particles.emitting = false
 
-func _update_spray_particles(origin: Vector2, facing: Vector2) -> void:
+func _update_spray_particles(origin: Vector2, facing: Vector2, delta: float) -> void:
 	if _spray_particle_effect == null or _spray_particles == null:
 		return
 	_spray_particle_effect.global_position = origin
 	_spray_particle_effect.rotation = facing.angle()
+	var player_velocity: Vector2 = Vector2.ZERO
+	if _spray_has_last_origin and delta > 0.000001:
+		player_velocity = (origin - _spray_last_origin) / delta
+	_spray_last_origin = origin
+	_spray_has_last_origin = true
+	if _spray_particles.has_method("adapt_to_player_velocity"):
+		_spray_particles.call("adapt_to_player_velocity", player_velocity, _spray_particle_effect.rotation)
 	if not _spray_particles.emitting:
 		# Clear the previous emission buffer only after the emitter has its new
 		# transform. Keep it hidden for this frame so stale particles can never
@@ -622,6 +629,8 @@ func _stop_spray_particles() -> void:
 	if _spray_particles != null:
 		_spray_particles.emitting = false
 	_spray_particles_waiting_for_position = false
+	_spray_has_last_origin = false
+	_spray_last_origin = Vector2.ZERO
 	if _spray_particle_effect != null:
 		_spray_particle_effect.visible = false
 
