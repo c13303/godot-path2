@@ -1,7 +1,7 @@
 extends Node
 
 const SAVE_PATH: String = "user://progression_save.json"
-const SAVE_VERSION: int = 1
+const SAVE_VERSION: int = 2
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
 	"floor",
@@ -65,6 +65,12 @@ class Progression:
 
 
 var progression: Progression = Progression.new()
+
+
+## Public accessor so other systems (e.g. the monster spawner) can read a
+## progression prop value by key, e.g. get_value(&"monster_per_day").
+func get_value(key: StringName) -> int:
+	return progression.get_value(key)
 
 
 func _ready() -> void:
@@ -139,7 +145,7 @@ func save_progression() -> void:
 		_fail("Save failed: required game nodes are missing")
 		return
 
-	var inventory: Array[String] = _get_inventory(game_ui)
+	var inventory: Array[Dictionary] = _get_inventory(game_ui)
 	var layer_data: Dictionary = {}
 	for layer_name in LAYER_NAMES:
 		var layer: TileMapLayer = layers[layer_name] as TileMapLayer
@@ -293,12 +299,17 @@ func _get_player() -> Node2D:
 	return get_tree().get_first_node_in_group("player") as Node2D
 
 
-func _get_inventory(game_ui: Node) -> Array[String]:
-	var inventory: Array[String] = []
+func _get_inventory(game_ui: Node) -> Array[Dictionary]:
+	var inventory: Array[Dictionary] = []
 	var raw_inventory: Variant = game_ui.get("inventory_slots")
 	if raw_inventory is Array:
-		for raw_item: Variant in raw_inventory:
-			inventory.append(str(raw_item))
+		for raw_slot: Variant in raw_inventory:
+			if raw_slot is Dictionary:
+				var slot_data: Dictionary = raw_slot as Dictionary
+				inventory.append({
+					"item_id": str(slot_data.get("item_id", "")),
+					"quantity": int(slot_data.get("quantity", 0)),
+				})
 	return inventory
 
 
@@ -331,9 +342,22 @@ func _restore_layer(layer: TileMapLayer, cells: Array) -> void:
 
 func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 	var saved_inventory: Array = player_data["inventory"] as Array
-	var inventory: Array[String] = []
-	for raw_item: Variant in saved_inventory:
-		inventory.append(str(raw_item))
+	var inventory: Array[Dictionary] = []
+	for raw_slot: Variant in saved_inventory:
+		if raw_slot is Dictionary:
+			var saved_slot: Dictionary = raw_slot as Dictionary
+			inventory.append({
+				"item_id": str(saved_slot.get("item_id", "")),
+				"quantity": int(saved_slot.get("quantity", 0)),
+			})
+		else:
+			# Version 1 stored only item-id strings. Preserve those saves by
+			# restoring every occupied slot as one item.
+			var legacy_item_id: String = str(raw_slot)
+			inventory.append({
+				"item_id": legacy_item_id,
+				"quantity": 1 if legacy_item_id != "" else 0,
+			})
 	game_ui.set("inventory_slots", inventory)
 	game_ui.set("selected_quick_index", int(player_data.get("selected_quick_index", 0)))
 	if game_ui.has_method("_refresh_all_slots"):
@@ -356,7 +380,8 @@ func _reindex_loaded_layers(scene: Node) -> void:
 
 
 func _validate_save(data: Dictionary) -> String:
-	if int(data.get("version", -1)) != SAVE_VERSION:
+	var save_version: int = int(data.get("version", -1))
+	if save_version != 1 and save_version != SAVE_VERSION:
 		return "unsupported save version"
 	if not (data.get("layers") is Dictionary) or not (data.get("player") is Dictionary):
 		return "missing save sections"
@@ -381,6 +406,24 @@ func _validate_save(data: Dictionary) -> String:
 		return "invalid player position"
 	if not (inventory is Array):
 		return "invalid player inventory"
+	var inventory_data: Array = inventory as Array
+	for raw_slot: Variant in inventory_data:
+		if save_version == 1:
+			if not (raw_slot is String):
+				return "invalid player inventory slot"
+			continue
+		if not (raw_slot is Dictionary):
+			return "invalid player inventory slot"
+		var slot_data: Dictionary = raw_slot as Dictionary
+		if not slot_data.has("item_id") or not slot_data.has("quantity"):
+			return "invalid player inventory slot"
+		var item_id: String = str(slot_data["item_id"])
+		var quantity: int = int(slot_data["quantity"])
+		var max_stack: int = ItemCatalog.get_max_stack(item_id)
+		if quantity < 0 or quantity > max_stack:
+			return "invalid player inventory quantity"
+		if (item_id == "") != (quantity == 0):
+			return "invalid player inventory slot"
 	return ""
 
 

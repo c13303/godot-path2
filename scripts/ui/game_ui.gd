@@ -18,7 +18,7 @@ const MOONSUN_TILE_SIZE: int = 64
 var _sun_icon: AtlasTexture
 var _moon_icon: AtlasTexture
 
-var inventory_slots: Array[String] = []
+var inventory_slots: Array[Dictionary] = []
 var selected_quick_index: int = 0
 var _toolbar_slot_nodes: Array[ItemSlot] = []
 var _inventory_slot_nodes: Array[ItemSlot] = []
@@ -107,9 +107,23 @@ func move_inventory_item(from_slot: int, to_slot: int) -> void:
 	if from_slot == to_slot:
 		return
 
-	var from_item := inventory_slots[from_slot]
-	inventory_slots[from_slot] = inventory_slots[to_slot]
-	inventory_slots[to_slot] = from_item
+	var from_item: Dictionary = inventory_slots[from_slot]
+	var to_item: Dictionary = inventory_slots[to_slot]
+	var from_item_id: String = _slot_item_id(from_item)
+	var to_item_id: String = _slot_item_id(to_item)
+	if from_item_id != "" and from_item_id == to_item_id and ItemCatalog.is_stackable(from_item_id):
+		var max_stack: int = ItemCatalog.get_max_stack(from_item_id)
+		var from_quantity: int = _slot_quantity(from_item)
+		var to_quantity: int = _slot_quantity(to_item)
+		var moved_quantity: int = mini(from_quantity, max_stack - to_quantity)
+		if moved_quantity <= 0:
+			return
+		inventory_slots[to_slot] = _make_slot(from_item_id, to_quantity + moved_quantity)
+		var remaining_quantity: int = from_quantity - moved_quantity
+		inventory_slots[from_slot] = _make_slot(from_item_id, remaining_quantity) if remaining_quantity > 0 else _empty_slot()
+	else:
+		inventory_slots[from_slot] = to_item
+		inventory_slots[to_slot] = from_item
 	_refresh_all_slots()
 
 func select_quick_slot(index: int) -> void:
@@ -121,7 +135,21 @@ func select_quick_slot(index: int) -> void:
 func get_selected_quick_item_id() -> String:
 	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
 		return ""
-	return inventory_slots[selected_quick_index]
+	return _slot_item_id(inventory_slots[selected_quick_index])
+
+func consume_selected_quick_item(expected_item_id: String) -> bool:
+	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
+		return false
+	var slot_data: Dictionary = inventory_slots[selected_quick_index]
+	if _slot_item_id(slot_data) != expected_item_id:
+		return false
+	var quantity: int = _slot_quantity(slot_data)
+	if quantity <= 0:
+		return false
+	quantity -= 1
+	inventory_slots[selected_quick_index] = _make_slot(expected_item_id, quantity) if quantity > 0 else _empty_slot()
+	_refresh_all_slots()
+	return true
 
 func get_selected_quick_item_def() -> Dictionary:
 	return ItemCatalog.get_item_def(get_selected_quick_item_id())
@@ -136,14 +164,34 @@ func is_item_disabled_for_placement(item_id: String) -> bool:
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
-		inventory_slots[i] = ""
-	inventory_slots[0] = "sword"
-	inventory_slots[1] = "bomb"
-	inventory_slots[2] = "water"
-	inventory_slots[3] = "wall"
-	inventory_slots[4] = "lamp"
-	inventory_slots[5] = "rose"
-	inventory_slots[6] = "turret1"
+		inventory_slots[i] = _empty_slot()
+	inventory_slots[0] = _make_slot("sword", 1)
+	inventory_slots[1] = _make_slot("bomb", 1)
+	inventory_slots[2] = _make_slot("water", 1)
+	inventory_slots[3] = _make_slot("wall", 5)
+	inventory_slots[4] = _make_slot("lamp", 5)
+	inventory_slots[5] = _make_slot("rose", 5)
+	inventory_slots[6] = _make_slot("turret1", 1)
+
+func _make_slot(item_id: String, quantity: int) -> Dictionary:
+	if item_id == "" or quantity <= 0:
+		return _empty_slot()
+	return {
+		"item_id": item_id,
+		"quantity": mini(quantity, ItemCatalog.get_max_stack(item_id)),
+	}
+
+func _empty_slot() -> Dictionary:
+	return {
+		"item_id": "",
+		"quantity": 0,
+	}
+
+func _slot_item_id(slot_data: Dictionary) -> String:
+	return str(slot_data.get("item_id", ""))
+
+func _slot_quantity(slot_data: Dictionary) -> int:
+	return int(slot_data.get("quantity", 0))
 
 func _show_inventory() -> void:
 	_set_inventory_open(true)
@@ -325,12 +373,14 @@ func _refresh_all_slots() -> void:
 		_apply_slot_item(_inventory_slot_nodes[i], i)
 
 func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
-	var item_id: String = inventory_slots[slot_index]
+	var slot_data: Dictionary = inventory_slots[slot_index]
+	var item_id: String = _slot_item_id(slot_data)
+	var quantity: int = _slot_quantity(slot_data)
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if not item_def.is_empty():
-		slot.set_item(item_def)
+		slot.set_item(item_def, quantity)
 	else:
-		slot.set_item({})
+		slot.set_item({}, 0)
 	slot.set_disabled(is_item_disabled_for_placement(item_id))
 	slot.set_selected(slot_index == selected_quick_index)
 

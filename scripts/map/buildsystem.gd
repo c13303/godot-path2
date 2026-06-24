@@ -109,6 +109,12 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	)
 	target_layer.update_internals()
 	_after_placeable_placed(_hover_cell, placeable_def)
+	_consume_placed_item(str(placeable_def.get("id", "")))
+
+func _consume_placed_item(item_id: String) -> void:
+	if item_id == "" or not game_ui or not game_ui.has_method("consume_selected_quick_item"):
+		return
+	game_ui.call("consume_selected_quick_item", item_id)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":

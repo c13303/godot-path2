@@ -35,6 +35,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": true,
 		"blocks_projectiles": true,
 		"runtime_id": "",
+		"max_stack": 99,
 	},
 	"rose": {
 		"id": "rose",
@@ -48,6 +49,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_projectiles": false,
 		"runtime_id": "rose",
+		"max_stack": 99,
 	},
 	"lamp": {
 		"id": "lamp",
@@ -62,6 +64,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "lamp",
 		"light_source": 3,
+		"max_stack": 99,
 	},
 	"turret1": {
 		"id": "turret1",
@@ -80,6 +83,7 @@ const ITEM_DEFS: Dictionary = {
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
+		"max_stack": 99,
 	},
 }
 
@@ -96,6 +100,12 @@ static func get_place_tile(item_id: String) -> Dictionary:
 
 static func is_placeable(item_id: String) -> bool:
 	return str(get_item_def(item_id).get("type", "")) == "placeable"
+
+static func get_max_stack(item_id: String) -> int:
+	return maxi(1, int(get_item_def(item_id).get("max_stack", 1)))
+
+static func is_stackable(item_id: String) -> bool:
+	return get_max_stack(item_id) > 1
 
 static func get_placeable_def(item_id: String) -> Dictionary:
 	var item_def: Dictionary = get_item_def(item_id)

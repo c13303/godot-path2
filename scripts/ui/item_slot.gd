@@ -7,11 +7,13 @@ var game_ui: Node
 var slot_type: String = "inventory"
 var slot_index: int = -1
 var item_data: Dictionary = {}
+var quantity: int = 0
 var selected: bool = false
 var disabled: bool = false
 
 var _icon: TextureRect
 var _key_label: Label
+var _quantity_label: Label
 
 func setup(owner_ui: Node, type: String, index: int = -1) -> void:
 	game_ui = owner_ui
@@ -20,8 +22,9 @@ func setup(owner_ui: Node, type: String, index: int = -1) -> void:
 	_build()
 	_refresh()
 
-func set_item(data: Dictionary) -> void:
+func set_item(data: Dictionary, item_quantity: int = 0) -> void:
 	item_data = data
+	quantity = item_quantity
 	_refresh()
 
 func set_selected(value: bool) -> void:
@@ -74,6 +77,22 @@ func _build() -> void:
 	_key_label.offset_bottom = 16.0
 	stack.add_child(_key_label)
 
+	_quantity_label = Label.new()
+	_quantity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_quantity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_quantity_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	_quantity_label.add_theme_font_size_override("font_size", 14)
+	_quantity_label.add_theme_color_override("font_color", Color.WHITE)
+	_quantity_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_quantity_label.add_theme_constant_override("shadow_offset_x", 1)
+	_quantity_label.add_theme_constant_override("shadow_offset_y", 1)
+	_quantity_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_quantity_label.offset_left = 2.0
+	_quantity_label.offset_top = 2.0
+	_quantity_label.offset_right = -4.0
+	_quantity_label.offset_bottom = -2.0
+	stack.add_child(_quantity_label)
+
 func _refresh() -> void:
 	if not _icon:
 		return
@@ -83,7 +102,8 @@ func _refresh() -> void:
 		tooltip_text = ""
 	else:
 		_icon.texture = _atlas_for_frame(int(item_data.get("frame", 0)))
-		tooltip_text = str(item_data.get("name", ""))
+		tooltip_text = "%s x%d" % [str(item_data.get("name", "")), quantity]
+	_quantity_label.text = str(quantity) if not item_data.is_empty() and quantity > 1 else ""
 	_icon.modulate = Color(0.45, 0.45, 0.45, 0.55) if disabled else Color(1.0, 1.0, 1.0, 1.0)
 
 	if slot_index >= 0 and slot_index < 8:

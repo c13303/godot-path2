@@ -247,6 +247,13 @@ var _walkable_map_tiles: Dictionary = {}  # Vector2i -> true
 const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
 var _spawned_this_night: bool = false
 var _empty_night_elapsed: float = 0.0
+# Per-night spawn quota: monster_per_day * nDays (read from the progression node
+# at the start of each night). _spawn_limit <= 0 means "no cap". Once
+# _spawned_count reaches the limit, no new monsters spawn; the night still ends
+# normally once the already-spawned monsters are gone.
+var _spawned_count_this_night: int = 0
+var _spawn_limit_this_night: int = 0
+var _progression: Node = null
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
@@ -391,8 +398,31 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_validate_dirty_gardens()
 	_rebuild_spawner_garden_route_cache()
 	_spawned_this_night = false
+	_spawned_count_this_night = 0
+	_spawn_limit_this_night = _compute_spawn_limit()
+	if debug_logs:
+		_log("Night spawn limit: %d (monster_per_day * nDays)" % _spawn_limit_this_night)
 	for cell in _spawn_timers.keys():
 		_spawn_timers[cell] = 0.0
+
+# This night's monster quota = monster_per_day * nDays, read from the progression
+# node. Returns 0 ("no cap") if progression is unavailable, so a missing node can
+# never soft-lock the night by suppressing all spawns.
+func _compute_spawn_limit() -> int:
+	var prog: Node = _get_progression()
+	if prog == null:
+		return 0
+	var per_day: int = int(prog.call("get_value", &"monster_per_day"))
+	var n_days: int = int(prog.call("get_value", &"nDays"))
+	return per_day * n_days
+
+func _get_progression() -> Node:
+	if _progression != null and is_instance_valid(_progression):
+		return _progression
+	var scene: Node = get_tree().current_scene
+	if scene != null:
+		_progression = scene.get_node_or_null("progression")
+	return _progression
 
 func _monster_count() -> int:
 	return get_tree().get_nodes_in_group("monsters").size()
@@ -1087,6 +1117,12 @@ func _process_spawners(delta: float) -> void:
 		return
 	_empty_night_elapsed = 0.0
 
+	# Spawn quota reached: stop creating new monsters for the rest of the night.
+	# The already-spawned monsters keep going; the night ends via the mc == 0 check
+	# above once they're all gone.
+	if _spawn_limit_this_night > 0 and _spawned_count_this_night >= _spawn_limit_this_night:
+		return
+
 	# Two phases so multiple ready spawners don't all spawn+assign in one frame:
 	#   1. advance every spawner's cooldown timer (cheap) and enqueue the ones that
 	#      just became ready,
@@ -1130,6 +1166,10 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 	while not _ready_spawner_queue.is_empty():
 		if processed >= spawner_budget_per_frame:
 			break
+		# Strict quota: never spawn past the night's limit, even within a single
+		# frame where several spawners are ready at once.
+		if _spawn_limit_this_night > 0 and _spawned_count_this_night >= _spawn_limit_this_night:
+			break
 		# Time budget only applies after the first spawn this frame, so a single
 		# expensive spawner can't starve the queue entirely.
 		if processed > 0 and budget_us > 0:
@@ -1150,6 +1190,7 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 		var spawned: bool = _spawn_monster_from(cell)
 		if spawned:
 			_spawned_this_night = true
+			_spawned_count_this_night += 1
 			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
 			var spawner: Dictionary = _spawners[cell] as Dictionary
 			_spawn_timers[cell] = float(spawner.get("cooldown", DEFAULT_SPAWN_COOLDOWN))
