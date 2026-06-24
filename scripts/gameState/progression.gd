@@ -36,6 +36,7 @@ class Progression:
 	var props: Array[ProgressionProp] = [
 		ProgressionProp.new(&"nDays", "Day", 1),
 		ProgressionProp.new(&"monster_per_day", "Monster per day", 2),
+		ProgressionProp.new(&"seeds", "Seeds", 5),
 	]
 
 	func get_prop(key: StringName) -> ProgressionProp:
