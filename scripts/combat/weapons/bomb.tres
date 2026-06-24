@@ -9,6 +9,7 @@ radius = 100.0
 aoe_duration = 0.35
 smash_force = 200.0
 control_suppression_duration = 0.35
+damage = 50
 falloff = 0.1
 radial = true
 detach_flow = true

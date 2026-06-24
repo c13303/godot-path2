@@ -110,6 +110,12 @@ namespace ffcore
                 cfg.end_aoe_control_suppression_duration,
                 p.owner_agent_id,
                 p.affected_smash_classes);
+            steering->apply_area_damage(
+                at,
+                cfg.end_aoe_radius,
+                p.owner_agent_id,
+                p.affected_smash_classes,
+                cfg.damage);
         }
         // Surface the AoE so GDScript can render it (one-frame event buffer).
         impact_events.push_back(ProjectileImpact{
@@ -284,6 +290,12 @@ namespace ffcore
                         cfg.smash_control_suppression_duration,
                         p.owner_agent_id,
                         p.affected_smash_classes);
+                    steering->apply_area_damage(
+                        p.pos,
+                        cfg.aoe_radius,
+                        p.owner_agent_id,
+                        p.affected_smash_classes,
+                        cfg.damage);
 
                     impact_events.push_back(ProjectileImpact{
                         p.pos, impact_dir, cfg.aoe_radius,

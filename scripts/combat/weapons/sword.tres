@@ -12,3 +12,4 @@ aoe_duration = 0.15
 smash_force = 400.0
 control_suppression = 0.35
 control_suppression_duration = 0.15
+damage = 50

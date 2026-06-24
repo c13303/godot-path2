@@ -33,8 +33,16 @@ namespace ffcore
         int owner_id = -1; // if valid, zone.pos tracks this agent's live position each tick
         Vec2 follow_offset; // added to the owner's live position so the zone can sit off-center
         int affected_smash_classes = 0;
+        int damage = 0;
         double time_left = 0.0;
         std::unordered_set<int> hit_ids;
+    };
+
+    struct DamageEvent
+    {
+        int agent_id = -1;
+        int damage = 0;
+        Vec2 position;
     };
 
     struct BottleneckReservation
@@ -85,7 +93,9 @@ namespace ffcore
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
-        void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset = Vec2(0, 0));
+        void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage);
+        void apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage);
+        std::vector<DamageEvent> take_damage_events();
         void set_agent_never_rest(int id, bool value);
         void set_agent_phase(int id, AgentPhase phase, float eating_seconds);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
@@ -174,6 +184,7 @@ namespace ffcore
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
         std::vector<ActiveAoE> active_aoes;
+        std::vector<DamageEvent> damage_events;
         std::unordered_map<FlowField *, std::unordered_map<int, BottleneckReservation>> bottleneck_reservations;
         std::unordered_map<FlowField *, std::unordered_map<int, int>> bottleneck_core_occupancy;
         double max_fight_query_padding = 0.0;

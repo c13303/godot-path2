@@ -97,6 +97,7 @@ int ProjectileSystemNative::register_type(const Dictionary &cfg)
     if (cfg.has("smash_detach_flow")) c.smash_detach_flow = bool(cfg["smash_detach_flow"]);
     if (cfg.has("smash_control_suppression")) c.smash_control_suppression = double(cfg["smash_control_suppression"]);
     if (cfg.has("smash_control_suppression_duration")) c.smash_control_suppression_duration = double(cfg["smash_control_suppression_duration"]);
+    if (cfg.has("damage")) c.damage = int(cfg["damage"]);
     if (cfg.has("stopped_by_walls")) c.stopped_by_walls = bool(cfg["stopped_by_walls"]);
     if (cfg.has("end_of_life_aoe_enabled")) c.end_of_life_aoe_enabled = bool(cfg["end_of_life_aoe_enabled"]);
     if (cfg.has("end_aoe_radius")) c.end_aoe_radius = double(cfg["end_aoe_radius"]);

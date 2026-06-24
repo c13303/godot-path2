@@ -16,8 +16,11 @@ class_name FightSystem
 
 var _steering: Node
 var _projectiles: Node
+var _agent_manager: Node
+var _building_manager: Node
 var _drawer
 var _projectile_drawer
+var _damage_number_drawer: DamageNumberDrawer
 var _weapons_by_id: Dictionary = {}
 var _guns_by_id: Dictionary = {}
 var _gun_type_ids: Dictionary = {}
@@ -27,9 +30,15 @@ var _gun_fire_timers: Dictionary = {}
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
 	_projectiles = get_node_or_null("../CPP/ProjectileSystemNative")
+	_agent_manager = get_node_or_null("../CPP/AgentManagerNative")
+	_building_manager = get_node_or_null("../Map/BuildingManager")
+	if _steering and not _steering.has_method("take_damage_events"):
+		push_error("FightSystem: native damage API is unavailable. Rebuild the GDExtension and restart Godot.")
 	_drawer = WeaponAOEDrawer.new()
 	_drawer.setup(_steering)
 	add_child(_drawer)
+	_damage_number_drawer = DamageNumberDrawer.new()
+	add_child(_damage_number_drawer)
 	_rebuild_weapon_index()
 	_register_guns()
 	_upload_projectile_walls()
@@ -41,6 +50,94 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_drain_projectile_impacts()
+	_drain_damage_events()
+
+func _drain_damage_events() -> void:
+	if not _steering or not _steering.has_method("take_damage_events") or not _agent_manager:
+		return
+	var events: Array = _steering.call("take_damage_events") as Array
+	for event_variant: Variant in events:
+		var event: Dictionary = event_variant as Dictionary
+		var agent_id: int = int(event.get("agent_id", -1))
+		var damage: int = int(event.get("damage", 0))
+		if agent_id < 0 or damage <= 0:
+			continue
+		var enemy: Node2D = _agent_manager.call("find_node_by_agent", agent_id) as Node2D
+		if not is_instance_valid(enemy) or not enemy.is_in_group("monsters") or not enemy.has_method("take_damage"):
+			continue
+		var number_position: Vector2 = event.get("position", enemy.global_position) as Vector2
+		_damage_number_drawer.show_damage(number_position, damage)
+		var died: bool = bool(enemy.call("take_damage", damage))
+		if died:
+			_remove_dead_enemy(enemy, agent_id)
+
+func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
+	if _building_manager and _building_manager.has_method("remove_dead_monster"):
+		_building_manager.call("remove_dead_monster", enemy)
+		return
+	if _agent_manager and _agent_manager.has_method("unregister_agent"):
+		_agent_manager.call("unregister_agent", agent_id)
+	enemy.remove_from_group("monsters")
+	enemy.queue_free()
+
+class DamageNumberDrawer:
+	extends Node2D
+
+	const LIFETIME: float = 0.65
+	const RISE_SPEED: float = 26.0
+	const FONT_SIZE: int = 14
+	const DRAW_Z_INDEX: int = 4096
+
+	var _positions: PackedVector2Array = PackedVector2Array()
+	var _damages: PackedInt32Array = PackedInt32Array()
+	var _times_left: PackedFloat32Array = PackedFloat32Array()
+
+	func _ready() -> void:
+		z_as_relative = false
+		z_index = DRAW_Z_INDEX
+
+	func show_damage(world_position: Vector2, damage: int) -> void:
+		_positions.push_back(world_position + Vector2(0.0, -28.0))
+		_damages.push_back(damage)
+		_times_left.push_back(LIFETIME)
+		queue_redraw()
+
+	func _process(delta: float) -> void:
+		var had_numbers: bool = not _positions.is_empty()
+		for index: int in range(_positions.size() - 1, -1, -1):
+			var position: Vector2 = _positions[index]
+			position.y -= RISE_SPEED * delta
+			_positions[index] = position
+			_times_left[index] = _times_left[index] - delta
+			if _times_left[index] <= 0.0:
+				_remove_number_at(index)
+		if had_numbers:
+			queue_redraw()
+
+	# Order is visually irrelevant, so swap-remove keeps expiry O(1) and avoids
+	# shifting every later number during large bursts.
+	func _remove_number_at(index: int) -> void:
+		var last_index: int = _positions.size() - 1
+		if index != last_index:
+			_positions[index] = _positions[last_index]
+			_damages[index] = _damages[last_index]
+			_times_left[index] = _times_left[last_index]
+		_positions.resize(last_index)
+		_damages.resize(last_index)
+		_times_left.resize(last_index)
+
+	func _draw() -> void:
+		var font: Font = ThemeDB.fallback_font
+		for index: int in range(_positions.size()):
+			var text_value: String = str(_damages[index])
+			var position: Vector2 = _positions[index]
+			var text_size: Vector2 = font.get_string_size(text_value, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE)
+			var draw_position: Vector2 = position - Vector2(text_size.x * 0.5, 0.0)
+			var alpha: float = min(1.0, _times_left[index] / 0.18)
+			var outline_color: Color = Color(0.0, 0.0, 0.0, alpha)
+			for offset: Vector2 in [Vector2(-1.0, 0.0), Vector2(1.0, 0.0), Vector2(0.0, -1.0), Vector2(0.0, 1.0)]:
+				draw_string(font, draw_position + offset, text_value, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, outline_color)
+			draw_string(font, draw_position, text_value, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, Color(1.0, 1.0, 1.0, alpha))
 
 # Drain this frame's projectile AoE impacts (wall/expiry/agent) from the native
 # system and render each as a fading ring via the shared WeaponAOEDrawer. The
@@ -124,7 +221,8 @@ func use_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_a
 		weapon.control_suppression_duration,
 		source_agent_id,
 		weapon.affected_smash_classes,
-		aoe_follow_offset
+		aoe_follow_offset,
+		weapon.damage
 	)
 	return true
 
@@ -163,6 +261,7 @@ func _register_guns() -> void:
 			"smash_detach_flow": gun.smash_detach_flow,
 			"smash_control_suppression": gun.smash_control_suppression,
 			"smash_control_suppression_duration": gun.smash_control_suppression_duration,
+			"damage": gun.damage,
 			"stopped_by_walls": gun.stopped_by_walls,
 			"end_of_life_aoe_enabled": gun.end_of_life_aoe_enabled,
 			"end_aoe_radius": gun.end_aoe_radius,

@@ -28,6 +28,7 @@ class_name GunData
 @export var projectile_shadow_texture: Texture2D
 
 @export var aoe_radius: float = 18.0
+@export var damage: int = 1
 @export var smash_force: float = 120.0
 @export_range(0.0, 1.0, 0.01) var smash_friction_loss: float = 0.5
 @export var smash_falloff: float = 1.0

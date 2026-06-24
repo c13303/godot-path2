@@ -14,6 +14,7 @@ projectile_sprite = ExtResource("1_dqrmy")
 throw_offset = 32.0
 projectile_altitude_px = 22.0
 projectile_shadow_size = Vector2(18, 7)
+damage = 10
 smash_force = 400.0
 smash_friction_loss = 0.6
 smash_control_suppression = 0.2

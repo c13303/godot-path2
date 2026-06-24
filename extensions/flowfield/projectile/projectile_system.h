@@ -22,6 +22,7 @@ namespace ffcore
         bool smash_detach_flow = false;
         double smash_control_suppression = 1.0;
         double smash_control_suppression_duration = 0.0;
+        int damage = 0;
 
         // Projectiles are stopped by walls (visual altitude is NOT physical;
         // collision uses the ground position p.pos only).

@@ -165,13 +165,39 @@ func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
 		inventory_slots[i] = _empty_slot()
-	inventory_slots[0] = _make_slot("sword", 1)
-	inventory_slots[1] = _make_slot("bomb", 1)
-	inventory_slots[2] = _make_slot("water", 1)
-	inventory_slots[3] = _make_slot("wall", 5)
-	inventory_slots[4] = _make_slot("lamp", 5)
-	inventory_slots[5] = _make_slot("rose", 5)
-	inventory_slots[6] = _make_slot("turret1", 1)
+	add_inventory("sword", 1)
+	add_inventory("water", 1)
+	add_inventory("rose", 5)
+	add_inventory("turret1", 1)
+
+# Generic inventory add, reusable for pickups/rewards later.
+# For now its only behaviour is auto-slotting: if the item is not already
+# placed in a slot and a free slot exists, it drops into the first free slot.
+# Returns true if the item ended up slotted.
+func add_inventory(item_id: String, quantity: int = 1) -> bool:
+	if item_id == "" or quantity <= 0:
+		return false
+	if _is_item_slotted(item_id):
+		return false
+	var free_index: int = _first_free_slot()
+	if free_index < 0:
+		return false
+	inventory_slots[free_index] = _make_slot(item_id, quantity)
+	_refresh_all_slots()
+	return true
+
+func _is_item_slotted(item_id: String) -> bool:
+	for slot_data in inventory_slots:
+		if _slot_item_id(slot_data) == item_id:
+			return true
+	return false
+
+func _first_free_slot() -> int:
+	for i in range(inventory_slots.size()):
+		if _slot_item_id(inventory_slots[i]) == "":
+			return i
+	return -1
+
 
 func _make_slot(item_id: String, quantity: int) -> Dictionary:
 	if item_id == "" or quantity <= 0:

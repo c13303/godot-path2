@@ -1,6 +1,13 @@
 extends CharacterBody2D
 class_name FlowAgent
 
+const HEALTH_BAR_SIZE: Vector2 = Vector2(28.0, 4.0)
+const HEALTH_BAR_POSITION: Vector2 = Vector2(-14.0, -38.0)
+const FLASH_DURATION: float = 0.09
+const FLASH_SHADER: Shader = preload("res://scripts/entities/enemy_flash.gdshader")
+
+static var _shared_flash_material: ShaderMaterial
+
 # Mission phase codes — must match ffcore::AgentPhase in agent.h.
 const PHASE_NONE: int = 0
 const PHASE_FLOW_IN: int = 1
@@ -24,6 +31,10 @@ var _agent_manager: Node
 var _velocity_len: float = 0.0
 var _eating_timer: float = 0.0
 var status: String = ""
+@export var max_health: int = 100
+var health: int = 100
+var _flash_time_left: float = 0.0
+var _dead: bool = false
 
 @export var use_native_steering: bool = true
 @export var max_speed: float = 100.0
@@ -51,13 +62,52 @@ const MONSTER_FRAME_EATING: int = 1
 
 
 func _ready() -> void:
+	health = max(1, max_health)
+	_setup_flash_material()
+	queue_redraw()
 	if use_native_steering:
 		set_physics_process(false)
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
+	_process_damage_flash(delta)
 	_process_eating_status(delta)
 	_update_monster_frame()
+
+func take_damage(amount: int) -> bool:
+	if _dead or amount <= 0:
+		return false
+	health = max(0, health - amount)
+	_flash_time_left = FLASH_DURATION
+	_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
+	queue_redraw()
+	if health <= 0:
+		_dead = true
+		return true
+	return false
+
+func _draw() -> void:
+	var background_rect: Rect2 = Rect2(HEALTH_BAR_POSITION, HEALTH_BAR_SIZE)
+	draw_rect(background_rect, Color.BLACK)
+	var health_ratio: float = float(health) / float(max(1, max_health))
+	var fill_size: Vector2 = Vector2((HEALTH_BAR_SIZE.x - 2.0) * health_ratio, HEALTH_BAR_SIZE.y - 2.0)
+	draw_rect(Rect2(HEALTH_BAR_POSITION + Vector2.ONE, fill_size), Color(0.9, 0.05, 0.05, 1.0))
+
+func _setup_flash_material() -> void:
+	if not is_instance_valid(_monster_sprite):
+		return
+	if _shared_flash_material == null:
+		_shared_flash_material = ShaderMaterial.new()
+		_shared_flash_material.shader = FLASH_SHADER
+	_monster_sprite.material = _shared_flash_material
+	_monster_sprite.set_instance_shader_parameter("flash_amount", 0.0)
+
+func _process_damage_flash(delta: float) -> void:
+	if _flash_time_left <= 0.0 or not is_instance_valid(_monster_sprite):
+		return
+	_flash_time_left = max(0.0, _flash_time_left - delta)
+	var flash_amount: float = _flash_time_left / FLASH_DURATION
+	_monster_sprite.set_instance_shader_parameter("flash_amount", flash_amount)
 
 # Drive the spritesheet frame purely from the eating status so it can never desync.
 func _update_monster_frame() -> void:

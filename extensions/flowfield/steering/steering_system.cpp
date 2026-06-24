@@ -1273,7 +1273,7 @@ void SteeringSystem::apply_explosion_filtered(const Vec2 &pos, double radius, do
     }
 }
 
-void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset)
+void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage)
 {
     if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(radius) || !std::isfinite(duration) || !std::isfinite(force) || !std::isfinite(follow_offset.x) || !std::isfinite(follow_offset.y))
     {
@@ -1313,9 +1313,44 @@ void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, doub
     zone.ignored_agent_id = ignored_agent_id;
     zone.owner_id = ignored_agent_id; // the swing's source agent: zone follows it while alive
     zone.affected_smash_classes = affected_smash_classes;
+    zone.damage = std::max(0, damage);
     zone.time_left = duration;
 
     active_aoes.push_back(std::move(zone));
+}
+
+void SteeringSystem::apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage)
+{
+    if (!grid || radius <= 0.0 || damage <= 0)
+        return;
+
+    auto neighbors = grid->query_neighbors(pos, radius + max_fight_query_padding);
+    for (int nid : neighbors)
+    {
+        if (nid == ignored_agent_id)
+            continue;
+        auto it = id_to_index.find(nid);
+        if (it == id_to_index.end())
+            continue;
+
+        const AgentData &agent = agents[it->second];
+        if (agent.profile.weapon_immune)
+            continue;
+        if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+            continue;
+
+        Vec2 fight_center = agent_fight_center(agent);
+        if (point_aabb_distance(pos, fight_center, agent.profile.fight_half_w, agent.profile.fight_half_h) > radius)
+            continue;
+        damage_events.push_back(DamageEvent{nid, damage, fight_center});
+    }
+}
+
+std::vector<DamageEvent> SteeringSystem::take_damage_events()
+{
+    std::vector<DamageEvent> out;
+    out.swap(damage_events);
+    return out;
 }
 
 void SteeringSystem::set_agent_never_rest(int id, bool value)
@@ -1455,6 +1490,8 @@ void SteeringSystem::update_all(double delta)
             double attenuation = std::pow(base, zone.falloff);
 
             apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
+            if (zone.damage > 0)
+                damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
             zone.hit_ids.insert(nid);
         }
 

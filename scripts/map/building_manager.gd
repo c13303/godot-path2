@@ -1818,6 +1818,27 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	agent.remove_from_group("monsters")
 	agent.queue_free()
 
+# Combat death uses the same authoritative owner that created and routed monsters.
+# Clear every phase/index before unregistering the native agent so no deferred
+# garden work can retain or later re-route a dead nav_id.
+func remove_dead_monster(agent: Node2D) -> void:
+	if not is_instance_valid(agent):
+		return
+	var nav_id: int = int(agent.get("nav_id"))
+	_entry_path_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
+	_erase_eating_agent(nav_id)
+	_escaping_agents.erase(nav_id)
+	_garden_retarget_queued.erase(nav_id)
+	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
+		var item: Dictionary = _garden_retarget_queue[index]
+		if int(item.get("nav_id", -1)) == nav_id:
+			_garden_retarget_queue.remove_at(index)
+	if agent_manager and agent_manager.has_method("unregister_agent") and nav_id >= 0:
+		agent_manager.call("unregister_agent", nav_id)
+	agent.remove_from_group("monsters")
+	agent.queue_free()
+
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL
 	var best_dist_sq: int = 2147483647

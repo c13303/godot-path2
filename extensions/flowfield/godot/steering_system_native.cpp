@@ -56,7 +56,8 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
     ClassDB::bind_method(D_METHOD("apply_explosion_filtered", "position", "radius", "intensity", "friction_loss", "falloff", "ignored_agent_id", "control_suppression", "control_suppression_duration", "affected_smash_classes"), &SteeringSystemNative::apply_explosion_filtered);
-    ClassDB::bind_method(D_METHOD("spawn_aoe_zone", "position", "direction", "radius", "angle_degrees", "duration", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes", "follow_offset"), &SteeringSystemNative::spawn_aoe_zone, DEFVAL(Vector2(0, 0)));
+    ClassDB::bind_method(D_METHOD("spawn_aoe_zone", "position", "direction", "radius", "angle_degrees", "duration", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes", "follow_offset", "damage"), &SteeringSystemNative::spawn_aoe_zone);
+    ClassDB::bind_method(D_METHOD("take_damage_events"), &SteeringSystemNative::take_damage_events);
     ClassDB::bind_method(D_METHOD("register_static_obstacle", "obstacle_id", "position", "radius", "push_strength"), &SteeringSystemNative::register_static_obstacle, DEFVAL(1.0));
     ClassDB::bind_method(D_METHOD("unregister_static_obstacle", "obstacle_id"), &SteeringSystemNative::unregister_static_obstacle);
     ClassDB::bind_method(D_METHOD("clear_static_obstacles"), &SteeringSystemNative::clear_static_obstacles);
@@ -220,7 +221,7 @@ void SteeringSystemNative::apply_explosion_filtered(const Vector2 &position, dou
     system.apply_explosion_filtered(ffcore::Vec2(position.x, position.y), radius, intensity, friction_loss, falloff, ignored_agent_id, control_suppression, control_suppression_duration, affected_smash_classes);
 }
 
-void SteeringSystemNative::spawn_aoe_zone(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vector2 &follow_offset)
+void SteeringSystemNative::spawn_aoe_zone(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vector2 &follow_offset, int damage)
 {
     system.spawn_aoe_zone(
         ffcore::Vec2(position.x, position.y),
@@ -236,7 +237,22 @@ void SteeringSystemNative::spawn_aoe_zone(const Vector2 &position, const Vector2
         control_suppression_duration,
         ignored_agent_id,
         affected_smash_classes,
-        ffcore::Vec2(follow_offset.x, follow_offset.y));
+        ffcore::Vec2(follow_offset.x, follow_offset.y),
+        damage);
+}
+
+Array SteeringSystemNative::take_damage_events()
+{
+    Array out;
+    for (const ffcore::DamageEvent &event : system.take_damage_events())
+    {
+        Dictionary data;
+        data["agent_id"] = event.agent_id;
+        data["damage"] = event.damage;
+        data["position"] = Vector2(event.position.x, event.position.y);
+        out.push_back(data);
+    }
+    return out;
 }
 
 void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
