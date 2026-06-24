@@ -16,6 +16,7 @@
 [ext_resource type="Script" uid="uid://d3edhdcktbvkw" path="res://scripts/combat/fight_system.gd" id="19_gvmlv"]
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
+[ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
@@ -1680,3 +1681,6 @@ script = ExtResource("11_62xsw")
 
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
+
+[node name="progression" type="Node" parent="." unique_id=1463723645]
+script = ExtResource("22_m1b8m")
