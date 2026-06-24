@@ -35,7 +35,10 @@ namespace ffcore
         int affected_smash_classes = 0;
         int damage = 0;
         double time_left = 0.0;
+        int continuous_id = -1;
+        double hit_frequency = 0.0;
         std::unordered_set<int> hit_ids;
+        std::unordered_map<int, double> hit_cooldowns;
     };
 
     struct DamageEvent
@@ -94,6 +97,9 @@ namespace ffcore
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vec2 &pos, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage);
+        int start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double hit_frequency);
+        bool update_continuous_aoe(int continuous_id, const Vec2 &direction, const Vec2 &follow_offset);
+        void stop_continuous_aoe(int continuous_id);
         void apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage);
         std::vector<DamageEvent> take_damage_events();
         void set_agent_never_rest(int id, bool value);
@@ -183,6 +189,7 @@ namespace ffcore
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
+        int next_continuous_aoe_id = 1;
         std::vector<ActiveAoE> active_aoes;
         std::vector<DamageEvent> damage_events;
         std::unordered_map<FlowField *, std::unordered_map<int, BottleneckReservation>> bottleneck_reservations;

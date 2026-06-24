@@ -1525,6 +1525,25 @@ icon = SubResource("AtlasTexture_sun")
 icon_alignment = 1
 expand_icon = true
 
+[node name="dayLabel" type="RichTextLabel" parent="GameUI/top anchor" unique_id=2071789186]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -64.0
+offset_top = 4.0
+offset_right = 64.0
+offset_bottom = 40.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+
 [node name="top right" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
 anchors_preset = 1

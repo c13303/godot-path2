@@ -3,6 +3,10 @@ class_name GunData
 
 @export var id: String = ""
 
+@export_group("Reserve")
+@export var reserve_id: StringName = &""
+@export var reserve_cost: int = 0
+
 @export var fire_delay_ms: float = 50.0
 
 @export var projectile_speed: float = 600.0

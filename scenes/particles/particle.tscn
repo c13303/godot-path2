@@ -1,0 +1,20 @@
+[gd_scene format=3 uid="uid://b6wggeesgr4ke"]
+
+[ext_resource type="Texture2D" uid="uid://bpg1rw3ed244l" path="res://assets/sprites/legval/tear.png" id="1_80o68"]
+
+[node name="Particle" type="Node2D" unique_id=1410269606]
+
+[node name="CPUParticles2D" type="CPUParticles2D" parent="." unique_id=416537657]
+amount = 48
+texture = ExtResource("1_80o68")
+lifetime = 0.27
+explosiveness = 0.22
+randomness = 0.3
+spread = 48.35
+gravity = Vector2(0, 0)
+initial_velocity_min = 240.07
+initial_velocity_max = 370.18
+angular_velocity_min = -5.35
+angular_velocity_max = 406.84
+scale_amount_min = 0.2
+scale_amount_max = 0.5

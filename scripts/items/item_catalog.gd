@@ -24,6 +24,13 @@ const ITEM_DEFS: Dictionary = {
 		"category": "tools",
 		"frame": 2,
 	},
+	"spray": {
+		"id": "spray",
+		"name": "Spray",
+		"type": "weapon",
+		"category": "tools",
+		"frame": 2,
+	},
 	"wall": {
 		"id": "wall",
 		"name": "Wall",

@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://bs67ji5wuue4h"]
+
+[ext_resource type="Script" uid="uid://7fy1vw4t2nil" path="res://scripts/combat/weapons/weapon_data.gd" id="1_weapon_data"]
+
+[resource]
+script = ExtResource("1_weapon_data")
+id = "spray"
+throw_offset = 16.0
+directional_area_angle = 100.0
+radius = 96.0
+smash_force = 400.0
+control_suppression = 0.35
+control_suppression_duration = 0.15
+damage = 10
+continuous = true
+hit_frequency = 0.5
+reserve_id = &"water"
+reserve_cost = 1
+reserve_cost_interval = 0.5
+waters_reactive_plants = true
+continuous_sound = &"spray"
+aoe_fill_color = Color(0.12, 0.48, 1, 0.22)
+aoe_stroke_color = Color(0.35, 0.72, 1, 0.95)

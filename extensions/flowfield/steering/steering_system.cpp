@@ -1319,6 +1319,65 @@ void SteeringSystem::spawn_aoe_zone(const Vec2 &pos, const Vec2 &direction, doub
     active_aoes.push_back(std::move(zone));
 }
 
+int SteeringSystem::start_continuous_aoe(const Vec2 &pos, const Vec2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vec2 &follow_offset, int damage, double hit_frequency)
+{
+    if (!std::isfinite(pos.x) || !std::isfinite(pos.y) || !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(radius) || !std::isfinite(force) || !std::isfinite(follow_offset.x) || !std::isfinite(follow_offset.y) || !std::isfinite(hit_frequency))
+        return -1;
+    if (radius <= 0.0 || hit_frequency <= 0.0)
+        return -1;
+
+    Vec2 facing = safe_normalize(direction);
+    double clamped_angle = std::clamp(angle_degrees, 0.0, 360.0);
+    if (clamped_angle < 360.0 && facing.is_zero())
+        return -1;
+
+    ActiveAoE zone;
+    zone.pos = pos;
+    zone.follow_offset = follow_offset;
+    zone.direction = clamped_angle < 360.0 ? facing : Vec2(0, 0);
+    zone.radius = radius;
+    zone.angle_degrees = clamped_angle;
+    zone.force = force;
+    zone.friction_loss = friction_loss;
+    zone.falloff = std::max(0.0, falloff);
+    zone.detach_flow = detach_flow;
+    zone.control_suppression = control_suppression;
+    zone.control_suppression_duration = control_suppression_duration;
+    zone.ignored_agent_id = ignored_agent_id;
+    zone.owner_id = ignored_agent_id;
+    zone.affected_smash_classes = affected_smash_classes;
+    zone.damage = std::max(0, damage);
+    zone.time_left = 1.0;
+    zone.continuous_id = next_continuous_aoe_id++;
+    zone.hit_frequency = hit_frequency;
+    active_aoes.push_back(std::move(zone));
+    return active_aoes.back().continuous_id;
+}
+
+bool SteeringSystem::update_continuous_aoe(int continuous_id, const Vec2 &direction, const Vec2 &follow_offset)
+{
+    for (ActiveAoE &zone : active_aoes)
+    {
+        if (zone.continuous_id != continuous_id)
+            continue;
+        Vec2 facing = safe_normalize(direction);
+        if (zone.angle_degrees < 360.0 && facing.is_zero())
+            return false;
+        if (zone.angle_degrees < 360.0)
+            zone.direction = facing;
+        zone.follow_offset = follow_offset;
+        return true;
+    }
+    return false;
+}
+
+void SteeringSystem::stop_continuous_aoe(int continuous_id)
+{
+    active_aoes.erase(std::remove_if(active_aoes.begin(), active_aoes.end(),
+                                     [continuous_id](const ActiveAoE &zone) { return zone.continuous_id == continuous_id; }),
+                      active_aoes.end());
+}
+
 void SteeringSystem::apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage)
 {
     if (!grid || radius <= 0.0 || damage <= 0)
@@ -1436,6 +1495,11 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &zone : active_aoes)
     {
+        if (zone.continuous_id >= 0)
+        {
+            for (auto &cooldown : zone.hit_cooldowns)
+                cooldown.second -= delta;
+        }
         // Zone follows its owner: re-read the source agent's live position each tick so the
         // hitbox sweeps with the player. If the owner despawned, keep the last known position.
         if (zone.owner_id >= 0)
@@ -1449,8 +1513,16 @@ void SteeringSystem::update_all(double delta)
         {
             if (nid == zone.ignored_agent_id)
                 continue;
-            if (zone.hit_ids.count(nid) != 0)
+            if (zone.continuous_id >= 0)
+            {
+                auto cooldown_it = zone.hit_cooldowns.find(nid);
+                if (cooldown_it != zone.hit_cooldowns.end() && cooldown_it->second > 0.0)
+                    continue;
+            }
+            else if (zone.hit_ids.count(nid) != 0)
+            {
                 continue;
+            }
 
             auto it = id_to_index.find(nid);
             if (it == id_to_index.end())
@@ -1492,13 +1564,17 @@ void SteeringSystem::update_all(double delta)
             apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
             if (zone.damage > 0)
                 damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
-            zone.hit_ids.insert(nid);
+            if (zone.continuous_id >= 0)
+                zone.hit_cooldowns[nid] = zone.hit_frequency;
+            else
+                zone.hit_ids.insert(nid);
         }
 
-        zone.time_left -= delta;
+        if (zone.continuous_id < 0)
+            zone.time_left -= delta;
     }
     active_aoes.erase(std::remove_if(active_aoes.begin(), active_aoes.end(),
-                                     [](const ActiveAoE &z) { return z.time_left <= 0.0; }),
+                                     [](const ActiveAoE &z) { return z.continuous_id < 0 && z.time_left <= 0.0; }),
                       active_aoes.end());
 
     for (auto &a : agents)

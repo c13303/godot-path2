@@ -63,8 +63,9 @@ func _input(event: InputEvent) -> void:
 			if _selected_item_places_tile():
 				return
 			var weapon_id := _selected_item_id()
-			if fight_system and fight_system.is_gun(weapon_id):
-				fight_system.reset_gun_cooldown(weapon_id)
+			if fight_system and fight_system.is_held_weapon(weapon_id):
+				if fight_system.is_gun(weapon_id):
+					fight_system.reset_gun_cooldown(weapon_id)
 			else:
 				_try_use_equipped_item()
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.ctrl_pressed and not _paused and not _is_inventory_open():
@@ -141,27 +142,22 @@ func _gamepad_stick_vector(x_axis: JoyAxis, y_axis: JoyAxis) -> Vector2:
 	return stick.normalized() * scaled_magnitude
 
 func _update_gun_fire(delta: float) -> void:
-	if _paused or _is_inventory_open():
-		return
 	if not fight_system:
 		return
-	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		return
-	if get_viewport().gui_get_hovered_control() != null:
-		return
-	var weapon_id: String = _selected_item_id()
-	if _selected_item_disabled_for_placement(weapon_id):
-		return
-	if weapon_id == "" or not fight_system.is_gun(weapon_id):
-		return
-	var player := _get_player_node()
+	var player: Node2D = _get_player_node()
 	if not player:
 		return
-	var origin := _weapon_origin(player)
-	var direction := get_global_mouse_position() - origin
-	if direction.length_squared() < 0.000001:
-		return
-	fight_system.fire_gun_held(weapon_id, origin, direction, player_nav_id, delta)
+	var origin: Vector2 = _weapon_origin(player)
+	var direction: Vector2 = get_global_mouse_position() - origin
+	var weapon_id: String = ""
+	var trigger_allowed: bool = not _paused and not _is_inventory_open()
+	trigger_allowed = trigger_allowed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	trigger_allowed = trigger_allowed and get_viewport().gui_get_hovered_control() == null
+	if trigger_allowed:
+		var selected_id: String = _selected_item_id()
+		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
+			weapon_id = selected_id
+	fight_system.process_held_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player), delta)
 
 func _setup_player() -> void:
 	var player := _get_player_node()

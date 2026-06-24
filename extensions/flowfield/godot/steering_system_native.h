@@ -79,6 +79,9 @@ namespace godot
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);
         void apply_explosion_filtered(const Vector2 &position, double radius, double intensity, double friction_loss, double falloff, int ignored_agent_id, double control_suppression, double control_suppression_duration, int affected_smash_classes);
         void spawn_aoe_zone(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double duration, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vector2 &follow_offset, int damage);
+        int start_continuous_aoe(const Vector2 &position, const Vector2 &direction, double radius, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes, const Vector2 &follow_offset, int damage, double hit_frequency);
+        bool update_continuous_aoe(int continuous_id, const Vector2 &direction, const Vector2 &follow_offset);
+        void stop_continuous_aoe(int continuous_id);
         Array take_damage_events();
 
         // Generic static circular obstacle API (names stay game-agnostic on purpose).

@@ -4,6 +4,11 @@ class_name FightSystem
 const STATIC_COLLISION_TERRAIN: int = 1 << 0
 const STATIC_COLLISION_REACTIVE_PLANT: int = 1 << 1
 const STATIC_IMPACT_KIND: int = 0
+const WATER_RESERVE_ID: StringName = &"water"
+const WATER_RESERVE_KEY: StringName = &"water_reserve"
+const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
+const WATER_REFILL_AMOUNT_KEY: StringName = &"water_refill_amount"
+const WATER_REFILL_INTERVAL_MS_KEY: StringName = &"water_refill_interval_ms"
 
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
@@ -13,6 +18,7 @@ const STATIC_IMPACT_KIND: int = 0
 @export var weapons: Array[WeaponData] = [
 	preload("res://scripts/combat/weapons/bomb.tres"),
 	preload("res://scripts/combat/weapons/sword.tres"),
+	preload("res://scripts/combat/weapons/spray.tres"),
 ]
 @export var guns: Array[GunData] = [
 	preload("res://scripts/combat/weapons/water.tres"),
@@ -26,6 +32,7 @@ var _plant_manager: Node
 var _plant_layer: TileMapLayer
 var _wall_layer: TileMapLayer
 var _floor_layer: TileMapLayer
+var _progression: Node
 var _drawer
 var _projectile_drawer
 var _damage_number_drawer: DamageNumberDrawer
@@ -34,6 +41,11 @@ var _guns_by_id: Dictionary = {}
 var _gun_type_ids: Dictionary = {}
 var _gun_by_type_id: Dictionary = {}  # type_id (int) -> GunData, for impact visuals
 var _gun_fire_timers: Dictionary = {}
+var _water_refill_elapsed: float = 0.0
+var _continuous_aoe_id: int = -1
+var _continuous_weapon_id: String = ""
+var _continuous_cost_time_left: float = 0.0
+var _continuous_sound_id: StringName = &""
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -44,6 +56,7 @@ func _ready() -> void:
 	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
 	_wall_layer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
 	_floor_layer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
+	_progression = get_node_or_null("../progression")
 	if _steering and not _steering.has_method("take_damage_events"):
 		push_error("FightSystem: native damage API is unavailable. Rebuild the GDExtension and restart Godot.")
 	_drawer = WeaponAOEDrawer.new()
@@ -322,6 +335,12 @@ func _weapon_by_id(weapon_id: String) -> WeaponData:
 func is_gun(item_id: String) -> bool:
 	return _guns_by_id.has(item_id)
 
+func is_held_weapon(item_id: String) -> bool:
+	if is_gun(item_id):
+		return true
+	var weapon: WeaponData = _weapon_by_id(item_id)
+	return weapon != null and weapon.continuous
+
 func _register_guns() -> void:
 	_guns_by_id.clear()
 	_gun_type_ids.clear()
@@ -365,6 +384,158 @@ func _register_guns() -> void:
 	if _projectile_drawer:
 		_projectile_drawer.rebuild_visual_cache()
 
+## Called once per player frame. A non-empty weapon id means the trigger is held
+## for that weapon; an empty id stops channelled weapons and advances refill.
+func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, follow_offset: Vector2, delta: float) -> void:
+	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
+	if gun != null:
+		_stop_continuous_weapon()
+		if gun.reserve_id == WATER_RESERVE_ID:
+			_water_refill_elapsed = 0.0
+		else:
+			_refill_water_reserve(delta)
+		fire_gun_held(weapon_id, origin, direction, source_agent_id, delta)
+		return
+
+	var weapon: WeaponData = _weapon_by_id(weapon_id)
+	if weapon != null and weapon.continuous:
+		if weapon.reserve_id == WATER_RESERVE_ID:
+			_water_refill_elapsed = 0.0
+		else:
+			_refill_water_reserve(delta)
+		_update_continuous_weapon(weapon, origin, direction, source_agent_id, follow_offset, delta)
+		return
+
+	_stop_continuous_weapon()
+	_refill_water_reserve(delta)
+
+func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, follow_offset: Vector2, delta: float) -> void:
+	if not _steering or not _steering.has_method("start_continuous_aoe") or direction.length_squared() <= 0.000001:
+		_stop_continuous_weapon()
+		return
+	if _continuous_weapon_id != "" and _continuous_weapon_id != weapon.id:
+		_stop_continuous_weapon()
+
+	var facing: Vector2 = direction.normalized()
+	var aoe_follow_offset: Vector2 = follow_offset + facing * weapon.throw_offset
+	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
+	if _continuous_aoe_id < 0:
+		if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+			return
+		var started_id: int = int(_steering.call(
+			"start_continuous_aoe",
+			spawn_origin,
+			facing,
+			weapon.radius,
+			weapon.directional_area_angle,
+			weapon.smash_force,
+			weapon.friction,
+			weapon.falloff,
+			weapon.detach_flow,
+			weapon.control_suppression,
+			weapon.control_suppression_duration,
+			source_agent_id,
+			weapon.affected_smash_classes,
+			aoe_follow_offset,
+			weapon.damage,
+			weapon.hit_frequency
+		))
+		if started_id < 0:
+			_refund_reserve(weapon.reserve_id, weapon.reserve_cost)
+			return
+		_continuous_aoe_id = started_id
+		_continuous_weapon_id = weapon.id
+		_continuous_cost_time_left = weapon.reserve_cost_interval
+		_continuous_sound_id = weapon.continuous_sound
+		if _continuous_sound_id != &"":
+			Sfx.play_sound(_continuous_sound_id)
+	else:
+		_continuous_cost_time_left -= delta
+		while _continuous_cost_time_left <= 0.0:
+			if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+				_stop_continuous_weapon()
+				return
+			_continuous_cost_time_left += maxf(weapon.reserve_cost_interval, 0.001)
+		var updated: bool = bool(_steering.call("update_continuous_aoe", _continuous_aoe_id, facing, aoe_follow_offset))
+		if not updated:
+			_stop_continuous_weapon()
+			return
+
+	if visualize_AOE_weapons and weapon.aoe_visual_enabled:
+		_drawer.set_persistent_weapon_area(weapon.id, spawn_origin, facing, weapon.radius, weapon.directional_area_angle, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
+	if weapon.waters_reactive_plants:
+		_water_plants_in_cone(spawn_origin, facing, weapon.radius, weapon.directional_area_angle)
+
+func _stop_continuous_weapon() -> void:
+	if _continuous_aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
+		_steering.call("stop_continuous_aoe", _continuous_aoe_id)
+	if _continuous_weapon_id != "" and _drawer:
+		_drawer.clear_persistent_weapon_area(_continuous_weapon_id)
+	if _continuous_sound_id != &"" and Sfx.has_method("stop_sound"):
+		Sfx.stop_sound(_continuous_sound_id)
+	_continuous_aoe_id = -1
+	_continuous_weapon_id = ""
+	_continuous_cost_time_left = 0.0
+	_continuous_sound_id = &""
+
+func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
+	if reserve_id == &"" or amount <= 0:
+		return true
+	if reserve_id != WATER_RESERVE_ID or not _progression or not _progression.has_method("spend"):
+		return false
+	return bool(_progression.call("spend", WATER_RESERVE_KEY, amount))
+
+func _refund_reserve(reserve_id: StringName, amount: int) -> void:
+	if reserve_id != WATER_RESERVE_ID or amount <= 0:
+		return
+	_update_water_reserve(amount)
+
+func _refill_water_reserve(delta: float) -> void:
+	if not _progression or not _progression.has_method("get_value"):
+		return
+	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
+	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
+	if current >= maximum:
+		_water_refill_elapsed = 0.0
+		return
+	var interval_ms: int = maxi(1, int(_progression.call("get_value", WATER_REFILL_INTERVAL_MS_KEY)))
+	var interval_seconds: float = float(interval_ms) * 0.001
+	var refill_amount: int = maxi(0, int(_progression.call("get_value", WATER_REFILL_AMOUNT_KEY)))
+	if refill_amount <= 0:
+		return
+	_water_refill_elapsed += delta
+	while _water_refill_elapsed >= interval_seconds and current < maximum:
+		_water_refill_elapsed -= interval_seconds
+		var added: int = mini(refill_amount, maximum - current)
+		_update_water_reserve(added)
+		current += added
+
+func _update_water_reserve(delta_value: int) -> void:
+	if not _progression or not _progression.has_method("update_value"):
+		return
+	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
+	_progression.call("update_value", WATER_RESERVE_KEY, delta_value, 0, maximum)
+
+func _water_plants_in_cone(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float) -> void:
+	if not _plant_manager or not _plant_layer or not _plant_manager.has_method("is_rose_cell") or not _plant_manager.has_method("wet_rose"):
+		return
+	var tile_size: Vector2i = _plant_layer.tile_set.tile_size if _plant_layer.tile_set else Vector2i(32, 32)
+	var cell_radius: int = int(ceil(radius / maxf(1.0, float(mini(tile_size.x, tile_size.y))))) + 1
+	var origin_cell: Vector2i = _plant_layer.local_to_map(_plant_layer.to_local(origin))
+	var min_dot: float = cos(deg_to_rad(angle_degrees * 0.5))
+	for y: int in range(origin_cell.y - cell_radius, origin_cell.y + cell_radius + 1):
+		for x: int in range(origin_cell.x - cell_radius, origin_cell.x + cell_radius + 1):
+			var cell: Vector2i = Vector2i(x, y)
+			if not bool(_plant_manager.call("is_rose_cell", cell)):
+				continue
+			var cell_world: Vector2 = _plant_layer.to_global(_plant_layer.map_to_local(cell))
+			var offset: Vector2 = cell_world - origin
+			if offset.length_squared() > radius * radius:
+				continue
+			if angle_degrees < 359.9 and offset.length_squared() > 0.000001 and offset.normalized().dot(direction) < min_dot:
+				continue
+			_plant_manager.call("wet_rose", cell)
+
 func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
 	var gun: GunData = _guns_by_id.get(gun_id) as GunData
 	if not gun or not _projectiles:
@@ -373,7 +544,7 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 	t -= delta
 	if t <= 0.0:
 		var type_id: int = int(_gun_type_ids.get(gun_id, -1))
-		if type_id >= 0:
+		if type_id >= 0 and _spend_reserve(gun.reserve_id, gun.reserve_cost):
 			var spawn_pos: Vector2 = origin
 			if gun.throw_offset != 0.0 and direction.length_squared() > 0.000001:
 				spawn_pos += direction.normalized() * gun.throw_offset
@@ -391,6 +562,7 @@ class WeaponAOEDrawer:
 	extends Node2D
 
 	var _areas: Array[Dictionary] = []
+	var _persistent_areas: Dictionary = {}
 	# Draw above every agent. Agents set z_index from their world Y
 	# (z_index = int(position.y)), so an absolute z_index well past the world
 	# height keeps AOE visuals on top regardless of where they spawn.
@@ -424,35 +596,59 @@ class WeaponAOEDrawer:
 		})
 		queue_redraw()
 
+	func set_persistent_weapon_area(key: String, origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, owner_id: int = -1, follow_offset: Vector2 = Vector2.ZERO, fill_color: Color = DEFAULT_FILL, stroke_color: Color = DEFAULT_STROKE, stroke_width: float = DEFAULT_STROKE_WIDTH) -> void:
+		_persistent_areas[key] = {
+			"origin": origin,
+			"owner_id": owner_id,
+			"follow_offset": follow_offset,
+			"direction": direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT,
+			"radius": radius,
+			"angle": angle_degrees,
+			"fill": fill_color,
+			"stroke": stroke_color,
+			"stroke_width": stroke_width,
+		}
+		queue_redraw()
+
+	func clear_persistent_weapon_area(key: String) -> void:
+		if _persistent_areas.erase(key):
+			queue_redraw()
+
 	func _process(delta: float) -> void:
-		var changed := false
+		var changed: bool = false
 		for i in range(_areas.size() - 1, -1, -1):
 			_areas[i]["time_left"] = float(_areas[i]["time_left"]) - delta
 			if float(_areas[i]["time_left"]) <= 0.0:
 				_areas.remove_at(i)
 				changed = true
-		if changed or not _areas.is_empty():
+		if changed or not _areas.is_empty() or not _persistent_areas.is_empty():
 			queue_redraw()
 
 	func _draw() -> void:
-		for area in _areas:
-			var origin: Vector2 = area["origin"]
-			# Follow the owning agent's live position so the cone tracks the player.
-			# Falls back to the captured origin when there is no valid owner.
-			var owner_id: int = int(area.get("owner_id", -1))
-			if owner_id >= 0 and _steering:
-				origin = _steering.get_agent_position(owner_id) + (area.get("follow_offset", Vector2.ZERO) as Vector2)
-			var radius: float = float(area["radius"])
-			var angle: float = float(area["angle"])
-			var direction: Vector2 = area["direction"]
-			var fill: Color = area.get("fill", DEFAULT_FILL)
-			var stroke: Color = area.get("stroke", DEFAULT_STROKE)
-			var stroke_width: float = float(area.get("stroke_width", DEFAULT_STROKE_WIDTH))
-			if angle >= 359.9:
-				draw_circle(origin, radius, fill)
-				draw_arc(origin, radius, 0.0, TAU, 64, stroke, stroke_width)
-			else:
-				_draw_cone(origin, direction, radius, angle, fill, stroke, stroke_width)
+		for area: Dictionary in _areas:
+			_draw_area(area)
+		for area_variant: Variant in _persistent_areas.values():
+			var area: Dictionary = area_variant as Dictionary
+			_draw_area(area)
+
+	func _draw_area(area: Dictionary) -> void:
+		var origin: Vector2 = area["origin"] as Vector2
+		# Follow the owning agent's live position so the cone tracks the player.
+		# Falls back to the captured origin when there is no valid owner.
+		var owner_id: int = int(area.get("owner_id", -1))
+		if owner_id >= 0 and _steering:
+			origin = _steering.get_agent_position(owner_id) + (area.get("follow_offset", Vector2.ZERO) as Vector2)
+		var radius: float = float(area["radius"])
+		var angle: float = float(area["angle"])
+		var direction: Vector2 = area["direction"] as Vector2
+		var fill: Color = area.get("fill", DEFAULT_FILL) as Color
+		var stroke: Color = area.get("stroke", DEFAULT_STROKE) as Color
+		var stroke_width: float = float(area.get("stroke_width", DEFAULT_STROKE_WIDTH))
+		if angle >= 359.9:
+			draw_circle(origin, radius, fill)
+			draw_arc(origin, radius, 0.0, TAU, 64, stroke, stroke_width)
+		else:
+			_draw_cone(origin, direction, radius, angle, fill, stroke, stroke_width)
 
 	func _draw_cone(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float, fill: Color, stroke: Color, stroke_width: float) -> void:
 		var points: PackedVector2Array = PackedVector2Array()

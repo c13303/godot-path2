@@ -6,6 +6,7 @@ const SAVE_PATH: String = "user://progression_save.json"
 const SAVE_VERSION: int = 2
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
+const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
 	"floor",
@@ -41,6 +42,10 @@ class Progression:
 		ProgressionProp.new(&"monster_per_rose", "Monster per rose", 1),
 		ProgressionProp.new(&"seeds", "Seeds", 5),
 		ProgressionProp.new(&"gems", "Gems", 0),
+		ProgressionProp.new(&"water_reserve", "Water reserve", 100),
+		ProgressionProp.new(&"water_reserve_max", "Water reserve max", 100),
+		ProgressionProp.new(&"water_refill_amount", "Water refill amount", 1),
+		ProgressionProp.new(&"water_refill_interval_ms", "Water refill interval (ms)", 100),
 	]
 
 	func get_prop(key: StringName) -> ProgressionProp:
@@ -92,6 +97,20 @@ func spend(key: StringName, amount: int) -> bool:
 	return true
 
 
+## Change any progression value through the same save/UI path used by currencies.
+## Optional bounds keep runtime resources valid when their progression limits change.
+func update_value(key: StringName, delta: int, minimum: int = -2147483648, maximum: int = 2147483647) -> bool:
+	var prop: ProgressionProp = progression.get_prop(key)
+	if prop == null or delta == 0:
+		return false
+	var next_value: int = clampi(prop.value + delta, minimum, maximum)
+	if next_value == prop.value:
+		return false
+	prop.value = next_value
+	_update_progression_ui(key == SEED_KEY, key == GEM_KEY)
+	return true
+
+
 ## Single entry point for changing the seed count. Pass a positive `delta` to
 ## grant seeds, a negative `delta` to spend them. Spending more seeds than the
 ## player owns fails and leaves the count untouched. Refreshes the seed UI on
@@ -138,9 +157,24 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		return
 	progression.add(&"nDays", 1)
 	var day_number: int = progression.get_value(&"nDays")
+	_update_day_label(day_number)
 	day_started.emit(day_number)
 	_log("New day started: Day %d" % day_number)
 	_update_progression_ui()
+
+
+## Show the current day on the dedicated day label, e.g. "day 3".
+func _update_day_label(day_number: int) -> void:
+	var label: RichTextLabel = _get_day_label()
+	if label != null:
+		label.text = "day %d" % day_number
+
+
+func _get_day_label() -> RichTextLabel:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top anchor/dayLabel") as RichTextLabel
 
 
 func _get_progression_ui() -> RichTextLabel:
@@ -177,6 +211,8 @@ func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label:
 		gem_label.text = "x %d" % progression.get_value(GEM_KEY)
 		if animate_gem_label:
 			_animate_gem_label(gem_label)
+
+	_update_day_label(progression.get_value(&"nDays"))
 
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:

@@ -170,7 +170,7 @@ func _setup_starting_inventory() -> void:
 	for i in range(INVENTORY_SLOT_COUNT):
 		inventory_slots[i] = _empty_slot()
 	#add_inventory("sword", 1)
-	add_inventory("water", 1)
+	add_inventory("spray", 1)
 	#add_inventory("rose", 5)
 	#add_inventory("turret1", 1)
 

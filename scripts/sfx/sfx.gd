@@ -11,6 +11,7 @@ const MONSTER_VOLUME : float = 0.6
 const SOUNDS: Dictionary = {
 	&"bubble1": {"stream": preload("res://assets/sfx/bubble1.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"splash": {"stream": preload("res://assets/sfx/splash.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
+	&"spray": {"stream": preload("res://assets/sfx/spray.wav"), "overlap": 0, "volume": DEFAULT_VOLUME},
 	&"buy": {"stream": preload("res://assets/sfx/buy.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"pop1": {"stream": preload("res://assets/sfx/pop1.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
 	&"pop2": {"stream": preload("res://assets/sfx/pop2.wav"), "overlap": DEFAULT_OVERLAP, "volume": DEFAULT_VOLUME},
@@ -52,6 +53,17 @@ func play_sound(sound_id: StringName) -> bool:
 	var player: AudioStreamPlayer = pool[player_index] as AudioStreamPlayer
 	_next_player[sound_id] = (player_index + 1) % pool.size()
 	player.play()
+	return true
+
+
+func stop_sound(sound_id: StringName) -> bool:
+	var pool: Array = _players.get(sound_id, []) as Array
+	if pool.is_empty():
+		return false
+	for player_variant: Variant in pool:
+		var player: AudioStreamPlayer = player_variant as AudioStreamPlayer
+		if player != null:
+			player.stop()
 	return true
 
 

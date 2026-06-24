@@ -20,6 +20,15 @@ class_name WeaponData
 @export var detach_flow: bool = false
 @export_flags("Player", "MainChar", "Monster") var affected_smash_classes: int = 4
 
+@export_group("Continuous Use")
+@export var continuous: bool = false
+@export var hit_frequency: float = 0.0
+@export var reserve_id: StringName = &""
+@export var reserve_cost: int = 0
+@export var reserve_cost_interval: float = 0.0
+@export var waters_reactive_plants: bool = false
+@export var continuous_sound: StringName = &""
+
 # --- AoE visual appearance (per-weapon; rendered by WeaponAOEDrawer) ---
 # The FightSystem.visualize_AOE_weapons flag is the global on/off; aoe_visual_enabled
 # lets an individual weapon opt out without disabling the rest.

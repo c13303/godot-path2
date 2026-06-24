@@ -6,6 +6,8 @@
 [resource]
 script = ExtResource("1_gun_data")
 id = "water"
+reserve_id = &"water"
+reserve_cost = 1
 fire_delay_ms = 100.0
 projectile_speed = 700.0
 projectile_lifetime = 0.5
@@ -21,5 +23,5 @@ smash_control_suppression = 0.2
 smash_control_suppression_duration = 0.05
 static_collision_mask = 3
 end_of_life_aoe_enabled = true
-end_aoe_force = 250.0
+end_aoe_force = 400.0
 end_aoe_friction_loss = 0.6
