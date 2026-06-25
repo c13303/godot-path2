@@ -83,6 +83,17 @@ func rose_count() -> int:
 			count += 1
 	return count
 
+## Number of planted roses that are still dry (not yet watered).
+func unwatered_rose_count() -> int:
+	if not plantz:
+		return 0
+	var count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if plantz.get_cell_atlas_coords(cell) == ROSE_DRY_ATLAS:
+			count += 1
+	return count
+
 func is_rose_cell(cell: Vector2i) -> bool:
 	if not plantz or not _plants.has(cell):
 		return false

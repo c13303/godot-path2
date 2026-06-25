@@ -1563,10 +1563,12 @@ horizontal_alignment = 1
 
 [node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
 layout_mode = 0
-offset_left = -176.0
-offset_top = 141.0
-offset_right = 353.0
-offset_bottom = 269.0
+offset_left = -225.0
+offset_top = 95.0
+offset_right = 304.0
+offset_bottom = 223.0
+text = "achetez des roses"
+horizontal_alignment = 1
 script = ExtResource("20_7xko8")
 
 [node name="top right" type="Control" parent="GameUI" unique_id=401142736]

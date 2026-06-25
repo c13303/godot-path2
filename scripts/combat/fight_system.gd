@@ -107,11 +107,11 @@ func _process(_delta: float) -> void:
 	_drain_damage_events()
 	_water_roses_under_spray_projectiles()
 
-func set_paused(is_paused: bool) -> void:
-	_paused = is_paused
+func set_paused(paused: bool) -> void:
+	_paused = paused
 	if _projectiles and _projectiles.has_method("set_paused"):
-		_projectiles.call("set_paused", is_paused)
-	if is_paused:
+		_projectiles.call("set_paused", paused)
+	if paused:
 		for raw_cell: Variant in _turret_sprays.keys():
 			var cell: Vector2i = raw_cell as Vector2i
 			stop_turret_spray(cell)
@@ -993,9 +993,9 @@ class SprayProjectileDrawer:
 			states = _projectile_system.call("get_active_projectile_states", type_id) as Array
 		else:
 			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", type_id) as PackedVector2Array
-			for position: Vector2 in positions:
+			for projectile_position: Vector2 in positions:
 				states.append({
-					"position": position,
+					"position": projectile_position,
 					"age_progress": 1.0,
 				})
 		return states
