@@ -30,6 +30,7 @@
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
+[ext_resource type="Script" path="res://scripts/map/desire.gd" id="31_desire"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1424,6 +1425,10 @@ tile_map_data = PackedByteArray("AAAIAA0AAAALAAYAAAAIAA4AAAALAAYAAAAJAA4AAAALAAY
 tile_set = SubResource("TileSet_egp0g")
 collision_enabled = false
 navigation_enabled = false
+
+[node name="Desire" type="Sprite2D" parent="Map/MonTilemap"]
+z_index = -99
+script = ExtResource("31_desire")
 
 [node name="plantz" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1102024521]
 z_index = -60
