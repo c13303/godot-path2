@@ -10,16 +10,13 @@ extends RichTextLabel
 ## Priority order (most prioritary first):
 ##   1. no roses anywhere + no seeds ................. Game Over
 ##   2. seeds left to spend .......................... Buy roses
-##   3. rose items waiting in the inventory .......... Plant your roses
-##   4. planted roses still dry ...................... Water your roses
-##   5. all roses watered, nothing left ............. Pass the night (+ glow)
+##   3. planted roses still dry ...................... Water your roses
+##   4. all roses watered, nothing left ............. Pass the night (+ glow)
 
-const ROSE_ITEM_ID: String = "rose"
 const SEED_KEY: StringName = &"seeds"
 
 const KEY_GAME_OVER: String = "tutorial.game_over"
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
-const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 
@@ -117,22 +114,16 @@ func _current_message_key() -> String:
 	if _plant_manager != null:
 		planted = int(_plant_manager.call("rose_count"))
 		unwatered = int(_plant_manager.call("unwatered_rose_count"))
-	var rose_inventory: int = 0
-	if _game_ui != null:
-		rose_inventory = int(_game_ui.call("get_inventory_item_quantity", ROSE_ITEM_ID))
 	var seeds: int = 0
 	if _progression != null:
 		seeds = int(_progression.call("get_value", SEED_KEY))
 
-	# Nothing growing, nothing to plant, nothing to buy with: the run is lost.
-	if planted == 0 and rose_inventory == 0 and seeds == 0:
+	# Nothing growing and nothing to build with: the run is lost.
+	if planted == 0 and seeds == 0:
 		return KEY_GAME_OVER
-	# Spend seeds on roses before any other step (outranks plant/water).
+	# Seeds buy (and directly place) roses; that outranks watering.
 	if seeds > 0:
 		return KEY_BUY_ROSES
-	# Plant the rose items already bought.
-	if rose_inventory > 0:
-		return KEY_PLANT_ROSES
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES

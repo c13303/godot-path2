@@ -1,13 +1,12 @@
 extends CanvasLayer
 
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
-const ITEM_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
 
-const PURCHASE_FLIGHT_SIZE: Vector2 = Vector2(40.0, 40.0)
-const PURCHASE_FLIGHT_DURATION: float = 0.55
+const SEED_KEY: StringName = &"seeds"
+const GEM_KEY: StringName = &"gems"
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
 @onready var toolbar_anchor: Control = $"bottom anchor"
@@ -25,6 +24,12 @@ var _moon_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
 var selected_quick_index: int = 0
+# The building the shop has selected for placement (rose/wall/turret), or "" when
+# nothing is selected. While non-empty the player is in build mode: the build
+# system places this item and the player's weapon is suppressed. Buildings are
+# paid for directly from currency on placement and never enter the inventory.
+var selected_build_item_id: String = ""
+var _progression_node: Node
 var _toolbar_slot_nodes: Array[ItemSlot] = []
 var _inventory_slot_nodes: Array[ItemSlot] = []
 var _startup_loading_overlay: Control
@@ -35,6 +40,8 @@ var _startup_loading_finished: bool = false
 
 func _ready() -> void:
 	layer = 50
+	var scene: Node = get_tree().current_scene
+	_progression_node = scene.get_node_or_null("progression") if scene != null else null
 	_create_startup_loading_overlay()
 	_setup_starting_inventory()
 	close_button.pressed.connect(_hide_inventory)
@@ -234,6 +241,63 @@ func selected_quick_item_places_tile() -> bool:
 func is_item_disabled_for_placement(item_id: String) -> bool:
 	return GameState.is_night and ItemCatalog.is_placeable(item_id)
 
+# --- Build mode (shop-driven placement, paid directly from currency) ---------
+
+func get_selected_build_item_id() -> String:
+	return selected_build_item_id
+
+func set_selected_build_item(item_id: String) -> void:
+	selected_build_item_id = item_id
+
+func clear_build_selection() -> void:
+	selected_build_item_id = ""
+
+func is_build_mode_active() -> bool:
+	return selected_build_item_id != ""
+
+## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
+func _build_currency_prog_key(item_id: String) -> StringName:
+	var currency: StringName = ItemCatalog.get_currency(item_id)
+	if currency == &"seed":
+		return SEED_KEY
+	if currency == &"gem":
+		return GEM_KEY
+	return &""
+
+## How many of item_id the player can currently afford (floor(currency / price)).
+func get_build_affordable_quantity(item_id: String) -> int:
+	var price: int = ItemCatalog.get_price(item_id)
+	var key: StringName = _build_currency_prog_key(item_id)
+	if price <= 0 or key == &"" or _progression_node == null:
+		return 0
+	var owned: int = int(_progression_node.call("get_value", key))
+	@warning_ignore("integer_division")
+	return owned / price
+
+func can_afford_build(item_id: String, count: int = 1) -> bool:
+	return count > 0 and get_build_affordable_quantity(item_id) >= count
+
+## Spend the cost of `count` units of item_id. Returns false (spending nothing)
+## when unaffordable, so callers can place only what was actually paid for.
+func try_purchase_build(item_id: String, count: int) -> bool:
+	if count <= 0:
+		return false
+	var price: int = ItemCatalog.get_price(item_id)
+	var key: StringName = _build_currency_prog_key(item_id)
+	if price <= 0 or key == &"" or _progression_node == null:
+		return false
+	return bool(_progression_node.call("spend", key, price * count))
+
+## Refund the full price of `count` removed units back to the matching currency.
+func refund_build(item_id: String, count: int = 1) -> void:
+	if count <= 0:
+		return
+	var price: int = ItemCatalog.get_price(item_id)
+	var key: StringName = _build_currency_prog_key(item_id)
+	if price <= 0 or key == &"" or _progression_node == null:
+		return
+	_progression_node.call("update_value", key, price * count)
+
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
@@ -297,125 +361,6 @@ func _first_free_slot() -> int:
 		if _slot_item_id(inventory_slots[i]) == "":
 			return i
 	return -1
-
-# Like add_inventory, but the item visually flies from source_global_position
-# (e.g. the clicked shop icon) along a curve to its visible quick-slot. Items
-# landing outside the visible quick-slots use the toolbar center as a fallback.
-# The actual increment + a white slot flash happen on arrival.
-# Capacity is validated up front so the deferred add cannot silently fail.
-func add_inventory_animated(item_id: String, quantity: int, source_global_position: Vector2) -> bool:
-	if item_id == "" or quantity <= 0:
-		return false
-	if not can_add_inventory(item_id, quantity):
-		return false
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if item_def.is_empty():
-		# No icon to fly with; fall back to an instant add.
-		return add_inventory(item_id, quantity)
-	var start_position: Vector2 = source_global_position
-	var end_position: Vector2 = _purchase_flight_target(item_id)
-	_spawn_purchase_flight(int(item_def.get("frame", 0)), start_position, end_position, item_id, quantity)
-	return true
-
-func _purchase_flight_target(item_id: String) -> Vector2:
-	var landing_slot: int = _predict_landing_slot(item_id)
-	if (
-		toolbar_anchor.visible
-		and landing_slot >= 0
-		and landing_slot < QUICK_SLOT_COUNT
-		and landing_slot < _toolbar_slot_nodes.size()
-	):
-		var slot_node: ItemSlot = _toolbar_slot_nodes[landing_slot]
-		if is_instance_valid(slot_node) and slot_node.is_visible_in_tree():
-			return slot_node.get_global_rect().get_center()
-	return toolbar_slots.get_global_rect().get_center()
-
-# Predicts which slot add_inventory would fill first: an existing stack with
-# room, otherwise the first free slot. Used to flash the landing slot.
-func _predict_landing_slot(item_id: String) -> int:
-	var max_stack: int = ItemCatalog.get_max_stack(item_id)
-	for i in range(inventory_slots.size()):
-		var slot_data: Dictionary = inventory_slots[i]
-		if _slot_item_id(slot_data) == item_id and _slot_quantity(slot_data) < max_stack:
-			return i
-	return _first_free_slot()
-
-func _spawn_purchase_flight(frame: int, start_position: Vector2, end_position: Vector2, item_id: String, quantity: int) -> void:
-	var sprite: TextureRect = TextureRect.new()
-	sprite.texture = _atlas_for_frame(frame)
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	sprite.custom_minimum_size = PURCHASE_FLIGHT_SIZE
-	sprite.size = PURCHASE_FLIGHT_SIZE
-	sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
-	sprite.z_index = 100
-	add_child(sprite)
-	sprite.position = start_position - PURCHASE_FLIGHT_SIZE * 0.5
-	sprite.scale = Vector2(0.6, 0.6)
-
-	var distance: float = start_position.distance_to(end_position)
-	var arc_height: float = clampf(distance * 0.3, 80.0, 220.0)
-	var curve_position: Vector2 = (start_position + end_position) * 0.5 + Vector2(0.0, -arc_height)
-
-	var tween: Tween = create_tween()
-	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	tween.tween_method(
-		Callable(self, "_update_purchase_flight").bind(sprite, start_position, curve_position, end_position),
-		0.0,
-		1.0,
-		PURCHASE_FLIGHT_DURATION
-	)
-	tween.parallel().tween_property(sprite, "scale", Vector2.ONE, PURCHASE_FLIGHT_DURATION * 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tween.parallel().tween_property(sprite, "rotation", TAU, PURCHASE_FLIGHT_DURATION)
-	tween.tween_callback(Callable(self, "_finish_purchase_flight").bind(sprite, item_id, quantity))
-
-func _update_purchase_flight(
-	progress: float,
-	sprite: TextureRect,
-	start_position: Vector2,
-	curve_position: Vector2,
-	end_position: Vector2
-) -> void:
-	if not is_instance_valid(sprite):
-		return
-	var inverse_progress: float = 1.0 - progress
-	var curved_position: Vector2 = (
-		inverse_progress * inverse_progress * start_position
-		+ 2.0 * inverse_progress * progress * curve_position
-		+ progress * progress * end_position
-	)
-	sprite.position = curved_position - PURCHASE_FLIGHT_SIZE * 0.5
-
-func _finish_purchase_flight(sprite: TextureRect, item_id: String, quantity: int) -> void:
-	if is_instance_valid(sprite):
-		sprite.queue_free()
-	# Resolve the landing slot before mutating, then add and flash it.
-	var target_index: int = _predict_landing_slot(item_id)
-	add_inventory(item_id, quantity)
-	_flash_slot(target_index)
-
-# Flashes the slot at slot_index, but only if it is currently on-screen: a
-# quick slot when the toolbar is shown, or a grid slot when the modal is open.
-func _flash_slot(slot_index: int) -> void:
-	if slot_index < 0:
-		return
-	var slot_node: ItemSlot = null
-	if slot_index < QUICK_SLOT_COUNT:
-		if toolbar_anchor.visible and slot_index < _toolbar_slot_nodes.size():
-			slot_node = _toolbar_slot_nodes[slot_index]
-	elif inventory_modal.visible and slot_index < _inventory_slot_nodes.size():
-		slot_node = _inventory_slot_nodes[slot_index]
-	if slot_node != null and is_instance_valid(slot_node):
-		slot_node.flash()
-
-func _atlas_for_frame(frame: int) -> AtlasTexture:
-	var atlas: AtlasTexture = AtlasTexture.new()
-	atlas.atlas = ITEM_TEXTURE
-	atlas.region = Rect2(frame * 32, 0, 32, 32)
-	return atlas
-
 
 func _make_slot(item_id: String, quantity: int) -> Dictionary:
 	if item_id == "" or quantity <= 0:

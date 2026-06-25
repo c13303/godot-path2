@@ -83,7 +83,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
-			if _selected_item_places_tile():
+			# In build mode the click belongs to the build system, not the weapon.
+			if _in_build_mode():
 				return
 			var weapon_id := _selected_item_id()
 			if fight_system and fight_system.is_held_weapon(weapon_id):
@@ -183,6 +184,7 @@ func _update_gun_fire(delta: float) -> void:
 	var trigger_allowed: bool = not _paused and not _is_inventory_open()
 	trigger_allowed = trigger_allowed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	trigger_allowed = trigger_allowed and get_viewport().gui_get_hovered_control() == null
+	trigger_allowed = trigger_allowed and not _in_build_mode()
 	if trigger_allowed:
 		var selected_id: String = _selected_item_id()
 		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
@@ -461,8 +463,9 @@ func _selected_item_id() -> String:
 		return ""
 	return String(game_ui.call("get_selected_quick_item_id"))
 
-func _selected_item_places_tile() -> bool:
-	return game_ui and game_ui.has_method("selected_quick_item_places_tile") and bool(game_ui.call("selected_quick_item_places_tile"))
+## True while the shop has a building selected: the player is placing, not fighting.
+func _in_build_mode() -> bool:
+	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
 func _selected_item_disabled_for_placement(item_id: String) -> bool:
 	return game_ui and game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id))

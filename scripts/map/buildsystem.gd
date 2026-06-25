@@ -70,7 +70,7 @@ func _process(delta: float) -> void:
 			_cancel_drag_build()
 			return
 		var drag_cell: Vector2i = _hovered_cell()
-		var available: int = _inventory_item_quantity(_drag_build_item_id)
+		var available: int = _affordable_quantity(_drag_build_item_id)
 		if drag_cell != _drag_build_end_cell or available != _drag_build_preview_limit:
 			_drag_build_end_cell = drag_cell
 			_draw_drag_build_preview(placeable_def, available)
@@ -97,11 +97,12 @@ func _process(delta: float) -> void:
 	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var removal_mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if removal_mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+	# Holding X or Delete over a placed building removes it (with a full refund).
+	if event is InputEventKey:
+		var removal_key_event: InputEventKey = event as InputEventKey
+		if not removal_key_event.echo and _is_removal_key(removal_key_event.keycode):
 			var was_removing: bool = _remove_active
-			if removal_mouse_event.pressed:
+			if removal_key_event.pressed:
 				_try_start_removal()
 			else:
 				_cancel_removal()
@@ -129,6 +130,12 @@ func _input(event: InputEvent) -> void:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
+func _is_removal_key(keycode: int) -> bool:
+	return keycode == KEY_X or keycode == KEY_DELETE
+
+func _removal_key_held() -> bool:
+	return Input.is_key_pressed(KEY_X) or Input.is_key_pressed(KEY_DELETE)
+
 func _try_start_removal() -> void:
 	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
@@ -137,8 +144,7 @@ func _try_start_removal() -> void:
 	if removal.is_empty():
 		return
 	var item_id: String = str(removal.get("item_id", ""))
-	if not _can_return_to_inventory(item_id):
-		_notify("inventory full")
+	if item_id == "":
 		return
 	_remove_active = true
 	_remove_cell = cell
@@ -151,7 +157,7 @@ func _try_start_removal() -> void:
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+	if GameState.is_night or _is_inventory_open() or not _removal_key_held():
 		_cancel_removal()
 		return
 	if _hovered_cell() != _remove_cell:
@@ -175,18 +181,15 @@ func _finish_removal() -> void:
 	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != _remove_item_id:
 		_cancel_removal()
 		return
-	if not _can_return_to_inventory(_remove_item_id):
-		_notify("inventory full")
-		_cancel_removal()
-		return
 
 	var removed_cell: Vector2i = _remove_cell
 	var removed_item_id: String = _remove_item_id
 	var removed_layer: TileMapLayer = _remove_layer
 	_cancel_removal()
 	_remove_tile(removed_layer, removed_cell)
-	if ItemCatalog.removed_item_returns_to_inventory(removed_item_id):
-		game_ui.call("add_inventory", removed_item_id, 1)
+	# Refund the building's full price back to its currency (priceless items refund 0).
+	if game_ui and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", removed_item_id, 1)
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
@@ -215,11 +218,6 @@ func _removable_at_cell(cell: Vector2i) -> Dictionary:
 		if item_id != "":
 			return {"item_id": item_id, "layer": layer}
 	return {}
-
-func _can_return_to_inventory(item_id: String) -> bool:
-	if not ItemCatalog.removed_item_returns_to_inventory(item_id):
-		return item_id != ""
-	return item_id != "" and game_ui and game_ui.has_method("can_add_inventory") and bool(game_ui.call("can_add_inventory", item_id, 1))
 
 func _create_remove_progress() -> void:
 	_free_remove_progress()
@@ -305,13 +303,13 @@ func _drag_build_sound(item_id: String) -> StringName:
 
 func _start_drag_build(placeable_def: Dictionary) -> void:
 	var item_id: String = str(placeable_def.get("id", ""))
-	if _inventory_item_quantity(item_id) <= 0:
+	if _affordable_quantity(item_id) <= 0:
 		return
 	_drag_build_active = true
 	_drag_build_item_id = item_id
 	_drag_build_start_cell = _hovered_cell()
 	_drag_build_end_cell = _drag_build_start_cell
-	_draw_drag_build_preview(placeable_def, _inventory_item_quantity(item_id))
+	_draw_drag_build_preview(placeable_def, _affordable_quantity(item_id))
 
 func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
 	_clear_hover()
@@ -376,7 +374,7 @@ func _finish_drag_build() -> void:
 		return
 	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	var available: int = _inventory_item_quantity(item_id)
+	var available: int = _affordable_quantity(item_id)
 	var cells: Array[Vector2i] = []
 	_drag_build_end_cell = _hovered_cell()
 	if target_layer and atlas_coords != Vector2i(-1, -1):
@@ -386,9 +384,10 @@ func _finish_drag_build() -> void:
 	_drag_build_item_id = ""
 	if cells.is_empty():
 		return
-	if not game_ui or not game_ui.has_method("consume_inventory_item"):
+	# Pay for exactly the cells we are about to place; bail if the spend fails.
+	if not game_ui or not game_ui.has_method("try_purchase_build"):
 		return
-	if not bool(game_ui.call("consume_inventory_item", item_id, cells.size())):
+	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
 		return
 	for cell: Vector2i in cells:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
@@ -405,10 +404,15 @@ func _cancel_drag_build() -> void:
 	_drag_build_item_id = ""
 	_clear_hover()
 
-func _inventory_item_quantity(item_id: String) -> int:
-	if not game_ui or not game_ui.has_method("get_inventory_item_quantity"):
+# How many of item_id the player can currently afford. Replaces the old inventory
+# count: buildings are paid for directly from currency, so affordability is the cap.
+func _affordable_quantity(item_id: String) -> int:
+	if not game_ui or not game_ui.has_method("get_build_affordable_quantity"):
 		return 0
-	return int(game_ui.call("get_inventory_item_quantity", item_id))
+	return int(game_ui.call("get_build_affordable_quantity", item_id))
+
+func _can_afford(item_id: String) -> bool:
+	return game_ui and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
@@ -426,6 +430,11 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		_notify("invalid construction")
 		return
 
+	var item_id: String = str(placeable_def.get("id", ""))
+	if not _can_afford(item_id):
+		_notify("can't afford")
+		return
+
 	_clear_other_build_layer(target_layer, _hover_cell)
 	target_layer.set_cell(
 		_hover_cell,
@@ -435,12 +444,8 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	)
 	target_layer.update_internals()
 	_after_placeable_placed(_hover_cell, placeable_def)
-	_consume_placed_item(str(placeable_def.get("id", "")))
-
-func _consume_placed_item(item_id: String) -> void:
-	if item_id == "" or not game_ui or not game_ui.has_method("consume_selected_quick_item"):
-		return
-	game_ui.call("consume_selected_quick_item", item_id)
+	if game_ui and game_ui.has_method("try_purchase_build"):
+		game_ui.call("try_purchase_build", item_id, 1)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":
@@ -658,11 +663,11 @@ func _flush_plant_layer_visuals_deferred() -> void:
 	plantz.queue_redraw()
 
 func _selected_placeable_def() -> Dictionary:
-	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
+	if not game_ui or not game_ui.has_method("get_selected_build_item_id"):
 		return {}
 	if _placement_disabled():
 		return {}
-	return ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_quick_item_id")))
+	return ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_build_item_id")))
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))

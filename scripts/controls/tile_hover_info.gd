@@ -108,9 +108,9 @@ func process() -> void:
 			mouse_outline.visible = false
 
 func _selected_item_places_tile() -> bool:
-	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
+	if not game_ui or not game_ui.has_method("get_selected_build_item_id"):
 		return false
-	var item_id: String = String(game_ui.call("get_selected_quick_item_id"))
+	var item_id: String = String(game_ui.call("get_selected_build_item_id"))
 	if item_id == "":
 		return false
 	if game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id)):

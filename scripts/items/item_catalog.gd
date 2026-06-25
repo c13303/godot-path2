@@ -38,6 +38,7 @@ const ITEM_DEFS: Dictionary = {
 		"type": "placeable",
 		"category": "wall",
 		"frame": 3,
+		"price": 100,
 		"target_layer": "wallz",
 		"atlas": Vector2i(11, 1),
 		"occupies_cell": true,
@@ -53,6 +54,7 @@ const ITEM_DEFS: Dictionary = {
 		"type": "placeable",
 		"category": "plant",
 		"frame": 5,
+		"price": 1,
 		"target_layer": "plantz",
 		"atlas": Vector2i(0, 0),
 		# A watered rose is still the same inventory item when picked back up.
@@ -95,6 +97,7 @@ const ITEM_DEFS: Dictionary = {
 		"type": "placeable",
 		"category": "turret",
 		"frame": 6,
+		"price": 5,
 		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(2, 0),
 		"occupies_cell": true,
@@ -136,6 +139,10 @@ static func get_max_stack(item_id: String) -> int:
 
 static func get_currency(item_id: String) -> StringName:
 	return StringName(get_item_def(item_id).get("currency", &""))
+
+## Build price in the item's currency (see get_currency). 0 means "not for sale".
+static func get_price(item_id: String) -> int:
+	return int(get_item_def(item_id).get("price", 0))
 
 static func is_stackable(item_id: String) -> bool:
 	return get_max_stack(item_id) > 1
