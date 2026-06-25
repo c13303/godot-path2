@@ -528,7 +528,7 @@ func _register_guns() -> void:
 
 ## Called once per player frame. A non-empty weapon id means the trigger is held
 ## for that weapon; an empty id stops channelled weapons and advances refill.
-func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float) -> void:
+func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float, source_velocity: Vector2 = Vector2.ZERO) -> void:
 	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
 	if gun != null:
 		_stop_held_spray()
@@ -545,13 +545,13 @@ func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2,
 			_water_refill_elapsed = 0.0
 		else:
 			_refill_water_reserve(delta)
-		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta)
+		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta, source_velocity)
 		return
 
 	_stop_held_spray()
 	_refill_water_reserve(delta)
 
-func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
+func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float, source_velocity: Vector2) -> void:
 	if not _projectiles or direction.length_squared() <= 0.000001:
 		_stop_held_spray()
 		return
@@ -588,21 +588,21 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 				return
 			_held_spray_cost_time_left += maxf(weapon.spray_reserve_cost_interval, 0.001)
 
-	_held_spray_fire_time_left = _advance_spray_projectile_emission(weapon, type_id, spawn_origin, collision_facing, source_agent_id, delta, _held_spray_fire_time_left)
+	_held_spray_fire_time_left = _advance_spray_projectile_emission(weapon, type_id, spawn_origin, collision_facing, source_agent_id, delta, _held_spray_fire_time_left, source_velocity)
 	_start_spray_audio()
 
-func _advance_spray_projectile_emission(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int, delta: float, fire_time_left: float) -> float:
+func _advance_spray_projectile_emission(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int, delta: float, fire_time_left: float, inherited_velocity: Vector2 = Vector2.ZERO) -> float:
 	var rate: float = maxf(weapon.spray_projectiles_per_second, 0.001)
 	var interval: float = 1.0 / rate
 	var next_fire_time: float = fire_time_left - delta
 	var guard: int = 0
 	while next_fire_time <= 0.0 and guard < 8:
-		_fire_one_spray_projectile(weapon, type_id, origin, facing, source_agent_id)
+		_fire_one_spray_projectile(weapon, type_id, origin, facing, source_agent_id, inherited_velocity)
 		next_fire_time += interval
 		guard += 1
 	return next_fire_time
 
-func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int) -> void:
+func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int, inherited_velocity: Vector2 = Vector2.ZERO) -> void:
 	if not _projectiles:
 		return
 	var base_angle: float = facing.angle()
@@ -610,7 +610,10 @@ func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector
 	var jitter: float = deg_to_rad(weapon.spray_projectile_spread_jitter_degrees)
 	var angle: float = base_angle + randf_range(-half_angle, half_angle) + randf_range(-jitter, jitter)
 	var projectile_direction: Vector2 = Vector2.from_angle(angle)
-	_projectiles.call("fire", type_id, origin, projectile_direction, source_agent_id, weapon.affected_smash_classes)
+	if _projectiles.has_method("fire_with_velocity"):
+		_projectiles.call("fire_with_velocity", type_id, origin, projectile_direction, inherited_velocity, source_agent_id, weapon.affected_smash_classes)
+	else:
+		_projectiles.call("fire", type_id, origin, projectile_direction, source_agent_id, weapon.affected_smash_classes)
 
 func _stop_held_spray() -> void:
 	_stop_spray_audio()
@@ -895,6 +898,7 @@ class SprayProjectileDrawer:
 	var _weapons_by_id: Dictionary = {}
 	var _material: ShaderMaterial
 	var _shader_points: Array = []
+	var _shader_radii: PackedFloat32Array = PackedFloat32Array()
 	var _draw_bounds: Rect2 = Rect2()
 	var _has_points: bool = false
 
@@ -910,8 +914,12 @@ class SprayProjectileDrawer:
 		_shader_points.resize(MAX_DROPLETS)
 		for index: int in range(MAX_DROPLETS):
 			_shader_points[index] = Vector2.ZERO
+		_shader_radii.resize(MAX_DROPLETS)
+		for index: int in range(MAX_DROPLETS):
+			_shader_radii[index] = 0.0
 		_material.set_shader_parameter("droplet_count", 0)
 		_material.set_shader_parameter("droplets", _shader_points)
+		_material.set_shader_parameter("droplet_radii", _shader_radii)
 
 	func _process(_delta: float) -> void:
 		if not _projectile_system or _material == null:
@@ -925,15 +933,20 @@ class SprayProjectileDrawer:
 				break
 			var weapon_id: String = str(weapon_id_variant)
 			var type_id: int = int(_spray_type_ids[weapon_id])
-			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", type_id) as PackedVector2Array
-			if positions.is_empty():
+			var weapon: WeaponData = _weapons_by_id.get(weapon_id) as WeaponData
+			var projectile_states: Array = _get_spray_projectile_states(type_id)
+			if projectile_states.is_empty():
 				continue
 			if active_weapon == null:
-				active_weapon = _weapons_by_id.get(weapon_id) as WeaponData
-			for droplet_pos: Vector2 in positions:
+				active_weapon = weapon
+			for state_variant: Variant in projectile_states:
 				if point_count >= MAX_DROPLETS:
 					break
+				var state: Dictionary = state_variant as Dictionary
+				var droplet_pos: Vector2 = state.get("position", Vector2.ZERO) as Vector2
+				var age_progress: float = clampf(float(state.get("age_progress", 1.0)), 0.0, 1.0)
 				_shader_points[point_count] = droplet_pos
+				_shader_radii[point_count] = _get_spray_visual_radius(weapon, age_progress)
 				if point_count == 0:
 					min_pos = droplet_pos
 					max_pos = droplet_pos
@@ -947,6 +960,7 @@ class SprayProjectileDrawer:
 		_has_points = point_count > 0
 		_material.set_shader_parameter("droplet_count", point_count)
 		_material.set_shader_parameter("droplets", _shader_points)
+		_material.set_shader_parameter("droplet_radii", _shader_radii)
 		if active_weapon != null:
 			_material.set_shader_parameter("radius_px", active_weapon.spray_visual_radius)
 			_material.set_shader_parameter("threshold", active_weapon.spray_visual_threshold)
@@ -957,6 +971,28 @@ class SprayProjectileDrawer:
 				padding = active_weapon.spray_visual_radius * 4.0
 			_draw_bounds = Rect2(min_pos - Vector2(padding, padding), (max_pos - min_pos) + Vector2(padding * 2.0, padding * 2.0))
 		queue_redraw()
+
+	func _get_spray_projectile_states(type_id: int) -> Array:
+		var states: Array = []
+		if _projectile_system.has_method("get_active_projectile_states"):
+			states = _projectile_system.call("get_active_projectile_states", type_id) as Array
+		else:
+			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", type_id) as PackedVector2Array
+			for position: Vector2 in positions:
+				states.append({
+					"position": position,
+					"age_progress": 1.0,
+				})
+		return states
+
+	func _get_spray_visual_radius(weapon: WeaponData, age_progress: float) -> float:
+		if weapon == null:
+			return 0.0
+		var full_radius: float = maxf(weapon.spray_visual_radius, 0.0)
+		if not weapon.spray_visual_projectiles_grow:
+			return full_radius
+		var min_radius: float = clampf(weapon.spray_visual_min_size, 0.0, full_radius)
+		return lerpf(min_radius, full_radius, age_progress)
 
 	func _draw() -> void:
 		if not _has_points:

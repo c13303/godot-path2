@@ -190,7 +190,8 @@ namespace ffcore
                                 const Vec2 &pos,
                                 const Vec2 &dir,
                                 int owner_agent_id,
-                                int affected_smash_classes)
+                                int affected_smash_classes,
+                                const Vec2 &inherited_velocity)
     {
         if (type_id < 0 || type_id >= static_cast<int>(types.size()))
             return false;
@@ -205,7 +206,7 @@ namespace ffcore
         Projectile &p = pools[type_id][idx];
 
         p.pos = pos;
-        p.vel = ndir * cfg.speed;
+        p.vel = ndir * cfg.speed + inherited_velocity;
         p.lifetime_remaining = cfg.lifetime;
         p.owner_agent_id = owner_agent_id;
         p.affected_smash_classes = affected_smash_classes;

@@ -38,8 +38,10 @@ namespace godot
 
         int register_type(const Dictionary &cfg);
         bool fire(int type_id, const Vector2 &pos, const Vector2 &dir, int owner_agent_id, int affected_smash_classes);
+        bool fire_with_velocity(int type_id, const Vector2 &pos, const Vector2 &dir, const Vector2 &inherited_velocity, int owner_agent_id, int affected_smash_classes);
 
         PackedVector2Array get_active_positions(int type_id) const;
+        Array get_active_projectile_states(int type_id) const;
         int get_active_count(int type_id) const;
         int get_type_count() const;
 

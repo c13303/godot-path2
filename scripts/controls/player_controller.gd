@@ -66,6 +66,13 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
+	if event is InputEventKey:
+		var key_event: InputEventKey = event
+		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_P:
+			_toggle_pause()
+			get_viewport().set_input_as_handled()
+			return
+
 	if event is InputEventJoypadMotion:
 		var joy_motion_event: InputEventJoypadMotion = event
 		_active_gamepad_device = joy_motion_event.device
@@ -170,7 +177,8 @@ func _update_gun_fire(delta: float) -> void:
 		var selected_id: String = _selected_item_id()
 		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
 			weapon_id = selected_id
-	fight_system.process_held_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player), delta)
+	var player_velocity: Vector2 = _agent_velocity(player_nav_id)
+	fight_system.process_held_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player), delta, player_velocity)
 
 func _setup_player() -> void:
 	var player := _get_player_node()
@@ -268,6 +276,11 @@ func _weapon_origin(player: Node2D) -> Vector2:
 func _weapon_origin_offset(player: Node2D) -> Vector2:
 	if "weapon_origin" in player:
 		return player.get("weapon_origin")
+	return Vector2.ZERO
+
+func _agent_velocity(agent_id: int) -> Vector2:
+	if steering and agent_id >= 0 and steering.has_method("get_agent_velocity"):
+		return steering.call("get_agent_velocity", agent_id) as Vector2
 	return Vector2.ZERO
 
 func _update_player_input(delta: float) -> void:

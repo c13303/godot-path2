@@ -37,8 +37,10 @@ class_name WeaponData
 @export var spray_projectile_pool_size: int = 128
 @export var spray_waters_reactive_plants: bool = false
 @export var spray_visual_radius: float = 13.0
-@export var spray_visual_threshold: float = 1.05
-@export var spray_visual_softness: float = 0.42
+@export var spray_visual_projectiles_grow: bool = false
+@export var spray_visual_min_size: float = 1.0
+@export var spray_visual_threshold: float = 0.75
+@export var spray_visual_softness: float = 0.0
 
 # --- AoE visual appearance (per-weapon; rendered by WeaponAOEDrawer) ---
 # The FightSystem.visualize_AOE_weapons flag is the global on/off; aoe_visual_enabled

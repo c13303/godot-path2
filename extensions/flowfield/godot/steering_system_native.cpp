@@ -51,6 +51,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
     ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_id", "profile"), &SteeringSystemNative::set_agent_profile);
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
+    ClassDB::bind_method(D_METHOD("get_agent_velocity", "agent_id"), &SteeringSystemNative::get_agent_velocity);
     ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
     ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_area_smash);
     ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
@@ -368,6 +369,14 @@ Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
     return Vector2(a->position.x, a->position.y);
 }
 
+Vector2 SteeringSystemNative::get_agent_velocity(int agent_id) const
+{
+    const ffcore::AgentData *a = system.get_agent(agent_id);
+    if (!a)
+        return Vector2();
+    return Vector2(a->velocity.x, a->velocity.y);
+}
+
 void SteeringSystemNative::_reset_agent_cache(int agent_id)
 {
     // Clears only the label caches. The per-agent state maps (flow/active/phase) are
@@ -446,7 +455,7 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
 
     if (a->smash_pending)
         return "smash pending";
-    if (a->is_propelled)
+    if (a->is_propelled && a->smash_control_suppression_timer > 0.0 && a->smash_control_suppression > 0.001)
         return "propelled";
     if (a->control_mode == ffcore::AgentControlMode::Manual)
         return velocity_len > 1.0 ? "manual moving" : "manual idle";
@@ -585,6 +594,7 @@ void SteeringSystemNative::_process(double delta)
         bool control_impaired_changed = it_control_impaired_state == agent_control_impaired_states.end() || prev_control_impaired != control_impaired;
         if (propelled_changed || control_impaired_changed)
         {
+            _reset_agent_cache(id);
             agent_propelled_states[id] = a->is_propelled;
             agent_control_impaired_states[id] = control_impaired;
             if (agent_manager)

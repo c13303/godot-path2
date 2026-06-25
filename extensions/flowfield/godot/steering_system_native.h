@@ -73,6 +73,7 @@ namespace godot
         void set_agent_manual_motion(int agent_id, double acceleration, double deceleration);
         void set_agent_profile(int agent_id, const Dictionary &profile);
         Vector2 get_agent_position(int agent_id) const;
+        Vector2 get_agent_velocity(int agent_id) const;
         void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
         void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vector2 &position, double radius, const Vector2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);

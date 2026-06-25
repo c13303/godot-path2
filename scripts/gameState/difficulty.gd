@@ -46,8 +46,10 @@ func _apply_hardcore_preset() -> void:
 	_spray.spray_projectile_pool_size = 128
 	_spray.spray_waters_reactive_plants = true
 	_spray.spray_visual_radius = 13.0
-	_spray.spray_visual_threshold = 1.05
-	_spray.spray_visual_softness = 0.42
+	_spray.spray_visual_projectiles_grow = true
+	_spray.spray_visual_min_size = 1.0
+	_spray.spray_visual_threshold = 0.75
+	_spray.spray_visual_softness = 0.0
 	print("Difficulty changed: hardcore (F1)")
 
 

@@ -44,7 +44,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": true,
 		"blocks_projectiles": true,
 		"runtime_id": "",
-		"max_stack": 99,
+		"max_stack": 999,
 	},
 	"rose": {
 		"id": "rose",
@@ -61,7 +61,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_projectiles": false,
 		"runtime_id": "rose",
-		"max_stack": 99,
+		"max_stack": 999,
 	},
 	"debris": {
 		"id": "debris",
@@ -86,7 +86,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "lamp",
 		"light_source": 3,
-		"max_stack": 99,
+		"max_stack": 999,
 	},
 	"turret1": {
 		"id": "turret1",
@@ -112,7 +112,7 @@ const ITEM_DEFS: Dictionary = {
 		# Enemy-detection radius. Kept equal to spray.tres's cone radius so the turret
 		# only targets enemies the spray can actually reach.
 		"range": 200.0,
-		"max_stack": 99,
+		"max_stack": 999,
 	},
 }
 
@@ -131,7 +131,7 @@ static func is_placeable(item_id: String) -> bool:
 	return str(get_item_def(item_id).get("type", "")) == "placeable"
 
 static func get_max_stack(item_id: String) -> int:
-	return maxi(1, int(get_item_def(item_id).get("max_stack", 1)))
+	return maxi(1, int(get_item_def(item_id).get("max_stack", 999)))
 
 static func get_currency(item_id: String) -> StringName:
 	return StringName(get_item_def(item_id).get("currency", &""))

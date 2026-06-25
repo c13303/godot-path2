@@ -130,12 +130,14 @@ namespace ffcore
                   const Vec2 &pos,
                   const Vec2 &dir,
                   int owner_agent_id,
-                  int affected_smash_classes);
+                  int affected_smash_classes,
+                  const Vec2 &inherited_velocity = Vec2());
 
         void update(double delta);
 
         std::size_t type_count() const { return types.size(); }
         std::size_t active_count(int type_id) const;
+        const ProjectileTypeConfig &type_config(int type_id) const { return types[type_id]; }
 
         const std::vector<Projectile> &pool_for(int type_id) const { return pools[type_id]; }
 

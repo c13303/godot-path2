@@ -23,7 +23,9 @@ void ProjectileSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_grid", "grid"), &ProjectileSystemNative::set_grid);
     ClassDB::bind_method(D_METHOD("register_type", "config"), &ProjectileSystemNative::register_type);
     ClassDB::bind_method(D_METHOD("fire", "type_id", "pos", "dir", "owner_agent_id", "affected_smash_classes"), &ProjectileSystemNative::fire);
+    ClassDB::bind_method(D_METHOD("fire_with_velocity", "type_id", "pos", "dir", "inherited_velocity", "owner_agent_id", "affected_smash_classes"), &ProjectileSystemNative::fire_with_velocity);
     ClassDB::bind_method(D_METHOD("get_active_positions", "type_id"), &ProjectileSystemNative::get_active_positions);
+    ClassDB::bind_method(D_METHOD("get_active_projectile_states", "type_id"), &ProjectileSystemNative::get_active_projectile_states);
     ClassDB::bind_method(D_METHOD("get_active_count", "type_id"), &ProjectileSystemNative::get_active_count);
     ClassDB::bind_method(D_METHOD("get_type_count"), &ProjectileSystemNative::get_type_count);
     ClassDB::bind_method(D_METHOD("get_impacts"), &ProjectileSystemNative::get_impacts);
@@ -127,6 +129,16 @@ bool ProjectileSystemNative::fire(int type_id, const Vector2 &pos, const Vector2
                        affected_smash_classes);
 }
 
+bool ProjectileSystemNative::fire_with_velocity(int type_id, const Vector2 &pos, const Vector2 &dir, const Vector2 &inherited_velocity, int owner_agent_id, int affected_smash_classes)
+{
+    return system.fire(type_id,
+                       ffcore::Vec2(pos.x, pos.y),
+                       ffcore::Vec2(dir.x, dir.y),
+                       owner_agent_id,
+                       affected_smash_classes,
+                       ffcore::Vec2(inherited_velocity.x, inherited_velocity.y));
+}
+
 PackedVector2Array ProjectileSystemNative::get_active_positions(int type_id) const
 {
     PackedVector2Array out;
@@ -140,6 +152,27 @@ PackedVector2Array ProjectileSystemNative::get_active_positions(int type_id) con
         if (!p.active)
             continue;
         out.set(j++, Vector2(p.pos.x, p.pos.y));
+    }
+    return out;
+}
+
+Array ProjectileSystemNative::get_active_projectile_states(int type_id) const
+{
+    Array out;
+    if (type_id < 0 || type_id >= static_cast<int>(system.type_count()))
+        return out;
+
+    const auto &pool = system.pool_for(type_id);
+    const double lifetime = system.type_config(type_id).lifetime;
+    const double safe_lifetime = std::max(lifetime, 0.000001);
+    for (const auto &p : pool)
+    {
+        if (!p.active)
+            continue;
+        Dictionary state;
+        state["position"] = Vector2(p.pos.x, p.pos.y);
+        state["age_progress"] = std::clamp(1.0 - p.lifetime_remaining / safe_lifetime, 0.0, 1.0);
+        out.push_back(state);
     }
     return out;
 }
