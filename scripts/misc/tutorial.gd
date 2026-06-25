@@ -23,12 +23,18 @@ const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 
+## When the hint switches messages it first blanks out for this long, so each
+## new instruction reads as a distinct prompt rather than a silent swap.
+const CHANGE_DELAY: float = 2.0
+
 var _plant_manager: Node
 var _game_ui: Node
 var _progression: Node
 var _shop: CanvasItem
 var _day_toggle: Button
-var _last_key: String = ""
+var _displayed_key: String = ""  # key currently shown ("" while blank)
+var _pending_key: String = ""    # key we are waiting to reveal
+var _pending_remaining: float = 0.0
 var _glow_tween: Tween
 var _glow_active: bool = false
 
@@ -57,8 +63,8 @@ func _resolve_nodes() -> void:
 	_day_toggle = get_node_or_null("../dayToggle") as Button
 
 
-func _process(_delta: float) -> void:
-	_refresh()
+func _process(delta: float) -> void:
+	_refresh(delta)
 
 
 func _on_mode_changed(_is_night: bool) -> void:
@@ -66,12 +72,12 @@ func _on_mode_changed(_is_night: bool) -> void:
 
 
 func _on_locale_changed(_locale: String) -> void:
-	# Force a re-translate on the next evaluation even if the key is unchanged.
-	_last_key = ""
-	_refresh()
+	# Same message, new language: re-translate in place without re-blanking.
+	if _displayed_key != "":
+		text = Translations.t(_displayed_key)
 
 
-func _refresh() -> void:
+func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _game_ui == null or _progression == null or _shop == null or _day_toggle == null:
 		_resolve_nodes()
 	# The hint is only relevant while the shop is open. The shop hides itself at
@@ -83,10 +89,26 @@ func _refresh() -> void:
 		return
 	visible = true
 	var key: String = _current_message_key()
-	_set_glow(key == KEY_PASS_NIGHT)
-	if key != _last_key:
-		_last_key = key
-		text = Translations.t(key)
+
+	if key == _displayed_key:
+		# Already showing the right message; cancel any stale pending switch.
+		_pending_key = key
+	else:
+		# A change is needed: blank the label and (re)start the delay toward the
+		# newest target. The message only appears once it has held for CHANGE_DELAY.
+		if key != _pending_key:
+			_pending_key = key
+			_pending_remaining = CHANGE_DELAY
+			_displayed_key = ""
+			text = ""
+		else:
+			_pending_remaining -= delta
+			if _pending_remaining <= 0.0:
+				_displayed_key = key
+				text = Translations.t(key)
+
+	# Glow tracks the message actually on screen, so it stays in step with the text.
+	_set_glow(_displayed_key == KEY_PASS_NIGHT)
 
 
 func _current_message_key() -> String:
