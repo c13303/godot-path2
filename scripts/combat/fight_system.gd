@@ -9,9 +9,8 @@ const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
 const WATER_REFILL_AMOUNT_KEY: StringName = &"water_refill_amount"
 const WATER_REFILL_INTERVAL_MS_KEY: StringName = &"water_refill_interval_ms"
-const SPRAY_PARTICLE_SCENE: PackedScene = preload("res://scenes/particles/particle.tscn")
 const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
-const SPRAY_PARTICLE_Z_INDEX: int = 4096
+const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
 
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
@@ -43,22 +42,18 @@ var _weapons_by_id: Dictionary = {}
 var _guns_by_id: Dictionary = {}
 var _gun_type_ids: Dictionary = {}
 var _gun_by_type_id: Dictionary = {}  # type_id (int) -> GunData, for impact visuals
+var _spray_type_ids: Dictionary = {}
+var _spray_weapon_by_type_id: Dictionary = {}
 var _gun_fire_timers: Dictionary = {}
 var _water_refill_elapsed: float = 0.0
-var _continuous_aoe_id: int = -1
-var _continuous_weapon_id: String = ""
-var _continuous_facing: Vector2 = Vector2.RIGHT
-var _continuous_cost_time_left: float = 0.0
-var _continuous_sound_id: StringName = &""
-var _spray_particle_effect: Node2D
-var _spray_particles: CPUParticles2D
-var _spray_particles_waiting_for_position: bool = false
-var _spray_last_origin: Vector2 = Vector2.ZERO
-var _spray_has_last_origin: bool = false
+var _held_spray_weapon_id: String = ""
+var _held_spray_facing: Vector2 = Vector2.RIGHT
+var _held_spray_cost_time_left: float = 0.0
+var _held_spray_fire_time_left: float = 0.0
+var _spray_projectile_drawer
 var _spray_audio_player: AudioStreamPlayer
-# Per-turret spray instances: cell (Vector2i) -> {effect, particles, aoe_id,
-# waiting_for_position, cost_time_left, facing}. Each turret owns a pre-instantiated
-# particle effect that is shown/hidden, never created per shot.
+# Per-turret spray instances: cell (Vector2i) -> {cost_time_left, fire_time_left,
+# facing}. Turrets use the same projectile spray as the player.
 var _turret_sprays: Dictionary = {}
 var _static_colliders_dirty: bool = true
 var _static_collider_prepare_generation: int = 0
@@ -78,11 +73,11 @@ func _ready() -> void:
 	_drawer = WeaponAOEDrawer.new()
 	_drawer.setup(_steering)
 	add_child(_drawer)
-	_setup_spray_particles()
 	_setup_spray_audio()
 	_damage_number_drawer = DamageNumberDrawer.new()
 	add_child(_damage_number_drawer)
 	_rebuild_weapon_index()
+	_register_spray_projectiles()
 	_register_guns()
 	_connect_static_collider_updates()
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -91,6 +86,10 @@ func _ready() -> void:
 		_projectile_drawer.z_order_enabled = z_order_projectiles
 		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
 		add_child(_projectile_drawer)
+	if _projectiles:
+		_spray_projectile_drawer = SprayProjectileDrawer.new()
+		_spray_projectile_drawer.setup(_projectiles, _spray_type_ids, _weapons_by_id, SPRAY_METABALL_SHADER)
+		add_child(_spray_projectile_drawer)
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
@@ -103,6 +102,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _process(_delta: float) -> void:
 	_drain_projectile_impacts()
 	_drain_damage_events()
+	_water_roses_under_spray_projectiles()
 
 func _drain_damage_events() -> void:
 	if not _steering or not _steering.has_method("take_damage_events") or not _agent_manager:
@@ -123,6 +123,29 @@ func _drain_damage_events() -> void:
 		Sfx.play_random_scream()
 		if died:
 			_remove_dead_enemy(enemy, agent_id)
+
+func _water_roses_under_spray_projectiles() -> void:
+	if not _projectiles or _spray_type_ids.is_empty() or not _plant_manager or not _plant_layer:
+		return
+	if not _plant_manager.has_method("is_rose_cell") or not _plant_manager.has_method("wet_rose"):
+		return
+	var checked_cells: Dictionary = {}
+	for weapon_id_variant: Variant in _spray_type_ids.keys():
+		var weapon: WeaponData = _weapons_by_id.get(str(weapon_id_variant)) as WeaponData
+		if weapon == null or not weapon.spray_waters_reactive_plants:
+			continue
+		var type_id: int = int(_spray_type_ids[weapon_id_variant])
+		var positions: PackedVector2Array = _projectiles.call("get_active_positions", type_id) as PackedVector2Array
+		for droplet_pos: Vector2 in positions:
+			var center_cell: Vector2i = _plant_layer.local_to_map(_plant_layer.to_local(droplet_pos))
+			for y: int in range(center_cell.y - 1, center_cell.y + 2):
+				for x: int in range(center_cell.x - 1, center_cell.x + 2):
+					var cell: Vector2i = Vector2i(x, y)
+					if checked_cells.has(cell):
+						continue
+					checked_cells[cell] = true
+					if bool(_plant_manager.call("is_rose_cell", cell)):
+						_plant_manager.call("wet_rose", cell)
 
 func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
 	_spawn_gem_harvest(enemy.global_position)
@@ -217,10 +240,15 @@ func _drain_projectile_impacts() -> void:
 		return
 	for impact_variant: Variant in impacts:
 		var impact: Dictionary = impact_variant as Dictionary
-		var gun: GunData = _gun_by_type_id.get(int(impact.get("type_id", -1))) as GunData
+		var type_id: int = int(impact.get("type_id", -1))
+		var gun: GunData = _gun_by_type_id.get(type_id) as GunData
+		var spray_weapon: WeaponData = _spray_weapon_by_type_id.get(type_id) as WeaponData
 		if gun != null and gun.id == "water":
 			Sfx.play_sound(&"splash")
-		_handle_static_projectile_impact(impact, gun)
+		if gun != null:
+			_handle_static_projectile_impact(impact, gun.id == "water")
+		elif spray_weapon != null:
+			_handle_static_projectile_impact(impact, spray_weapon.spray_waters_reactive_plants)
 		if not gun or not gun.impact_visual_enabled:
 			continue
 		var pos: Vector2 = impact.get("pos", Vector2.ZERO) as Vector2
@@ -235,8 +263,8 @@ func _drain_projectile_impacts() -> void:
 		# Impacts are world-anchored circles (owner_id = -1, angle = 360).
 		_drawer.show_weapon_area(visual_pos, dir, radius, 360.0, gun.impact_display_duration, -1, Vector2.ZERO, gun.impact_fill_color, gun.impact_stroke_color, gun.impact_stroke_width)
 
-func _handle_static_projectile_impact(impact: Dictionary, gun: GunData) -> void:
-	if not gun or gun.id != "water" or not _plant_manager or not _plant_layer:
+func _handle_static_projectile_impact(impact: Dictionary, waters_plants: bool) -> void:
+	if not waters_plants or not _plant_manager or not _plant_layer:
 		return
 	if int(impact.get("kind", -1)) != STATIC_IMPACT_KIND:
 		return
@@ -283,6 +311,11 @@ func _upload_static_projectile_colliders() -> void:
 			"atlas_coords": [PlantManager.ROSE_DRY_ATLAS, PlantManager.ROSE_WET_ATLAS],
 		})
 	_projectiles.call("set_static_collision_layers", collider_configs, _floor_layer)
+
+func _ensure_static_projectile_colliders_ready() -> void:
+	if _static_colliders_dirty:
+		_upload_static_projectile_colliders()
+		_static_colliders_dirty = false
 
 func _connect_static_collider_updates() -> void:
 	if not _plant_manager:
@@ -408,6 +441,34 @@ func _rebuild_weapon_index() -> void:
 		if weapon and weapon.id != "":
 			_weapons_by_id[weapon.id] = weapon
 
+func _register_spray_projectiles() -> void:
+	_spray_type_ids.clear()
+	_spray_weapon_by_type_id.clear()
+	if not _projectiles:
+		return
+	for weapon in weapons:
+		if not weapon or weapon.id == "" or not weapon.spray_projectiles_enabled:
+			continue
+		var cfg: Dictionary = {
+			"speed": weapon.spray_projectile_speed,
+			"lifetime": weapon.spray_projectile_lifetime,
+			"radius": weapon.spray_projectile_radius,
+			"aoe_radius": weapon.spray_projectile_radius,
+			"smash_force": weapon.smash_force,
+			"smash_friction_loss": 1.0 - weapon.friction,
+			"smash_falloff": weapon.falloff,
+			"smash_detach_flow": weapon.detach_flow,
+			"smash_control_suppression": weapon.control_suppression,
+			"smash_control_suppression_duration": weapon.control_suppression_duration,
+			"damage": weapon.spray_projectile_damage,
+			"static_collision_mask": weapon.spray_projectile_static_collision_mask,
+			"end_of_life_aoe_enabled": false,
+			"pool_size": weapon.spray_projectile_pool_size,
+		}
+		var type_id: int = int(_projectiles.call("register_type", cfg))
+		_spray_type_ids[weapon.id] = type_id
+		_spray_weapon_by_type_id[type_id] = weapon
+
 func _weapon_by_id(weapon_id: String) -> WeaponData:
 	if _weapons_by_id.is_empty():
 		_rebuild_weapon_index()
@@ -420,7 +481,7 @@ func is_held_weapon(item_id: String) -> bool:
 	if is_gun(item_id):
 		return true
 	var weapon: WeaponData = _weapon_by_id(item_id)
-	return weapon != null and weapon.continuous
+	return weapon != null and weapon.spray_projectiles_enabled
 
 func _register_guns() -> void:
 	_guns_by_id.clear()
@@ -467,10 +528,10 @@ func _register_guns() -> void:
 
 ## Called once per player frame. A non-empty weapon id means the trigger is held
 ## for that weapon; an empty id stops channelled weapons and advances refill.
-func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, follow_offset: Vector2, delta: float) -> void:
+func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float) -> void:
 	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
 	if gun != null:
-		_stop_continuous_weapon()
+		_stop_held_spray()
 		if gun.reserve_id == WATER_RESERVE_ID:
 			_water_refill_elapsed = 0.0
 		else:
@@ -479,100 +540,84 @@ func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2,
 		return
 
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
-	if weapon != null and weapon.continuous:
-		if weapon.reserve_id == WATER_RESERVE_ID:
+	if weapon != null and weapon.spray_projectiles_enabled:
+		if weapon.spray_reserve_id == WATER_RESERVE_ID:
 			_water_refill_elapsed = 0.0
 		else:
 			_refill_water_reserve(delta)
-		_update_continuous_weapon(weapon, origin, direction, source_agent_id, follow_offset, delta)
+		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta)
 		return
 
-	_stop_continuous_weapon()
+	_stop_held_spray()
 	_refill_water_reserve(delta)
 
-func _update_continuous_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, follow_offset: Vector2, delta: float) -> void:
-	if not _steering or not _steering.has_method("start_continuous_aoe") or direction.length_squared() <= 0.000001:
-		_stop_continuous_weapon()
+func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
+	if not _projectiles or direction.length_squared() <= 0.000001:
+		_stop_held_spray()
 		return
-	if _continuous_weapon_id != "" and _continuous_weapon_id != weapon.id:
-		_stop_continuous_weapon()
+	_ensure_static_projectile_colliders_ready()
+	var type_id: int = int(_spray_type_ids.get(weapon.id, -1))
+	if type_id < 0:
+		_stop_held_spray()
+		return
+	if _held_spray_weapon_id != "" and _held_spray_weapon_id != weapon.id:
+		_stop_held_spray()
 
 	var facing: Vector2 = direction.normalized()
 	var collision_facing: Vector2 = facing
-	if _continuous_aoe_id < 0 or weapon.aim_inertia <= 0.0:
-		_continuous_facing = facing
+	if _held_spray_weapon_id == "" or weapon.spray_aim_inertia <= 0.0:
+		_held_spray_facing = facing
 	else:
-		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.aim_inertia)
-		var collision_angle: float = lerp_angle(_continuous_facing.angle(), facing.angle(), response)
-		_continuous_facing = Vector2.from_angle(collision_angle)
-		collision_facing = _continuous_facing
-	var aoe_follow_offset: Vector2 = follow_offset + facing * weapon.throw_offset
+		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.spray_aim_inertia)
+		var collision_angle: float = lerp_angle(_held_spray_facing.angle(), facing.angle(), response)
+		_held_spray_facing = Vector2.from_angle(collision_angle)
+		collision_facing = _held_spray_facing
+
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
-	if _continuous_aoe_id < 0:
-		if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+	if _held_spray_weapon_id == "":
+		if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
 			return
-		var started_id: int = int(_steering.call(
-			"start_continuous_aoe",
-			spawn_origin,
-			collision_facing,
-			weapon.radius,
-			weapon.directional_area_angle,
-			weapon.smash_force,
-			weapon.friction,
-			weapon.falloff,
-			weapon.detach_flow,
-			weapon.control_suppression,
-			weapon.control_suppression_duration,
-			source_agent_id,
-			weapon.affected_smash_classes,
-			aoe_follow_offset,
-			weapon.damage,
-			weapon.damage_frequency,
-			weapon.repulse_frequency
-		))
-		if started_id < 0:
-			_refund_reserve(weapon.reserve_id, weapon.reserve_cost)
-			return
-		_continuous_aoe_id = started_id
-		_continuous_weapon_id = weapon.id
-		_continuous_cost_time_left = weapon.reserve_cost_interval
-		_continuous_sound_id = weapon.continuous_sound
-		if _continuous_sound_id != &"":
-			Sfx.play_sound(_continuous_sound_id)
+		_held_spray_weapon_id = weapon.id
+		_held_spray_cost_time_left = weapon.spray_reserve_cost_interval
+		_held_spray_fire_time_left = 0.0
 	else:
-		_continuous_cost_time_left -= delta
-		while _continuous_cost_time_left <= 0.0:
-			if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
-				_stop_continuous_weapon()
+		_held_spray_cost_time_left -= delta
+		while _held_spray_cost_time_left <= 0.0:
+			if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
+				_stop_held_spray()
 				return
-			_continuous_cost_time_left += maxf(weapon.reserve_cost_interval, 0.001)
-		var updated: bool = bool(_steering.call("update_continuous_aoe", _continuous_aoe_id, collision_facing, aoe_follow_offset))
-		if not updated:
-			_stop_continuous_weapon()
-			return
+			_held_spray_cost_time_left += maxf(weapon.spray_reserve_cost_interval, 0.001)
 
-	if visualize_AOE_weapons and weapon.aoe_visual_enabled:
-		_drawer.set_persistent_weapon_area(weapon.id, spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle, source_agent_id, aoe_follow_offset, weapon.aoe_fill_color, weapon.aoe_stroke_color, weapon.aoe_stroke_width)
-	if weapon.waters_reactive_plants:
-		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
-	if weapon.id == "spray":
-		_start_spray_audio()
-		_update_spray_particles(spawn_origin, collision_facing, delta)
+	_held_spray_fire_time_left = _advance_spray_projectile_emission(weapon, type_id, spawn_origin, collision_facing, source_agent_id, delta, _held_spray_fire_time_left)
+	_start_spray_audio()
 
-func _stop_continuous_weapon() -> void:
-	if _continuous_aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
-		_steering.call("stop_continuous_aoe", _continuous_aoe_id)
-	if _continuous_weapon_id != "" and _drawer:
-		_drawer.clear_persistent_weapon_area(_continuous_weapon_id)
-	if _continuous_sound_id != &"" and Sfx.has_method("stop_sound"):
-		Sfx.stop_sound(_continuous_sound_id)
+func _advance_spray_projectile_emission(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int, delta: float, fire_time_left: float) -> float:
+	var rate: float = maxf(weapon.spray_projectiles_per_second, 0.001)
+	var interval: float = 1.0 / rate
+	var next_fire_time: float = fire_time_left - delta
+	var guard: int = 0
+	while next_fire_time <= 0.0 and guard < 8:
+		_fire_one_spray_projectile(weapon, type_id, origin, facing, source_agent_id)
+		next_fire_time += interval
+		guard += 1
+	return next_fire_time
+
+func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector2, facing: Vector2, source_agent_id: int) -> void:
+	if not _projectiles:
+		return
+	var base_angle: float = facing.angle()
+	var half_angle: float = deg_to_rad(weapon.directional_area_angle * 0.5)
+	var jitter: float = deg_to_rad(weapon.spray_projectile_spread_jitter_degrees)
+	var angle: float = base_angle + randf_range(-half_angle, half_angle) + randf_range(-jitter, jitter)
+	var projectile_direction: Vector2 = Vector2.from_angle(angle)
+	_projectiles.call("fire", type_id, origin, projectile_direction, source_agent_id, weapon.affected_smash_classes)
+
+func _stop_held_spray() -> void:
 	_stop_spray_audio()
-	_stop_spray_particles()
-	_continuous_aoe_id = -1
-	_continuous_weapon_id = ""
-	_continuous_facing = Vector2.RIGHT
-	_continuous_cost_time_left = 0.0
-	_continuous_sound_id = &""
+	_held_spray_weapon_id = ""
+	_held_spray_facing = Vector2.RIGHT
+	_held_spray_cost_time_left = 0.0
+	_held_spray_fire_time_left = 0.0
 
 func _setup_spray_audio() -> void:
 	_spray_audio_player = AudioStreamPlayer.new()
@@ -588,213 +633,81 @@ func _stop_spray_audio() -> void:
 	if _spray_audio_player != null:
 		_spray_audio_player.stop()
 
-func _setup_spray_particles() -> void:
-	var made: Dictionary = _make_spray_effect("SprayParticles")
-	_spray_particle_effect = made.get("effect") as Node2D
-	_spray_particles = made.get("particles") as CPUParticles2D
-
-# Instantiate one hidden, world-space spray particle effect and return its nodes.
-# Shared by the player's single effect and each turret's own effect.
-func _make_spray_effect(effect_name: String) -> Dictionary:
-	var effect_node: Node = SPRAY_PARTICLE_SCENE.instantiate()
-	var effect: Node2D = effect_node as Node2D
-	if effect == null:
-		effect_node.queue_free()
-		return {}
-	effect.name = effect_name
-	effect.z_as_relative = false
-	effect.z_index = SPRAY_PARTICLE_Z_INDEX
-	effect.visible = false
-	add_child(effect)
-	var particles: CPUParticles2D = effect.get_node_or_null("sprayParticle2DCPU") as CPUParticles2D
-	if particles != null:
-		particles.local_coords = false
-		particles.emitting = false
-	return {"effect": effect, "particles": particles}
-
-func _update_spray_particles(origin: Vector2, facing: Vector2, delta: float) -> void:
-	if _spray_particle_effect == null or _spray_particles == null:
-		return
-	_spray_particle_effect.global_position = origin
-	_spray_particle_effect.rotation = facing.angle()
-	var player_velocity: Vector2 = Vector2.ZERO
-	if _spray_has_last_origin and delta > 0.000001:
-		player_velocity = (origin - _spray_last_origin) / delta
-	_spray_last_origin = origin
-	_spray_has_last_origin = true
-	if _spray_particles.has_method("adapt_to_player_velocity"):
-		_spray_particles.call("adapt_to_player_velocity", player_velocity, _spray_particle_effect.rotation)
-	if not _spray_particles.emitting:
-		# Clear the previous emission buffer only after the emitter has its new
-		# transform. Keep it hidden for this frame so stale particles can never
-		# flash at the last spray position when emission restarts.
-		_spray_particle_effect.visible = false
-		_spray_particles.restart()
-		_spray_particles.emitting = true
-		_spray_particles_waiting_for_position = true
-		return
-	if _spray_particles_waiting_for_position:
-		_spray_particles_waiting_for_position = false
-	_spray_particle_effect.visible = true
-
-func _stop_spray_particles() -> void:
-	if _spray_particles != null:
-		_spray_particles.emitting = false
-	_spray_particles_waiting_for_position = false
-	_spray_has_last_origin = false
-	_spray_last_origin = Vector2.ZERO
-	if _spray_particle_effect != null:
-		_spray_particle_effect.visible = false
-
 # --- Turret spray (multi-instance) -----------------------------------------
-# Turrets reuse the "spray" WeaponData and the spray particle scene, but unlike the
-# player they are static (owner_id -1) and there can be many at once. Each turret keeps
-# its own continuous-AoE id and its own pre-instantiated particle effect.
+# Turrets reuse the "spray" WeaponData and emit the same native projectiles as
+# the player, but they keep their own aim/cost/fire timers.
 
-## Pre-instantiate a turret's spray particle effect (hidden). Call once when the turret
-## is placed; the node is reused for every spray, never recreated per shot.
 func create_turret_spray(cell: Vector2i) -> void:
 	if _turret_sprays.has(cell):
 		return
-	var made: Dictionary = _make_spray_effect("TurretSpray_%d_%d" % [cell.x, cell.y])
-	if made.is_empty():
-		return
-	made["aoe_id"] = -1
-	made["waiting_for_position"] = false
-	made["cost_time_left"] = 0.0
-	made["facing"] = Vector2.RIGHT
-	_turret_sprays[cell] = made
+	_turret_sprays[cell] = {
+		"cost_time_left": 0.0,
+		"fire_time_left": 0.0,
+		"facing": Vector2.RIGHT,
+	}
 
-## Free a turret's spray effect and stop any active cone. Call when the turret is removed.
 func remove_turret_spray(cell: Vector2i) -> void:
 	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
 	if inst == null:
 		return
-	_stop_turret_spray_aoe(inst)
-	var effect: Node2D = inst.get("effect") as Node2D
-	if effect != null:
-		effect.queue_free()
 	_turret_sprays.erase(cell)
 
-## Drive one turret's spray for a frame: starts/updates the static continuous AoE,
-## spends the water reserve, and shows the particle effect aimed along `direction`.
+## Drive one turret's spray for a frame: spends water and emits low-density
+## spray projectiles aimed along `direction`.
 func update_turret_spray(cell: Vector2i, weapon_id: String, origin: Vector2, direction: Vector2, delta: float) -> void:
 	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
 	if inst == null:
 		return
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
-	if weapon == null or not weapon.continuous or not _steering or not _steering.has_method("start_continuous_aoe"):
+	if weapon == null or not weapon.spray_projectiles_enabled or not _projectiles:
 		return
 	if direction.length_squared() <= 0.000001:
 		stop_turret_spray(cell)
 		return
+	_ensure_static_projectile_colliders_ready()
+	var type_id: int = int(_spray_type_ids.get(weapon.id, -1))
+	if type_id < 0:
+		stop_turret_spray(cell)
+		return
 
 	var facing: Vector2 = direction.normalized()
-	var aoe_id: int = int(inst.get("aoe_id", -1))
 	var inst_facing: Vector2 = inst.get("facing", facing) as Vector2
 	var collision_facing: Vector2 = facing
-	if aoe_id < 0 or weapon.aim_inertia <= 0.0:
+	var was_idle: bool = float(inst.get("cost_time_left", 0.0)) <= 0.0 and float(inst.get("fire_time_left", 0.0)) <= 0.0
+	if was_idle or weapon.spray_aim_inertia <= 0.0:
 		inst_facing = facing
 	else:
-		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.aim_inertia)
+		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.spray_aim_inertia)
 		var collision_angle: float = lerp_angle(inst_facing.angle(), facing.angle(), response)
 		inst_facing = Vector2.from_angle(collision_angle)
 		collision_facing = inst_facing
 	inst["facing"] = inst_facing
 
-	# Static cone: bake the (tiny) throw offset into the spawn position once. owner_id is
-	# -1 so the native zone never re-anchors to an agent and the follow_offset is unused.
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
-	if aoe_id < 0:
-		if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+	if was_idle:
+		if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
 			return
-		var started_id: int = int(_steering.call(
-			"start_continuous_aoe",
-			spawn_origin,
-			collision_facing,
-			weapon.radius,
-			weapon.directional_area_angle,
-			weapon.smash_force,
-			weapon.friction,
-			weapon.falloff,
-			weapon.detach_flow,
-			weapon.control_suppression,
-			weapon.control_suppression_duration,
-			-1,
-			weapon.affected_smash_classes,
-			Vector2.ZERO,
-			weapon.damage,
-			weapon.damage_frequency,
-			weapon.repulse_frequency
-		))
-		if started_id < 0:
-			_refund_reserve(weapon.reserve_id, weapon.reserve_cost)
-			return
-		inst["aoe_id"] = started_id
-		inst["cost_time_left"] = weapon.reserve_cost_interval
+		inst["cost_time_left"] = weapon.spray_reserve_cost_interval
+		inst["fire_time_left"] = 0.0
 	else:
 		var cost_left: float = float(inst.get("cost_time_left", 0.0)) - delta
 		while cost_left <= 0.0:
-			if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+			if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
 				stop_turret_spray(cell)
 				return
-			cost_left += maxf(weapon.reserve_cost_interval, 0.001)
+			cost_left += maxf(weapon.spray_reserve_cost_interval, 0.001)
 		inst["cost_time_left"] = cost_left
-		var updated: bool = bool(_steering.call("update_continuous_aoe", aoe_id, collision_facing, Vector2.ZERO))
-		if not updated:
-			stop_turret_spray(cell)
-			return
 
-	if weapon.waters_reactive_plants:
-		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
-	_drive_spray_effect(inst, spawn_origin, collision_facing.angle())
+	var fire_time_left: float = float(inst.get("fire_time_left", 0.0))
+	inst["fire_time_left"] = _advance_spray_projectile_emission(weapon, type_id, spawn_origin, collision_facing, -1, delta, fire_time_left)
 
-## End a turret's spray burst: stop the cone and hide its particles. The effect node is
-## kept for the next burst.
+## End a turret's spray burst. Already-fired droplets keep simulating normally.
 func stop_turret_spray(cell: Vector2i) -> void:
 	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
 	if inst == null:
 		return
-	_stop_turret_spray_aoe(inst)
-	_hide_spray_effect(inst)
-
-func _stop_turret_spray_aoe(inst: Dictionary) -> void:
-	var aoe_id: int = int(inst.get("aoe_id", -1))
-	if aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
-		_steering.call("stop_continuous_aoe", aoe_id)
-	inst["aoe_id"] = -1
 	inst["cost_time_left"] = 0.0
-
-# Position/show one instance's particle effect. Mirrors the player path: the first frame
-# restarts emission while hidden so stale particles never flash at the previous spot.
-func _drive_spray_effect(inst: Dictionary, origin: Vector2, rotation: float) -> void:
-	var effect: Node2D = inst.get("effect") as Node2D
-	var particles: CPUParticles2D = inst.get("particles") as CPUParticles2D
-	if effect == null or particles == null:
-		return
-	effect.global_position = origin
-	effect.rotation = rotation
-	# Turrets are stationary, so there is no emitter velocity to inherit.
-	if particles.has_method("adapt_to_player_velocity"):
-		particles.call("adapt_to_player_velocity", Vector2.ZERO, rotation)
-	if not particles.emitting:
-		effect.visible = false
-		particles.restart()
-		particles.emitting = true
-		inst["waiting_for_position"] = true
-		return
-	if bool(inst.get("waiting_for_position", false)):
-		inst["waiting_for_position"] = false
-	effect.visible = true
-
-func _hide_spray_effect(inst: Dictionary) -> void:
-	var particles: CPUParticles2D = inst.get("particles") as CPUParticles2D
-	if particles != null:
-		particles.emitting = false
-	inst["waiting_for_position"] = false
-	var effect: Node2D = inst.get("effect") as Node2D
-	if effect != null:
-		effect.visible = false
+	inst["fire_time_left"] = 0.0
 
 func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id == &"" or amount <= 0:
@@ -802,11 +715,6 @@ func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id != WATER_RESERVE_ID or not _progression or not _progression.has_method("spend"):
 		return false
 	return bool(_progression.call("spend", WATER_RESERVE_KEY, amount))
-
-func _refund_reserve(reserve_id: StringName, amount: int) -> void:
-	if reserve_id != WATER_RESERVE_ID or amount <= 0:
-		return
-	_update_water_reserve(amount)
 
 func _refill_water_reserve(delta: float) -> void:
 	if not _progression or not _progression.has_method("get_value"):
@@ -833,26 +741,6 @@ func _update_water_reserve(delta_value: int) -> void:
 		return
 	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
 	_progression.call("update_value", WATER_RESERVE_KEY, delta_value, 0, maximum)
-
-func _water_plants_in_cone(origin: Vector2, direction: Vector2, radius: float, angle_degrees: float) -> void:
-	if not _plant_manager or not _plant_layer or not _plant_manager.has_method("is_rose_cell") or not _plant_manager.has_method("wet_rose"):
-		return
-	var tile_size: Vector2i = _plant_layer.tile_set.tile_size if _plant_layer.tile_set else Vector2i(32, 32)
-	var cell_radius: int = int(ceil(radius / maxf(1.0, float(mini(tile_size.x, tile_size.y))))) + 1
-	var origin_cell: Vector2i = _plant_layer.local_to_map(_plant_layer.to_local(origin))
-	var min_dot: float = cos(deg_to_rad(angle_degrees * 0.5))
-	for y: int in range(origin_cell.y - cell_radius, origin_cell.y + cell_radius + 1):
-		for x: int in range(origin_cell.x - cell_radius, origin_cell.x + cell_radius + 1):
-			var cell: Vector2i = Vector2i(x, y)
-			if not bool(_plant_manager.call("is_rose_cell", cell)):
-				continue
-			var cell_world: Vector2 = _plant_layer.to_global(_plant_layer.map_to_local(cell))
-			var offset: Vector2 = cell_world - origin
-			if offset.length_squared() > radius * radius:
-				continue
-			if angle_degrees < 359.9 and offset.length_squared() > 0.000001 and offset.normalized().dot(direction) < min_dot:
-				continue
-			_plant_manager.call("wet_rose", cell)
 
 func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
 	var gun: GunData = _guns_by_id.get(gun_id) as GunData
@@ -901,9 +789,9 @@ class WeaponAOEDrawer:
 	const AOE_Z_INDEX: int = 4096
 
 	# Fallback appearance, used only if a weapon supplies no visual override.
-	const DEFAULT_FILL := Color(1.0, 0.0, 0.0, 0.18)
-	const DEFAULT_STROKE := Color(1.0, 0.0, 0.0, 0.85)
-	const DEFAULT_STROKE_WIDTH := 2.0
+	const DEFAULT_FILL: Color = Color(1.0, 0.0, 0.0, 0.18)
+	const DEFAULT_STROKE: Color = Color(1.0, 0.0, 0.0, 0.85)
+	const DEFAULT_STROKE_WIDTH: float = 2.0
 	var _steering: Node
 
 	func setup(steering: Node) -> void:
@@ -995,6 +883,85 @@ class WeaponAOEDrawer:
 		draw_colored_polygon(points, fill)
 		for i in range(points.size()):
 			draw_line(points[i], points[(i + 1) % points.size()], stroke, stroke_width)
+
+class SprayProjectileDrawer:
+	extends Node2D
+
+	const MAX_DROPLETS: int = 128
+	const DRAW_Z_INDEX: int = 4096
+
+	var _projectile_system: Node
+	var _spray_type_ids: Dictionary = {}
+	var _weapons_by_id: Dictionary = {}
+	var _material: ShaderMaterial
+	var _shader_points: Array = []
+	var _draw_bounds: Rect2 = Rect2()
+	var _has_points: bool = false
+
+	func setup(projectile_system: Node, spray_type_ids: Dictionary, weapons_by_id: Dictionary, shader: Shader) -> void:
+		_projectile_system = projectile_system
+		_spray_type_ids = spray_type_ids
+		_weapons_by_id = weapons_by_id
+		z_as_relative = false
+		z_index = DRAW_Z_INDEX
+		_material = ShaderMaterial.new()
+		_material.shader = shader
+		material = _material
+		_shader_points.resize(MAX_DROPLETS)
+		for index: int in range(MAX_DROPLETS):
+			_shader_points[index] = Vector2.ZERO
+		_material.set_shader_parameter("droplet_count", 0)
+		_material.set_shader_parameter("droplets", _shader_points)
+
+	func _process(_delta: float) -> void:
+		if not _projectile_system or _material == null:
+			return
+		var point_count: int = 0
+		var min_pos: Vector2 = Vector2.ZERO
+		var max_pos: Vector2 = Vector2.ZERO
+		var active_weapon: WeaponData = null
+		for weapon_id_variant: Variant in _spray_type_ids.keys():
+			if point_count >= MAX_DROPLETS:
+				break
+			var weapon_id: String = str(weapon_id_variant)
+			var type_id: int = int(_spray_type_ids[weapon_id])
+			var positions: PackedVector2Array = _projectile_system.call("get_active_positions", type_id) as PackedVector2Array
+			if positions.is_empty():
+				continue
+			if active_weapon == null:
+				active_weapon = _weapons_by_id.get(weapon_id) as WeaponData
+			for droplet_pos: Vector2 in positions:
+				if point_count >= MAX_DROPLETS:
+					break
+				_shader_points[point_count] = droplet_pos
+				if point_count == 0:
+					min_pos = droplet_pos
+					max_pos = droplet_pos
+				else:
+					min_pos.x = minf(min_pos.x, droplet_pos.x)
+					min_pos.y = minf(min_pos.y, droplet_pos.y)
+					max_pos.x = maxf(max_pos.x, droplet_pos.x)
+					max_pos.y = maxf(max_pos.y, droplet_pos.y)
+				point_count += 1
+
+		_has_points = point_count > 0
+		_material.set_shader_parameter("droplet_count", point_count)
+		_material.set_shader_parameter("droplets", _shader_points)
+		if active_weapon != null:
+			_material.set_shader_parameter("radius_px", active_weapon.spray_visual_radius)
+			_material.set_shader_parameter("threshold", active_weapon.spray_visual_threshold)
+			_material.set_shader_parameter("softness", active_weapon.spray_visual_softness)
+		if _has_points:
+			var padding: float = 52.0
+			if active_weapon != null:
+				padding = active_weapon.spray_visual_radius * 4.0
+			_draw_bounds = Rect2(min_pos - Vector2(padding, padding), (max_pos - min_pos) + Vector2(padding * 2.0, padding * 2.0))
+		queue_redraw()
+
+	func _draw() -> void:
+		if not _has_points:
+			return
+		draw_rect(_draw_bounds, Color.WHITE, true)
 
 class ProjectileDrawer:
 	extends Node2D

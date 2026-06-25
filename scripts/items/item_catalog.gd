@@ -98,16 +98,16 @@ const ITEM_DEFS: Dictionary = {
 		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(2, 0),
 		"occupies_cell": true,
-		# Breakable dynamic obstacle. It participates in navigation like a wall; the
-		# accumulated daytime topology is applied when night starts.
-		"isWall": true,
-		"blocks_movement": true,
+		# Walkable breakable object. Monsters can step on it, briefly eat it, and
+		# then continue their previous route.
+		"isWall": false,
+		"blocks_movement": false,
 		"blocks_projectiles": false,
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
 		"shoot_frequency": 3.0,
-		"shoot_duration": 1.0,
+		"shoot_duration": 0.5,
 		"weapon": "spray",
 		# Enemy-detection radius. Kept equal to spray.tres's cone radius so the turret
 		# only targets enemies the spray can actually reach.

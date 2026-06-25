@@ -4,7 +4,7 @@ const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const SEED_CURRENCY: StringName = &"seed"
 const GEM_CURRENCY: StringName = &"gem"
-const BULK_BUY_HOLD_SECONDS: float = 1.0
+const BULK_BUY_HOLD_SECONDS: float = 0.5
 
 ## Price for each shop item, keyed by the inventory item id. The item's
 ## currency is defined in ItemCatalog.

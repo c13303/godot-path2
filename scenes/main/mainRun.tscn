@@ -1366,6 +1366,7 @@ rush_speed_mult = 2.0
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+dev_keys = true
 draw_combat_hitboxes = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0

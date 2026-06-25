@@ -13,6 +13,7 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const PLANT_ZONE_MARGIN: int = 2
+const TURRET_ID: String = "turret1"
 # Max walkable path length (in cells) allowed between two plants for them to share
 # a garden, measured through walkable cells so walls split gardens. BFS from a
 # seed plant is bounded by this radius and re-seeded from each plant it absorbs,
@@ -139,6 +140,7 @@ var _find_path_in_zone_accum: Dictionary = {}
 # blocker-construction vs. the rest, without changing the void signature.
 var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
+var _turret_eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
@@ -844,11 +846,11 @@ func _recompute_spawner_reachable_cells_budgeted(token: int) -> bool:
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
 		for dy: int in range(-1, 2):
 			for dx: int in range(-1, 2):
-				var seed: Vector2i = spawner_cell + Vector2i(dx, dy)
-				if _spawner_reachable_cells.has(seed) or not _is_walkable(seed):
+				var candidate_cell: Vector2i = spawner_cell + Vector2i(dx, dy)
+				if _spawner_reachable_cells.has(candidate_cell) or not _is_walkable(candidate_cell):
 					continue
-				_spawner_reachable_cells[seed] = true
-				queue.append(seed)
+				_spawner_reachable_cells[candidate_cell] = true
+				queue.append(candidate_cell)
 	var slice_started_us: int = Time.get_ticks_usec()
 	while head < queue.size():
 		if not _night_preparation_is_current(token):
@@ -953,6 +955,13 @@ func _process(delta: float) -> void:
 			"eating=%d astar_in=%d escaping=%d" % [
 				_eating_agents.size(), _astar_in_agents.size(),
 				_escaping_agents.size()])
+
+	t = Time.get_ticks_usec()
+	_process_turret_eating_agents(delta)
+	_process_turret_overlaps()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
+			"turret_eating=%d" % _turret_eating_agents.size())
 
 	t = Time.get_ticks_usec()
 	_process_astar_in_arrivals()
@@ -1165,12 +1174,12 @@ func _on_plant_removed(cell: Vector2i) -> void:
 			_zone_overlay.queue_redraw()
 		return
 	var removed_us: int = Time.get_ticks_usec()
-	var result := _remove_plant_from_garden_content_only(cell)
+	var result: Dictionary = _remove_plant_from_garden_content_only(cell)
 	if not bool(result.get("was_removed", false)):
 		return
 
-	var garden_id := int(result.get("garden_id", 0))
-	var became_empty := bool(result.get("became_empty", false))
+	var garden_id: int = int(result.get("garden_id", 0))
+	var became_empty: bool = bool(result.get("became_empty", false))
 
 	if became_empty and garden_id > 0:
 		var empty_us: int = Time.get_ticks_usec()
@@ -1260,7 +1269,25 @@ func _definition_for_cell(cell: Vector2i) -> Dictionary:
 # cells; only local agent movement should treat them as soft round blockers. Placement
 # of a blocking building never triggers a wall/FF topology rebuild.
 func is_blocking_building_cell(cell: Vector2i) -> bool:
-	return blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0
+	return _building_cell_blocks_movement(cell)
+
+func _building_cell_blocks_movement(cell: Vector2i) -> bool:
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return false
+	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
+	for raw_item_def: Variant in ItemCatalog.ITEM_DEFS.values():
+		var item_def: Dictionary = raw_item_def as Dictionary
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		if str(item_def.get("target_layer", "")) != "blocking_buildings":
+			continue
+		var raw_atlas: Variant = item_def.get("atlas", Vector2i(-1, -1))
+		if not raw_atlas is Vector2i:
+			continue
+		if (raw_atlas as Vector2i) != atlas:
+			continue
+		return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+	return true
 
 func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictionary:
 	if not layer:
@@ -2090,6 +2117,161 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 	_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
 
+func _process_turret_overlaps() -> void:
+	if blocking_buildings == null:
+		return
+	for raw_node: Node in get_tree().get_nodes_in_group("monsters"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0 or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id):
+			continue
+		var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
+		if not _is_turret_cell(agent_cell):
+			continue
+		_consume_turret(agent, agent_cell)
+
+func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	if nav_id < 0:
+		return
+	var resume_state: Dictionary = _capture_agent_resume_state(nav_id, agent)
+	_turret_eating_agents[nav_id] = {
+		"node": agent,
+		"timer": _eating_time,
+		"resume_state": resume_state,
+	}
+	_suspend_agent_for_turret_eating(nav_id)
+	_remove_turret_cell(turret_cell)
+	Sfx.play_sound(&"crunsh")
+	if agent.has_method("start_eating"):
+		agent.call("start_eating", _eating_time)
+
+func _process_turret_eating_agents(delta: float) -> void:
+	var finished: Array[int] = []
+	for raw_nav_id: Variant in _turret_eating_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _turret_eating_agents.has(nav_id):
+			continue
+		var data: Dictionary = _turret_eating_agents[nav_id] as Dictionary
+		var timer: float = float(data.get("timer", 0.0)) - delta
+		data["timer"] = timer
+		_turret_eating_agents[nav_id] = data
+		if timer <= 0.0:
+			finished.append(nav_id)
+
+	for nav_id: int in finished:
+		var data: Dictionary = _turret_eating_agents.get(nav_id, {}) as Dictionary
+		_turret_eating_agents.erase(nav_id)
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
+			continue
+		if agent.has_method("stop_eating"):
+			agent.call("stop_eating")
+		var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
+		_resume_agent_after_turret_eating(nav_id, agent, resume_state)
+
+func _capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
+	if _entry_path_agents.has(nav_id):
+		return {
+			"kind": "entry",
+			"data": (_entry_path_agents[nav_id] as Dictionary).duplicate(),
+		}
+	if _astar_in_agents.has(nav_id):
+		return {
+			"kind": "astar",
+			"data": (_astar_in_agents[nav_id] as Dictionary).duplicate(),
+		}
+	if _escaping_agents.has(nav_id):
+		return {
+			"kind": "escape",
+			"data": (_escaping_agents[nav_id] as Dictionary).duplicate(),
+		}
+	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	return {
+		"kind": "retarget",
+		"spawner_cell": spawner_cell,
+		"garden_id": garden_id,
+	}
+
+func _suspend_agent_for_turret_eating(nav_id: int) -> void:
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	_entry_path_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
+	_escaping_agents.erase(nav_id)
+
+func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
+	var kind: String = str(resume_state.get("kind", "retarget"))
+	var data: Dictionary = resume_state.get("data", {}) as Dictionary
+	if kind == "entry":
+		if _resume_agent_path(nav_id, agent, data):
+			_entry_path_agents[nav_id] = data
+			_erase_astar_in_agent(nav_id)
+			_escaping_agents.erase(nav_id)
+			if agent.has_method("start_flow_in"):
+				agent.call("start_flow_in")
+			return
+	elif kind == "astar":
+		if _resume_agent_path(nav_id, agent, data):
+			_entry_path_agents.erase(nav_id)
+			_set_astar_in_agent(nav_id, data)
+			_escaping_agents.erase(nav_id)
+			if agent.has_method("start_astar_in"):
+				agent.call("start_astar_in")
+			return
+	elif kind == "escape":
+		if _assign_agent_to_escape(agent):
+			return
+
+	var spawner_cell: Vector2i = resume_state.get("spawner_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
+		agent.call("start_waiting_new_status")
+
+func _resume_agent_path(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
+	if agent_manager == null or not agent_manager.has_method("assign_agent_path"):
+		return false
+	var path_world: PackedVector2Array = data.get("path_world", PackedVector2Array()) as PackedVector2Array
+	if path_world.is_empty():
+		return false
+	if agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	data["node"] = agent
+	agent_manager.call("assign_agent_path", nav_id, path_world)
+	return true
+
+func _remove_turret_cell(turret_cell: Vector2i) -> void:
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects != null and building_objects.has_method("remove_building"):
+		building_objects.call("remove_building", turret_cell, true)
+		return
+	if blocking_buildings != null and blocking_buildings.get_cell_source_id(turret_cell) >= 0:
+		blocking_buildings.erase_cell(turret_cell)
+		blocking_buildings.update_internals()
+
+func _get_building_object_manager() -> BuildingObjectManager:
+	var manager: BuildingObjectManager = get_node_or_null("../BuildingObjectManager") as BuildingObjectManager
+	return manager
+
+func _is_turret_cell(cell: Vector2i) -> bool:
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return false
+	var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
+	var raw_atlas: Variant = turret_def.get("atlas", Vector2i(-1, -1))
+	var turret_atlas: Vector2i = raw_atlas as Vector2i
+	return blocking_buildings.get_cell_atlas_coords(cell) == turret_atlas
+
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
 		return
@@ -2426,7 +2608,7 @@ func _has_floor(cell: Vector2i) -> bool:
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
 		return true
-	return blocking_buildings != null and blocking_buildings.get_cell_tile_data(cell) != null
+	return _building_cell_blocks_movement(cell)
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))
@@ -4043,6 +4225,8 @@ func _wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
 			var c: Vector2i = raw_cell as Vector2i
 			if c.x < min_cell.x or c.x > max_cell.x or c.y < min_cell.y or c.y > max_cell.y:
 				continue
+			if layer == blocking_buildings and not _building_cell_blocks_movement(c):
+				continue
 			blockers.append(Vector2(float(c.x), float(c.y)))
 	return blockers
 
@@ -4258,8 +4442,8 @@ func _path_endpoint_local_offset(cell: Vector2i, nav_id: int) -> Vector2:
 	@warning_ignore("integer_division")
 	var ring: int = _positive_mod(h / 12, 2)
 	var angle: float = (PI * 2.0 * float(slot)) / 12.0
-	var scale: float = 0.65 + 0.35 * float(ring)
-	return Vector2(cos(angle), sin(angle)) * radius * scale
+	var ring_scale: float = 0.65 + 0.35 * float(ring)
+	return Vector2(cos(angle), sin(angle)) * radius * ring_scale
 
 func _positive_mod(value: int, divisor: int) -> int:
 	var r: int = value % divisor

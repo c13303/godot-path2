@@ -24,29 +24,30 @@ func _apply_hardcore_preset() -> void:
 	# even after another preset changes the shared weapon resource at runtime.
 	_spray.throw_offset = 16.0
 	_spray.directional_area_angle = 86.0
-	_spray.radius = 108.0
-	_spray.aoe_duration = 0.0
 	_spray.smash_force = 400.0
 	_spray.control_suppression = 0.35
 	_spray.control_suppression_duration = 0.15
-	_spray.damage = 30
 	_spray.friction = 0.91
 	_spray.falloff = 0.0
-	_spray.radial = false
 	_spray.detach_flow = false
 	_spray.affected_smash_classes = 4
-	_spray.continuous = true
-	_spray.damage_frequency = 0.1
-	_spray.repulse_frequency = 0.03
-	_spray.reserve_id = &"water"
-	_spray.reserve_cost = 1
-	_spray.reserve_cost_interval = 0.5
-	_spray.waters_reactive_plants = true
-	_spray.continuous_sound = &""
-	_spray.aoe_visual_enabled = false
-	_spray.aoe_fill_color = Color(0.12, 0.48, 1.0, 0.22)
-	_spray.aoe_stroke_color = Color(0.35, 0.72, 1.0, 0.95)
-	_spray.aoe_stroke_width = 2.0
+	_spray.spray_projectiles_enabled = true
+	_spray.spray_reserve_id = &"water"
+	_spray.spray_reserve_cost = 1
+	_spray.spray_reserve_cost_interval = 0.5
+	_spray.spray_projectiles_per_second = 28.0
+	_spray.spray_aim_inertia = 0.05
+	_spray.spray_projectile_speed = 760.0
+	_spray.spray_projectile_lifetime = 0.27
+	_spray.spray_projectile_radius = 5.25
+	_spray.spray_projectile_damage = 4
+	_spray.spray_projectile_spread_jitter_degrees = 3.0
+	_spray.spray_projectile_static_collision_mask = 1
+	_spray.spray_projectile_pool_size = 128
+	_spray.spray_waters_reactive_plants = true
+	_spray.spray_visual_radius = 13.0
+	_spray.spray_visual_threshold = 1.05
+	_spray.spray_visual_softness = 0.42
 	print("Difficulty changed: hardcore (F1)")
 
 

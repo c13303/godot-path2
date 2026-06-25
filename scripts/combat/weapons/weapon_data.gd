@@ -20,18 +20,25 @@ class_name WeaponData
 @export var detach_flow: bool = false
 @export_flags("Player", "MainChar", "Monster") var affected_smash_classes: int = 4
 
-@export_group("Continuous Use")
-@export var continuous: bool = false
-# Rotation response time in seconds for the collision cone. Zero follows the
-# aim immediately.
-@export_range(0.0, 2.0, 0.001, "or_greater") var aim_inertia: float = 0.0
-@export var damage_frequency: float = 0.0
-@export var repulse_frequency: float = 0.0
-@export var reserve_id: StringName = &""
-@export var reserve_cost: int = 0
-@export var reserve_cost_interval: float = 0.0
-@export var waters_reactive_plants: bool = false
-@export var continuous_sound: StringName = &""
+@export_group("Spray Projectiles")
+@export var spray_projectiles_enabled: bool = false
+@export var spray_reserve_id: StringName = &""
+@export var spray_reserve_cost: int = 0
+@export var spray_reserve_cost_interval: float = 0.0
+@export var spray_projectiles_per_second: float = 26.0
+# Rotation response time in seconds for the spray cone. Zero follows aim immediately.
+@export_range(0.0, 2.0, 0.001, "or_greater") var spray_aim_inertia: float = 0.0
+@export var spray_projectile_speed: float = 720.0
+@export var spray_projectile_lifetime: float = 0.28
+@export var spray_projectile_radius: float = 5.25
+@export var spray_projectile_damage: int = 4
+@export var spray_projectile_spread_jitter_degrees: float = 4.0
+@export_flags("Terrain", "Reactive Plant") var spray_projectile_static_collision_mask: int = 1
+@export var spray_projectile_pool_size: int = 128
+@export var spray_waters_reactive_plants: bool = false
+@export var spray_visual_radius: float = 13.0
+@export var spray_visual_threshold: float = 1.05
+@export var spray_visual_softness: float = 0.42
 
 # --- AoE visual appearance (per-weapon; rendered by WeaponAOEDrawer) ---
 # The FightSystem.visualize_AOE_weapons flag is the global on/off; aoe_visual_enabled

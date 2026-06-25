@@ -6,6 +6,12 @@ extends Node
 		debug_enabled = value
 		_apply_debug_settings()
 
+## When ON, dev cheat keys are active: Numpad + grants 100 seeds + 100 gems.
+@export var dev_keys: bool = false:
+	set(value):
+		dev_keys = value
+		_apply_debug_settings()
+
 @export var draw_world_hitboxes: bool = false:
 	set(value):
 		draw_world_hitboxes = value
@@ -183,6 +189,28 @@ func _setup_tile_hover_info() -> void:
 func _process(_delta: float) -> void:
 	if tile_hover_info:
 		tile_hover_info.process()
+
+
+## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds + 100 gems.
+func _unhandled_input(event: InputEvent) -> void:
+	if not dev_keys or not (event is InputEventKey):
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return
+	if key_event.keycode == KEY_KP_ADD:
+		get_viewport().set_input_as_handled()
+		_grant_dev_currency()
+
+
+func _grant_dev_currency() -> void:
+	var scene: Node = get_tree().current_scene if is_inside_tree() else null
+	var progression: Node = scene.get_node_or_null("progression") if scene else null
+	if progression == null:
+		push_warning("dev_keys: progression node not found")
+		return
+	_call_if_available(progression, "update_seeds", 100)
+	_call_if_available(progression, "update_gems", 100)
 
 
 func _apply_debug_settings() -> void:

@@ -6,7 +6,6 @@ signal loading_progress(progress: float, label: String)
 @onready var ff: FlowFieldNative = get_parent()
 @onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
 @onready var wall_layer: TileMapLayer = $"../../../Map/MonTilemap/wallz"
-@onready var blocking_layer: TileMapLayer = $"../../../Map/MonTilemap/blocking_buildings"
 
 var is_ready: bool = false
 
@@ -27,7 +26,6 @@ func _ready() -> void:
 	#print("FlowFieldCode: assigning layers...")
 	ff.set_floor_layer(floor_layer)
 	ff.set_wall_layer(wall_layer)
-	ff.set_blocking_layer(blocking_layer)
 	loading_progress.emit(0.15, "Reading map layers")
 
 	#print("floor_layer:", floor_layer)

@@ -110,8 +110,7 @@ func _register_turret(cell: Vector2i) -> void:
 		"spray_time_left": 0.0,
 		"last_direction": Vector2.RIGHT,
 	}
-	# Pre-instantiate this turret's spray particle effect once; it is shown/hidden per
-	# burst rather than recreated each shot.
+	# Initialize this turret's independent spray timers.
 	_fight_system.create_turret_spray(cell)
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
