@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/entities/player.gd" id="1_player"]
 [ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_farmer"]
+[ext_resource type="Script" uid="uid://ddklovsi2tle0" path="res://scripts/animations/characterAnimation.gd" id="3_anim"]
 
 [node name="Player" type="CharacterBody2D"]
 z_index = 2
@@ -14,3 +15,7 @@ sprite_offset = Vector2(0, -31.5)
 position = Vector2(0, -31.5)
 texture = ExtResource("2_farmer")
 hframes = 2
+
+[node name="characterAnimation" type="Node" parent="."]
+script = ExtResource("3_anim")
+preset = 1
