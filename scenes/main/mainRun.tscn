@@ -2062,17 +2062,6 @@ texture = SubResource("AtlasTexture_gem_icon")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="CloseButton" type="Button" parent="GameUI/right anchor/Shop" unique_id=1347609122]
-layout_mode = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -40.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = 40.0
-grow_horizontal = 0
-text = "X"
-
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")
 starting_gems = 1000

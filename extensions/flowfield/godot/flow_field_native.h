@@ -176,6 +176,14 @@ namespace godot
                                   int radius = 1);
 
         void compute_distance_field_global();
+
+        // Live-edit the physics passability of a single cell on the default collision
+        // field, in place. `map_cell` is an absolute tilemap cell; `blocked` true marks
+        // it as a wall, false as walkable. Intentionally does NOT recompute the flow
+        // field, distance field, or bottlenecks — it only keeps the player's hard wall
+        // collision in sync when a wall/building is built or removed mid-day. The heavy
+        // fields stay valid for routing and are rebuilt wholesale when night begins.
+        void set_cell_blocked(Vector2i map_cell, bool blocked);
     };
 
 } // namespace godot

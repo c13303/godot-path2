@@ -31,6 +31,23 @@ const ITEM_DEFS: Dictionary = {
 		"category": "tools",
 		"frame": 2,
 	},
+	# Selecting this quick-slot tool opens the shop (build mode). It is not a weapon
+	# or a placeable itself; the shop chooses which building to place.
+	"build_tool": {
+		"id": "build_tool",
+		"name": "Build",
+		"type": "tool",
+		"category": "tools",
+		"frame": 9,
+	},
+	# Holding left-click with this quick-slot tool removes the hovered building.
+	"unbuild_tool": {
+		"id": "unbuild_tool",
+		"name": "Unbuild",
+		"type": "tool",
+		"category": "tools",
+		"frame": 10,
+	},
 	"wall": {
 		"id": "wall",
 		"name": "Wall",

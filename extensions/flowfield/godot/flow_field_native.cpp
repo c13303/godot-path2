@@ -98,6 +98,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_water_layer"), &FlowFieldNative::get_water_layer);
     ClassDB::bind_method(D_METHOD("get_blocking_layer"), &FlowFieldNative::get_blocking_layer);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
+    ClassDB::bind_method(D_METHOD("set_cell_blocked", "map_cell", "blocked"), &FlowFieldNative::set_cell_blocked);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
 
 }
@@ -386,6 +387,20 @@ void FlowFieldNative::compute_distance_field_global()
     compute_distance_field(used, wall_set);
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_bottlenecks(used, walkable_set, costs);
+}
+
+void FlowFieldNative::set_cell_blocked(Vector2i map_cell, bool blocked)
+{
+    // Single-cell, in-place passability edit for live wall/building build and removal.
+    // Only the default collision field's physics mask is touched; the distance field,
+    // bottlenecks, and group flow fields are deliberately left untouched (they stay
+    // valid for routing and are recomputed wholesale when night begins). The mask is
+    // only meaningful once compute_distance_field_global() has enabled it.
+    if (!field.is_ready())
+        return;
+    const ffcore::Vec2i origin = field.get_cell_origin();
+    const ffcore::Vec2i rel(map_cell.x - origin.x, map_cell.y - origin.y);
+    field.set_cell_physics_passable(rel, !blocked);
 }
 
 void FlowFieldNative::compute_bottlenecks(const Rect2i &used,

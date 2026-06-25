@@ -7,6 +7,9 @@ const INVENTORY_COLUMNS: int = 8
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
+# Quick-slot tools that drive build/unbuild mode rather than acting as weapons.
+const BUILD_TOOL_ID: String = "build_tool"
+const UNBUILD_TOOL_ID: String = "unbuild_tool"
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
 @onready var toolbar_anchor: Control = $"bottom anchor"
@@ -51,6 +54,11 @@ func _ready() -> void:
 	_refresh_all_slots()
 	_set_inventory_open(false)
 	call_deferred("_connect_startup_loading_signals")
+	# Day 1 starts in build mode (the shop is open). Later days re-select the build
+	# tool when the day's seed-harvest finishes (driven from the shop). A loaded save
+	# overrides this afterwards via its restored selected_quick_index.
+	if not GameState.is_night:
+		call_deferred("select_build_tool")
 
 func _setup_day_toggle() -> void:
 	_sun_icon = AtlasTexture.new()
@@ -255,6 +263,20 @@ func clear_build_selection() -> void:
 func is_build_mode_active() -> bool:
 	return selected_build_item_id != ""
 
+func is_build_tool_selected() -> bool:
+	return get_selected_quick_item_id() == BUILD_TOOL_ID
+
+func is_unbuild_tool_selected() -> bool:
+	return get_selected_quick_item_id() == UNBUILD_TOOL_ID
+
+## Select the quick slot holding the build tool (opens the shop). No-op if the
+## build tool is not in the quick bar.
+func select_build_tool() -> void:
+	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
+		if _slot_item_id(inventory_slots[i]) == BUILD_TOOL_ID:
+			select_quick_slot(i)
+			return
+
 ## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:
 	var currency: StringName = ItemCatalog.get_currency(item_id)
@@ -288,15 +310,34 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 		return false
 	return bool(_progression_node.call("spend", key, price * count))
 
-## Refund the full price of `count` removed units back to the matching currency.
-func refund_build(item_id: String, count: int = 1) -> void:
+## Refund the full price of `count` removed units back to the matching currency,
+## flying one currency icon per unit from `world_position` to the HUD and crediting
+## on arrival — exactly like the seed/gem harvest. Falls back to an instant credit
+## if the HUD icon is unavailable so a refund is never lost.
+func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
 		return
 	var price: int = ItemCatalog.get_price(item_id)
-	var key: StringName = _build_currency_prog_key(item_id)
-	if price <= 0 or key == &"" or _progression_node == null:
+	var units: int = price * count
+	if units <= 0:
 		return
-	_progression_node.call("update_value", key, price * count)
+	var currency: StringName = ItemCatalog.get_currency(item_id)
+	var icon: Node = null
+	var animate_method: String = ""
+	if currency == &"seed":
+		icon = get_node_or_null("top right/seedIcon")
+		animate_method = "animate_seed_harvest"
+	elif currency == &"gem":
+		icon = get_node_or_null("top right/gemIcon")
+		animate_method = "animate_gem_harvest"
+	if icon != null and icon.has_method(animate_method):
+		for i: int in range(units):
+			icon.call(animate_method, world_position, i)
+		return
+	# Fallback: no HUD icon to animate, so credit immediately.
+	var key: StringName = _build_currency_prog_key(item_id)
+	if key != &"" and _progression_node != null:
+		_progression_node.call("update_value", key, units)
 
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
@@ -304,8 +345,8 @@ func _setup_starting_inventory() -> void:
 		inventory_slots[i] = _empty_slot()
 	#add_inventory("sword", 1)
 	add_inventory("spray", 1)
-	#add_inventory("rose", 5)
-	#add_inventory("turret1", 1)
+	add_inventory(BUILD_TOOL_ID, 1)
+	add_inventory(UNBUILD_TOOL_ID, 1)
 
 # Generic inventory add, reusable for purchases, pickups, and rewards.
 # Existing stacks are filled before new slots are used. The operation is

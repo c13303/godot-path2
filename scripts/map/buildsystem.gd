@@ -20,6 +20,9 @@ const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
 
 var _atlas_source_id: int = -1
+# Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
+# wall/building is built or removed during the day (see _refresh_cell_collision).
+var _flow_field: Object = null
 
 var _hover_active: bool = false
 var _hover_cell: Vector2i
@@ -97,18 +100,20 @@ func _process(delta: float) -> void:
 	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
-	# Holding X or Delete over a placed building removes it (with a full refund).
-	if event is InputEventKey:
-		var removal_key_event: InputEventKey = event as InputEventKey
-		if not removal_key_event.echo and _is_removal_key(removal_key_event.keycode):
-			var was_removing: bool = _remove_active
-			if removal_key_event.pressed:
-				_try_start_removal()
-			else:
-				_cancel_removal()
-			if was_removing or _remove_active:
-				get_viewport().set_input_as_handled()
-			return
+	# With the Unbuild tool selected, holding left-click over a building removes it
+	# (with a full refund). No placement happens while the unbuild tool is active.
+	if _unbuild_tool_selected():
+		if event is InputEventMouseButton:
+			var unbuild_event: InputEventMouseButton = event as InputEventMouseButton
+			if unbuild_event.button_index == MOUSE_BUTTON_LEFT:
+				var was_removing: bool = _remove_active
+				if unbuild_event.pressed:
+					_try_start_removal()
+				else:
+					_cancel_removal()
+				if was_removing or _remove_active:
+					get_viewport().set_input_as_handled()
+		return
 
 	if event is InputEventMouseButton:
 		var drag_mouse_event: InputEventMouseButton = event as InputEventMouseButton
@@ -130,11 +135,8 @@ func _input(event: InputEvent) -> void:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
-func _is_removal_key(keycode: int) -> bool:
-	return keycode == KEY_X or keycode == KEY_DELETE
-
-func _removal_key_held() -> bool:
-	return Input.is_key_pressed(KEY_X) or Input.is_key_pressed(KEY_DELETE)
+func _unbuild_tool_selected() -> bool:
+	return game_ui and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
 
 func _try_start_removal() -> void:
 	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
@@ -157,7 +159,7 @@ func _try_start_removal() -> void:
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _removal_key_held():
+	if GameState.is_night or _is_inventory_open() or not _unbuild_tool_selected() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_cancel_removal()
 		return
 	if _hovered_cell() != _remove_cell:
@@ -186,10 +188,12 @@ func _finish_removal() -> void:
 	var removed_item_id: String = _remove_item_id
 	var removed_layer: TileMapLayer = _remove_layer
 	_cancel_removal()
+	var refund_world_position: Vector2 = previewbuild.to_global(previewbuild.map_to_local(removed_cell))
 	_remove_tile(removed_layer, removed_cell)
-	# Refund the building's full price back to its currency (priceless items refund 0).
+	# Refund the building's full price back to its currency, flying the seeds/gems
+	# to the HUD like a harvest (priceless items refund nothing).
 	if game_ui and game_ui.has_method("refund_build"):
-		game_ui.call("refund_build", removed_item_id, 1)
+		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
@@ -205,9 +209,11 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 		if layer.get_cell_source_id(cell) >= 0:
 			layer.erase_cell(cell)
 			layer.update_internals()
+		_refresh_cell_collision(cell)
 		return
 	layer.erase_cell(cell)
 	layer.update_internals()
+	_refresh_cell_collision(cell)
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
 	var layers: Array[TileMapLayer] = [blocking_buildings, traversable_buildings, plantz, wallz]
@@ -274,6 +280,30 @@ func _resolve_atlas_source_id() -> void:
 		if ts.get_source(sid) is TileSetAtlasSource:
 			_atlas_source_id = sid
 			return
+
+# The flow field only recomputes the wall collision mask at the start of night, so a
+# wall built or removed during the day would leave the player walking through new walls
+# or stuck on removed ones. After any change to a collision layer (wallz / blocking
+# buildings), re-derive that single cell's blocked state and push it to the flow field.
+# This updates just the wall index, not the (costly) flow/distance/bottleneck fields.
+func _refresh_cell_collision(cell: Vector2i) -> void:
+	var ff: Object = _resolve_flow_field()
+	if ff == null or not ff.has_method("set_cell_blocked"):
+		return
+	var blocked: bool = false
+	if wallz and wallz.get_cell_source_id(cell) >= 0:
+		blocked = true
+	elif blocking_buildings and blocking_buildings.get_cell_source_id(cell) >= 0:
+		blocked = true
+	ff.call("set_cell_blocked", cell, blocked)
+
+func _resolve_flow_field() -> Object:
+	if _flow_field and is_instance_valid(_flow_field):
+		return _flow_field
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		_flow_field = scene.get_node_or_null("CPP/FlowFieldNative")
+	return _flow_field
 
 func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
@@ -391,6 +421,7 @@ func _finish_drag_build() -> void:
 		return
 	for cell: Vector2i in cells:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+		_refresh_cell_collision(cell)
 		_after_placeable_placed(cell, placeable_def, false)
 	target_layer.update_internals()
 	if target_layer == plantz:
@@ -443,6 +474,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		0
 	)
 	target_layer.update_internals()
+	_refresh_cell_collision(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
 	if game_ui and game_ui.has_method("try_purchase_build"):
 		game_ui.call("try_purchase_build", item_id, 1)

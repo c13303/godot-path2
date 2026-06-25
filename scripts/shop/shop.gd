@@ -1,10 +1,10 @@
 extends Panel
 
-## The shop is the entry point to build mode. Clicking an item selects it (a green
-## frame appears) and the cursor enters build mode for that item, provided the
-## player can afford one. Buildings are paid for directly from currency as they are
-## placed and never enter the inventory. Hiding the shop (Tab / Esc / right-click /
-## the close button) clears the selection and returns to the weapon toolbar.
+## The shop is the building picker for build mode. It is open exactly while the
+## quick-bar Build tool is selected (see game_ui.is_build_tool_selected) and during
+## the day; selecting any other quick slot closes it. Clicking an affordable item
+## selects it (a green frame appears) so the build system places it; buildings are
+## paid for directly from currency and never enter the inventory.
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
@@ -18,12 +18,14 @@ const GEM_CURRENCY: StringName = &"gem"
 @onready var rose_price_label: Label = $MarginContainer/Content/Items/RoseItem/Price/Amount
 @onready var turret_price_label: Label = $MarginContainer/Content/Items/TurretItem/Price/Amount
 @onready var wall_price_label: Label = $MarginContainer/Content/Items/WallItem/Price/Amount
-@onready var close_button: Button = $CloseButton
 
 var progression_node: Node
 var game_ui: Node
 var _waiting_for_seed_harvest: bool = false
+# The building currently picked for placement (drives the green frame + build mode).
 var _selected_item_id: String = ""
+# The last building the player picked; restored when the shop reopens (if affordable).
+var _last_picked_item_id: String = ""
 var _selection_frame: Panel
 # Shop item id -> its button, used to drive selection and position the green frame.
 var _item_buttons: Dictionary = {}
@@ -48,68 +50,71 @@ func _ready() -> void:
 		# reaches the game.
 		button.focus_mode = Control.FOCUS_NONE
 
-	if close_button != null:
-		close_button.pressed.connect(_close_shop)
-		close_button.focus_mode = Control.FOCUS_NONE
-
 	rose_price_label.text = str(ItemCatalog.get_price("rose"))
 	turret_price_label.text = str(ItemCatalog.get_price("turret1"))
 	wall_price_label.text = str(ItemCatalog.get_price("wall"))
 
-	# The shop is open during the day and closed during the night.
+	# The shop is closed during the night and during the day's seed-harvest animation.
 	GameState.mode_changed.connect(_on_game_mode_changed)
+	_waiting_for_seed_harvest = false
 	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene != null else null
 	if plant_manager != null and plant_manager.has_signal("day_seed_harvest_finished"):
 		plant_manager.connect("day_seed_harvest_finished", _on_day_seed_harvest_finished)
-	visible = not GameState.is_night
+	visible = false
+	set_process(true)
 
 
-func _input(event: InputEvent) -> void:
-	# Right-click anywhere hides the shop (and exits build mode).
-	if event is InputEventMouseButton:
-		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and mouse_event.pressed and visible:
-			_close_shop()
-			get_viewport().set_input_as_handled()
-		return
-
-	if not (event is InputEventKey):
-		return
-	var key_event: InputEventKey = event as InputEventKey
-	if not key_event.pressed or key_event.echo:
-		return
-
-	if key_event.keycode == KEY_TAB:
-		if _waiting_for_seed_harvest:
-			return
-		_set_shop_visible(not visible)
-		get_viewport().set_input_as_handled()
-	elif key_event.keycode == KEY_ESCAPE and visible:
+## Shop visibility is derived from the quick-bar selection: open only while the
+## Build tool is the selected quick slot (and it is daytime, past the harvest).
+func _process(_delta: float) -> void:
+	var should_show: bool = (
+		game_ui != null
+		and game_ui.has_method("is_build_tool_selected")
+		and bool(game_ui.call("is_build_tool_selected"))
+		and not GameState.is_night
+		and not _waiting_for_seed_harvest
+	)
+	if should_show and not visible:
+		_open_shop()
+	elif not should_show and visible:
 		_close_shop()
-		get_viewport().set_input_as_handled()
 
 
-## Auto-close the shop at night. On a new day, wait for harvested seeds to land.
+func _open_shop() -> void:
+	visible = true
+	# Resume placing the building we were last on, if we can still afford it.
+	if _last_picked_item_id != "" and _can_afford(_last_picked_item_id):
+		_select_item(_last_picked_item_id)
+
+
+func _close_shop() -> void:
+	visible = false
+	_deselect_active()
+	_reset_title()
+
+
+## At night the shop is closed; on a new day it stays closed until the seed-harvest
+## animation finishes, after which the build tool is auto-selected to reopen it.
 func _on_game_mode_changed(is_night: bool) -> void:
-	_set_shop_visible(false)
 	_waiting_for_seed_harvest = not is_night
 
 
 func _on_day_seed_harvest_finished() -> void:
 	_waiting_for_seed_harvest = false
-	if not GameState.is_night:
-		visible = true
+	if not GameState.is_night and game_ui != null and game_ui.has_method("select_build_tool"):
+		game_ui.call("select_build_tool")
 
 
 func _on_item_pressed(item_id: String) -> void:
 	if not visible or GameState.is_night:
 		return
-	# Clicking the already-selected item toggles it back off.
+	# Clicking the already-selected item toggles it back off and forgets it.
 	if _selected_item_id == item_id:
-		_clear_selection()
+		_deselect_active()
+		_last_picked_item_id = ""
 		_reset_title()
 		return
-	# Build mode is only entered when the player can afford at least one.
+	# Build placement is only armed when the player can afford at least one.
 	if not _can_afford(item_id):
 		_show_insufficient_currency(ItemCatalog.get_currency(item_id))
 		return
@@ -119,29 +124,21 @@ func _on_item_pressed(item_id: String) -> void:
 
 func _select_item(item_id: String) -> void:
 	_selected_item_id = item_id
+	_last_picked_item_id = item_id
 	if game_ui != null and game_ui.has_method("set_selected_build_item"):
 		game_ui.call("set_selected_build_item", item_id)
 	_show_selection_frame_over(_item_buttons[item_id])
 	Sfx.play_sound(&"buy")
 
 
-func _clear_selection() -> void:
+## Clears the active build pick (green frame + build mode) but remembers it for the
+## next time the shop opens.
+func _deselect_active() -> void:
 	_selected_item_id = ""
 	if game_ui != null and game_ui.has_method("clear_build_selection"):
 		game_ui.call("clear_build_selection")
 	if _selection_frame != null:
 		_selection_frame.visible = false
-
-
-func _close_shop() -> void:
-	_set_shop_visible(false)
-
-
-func _set_shop_visible(value: bool) -> void:
-	visible = value
-	if not value:
-		_clear_selection()
-		_reset_title()
 
 
 func _can_afford(item_id: String) -> bool:
