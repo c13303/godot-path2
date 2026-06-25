@@ -92,25 +92,35 @@ void SteeringSystem::clear_phase_directional_cell_field(AgentPhase phase)
     phase_directional_cell_fields.erase((int)phase);
 }
 
-Vec2 SteeringSystem::directional_cell_field_velocity_for_agent(const AgentData &agent) const
+DirectionalCellFieldSample SteeringSystem::directional_cell_field_sample_for_agent(const AgentData &agent) const
 {
+    DirectionalCellFieldSample sample;
     auto phase_it = phase_directional_cell_fields.find((int)agent.phase);
     if (phase_it == phase_directional_cell_fields.end())
-        return Vec2(0, 0);
+        return sample;
+    sample.phase_bound = true;
+    sample.field_id = phase_it->second;
+
     auto field_it = directional_cell_fields.find(phase_it->second);
     if (field_it == directional_cell_fields.end())
-        return Vec2(0, 0);
+        return sample;
+    sample.field_found = true;
 
     const DirectionalCellField &field = field_it->second;
     const Vec2 sample_world = agent.position + field.sample_offset_world;
     const Vec2i cell = field.world_to_cell(sample_world);
+    sample.sample_world = sample_world;
+    sample.sample_cell = cell;
 
     auto exact_it = field.directions.find(field.key(cell.x, cell.y));
-    if (exact_it != field.directions.end())
-        return exact_it->second * field.speed;
+    if (exact_it != field.directions.end()) {
+        sample.exact = true;
+        sample.velocity = exact_it->second * field.speed;
+        return sample;
+    }
 
     if (field.sample_radius_world <= 0.0)
-        return Vec2(0, 0);
+        return sample;
 
     const int radius_cells = (int)std::ceil(field.sample_radius_world / std::max(1.0, field.tile_size));
     const double radius_sq = field.sample_radius_world * field.sample_radius_world;
@@ -133,5 +143,14 @@ Vec2 SteeringSystem::directional_cell_field_velocity_for_agent(const AgentData &
         }
     }
 
-    return best_dir * field.speed;
+    if (!best_dir.is_zero()) {
+        sample.fallback = true;
+        sample.velocity = best_dir * field.speed;
+    }
+    return sample;
+}
+
+Vec2 SteeringSystem::directional_cell_field_velocity_for_agent(const AgentData &agent) const
+{
+    return directional_cell_field_sample_for_agent(agent).velocity;
 }

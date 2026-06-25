@@ -641,4 +641,4 @@ func _fail(message: String) -> void:
 
 
 func _log(message: String) -> void:
-	print("[Progression] " + message)
+	pass

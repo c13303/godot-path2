@@ -682,6 +682,19 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["config_wall_stuck_velocity_ratio"] = cfg.wall_stuck_velocity_ratio;
     d["config_wall_stuck_wall_vs_sep_ratio"] = cfg.wall_stuck_wall_vs_sep_ratio;
 
+    const ffcore::DirectionalCellFieldSample directional_sample = system.directional_cell_field_sample_for_agent(*a);
+    Dictionary directional_field;
+    directional_field["phase_bound"] = directional_sample.phase_bound;
+    directional_field["field_found"] = directional_sample.field_found;
+    directional_field["exact"] = directional_sample.exact;
+    directional_field["fallback"] = directional_sample.fallback;
+    directional_field["field_id"] = directional_sample.field_id;
+    directional_field["sample_world"] = Vector2(directional_sample.sample_world.x, directional_sample.sample_world.y);
+    directional_field["sample_cell"] = Vector2i(directional_sample.sample_cell.x, directional_sample.sample_cell.y);
+    directional_field["velocity"] = Vector2(directional_sample.velocity.x, directional_sample.velocity.y);
+    directional_field["speed"] = Vector2(directional_sample.velocity.x, directional_sample.velocity.y).length();
+    d["directional_cell_field"] = directional_field;
+
     if (a->flow)
     {
         const ffcore::Vec2i rel_cell = a->flow->world_to_cell(foot);

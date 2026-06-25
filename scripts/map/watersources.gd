@@ -73,26 +73,38 @@ func _tile_size() -> Vector2:
 
 func rebuild_waterpool_directional_field(steering: Node) -> bool:
 	if steering == null:
+		print("Waterpools: no steering node; upload skipped")
 		return false
 	if not steering.has_method("set_directional_cell_field"):
+		print("Waterpools: steering lacks set_directional_cell_field; upload skipped")
 		return false
 	if not steering.has_method("bind_phase_directional_cell_field"):
+		print("Waterpools: steering lacks bind_phase_directional_cell_field; upload skipped")
 		return false
 	if not waterpool_drift_enabled or waterpool_drift_speed <= 0.0:
 		_clear_waterpool_directional_field(steering)
+		print("Waterpools: disabled; field cleared")
 		return true
 
 	var used_water_cells: Array[Vector2i] = get_used_cells()
 	if used_water_cells.is_empty():
 		_clear_waterpool_directional_field(steering)
+		print("Waterpools: no water cells; field cleared")
 		return true
 
 	var waterpool_field: Dictionary = Waterpools.build_directional_field(used_water_cells)
 	var field_cells: PackedVector2Array = waterpool_field.get("cells", PackedVector2Array()) as PackedVector2Array
 	var field_directions: PackedVector2Array = waterpool_field.get("directions", PackedVector2Array()) as PackedVector2Array
+	var pool_count: int = int(waterpool_field.get("pool_count", 0))
+	var deep_count: int = int(waterpool_field.get("deep_cells", 0))
 
 	if field_cells.size() == 0:
 		_clear_waterpool_directional_field(steering)
+		print("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=0; field cleared" % [
+			pool_count,
+			used_water_cells.size(),
+			deep_count,
+		])
 		return true
 
 	var size: Vector2 = _tile_size()
@@ -109,6 +121,16 @@ func rebuild_waterpool_directional_field(steering: Node) -> bool:
 		waterpool_drift_sample_radius
 	)
 	steering.call("bind_phase_directional_cell_field", waterpool_bound_phase, waterpool_directional_field_id)
+	print("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=%d speed=%.1f sample_radius=%.1f field_id=%d phase=%d" % [
+		pool_count,
+		used_water_cells.size(),
+		deep_count,
+		field_cells.size(),
+		waterpool_drift_speed,
+		waterpool_drift_sample_radius,
+		waterpool_directional_field_id,
+		waterpool_bound_phase,
+	])
 	return true
 
 func clear_waterpool_directional_field(steering: Node) -> void:

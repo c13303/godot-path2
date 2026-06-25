@@ -68,6 +68,18 @@ namespace ffcore
         double push_strength = 1.0;
     };
 
+    struct DirectionalCellFieldSample
+    {
+        bool phase_bound = false;
+        bool field_found = false;
+        bool exact = false;
+        bool fallback = false;
+        int field_id = -1;
+        Vec2 sample_world;
+        Vec2i sample_cell;
+        Vec2 velocity;
+    };
+
     class SteeringSystem
     {
     public:
@@ -131,6 +143,7 @@ namespace ffcore
         void clear_directional_cell_fields();
         void bind_phase_directional_cell_field(AgentPhase phase, int field_id);
         void clear_phase_directional_cell_field(AgentPhase phase);
+        DirectionalCellFieldSample directional_cell_field_sample_for_agent(const AgentData &agent) const;
 
     private:
         // Dedicated spatial index for static obstacles. Kept separate from the moving-agent

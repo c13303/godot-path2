@@ -15,6 +15,9 @@ static func build_directional_field(used_cells: Array[Vector2i]) -> Dictionary:
 	var field: Dictionary = {
 		"cells": PackedVector2Array(),
 		"directions": PackedVector2Array(),
+		"water_cells": water_cells.size(),
+		"pool_count": _count_pools(water_cells),
+		"deep_cells": 0,
 	}
 	if water_cells.is_empty():
 		return field
@@ -27,6 +30,7 @@ static func build_directional_field(used_cells: Array[Vector2i]) -> Dictionary:
 
 	if deep_cells.is_empty():
 		return field
+	field["deep_cells"] = deep_cells.size()
 
 	var next_cell_toward_deep: Dictionary = _build_next_cells(water_cells, deep_cells)
 	var field_cells: PackedVector2Array = PackedVector2Array()
@@ -47,6 +51,28 @@ static func build_directional_field(used_cells: Array[Vector2i]) -> Dictionary:
 	field["cells"] = field_cells
 	field["directions"] = field_directions
 	return field
+
+static func _count_pools(water_cells: Dictionary) -> int:
+	var visited: Dictionary = {}
+	var pool_count: int = 0
+	for raw_cell: Variant in water_cells.keys():
+		var start: Vector2i = raw_cell as Vector2i
+		if visited.has(start):
+			continue
+		pool_count += 1
+		var queue: Array[Vector2i] = [start]
+		visited[start] = true
+		var read_index: int = 0
+		while read_index < queue.size():
+			var current: Vector2i = queue[read_index]
+			read_index += 1
+			for offset: Vector2i in NEIGHBORS_8:
+				var neighbor: Vector2i = current + offset
+				if visited.has(neighbor) or not water_cells.has(neighbor):
+					continue
+				visited[neighbor] = true
+				queue.append(neighbor)
+	return pool_count
 
 static func _is_deep_water_cell(cell: Vector2i, water_cells: Dictionary) -> bool:
 	for offset: Vector2i in NEIGHBORS_8:

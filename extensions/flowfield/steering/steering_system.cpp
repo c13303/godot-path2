@@ -1694,10 +1694,11 @@ void SteeringSystem::update_all(double delta)
     {
         if (is_drowning_agent(a))
         {
-            const double vel_damp = std::exp(-DROWNING_VELOCITY_DAMPING_PER_SEC * delta);
-            a.velocity = a.velocity * vel_damp;
-            if (safe_len(a.velocity) < DROWNING_STOP_SPEED)
-                a.velocity = Vec2(0, 0);
+            // Velocity for drowning agents is owned entirely by the drift pass
+            // below (the directional-cell-field branch). Damping it here as well
+            // zeroed the drift every frame before the per-frame lerp could build
+            // it up — that was the "stuck on the edge tile" freeze. Only clear the
+            // smash residue so the smash pipeline keeps ignoring drowning agents.
             a.smash_force = Vec2(0, 0);
             continue;
         }
@@ -1765,9 +1766,19 @@ void SteeringSystem::update_all(double delta)
         if (is_drowning_agent(a))
         {
             Vec2 offset(0, a.profile.foot_offset_y);
+            // Single owner of drowning velocity. Exponentially relax velocity toward
+            // the pool-center drift target: residual impact/propel velocity bleeds off
+            // fast (a smashed monster can't be flung out of the water) while the bounded
+            // drift ramps up and then holds steady. This replaces the old two-pass scheme
+            // where a separate damping pass zeroed the drift before it could accumulate.
             Vec2 target_velocity = directional_cell_field_velocity_for_agent(a);
-            if (!target_velocity.is_zero())
-                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+            const double drift_relax = std::exp(-DROWNING_VELOCITY_DAMPING_PER_SEC * delta);
+            a.velocity = target_velocity + (a.velocity - target_velocity) * drift_relax;
+            // Preserve the original rest behaviour: only snap to a hard stop when there
+            // is no drift pulling the agent and it has effectively stopped. With an active
+            // drift (>= stop speed) the velocity is never zeroed, so it can build/hold.
+            if (safe_len(target_velocity) < DROWNING_STOP_SPEED && safe_len(a.velocity) < DROWNING_STOP_SPEED)
+                a.velocity = Vec2(0, 0);
             Vec2 old_pos = a.position;
             Vec2 step = a.velocity * delta;
             a.position = apply_walk_with_walls(a, step, nav);
