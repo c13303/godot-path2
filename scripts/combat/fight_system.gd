@@ -500,6 +500,12 @@ func is_held_weapon(item_id: String) -> bool:
 	var weapon: WeaponData = _weapon_by_id(item_id)
 	return weapon != null and weapon.spray_projectiles_enabled
 
+func get_spray_weapon_throw_offset(item_id: String) -> float:
+	var weapon: WeaponData = _weapon_by_id(item_id)
+	if weapon == null or not weapon.spray_projectiles_enabled:
+		return 0.0
+	return weapon.throw_offset
+
 func _register_guns() -> void:
 	_guns_by_id.clear()
 	_gun_type_ids.clear()

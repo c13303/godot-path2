@@ -104,6 +104,7 @@ func _process(delta: float) -> void:
 	_update_gamepad_slot_input()
 	_update_player_input(delta)
 	_update_gun_fire(delta)
+	_update_lance_sprite()
 	camera_controller.process(delta, _paused)
 
 func _emulate_mouse_button(button_index: MouseButton, pressed: bool) -> void:
@@ -287,6 +288,41 @@ func _weapon_origin_offset(player: Node2D) -> Vector2:
 	if "weapon_origin" in player:
 		return player.get("weapon_origin")
 	return Vector2.ZERO
+
+func _update_lance_sprite() -> void:
+	var player: Node2D = _get_player_node()
+	if not player or not fight_system:
+		return
+	var lance: Sprite2D = player.get_node_or_null("lance") as Sprite2D
+	if not lance:
+		return
+
+	var weapon_id: String = _selected_item_id()
+	if not _is_lance_weapon(weapon_id):
+		lance.visible = false
+		return
+
+	var origin: Vector2 = _weapon_origin(player)
+	var direction: Vector2 = get_global_mouse_position() - origin
+	if direction.length_squared() <= 0.000001:
+		lance.visible = false
+		return
+
+	var facing: Vector2 = direction.normalized()
+	var throw_offset: float = float(fight_system.call("get_spray_weapon_throw_offset", weapon_id))
+	var local_origin: Vector2 = _weapon_origin_offset(player)
+	lance.position = local_origin + facing * throw_offset
+	lance.rotation = facing.angle() + PI * 0.5
+	lance.visible = true
+
+func _is_lance_weapon(weapon_id: String) -> bool:
+	if weapon_id == "" or not fight_system:
+		return false
+	if fight_system.is_gun(weapon_id):
+		return false
+	if not fight_system.is_held_weapon(weapon_id):
+		return false
+	return fight_system.has_method("get_spray_weapon_throw_offset")
 
 func _agent_velocity(agent_id: int) -> Vector2:
 	if steering and agent_id >= 0 and steering.has_method("get_agent_velocity"):

@@ -5,6 +5,8 @@
 [ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_gtwxa"]
 [ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://scripts/controls/player_controller.gd" id="3_mdsmv"]
 [ext_resource type="Script" uid="uid://cyemr34mbedp8" path="res://scripts/controls/camera_controller.gd" id="4_jptjp"]
+[ext_resource type="Texture2D" uid="uid://nbn16r37mwdo" path="res://assets/sprites/legval/lance.png" id="6_y7386"]
+[ext_resource type="Script" uid="uid://uxunvnd1ke7a" path="res://scripts/animations/lance.gd" id="7_pqqvp"]
 [ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://scripts/controls/tile_hover_info.gd" id="8_5nq50"]
 [ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://scripts/global/agent_listener.gd" id="9_v7qf8"]
 [ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://scripts/pathfinder/FlowFieldCode.gd" id="10_8g1qu"]
@@ -1374,6 +1376,11 @@ rush_speed_mult = 2.0
 script = ExtResource("32_anim")
 preset = 1
 target_sprite_path = NodePath("../rosa")
+
+[node name="lance" type="Sprite2D" parent="Player" unique_id=1598475842]
+visible = false
+texture = ExtResource("6_y7386")
+script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
