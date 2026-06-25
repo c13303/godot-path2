@@ -407,6 +407,7 @@ func set_paused(value: bool) -> void:
 	_paused = value
 
 func _ready() -> void:
+	_resolve_level_layers()
 	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
@@ -414,6 +415,17 @@ func _ready() -> void:
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
+
+# floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
+# injected into MonTilemap before any _ready runs, so they are resolved by path
+# here instead of through scene-wired exports.
+func _resolve_level_layers() -> void:
+	if floorz == null:
+		floorz = get_node_or_null("../MonTilemap/floor") as TileMapLayer
+	if watersources == null:
+		watersources = get_node_or_null("../MonTilemap/watersources") as WaterSources
+	if wallz == null:
+		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0

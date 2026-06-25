@@ -48,10 +48,22 @@ var _remove_elapsed: float = 0.0
 var _remove_progress: ProgressBar
 
 func _ready() -> void:
+	_resolve_level_layers()
 	_resolve_atlas_source_id()
 	set_process(true)
 	set_process_input(true)
 	GameState.mode_changed.connect(_on_game_mode_changed)
+
+# floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
+# injected into MonTilemap before any _ready runs, so they are resolved by path
+# here instead of through scene-wired exports.
+func _resolve_level_layers() -> void:
+	if floorz == null:
+		floorz = get_node_or_null("../MonTilemap/floor") as TileMapLayer
+	if watersources == null:
+		watersources = get_node_or_null("../MonTilemap/watersources") as TileMapLayer
+	if wallz == null:
+		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if not is_night:
