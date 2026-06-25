@@ -2235,6 +2235,7 @@ func _process_drowning_agents(delta: float) -> void:
 		var nav_id: int = int(agent.get("nav_id"))
 		if nav_id < 0:
 			continue
+		_update_monster_splash(agent, delta)
 		if _turret_eating_agents.has(nav_id):
 			continue
 		var in_water: bool = _agent_over_drowning_water(agent)
@@ -2280,6 +2281,22 @@ func _process_drowning_agents(delta: float) -> void:
 
 	for agent: Node2D in dead_agents:
 		remove_dead_monster(agent, false)
+
+func _update_monster_splash(agent: Node2D, delta: float) -> void:
+	# Any monster over the water emits a pooled splash, throttled per-monster.
+	# The timer lives on the node itself (meta) so it is freed with the monster
+	# and never accumulates stale entries.
+	if watersources == null:
+		return
+	if not watersources.has_water_at_foot_position(agent.global_position):
+		if agent.has_meta(&"water_splash_timer"):
+			agent.remove_meta(&"water_splash_timer")
+		return
+	var time_left: float = float(agent.get_meta(&"water_splash_timer", 0.0)) - delta
+	if time_left <= 0.0:
+		watersources.play_splash_at(agent.global_position)
+		time_left = maxf(watersources.splash_repeat_seconds, 0.0)
+	agent.set_meta(&"water_splash_timer", time_left)
 
 func _agent_can_drown(agent: Node2D) -> bool:
 	var drownable_value: Variant = agent.get("drownable")

@@ -1456,6 +1456,7 @@ navigation_enabled = false
 script = ExtResource("33_watersources")
 refill_amount = 1
 refill_interval_seconds = 0.01
+waterpool_drift_speed = 11.0
 metadata/water = false
 
 [node name="Desire" type="Sprite2D" parent="Map/MonTilemap" unique_id=1391463247]

@@ -1,6 +1,9 @@
 extends TileMapLayer
 class_name WaterSources
 
+const SPLASH_SCENE: PackedScene = preload("res://scenes/particles/splash.tscn")
+const FLOOR_SPLASH_Z_INDEX: int = -99
+
 @export var refill_amount: int = 10
 @export var refill_interval_seconds: float = 0.1
 @export_range(0.01, 1.0, 0.01) var player_slowdown: float = 0.5
@@ -8,12 +11,22 @@ class_name WaterSources
 @export var foot_sample_offset: Vector2 = Vector2.ZERO
 @export_group("Waterpools")
 @export var waterpool_drift_enabled: bool = true
-@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_speed: float = 36.0
+@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_speed: float = 9.0
 @export var waterpool_drift_sample_offset: Vector2 = Vector2.ZERO
 @export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_sample_radius: float = 24.0
 @export var waterpool_directional_field_id: int = 1
 @export var waterpool_bound_phase: int = 7
+@export_group("Visual FX")
+@export var pre_instantiated_splashes: int = 32
+@export_range(0.0, 2.0, 0.01, "or_greater") var splash_repeat_seconds: float = 0.1
 @export_group("")
+
+var _splash_pool: Array[Node2D] = []
+var _splash_cursor: int = 0
+
+
+func _ready() -> void:
+	_preload_splash_pool()
 
 
 func has_water_at_foot_position(world_position: Vector2) -> bool:
@@ -143,3 +156,63 @@ func _clear_waterpool_directional_field(steering: Node) -> void:
 		steering.call("clear_directional_cell_field", waterpool_directional_field_id)
 	if steering.has_method("clear_phase_directional_cell_field"):
 		steering.call("clear_phase_directional_cell_field", waterpool_bound_phase)
+
+# --- Splash visual FX pool ------------------------------------------------
+# Pre-instantiated, reused splash scenes (no per-event instantiate/free spam).
+# Plays for any agent over the water; mirrors the player's splashController.
+
+func _preload_splash_pool() -> void:
+	var count: int = maxi(pre_instantiated_splashes, 0)
+	for index: int in range(count):
+		var splash: Node2D = SPLASH_SCENE.instantiate() as Node2D
+		if splash == null:
+			continue
+		splash.name = "MonsterSplash%02d" % index
+		splash.visible = false
+		splash.z_as_relative = false
+		splash.z_index = FLOOR_SPLASH_Z_INDEX
+		add_child(splash)
+		_splash_pool.append(splash)
+
+func play_splash_at(world_position: Vector2) -> void:
+	if _splash_pool.is_empty():
+		return
+	var splash: Node2D = _next_available_splash()
+	if splash == null:
+		return
+	splash.global_position = world_position
+	splash.visible = true
+	for particle: CPUParticles2D in _particles_for(splash):
+		particle.emitting = false
+		particle.restart()
+		particle.emitting = true
+
+func _next_available_splash() -> Node2D:
+	var pool_count: int = _splash_pool.size()
+	for offset: int in range(pool_count):
+		var index: int = (_splash_cursor + offset) % pool_count
+		var splash: Node2D = _splash_pool[index]
+		if not _is_splash_busy(splash):
+			_splash_cursor = (index + 1) % pool_count
+			return splash
+	var fallback_index: int = _splash_cursor
+	_splash_cursor = (_splash_cursor + 1) % pool_count
+	return _splash_pool[fallback_index]
+
+func _is_splash_busy(splash: Node2D) -> bool:
+	for particle: CPUParticles2D in _particles_for(splash):
+		if particle.emitting:
+			return true
+	splash.visible = false
+	return false
+
+func _particles_for(root: Node) -> Array[CPUParticles2D]:
+	var particles: Array[CPUParticles2D] = []
+	_collect_particles(root, particles)
+	return particles
+
+func _collect_particles(root: Node, particles: Array[CPUParticles2D]) -> void:
+	for child: Node in root.get_children():
+		if child is CPUParticles2D:
+			particles.append(child as CPUParticles2D)
+		_collect_particles(child, particles)
