@@ -2155,6 +2155,7 @@ func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
 		"resume_state": resume_state,
 	}
 	_suspend_agent_for_turret_eating(nav_id)
+	_leave_turret_debris(turret_cell)
 	_remove_turret_cell(turret_cell)
 	Sfx.play_sound(&"crunsh")
 	if agent.has_method("start_eating"):
@@ -2273,6 +2274,24 @@ func _resume_agent_path(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
 	data["node"] = agent
 	agent_manager.call("assign_agent_path", nav_id, path_world)
 	return true
+
+# A devoured turret leaves the same debris tile a consumed rose does, so the cell
+# reads as "something was eaten here". plantz/blocking_buildings share one TileSet
+# and transform (see mainRun.tscn), so the turret cell maps directly and its source
+# id is the shared atlas source we need for the debris tile. Capture it before the
+# turret is erased.
+func _leave_turret_debris(turret_cell: Vector2i) -> void:
+	if plantz == null or blocking_buildings == null:
+		return
+	# Don't stomp an existing rose/debris occupant on the plant layer.
+	if plantz.get_cell_source_id(turret_cell) >= 0:
+		return
+	var source_id: int = blocking_buildings.get_cell_source_id(turret_cell)
+	if source_id < 0:
+		return
+	var alternative_tile: int = blocking_buildings.get_cell_alternative_tile(turret_cell)
+	plantz.set_cell(turret_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
+	_flush_plant_layer_visuals()
 
 func _remove_turret_cell(turret_cell: Vector2i) -> void:
 	var building_objects: BuildingObjectManager = _get_building_object_manager()

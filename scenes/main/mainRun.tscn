@@ -15,6 +15,7 @@
 [ext_resource type="Script" uid="uid://cv7jp6vpx4hh8" path="res://scripts/map/building_manager.gd" id="18_vt3yt"]
 [ext_resource type="Script" uid="uid://d3edhdcktbvkw" path="res://scripts/combat/fight_system.gd" id="19_gvmlv"]
 [ext_resource type="Script" uid="uid://b1e22fwbyfhns" path="res://scripts/combat/turret_system.gd" id="19_turret"]
+[ext_resource type="Script" uid="uid://y5eghj2cqur0" path="res://scripts/misc/tutorial.gd" id="20_7xko8"]
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
@@ -1508,6 +1509,7 @@ offset_bottom = 40.0
 mouse_filter = 2
 
 [node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
+visible = false
 layout_mode = 0
 offset_left = 15.0
 offset_top = 15.0
@@ -1558,6 +1560,14 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 horizontal_alignment = 1
+
+[node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
+layout_mode = 0
+offset_left = -176.0
+offset_top = 141.0
+offset_right = 353.0
+offset_bottom = 269.0
+script = ExtResource("20_7xko8")
 
 [node name="top right" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
