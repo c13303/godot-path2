@@ -33,6 +33,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_hovered_turret()
+	if _fight_system and _fight_system.has_method("is_paused") and bool(_fight_system.call("is_paused")):
+		return
 	for raw_cell: Variant in _turrets.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		var state: Dictionary = _turrets[cell] as Dictionary

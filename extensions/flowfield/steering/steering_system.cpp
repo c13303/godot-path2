@@ -1785,6 +1785,16 @@ void SteeringSystem::update_all(double delta)
             if (desired_dir.is_zero())
                 desired_dir = nav_dir;
 
+            if (a.is_propelled && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
+            {
+                a.is_propelled = false;
+                a.propelled_timer = 0.0;
+                a.smash_force = Vec2(0, 0);
+                a.smash_friction = -1.0;
+                a.velocity = Vec2(0, 0);
+                smash_control_factor = 1.0;
+            }
+
             a.debug_nav_dir = nav_dir;
             a.debug_wall_repel = wall_repel;
             a.debug_separation = agent_separation;
@@ -2148,6 +2158,17 @@ void SteeringSystem::update_all(double delta)
         desired_dir = safe_normalize(target_velocity);
         if (desired_dir.is_zero() && dist_to_target > 0.0)
             desired_dir = safe_normalize(to_goal);
+
+        if (a.is_propelled && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
+        {
+            a.is_propelled = false;
+            a.propelled_timer = 0.0;
+            a.smash_force = Vec2(0, 0);
+            a.smash_friction = -1.0;
+            a.velocity = Vec2(0, 0);
+            smash_control_factor = 1.0;
+        }
+
         a.debug_desired_dir = desired_dir;
         a.debug_target_velocity = target_velocity;
 

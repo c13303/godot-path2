@@ -57,6 +57,7 @@ var _spray_audio_player: AudioStreamPlayer
 var _turret_sprays: Dictionary = {}
 var _static_colliders_dirty: bool = true
 var _static_collider_prepare_generation: int = 0
+var _paused: bool = false
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -100,9 +101,23 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_static_colliders_dirty = true
 
 func _process(_delta: float) -> void:
+	if _paused:
+		return
 	_drain_projectile_impacts()
 	_drain_damage_events()
 	_water_roses_under_spray_projectiles()
+
+func set_paused(is_paused: bool) -> void:
+	_paused = is_paused
+	if _projectiles and _projectiles.has_method("set_paused"):
+		_projectiles.call("set_paused", is_paused)
+	if is_paused:
+		for raw_cell: Variant in _turret_sprays.keys():
+			var cell: Vector2i = raw_cell as Vector2i
+			stop_turret_spray(cell)
+
+func is_paused() -> bool:
+	return _paused
 
 func _drain_damage_events() -> void:
 	if not _steering or not _steering.has_method("take_damage_events") or not _agent_manager:

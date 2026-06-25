@@ -35,6 +35,7 @@ var status: String = ""
 var health: int = 100
 var _flash_time_left: float = 0.0
 var _dead: bool = false
+var _paused: bool = false
 
 @export var use_native_steering: bool = true
 @export var max_speed: float = 100.0
@@ -71,6 +72,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
+	if _paused:
+		return
 	_process_damage_flash(delta)
 	_process_eating_status(delta)
 	_update_monster_frame()
@@ -230,6 +233,9 @@ func set_control_impaired_state(enabled: bool) -> void:
 
 	_controls_impaired = enabled
 	_update_sprite_tint()
+
+func set_paused(enabled: bool) -> void:
+	_paused = enabled
 
 func set_velocity_len(value: float) -> void:
 	_velocity_len = value

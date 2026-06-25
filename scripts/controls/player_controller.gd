@@ -7,6 +7,7 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
+@onready var projectile_system: Node = $"../../CPP/ProjectileSystemNative"
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
@@ -415,6 +416,14 @@ func _toggle_pause() -> void:
 	_paused = not _paused
 	if steering and steering.has_method("set_paused"):
 		steering.call("set_paused", _paused)
+	if projectile_system and projectile_system.has_method("set_paused"):
+		projectile_system.call("set_paused", _paused)
+	if fight_system and fight_system.has_method("set_paused"):
+		fight_system.call("set_paused", _paused)
+	var building_manager: Node = get_node_or_null("../../Map/BuildingManager")
+	if building_manager and building_manager.has_method("set_paused"):
+		building_manager.call("set_paused", _paused)
+	_toggle_group_paused(&"monsters", _paused)
 
 	if _paused:
 		_mouse_was_locked_before_pause = camera_controller.is_mouse_locked()
@@ -433,3 +442,8 @@ func _toggle_units_visible(isvisible: bool) -> void:
 		if node is Node2D:
 			var unit: Node2D = node
 			unit.visible = isvisible
+
+func _toggle_group_paused(group_name: StringName, paused: bool) -> void:
+	for node: Node in get_tree().get_nodes_in_group(group_name):
+		if node.has_method("set_paused"):
+			node.call("set_paused", paused)

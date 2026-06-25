@@ -72,6 +72,9 @@ extends Node
 		show_enters_exits = value
 		_apply_debug_settings()
 
+@export var click_log_agents: bool = true
+@export_range(1.0, 128.0, 1.0, "or_greater") var click_agent_radius: float = 32.0
+
 @export_group("Monsters")
 ## Seconds a monster spends eating a plant before leaving the garden.
 @export_range(0.0, 60.0, 0.1, "or_greater") var monster_eating_time: float = 5.0:
@@ -190,6 +193,18 @@ func _process(_delta: float) -> void:
 	if tile_hover_info:
 		tile_hover_info.process()
 
+func _input(event: InputEvent) -> void:
+	if not debug_enabled or not click_log_agents:
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if get_viewport().gui_get_hovered_control() != null:
+		return
+	_log_clicked_agent_debug_snapshot()
+
 
 ## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds + 100 gems.
 func _unhandled_input(event: InputEvent) -> void:
@@ -211,6 +226,54 @@ func _grant_dev_currency() -> void:
 		return
 	_call_if_available(progression, "update_seeds", 100)
 	_call_if_available(progression, "update_gems", 100)
+
+func _log_clicked_agent_debug_snapshot() -> void:
+	var steering: Node = get_node_or_null("SteeringSystemNative")
+	if steering == null or not steering.has_method("get_agent_debug_snapshot"):
+		return
+	var clicked_agent: Node2D = _nearest_clicked_agent()
+	if clicked_agent == null:
+		return
+	var nav_id: int = int(clicked_agent.get("nav_id"))
+	if nav_id < 0:
+		return
+	var snapshot: Dictionary = steering.call("get_agent_debug_snapshot", nav_id) as Dictionary
+	if snapshot.is_empty():
+		print("Agent debug click: no native snapshot for nav_id=", nav_id, " node=", clicked_agent.name)
+		return
+	snapshot["node"] = clicked_agent.name
+	snapshot["node_status"] = str(clicked_agent.get("status"))
+	snapshot["node_position"] = clicked_agent.global_position
+	snapshot["click_world"] = _mouse_world_position()
+	print("Agent debug click:\n", JSON.stringify(snapshot, "\t"))
+
+func _nearest_clicked_agent() -> Node2D:
+	var scene: Node = get_tree().get_current_scene()
+	if scene == null:
+		return null
+	var click_world: Vector2 = _mouse_world_position()
+	var best_agent: Node2D = null
+	var best_distance_squared: float = click_agent_radius * click_agent_radius
+	for raw_agent: Node in get_tree().get_nodes_in_group(&"monsters"):
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var distance_squared: float = agent.global_position.distance_squared_to(click_world)
+		if distance_squared <= best_distance_squared:
+			best_distance_squared = distance_squared
+			best_agent = agent
+	return best_agent
+
+func _mouse_world_position() -> Vector2:
+	var viewport: Viewport = get_viewport()
+	var camera: Camera2D = viewport.get_camera_2d()
+	if camera:
+		return camera.get_global_mouse_position()
+	var scene: Node = get_tree().get_current_scene()
+	if scene is CanvasItem:
+		var canvas_scene: CanvasItem = scene as CanvasItem
+		return canvas_scene.get_global_mouse_position()
+	return viewport.get_mouse_position()
 
 
 func _apply_debug_settings() -> void:

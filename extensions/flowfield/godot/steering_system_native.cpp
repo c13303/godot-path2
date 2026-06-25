@@ -67,6 +67,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("clear_static_obstacles"), &SteeringSystemNative::clear_static_obstacles);
     ClassDB::bind_method(D_METHOD("get_static_obstacle_count"), &SteeringSystemNative::get_static_obstacle_count);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
+    ClassDB::bind_method(D_METHOD("get_agent_debug_snapshot", "agent_id"), &SteeringSystemNative::get_agent_debug_snapshot);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
     ClassDB::bind_method(D_METHOD("set_debug_disable_all_debug", "enabled"), &SteeringSystemNative::set_debug_disable_all_debug);
     ClassDB::bind_method(D_METHOD("get_debug_disable_all_debug"), &SteeringSystemNative::get_debug_disable_all_debug);
@@ -455,7 +456,7 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
 
     if (a->smash_pending)
         return "smash pending";
-    if (a->is_propelled && a->smash_control_suppression_timer > 0.0 && a->smash_control_suppression > 0.001)
+    if (a->is_propelled)
         return "propelled";
     if (a->phase != ffcore::AgentPhase::None)
         return String();
@@ -536,6 +537,115 @@ Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const
             out.push_back(_agent_summary(a));
     }
     return out;
+}
+
+Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
+{
+    Dictionary d;
+    const ffcore::AgentData *a = system.get_agent(agent_id);
+    if (!a)
+        return d;
+
+    const auto &cfg = ffcore::globalconfig();
+    const ffcore::Vec2 foot = a->position + ffcore::Vec2(0, a->profile.foot_offset_y);
+    const Vector2 velocity(a->velocity.x, a->velocity.y);
+    const Vector2 nav_dir(a->debug_nav_dir.x, a->debug_nav_dir.y);
+    const Vector2 desired_dir(a->debug_desired_dir.x, a->debug_desired_dir.y);
+    const Vector2 target_velocity(a->debug_target_velocity.x, a->debug_target_velocity.y);
+    const Vector2 wall_repel(a->debug_wall_repel.x, a->debug_wall_repel.y);
+    const Vector2 separation(a->debug_separation.x, a->debug_separation.y);
+    const double velocity_along_desired = velocity.dot(desired_dir);
+    const double speed = velocity.length();
+    const double target_speed = target_velocity.length();
+    const double wall_repel_len = wall_repel.length();
+    const double separation_len = separation.length();
+
+    d["id"] = a->id;
+    d["phase"] = _agent_phase_label(a);
+    d["physics"] = _agent_physics_label(a);
+    if (a->lost_timer > 0.0)
+        d["diagnostic"] = "lost";
+    else if (a->debug_bottleneck_wait)
+        d["diagnostic"] = "bottleneck wait";
+    else if (a->stuck_in_wall_accum > 0.0)
+        d["diagnostic"] = "stuck in wall accumulating";
+    else if (a->target_radius_timer > 0.0)
+        d["diagnostic"] = "target wait";
+    else if (a->is_propelled)
+        d["diagnostic"] = "propelled";
+    else if (speed <= 1.0 && target_speed > 1.0)
+        d["diagnostic"] = "slow below target";
+    else
+        d["diagnostic"] = "normal";
+    d["active"] = a->active;
+    d["moving"] = a->moving;
+    d["control_mode"] = static_cast<int>(a->control_mode);
+    d["group"] = a->group;
+    d["has_flow"] = a->flow != nullptr;
+    d["flow_ready"] = a->flow ? a->flow->is_ready() : false;
+    d["path_active"] = a->path_active;
+    d["path_arrived"] = a->path_arrived;
+    d["path_index"] = a->path_index;
+    d["path_count"] = static_cast<int>(a->path_waypoints.size());
+    d["position"] = Vector2(a->position.x, a->position.y);
+    d["foot_position"] = Vector2(foot.x, foot.y);
+    d["velocity"] = velocity;
+    d["speed"] = speed;
+    d["max_speed"] = a->max_speed;
+    d["speed_ratio"] = a->max_speed > 0.001 ? speed / a->max_speed : 0.0;
+    d["nav_dir"] = nav_dir;
+    d["desired_dir"] = desired_dir;
+    d["target_velocity"] = target_velocity;
+    d["target_speed"] = target_speed;
+    d["target_speed_ratio"] = a->max_speed > 0.001 ? target_speed / a->max_speed : 0.0;
+    d["velocity_along_desired"] = velocity_along_desired;
+    d["velocity_along_desired_ratio"] = a->max_speed > 0.001 ? velocity_along_desired / a->max_speed : 0.0;
+    d["wall_repel"] = wall_repel;
+    d["wall_repel_len"] = wall_repel_len;
+    d["separation"] = separation;
+    d["separation_len"] = separation_len;
+    d["wall_vs_sep_ratio"] = separation_len > 0.001 ? wall_repel_len / separation_len : wall_repel_len;
+    d["is_propelled"] = a->is_propelled;
+    d["propelled_timer"] = a->propelled_timer;
+    d["smash_pending"] = a->smash_pending;
+    d["smash_delay"] = a->smash_delay;
+    d["smash_control_suppression"] = a->smash_control_suppression;
+    d["smash_control_suppression_timer"] = a->smash_control_suppression_timer;
+    d["lost_timer"] = a->lost_timer;
+    d["stuck_in_wall_accum"] = a->stuck_in_wall_accum;
+    d["target_radius_timer"] = a->target_radius_timer;
+    d["micro_osc"] = a->micro_osc;
+    d["bottleneck_wait"] = a->debug_bottleneck_wait;
+    d["in_bottleneck_state"] = a->debug_in_bottleneck_state;
+    d["bottleneck_core"] = a->debug_bottleneck_core;
+    d["bottleneck_zone"] = a->debug_bottleneck_zone;
+    d["active_bottleneck"] = a->active_bottleneck;
+    d["completed_bottleneck"] = a->completed_bottleneck;
+    d["config_flow_weight"] = cfg.flow_weight;
+    d["config_lerp_general"] = cfg.lerp_general;
+    d["config_wall_avoid_radius"] = cfg.wall_avoid_radius;
+    d["config_wall_repel_strength"] = cfg.wall_repel_strength;
+    d["config_bottleneck_wait_speed_ratio"] = cfg.bottleneck_wait_speed_ratio;
+    d["config_wall_stuck_detect_seconds"] = cfg.wall_stuck_detect_seconds;
+    d["config_wall_stuck_velocity_ratio"] = cfg.wall_stuck_velocity_ratio;
+    d["config_wall_stuck_wall_vs_sep_ratio"] = cfg.wall_stuck_wall_vs_sep_ratio;
+
+    if (a->flow)
+    {
+        const ffcore::Vec2i rel_cell = a->flow->world_to_cell(foot);
+        const ffcore::Vec2i origin = a->flow->get_cell_origin();
+        const ffcore::Vec2 goal = a->flow->goal_center_world();
+        d["flow_cell"] = Vector2i(rel_cell.x, rel_cell.y);
+        d["map_cell"] = Vector2i(rel_cell.x + origin.x, rel_cell.y + origin.y);
+        d["flow_goal"] = Vector2(goal.x, goal.y);
+        d["dist_to_flow_goal"] = Vector2(goal.x - foot.x, goal.y - foot.y).length();
+        d["route_cost"] = a->flow->route_cost_at_cell(rel_cell);
+        d["target_radius"] = a->flow->get_ff_target_radius();
+        d["bottleneck_core_at_cell"] = a->flow->bottleneck_core_at_cell(rel_cell);
+        d["bottleneck_zone_at_cell"] = a->flow->bottleneck_zone_at_cell(rel_cell);
+    }
+
+    return d;
 }
 
 void SteeringSystemNative::_process(double delta)

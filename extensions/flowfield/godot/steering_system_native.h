@@ -92,6 +92,7 @@ namespace godot
         int get_static_obstacle_count() const;
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
+        Dictionary get_agent_debug_snapshot(int agent_id) const;
         void set_paused(bool p);
         void set_debug_disable_all_debug(bool enabled);
         bool get_debug_disable_all_debug() const;

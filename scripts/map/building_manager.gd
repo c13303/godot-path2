@@ -144,6 +144,7 @@ var _turret_eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
+var _paused: bool = false
 var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
@@ -398,6 +399,9 @@ func set_number_of_roses_before_satiety(value: int) -> void:
 
 func set_same_garden_only(value: bool) -> void:
 	_same_garden_only = value
+
+func set_paused(value: bool) -> void:
+	_paused = value
 
 func _ready() -> void:
 	startup_loading_progress.emit(0.48, "Preparing zones")
@@ -924,6 +928,9 @@ func _sync_plant_zone_debug_visibility() -> void:
 
 func _process(delta: float) -> void:
 	if not _flow_ready or not _startup_ready:
+		return
+	if _paused:
+		_sync_plant_zone_debug_visibility()
 		return
 	if _night_preparing:
 		_sync_plant_zone_debug_visibility()
