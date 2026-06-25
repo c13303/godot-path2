@@ -457,6 +457,8 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
         return "smash pending";
     if (a->is_propelled && a->smash_control_suppression_timer > 0.0 && a->smash_control_suppression > 0.001)
         return "propelled";
+    if (a->phase != ffcore::AgentPhase::None)
+        return String();
     if (a->control_mode == ffcore::AgentControlMode::Manual)
         return velocity_len > 1.0 ? "manual moving" : "manual idle";
     if (!a->active)

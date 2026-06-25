@@ -1338,8 +1338,8 @@ func _drain_dirty_routes() -> void:
 			_rebuild_spawner_escape_ff(raw_cell)
 
 func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	# One-shot: compute static escape cells. Plant entry routes use per-agent A*
-	# and are created lazily when a spawner needs a target garden.
+	# One-shot: compute static escape cells. Plant-entry flow routes are created
+	# lazily when a spawner needs a target garden.
 	if not _flow_ready or not _plant_zone_built:
 		return
 	if not agent_manager or not flow:
@@ -1390,8 +1390,6 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 	])
 
 func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
-	# Plant-entry routing no longer owns flow fields. Route freshness is validated
-	# through garden version/epoch and each agent gets a direct A* path to entry.
 	if not _spawner_garden_routes.has(spawner_cell):
 		return
 	var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
@@ -1401,7 +1399,12 @@ func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 		if entry_cell == INVALID_CELL:
 			continue
-		route["entry_world"] = _cell_center(entry_cell)
+		var plant_group: int = int(route.get("plant_group", -1))
+		if plant_group <= IDLE_GROUP:
+			continue
+		var entry_world: Vector2 = _cell_center(entry_cell)
+		route["entry_world"] = entry_world
+		_request_group_flow_rebuild(plant_group, entry_world)
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
 
@@ -1771,10 +1774,10 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 			_warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
 				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
 
-		# Assign the garden-entry route: runs A* on the walkable map and pushes the
-		# resulting path into the agent/flow manager. Usually the heaviest leg.
+			# Assign the garden-entry route: attaches the monster to the entry flow
+			# group. Usually the heaviest leg when the route/flow is first created.
 		var t_assign: int = Time.get_ticks_usec()
-		var assigned: bool = _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell)
+		var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 		var assign_us: int = Time.get_ticks_usec() - t_assign
 		if _over_garden_threshold_us(assign_us):
 			_warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
@@ -1785,7 +1788,7 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 				agent_manager.call("unregister_agent", nav_id)
 			agent.remove_from_group("monsters")
 			agent.queue_free()
-			_log_spawn_failure("spawner %s garden %d entry path not ready" % [spawner_cell, garden_id])
+			_log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
 			return false
 		_spawn_pass_stats["assigned_count"] = int(_spawn_pass_stats.get("assigned_count", 0)) + 1
 		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
@@ -1794,8 +1797,8 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 
 	return true
 
-# Phase 1 -> 2: agent reached its assigned garden entry via A*. Compute A* to a
-# plant target inside that garden and attach that path.
+# Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
+# A* to a plant target inside that garden and attach that path.
 func _process_astar_in_arrivals() -> void:
 	var finished: Array[int] = []
 	var entry_ids: Array = _entry_path_agents.keys()
@@ -1817,9 +1820,11 @@ func _process_astar_in_arrivals() -> void:
 			continue
 		if _astar_in_agents.has(nav_id):
 			continue
-		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+		var entry_cell: Vector2i = data.get("entry_cell", INVALID_CELL) as Vector2i
+		if entry_cell == INVALID_CELL:
+			finished.append(nav_id)
 			continue
-		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
+		if not _agent_reached_cell(agent, entry_cell):
 			continue
 		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
 		var garden_id: int = int(data.get("garden_id", 0))
@@ -2212,7 +2217,7 @@ func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state:
 	var kind: String = str(resume_state.get("kind", "retarget"))
 	var data: Dictionary = resume_state.get("data", {}) as Dictionary
 	if kind == "entry":
-		if _resume_agent_path(nav_id, agent, data):
+		if _resume_agent_entry_flow(nav_id, agent, data):
 			_entry_path_agents[nav_id] = data
 			_erase_astar_in_agent(nav_id)
 			_escaping_agents.erase(nav_id)
@@ -2236,6 +2241,17 @@ func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state:
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 	if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
 		agent.call("start_waiting_new_status")
+
+func _resume_agent_entry_flow(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
+	if agent_manager == null or not agent_manager.has_method("assign_agent"):
+		return false
+	var plant_group: int = int(data.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		return false
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	agent_manager.call("assign_agent", agent, plant_group)
+	return true
 
 func _resume_agent_path(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
 	if agent_manager == null or not agent_manager.has_method("assign_agent_path"):
@@ -3438,38 +3454,37 @@ func _finish_local_retarget_profile(nav_id: int, from_cell: Vector2i, total_star
 		float(p.get("assignment_us", 0)) / 1000.0,
 	])
 
-func _assign_agent_to_garden_entry_path(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
+func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
 	if not is_instance_valid(agent):
 		return false
 	if entry_cell == INVALID_CELL or not _is_sane_cell(entry_cell):
 		return false
-	if agent_manager == null or not agent_manager.has_method("assign_agent_path"):
+	if agent_manager == null or not agent_manager.has_method("assign_agent"):
 		return false
 	var nav_id: int = int(agent.get("nav_id"))
-	var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var path_cells: PackedVector2Array = _find_path_on_walkable_map(from_cell, entry_cell)
-	if path_cells.is_empty():
+	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+	if not bool(route.get("ready", false)):
+		return false
+	var plant_group: int = int(route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
 		return false
 	if agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
 	if agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
-	agent_manager.call("assign_agent_path", nav_id, path_world)
+	agent_manager.call("assign_agent", agent, plant_group)
 	_entry_path_agents[nav_id] = {
 		"node": agent,
 		"spawner_cell": spawner_cell,
 		"garden_id": garden_id,
 		"entry_cell": entry_cell,
-		"path_world": path_world
+		"plant_group": plant_group
 	}
 	_erase_astar_in_agent(nav_id)
 	_escaping_agents.erase(nav_id)
 	agent.set_meta("spawner_cell", spawner_cell)
 	agent.set_meta("garden_id", garden_id)
 	agent.set_meta("garden_entry_cell", entry_cell)
-	# Heading toward the garden, not yet eaten: "flow in". The inside-garden A* leg
-	# transitions to "astar in" in _start_astar_in once the entry is reached.
 	if agent.has_method("start_flow_in"):
 		agent.call("start_flow_in")
 	return true
@@ -3479,7 +3494,7 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 		_spawner_garden_routes[spawner_cell] = {}
 	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
 	var existing_route: Dictionary = routes.get(garden_id, {}) as Dictionary
-	if bool(existing_route.get("ready", false)) and _garden_route_is_current(existing_route, garden_id):
+	if bool(existing_route.get("ready", false)) and int(existing_route.get("plant_group", -1)) > IDLE_GROUP and _garden_route_is_current(existing_route, garden_id):
 		_route_cache_hits += 1
 		return existing_route
 	# Cache miss: recompute the route (nearest garden entry + sanity checks) below.
@@ -3501,9 +3516,18 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 			entry_world, entry_cell, spawner_cell, garden_id
 		])
 		return {"ready": false}
+	if agent_manager == null or not agent_manager.has_method("create_group"):
+		return {"ready": false}
+	var plant_group: int = int(existing_route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		plant_group = int(agent_manager.call("create_group"))
+	if plant_group <= IDLE_GROUP:
+		return {"ready": false}
+	_request_group_flow_rebuild(plant_group, entry_world)
 	var route: Dictionary = {
 		"entry_cell": entry_cell,
 		"entry_world": entry_world,
+		"plant_group": plant_group,
 		"ready": true,
 		"garden_version": int(garden.get("version", 0)),
 		"garden_epoch": int(garden.get("epoch", -1))
@@ -3512,7 +3536,7 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 	_spawner_garden_routes[spawner_cell] = routes
 	return route
 
-# Returns true once the agent has a real new nav state (a garden entry path, or a
+# Returns true once the agent has a real new nav state (a garden entry flow, or a
 # successfully assigned escape). Returns false only when neither a garden route nor
 # an escape could be assigned, so the budgeted queue can requeue it. Every escape
 # fallback below propagates _assign_agent_to_escape's own success/failure.
@@ -3623,7 +3647,7 @@ func _reset_find_path_in_zone_accum() -> void:
 #   .local_retarget - _try_local_retarget_agent (radius scan + per-candidate paths)
 #   .target_resolve - _select_spawner_garden_for_agent + route lookup/entry resolution
 #   .escape         - _assign_agent_to_escape fallback (whichever branch reaches it)
-#   .final_assign   - _assign_agent_to_garden_entry_path + set_agent_never_rest
+#   .final_assign   - _assign_agent_to_garden_entry_flow + set_agent_never_rest
 func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bool:
 	_reset_retarget_profile()
 	var t_val: int = Time.get_ticks_usec()
@@ -3702,15 +3726,15 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", resolve_us,
 		"nav_id=%d garden=%d entry=%s" % [nav_id_dbg, garden_id, str(entry_cell)])
 
-	# Final assignment section: build + push the garden-entry path (the A* leg).
+	# Final assignment section: attach the garden-entry flow leg.
 	var t_fin: int = Time.get_ticks_usec()
-	var assigned: bool = _assign_agent_to_garden_entry_path(agent, spawner_cell, garden_id, entry_cell)
+	var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 	var fin_us: int = Time.get_ticks_usec() - t_fin
 	_last_retarget_profile["assign_us"] = fin_us
 	_warn_garden_task_lag_us("_retarget_agent_or_escape.final_assign", fin_us,
 		"nav_id=%d garden=%d entry=%s assigned=%s" % [nav_id_dbg, garden_id, str(entry_cell), str(assigned)])
 	if not assigned:
-		return _escape_with_detector(agent, nav_id_dbg, "entry_path_failed")
+		return _escape_with_detector(agent, nav_id_dbg, "entry_flow_failed")
 	_last_retarget_profile["reason"] = "garden_entry"
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager.has_method("set_agent_never_rest"):
@@ -4167,7 +4191,8 @@ func get_dirty_garden_cells() -> Array:
 func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
 	if _entry_path_agents.has(nav_id):
 		var entry_data: Dictionary = _entry_path_agents[nav_id] as Dictionary
-		return entry_data.get("path_world", PackedVector2Array()) as PackedVector2Array
+		var entry_cell: Vector2i = entry_data.get("entry_cell", INVALID_CELL) as Vector2i
+		return _debug_path_to_cell(entry_cell)
 	if _astar_in_agents.has(nav_id):
 		var astar_in_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
 		return astar_in_data.get("path_world", PackedVector2Array()) as PackedVector2Array

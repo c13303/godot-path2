@@ -20,7 +20,7 @@ namespace ffcore
     enum class AgentPhase
     {
         None = 0,
-        FlowIn = 1,   // spawned, on the flow field, heading toward a garden
+        FlowIn = 1,   // following a flow field toward a garden
         AstarIn = 2,  // entered a garden, A* toward the plant
         Eating = 3,   // at the plant, eating (eating_seconds counts down)
         AstarOut = 4, // finished eating, A* out of the garden

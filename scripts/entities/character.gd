@@ -179,7 +179,7 @@ func start_waiting_new_status() -> void:
 func stop_waiting_new_status() -> void:
 	if status == "waiting_new_status":
 		status = ""
-	_set_phase(PHASE_NONE)
+		_set_phase(PHASE_NONE)
 
 func _process_eating_status(delta: float) -> void:
 	if status != "eating" or _eating_timer <= 0.0:
