@@ -4,18 +4,26 @@ class_name TurretSystem
 const TURRET_ID: String = "turret1"
 const TURRET_SHOW_RADIUS: bool = true
 const RADIUS_COLOR: Color = Color(0.55, 0.55, 0.55, 0.8)
+const FORBIDDEN_RADIUS_COLOR: Color = Color(1.0, 0.1, 0.1, 0.9)
 const RADIUS_LINE_WIDTH: float = 1.0
 const RADIUS_SEGMENTS: int = 96
 
 var _fight_system: FightSystem
 var _building_objects: BuildingObjectManager
+var _build_system: Node
 var _turrets: Dictionary = {}
 var _has_hovered_turret: bool = false
 var _hovered_turret_cell: Vector2i = Vector2i.ZERO
+var _has_preview_turret: bool = false
+var _preview_turret_cell: Vector2i = Vector2i.ZERO
+var _has_forbidden_preview_range: bool = false
+var _forbidden_preview_range_cell: Vector2i = Vector2i.ZERO
+var _forbidden_preview_range: float = 0.0
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
 	_building_objects = get_node_or_null("../../Map/BuildingObjectManager") as BuildingObjectManager
+	_build_system = get_node_or_null("../../Map/BuildSystem")
 	if _fight_system == null or _building_objects == null:
 		push_error("TurretSystem: FightSystem or BuildingObjectManager is missing.")
 		set_process(false)
@@ -33,6 +41,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_hovered_turret()
+	_update_preview_turret()
 	if _fight_system and _fight_system.has_method("is_paused") and bool(_fight_system.call("is_paused")):
 		return
 	for raw_cell: Variant in _turrets.keys():
@@ -78,12 +87,22 @@ func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, a
 		state["spray_time_left"] = time_left
 
 func _draw() -> void:
-	if not TURRET_SHOW_RADIUS or not _has_hovered_turret:
+	if not TURRET_SHOW_RADIUS:
 		return
-	var state: Dictionary = _turrets.get(_hovered_turret_cell, {}) as Dictionary
-	var activation_range: float = float(state.get("range", 0.0))
-	if activation_range > 0.0:
-		draw_arc(to_local(_turret_world_position(_hovered_turret_cell)), activation_range, 0.0, TAU, RADIUS_SEGMENTS, RADIUS_COLOR, RADIUS_LINE_WIDTH, true)
+	if _has_forbidden_preview_range:
+		_draw_turret_range(_forbidden_preview_range_cell, _forbidden_preview_range, FORBIDDEN_RADIUS_COLOR)
+		return
+	if _has_hovered_turret:
+		var state: Dictionary = _turrets.get(_hovered_turret_cell, {}) as Dictionary
+		_draw_turret_range(_hovered_turret_cell, float(state.get("range", 0.0)), RADIUS_COLOR)
+	if _has_preview_turret and (not _has_hovered_turret or _preview_turret_cell != _hovered_turret_cell):
+		var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
+		_draw_turret_range(_preview_turret_cell, float(turret_def.get("range", 200.0)), RADIUS_COLOR)
+
+func _draw_turret_range(cell: Vector2i, activation_range: float, color: Color) -> void:
+	if activation_range <= 0.0:
+		return
+	draw_arc(to_local(_turret_world_position(cell)), activation_range, 0.0, TAU, RADIUS_SEGMENTS, color, RADIUS_LINE_WIDTH, true)
 
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	if item_id == TURRET_ID:
@@ -130,6 +149,41 @@ func _update_hovered_turret() -> void:
 		return
 	_has_hovered_turret = has_hovered_turret
 	_hovered_turret_cell = mouse_cell
+	queue_redraw()
+
+func _update_preview_turret() -> void:
+	if not TURRET_SHOW_RADIUS:
+		return
+	var has_preview_turret: bool = false
+	var preview_cell: Vector2i = Vector2i.ZERO
+	var has_forbidden_preview_range: bool = false
+	var forbidden_preview_range_cell: Vector2i = Vector2i.ZERO
+	var forbidden_preview_range: float = 0.0
+	if _build_system != null and _build_system.has_method("has_single_tile_preview") and bool(_build_system.call("has_single_tile_preview")):
+		var preview_item_id: String = str(_build_system.call("get_preview_item_id"))
+		if preview_item_id == TURRET_ID and _build_system.has_method("get_preview_cell"):
+			var raw_preview_cell: Variant = _build_system.call("get_preview_cell")
+			if raw_preview_cell is Vector2i:
+				has_preview_turret = true
+				preview_cell = raw_preview_cell as Vector2i
+			if _build_system.has_method("has_forbidden_turret_range_preview") and bool(_build_system.call("has_forbidden_turret_range_preview")):
+				var raw_forbidden_cell: Variant = _build_system.call("get_forbidden_turret_range_cell")
+				if raw_forbidden_cell is Vector2i:
+					has_forbidden_preview_range = true
+					forbidden_preview_range_cell = raw_forbidden_cell as Vector2i
+					forbidden_preview_range = float(_build_system.call("get_forbidden_turret_range"))
+	if (
+		has_preview_turret == _has_preview_turret
+		and (not has_preview_turret or preview_cell == _preview_turret_cell)
+		and has_forbidden_preview_range == _has_forbidden_preview_range
+		and (not has_forbidden_preview_range or (forbidden_preview_range_cell == _forbidden_preview_range_cell and forbidden_preview_range == _forbidden_preview_range))
+	):
+		return
+	_has_preview_turret = has_preview_turret
+	_preview_turret_cell = preview_cell
+	_has_forbidden_preview_range = has_forbidden_preview_range
+	_forbidden_preview_range_cell = forbidden_preview_range_cell
+	_forbidden_preview_range = forbidden_preview_range
 	queue_redraw()
 
 func _nearest_enemy_in_range(origin: Vector2, activation_range: float) -> Node2D:

@@ -3,6 +3,8 @@ extends Node
 const REMOVE_HOLD_SECONDS: float = 1.0
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
+const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
+const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 
 @export var floorz: TileMapLayer
 @export var wallz: TileMapLayer
@@ -20,7 +22,11 @@ var _atlas_source_id: int = -1
 
 var _hover_active: bool = false
 var _hover_cell: Vector2i
+var _hover_item_id: String = ""
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
+var _has_forbidden_turret_range_preview: bool = false
+var _forbidden_turret_range_cell: Vector2i = Vector2i.ZERO
+var _forbidden_turret_range: float = 0.0
 var _preview_cells: Array[Vector2i] = []
 var _rose_drag_active: bool = false
 var _rose_drag_start_cell: Vector2i = Vector2i.ZERO
@@ -71,18 +77,20 @@ func _process(delta: float) -> void:
 
 	var cell: Vector2i = _hovered_cell()
 	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
+	var item_id: String = str(placeable_def.get("id", ""))
 	if atlas_coords == Vector2i(-1, -1):
 		_clear_hover()
 		return
 
-	if _hover_active and cell == _hover_cell and atlas_coords == _hover_atlas_coords:
+	if _hover_active and cell == _hover_cell and atlas_coords == _hover_atlas_coords and item_id == _hover_item_id:
+		_refresh_preview_visual_state(placeable_def)
 		return
 
 	_clear_hover()
 	_hover_cell = cell
 	_hover_atlas_coords = atlas_coords
 	_hover_active = true
-	_draw_preview(cell, atlas_coords)
+	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -265,7 +273,7 @@ func _resolve_atlas_source_id() -> void:
 			_atlas_source_id = sid
 			return
 
-func _draw_preview(cell: Vector2i, atlas_coords: Vector2i) -> void:
+func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
 		return
 
@@ -276,6 +284,8 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i) -> void:
 		0
 	)
 	_preview_cells.append(cell)
+	_hover_item_id = item_id
+	_refresh_preview_visual_state(placeable_def)
 	previewbuild.update_internals()
 
 func _start_rose_drag(placeable_def: Dictionary) -> void:
@@ -307,7 +317,9 @@ func _draw_rose_drag_preview(placeable_def: Dictionary, available_roses: int) ->
 	previewbuild.modulate.a = 0.5
 	_preview_cells = valid_cells
 	_hover_active = not _preview_cells.is_empty()
+	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
 	_hover_atlas_coords = atlas_coords
+	_clear_forbidden_turret_range_preview()
 	previewbuild.update_internals()
 
 func _rose_rectangle_cells(
@@ -465,7 +477,64 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
 	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(cell):
 		return false
+	if not _turret_range_blocker_for_cell(cell, placeable_def).is_empty():
+		return false
 	return not _is_placeable_occupied(cell, target_layer, placeable_def)
+
+func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
+	if str(placeable_def.get("category", "")) != "turret":
+		return {}
+	if bool(placeable_def.get("build_in_range", true)):
+		return {}
+	if blocking_buildings == null:
+		return {}
+	var candidate_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(cell))
+	var best_blocker: Dictionary = {}
+	var best_distance_squared: float = INF
+	for raw_turret_cell: Variant in blocking_buildings.get_used_cells():
+		var turret_cell: Vector2i = raw_turret_cell as Vector2i
+		var turret_item_id: String = _turret_item_id_at_cell(turret_cell)
+		if turret_item_id == "":
+			continue
+		var turret_def: Dictionary = ItemCatalog.get_item_def(turret_item_id)
+		var turret_range: float = float(turret_def.get("range", 0.0))
+		if turret_range <= 0.0:
+			continue
+		var range_squared: float = turret_range * turret_range
+		var turret_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(turret_cell))
+		var distance_squared: float = candidate_world_position.distance_squared_to(turret_world_position)
+		if distance_squared <= range_squared and distance_squared < best_distance_squared:
+			best_distance_squared = distance_squared
+			best_blocker = {
+				"cell": turret_cell,
+				"range": turret_range,
+			}
+	return best_blocker
+
+func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
+	var blocker: Dictionary = _turret_range_blocker_for_cell(_hover_cell, placeable_def)
+	if blocker.is_empty():
+		_clear_forbidden_turret_range_preview()
+		previewbuild.modulate = PREVIEW_NORMAL_COLOR
+		return
+	_has_forbidden_turret_range_preview = true
+	_forbidden_turret_range_cell = blocker.get("cell", Vector2i.ZERO) as Vector2i
+	_forbidden_turret_range = float(blocker.get("range", 0.0))
+	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR
+
+func _clear_forbidden_turret_range_preview() -> void:
+	_has_forbidden_turret_range_preview = false
+	_forbidden_turret_range_cell = Vector2i.ZERO
+	_forbidden_turret_range = 0.0
+
+func _turret_item_id_at_cell(cell: Vector2i) -> String:
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return ""
+	var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_buildings.get_cell_atlas_coords(cell))
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if str(item_def.get("category", "")) != "turret":
+		return ""
+	return item_id
 
 func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_placement_sound: bool = true) -> void:
 	var placeable_category: String = str(placeable_def.get("category", ""))
@@ -505,19 +574,40 @@ func _notify(message: String) -> void:
 		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
-	previewbuild.modulate.a = 1.0
+	previewbuild.modulate = PREVIEW_NORMAL_COLOR
+	_clear_forbidden_turret_range_preview()
 	if not _hover_active and _preview_cells.is_empty():
+		_hover_item_id = ""
 		return
 	for cell: Vector2i in _preview_cells:
 		previewbuild.erase_cell(cell)
 	_preview_cells.clear()
 	previewbuild.update_internals()
 	_hover_active = false
+	_hover_item_id = ""
 	_hover_atlas_coords = Vector2i(-1, -1)
 
 func _hovered_cell() -> Vector2i:
 	var world: Vector2 = previewbuild.get_global_mouse_position()
 	return previewbuild.local_to_map(previewbuild.to_local(world))
+
+func has_single_tile_preview() -> bool:
+	return _hover_active and _preview_cells.size() == 1
+
+func get_preview_item_id() -> String:
+	return _hover_item_id
+
+func get_preview_cell() -> Vector2i:
+	return _hover_cell
+
+func has_forbidden_turret_range_preview() -> bool:
+	return _has_forbidden_turret_range_preview
+
+func get_forbidden_turret_range_cell() -> Vector2i:
+	return _forbidden_turret_range_cell
+
+func get_forbidden_turret_range() -> float:
+	return _forbidden_turret_range
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:

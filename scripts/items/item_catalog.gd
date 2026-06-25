@@ -107,11 +107,12 @@ const ITEM_DEFS: Dictionary = {
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
 		"shoot_frequency": 3.0,
-		"shoot_duration": 0.5,
+		"shoot_duration": 0.2,
 		"weapon": "spray",
 		# Enemy-detection radius. Kept equal to spray.tres's cone radius so the turret
 		# only targets enemies the spray can actually reach.
 		"range": 200.0,
+		"build_in_range": false,
 		"max_stack": 999,
 	},
 }
