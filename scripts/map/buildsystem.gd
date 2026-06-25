@@ -29,10 +29,13 @@ var _has_forbidden_turret_range_preview: bool = false
 var _forbidden_turret_range_cell: Vector2i = Vector2i.ZERO
 var _forbidden_turret_range: float = 0.0
 var _preview_cells: Array[Vector2i] = []
-var _rose_drag_active: bool = false
-var _rose_drag_start_cell: Vector2i = Vector2i.ZERO
-var _rose_drag_end_cell: Vector2i = Vector2i.ZERO
-var _rose_drag_preview_limit: int = 0
+# Generic click-drag chunk build (roses and walls). _drag_build_item_id records which
+# item the active drag is placing so inventory/sound are resolved per item.
+var _drag_build_active: bool = false
+var _drag_build_item_id: String = ""
+var _drag_build_start_cell: Vector2i = Vector2i.ZERO
+var _drag_build_end_cell: Vector2i = Vector2i.ZERO
+var _drag_build_preview_limit: int = 0
 var _plant_layer_flush_queued: bool = false
 var _remove_active: bool = false
 var _remove_cell: Vector2i = Vector2i.ZERO
@@ -53,7 +56,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	# Removal is forbidden at night. Cancel immediately rather than waiting for
 	# the next process tick to clear a hold that began during the day.
 	_cancel_removal()
-	_cancel_rose_drag()
+	_cancel_drag_build()
 
 func _process(delta: float) -> void:
 	_process_removal(delta)
@@ -62,15 +65,15 @@ func _process(delta: float) -> void:
 		return
 
 	var placeable_def: Dictionary = _selected_placeable_def()
-	if _rose_drag_active:
-		if _placement_disabled() or _is_inventory_open() or str(placeable_def.get("id", "")) != "rose":
-			_cancel_rose_drag()
+	if _drag_build_active:
+		if _placement_disabled() or _is_inventory_open() or str(placeable_def.get("id", "")) != _drag_build_item_id:
+			_cancel_drag_build()
 			return
 		var drag_cell: Vector2i = _hovered_cell()
-		var available_roses: int = _inventory_item_quantity("rose")
-		if drag_cell != _rose_drag_end_cell or available_roses != _rose_drag_preview_limit:
-			_rose_drag_end_cell = drag_cell
-			_draw_rose_drag_preview(placeable_def, available_roses)
+		var available: int = _inventory_item_quantity(_drag_build_item_id)
+		if drag_cell != _drag_build_end_cell or available != _drag_build_preview_limit:
+			_drag_build_end_cell = drag_cell
+			_draw_drag_build_preview(placeable_def, available)
 		return
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
@@ -108,8 +111,8 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		var drag_mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if drag_mouse_event.button_index == MOUSE_BUTTON_LEFT and not drag_mouse_event.pressed and _rose_drag_active:
-			_finish_rose_drag()
+		if drag_mouse_event.button_index == MOUSE_BUTTON_LEFT and not drag_mouse_event.pressed and _drag_build_active:
+			_finish_drag_build()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -120,8 +123,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		var mouse_event: InputEventMouseButton = event
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
-			if str(placeable_def.get("id", "")) == "rose":
-				_start_rose_drag(placeable_def)
+			if _is_drag_buildable(placeable_def):
+				_start_drag_build(placeable_def)
 			else:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
@@ -289,29 +292,42 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 	_refresh_preview_visual_state(placeable_def)
 	previewbuild.update_internals()
 
-func _start_rose_drag(placeable_def: Dictionary) -> void:
-	if _inventory_item_quantity("rose") <= 0:
-		return
-	_rose_drag_active = true
-	_rose_drag_start_cell = _hovered_cell()
-	_rose_drag_end_cell = _rose_drag_start_cell
-	_draw_rose_drag_preview(placeable_def, _inventory_item_quantity("rose"))
+# Items that build as a click-drag rectangle chunk (placed up to the available
+# inventory count, skipping occupied/invalid cells) rather than one tile per click.
+func _is_drag_buildable(placeable_def: Dictionary) -> bool:
+	var item_id: String = str(placeable_def.get("id", ""))
+	return item_id == "rose" or item_id == "wall"
 
-func _draw_rose_drag_preview(placeable_def: Dictionary, available_roses: int) -> void:
-	_clear_hover()
-	_rose_drag_preview_limit = available_roses
-	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	if atlas_coords == Vector2i(-1, -1) or available_roses <= 0:
+# Placement sound for a finished chunk build. Walls have no dedicated build sound,
+# so they stay silent (matching single-wall placement); roses keep the plant sound.
+func _drag_build_sound(item_id: String) -> StringName:
+	return &"plant" if item_id == "rose" else &""
+
+func _start_drag_build(placeable_def: Dictionary) -> void:
+	var item_id: String = str(placeable_def.get("id", ""))
+	if _inventory_item_quantity(item_id) <= 0:
 		return
-	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "plantz")))
+	_drag_build_active = true
+	_drag_build_item_id = item_id
+	_drag_build_start_cell = _hovered_cell()
+	_drag_build_end_cell = _drag_build_start_cell
+	_draw_drag_build_preview(placeable_def, _inventory_item_quantity(item_id))
+
+func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
+	_clear_hover()
+	_drag_build_preview_limit = available
+	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
+	if atlas_coords == Vector2i(-1, -1) or available <= 0:
+		return
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	if not target_layer:
 		return
-	var valid_cells: Array[Vector2i] = _rose_rectangle_cells(
-		_rose_drag_start_cell,
-		_rose_drag_end_cell,
+	var valid_cells: Array[Vector2i] = _drag_build_rectangle_cells(
+		_drag_build_start_cell,
+		_drag_build_end_cell,
 		target_layer,
 		placeable_def,
-		available_roses
+		available
 	)
 	for cell: Vector2i in valid_cells:
 		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, 0)
@@ -323,7 +339,7 @@ func _draw_rose_drag_preview(placeable_def: Dictionary, available_roses: int) ->
 	_clear_forbidden_turret_range_preview()
 	previewbuild.update_internals()
 
-func _rose_rectangle_cells(
+func _drag_build_rectangle_cells(
 	start_cell: Vector2i,
 	end_cell: Vector2i,
 	target_layer: TileMapLayer,
@@ -352,35 +368,41 @@ func _rose_rectangle_cells(
 		y += y_step
 	return cells
 
-func _finish_rose_drag() -> void:
+func _finish_drag_build() -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()
-	if _placement_disabled() or str(placeable_def.get("id", "")) != "rose":
-		_cancel_rose_drag()
+	var item_id: String = _drag_build_item_id
+	if _placement_disabled() or str(placeable_def.get("id", "")) != item_id:
+		_cancel_drag_build()
 		return
-	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "plantz")))
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	var available_roses: int = _inventory_item_quantity("rose")
+	var available: int = _inventory_item_quantity(item_id)
 	var cells: Array[Vector2i] = []
-	_rose_drag_end_cell = _hovered_cell()
+	_drag_build_end_cell = _hovered_cell()
 	if target_layer and atlas_coords != Vector2i(-1, -1):
-		cells = _rose_rectangle_cells(_rose_drag_start_cell, _rose_drag_end_cell, target_layer, placeable_def, available_roses)
+		cells = _drag_build_rectangle_cells(_drag_build_start_cell, _drag_build_end_cell, target_layer, placeable_def, available)
 	_clear_hover()
-	_rose_drag_active = false
+	_drag_build_active = false
+	_drag_build_item_id = ""
 	if cells.is_empty():
 		return
 	if not game_ui or not game_ui.has_method("consume_inventory_item"):
 		return
-	if not bool(game_ui.call("consume_inventory_item", "rose", cells.size())):
+	if not bool(game_ui.call("consume_inventory_item", item_id, cells.size())):
 		return
 	for cell: Vector2i in cells:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
 		_after_placeable_placed(cell, placeable_def, false)
 	target_layer.update_internals()
-	_flush_plant_layer_visuals()
-	Sfx.play_sound(&"plant")
+	if target_layer == plantz:
+		_flush_plant_layer_visuals()
+	var sound: StringName = _drag_build_sound(item_id)
+	if sound != &"":
+		Sfx.play_sound(sound)
 
-func _cancel_rose_drag() -> void:
-	_rose_drag_active = false
+func _cancel_drag_build() -> void:
+	_drag_build_active = false
+	_drag_build_item_id = ""
 	_clear_hover()
 
 func _inventory_item_quantity(item_id: String) -> int:

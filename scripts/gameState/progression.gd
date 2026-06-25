@@ -20,6 +20,19 @@ const LAYER_NAMES: Array[String] = [
 	"blocking_buildings",
 ]
 
+## Per-prop starting values, exposed for inspector tuning. These seed the matching
+## progression props in _ready() before any save is applied, so a saved game still
+## overrides them. Keep one export per ProgressionProp key below.
+@export_group("Starting Props")
+@export var starting_day: int = 1
+@export var starting_monster_per_day: int = 1
+@export var starting_monster_per_rose: int = 1
+@export var starting_seeds: int = 20
+@export var starting_gems: int = 100
+@export var starting_water_reserve: int = 100
+@export var starting_water_reserve_max: int = 100
+@export_group("")
+
 
 ## A single "progression prop": one tracked global value plus the metadata
 ## needed to save it (`key`) and to show it in the UI (`display_name`).
@@ -39,13 +52,17 @@ class ProgressionProp:
 ## To add a new tracked value, add ONE ProgressionProp entry to `props` below.
 ## It is then automatically saved, reloaded, and shown in the progression label
 ## with no other code changes required.
+##
+## The values passed here are class-level fallbacks; the node's "Starting Props"
+## exports re-seed these in _ready() via _apply_starting_values(), so add a matching
+## export there when you want a new prop's starting value to be inspector-tunable.
 class Progression:
 	var props: Array[ProgressionProp] = [
 		ProgressionProp.new(&"nDays", "Day", 1),
 		ProgressionProp.new(&"monster_per_day", "Monster per day", 1),
 		ProgressionProp.new(&"monster_per_rose", "Monster per rose", 1),
-		ProgressionProp.new(&"seeds", "Seeds", 5),
-		ProgressionProp.new(&"gems", "Gems", 0),
+		ProgressionProp.new(&"seeds", "Seeds", 20),
+		ProgressionProp.new(&"gems", "Gems", 100),
 		ProgressionProp.new(&"water_reserve", "Water reserve", 100),
 		ProgressionProp.new(&"water_reserve_max", "Water reserve max", 100),
 	]
@@ -141,10 +158,33 @@ func update_gems(delta: int) -> bool:
 	return true
 
 
+## Copy the inspector-exposed Starting Props onto their matching progression props.
+## One entry per ProgressionProp key; a key with no export keeps its class default.
+func _apply_starting_values() -> void:
+	var starting: Dictionary = {
+		&"nDays": starting_day,
+		&"monster_per_day": starting_monster_per_day,
+		&"monster_per_rose": starting_monster_per_rose,
+		&"seeds": starting_seeds,
+		&"gems": starting_gems,
+		&"water_reserve": starting_water_reserve,
+		&"water_reserve_max": starting_water_reserve_max,
+	}
+	for raw_key: Variant in starting:
+		var key: StringName = raw_key as StringName
+		var prop: ProgressionProp = progression.get_prop(key)
+		if prop != null:
+			prop.value = int(starting[key])
+
+
 func _ready() -> void:
 	# GameState is an autoload, so reconnect every time a fresh scene loads.
 	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
 		GameState.mode_changed.connect(_on_game_mode_changed)
+
+	# Seed the props from the inspector-exposed Starting Props before any save is
+	# applied, so a saved game still overrides these starting values below.
+	_apply_starting_values()
 
 	if GameState.has_meta(PENDING_LOAD_META):
 		GameState.remove_meta(PENDING_LOAD_META)
