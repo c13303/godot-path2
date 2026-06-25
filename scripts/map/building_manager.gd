@@ -47,6 +47,7 @@ const ACCESS_ENTER_DEAD_CONTINUATION_PENALTY: float = 30.0
 const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 
 @export var floorz: TileMapLayer
+@export var watersources: WaterSources
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer
 # Decorative / passive / walkable placeables (lamps, spawners). Spawner and other
@@ -141,6 +142,7 @@ var _find_path_in_zone_accum: Dictionary = {}
 var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
 var _turret_eating_agents: Dictionary = {}
+var _drowning_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
@@ -184,6 +186,7 @@ var _garden_retarget_queue: Array[Dictionary] = []
 var _garden_retarget_queued: Dictionary = {}  # nav_id -> true
 var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
+var _last_water_signature: int = 0
 var _last_blocking_signature: int = 0
 var _navigation_topology_dirty: bool = true
 var _last_scan_summary: String = ""
@@ -971,6 +974,12 @@ func _process(delta: float) -> void:
 			"turret_eating=%d" % _turret_eating_agents.size())
 
 	t = Time.get_ticks_usec()
+	_process_drowning_agents(delta)
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
+			"drowning=%d" % _drowning_agents.size())
+
+	t = Time.get_ticks_usec()
 	_process_astar_in_arrivals()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_astar_in_arrivals", Time.get_ticks_usec() - t,
@@ -1071,15 +1080,21 @@ func _scan_buildings() -> void:
 
 	t = Time.get_ticks_usec()
 	var wall_signature: int = _tile_layer_signature(wallz)
+	var water_signature: int = _tile_layer_signature(watersources)
 	var blocking_signature: int = _tile_layer_signature(blocking_buildings)
 	_warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
-		"wall_cells=%d" % (wallz.get_used_cells().size() if wallz else 0))
+		"wall_cells=%d water_cells=%d" % [
+			wallz.get_used_cells().size() if wallz else 0,
+			watersources.get_used_cells().size() if watersources else 0,
+		])
 	var walls_changed: bool = (
 		wall_signature != _last_wall_signature
+		or water_signature != _last_water_signature
 		or blocking_signature != _last_blocking_signature
 		or migrated
 	)
 	_last_wall_signature = wall_signature
+	_last_water_signature = water_signature
 	_last_blocking_signature = blocking_signature
 
 	var seen_spawners: Dictionary = {}
@@ -2137,7 +2152,7 @@ func _process_turret_overlaps() -> void:
 		if agent == null or not is_instance_valid(agent):
 			continue
 		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0 or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id):
+		if nav_id < 0 or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or _drowning_agents.has(nav_id):
 			continue
 		var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
 		if not _is_turret_cell(agent_cell):
@@ -2187,6 +2202,113 @@ func _process_turret_eating_agents(delta: float) -> void:
 			agent.call("stop_eating")
 		var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
 		_resume_agent_after_turret_eating(nav_id, agent, resume_state)
+
+func _process_drowning_agents(delta: float) -> void:
+	if watersources == null:
+		return
+
+	for raw_node: Node in get_tree().get_nodes_in_group("monsters"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0:
+			continue
+		if _turret_eating_agents.has(nav_id):
+			continue
+		var in_water: bool = watersources.has_water_at_foot_position(agent.global_position)
+		if _drowning_agents.has(nav_id):
+			if not in_water:
+				_stop_agent_drowning(nav_id, agent)
+			continue
+		if in_water and _agent_can_drown(agent):
+			_start_agent_drowning(nav_id, agent)
+
+	var dead_agents: Array[Node2D] = []
+	var drowning_ids: Array = _drowning_agents.keys()
+	for raw_nav_id: Variant in drowning_ids:
+		var nav_id: int = int(raw_nav_id)
+		if not _drowning_agents.has(nav_id):
+			continue
+		var data: Dictionary = _drowning_agents[nav_id] as Dictionary
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			_drowning_agents.erase(nav_id)
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
+			_drowning_agents.erase(nav_id)
+			continue
+		if not watersources.has_water_at_foot_position(agent.global_position):
+			_stop_agent_drowning(nav_id, agent)
+			continue
+		var duration: float = maxf(float(data.get("duration", 0.0)), 0.001)
+		var update_freq: float = maxf(float(data.get("update_freq", 0.1)), 0.01)
+		var tick_timer: float = float(data.get("tick_timer", update_freq)) - delta
+		var elapsed: float = minf(float(data.get("elapsed", 0.0)) + delta, duration)
+		var dealt_damage: int = int(data.get("dealt_damage", 0))
+		var total_damage: int = int(data.get("total_damage", 0))
+		var damage_target: int = int(floor((elapsed / duration) * float(total_damage)))
+		if tick_timer <= 0.0 or elapsed >= duration:
+			var damage: int = maxi(0, damage_target - dealt_damage)
+			if damage > 0 and agent.has_method("take_damage"):
+				var died: bool = bool(agent.call("take_damage", damage))
+				dealt_damage += damage
+				if died:
+					dead_agents.append(agent)
+			tick_timer = update_freq
+		data["elapsed"] = elapsed
+		data["tick_timer"] = tick_timer
+		data["dealt_damage"] = dealt_damage
+		_drowning_agents[nav_id] = data
+
+	for agent: Node2D in dead_agents:
+		remove_dead_monster(agent, false)
+
+func _agent_can_drown(agent: Node2D) -> bool:
+	var drownable_value: Variant = agent.get("drownable")
+	var duration_value: Variant = agent.get("drowning")
+	return drownable_value is bool and bool(drownable_value) and duration_value != null and float(duration_value) > 0.0
+
+func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
+	var duration: float = maxf(float(agent.get("drowning")), 0.001)
+	var raw_update_freq: Variant = agent.get("drowning_update_freq")
+	var update_freq: float = maxf(float(raw_update_freq) if raw_update_freq != null else 0.1, 0.01)
+	var resume_state: Dictionary = _capture_agent_resume_state(nav_id, agent)
+	_drowning_agents[nav_id] = {
+		"node": agent,
+		"duration": duration,
+		"update_freq": update_freq,
+		"tick_timer": update_freq,
+		"elapsed": 0.0,
+		"total_damage": maxi(1, int(agent.get("health"))),
+		"dealt_damage": 0,
+		"resume_state": resume_state,
+	}
+	_suspend_agent_for_drowning(nav_id)
+	if agent.has_method("start_drowning"):
+		agent.call("start_drowning", duration)
+
+func _stop_agent_drowning(nav_id: int, agent: Node2D) -> void:
+	var data: Dictionary = _drowning_agents.get(nav_id, {}) as Dictionary
+	_drowning_agents.erase(nav_id)
+	if agent.has_method("stop_drowning"):
+		agent.call("stop_drowning")
+	var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
+	_resume_agent_after_drowning(nav_id, agent, resume_state)
+
+func _suspend_agent_for_drowning(nav_id: int) -> void:
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	_entry_path_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
+	_erase_eating_agent(nav_id)
+	_escaping_agents.erase(nav_id)
+
+func _resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
+	_resume_agent_after_turret_eating(nav_id, agent, resume_state)
 
 func _capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 	if _entry_path_agents.has(nav_id):
@@ -2433,7 +2555,7 @@ func _start_escape_for_all_monsters() -> void:
 		if node is Node2D:
 			var agent: Node2D = node
 			var nav_id: int = int(agent.get("nav_id"))
-			if _escaping_agents.has(nav_id) or _eating_agents.has(nav_id):
+			if _escaping_agents.has(nav_id) or _eating_agents.has(nav_id) or _drowning_agents.has(nav_id):
 				continue
 			_assign_agent_to_escape(agent)
 
@@ -2539,14 +2661,16 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 # Combat death uses the same authoritative owner that created and routed monsters.
 # Clear every phase/index before unregistering the native agent so no deferred
 # garden work can retain or later re-route a dead nav_id.
-func remove_dead_monster(agent: Node2D) -> void:
+func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if not is_instance_valid(agent):
 		return
-	_spawn_monster_corpse(agent)
+	if spawn_corpse:
+		_spawn_monster_corpse(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
+	_drowning_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	_garden_retarget_queued.erase(nav_id)
 	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
@@ -2650,7 +2774,12 @@ func _has_floor(cell: Vector2i) -> bool:
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
 		return true
+	if _has_water(cell):
+		return true
 	return _building_cell_blocks_movement(cell)
+
+func _has_water(cell: Vector2i) -> bool:
+	return watersources != null and watersources.get_cell_tile_data(cell) != null
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))

@@ -39,6 +39,7 @@ namespace godot
 
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
+        TileMapLayer *water_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
 
         struct AsyncFlowSnapshot
@@ -131,6 +132,9 @@ namespace godot
 
         void set_wall_layer(Object *node);
         Object *get_wall_layer() const;
+
+        void set_water_layer(Object *node);
+        Object *get_water_layer() const;
 
         void set_blocking_layer(Object *node);
         Object *get_blocking_layer() const;

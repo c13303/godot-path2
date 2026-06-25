@@ -6,6 +6,7 @@ signal loading_progress(progress: float, label: String)
 @onready var ff: FlowFieldNative = get_parent()
 @onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
 @onready var wall_layer: TileMapLayer = $"../../../Map/MonTilemap/wallz"
+@onready var water_layer: TileMapLayer = $"../../../Map/MonTilemap/watersources"
 
 var is_ready: bool = false
 
@@ -26,6 +27,8 @@ func _ready() -> void:
 	#print("FlowFieldCode: assigning layers...")
 	ff.set_floor_layer(floor_layer)
 	ff.set_wall_layer(wall_layer)
+	if ff.has_method("set_water_layer"):
+		ff.call("set_water_layer", water_layer)
 	loading_progress.emit(0.15, "Reading map layers")
 
 	#print("floor_layer:", floor_layer)

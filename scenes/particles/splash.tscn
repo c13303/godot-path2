@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://c00o6iiqyd1ch"]
+
+[ext_resource type="Texture2D" uid="uid://bpg1rw3ed244l" path="res://assets/sprites/legval/tear.png" id="1_ovdco"]
+[ext_resource type="Script" uid="uid://dqboa8gyqvntv" path="res://scripts/combat/spray_particle_2d_cpu.gd" id="2_s7noy"]
+
+[node name="Splash_tscn" type="Node2D" unique_id=1028117761]
+
+[node name="splashParticle" type="CPUParticles2D" parent="." unique_id=1476536260]
+emitting = false
+amount = 32
+texture = ExtResource("1_ovdco")
+lifetime = 0.17
+one_shot = true
+randomness = 0.3
+direction = Vector2(0, 0)
+spread = 180.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 200.0
+initial_velocity_max = 200.0
+scale_amount_min = 0.2
+scale_amount_max = 0.5
+script = ExtResource("2_s7noy")

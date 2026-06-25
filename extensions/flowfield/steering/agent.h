@@ -30,6 +30,7 @@ namespace ffcore
         // building_manager. Not gameplay behavior; the agent follows no path/flow
         // while in this state. Kept last so existing phase codes are unchanged.
         WaitingNewStatus = 6,
+        Drowning = 7,
     };
 
     constexpr int SMASH_CLASS_PLAYER = 1 << 0;

@@ -24,6 +24,7 @@ const PHASE_FLOW_OUT: int = 5
 # gameplay behavior — just a visible debug label while the agent waits a few
 # frames for a new navigation state. Mirrors ffcore::AgentPhase::WaitingNewStatus.
 const PHASE_WAITING_NEW_STATUS: int = 6
+const PHASE_DROWNING: int = 7
 
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
@@ -32,6 +33,9 @@ var _velocity_len: float = 0.0
 var _eating_timer: float = 0.0
 var status: String = ""
 @export var max_health: int = 100
+@export var drownable: bool = true
+@export_range(0.0, 60.0, 0.1, "or_greater") var drowning: float = 1.0
+@export_range(0.01, 10.0, 0.01, "or_greater") var drowning_update_freq: float = 0.1
 var health: int = 100
 var _flash_time_left: float = 0.0
 var _dead: bool = false
@@ -56,10 +60,12 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
-# monster.png is a 3-frame horizontal spritesheet. Live monsters only use frame 0
-# (idle) and frame 1 (eating); the separate corpse scene uses frame 2.
+# monster.png is a 4-frame horizontal spritesheet. Live monsters use frame 0
+# (idle), frame 1 (eating), and frame 3 (drowning); the separate corpse scene
+# uses frame 2.
 const MONSTER_FRAME_IDLE: int = 0
 const MONSTER_FRAME_EATING: int = 1
+const MONSTER_FRAME_DROWNING: int = 3
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
 
 
@@ -117,7 +123,11 @@ func _process_damage_flash(delta: float) -> void:
 func _update_monster_frame() -> void:
 	if not is_instance_valid(_monster_sprite):
 		return
-	var frame: int = MONSTER_FRAME_EATING if status == "eating" else MONSTER_FRAME_IDLE
+	var frame: int = MONSTER_FRAME_IDLE
+	if status == "eating":
+		frame = MONSTER_FRAME_EATING
+	elif status == "drowning":
+		frame = MONSTER_FRAME_DROWNING
 	if _monster_sprite.frame != frame:
 		_monster_sprite.frame = frame
 
@@ -139,6 +149,16 @@ func stop_eating() -> void:
 		status = ""
 	_eating_timer = 0.0
 	_set_phase(PHASE_NONE)
+
+func start_drowning(seconds: float) -> void:
+	status = "drowning"
+	_eating_timer = 0.0
+	_set_phase(PHASE_DROWNING, ceil(maxf(seconds, 0.0)))
+
+func stop_drowning() -> void:
+	if status == "drowning":
+		status = ""
+		_set_phase(PHASE_NONE)
 
 func start_flow_in() -> void:
 	status = "flow_in"

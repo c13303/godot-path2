@@ -7,8 +7,6 @@ const STATIC_IMPACT_KIND: int = 0
 const WATER_RESERVE_ID: StringName = &"water"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
-const WATER_REFILL_AMOUNT_KEY: StringName = &"water_refill_amount"
-const WATER_REFILL_INTERVAL_MS_KEY: StringName = &"water_refill_interval_ms"
 const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
 const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
 
@@ -34,6 +32,8 @@ var _plant_manager: Node
 var _plant_layer: TileMapLayer
 var _wall_layer: TileMapLayer
 var _floor_layer: TileMapLayer
+var _water_sources: WaterSources
+var _player: Node2D
 var _progression: Node
 var _drawer
 var _projectile_drawer
@@ -68,6 +68,8 @@ func _ready() -> void:
 	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
 	_wall_layer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
 	_floor_layer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
+	_water_sources = get_node_or_null("../Map/MonTilemap/watersources") as WaterSources
+	_player = get_node_or_null("../Player") as Node2D
 	_progression = get_node_or_null("../progression")
 	if _steering and not _steering.has_method("take_damage_events"):
 		push_error("FightSystem: native damage API is unavailable. Rebuild the GDExtension and restart Godot.")
@@ -541,30 +543,22 @@ func _register_guns() -> void:
 	if _projectile_drawer:
 		_projectile_drawer.rebuild_visual_cache()
 
-## Called once per player frame. A non-empty weapon id means the trigger is held
-## for that weapon; an empty id stops channelled weapons and advances refill.
+## Called once per player frame. Water-source refill advances every frame, and
+## a non-empty weapon id means the trigger is held for that weapon.
 func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float, source_velocity: Vector2 = Vector2.ZERO) -> void:
+	_refill_water_reserve(delta)
 	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
 	if gun != null:
 		_stop_held_spray()
-		if gun.reserve_id == WATER_RESERVE_ID:
-			_water_refill_elapsed = 0.0
-		else:
-			_refill_water_reserve(delta)
 		fire_gun_held(weapon_id, origin, direction, source_agent_id, delta)
 		return
 
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
 	if weapon != null and weapon.spray_projectiles_enabled:
-		if weapon.spray_reserve_id == WATER_RESERVE_ID:
-			_water_refill_elapsed = 0.0
-		else:
-			_refill_water_reserve(delta)
 		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta, source_velocity)
 		return
 
 	_stop_held_spray()
-	_refill_water_reserve(delta)
 
 func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float, source_velocity: Vector2) -> void:
 	if not _projectiles or direction.length_squared() <= 0.000001:
@@ -737,14 +731,18 @@ func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 func _refill_water_reserve(delta: float) -> void:
 	if not _progression or not _progression.has_method("get_value"):
 		return
+	if not _player_is_above_water_source():
+		_water_refill_elapsed = 0.0
+		return
 	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
 	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
 	if current >= maximum:
 		_water_refill_elapsed = 0.0
 		return
-	var interval_ms: int = maxi(1, int(_progression.call("get_value", WATER_REFILL_INTERVAL_MS_KEY)))
-	var interval_seconds: float = float(interval_ms) * 0.001
-	var refill_amount: int = maxi(0, int(_progression.call("get_value", WATER_REFILL_AMOUNT_KEY)))
+	if _water_sources == null:
+		return
+	var interval_seconds: float = maxf(_water_sources.refill_interval_seconds, 0.001)
+	var refill_amount: int = maxi(0, _water_sources.refill_amount)
 	if refill_amount <= 0:
 		return
 	_water_refill_elapsed += delta
@@ -753,6 +751,15 @@ func _refill_water_reserve(delta: float) -> void:
 		var added: int = mini(refill_amount, maximum - current)
 		_update_water_reserve(added)
 		current += added
+
+func _player_is_above_water_source() -> bool:
+	if _water_sources == null:
+		return false
+	if not is_instance_valid(_player):
+		_player = get_node_or_null("../Player") as Node2D
+	if _player == null:
+		return false
+	return _water_sources.has_water_at_foot_position(_player.global_position)
 
 func _update_water_reserve(delta_value: int) -> void:
 	if not _progression or not _progression.has_method("update_value"):

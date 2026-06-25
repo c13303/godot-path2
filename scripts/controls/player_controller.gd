@@ -11,6 +11,7 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
+@onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
 
 @onready var camera_controller: CameraController = $"../../Camera2D"
 
@@ -43,6 +44,7 @@ var _rush_time_left: float = 0.0
 var _rush_direction: Vector2 = Vector2.ZERO
 var _rush_sample_position: Vector2 = Vector2.ZERO
 var _last_move_direction: Vector2 = Vector2.ZERO
+var _player_in_water: bool = false
 
 func _ready() -> void:
 	var scene: Node = get_tree().get_current_scene()
@@ -124,9 +126,15 @@ func _update_gamepad_cursor(delta: float) -> void:
 	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	if stick == Vector2.ZERO:
 		return
-	var viewport_size: Vector2 = get_viewport_rect().size
-	var max_position: Vector2 = Vector2(maxf(viewport_size.x - 1.0, 0.0), maxf(viewport_size.y - 1.0, 0.0))
-	var cursor_position: Vector2 = get_viewport().get_mouse_position() + stick * gamepad_cursor_speed * delta
+	# Work entirely in window-pixel space. The viewport uses canvas_items "expand"
+	# stretch, so get_viewport().get_mouse_position() (stretched/base coords) and
+	# Input.warp_mouse() (window pixels) live in different spaces; mixing them makes
+	# the cursor contract into the top-left corner. DisplayServer-relative coords
+	# match warp_mouse, giving a stable read/write loop.
+	var window_size: Vector2 = Vector2(DisplayServer.window_get_size())
+	var max_position: Vector2 = (window_size - Vector2.ONE).max(Vector2.ZERO)
+	var mouse_window: Vector2 = Vector2(DisplayServer.mouse_get_position()) - Vector2(get_window().position)
+	var cursor_position: Vector2 = mouse_window + stick * gamepad_cursor_speed * delta
 	cursor_position = cursor_position.clamp(Vector2.ZERO, max_position)
 	Input.warp_mouse(cursor_position)
 
@@ -182,7 +190,7 @@ func _update_gun_fire(delta: float) -> void:
 	fight_system.process_held_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player), delta, player_velocity)
 
 func _setup_player() -> void:
-	var player := _get_player_node()
+	var player: Node2D = _get_player_node()
 	if not player:
 		push_warning("PlayerController: Player node not found.")
 		return
@@ -201,15 +209,15 @@ func _setup_player() -> void:
 		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
 
 	if steering and steering.has_method("set_agent_profile") and player_nav_id >= 0:
-		var player_world_radius := _agent_world_radius()
-		var sprite := player.get_node_or_null("Sprite2D") as Sprite2D
-		var fight_half_size := Vector2(32.0, 32.0)
-		var fight_offset_y := -32.0
+		var player_world_radius: float = _agent_world_radius()
+		var sprite: Sprite2D = player.get_node_or_null("Sprite2D") as Sprite2D
+		var fight_half_size: Vector2 = Vector2(32.0, 32.0)
+		var fight_offset_y: float = -32.0
 		if sprite and sprite.texture:
 			var sprite_size: Vector2 = sprite.texture.get_size() * sprite.scale.abs()
 			fight_half_size = sprite_size * 0.5
 			fight_offset_y = sprite.position.y
-		var profile := {
+		var profile: Dictionary = {
 			"crowd_push_strength": 2.0,
 			"world_radius": player_world_radius,
 			"foot_offset_y": -player_world_radius,
@@ -222,10 +230,11 @@ func _setup_player() -> void:
 		# We resolve the effective speed and multiply it explicitly so the player
 		# scales with the CPP > Debug speed_multiplier without double-counting the
 		# already-multiplied global agent_max_speed.
-		var player_max_speed := float(player.get("max_speed"))
-		var base_speed := player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
+		var player_max_speed: float = float(player.get("max_speed"))
+		var base_speed: float = player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
 		if base_speed > 0.0:
-			profile["max_speed"] = base_speed * _speed_multiplier()
+			_player_in_water = _is_player_in_water(player)
+			profile["max_speed"] = _player_profile_speed(player, false)
 		steering.call("set_agent_profile", player_nav_id, profile)
 
 	if player:
@@ -339,6 +348,7 @@ func _update_player_input(delta: float) -> void:
 		if dir.length_squared() > 0.0:
 			_last_move_direction = dir.normalized()
 
+	_update_water_speed_state()
 	steering.call("set_agent_input", player_nav_id, dir)
 
 func _start_rush(direction: Vector2) -> void:
@@ -368,13 +378,38 @@ func _set_rush_speed(enabled: bool) -> void:
 	var player: Node2D = _get_player_node()
 	if not player:
 		return
+	var speed: float = _player_profile_speed(player, enabled)
+	if speed <= 0.0:
+		return
+	var profile: Dictionary = {"max_speed": speed}
+	steering.call("set_agent_profile", player_nav_id, profile)
+
+func _update_water_speed_state() -> void:
+	var player: Node2D = _get_player_node()
+	if not player:
+		return
+	var in_water: bool = _is_player_in_water(player)
+	if in_water == _player_in_water:
+		return
+	_player_in_water = in_water
+	_set_rush_speed(_rush_active)
+
+func _is_player_in_water(player: Node2D) -> bool:
+	return watersources != null and watersources.has_water_at_foot_position(player.global_position)
+
+func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 	var player_max_speed: float = float(player.get("max_speed"))
 	var base_speed: float = player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
 	if base_speed <= 0.0:
-		return
-	var multiplier: float = maxf(rush_speed_mult, 0.0) if enabled else 1.0
-	var profile: Dictionary = {"max_speed": base_speed * _speed_multiplier() * multiplier}
-	steering.call("set_agent_profile", player_nav_id, profile)
+		return 0.0
+	var rush_multiplier: float = maxf(rush_speed_mult, 0.0) if rush_enabled else 1.0
+	var water_multiplier: float = _water_speed_multiplier() if _is_player_in_water(player) else 1.0
+	return base_speed * _speed_multiplier() * rush_multiplier * water_multiplier
+
+func _water_speed_multiplier() -> float:
+	if watersources == null:
+		return 1.0
+	return clampf(watersources.player_slowdown, 0.01, 1.0)
 
 func _is_any_key_pressed(keys: Array[int]) -> bool:
 	for key in keys:

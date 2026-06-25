@@ -7,6 +7,7 @@ const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 
 @export var floorz: TileMapLayer
+@export var watersources: TileMapLayer
 @export var wallz: TileMapLayer
 @export var plantz: TileMapLayer
 @export var traversable_buildings: TileMapLayer
@@ -475,11 +476,16 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 	return _is_occupied_by_group_node(cell)
 
 func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	if _is_water_source_cell(cell):
+		return false
 	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(cell):
 		return false
 	if not _turret_range_blocker_for_cell(cell, placeable_def).is_empty():
 		return false
 	return not _is_placeable_occupied(cell, target_layer, placeable_def)
+
+func _is_water_source_cell(cell: Vector2i) -> bool:
+	return watersources != null and watersources.get_cell_source_id(cell) >= 0
 
 func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
 	if str(placeable_def.get("category", "")) != "turret":

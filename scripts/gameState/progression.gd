@@ -2,7 +2,11 @@ extends Node
 
 signal day_started(day_number: int)
 
+## Manual save slot, written/read by the F5/F9 hotkeys.
 const SAVE_PATH: String = "user://progression_save.json"
+## Auto-save slot, written on each new day / on quit and restored on launch.
+## Kept separate from SAVE_PATH so auto-saving never clobbers a manual F5 save.
+const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 const SAVE_VERSION: int = 2
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
@@ -44,8 +48,6 @@ class Progression:
 		ProgressionProp.new(&"gems", "Gems", 0),
 		ProgressionProp.new(&"water_reserve", "Water reserve", 100),
 		ProgressionProp.new(&"water_reserve_max", "Water reserve max", 100),
-		ProgressionProp.new(&"water_refill_amount", "Water refill amount", 1),
-		ProgressionProp.new(&"water_refill_interval_ms", "Water refill interval (ms)", 100),
 	]
 
 	func get_prop(key: StringName) -> ProgressionProp:
@@ -79,6 +81,9 @@ class Progression:
 var progression: Progression = Progression.new()
 var _seed_label_tween: Tween
 var _gem_label_tween: Tween
+# True once a save has been applied to this scene instance (pending-load during
+# _ready or startup auto-load). Prevents the auto-save from being applied twice.
+var _save_applied: bool = false
 
 
 ## Public accessor so other systems (e.g. the monster spawner) can read a
@@ -277,10 +282,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		load_progression()
 
 
-func save_progression() -> void:
+func save_progression(save_path: String = SAVE_PATH) -> void:
 	if _reject_during_night():
 		return
-	_log("Save started: %s" % ProjectSettings.globalize_path(SAVE_PATH))
+	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
 	var scene: Node = get_tree().current_scene
 	var layers: Dictionary = _get_layers(scene)
 	var player: Node2D = _get_player()
@@ -309,7 +314,7 @@ func save_progression() -> void:
 	}
 
 	var json_text: String = JSON.stringify(data)
-	var file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
 		_fail("Save failed: cannot open save file")
 		return
@@ -338,6 +343,49 @@ func load_progression() -> void:
 		_fail("Load failed: scene reload error %d" % int(reload_error))
 
 
+## Write the auto-save slot (separate file from the F5/F9 manual slot).
+func auto_save() -> void:
+	save_progression(AUTOSAVE_PATH)
+
+
+## Startup auto-load: restore the auto-save slot into the freshly loaded scene.
+## No scene reload happens here (the scene is already pristine on launch). Skips
+## silently when there is no auto-save, or when a pending-load already applied a
+## manual save during _ready (the F9 reload path).
+func load_on_start() -> void:
+	if _save_applied:
+		return
+	if not FileAccess.file_exists(AUTOSAVE_PATH):
+		_log("No auto-save found on start; beginning a fresh game")
+		return
+	var data: Dictionary = _read_save_data(AUTOSAVE_PATH)
+	if data.is_empty():
+		return
+	_log("Auto-loading save on start")
+	_apply_save_to_fresh_scene(data)
+
+
+## Wipe the auto-save slot and restart a brand-new game (Day 1, defaults). The
+## fresh scene reload recreates progression at its defaults; deleting the
+## auto-save first stops the next launch (and the post-reload load_on_start)
+## from restoring it. The manual F5 slot is intentionally left untouched.
+func reset_game() -> void:
+	if FileAccess.file_exists(AUTOSAVE_PATH):
+		var remove_error: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(AUTOSAVE_PATH))
+		if remove_error == OK:
+			_log("Auto-save deleted; resetting to a new game")
+		else:
+			_fail("Reset: could not delete save (error %d)" % int(remove_error))
+	# A leftover pending-load flag must never carry into the fresh game.
+	if GameState.has_meta(PENDING_LOAD_META):
+		GameState.remove_meta(PENDING_LOAD_META)
+	GameState.set_night(false)
+	_unregister_scene_agents()
+	var reload_error: Error = get_tree().reload_current_scene()
+	if reload_error != OK:
+		_fail("Reset failed: scene reload error %d" % int(reload_error))
+
+
 func _unregister_scene_agents() -> void:
 	var scene: Node = get_tree().current_scene
 	var agent_manager: Node = scene.get_node_or_null("CPP/AgentManagerNative") if scene else null
@@ -357,12 +405,12 @@ func _unregister_scene_agents() -> void:
 	_log("Unregistered %d native scene agents before reload" % seen_ids.size())
 
 
-func _read_save_data() -> Dictionary:
-	if not FileAccess.file_exists(SAVE_PATH):
+func _read_save_data(save_path: String = SAVE_PATH) -> Dictionary:
+	if not FileAccess.file_exists(save_path):
 		_fail("Load failed: no save file")
 		return {}
 
-	var file: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	var file: FileAccess = FileAccess.open(save_path, FileAccess.READ)
 	if file == null:
 		_fail("Load failed: cannot open save file")
 		return {}
@@ -411,6 +459,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	player.set("velocity", Vector2.ZERO)
 	_restore_inventory(game_ui, player_data)
 	_reindex_loaded_layers(scene)
+	_save_applied = true
 	_log("Load complete: player=%s inventory_slots=%d" % [
 		str(player.global_position), (player_data["inventory"] as Array).size()
 	])

@@ -440,6 +440,8 @@ String SteeringSystemNative::_agent_phase_label(const ffcore::AgentData *a) cons
         return "flow out";
     case ffcore::AgentPhase::WaitingNewStatus:
         return "waiting new status";
+    case ffcore::AgentPhase::Drowning:
+        return "drowning";
     case ffcore::AgentPhase::None:
     default:
         return String();
