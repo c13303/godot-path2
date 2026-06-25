@@ -473,7 +473,7 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 		return true
 	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
 		return true
-	return _is_occupied_by_group_node(cell)
+	return _is_occupied_by_group_node(cell, placeable_def)
 
 func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
 	if _is_water_source_cell(cell):
@@ -559,11 +559,14 @@ func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
 		return true
 	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap"
 
-func _is_occupied_by_group_node(cell: Vector2i) -> bool:
+func _is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
 	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz
 	if not map_layer:
 		return false
+	var item_id: String = str(placeable_def.get("id", ""))
 	for group_name in occupied_groups:
+		if item_id == "rose" and group_name == "player":
+			continue
 		var nodes: Array[Node] = get_tree().get_nodes_in_group(group_name)
 		for node in nodes:
 			if node is Node2D:

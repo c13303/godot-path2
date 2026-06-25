@@ -2216,10 +2216,8 @@ func _process_drowning_agents(delta: float) -> void:
 			continue
 		if _turret_eating_agents.has(nav_id):
 			continue
-		var in_water: bool = watersources.has_water_at_foot_position(agent.global_position)
+		var in_water: bool = _agent_over_drowning_water(agent)
 		if _drowning_agents.has(nav_id):
-			if not in_water:
-				_stop_agent_drowning(nav_id, agent)
 			continue
 		if in_water and _agent_can_drown(agent):
 			_start_agent_drowning(nav_id, agent)
@@ -2238,9 +2236,6 @@ func _process_drowning_agents(delta: float) -> void:
 		var agent: Node2D = raw_agent as Node2D
 		if agent == null:
 			_drowning_agents.erase(nav_id)
-			continue
-		if not watersources.has_water_at_foot_position(agent.global_position):
-			_stop_agent_drowning(nav_id, agent)
 			continue
 		var duration: float = maxf(float(data.get("duration", 0.0)), 0.001)
 		var update_freq: float = maxf(float(data.get("update_freq", 0.1)), 0.01)
@@ -2269,6 +2264,30 @@ func _agent_can_drown(agent: Node2D) -> bool:
 	var drownable_value: Variant = agent.get("drownable")
 	var duration_value: Variant = agent.get("drowning")
 	return drownable_value is bool and bool(drownable_value) and duration_value != null and float(duration_value) > 0.0
+
+func _agent_over_drowning_water(agent: Node2D) -> bool:
+	if watersources == null:
+		return false
+	var threshold: float = clampf(watersources.drowning_coverage_threshold, 0.0, 1.0)
+	if threshold <= 0.0:
+		return watersources.has_water_at_foot_position(agent.global_position)
+	return _agent_water_coverage(agent) >= threshold
+
+func _agent_water_coverage(agent: Node2D) -> float:
+	if watersources == null:
+		return 0.0
+	var footprint: Rect2 = _agent_water_footprint_rect(agent)
+	return watersources.water_coverage_of_world_rect(footprint)
+
+func _agent_water_footprint_rect(agent: Node2D) -> Rect2:
+	var radius: float = maxf(1.0, _agent_world_radius())
+	var size: Vector2 = Vector2(radius * 2.0, radius * 2.0)
+	return Rect2(agent.global_position - size * 0.5, size)
+
+func _agent_world_radius() -> float:
+	if global_config and global_config.has_method("get_agent_world_radius"):
+		return float(global_config.call("get_agent_world_radius"))
+	return 12.0
 
 func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	var duration: float = maxf(float(agent.get("drowning")), 0.001)
@@ -2774,12 +2793,7 @@ func _has_floor(cell: Vector2i) -> bool:
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
 		return true
-	if _has_water(cell):
-		return true
 	return _building_cell_blocks_movement(cell)
-
-func _has_water(cell: Vector2i) -> bool:
-	return watersources != null and watersources.get_cell_tile_data(cell) != null
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))

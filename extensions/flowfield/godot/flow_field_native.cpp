@@ -22,6 +22,7 @@ using namespace godot;
 namespace
 {
     constexpr double FLOWFIELD_TARGET_RADIUS_PI = 3.14159265358979323846;
+    constexpr double NAVIGATION_BLOCKING_LAYER_COST_MULTIPLIER = 25.0;
 }
 
 struct DijkstraNode
@@ -56,6 +57,24 @@ static void sync_global_tile_size(double tile_size)
 
     cfg.tile_size = tile_size;
     cfg.recompute_from_tile();
+}
+
+static double layer_double_property(Object *object, const char *name, double fallback)
+{
+    if (!object)
+        return fallback;
+    Variant value = object->get(StringName(name));
+    if (value.get_type() == Variant::NIL)
+        return fallback;
+    return static_cast<double>(value);
+}
+
+static double navigation_blocking_coverage_threshold(Object *object)
+{
+    double threshold = layer_double_property(object, "navigation_blocking_coverage_threshold", -1.0);
+    if (threshold < 0.0)
+        threshold = layer_double_property(object, "drowning_coverage_threshold", 0.0);
+    return clamp01(threshold);
 }
 
 void FlowFieldNative::_bind_methods()
@@ -141,6 +160,7 @@ void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &phy
     physical_wall_set.clear();
     walkable_set.clear();
     std::unordered_set<Vector2i, Vector2iHash> navigation_blocked_set;
+    Array floors = floor_layer->get_used_cells();
 
     Array walls = wall_layer->get_used_cells();
     for (int i = 0; i < walls.size(); i++)
@@ -148,13 +168,6 @@ void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &phy
         Vector2i cell = (Vector2i)walls[i];
         physical_wall_set.insert(cell);
         navigation_blocked_set.insert(cell);
-    }
-
-    if (navigation_blocking_layer)
-    {
-        Array blockers = navigation_blocking_layer->get_used_cells();
-        for (int i = 0; i < blockers.size(); i++)
-            navigation_blocked_set.insert((Vector2i)blockers[i]);
     }
 
     if (blocking_layer)
@@ -168,13 +181,103 @@ void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &phy
         }
     }
 
-    Array floors = floor_layer->get_used_cells();
     for (int i = 0; i < floors.size(); i++)
     {
         Vector2i c = floors[i];
         if (!navigation_blocked_set.count(c))
             walkable_set.insert(c);
     }
+}
+
+void FlowFieldNative::add_navigation_coverage_blockers(const Array &floor_cells,
+                                                       std::unordered_set<Vector2i, Vector2iHash> &navigation_blocked_set,
+                                                       std::vector<Vector2i> *out_blockers) const
+{
+    if (!navigation_blocking_layer)
+        return;
+
+    const double threshold = navigation_blocking_coverage_threshold(navigation_blocking_layer);
+    if (threshold <= 0.0)
+    {
+        Array blockers = navigation_blocking_layer->get_used_cells();
+        if (out_blockers)
+            out_blockers->reserve(out_blockers->size() + blockers.size());
+        for (int i = 0; i < blockers.size(); i++)
+        {
+            Vector2i cell = (Vector2i)blockers[i];
+            if (navigation_blocked_set.insert(cell).second && out_blockers)
+                out_blockers->push_back(cell);
+        }
+        return;
+    }
+
+    const double radius = std::max(1.0, ffcore::globalconfig().tile_size * ffcore::globalconfig().agent_world_diameter_ratio * 0.5);
+    if (out_blockers)
+        out_blockers->reserve(out_blockers->size() + floor_cells.size());
+    for (int i = 0; i < floor_cells.size(); i++)
+    {
+        Vector2i cell = (Vector2i)floor_cells[i];
+        if (!cell_reaches_navigation_blocking_coverage(cell, radius, threshold))
+            continue;
+        if (navigation_blocked_set.insert(cell).second && out_blockers)
+            out_blockers->push_back(cell);
+    }
+}
+
+bool FlowFieldNative::cell_reaches_navigation_blocking_coverage(const Vector2i &cell,
+                                                                double radius,
+                                                                double threshold) const
+{
+    if (!floor_layer || !navigation_blocking_layer || radius <= 0.0)
+        return false;
+
+    const Vector2 world_center = floor_layer->to_global(floor_layer->map_to_local(cell));
+    const Rect2 world_rect(world_center - Vector2(radius, radius), Vector2(radius * 2.0, radius * 2.0));
+    const Vector2 p0 = navigation_blocking_layer->to_local(world_rect.position);
+    const Vector2 p1 = navigation_blocking_layer->to_local(world_rect.position + Vector2(world_rect.size.x, 0.0));
+    const Vector2 p2 = navigation_blocking_layer->to_local(world_rect.position + Vector2(0.0, world_rect.size.y));
+    const Vector2 p3 = navigation_blocking_layer->to_local(world_rect.position + world_rect.size);
+
+    const double min_x = std::min({(double)p0.x, (double)p1.x, (double)p2.x, (double)p3.x});
+    const double min_y = std::min({(double)p0.y, (double)p1.y, (double)p2.y, (double)p3.y});
+    const double max_x = std::max({(double)p0.x, (double)p1.x, (double)p2.x, (double)p3.x});
+    const double max_y = std::max({(double)p0.y, (double)p1.y, (double)p2.y, (double)p3.y});
+    const Rect2 local_rect(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y));
+    const double footprint_area = (double)local_rect.size.x * (double)local_rect.size.y;
+    if (footprint_area <= 0.0)
+        return false;
+
+    const double tile_size = tile_size_from_layer(navigation_blocking_layer);
+    const Vector2i first_cell = navigation_blocking_layer->local_to_map(local_rect.position);
+    const Vector2i last_cell = navigation_blocking_layer->local_to_map(local_rect.position + local_rect.size);
+    const int min_cell_x = std::min(first_cell.x, last_cell.x) - 1;
+    const int max_cell_x = std::max(first_cell.x, last_cell.x) + 1;
+    const int min_cell_y = std::min(first_cell.y, last_cell.y) - 1;
+    const int max_cell_y = std::max(first_cell.y, last_cell.y) + 1;
+    double covered_area = 0.0;
+
+    for (int y = min_cell_y; y <= max_cell_y; ++y)
+    {
+        for (int x = min_cell_x; x <= max_cell_x; ++x)
+        {
+            const Vector2i blocker_cell(x, y);
+            if (navigation_blocking_layer->get_cell_source_id(blocker_cell) == -1)
+                continue;
+
+            const Vector2 blocker_center = navigation_blocking_layer->map_to_local(blocker_cell);
+            const Rect2 blocker_rect(blocker_center - Vector2(tile_size * 0.5, tile_size * 0.5), Vector2(tile_size, tile_size));
+            const Rect2 overlap = local_rect.intersection(blocker_rect);
+            const double overlap_area = (double)overlap.size.x * (double)overlap.size.y;
+            if (overlap_area <= 0.0)
+                continue;
+
+            covered_area += overlap_area;
+            if (covered_area / footprint_area >= threshold)
+                return true;
+        }
+    }
+
+    return false;
 }
 
 void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
@@ -194,7 +297,8 @@ void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
 
 void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                     const Vector2i &goal_cell,
-                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs)
+                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+                                    const std::unordered_set<Vector2i, Vector2iHash> &navigation_penalty_set)
 {
     costs.clear();
     for (const Vector2i &c : walkable_set)
@@ -233,6 +337,8 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
             }
 
             double step = (i < 4) ? 1.0 : 1.41421356237;
+            if (navigation_penalty_set.count(nb))
+                step *= NAVIGATION_BLOCKING_LAYER_COST_MULTIPLIER;
             double new_cost = cur.cost + step;
             if (new_cost < costs[nb])
             {
@@ -677,6 +783,9 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
     build_sets(wall_set, walkable_set);
+    std::unordered_set<Vector2i, Vector2iHash> navigation_penalty_set;
+    Array floor_cells = floor_layer->get_used_cells();
+    add_navigation_coverage_blockers(floor_cells, navigation_penalty_set);
 
     if (!walkable_set.count(goal_cell))
     {
@@ -690,7 +799,7 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     compute_distance_field(used, wall_set);
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    compute_costs(walkable_set, goal_cell, costs);
+    compute_costs(walkable_set, goal_cell, costs, navigation_penalty_set);
     std::vector<double> route_costs(field.width() * field.height(), std::numeric_limits<double>::infinity());
     for (int y = 0; y < field.height(); ++y)
     {
@@ -736,14 +845,12 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> navigation_blocked_set;
     Array walls = wall_layer->get_used_cells();
-    Array navigation_blockers;
-    if (navigation_blocking_layer)
-        navigation_blockers = navigation_blocking_layer->get_used_cells();
     Array blockers;
     if (blocking_layer)
         blockers = blocking_layer->get_used_cells();
+    Array floors = floor_layer->get_used_cells();
     snapshot.walls.reserve(walls.size() + blockers.size());
-    snapshot.navigation_blockers.reserve(navigation_blockers.size());
+    snapshot.navigation_blockers.reserve(floors.size());
     for (int i = 0; i < walls.size(); i++)
     {
         Vector2i cell = walls[i];
@@ -751,12 +858,8 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
         navigation_blocked_set.insert(cell);
         snapshot.walls.push_back(cell);
     }
-    for (int i = 0; i < navigation_blockers.size(); i++)
-    {
-        Vector2i cell = navigation_blockers[i];
-        if (navigation_blocked_set.insert(cell).second)
-            snapshot.navigation_blockers.push_back(cell);
-    }
+    std::unordered_set<Vector2i, Vector2iHash> navigation_penalty_set;
+    add_navigation_coverage_blockers(floors, navigation_penalty_set, &snapshot.navigation_blockers);
     for (int i = 0; i < blockers.size(); i++)
     {
         Vector2i cell = blockers[i];
@@ -765,7 +868,6 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
             snapshot.walls.push_back(cell);
     }
 
-    Array floors = floor_layer->get_used_cells();
     snapshot.walkables.reserve(floors.size());
     bool goal_is_walkable = false;
     for (int i = 0; i < floors.size(); i++)
@@ -870,6 +972,11 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     for (const Vector2i &cell : snapshot.walkables)
         walkable_set.insert(cell);
 
+    std::unordered_set<Vector2i, Vector2iHash> navigation_penalty_set;
+    navigation_penalty_set.reserve(snapshot.navigation_blockers.size());
+    for (const Vector2i &cell : snapshot.navigation_blockers)
+        navigation_penalty_set.insert(cell);
+
     if (!walkable_set.count(snapshot.goal_cell))
         return result;
 
@@ -950,6 +1057,8 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
             }
 
             double step = (i < 4) ? 1.0 : 1.41421356237;
+            if (navigation_penalty_set.count(nb))
+                step *= NAVIGATION_BLOCKING_LAYER_COST_MULTIPLIER;
             double new_cost = cur.cost + step;
             if (new_cost < costs[nb])
             {

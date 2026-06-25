@@ -1359,7 +1359,7 @@ deceleration = 100000.0
 max_speed = 300.0
 sprite_node_path = NodePath("rosa")
 sprite_offset = Vector2(0, -36)
-weapon_origin = Vector2(0, -20)
+weapon_origin = Vector2(0, -12)
 
 [node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
 position = Vector2(0, -20)
@@ -1388,7 +1388,6 @@ dev_keys = true
 draw_combat_hitboxes = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
-draw_flow_field = true
 verbose = true
 show_gardens = false
 monster_eating_time = 1.0

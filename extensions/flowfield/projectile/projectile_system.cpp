@@ -282,6 +282,8 @@ namespace ffcore
                     const AgentData *a = steering ? steering->get_agent(nid) : nullptr;
                     if (!a)
                         continue;
+                    if (a->phase == AgentPhase::Drowning)
+                        continue;
                     if (a->profile.weapon_immune)
                         continue;
                     if (p.affected_smash_classes != 0 &&

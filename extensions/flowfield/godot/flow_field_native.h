@@ -90,12 +90,19 @@ namespace godot
         bool prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell);
         void build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
                         std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
+        void add_navigation_coverage_blockers(const Array &floor_cells,
+                                              std::unordered_set<Vector2i, Vector2iHash> &navigation_blocked_set,
+                                              std::vector<Vector2i> *out_blockers = nullptr) const;
+        bool cell_reaches_navigation_blocking_coverage(const Vector2i &cell,
+                                                       double radius,
+                                                       double threshold) const;
         void apply_physics_passability(ffcore::FlowField &target_field,
                                        const Rect2i &used,
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
-                           std::unordered_map<Vector2i, double, Vector2iHash> &costs);
+                           std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+                           const std::unordered_set<Vector2i, Vector2iHash> &navigation_penalty_set = {});
         void compute_directions(const Rect2i &used,
                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs,

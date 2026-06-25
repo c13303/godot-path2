@@ -7,11 +7,17 @@ const RADIUS_COLOR: Color = Color(0.55, 0.55, 0.55, 0.8)
 const FORBIDDEN_RADIUS_COLOR: Color = Color(1.0, 0.1, 0.1, 0.9)
 const RADIUS_LINE_WIDTH: float = 1.0
 const RADIUS_SEGMENTS: int = 96
+const COVERAGE_FILL_COLOR: Color = Color(0.55, 0.55, 0.55, 0.22)
+const LOS_PRECOMPUTE_BUDGET_MS: float = 1.5
+const LOS_PENDING: int = 0
+const LOS_READY: int = 1
 
 var _fight_system: FightSystem
 var _building_objects: BuildingObjectManager
 var _build_system: Node
+var _wall_layer: TileMapLayer
 var _turrets: Dictionary = {}
+var _los_generation: int = 0
 var _has_hovered_turret: bool = false
 var _hovered_turret_cell: Vector2i = Vector2i.ZERO
 var _has_preview_turret: bool = false
@@ -24,6 +30,7 @@ func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
 	_building_objects = get_node_or_null("../../Map/BuildingObjectManager") as BuildingObjectManager
 	_build_system = get_node_or_null("../../Map/BuildSystem")
+	_wall_layer = get_node_or_null("../../Map/MonTilemap/wallz") as TileMapLayer
 	if _fight_system == null or _building_objects == null:
 		push_error("TurretSystem: FightSystem or BuildingObjectManager is missing.")
 		set_process(false)
@@ -60,7 +67,7 @@ func _process(delta: float) -> void:
 		if elapsed < shoot_frequency:
 			state["elapsed"] = elapsed
 			continue
-		var target: Node2D = _nearest_enemy_in_range(origin, activation_range)
+		var target: Node2D = _nearest_enemy_in_range(cell, origin, activation_range)
 		if target == null:
 			# Ready to fire but nothing in range; stay primed and retry next frame.
 			state["elapsed"] = shoot_frequency
@@ -73,7 +80,7 @@ func _process(delta: float) -> void:
 		_fight_system.update_turret_spray(cell, str(state.get("weapon", "spray")), origin, direction, delta)
 
 func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float, delta: float) -> void:
-	var target: Node2D = _nearest_enemy_in_range(origin, activation_range)
+	var target: Node2D = _nearest_enemy_in_range(cell, origin, activation_range)
 	var direction: Vector2 = (target.global_position - origin) if target != null else (state.get("last_direction", Vector2.RIGHT) as Vector2)
 	state["last_direction"] = direction
 	_fight_system.update_turret_spray(cell, str(state.get("weapon", "spray")), origin, direction, delta)
@@ -94,7 +101,10 @@ func _draw() -> void:
 		return
 	if _has_hovered_turret:
 		var state: Dictionary = _turrets.get(_hovered_turret_cell, {}) as Dictionary
-		_draw_turret_range(_hovered_turret_cell, float(state.get("range", 0.0)), RADIUS_COLOR)
+		if int(state.get("los_status", LOS_PENDING)) == LOS_READY:
+			_draw_turret_coverage(state, COVERAGE_FILL_COLOR)
+		else:
+			_draw_turret_range(_hovered_turret_cell, float(state.get("range", 0.0)), RADIUS_COLOR)
 	if _has_preview_turret and (not _has_hovered_turret or _preview_turret_cell != _hovered_turret_cell):
 		var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
 		_draw_turret_range(_preview_turret_cell, float(turret_def.get("range", 200.0)), RADIUS_COLOR)
@@ -103,6 +113,22 @@ func _draw_turret_range(cell: Vector2i, activation_range: float, color: Color) -
 	if activation_range <= 0.0:
 		return
 	draw_arc(to_local(_turret_world_position(cell)), activation_range, 0.0, TAU, RADIUS_SEGMENTS, color, RADIUS_LINE_WIDTH, true)
+
+func _draw_turret_coverage(state: Dictionary, color: Color) -> void:
+	var layer: TileMapLayer = _building_objects.blocking_buildings
+	if layer == null:
+		return
+	var raw_visible_cells: Variant = state.get("visible_cells", {})
+	if not (raw_visible_cells is Dictionary):
+		return
+	var visible_cells: Dictionary = raw_visible_cells as Dictionary
+	if visible_cells.is_empty():
+		return
+	var half_size: Vector2 = Vector2.ONE * (_tile_size_pixels(layer) * 0.5)
+	for raw_cell: Variant in visible_cells.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var center: Vector2 = to_local(layer.to_global(layer.map_to_local(cell)))
+		draw_rect(Rect2(center - half_size, half_size * 2.0), color, true)
 
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	if item_id == TURRET_ID:
@@ -130,9 +156,13 @@ func _register_turret(cell: Vector2i) -> void:
 		"spraying": false,
 		"spray_time_left": 0.0,
 		"last_direction": Vector2.RIGHT,
+		"los_status": LOS_PENDING,
+		"visible_cells": {},
+		"los_generation": _next_los_generation(),
 	}
 	# Initialize this turret's independent spray timers.
 	_fight_system.create_turret_spray(cell)
+	call_deferred("_compute_turret_los_async", cell, int((_turrets[cell] as Dictionary).get("los_generation", 0)))
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
 
@@ -186,7 +216,7 @@ func _update_preview_turret() -> void:
 	_forbidden_preview_range = forbidden_preview_range
 	queue_redraw()
 
-func _nearest_enemy_in_range(origin: Vector2, activation_range: float) -> Node2D:
+func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_range: float) -> Node2D:
 	var nearest: Node2D = null
 	var nearest_distance_squared: float = activation_range * activation_range
 	for raw_enemy: Node in get_tree().get_nodes_in_group(&"monsters"):
@@ -194,7 +224,7 @@ func _nearest_enemy_in_range(origin: Vector2, activation_range: float) -> Node2D
 		if enemy == null or not is_instance_valid(enemy):
 			continue
 		var distance_squared: float = origin.distance_squared_to(enemy.global_position)
-		if distance_squared <= nearest_distance_squared:
+		if distance_squared <= nearest_distance_squared and _turret_can_see_world_position(turret_cell, enemy.global_position):
 			nearest = enemy
 			nearest_distance_squared = distance_squared
 	return nearest
@@ -202,3 +232,113 @@ func _nearest_enemy_in_range(origin: Vector2, activation_range: float) -> Node2D
 func _turret_world_position(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _building_objects.blocking_buildings
 	return layer.to_global(layer.map_to_local(cell))
+
+func _turret_can_see_world_position(turret_cell: Vector2i, world_position: Vector2) -> bool:
+	var state: Dictionary = _turrets.get(turret_cell, {}) as Dictionary
+	if int(state.get("los_status", LOS_PENDING)) != LOS_READY:
+		return false
+	var raw_visible_cells: Variant = state.get("visible_cells", {})
+	if not (raw_visible_cells is Dictionary):
+		return false
+	var visible_cells: Dictionary = raw_visible_cells as Dictionary
+	var layer: TileMapLayer = _building_objects.blocking_buildings
+	if layer == null:
+		return false
+	var target_cell: Vector2i = layer.local_to_map(layer.to_local(world_position))
+	return visible_cells.has(target_cell)
+
+func _compute_turret_los_async(cell: Vector2i, generation: int) -> void:
+	if not _turrets.has(cell):
+		return
+	var state: Dictionary = _turrets[cell] as Dictionary
+	if int(state.get("los_generation", 0)) != generation:
+		return
+	var layer: TileMapLayer = _building_objects.blocking_buildings
+	if layer == null:
+		return
+	var activation_range: float = float(state.get("range", 0.0))
+	var visible_cells: Dictionary = {}
+	if activation_range <= 0.0:
+		_finish_turret_los(cell, generation, visible_cells)
+		return
+
+	var tile_size: float = _tile_size_pixels(layer)
+	var radius_cells: int = ceili(activation_range / maxf(1.0, tile_size))
+	var origin_world: Vector2 = _turret_world_position(cell)
+	var range_squared: float = activation_range * activation_range
+	var budget_us: int = maxi(500, int(LOS_PRECOMPUTE_BUDGET_MS * 1000.0))
+	var slice_started_us: int = Time.get_ticks_usec()
+
+	for y_offset: int in range(-radius_cells, radius_cells + 1):
+		for x_offset: int in range(-radius_cells, radius_cells + 1):
+			if not _turrets.has(cell):
+				return
+			state = _turrets[cell] as Dictionary
+			if int(state.get("los_generation", 0)) != generation:
+				return
+			var target_cell: Vector2i = cell + Vector2i(x_offset, y_offset)
+			if _is_los_blocker_cell(target_cell):
+				continue
+			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
+			if origin_world.distance_squared_to(target_world) > range_squared:
+				continue
+			if _has_line_of_sight_cells(cell, target_cell):
+				visible_cells[target_cell] = true
+			if Time.get_ticks_usec() - slice_started_us >= budget_us:
+				await get_tree().process_frame
+				slice_started_us = Time.get_ticks_usec()
+
+	_finish_turret_los(cell, generation, visible_cells)
+
+func _finish_turret_los(cell: Vector2i, generation: int, visible_cells: Dictionary) -> void:
+	if not _turrets.has(cell):
+		return
+	var state: Dictionary = _turrets[cell] as Dictionary
+	if int(state.get("los_generation", 0)) != generation:
+		return
+	state["visible_cells"] = visible_cells
+	state["los_status"] = LOS_READY
+	if _has_hovered_turret and _hovered_turret_cell == cell:
+		queue_redraw()
+
+func _has_line_of_sight_cells(from_cell: Vector2i, to_cell: Vector2i) -> bool:
+	var x0: int = from_cell.x
+	var y0: int = from_cell.y
+	var x1: int = to_cell.x
+	var y1: int = to_cell.y
+	var dx: int = absi(x1 - x0)
+	var sx: int = 1 if x0 < x1 else -1
+	var dy: int = -absi(y1 - y0)
+	var sy: int = 1 if y0 < y1 else -1
+	var error: int = dx + dy
+	var x: int = x0
+	var y: int = y0
+	while true:
+		if x == x1 and y == y1:
+			return true
+		var error_twice: int = error * 2
+		if error_twice >= dy:
+			error += dy
+			x += sx
+		if error_twice <= dx:
+			error += dx
+			y += sy
+		var current_cell: Vector2i = Vector2i(x, y)
+		if current_cell == to_cell:
+			return true
+		if current_cell != from_cell and _is_los_blocker_cell(current_cell):
+			return false
+	return true
+
+func _is_los_blocker_cell(cell: Vector2i) -> bool:
+	return _wall_layer != null and _wall_layer.get_cell_source_id(cell) >= 0
+
+func _tile_size_pixels(layer: TileMapLayer) -> float:
+	if layer == null or layer.tile_set == null:
+		return 16.0
+	var tile_size: Vector2i = layer.tile_set.tile_size
+	return maxf(1.0, float(maxi(tile_size.x, tile_size.y)))
+
+func _next_los_generation() -> int:
+	_los_generation += 1
+	return _los_generation

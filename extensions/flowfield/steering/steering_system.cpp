@@ -13,6 +13,9 @@
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
+static constexpr double DROWNING_VELOCITY_DAMPING_PER_SEC = 35.0;
+static constexpr double DROWNING_STOP_SPEED = 8.0;
+
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
 SteeringSystem *ffcore::get_global_steering_system() { return g_steering; }
@@ -81,6 +84,11 @@ static inline double agent_fight_query_padding(const AgentData &a)
 static inline Vec2 agent_fight_center(const AgentData &a)
 {
     return a.position + Vec2(0, a.profile.fight_offset_y);
+}
+
+static inline bool is_drowning_agent(const AgentData &a)
+{
+    return a.phase == AgentPhase::Drowning;
 }
 
 static inline Vec2 aabb_radial_direction(const Vec2 &origin, const AgentData &agent)
@@ -1090,6 +1098,8 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     AgentData &agent = agents[it->second];
     if (agent.profile.weapon_immune)
         return;
+    if (is_drowning_agent(agent))
+        return;
     if (!std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(force))
     {
         godot::UtilityFunctions::printerr(
@@ -1149,6 +1159,8 @@ void SteeringSystem::apply_area_smash(const Vec2 &pos, double radius, const Vec2
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (is_drowning_agent(agent))
+            continue;
         if (agent.profile.weapon_immune)
             continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
@@ -1199,6 +1211,8 @@ void SteeringSystem::apply_cone_smash(const Vec2 &pos, double radius, const Vec2
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (is_drowning_agent(agent))
+            continue;
         if (agent.profile.weapon_immune)
             continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
@@ -1394,6 +1408,8 @@ void SteeringSystem::apply_area_damage(const Vec2 &pos, double radius, int ignor
             continue;
 
         const AgentData &agent = agents[it->second];
+        if (is_drowning_agent(agent))
+            continue;
         if (agent.profile.weapon_immune)
             continue;
         if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
@@ -1429,6 +1445,22 @@ void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seco
     AgentData &a = agents[it->second];
     a.phase = phase;
     a.eating_seconds = eating_seconds;
+    if (phase == AgentPhase::Drowning)
+    {
+        a.pending_smash = Vec2(0, 0);
+        a.smash_pending = false;
+        a.smash_delay = 0.0;
+        a.pending_smash_friction = -1.0;
+        a.pending_smash_control_suppression = 1.0;
+        a.pending_smash_control_suppression_duration = 0.0;
+        a.smash_force = Vec2(0, 0);
+        a.smash_friction = -1.0;
+        a.smash_control_suppression = 1.0;
+        a.smash_control_suppression_timer = 0.0;
+        a.smash_just_reset = false;
+        a.is_propelled = false;
+        a.propelled_timer = 0.0;
+    }
 }
 
 void SteeringSystem::set_agent_path(int id, const std::vector<Vec2> &waypoints_world)
@@ -1579,7 +1611,7 @@ void SteeringSystem::update_all(double delta)
                 bool damage_ready = damage_it == zone.damage_cooldowns.end() || damage_it->second <= 0.0;
                 if (damage_ready)
                 {
-                    if (zone.damage > 0)
+                    if (zone.damage > 0 && !is_drowning_agent(agent))
                         damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
                     zone.damage_cooldowns[nid] = zone.damage_frequency;
                 }
@@ -1589,7 +1621,7 @@ void SteeringSystem::update_all(double delta)
                 double base = std::max(0.0, 1.0 - dist / zone.radius);
                 double attenuation = std::pow(base, zone.falloff);
                 apply_smash_impulse(nid, impulse_dir, zone.force * attenuation, zone.friction_loss, 0.0, zone.detach_flow, zone.control_suppression, zone.control_suppression_duration);
-                if (zone.damage > 0)
+                if (zone.damage > 0 && !is_drowning_agent(agent))
                     damage_events.push_back(DamageEvent{nid, zone.damage, fight_center});
                 zone.hit_ids.insert(nid);
             }
@@ -1624,6 +1656,20 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        if (is_drowning_agent(a))
+        {
+            a.pending_smash = Vec2(0, 0);
+            a.smash_pending = false;
+            a.smash_delay = 0.0;
+            a.smash_force = Vec2(0, 0);
+            a.smash_just_reset = false;
+            a.is_propelled = false;
+            a.propelled_timer = 0.0;
+            a.smash_friction = -1.0;
+            a.smash_control_suppression = 1.0;
+            a.smash_control_suppression_timer = 0.0;
+            continue;
+        }
         if (a.smash_pending)
         {
             a.smash_delay -= delta;
@@ -1645,6 +1691,15 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        if (is_drowning_agent(a))
+        {
+            const double vel_damp = std::exp(-DROWNING_VELOCITY_DAMPING_PER_SEC * delta);
+            a.velocity = a.velocity * vel_damp;
+            if (safe_len(a.velocity) < DROWNING_STOP_SPEED)
+                a.velocity = Vec2(0, 0);
+            a.smash_force = Vec2(0, 0);
+            continue;
+        }
         if (a.smash_control_suppression_timer > 0.0)
             a.smash_control_suppression_timer = std::max(0.0, a.smash_control_suppression_timer - delta);
 
@@ -1705,6 +1760,25 @@ void SteeringSystem::update_all(double delta)
         FlowField *nav = a.flow ? a.flow : default_flow;
         if (nav && !nav->is_ready())
             nav = nullptr;
+
+        if (is_drowning_agent(a))
+        {
+            Vec2 offset(0, a.profile.foot_offset_y);
+            Vec2 old_pos = a.position;
+            Vec2 step = a.velocity * delta;
+            a.position = apply_walk_with_walls(a, step, nav);
+            if (nav)
+                ultimate_wall_correction(a, nav, delta);
+            resolve_static_obstacle_overlap(a);
+            grid->update(a.id, old_pos + offset, agent_foot_point(a));
+            a.debug_nav_dir = Vec2(0, 0);
+            a.debug_wall_repel = Vec2(0, 0);
+            a.debug_separation = Vec2(0, 0);
+            a.debug_desired_dir = safe_normalize(a.velocity);
+            a.debug_target_velocity = Vec2(0, 0);
+            a.update_motion_state(delta, cfg, safe_len(a.velocity) > 1.0);
+            continue;
+        }
 
         bool force_motion_state = false;
 
