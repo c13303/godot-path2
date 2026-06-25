@@ -10,6 +10,7 @@
 #include "../grid/spatial_grid.h"
 #include "../flow/flow_field_manager.h"
 #include <cstdlib>
+#include <utility>
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
@@ -1764,6 +1765,9 @@ void SteeringSystem::update_all(double delta)
         if (is_drowning_agent(a))
         {
             Vec2 offset(0, a.profile.foot_offset_y);
+            Vec2 target_velocity = directional_cell_field_velocity_for_agent(a);
+            if (!target_velocity.is_zero())
+                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
             Vec2 old_pos = a.position;
             Vec2 step = a.velocity * delta;
             a.position = apply_walk_with_walls(a, step, nav);
@@ -1775,7 +1779,7 @@ void SteeringSystem::update_all(double delta)
             a.debug_wall_repel = Vec2(0, 0);
             a.debug_separation = Vec2(0, 0);
             a.debug_desired_dir = safe_normalize(a.velocity);
-            a.debug_target_velocity = Vec2(0, 0);
+            a.debug_target_velocity = target_velocity;
             a.update_motion_state(delta, cfg, safe_len(a.velocity) > 1.0);
             continue;
         }

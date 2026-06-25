@@ -66,6 +66,11 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("unregister_static_obstacle", "obstacle_id"), &SteeringSystemNative::unregister_static_obstacle);
     ClassDB::bind_method(D_METHOD("clear_static_obstacles"), &SteeringSystemNative::clear_static_obstacles);
     ClassDB::bind_method(D_METHOD("get_static_obstacle_count"), &SteeringSystemNative::get_static_obstacle_count);
+    ClassDB::bind_method(D_METHOD("set_directional_cell_field", "field_id", "origin_world", "tile_size", "speed", "cells", "directions", "sample_offset_world", "sample_radius_world"), &SteeringSystemNative::set_directional_cell_field, DEFVAL(Vector2()), DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("clear_directional_cell_field", "field_id"), &SteeringSystemNative::clear_directional_cell_field);
+    ClassDB::bind_method(D_METHOD("clear_directional_cell_fields"), &SteeringSystemNative::clear_directional_cell_fields);
+    ClassDB::bind_method(D_METHOD("bind_phase_directional_cell_field", "phase", "field_id"), &SteeringSystemNative::bind_phase_directional_cell_field);
+    ClassDB::bind_method(D_METHOD("clear_phase_directional_cell_field", "phase"), &SteeringSystemNative::clear_phase_directional_cell_field);
     ClassDB::bind_method(D_METHOD("get_agents_in_map_cell", "cell"), &SteeringSystemNative::get_agents_in_map_cell);
     ClassDB::bind_method(D_METHOD("get_agent_debug_snapshot", "agent_id"), &SteeringSystemNative::get_agent_debug_snapshot);
     ClassDB::bind_method(D_METHOD("set_paused", "paused"), &SteeringSystemNative::set_paused);
@@ -522,6 +527,51 @@ void SteeringSystemNative::clear_static_obstacles()
 int SteeringSystemNative::get_static_obstacle_count() const
 {
     return system.get_static_obstacle_count();
+}
+
+void SteeringSystemNative::set_directional_cell_field(int field_id, const Vector2 &origin_world, double tile_size, double speed, const PackedVector2Array &cells, const PackedVector2Array &directions, const Vector2 &sample_offset_world, double sample_radius_world)
+{
+    const int count = std::min(cells.size(), directions.size());
+    std::vector<ffcore::Vec2i> native_cells;
+    std::vector<ffcore::Vec2> native_directions;
+    native_cells.reserve(count);
+    native_directions.reserve(count);
+    for (int i = 0; i < count; ++i)
+    {
+        const Vector2 cell = cells[i];
+        const Vector2 direction = directions[i];
+        native_cells.emplace_back((int)cell.x, (int)cell.y);
+        native_directions.emplace_back(direction.x, direction.y);
+    }
+    system.set_directional_cell_field(
+        field_id,
+        ffcore::Vec2(origin_world.x, origin_world.y),
+        tile_size,
+        speed,
+        native_cells,
+        native_directions,
+        ffcore::Vec2(sample_offset_world.x, sample_offset_world.y),
+        sample_radius_world);
+}
+
+void SteeringSystemNative::clear_directional_cell_field(int field_id)
+{
+    system.clear_directional_cell_field(field_id);
+}
+
+void SteeringSystemNative::clear_directional_cell_fields()
+{
+    system.clear_directional_cell_fields();
+}
+
+void SteeringSystemNative::bind_phase_directional_cell_field(int phase, int field_id)
+{
+    system.bind_phase_directional_cell_field((ffcore::AgentPhase)phase, field_id);
+}
+
+void SteeringSystemNative::clear_phase_directional_cell_field(int phase)
+{
+    system.clear_phase_directional_cell_field((ffcore::AgentPhase)phase);
 }
 
 Array SteeringSystemNative::get_agents_in_map_cell(const Vector2i &cell) const

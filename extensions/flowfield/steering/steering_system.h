@@ -123,6 +123,15 @@ namespace ffcore
         bool has_static_obstacle(int id) const;
         int get_static_obstacle_count() const { return (int)static_obstacles.size(); }
 
+        // Generic sparse per-cell direction fields. Game-side owns the semantic
+        // meaning (water current, conveyor, wind, etc.); the core only samples a
+        // world position into a cell and returns a velocity target for bound phases.
+        void set_directional_cell_field(int field_id, const Vec2 &origin_world, double tile_size, double speed, const std::vector<Vec2i> &cells, const std::vector<Vec2> &directions, const Vec2 &sample_offset_world = Vec2(0, 0), double sample_radius_world = 0.0);
+        void clear_directional_cell_field(int field_id);
+        void clear_directional_cell_fields();
+        void bind_phase_directional_cell_field(AgentPhase phase, int field_id);
+        void clear_phase_directional_cell_field(AgentPhase phase);
+
     private:
         // Dedicated spatial index for static obstacles. Kept separate from the moving-agent
         // SpatialGrid so obstacle ids can never leak into id_to_index / agent iteration.
@@ -188,6 +197,28 @@ namespace ffcore
             }
         };
 
+        struct DirectionalCellField
+        {
+            Vec2 origin_world;
+            Vec2 sample_offset_world;
+            double tile_size = 32.0;
+            double speed = 0.0;
+            double sample_radius_world = 0.0;
+            std::unordered_map<long long, Vec2> directions;
+
+            long long key(int x, int y) const
+            {
+                return (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+            }
+            Vec2i world_to_cell(const Vec2 &world) const
+            {
+                const double safe_tile = std::max(1.0, tile_size);
+                return Vec2i(
+                    (int)std::floor((world.x - origin_world.x) / safe_tile),
+                    (int)std::floor((world.y - origin_world.y) / safe_tile));
+            }
+        };
+
         std::vector<AgentData> agents;
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
@@ -204,6 +235,9 @@ namespace ffcore
         StaticObstacleGrid static_obstacle_grid;
         double max_static_obstacle_radius = 0.0;
 
+        std::unordered_map<int, DirectionalCellField> directional_cell_fields;
+        std::unordered_map<int, int> phase_directional_cell_fields;
+
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;
 
@@ -213,6 +247,7 @@ namespace ffcore
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);
+        Vec2 directional_cell_field_velocity_for_agent(const AgentData &agent) const;
         // Hard depenetration: pushes an agent's foot point out of any overlapping static
         // obstacle after integration. Guarantees blocking even when soft steering is
         // damped by lerp/momentum. Generic: applies to any moving agent.

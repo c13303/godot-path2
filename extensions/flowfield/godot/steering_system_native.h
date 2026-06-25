@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <unordered_map>
 
 #include "../steering/steering_system.h"
@@ -90,6 +91,14 @@ namespace godot
         void unregister_static_obstacle(int obstacle_id);
         void clear_static_obstacles();
         int get_static_obstacle_count() const;
+
+        // Generic sparse cell-direction field API. Cells are integer map cells
+        // encoded as Vector2 entries; directions are normalized by the C++ core.
+        void set_directional_cell_field(int field_id, const Vector2 &origin_world, double tile_size, double speed, const PackedVector2Array &cells, const PackedVector2Array &directions, const Vector2 &sample_offset_world, double sample_radius_world);
+        void clear_directional_cell_field(int field_id);
+        void clear_directional_cell_fields();
+        void bind_phase_directional_cell_field(int phase, int field_id);
+        void clear_phase_directional_cell_field(int phase);
 
         Array get_agents_in_map_cell(const Vector2i &cell) const;
         Dictionary get_agent_debug_snapshot(int agent_id) const;

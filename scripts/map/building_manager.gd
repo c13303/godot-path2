@@ -421,6 +421,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_night_preparation_token += 1
 		_night_preparing = false
 		_night_preparation_ready = false
+		_clear_waterpool_directional_field()
 		return
 	# Night visuals/build lock become active immediately, but spawning remains gated
 	# while all daytime topology is consumed by the capped preparation coroutine.
@@ -460,6 +461,24 @@ func _get_progression() -> Node:
 	if scene != null:
 		_progression = scene.get_node_or_null("progression")
 	return _progression
+
+func _get_steering_system() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("CPP/SteeringSystemNative")
+
+func _rebuild_waterpool_directional_field() -> void:
+	if watersources == null or not watersources.has_method("rebuild_waterpool_directional_field"):
+		return
+	var steering: Node = _get_steering_system()
+	watersources.call("rebuild_waterpool_directional_field", steering)
+
+func _clear_waterpool_directional_field() -> void:
+	if watersources == null or not watersources.has_method("clear_waterpool_directional_field"):
+		return
+	var steering: Node = _get_steering_system()
+	watersources.call("clear_waterpool_directional_field", steering)
 
 func _monster_count() -> int:
 	return get_tree().get_nodes_in_group("monsters").size()
@@ -511,6 +530,7 @@ func _run_night_preparation(token: int) -> void:
 		return
 
 	_scan_buildings()
+	_rebuild_waterpool_directional_field()
 	_navigation_topology_dirty = false
 	await get_tree().process_frame
 	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
@@ -1126,6 +1146,7 @@ func _apply_navigation_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
 		return
 	_navigation_topology_dirty = false
+	_rebuild_waterpool_directional_field()
 	_rebuild_walkable_map_cache()
 	if _plant_zone_built:
 		_rebuild_plant_zone_from_layer()

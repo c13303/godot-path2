@@ -6,6 +6,14 @@ class_name WaterSources
 @export_range(0.01, 1.0, 0.01) var player_slowdown: float = 0.5
 @export_range(0.0, 1.0, 0.01) var drowning_coverage_threshold: float = 0.5
 @export var foot_sample_offset: Vector2 = Vector2.ZERO
+@export_group("Waterpools")
+@export var waterpool_drift_enabled: bool = true
+@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_speed: float = 36.0
+@export var waterpool_drift_sample_offset: Vector2 = Vector2.ZERO
+@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_sample_radius: float = 24.0
+@export var waterpool_directional_field_id: int = 1
+@export var waterpool_bound_phase: int = 7
+@export_group("")
 
 
 func has_water_at_foot_position(world_position: Vector2) -> bool:
@@ -62,3 +70,54 @@ func _tile_size() -> Vector2:
 		return Vector2(32.0, 32.0)
 	var size: Vector2i = current_tile_set.tile_size
 	return Vector2(maxf(1.0, float(size.x)), maxf(1.0, float(size.y)))
+
+func rebuild_waterpool_directional_field(steering: Node) -> bool:
+	if steering == null:
+		return false
+	if not steering.has_method("set_directional_cell_field"):
+		return false
+	if not steering.has_method("bind_phase_directional_cell_field"):
+		return false
+	if not waterpool_drift_enabled or waterpool_drift_speed <= 0.0:
+		_clear_waterpool_directional_field(steering)
+		return true
+
+	var used_water_cells: Array[Vector2i] = get_used_cells()
+	if used_water_cells.is_empty():
+		_clear_waterpool_directional_field(steering)
+		return true
+
+	var waterpool_field: Dictionary = Waterpools.build_directional_field(used_water_cells)
+	var field_cells: PackedVector2Array = waterpool_field.get("cells", PackedVector2Array()) as PackedVector2Array
+	var field_directions: PackedVector2Array = waterpool_field.get("directions", PackedVector2Array()) as PackedVector2Array
+
+	if field_cells.size() == 0:
+		_clear_waterpool_directional_field(steering)
+		return true
+
+	var size: Vector2 = _tile_size()
+	var origin_world: Vector2 = to_global(map_to_local(Vector2i.ZERO) - size * 0.5)
+	steering.call(
+		"set_directional_cell_field",
+		waterpool_directional_field_id,
+		origin_world,
+		maxf(1.0, size.x),
+		waterpool_drift_speed,
+		field_cells,
+		field_directions,
+		waterpool_drift_sample_offset,
+		waterpool_drift_sample_radius
+	)
+	steering.call("bind_phase_directional_cell_field", waterpool_bound_phase, waterpool_directional_field_id)
+	return true
+
+func clear_waterpool_directional_field(steering: Node) -> void:
+	_clear_waterpool_directional_field(steering)
+
+func _clear_waterpool_directional_field(steering: Node) -> void:
+	if steering == null:
+		return
+	if steering.has_method("clear_directional_cell_field"):
+		steering.call("clear_directional_cell_field", waterpool_directional_field_id)
+	if steering.has_method("clear_phase_directional_cell_field"):
+		steering.call("clear_phase_directional_cell_field", waterpool_bound_phase)
