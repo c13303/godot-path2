@@ -140,6 +140,8 @@ var _find_path_in_zone_accum: Dictionary = {}
 var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
+var _number_of_roses_before_satiety: int = 3
+var _same_garden_only: bool = false
 var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
@@ -388,6 +390,12 @@ func set_empty_garden_local_retarget_radius(value: int) -> void:
 
 func set_eating_time(value: float) -> void:
 	_eating_time = maxf(0.0, value)
+
+func set_number_of_roses_before_satiety(value: int) -> void:
+	_number_of_roses_before_satiety = maxi(1, value)
+
+func set_same_garden_only(value: bool) -> void:
+	_same_garden_only = value
 
 func _ready() -> void:
 	startup_loading_progress.emit(0.48, "Preparing zones")
@@ -2112,24 +2120,59 @@ func _process_eating_agents(delta: float) -> void:
 				continue
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
-			# Direct wallexit-FF escape is the ONLY post-eating escape path. Every real
-			# exit wall already has a flow field covering the whole walkable map (floor
-			# minus walls; plant/garden cells are normal walkable cells), so a finished
-			# eater attaches straight to the nearest reachable escape FF — no garden-exit
-			# selection, no per-agent A* out of the garden.
-			if _assign_agent_to_escape(agent):
-				eat_exit_direct_ff_success += 1
-			else:
-				eat_exit_direct_ff_failed += 1
-				# Should be rare: a walkable plant cell with no covering exit-wall FF
-				# means FF coverage/walkability is wrong and must be fixed there, not
-				# papered over with an A*-out fallback. Park the agent safely (queue
-				# helper detaches stale nav and sets waiting_new_status) and warn.
-				var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
-				push_warning("direct_wallexit_ff_escape_failed nav_id=%d cell=%s" % [nav_id, fb_cell])
-				var fb_spawner: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-				var fb_garden: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-				_queue_agent_for_garden_retarget(nav_id, agent, "escape", fb_spawner, fb_garden)
+			_decide_after_eating(nav_id, agent, data)
+
+func _decide_after_eating(nav_id: int, agent: Node2D, data: Dictionary) -> void:
+	if not is_instance_valid(agent):
+		return
+	var roses_eaten: int = int(data.get("roses_eaten", 1))
+	var garden_id: int = int(data.get("garden_id", 0))
+	var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
+		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	if garden_id <= 0 and agent.has_meta("garden_id"):
+		garden_id = int(agent.get_meta("garden_id"))
+
+	if roses_eaten >= _number_of_roses_before_satiety:
+		_escape_finished_eater(nav_id, agent)
+		return
+
+	if garden_id > 0 and _garden_has_edible_plants(garden_id):
+		agent.set_meta("garden_id", garden_id)
+		if spawner_cell != INVALID_CELL:
+			agent.set_meta("spawner_cell", spawner_cell)
+		_start_astar_in(agent, spawner_cell)
+		_drain_pending_empty_gardens()
+		return
+	_drain_pending_empty_gardens()
+
+	if _same_garden_only:
+		_escape_finished_eater(nav_id, agent)
+		return
+
+	var retarget_garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else garden_id
+	if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, retarget_garden_id):
+		return
+	_escape_finished_eater(nav_id, agent)
+
+func _escape_finished_eater(nav_id: int, agent: Node2D) -> void:
+	# Direct wallexit-FF escape is the ONLY post-eating escape path. Every real
+	# exit wall already has a flow field covering the whole walkable map (floor
+	# minus walls; plant/garden cells are normal walkable cells), so a finished
+	# eater attaches straight to the nearest reachable escape FF — no garden-exit
+	# selection, no per-agent A* out of the garden.
+	if _assign_agent_to_escape(agent):
+		eat_exit_direct_ff_success += 1
+		return
+	eat_exit_direct_ff_failed += 1
+	# Should be rare: a walkable plant cell with no covering exit-wall FF means FF
+	# coverage/walkability is wrong and must be fixed there, not papered over with
+	# an A*-out fallback. Park the agent safely and warn.
+	var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
+	push_warning("direct_wallexit_ff_escape_failed nav_id=%d cell=%s" % [nav_id, fb_cell])
+	var fb_spawner: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	var fb_garden: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	_queue_agent_for_garden_retarget(nav_id, agent, "escape", fb_spawner, fb_garden)
 
 func _erase_eating_agent(nav_id: int) -> void:
 	_eating_agents.erase(nav_id)
@@ -2141,12 +2184,16 @@ func _start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = I
 	# garden_id / _handle_garden_became_empty).
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
 	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	var roses_eaten: int = int(agent.get_meta("roses_eaten")) if agent.has_meta("roses_eaten") else 0
+	roses_eaten += 1
+	agent.set_meta("roses_eaten", roses_eaten)
 	_eating_agents[nav_id] = {
 		"node": agent,
 		"timer": seconds,
 		"garden_id": garden_id,
 		"spawner_cell": spawner_cell,
-		"plant_cell": plant_cell
+		"plant_cell": plant_cell,
+		"roses_eaten": roses_eaten
 	}
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)

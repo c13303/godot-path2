@@ -12,7 +12,7 @@ const BASE_FLIGHT_DURATION: float = 0.72
 
 var _active_harvest_animation_count: int = 0
 
-func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0) -> bool:
+func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0, on_launch: Callable = Callable()) -> bool:
 	if texture == null:
 		return false
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
@@ -21,14 +21,17 @@ func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0) -> b
 	_active_harvest_animation_count += 1
 	var start_delay: float = float(sequence_index) * delay_between_seeds
 	if start_delay <= 0.0:
-		_start_seed_flight(world_position)
+		_start_seed_flight(world_position, on_launch)
 		return true
 	var delay_tween: Tween = create_tween()
 	delay_tween.tween_interval(start_delay)
-	delay_tween.tween_callback(Callable(self, "_start_seed_flight").bind(world_position))
+	delay_tween.tween_callback(Callable(self, "_start_seed_flight").bind(world_position, on_launch))
 	return true
 
-func _start_seed_flight(world_position: Vector2) -> void:
+func _start_seed_flight(world_position: Vector2, on_launch: Callable = Callable()) -> void:
+	# The seed pops off the rose now: let the caller dry the source rose.
+	if on_launch.is_valid():
+		on_launch.call()
 	Sfx.play_random_pop()
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
 	if game_ui == null or texture == null:

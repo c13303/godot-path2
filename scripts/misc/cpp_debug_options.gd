@@ -73,6 +73,18 @@ extends Node
 		monster_eating_time = value
 		_apply_debug_settings()
 
+## Number of roses a monster eats before it becomes full and leaves.
+@export_range(1, 64, 1, "or_greater") var number_of_roses_before_satiety: int = 3:
+	set(value):
+		number_of_roses_before_satiety = value
+		_apply_debug_settings()
+
+## When enabled, a monster leaves once its current garden is empty.
+@export var same_garden_only: bool = false:
+	set(value):
+		same_garden_only = value
+		_apply_debug_settings()
+
 ## Global speed multiplier applied at startup. 1.0 = no change.
 ## Scales monster movement speed and player speed (x mult), and the
 ## eating delay (/ mult, so >1 eats faster). Weapons are unaffected.
@@ -253,6 +265,8 @@ func _apply_debug_settings() -> void:
 		# Eating delay is divided by the multiplier so >1 means "eats faster".
 		var mult: float = maxf(0.0001, speed_multiplier)
 		_call_if_available(_building_manager, "set_eating_time", monster_eating_time / mult)
+		_call_if_available(_building_manager, "set_number_of_roses_before_satiety", number_of_roses_before_satiety)
+		_call_if_available(_building_manager, "set_same_garden_only", same_garden_only)
 
 
 ## Pushes agent_max_speed = base * speed_multiplier to the native global config.

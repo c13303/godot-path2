@@ -56,6 +56,10 @@ var _spray_particles_waiting_for_position: bool = false
 var _spray_last_origin: Vector2 = Vector2.ZERO
 var _spray_has_last_origin: bool = false
 var _spray_audio_player: AudioStreamPlayer
+# Per-turret spray instances: cell (Vector2i) -> {effect, particles, aoe_id,
+# waiting_for_position, cost_time_left, facing}. Each turret owns a pre-instantiated
+# particle effect that is shown/hidden, never created per shot.
+var _turret_sprays: Dictionary = {}
 var _static_colliders_dirty: bool = true
 var _static_collider_prepare_generation: int = 0
 
@@ -585,20 +589,28 @@ func _stop_spray_audio() -> void:
 		_spray_audio_player.stop()
 
 func _setup_spray_particles() -> void:
+	var made: Dictionary = _make_spray_effect("SprayParticles")
+	_spray_particle_effect = made.get("effect") as Node2D
+	_spray_particles = made.get("particles") as CPUParticles2D
+
+# Instantiate one hidden, world-space spray particle effect and return its nodes.
+# Shared by the player's single effect and each turret's own effect.
+func _make_spray_effect(effect_name: String) -> Dictionary:
 	var effect_node: Node = SPRAY_PARTICLE_SCENE.instantiate()
-	_spray_particle_effect = effect_node as Node2D
-	if _spray_particle_effect == null:
+	var effect: Node2D = effect_node as Node2D
+	if effect == null:
 		effect_node.queue_free()
-		return
-	_spray_particle_effect.name = "SprayParticles"
-	_spray_particle_effect.z_as_relative = false
-	_spray_particle_effect.z_index = SPRAY_PARTICLE_Z_INDEX
-	_spray_particle_effect.visible = false
-	add_child(_spray_particle_effect)
-	_spray_particles = _spray_particle_effect.get_node_or_null("sprayParticle2DCPU") as CPUParticles2D
-	if _spray_particles != null:
-		_spray_particles.local_coords = false
-		_spray_particles.emitting = false
+		return {}
+	effect.name = effect_name
+	effect.z_as_relative = false
+	effect.z_index = SPRAY_PARTICLE_Z_INDEX
+	effect.visible = false
+	add_child(effect)
+	var particles: CPUParticles2D = effect.get_node_or_null("sprayParticle2DCPU") as CPUParticles2D
+	if particles != null:
+		particles.local_coords = false
+		particles.emitting = false
+	return {"effect": effect, "particles": particles}
 
 func _update_spray_particles(origin: Vector2, facing: Vector2, delta: float) -> void:
 	if _spray_particle_effect == null or _spray_particles == null:
@@ -633,6 +645,156 @@ func _stop_spray_particles() -> void:
 	_spray_last_origin = Vector2.ZERO
 	if _spray_particle_effect != null:
 		_spray_particle_effect.visible = false
+
+# --- Turret spray (multi-instance) -----------------------------------------
+# Turrets reuse the "spray" WeaponData and the spray particle scene, but unlike the
+# player they are static (owner_id -1) and there can be many at once. Each turret keeps
+# its own continuous-AoE id and its own pre-instantiated particle effect.
+
+## Pre-instantiate a turret's spray particle effect (hidden). Call once when the turret
+## is placed; the node is reused for every spray, never recreated per shot.
+func create_turret_spray(cell: Vector2i) -> void:
+	if _turret_sprays.has(cell):
+		return
+	var made: Dictionary = _make_spray_effect("TurretSpray_%d_%d" % [cell.x, cell.y])
+	if made.is_empty():
+		return
+	made["aoe_id"] = -1
+	made["waiting_for_position"] = false
+	made["cost_time_left"] = 0.0
+	made["facing"] = Vector2.RIGHT
+	_turret_sprays[cell] = made
+
+## Free a turret's spray effect and stop any active cone. Call when the turret is removed.
+func remove_turret_spray(cell: Vector2i) -> void:
+	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
+	if inst == null:
+		return
+	_stop_turret_spray_aoe(inst)
+	var effect: Node2D = inst.get("effect") as Node2D
+	if effect != null:
+		effect.queue_free()
+	_turret_sprays.erase(cell)
+
+## Drive one turret's spray for a frame: starts/updates the static continuous AoE,
+## spends the water reserve, and shows the particle effect aimed along `direction`.
+func update_turret_spray(cell: Vector2i, weapon_id: String, origin: Vector2, direction: Vector2, delta: float) -> void:
+	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
+	if inst == null:
+		return
+	var weapon: WeaponData = _weapon_by_id(weapon_id)
+	if weapon == null or not weapon.continuous or not _steering or not _steering.has_method("start_continuous_aoe"):
+		return
+	if direction.length_squared() <= 0.000001:
+		stop_turret_spray(cell)
+		return
+
+	var facing: Vector2 = direction.normalized()
+	var aoe_id: int = int(inst.get("aoe_id", -1))
+	var inst_facing: Vector2 = inst.get("facing", facing) as Vector2
+	var collision_facing: Vector2 = facing
+	if aoe_id < 0 or weapon.aim_inertia <= 0.0:
+		inst_facing = facing
+	else:
+		var response: float = 1.0 - exp(-maxf(delta, 0.0) / weapon.aim_inertia)
+		var collision_angle: float = lerp_angle(inst_facing.angle(), facing.angle(), response)
+		inst_facing = Vector2.from_angle(collision_angle)
+		collision_facing = inst_facing
+	inst["facing"] = inst_facing
+
+	# Static cone: bake the (tiny) throw offset into the spawn position once. owner_id is
+	# -1 so the native zone never re-anchors to an agent and the follow_offset is unused.
+	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
+	if aoe_id < 0:
+		if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+			return
+		var started_id: int = int(_steering.call(
+			"start_continuous_aoe",
+			spawn_origin,
+			collision_facing,
+			weapon.radius,
+			weapon.directional_area_angle,
+			weapon.smash_force,
+			weapon.friction,
+			weapon.falloff,
+			weapon.detach_flow,
+			weapon.control_suppression,
+			weapon.control_suppression_duration,
+			-1,
+			weapon.affected_smash_classes,
+			Vector2.ZERO,
+			weapon.damage,
+			weapon.damage_frequency,
+			weapon.repulse_frequency
+		))
+		if started_id < 0:
+			_refund_reserve(weapon.reserve_id, weapon.reserve_cost)
+			return
+		inst["aoe_id"] = started_id
+		inst["cost_time_left"] = weapon.reserve_cost_interval
+	else:
+		var cost_left: float = float(inst.get("cost_time_left", 0.0)) - delta
+		while cost_left <= 0.0:
+			if not _spend_reserve(weapon.reserve_id, weapon.reserve_cost):
+				stop_turret_spray(cell)
+				return
+			cost_left += maxf(weapon.reserve_cost_interval, 0.001)
+		inst["cost_time_left"] = cost_left
+		var updated: bool = bool(_steering.call("update_continuous_aoe", aoe_id, collision_facing, Vector2.ZERO))
+		if not updated:
+			stop_turret_spray(cell)
+			return
+
+	if weapon.waters_reactive_plants:
+		_water_plants_in_cone(spawn_origin, collision_facing, weapon.radius, weapon.directional_area_angle)
+	_drive_spray_effect(inst, spawn_origin, collision_facing.angle())
+
+## End a turret's spray burst: stop the cone and hide its particles. The effect node is
+## kept for the next burst.
+func stop_turret_spray(cell: Vector2i) -> void:
+	var inst: Dictionary = _turret_sprays.get(cell) as Dictionary
+	if inst == null:
+		return
+	_stop_turret_spray_aoe(inst)
+	_hide_spray_effect(inst)
+
+func _stop_turret_spray_aoe(inst: Dictionary) -> void:
+	var aoe_id: int = int(inst.get("aoe_id", -1))
+	if aoe_id >= 0 and _steering and _steering.has_method("stop_continuous_aoe"):
+		_steering.call("stop_continuous_aoe", aoe_id)
+	inst["aoe_id"] = -1
+	inst["cost_time_left"] = 0.0
+
+# Position/show one instance's particle effect. Mirrors the player path: the first frame
+# restarts emission while hidden so stale particles never flash at the previous spot.
+func _drive_spray_effect(inst: Dictionary, origin: Vector2, rotation: float) -> void:
+	var effect: Node2D = inst.get("effect") as Node2D
+	var particles: CPUParticles2D = inst.get("particles") as CPUParticles2D
+	if effect == null or particles == null:
+		return
+	effect.global_position = origin
+	effect.rotation = rotation
+	# Turrets are stationary, so there is no emitter velocity to inherit.
+	if particles.has_method("adapt_to_player_velocity"):
+		particles.call("adapt_to_player_velocity", Vector2.ZERO, rotation)
+	if not particles.emitting:
+		effect.visible = false
+		particles.restart()
+		particles.emitting = true
+		inst["waiting_for_position"] = true
+		return
+	if bool(inst.get("waiting_for_position", false)):
+		inst["waiting_for_position"] = false
+	effect.visible = true
+
+func _hide_spray_effect(inst: Dictionary) -> void:
+	var particles: CPUParticles2D = inst.get("particles") as CPUParticles2D
+	if particles != null:
+		particles.emitting = false
+	inst["waiting_for_position"] = false
+	var effect: Node2D = inst.get("effect") as Node2D
+	if effect != null:
+		effect.visible = false
 
 func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id == &"" or amount <= 0:

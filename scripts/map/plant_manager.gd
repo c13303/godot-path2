@@ -103,28 +103,40 @@ func wet_rose(cell: Vector2i) -> bool:
 func dry_all_roses() -> int:
 	if not plantz:
 		return 0
+	# Roses stay wet during their seed's flight; each one dries the instant its
+	# seed launches toward the UI (see _dry_rose_on_launch).
 	var dried_count: int = 0
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
 			continue
-		_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
 		_spawn_seed_harvest(cell, dried_count)
 		dried_count += 1
-	if dried_count > 0:
-		_flush_plant_layer_now()
-		_queue_plant_layer_flush()
 	return dried_count
 
 func _spawn_seed_harvest(cell: Vector2i, sequence_index: int) -> void:
 	var scene: Node = get_tree().current_scene
 	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
 	var world_position: Vector2 = plantz.to_global(plantz.map_to_local(cell))
+	var on_launch: Callable = Callable(self, "_dry_rose_on_launch").bind(cell)
 	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
-		var animation_started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, sequence_index))
+		var animation_started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, sequence_index, on_launch))
 		if animation_started:
 			return
+	# No animation available: dry immediately and credit the seed.
+	_dry_rose(cell)
 	_credit_seed_immediately()
+
+func _dry_rose_on_launch(cell: Vector2i) -> void:
+	_dry_rose(cell)
+
+func _dry_rose(cell: Vector2i) -> void:
+	if not plantz:
+		return
+	# Guard against the cell being consumed/removed during the seed's flight.
+	if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
+		return
+	_set_rose_atlas(cell, ROSE_DRY_ATLAS)
 
 func _credit_seed_immediately() -> void:
 	var scene: Node = get_tree().current_scene

@@ -107,9 +107,11 @@ const ITEM_DEFS: Dictionary = {
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
 		"shoot_frequency": 3.0,
-		"weapon": "water",
-		# Matches water's default throw offset + projectile travel distance.
-		"range": 382.0,
+		"shoot_duration": 1.0,
+		"weapon": "spray",
+		# Enemy-detection radius. Kept equal to spray.tres's cone radius so the turret
+		# only targets enemies the spray can actually reach.
+		"range": 200.0,
 		"max_stack": 99,
 	},
 }
