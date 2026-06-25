@@ -27,7 +27,9 @@ func _ready() -> void:
 	#print("FlowFieldCode: assigning layers...")
 	ff.set_floor_layer(floor_layer)
 	ff.set_wall_layer(wall_layer)
-	if ff.has_method("set_water_layer"):
+	if ff.has_method("set_navigation_blocking_layer"):
+		ff.call("set_navigation_blocking_layer", water_layer)
+	elif ff.has_method("set_water_layer"):
 		ff.call("set_water_layer", water_layer)
 	loading_progress.emit(0.15, "Reading map layers")
 

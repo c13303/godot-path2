@@ -70,10 +70,12 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("get_debug_draw"), &FlowFieldNative::get_debug_draw);
     ClassDB::bind_method(D_METHOD("set_floor_layer", "node"), &FlowFieldNative::set_floor_layer);
     ClassDB::bind_method(D_METHOD("set_wall_layer", "node"), &FlowFieldNative::set_wall_layer);
+    ClassDB::bind_method(D_METHOD("set_navigation_blocking_layer", "node"), &FlowFieldNative::set_navigation_blocking_layer);
     ClassDB::bind_method(D_METHOD("set_water_layer", "node"), &FlowFieldNative::set_water_layer);
     ClassDB::bind_method(D_METHOD("set_blocking_layer", "node"), &FlowFieldNative::set_blocking_layer);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
+    ClassDB::bind_method(D_METHOD("get_navigation_blocking_layer"), &FlowFieldNative::get_navigation_blocking_layer);
     ClassDB::bind_method(D_METHOD("get_water_layer"), &FlowFieldNative::get_water_layer);
     ClassDB::bind_method(D_METHOD("get_blocking_layer"), &FlowFieldNative::get_blocking_layer);
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
@@ -83,11 +85,13 @@ void FlowFieldNative::_bind_methods()
 
 void FlowFieldNative::set_floor_layer(Object *node) { floor_layer = Object::cast_to<TileMapLayer>(node); }
 void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_to<TileMapLayer>(node); }
-void FlowFieldNative::set_water_layer(Object *node) { water_layer = Object::cast_to<TileMapLayer>(node); }
+void FlowFieldNative::set_navigation_blocking_layer(Object *node) { navigation_blocking_layer = Object::cast_to<TileMapLayer>(node); }
+void FlowFieldNative::set_water_layer(Object *node) { set_navigation_blocking_layer(node); }
 void FlowFieldNative::set_blocking_layer(Object *node) { blocking_layer = Object::cast_to<TileMapLayer>(node); }
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
-Object *FlowFieldNative::get_water_layer() const { return water_layer; }
+Object *FlowFieldNative::get_navigation_blocking_layer() const { return navigation_blocking_layer; }
+Object *FlowFieldNative::get_water_layer() const { return navigation_blocking_layer; }
 Object *FlowFieldNative::get_blocking_layer() const { return blocking_layer; }
 
 FlowFieldNative::~FlowFieldNative()
@@ -131,36 +135,60 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     return true;
 }
 
-void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
                                  std::unordered_set<Vector2i, Vector2iHash> &walkable_set)
 {
-    wall_set.clear();
+    physical_wall_set.clear();
     walkable_set.clear();
+    std::unordered_set<Vector2i, Vector2iHash> navigation_blocked_set;
 
     Array walls = wall_layer->get_used_cells();
     for (int i = 0; i < walls.size(); i++)
-        wall_set.insert((Vector2i)walls[i]);
-
-    if (water_layer)
     {
-        Array waters = water_layer->get_used_cells();
-        for (int i = 0; i < waters.size(); i++)
-            wall_set.insert((Vector2i)waters[i]);
+        Vector2i cell = (Vector2i)walls[i];
+        physical_wall_set.insert(cell);
+        navigation_blocked_set.insert(cell);
+    }
+
+    if (navigation_blocking_layer)
+    {
+        Array blockers = navigation_blocking_layer->get_used_cells();
+        for (int i = 0; i < blockers.size(); i++)
+            navigation_blocked_set.insert((Vector2i)blockers[i]);
     }
 
     if (blocking_layer)
     {
         Array blockers = blocking_layer->get_used_cells();
         for (int i = 0; i < blockers.size(); i++)
-            wall_set.insert((Vector2i)blockers[i]);
+        {
+            Vector2i cell = (Vector2i)blockers[i];
+            physical_wall_set.insert(cell);
+            navigation_blocked_set.insert(cell);
+        }
     }
 
     Array floors = floor_layer->get_used_cells();
     for (int i = 0; i < floors.size(); i++)
     {
         Vector2i c = floors[i];
-        if (!wall_set.count(c))
+        if (!navigation_blocked_set.count(c))
             walkable_set.insert(c);
+    }
+}
+
+void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
+                                                const Rect2i &used,
+                                                const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const
+{
+    target_field.enable_explicit_physics_passability();
+    for (int y = 0; y < target_field.height(); ++y)
+    {
+        for (int x = 0; x < target_field.width(); ++x)
+        {
+            Vector2i cell = used.position + Vector2i(x, y);
+            target_field.set_cell_physics_passable(ffcore::Vec2i(x, y), physical_wall_set.count(cell) == 0);
+        }
     }
 }
 
@@ -248,6 +276,7 @@ void FlowFieldNative::compute_distance_field_global()
         field.set_cell_navigable(ffcore::Vec2i(relative.x, relative.y), true);
     }
 
+    apply_physics_passability(field, used, wall_set);
     compute_distance_field(used, wall_set);
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
     compute_bottlenecks(used, walkable_set, costs);
@@ -655,7 +684,9 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
         return false;
     }
 
-    // Precompute clearance to walls so flow directions can blend in distance gradients.
+    // Precompute physical-wall clearance so flow directions can blend in distance gradients.
+    // Navigation-only blockers are omitted here: they affect routes, not collision/bounce.
+    apply_physics_passability(field, used, wall_set);
     compute_distance_field(used, wall_set);
 
     std::unordered_map<Vector2i, double, Vector2iHash> costs;
@@ -703,29 +734,33 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     Vector2i goal_cell = floor_layer->local_to_map(goal_local);
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
+    std::unordered_set<Vector2i, Vector2iHash> navigation_blocked_set;
     Array walls = wall_layer->get_used_cells();
-    Array waters;
-    if (water_layer)
-        waters = water_layer->get_used_cells();
+    Array navigation_blockers;
+    if (navigation_blocking_layer)
+        navigation_blockers = navigation_blocking_layer->get_used_cells();
     Array blockers;
     if (blocking_layer)
         blockers = blocking_layer->get_used_cells();
-    snapshot.walls.reserve(walls.size() + waters.size() + blockers.size());
+    snapshot.walls.reserve(walls.size() + blockers.size());
+    snapshot.navigation_blockers.reserve(navigation_blockers.size());
     for (int i = 0; i < walls.size(); i++)
     {
         Vector2i cell = walls[i];
         wall_set.insert(cell);
+        navigation_blocked_set.insert(cell);
         snapshot.walls.push_back(cell);
     }
-    for (int i = 0; i < waters.size(); i++)
+    for (int i = 0; i < navigation_blockers.size(); i++)
     {
-        Vector2i cell = waters[i];
-        if (wall_set.insert(cell).second)
-            snapshot.walls.push_back(cell);
+        Vector2i cell = navigation_blockers[i];
+        if (navigation_blocked_set.insert(cell).second)
+            snapshot.navigation_blockers.push_back(cell);
     }
     for (int i = 0; i < blockers.size(); i++)
     {
         Vector2i cell = blockers[i];
+        navigation_blocked_set.insert(cell);
         if (wall_set.insert(cell).second)
             snapshot.walls.push_back(cell);
     }
@@ -736,7 +771,7 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     for (int i = 0; i < floors.size(); i++)
     {
         Vector2i cell = floors[i];
-        if (wall_set.count(cell))
+        if (navigation_blocked_set.count(cell))
             continue;
         snapshot.walkables.push_back(cell);
         if (cell == goal_cell)
@@ -827,6 +862,8 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     wall_set.reserve(snapshot.walls.size());
     for (const Vector2i &cell : snapshot.walls)
         wall_set.insert(cell);
+
+    apply_physics_passability(computed, used, wall_set);
 
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
     walkable_set.reserve(snapshot.walkables.size());

@@ -39,7 +39,7 @@ namespace godot
 
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
-        TileMapLayer *water_layer = nullptr;
+        TileMapLayer *navigation_blocking_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
 
         struct AsyncFlowSnapshot
@@ -48,6 +48,7 @@ namespace godot
             Vector2i goal_cell;
             double tile_size = 1.0;
             std::vector<Vector2i> walls;
+            std::vector<Vector2i> navigation_blockers;
             std::vector<Vector2i> walkables;
             bool debug_disable_bottlenecks = false;
             int bottleneck_zone_radius_tiles = 0;
@@ -87,8 +88,11 @@ namespace godot
         Color debug_color_cell = Color(1, 1, 1);
 
         bool prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell);
-        void build_sets(std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+        void build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
                         std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
+        void apply_physics_passability(ffcore::FlowField &target_field,
+                                       const Rect2i &used,
+                                       const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
                            std::unordered_map<Vector2i, double, Vector2iHash> &costs);
@@ -133,6 +137,8 @@ namespace godot
         void set_wall_layer(Object *node);
         Object *get_wall_layer() const;
 
+        void set_navigation_blocking_layer(Object *node);
+        Object *get_navigation_blocking_layer() const;
         void set_water_layer(Object *node);
         Object *get_water_layer() const;
 

@@ -267,16 +267,16 @@ static Vec2 project_to_navigable(FlowField *ff, const Vec2 &from, const Vec2 &to
 {
     Vec2 a = from;
     Vec2 b = to;
-    if (!ff->is_cell_navigable(ff->world_to_cell(a)))
+    if (!ff->is_cell_physics_passable(ff->world_to_cell(a)))
         a = ff->cell_to_world(ff->world_to_cell(a));
-    if (ff->is_cell_navigable(ff->world_to_cell(b)))
+    if (ff->is_cell_physics_passable(ff->world_to_cell(b)))
         return b;
 
     Vec2 lo = a, hi = b;
     for (int i = 0; i < 10; ++i)
     {
         Vec2 mid = lo + (hi - lo) * 0.5;
-        if (ff->is_cell_navigable(ff->world_to_cell(mid)))
+        if (ff->is_cell_physics_passable(ff->world_to_cell(mid)))
             lo = mid;
         else
             hi = mid;
@@ -294,7 +294,7 @@ bool SteeringSystem::is_agent_footprint_navigable(const Vec2 &body_position, con
     Vec2i center_cell = ff->world_to_cell(center);
 
     if (radius <= 0.0)
-        return ff->is_cell_navigable(center_cell);
+        return ff->is_cell_physics_passable(center_cell);
 
     const double tile = ff->tile_size();
     const double half_tile = tile * 0.5;
@@ -306,7 +306,7 @@ bool SteeringSystem::is_agent_footprint_navigable(const Vec2 &body_position, con
         for (int dx = -scan_radius; dx <= scan_radius; ++dx)
         {
             Vec2i cell(center_cell.x + dx, center_cell.y + dy);
-            if (ff->is_cell_navigable(cell))
+            if (ff->is_cell_physics_passable(cell))
                 continue;
 
             Vec2 wall_center = ff->cell_to_world(cell);
@@ -343,7 +343,7 @@ static bool wall_contact_normal_for_footprint(const Vec2 &body_position, const A
         for (int dx = -scan_radius; dx <= scan_radius; ++dx)
         {
             Vec2i cell(center_cell.x + dx, center_cell.y + dy);
-            if (ff->is_cell_navigable(cell))
+            if (ff->is_cell_physics_passable(cell))
                 continue;
 
             Vec2 wall_center = ff->cell_to_world(cell);
@@ -494,7 +494,7 @@ void SteeringSystem::ultimate_wall_correction(AgentData &a, FlowField *ff, doubl
 
     /*     godot::UtilityFunctions::print("Hard Bounce Triggered"); */
 
-    Vec2i safe = ff->find_nearest_navigable(check);
+    Vec2i safe = ff->find_nearest_physics_passable(check);
     Vec2 safe_center = ff->cell_to_world(safe);
 
     Vec2 wall_normal = safe_normalize(footprint_center - wall_center);
@@ -541,7 +541,7 @@ Vec2 SteeringSystem::wall_repulsion_force(const AgentData &a, FlowField *ff)
             if (dx == 0 && dy == 0)
                 continue;
             Vec2i n{cur.x + dx, cur.y + dy};
-            if (!ff->is_cell_navigable(n))
+            if (!ff->is_cell_physics_passable(n))
             {
                 Vec2 d = footprint_center - ff->cell_to_world(n);
                 double L = d.length();

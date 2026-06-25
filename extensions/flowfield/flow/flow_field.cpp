@@ -22,6 +22,8 @@ void FlowField::resize(int width, int height)
     dirs.assign(w * h, Vec2());
     explicit_navigability = false;
     navigable_cells.assign(w * h, 0);
+    explicit_physics_passability = false;
+    physics_passable_cells.assign(w * h, 0);
     distance_field.assign(w * h, 0.0f);
     route_cost_field.assign(w * h, 0.0);
     clear_bottlenecks();
@@ -111,6 +113,8 @@ void FlowField::clear()
     goal_cell = Vec2i(-1, -1);
     explicit_navigability = false;
     std::fill(navigable_cells.begin(), navigable_cells.end(), 0);
+    explicit_physics_passability = false;
+    std::fill(physics_passable_cells.begin(), physics_passable_cells.end(), 0);
 }
 
 void FlowField::set_dir(int x, int y, const Vec2 &dir)
@@ -167,6 +171,31 @@ void FlowField::set_cell_navigable(const Vec2i &cell, bool navigable)
     navigable_cells[cell.y * w + cell.x] = navigable ? 1 : 0;
 }
 
+bool FlowField::is_cell_physics_passable(const Vec2i &cell) const
+{
+    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return false;
+
+    const int idx = cell.y * w + cell.x;
+    if (explicit_physics_passability)
+        return idx < static_cast<int>(physics_passable_cells.size()) && physics_passable_cells[idx] != 0;
+
+    return is_cell_navigable(cell);
+}
+
+void FlowField::enable_explicit_physics_passability()
+{
+    explicit_physics_passability = true;
+    physics_passable_cells.assign(w * h, 0);
+}
+
+void FlowField::set_cell_physics_passable(const Vec2i &cell, bool passable)
+{
+    if (!explicit_physics_passability || cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
+        return;
+    physics_passable_cells[cell.y * w + cell.x] = passable ? 1 : 0;
+}
+
 Vec2i FlowField::find_nearest_navigable(Vec2i start) const
 {
     if (is_cell_navigable(start))
@@ -185,6 +214,39 @@ Vec2i FlowField::find_nearest_navigable(Vec2i start) const
             {
                 Vec2i c = {start.x + dx, start.y + dy};
                 if (!is_cell_navigable(c))
+                    continue;
+                double d2 = double(dx * dx + dy * dy);
+                if (d2 < best_d2)
+                {
+                    best_d2 = d2;
+                    best = c;
+                }
+            }
+        }
+        if (best_d2 < 1e18)
+            break;
+    }
+
+    return best;
+}
+
+Vec2i FlowField::find_nearest_physics_passable(Vec2i start) const
+{
+    if (is_cell_physics_passable(start))
+        return start;
+
+    Vec2i best = start;
+    double best_d2 = 1e18;
+
+    const int MAX_RADIUS = 20;
+    for (int r = 1; r <= MAX_RADIUS; ++r)
+    {
+        for (int dx = -r; dx <= r; ++dx)
+        {
+            for (int dy = -r; dy <= r; ++dy)
+            {
+                Vec2i c = {start.x + dx, start.y + dy};
+                if (!is_cell_physics_passable(c))
                     continue;
                 double d2 = double(dx * dx + dy * dy);
                 if (d2 < best_d2)
@@ -307,6 +369,8 @@ void FlowField::copy_from(const FlowField &src)
     dirs = src.dirs;
     explicit_navigability = src.explicit_navigability;
     navigable_cells = src.navigable_cells;
+    explicit_physics_passability = src.explicit_physics_passability;
+    physics_passable_cells = src.physics_passable_cells;
     ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
     route_cost_field = src.route_cost_field;
