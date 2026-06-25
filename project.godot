@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Rose de Colère"
-run/main_scene="uid://ct78mat36fwuc"
+run/main_scene="res://scenes/menus/level_loader.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 

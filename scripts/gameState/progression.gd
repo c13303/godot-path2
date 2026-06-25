@@ -186,10 +186,15 @@ func _ready() -> void:
 	# applied, so a saved game still overrides these starting values below.
 	_apply_starting_values()
 
+	var pending_save_path: String = GameState.consume_startup_save_load_path(SAVE_PATH)
 	if GameState.has_meta(PENDING_LOAD_META):
 		GameState.remove_meta(PENDING_LOAD_META)
+		if pending_save_path == "":
+			pending_save_path = SAVE_PATH
+
+	if pending_save_path != "":
 		_log("Fresh scene ready; applying pending save before native player setup")
-		var data: Dictionary = _read_save_data()
+		var data: Dictionary = _read_save_data(pending_save_path)
 		if not data.is_empty():
 			_apply_save_to_fresh_scene(data)
 
@@ -344,6 +349,7 @@ func save_progression(save_path: String = SAVE_PATH) -> void:
 
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
+		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"layers": layer_data,
 		"player": {
@@ -375,6 +381,7 @@ func load_progression() -> void:
 		return
 
 	_unregister_scene_agents()
+	GameState.request_startup_save_load(SAVE_PATH)
 	GameState.set_meta(PENDING_LOAD_META, true)
 	_log("Save validated; reloading current scene")
 	var reload_error: Error = get_tree().reload_current_scene()
@@ -394,6 +401,9 @@ func auto_save() -> void:
 ## manual save during _ready (the F9 reload path).
 func load_on_start() -> void:
 	if _save_applied:
+		return
+	if GameState.consume_skip_startup_autosave():
+		_log("Startup auto-load skipped for fresh selected level")
 		return
 	if not FileAccess.file_exists(AUTOSAVE_PATH):
 		_log("No auto-save found on start; beginning a fresh game")
@@ -530,6 +540,15 @@ func _get_layers(scene: Node) -> Dictionary:
 
 func _get_player() -> Node2D:
 	return get_tree().get_first_node_in_group("player") as Node2D
+
+
+func _get_loaded_level_scene_path(scene: Node) -> String:
+	if scene == null:
+		return ""
+	var loader: Node = scene.get_node_or_null("LevelLoader")
+	if loader != null and loader.has_method("get_loaded_level_scene_path"):
+		return str(loader.call("get_loaded_level_scene_path"))
+	return ""
 
 
 func _get_inventory(game_ui: Node) -> Array[Dictionary]:
