@@ -51,10 +51,19 @@ func _load_level() -> void:
 			continue
 		level_root.remove_child(layer)
 		layer.name = layer_name
+		_clear_owner_recursive(layer)
 		host.add_child(layer)
 
 	level_root.free()
 	_loaded_level_scene_path = scene_to_load.resource_path
+
+
+## Clears the owner of a node and all its descendants so it can be re-parented
+## under a host in another scene without triggering owner-inconsistency warnings.
+func _clear_owner_recursive(node: Node) -> void:
+	node.owner = null
+	for child in node.get_children():
+		_clear_owner_recursive(child)
 
 
 func get_loaded_level_scene_path() -> String:

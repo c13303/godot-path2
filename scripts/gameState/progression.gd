@@ -699,5 +699,5 @@ func _fail(message: String) -> void:
 	_notify(message)
 
 
-func _log(message: String) -> void:
+func _log(_message: String) -> void:
 	pass

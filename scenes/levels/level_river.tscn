@@ -1,7 +1,7 @@
-[gd_scene format=4 uid="uid://ddrvm6trmkj3f"]
+[gd_scene format=4 uid="uid://crbpw1cm3djsw"]
 
-[ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
-[ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
+[ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="1_p6qoh"]
+[ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="2_lbmo8"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -10,7 +10,7 @@ outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 
 agent_radius = 0.0
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_vbdlb"]
-texture = ExtResource("13_1kyii")
+texture = ExtResource("1_p6qoh")
 texture_region_size = Vector2i(32, 32)
 0:0/0 = 0
 0:0/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_kset8")
@@ -799,7 +799,7 @@ outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 
 agent_radius = 0.0
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_egp0g"]
-texture = ExtResource("13_1kyii")
+texture = ExtResource("1_p6qoh")
 texture_region_size = Vector2i(32, 32)
 0:0/0 = 0
 1:0/0 = 0
@@ -1243,7 +1243,7 @@ tile_map_data = PackedByteArray("AAA/ACoAAAAEAAMAAAA/ACsAAAAEAAQAAAA/ACwAAAAEAAU
 tile_set = SubResource("TileSet_egp0g")
 collision_enabled = false
 navigation_enabled = false
-script = ExtResource("33_watersources")
+script = ExtResource("2_lbmo8")
 refill_amount = 1
 refill_interval_seconds = 0.01
 waterpool_drift_speed = 11.0

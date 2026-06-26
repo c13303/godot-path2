@@ -261,8 +261,17 @@ var _walkable_map_tiles: Dictionary = {}  # Vector2i -> true
 # Day/night state. A completed wave returns to day immediately; a night that
 # cannot start because there are no plants remains visible briefly before ending.
 const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
+# Fallback timeout for ending a night whose spawn quota is NOT yet exhausted but
+# whose spawners are making no progress (boxed-in / no reachable garden). Must be
+# comfortably larger than a spawner's cooldown so the normal "field empty between
+# two cooldown-gated spawns" gap never trips it.
+const QUOTA_STALL_DAY_DELAY_SECONDS: float = 5.0
 var _spawned_this_night: bool = false
 var _empty_night_elapsed: float = 0.0
+# Time the field has been empty while the night's spawn quota is still unspent.
+# Reset whenever a monster is present (or a spawn happens); used only as the
+# soft-lock guard above.
+var _quota_stall_elapsed: float = 0.0
 # Per-night spawn quota: nDays * monster_per_day + roses * monster_per_rose
 # (read at the start of each night). _spawn_limit <= 0 means "no cap". Once
 # _spawned_count reaches the limit, no new monsters spawn; the night still ends
@@ -429,6 +438,7 @@ func _resolve_level_layers() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
+	_quota_stall_elapsed = 0.0
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false
@@ -1638,9 +1648,29 @@ func _process_spawners(delta: float) -> void:
 	var mc: int = _monster_count()
 	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
 	_spawn_pass_stats["active_monsters"] = mc
+	# End-of-night: only flip back to day once the night's WHOLE spawn quota has been
+	# produced AND the field is clear. Previously the night ended the instant the
+	# field emptied after the first spawn, so with slow spawners (1 monster per
+	# cooldown) the player could clear the field between spawns and the night ended
+	# after only a few of the ~quota monsters (e.g. 20 roses -> ~20 quota but only
+	# 3-4 seen). We now keep the night running until every queued monster has
+	# spawned. A stall fallback still ends the night if spawners make no progress
+	# for a while, so a boxed-in spawner that can never produce the rest of its
+	# quota can't soft-lock the night.
+	var quota_exhausted: bool = _spawn_limit_this_night <= 0 \
+		or _spawned_count_this_night >= _spawn_limit_this_night
 	if mc == 0 and _spawned_this_night:
-		GameState.start_day()
-		return
+		if quota_exhausted:
+			GameState.start_day()
+			return
+		_quota_stall_elapsed += delta
+		if _quota_stall_elapsed >= QUOTA_STALL_DAY_DELAY_SECONDS:
+			_log("Night ended: spawn quota unspent (%d/%d) but spawners stalled" % [
+				_spawned_count_this_night, _spawn_limit_this_night])
+			GameState.start_day()
+			return
+	else:
+		_quota_stall_elapsed = 0.0
 
 	# Plant-state query (plant_manager.is_empty); cheap normally but time it in case
 	# the plant manager scans on this call.

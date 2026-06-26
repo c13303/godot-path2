@@ -112,16 +112,16 @@ func _stamp_agent(agent: Node2D) -> bool:
 
 	var floor_local: Vector2 = _floor.to_local(agent_pos)
 	var pixel_center: Vector2 = floor_local - _origin_floor_local
-	var offset: Vector2i = Vector2i.ZERO
+	var mark_offset: Vector2i = Vector2i.ZERO
 	if random_offset_px > 0:
-		offset = Vector2i(
+		mark_offset = Vector2i(
 			randi_range(-random_offset_px, random_offset_px),
 			randi_range(-random_offset_px, random_offset_px)
 		)
 
 	var draw_center: Vector2i = Vector2i(
-		int(round(pixel_center.x)) + offset.x,
-		int(round(pixel_center.y)) + offset.y
+		int(round(pixel_center.x)) + mark_offset.x,
+		int(round(pixel_center.y)) + mark_offset.y
 	)
 	var angle: float = randf_range(0.0, TAU)
 	if not _blend_mark(draw_center, angle):
