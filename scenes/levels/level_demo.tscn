@@ -1,7 +1,10 @@
 [gd_scene format=4 uid="uid://bdi57o0hf3tu5"]
 
+[ext_resource type="Texture2D" uid="uid://qfcwuejlefje" path="res://assets/sprites/legval/spawner.png" id="4_drkbx"]
 [ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
 [ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
+[ext_resource type="Script" uid="uid://cg6n61v6iuit1" path="res://scripts/spawning/level_spawn_config.gd" id="34_spawn_config"]
+[ext_resource type="Resource" uid="uid://dpq5y4xmy5a17" path="res://scenes/levels/playlists/level_demo_spawn_playlist.tres" id="35_spawn_playlist"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_kset8"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1228,6 +1231,8 @@ navigation_layer_0/layers = 1
 sources/0 = SubResource("TileSetAtlasSource_egp0g")
 
 [node name="level_demo" type="Node2D" unique_id=584686861]
+script = ExtResource("34_spawn_config")
+spawn_playlist = ExtResource("35_spawn_playlist")
 
 [node name="floor" type="TileMapLayer" parent="." unique_id=1840971265]
 z_index = -100
@@ -1256,3 +1261,15 @@ tile_map_data = PackedByteArray("AAA5AFQAAAANAAAAAAAzABgAAAAOAAAAAAA=")
 tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/water = true
+
+[node name="spawners" type="Node" parent="." unique_id=608668911]
+
+[node name="spawner2" type="Sprite2D" parent="spawners" unique_id=1155345194]
+position = Vector2(1882, 780)
+texture = ExtResource("4_drkbx")
+metadata/id = ""
+
+[node name="spawner1" type="Sprite2D" parent="spawners" unique_id=1274841071]
+position = Vector2(1502, 778)
+texture = ExtResource("4_drkbx")
+metadata/id = ""

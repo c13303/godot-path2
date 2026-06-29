@@ -22,8 +22,11 @@ extends Node
 
 ## The authored layers a level provides, in the order they should be hosted.
 const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz"]
+const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 
 var _loaded_level_scene_path: String = ""
+var _loaded_spawn_playlist: LevelSpawnPlaylist
+var _loaded_spawner_bindings: Array[SpawnerBinding] = []
 
 func _enter_tree() -> void:
 	_load_level()
@@ -41,6 +44,8 @@ func _load_level() -> void:
 
 	# Instanced off-tree; we only keep its authored layers and discard the shell.
 	var level_root: Node = scene_to_load.instantiate()
+	_capture_level_spawn_config(level_root)
+	_capture_level_spawner_bindings(level_root)
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
 		if layer == null:
@@ -53,6 +58,7 @@ func _load_level() -> void:
 		layer.name = layer_name
 		_clear_owner_recursive(layer)
 		host.add_child(layer)
+	_reparent_spawner_container(level_root, host)
 
 	level_root.free()
 	_loaded_level_scene_path = scene_to_load.resource_path
@@ -70,6 +76,17 @@ func get_loaded_level_scene_path() -> String:
 	return _loaded_level_scene_path
 
 
+func get_loaded_spawn_playlist() -> LevelSpawnPlaylist:
+	return _loaded_spawn_playlist
+
+
+func get_loaded_spawner_bindings() -> Array[SpawnerBinding]:
+	var bindings: Array[SpawnerBinding] = []
+	for binding: SpawnerBinding in _loaded_spawner_bindings:
+		bindings.append(binding)
+	return bindings
+
+
 func _resolve_level_scene() -> PackedScene:
 	var selected_path: String = GameState.get_selected_level_scene_path()
 	if selected_path != "":
@@ -79,3 +96,63 @@ func _resolve_level_scene() -> PackedScene:
 			return selected_scene
 		push_warning("LevelLoader: selected level '%s' could not be loaded; using exported level." % selected_path)
 	return level_scene
+
+
+func _capture_level_spawn_config(level_root: Node) -> void:
+	_loaded_spawn_playlist = null
+	_loaded_spawner_bindings.clear()
+	if level_root == null:
+		return
+	var config: LevelSpawnConfig = level_root as LevelSpawnConfig
+	if config == null:
+		config = level_root.get_node_or_null("LevelSpawnConfig") as LevelSpawnConfig
+	if config == null:
+		return
+	_loaded_spawn_playlist = config.spawn_playlist
+
+
+func _capture_level_spawner_bindings(level_root: Node) -> void:
+	var floor_layer: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
+	if floor_layer == null:
+		push_warning("LevelLoader: level '%s' has no floor layer; spawner node cells cannot be derived." % _level_path_for_log())
+		return
+	var spawner_container: Node = _find_spawner_container(level_root)
+	if spawner_container == null:
+		return
+	for child: Node in spawner_container.get_children():
+		var spawner_node: Node2D = child as Node2D
+		if spawner_node == null:
+			continue
+		var spawner_id: StringName = StringName(spawner_node.name)
+		if spawner_id == &"":
+			continue
+		var local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
+		var cell: Vector2i = floor_layer.local_to_map(local_pos)
+		var binding: SpawnerBinding = SpawnerBinding.new()
+		binding.spawner_id = spawner_id
+		binding.cell = cell
+		_loaded_spawner_bindings.append(binding)
+
+
+func _reparent_spawner_container(level_root: Node, host: Node) -> void:
+	var spawner_container: Node = _find_spawner_container(level_root)
+	if spawner_container == null:
+		return
+	if host.has_node(NodePath(spawner_container.name)):
+		push_warning("LevelLoader: host already has a '%s' node; skipping level spawner visuals." % spawner_container.name)
+		return
+	level_root.remove_child(spawner_container)
+	_clear_owner_recursive(spawner_container)
+	host.add_child(spawner_container)
+
+
+func _find_spawner_container(level_root: Node) -> Node:
+	for container_name: String in SPAWNER_CONTAINER_NAMES:
+		var container: Node = level_root.get_node_or_null(NodePath(container_name))
+		if container != null:
+			return container
+	return null
+
+
+func _level_path_for_log() -> String:
+	return _loaded_level_scene_path if _loaded_level_scene_path != "" else "<loading>"

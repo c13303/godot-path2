@@ -3,6 +3,7 @@ class_name BuildingManager
 
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
+signal level_completed
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
@@ -109,8 +110,8 @@ var _spawn_timers: Dictionary = {}
 # spawn+assign work of multiple ready spawners is spread over several frames instead
 # of stacking into one hitch. _ready_spawner_queue_set mirrors the queued cells so a
 # spawner can't be enqueued twice while it waits its turn.
-var _ready_spawner_queue: Array[Vector2i] = []
-var _ready_spawner_queue_set: Dictionary = {}  # Vector2i -> true
+var _ready_spawner_queue: Array[Dictionary] = []
+var _ready_spawner_queue_set: Dictionary = {}  # Vector2i or playlist track index -> true
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
 # Route-cache hit/miss counters (lifetime-of-process), bumped in
@@ -279,6 +280,15 @@ var _quota_stall_elapsed: float = 0.0
 var _spawned_count_this_night: int = 0
 var _spawn_limit_this_night: int = 0
 var _progression: Node = null
+var _level_spawn_playlist: LevelSpawnPlaylist
+var _level_spawner_bindings: Array[SpawnerBinding] = []
+var _spawner_bindings_by_id: Dictionary = {}  # StringName -> Vector2i
+var _spawn_playlist_controller: SpawnPlaylistController = SpawnPlaylistController.new()
+var _playlist_spawning_enabled: bool = false
+var _playlist_spawning_invalid: bool = false
+var _playlist_validation_attempted: bool = false
+var _current_playlist_night_index: int = -1
+var _level_completed_emitted: bool = false
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
@@ -417,6 +427,7 @@ func set_paused(value: bool) -> void:
 
 func _ready() -> void:
 	_resolve_level_layers()
+	_load_level_spawn_config()
 	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
@@ -424,6 +435,25 @@ func _ready() -> void:
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
+
+
+func _load_level_spawn_config() -> void:
+	_level_spawn_playlist = null
+	_level_spawner_bindings.clear()
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var loader: Node = scene.get_node_or_null("LevelLoader")
+	if loader == null:
+		return
+	if loader.has_method("get_loaded_spawn_playlist"):
+		_level_spawn_playlist = loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
+	if loader.has_method("get_loaded_spawner_bindings"):
+		var raw_bindings: Array = loader.call("get_loaded_spawner_bindings") as Array
+		for raw_binding: Variant in raw_bindings:
+			var binding: SpawnerBinding = raw_binding as SpawnerBinding
+			if binding != null:
+				_level_spawner_bindings.append(binding)
 
 # floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
 # injected into MonTilemap before any _ready runs, so they are resolved by path
@@ -449,9 +479,25 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	# while all daytime topology is consumed by the capped preparation coroutine.
 	_spawned_this_night = false
 	_spawned_count_this_night = 0
-	_spawn_limit_this_night = _compute_spawn_limit()
-	if debug_logs:
-		_log("Night spawn limit: %d (days + roses)" % _spawn_limit_this_night)
+	_current_playlist_night_index = _get_playlist_night_index_from_progression()
+	if _playlist_spawning_enabled:
+		_spawn_limit_this_night = 0
+		if not _spawn_playlist_controller.begin_night(_current_playlist_night_index):
+			push_error("BuildingManager: playlist night index %d is invalid; spawning disabled for this night." % (_current_playlist_night_index + 1))
+			_playlist_spawning_enabled = false
+			_playlist_spawning_invalid = true
+		elif debug_logs:
+			_log("Playlist night started: playable_night=%d total=%d" % [
+				_current_playlist_night_index + 1,
+				_spawn_playlist_controller.get_total_night_count(),
+			])
+	if _playlist_spawning_invalid:
+		_spawn_limit_this_night = 0
+		push_error("BuildingManager: assigned spawn playlist is invalid; spawning remains disabled this night.")
+	elif not _playlist_spawning_enabled:
+		_spawn_limit_this_night = _compute_spawn_limit()
+		if debug_logs:
+			_log("Night spawn limit: %d (days + roses)" % _spawn_limit_this_night)
 	for cell in _spawn_timers.keys():
 		_spawn_timers[cell] = 0.0
 	_ready_spawner_queue.clear()
@@ -460,6 +506,14 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_night_preparing = true
 	_night_preparation_ready = false
 	call_deferred("_run_night_preparation", _night_preparation_token)
+
+
+func _get_playlist_night_index_from_progression() -> int:
+	var prog: Node = _get_progression()
+	if prog == null:
+		return 0
+	var day_number: int = int(prog.call("get_value", &"nDays"))
+	return maxi(0, day_number - 1)
 
 # This night's monster quota = nDays * monster_per_day + roses * monster_per_rose.
 # Returns 0 ("no cap") if progression is unavailable, so a missing node can never
@@ -1141,8 +1195,9 @@ func _scan_buildings() -> void:
 
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
-	# Only the traversable layer carries spawners / special tiles. Turrets affect
-	# navigation through their layer signature above, but are not special tiles.
+	# Spawners are authored as child nodes in the loaded level's spawner/spawners
+	# container. Tile special scanning is kept only for non-spawner legacy markers.
+	_scan_configured_spawner_nodes(seen_spawners)
 	_scan_special_layer(traversable_buildings, seen_spawners)
 	_scan_special_layer(wallz, seen_spawners)
 	_warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
@@ -1184,6 +1239,7 @@ func _apply_navigation_topology_rebuild() -> void:
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
+	_validate_playlist_after_spawner_scan()
 	_apply_navigation_topology_rebuild()
 	var spawner_cells: Array = _spawners.keys()
 	var total_count: int = spawner_cells.size()
@@ -1200,6 +1256,75 @@ func _sync_runtime_state() -> void:
 		await get_tree().process_frame
 	# Per-exit-wall escape FFs (shared by all monsters); built once at startup.
 	_rebuild_exit_wall_escapes()
+
+
+func _validate_playlist_after_spawner_scan() -> void:
+	if _playlist_validation_attempted:
+		return
+	_playlist_validation_attempted = true
+	_playlist_spawning_enabled = false
+	_playlist_spawning_invalid = false
+	_spawner_bindings_by_id.clear()
+	if _level_spawn_playlist == null:
+		push_warning("BuildingManager: no level spawn playlist assigned; using legacy quota spawning.")
+		return
+	var binding_cells: Dictionary = {}
+	var bindings_valid: bool = true
+	for binding: SpawnerBinding in _level_spawner_bindings:
+		if binding == null:
+			push_error("BuildingManager: null spawner binding in level spawn config.")
+			bindings_valid = false
+			continue
+		if binding.spawner_id == &"":
+			push_error("BuildingManager: spawner binding has empty spawner_id for cell %s." % str(binding.cell))
+			bindings_valid = false
+			continue
+		if _spawner_bindings_by_id.has(binding.spawner_id):
+			push_error("BuildingManager: duplicate spawner binding ID '%s'." % String(binding.spawner_id))
+			bindings_valid = false
+			continue
+		if binding_cells.has(binding.cell):
+			push_error("BuildingManager: duplicate spawner binding cell %s." % str(binding.cell))
+			bindings_valid = false
+			continue
+		_spawner_bindings_by_id[binding.spawner_id] = binding.cell
+		binding_cells[binding.cell] = true
+	if not bindings_valid:
+		_playlist_spawning_invalid = true
+		push_error("BuildingManager: invalid spawner bindings; playlist spawning disabled for safety.")
+		return
+	var valid_monster_types: Dictionary = _valid_monster_types()
+	var valid: bool = _spawn_playlist_controller.configure(
+		_level_spawn_playlist,
+		_spawner_bindings_by_id,
+		_spawners,
+		valid_monster_types
+	)
+	if not valid:
+		for raw_error: Variant in _spawn_playlist_controller.get_last_errors():
+			push_error("BuildingManager: " + str(raw_error))
+		_playlist_spawning_invalid = true
+		push_error("BuildingManager: invalid level spawn playlist; playlist spawning disabled for safety.")
+		return
+	_playlist_spawning_enabled = true
+	if debug_logs:
+		_log("Configured spawn playlist nights=%d bindings=%d" % [
+			_spawn_playlist_controller.get_total_night_count(),
+			_spawner_bindings_by_id.size(),
+		])
+
+
+func _valid_monster_types() -> Dictionary:
+	return {
+		&"basic": true,
+	}
+
+
+func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
+	if monster_type == &"basic":
+		return AGENT_SCENE
+	_log_spawn_failure("unknown monster_type '%s'" % String(monster_type))
+	return null
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -1278,15 +1403,21 @@ func _scan_special_layer(layer: TileMapLayer, seen_spawners: Dictionary) -> void
 		var definition: Dictionary = _definition_for_layer_cell(layer, map_cell)
 		var kind: String = str(definition.get("kind", ""))
 		if kind == "spawner":
-			_log("detected spawner layer=%s cell=%s atlas=%s floor=%s wall=%s" % [
-				layer.name,
-				map_cell,
-				layer.get_cell_atlas_coords(map_cell),
-				_has_floor(map_cell),
-				_has_wall(map_cell)
-			])
-			seen_spawners[map_cell] = true
-			_register_spawner(map_cell, float(definition.get("cooldown", DEFAULT_SPAWN_COOLDOWN)))
+			continue
+
+
+func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
+	for binding: SpawnerBinding in _level_spawner_bindings:
+		if binding == null:
+			continue
+		_log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
+			String(binding.spawner_id),
+			binding.cell,
+			_has_floor(binding.cell),
+			_has_wall(binding.cell),
+		])
+		seen_spawners[binding.cell] = true
+		_register_spawner(binding.cell, DEFAULT_SPAWN_COOLDOWN)
 
 func _migrate_special_tiles_from_wallz() -> bool:
 	if not wallz or not traversable_buildings:
@@ -1298,6 +1429,15 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		var definition: Dictionary = _definition_for_layer_cell(wallz, cell)
 		var kind: String = str(definition.get("kind", ""))
 		if kind == "" or kind == "wall":
+			continue
+		if kind == "spawner":
+			var legacy_atlas: Vector2i = wallz.get_cell_atlas_coords(cell)
+			wallz.erase_cell(cell)
+			migrated = true
+			_log("removed legacy spawner tile cell=%s atlas=%s from wallz; level spawner nodes are used instead" % [
+				cell,
+				legacy_atlas,
+			])
 			continue
 
 		var target_layer: TileMapLayer = plantz if kind == "plantsToTarget" else traversable_buildings
@@ -1648,6 +1788,15 @@ func _process_spawners(delta: float) -> void:
 	var mc: int = _monster_count()
 	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
 	_spawn_pass_stats["active_monsters"] = mc
+	if _playlist_spawning_invalid:
+		if mc == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				GameState.start_day()
+		return
+	if _playlist_spawning_enabled:
+		_process_playlist_spawners(delta, mc)
+		return
 	# End-of-night: only flip back to day once the night's WHOLE spawn quota has been
 	# produced AND the field is clear. Previously the night ended the instant the
 	# field emptied after the first spawn, so with slow spawners (1 monster per
@@ -1704,6 +1853,51 @@ func _process_spawners(delta: float) -> void:
 	_update_spawner_timers_and_enqueue_ready(delta)
 	_drain_ready_spawner_queue_budgeted()
 
+
+func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
+	if _level_completed_emitted:
+		return
+	if _spawn_playlist_controller.is_current_night_schedule_complete():
+		if active_monsters == 0:
+			if _current_playlist_night_index >= _spawn_playlist_controller.get_total_night_count() - 1:
+				_level_completed_emitted = true
+				if debug_logs:
+					_log("Final playlist night survived; level completed.")
+				level_completed.emit()
+				return
+			GameState.start_day()
+		return
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = _no_plants_remaining()
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				_log("Playlist night stalled because no plants remain; leaving schedule unfinished.")
+				GameState.start_day()
+				return
+		else:
+			_empty_night_elapsed = 0.0
+		if debug_logs and not _spawners.is_empty():
+			_log("no plants remaining for playlist spawners")
+		return
+	_empty_night_elapsed = 0.0
+	_enqueue_playlist_spawn_requests(delta)
+	_drain_ready_spawner_queue_budgeted()
+
+
+func _enqueue_playlist_spawn_requests(delta: float) -> void:
+	var requests: Array[Dictionary] = _spawn_playlist_controller.advance(delta)
+	for request: Dictionary in requests:
+		var track_index: int = int(request.get("track_index", -1))
+		if track_index < 0:
+			continue
+		if _ready_spawner_queue_set.has(track_index):
+			continue
+		_ready_spawner_queue.append(request)
+		_ready_spawner_queue_set[track_index] = true
+
 # Phase 1: tick every spawner's cooldown and append the newly-ready ones to the
 # round-robin queue. This stays cheap (timer arithmetic only) and runs for all
 # spawners every frame, so existing per-spawner cadence is unchanged — the expensive
@@ -1725,7 +1919,11 @@ func _update_spawner_timers_and_enqueue_ready(delta: float) -> void:
 		# while it waits in the queue, then enqueue once.
 		_spawn_timers[cell] = 0.0
 		if not _ready_spawner_queue_set.has(cell):
-			_ready_spawner_queue.append(cell)
+			_ready_spawner_queue.append({
+				"mode": &"legacy",
+				"spawner_cell": cell,
+				"monster_type": &"basic",
+			})
 			_ready_spawner_queue_set[cell] = true
 
 # Phase 2: spawn from at most spawner_budget_per_frame ready spawners (and, if a
@@ -1749,37 +1947,71 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 			if Time.get_ticks_usec() - start_us >= budget_us:
 				break
 
-		var cell: Vector2i = _ready_spawner_queue.pop_front()
-		_ready_spawner_queue_set.erase(cell)
+		var request: Dictionary = _ready_spawner_queue.pop_front()
+		var mode: StringName = request.get("mode", &"legacy") as StringName
+		var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
+		if mode == &"playlist":
+			_ready_spawner_queue_set.erase(int(request.get("track_index", -1)))
+		else:
+			_ready_spawner_queue_set.erase(cell)
 		# A spawner may have been removed (rescan) while queued; skip stale entries
 		# without counting them against the budget.
 		if not _spawners.has(cell):
+			if mode == &"playlist":
+				_report_playlist_spawn_result(request, false, "physical spawner cell is missing")
 			continue
 
 		var spawner_us: int = Time.get_ticks_usec()
 		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
 		processed += 1
 
-		var spawned: bool = _spawn_monster_from(cell)
+		var monster_type: StringName = request.get("monster_type", &"basic") as StringName
+		var spawned: bool = _spawn_monster_from(cell, monster_type)
 		if spawned:
 			_spawned_this_night = true
-			_spawned_count_this_night += 1
+			if mode != &"playlist":
+				_spawned_count_this_night += 1
 			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
-			var spawner: Dictionary = _spawners[cell] as Dictionary
-			_spawn_timers[cell] = float(spawner.get("cooldown", DEFAULT_SPAWN_COOLDOWN))
+			if mode == &"playlist":
+				_report_playlist_spawn_result(request, true)
+			else:
+				var spawner: Dictionary = _spawners[cell] as Dictionary
+				_spawn_timers[cell] = float(spawner.get("cooldown", DEFAULT_SPAWN_COOLDOWN))
 		else:
-			_spawn_timers[cell] = 0.25
+			if mode == &"playlist":
+				_report_playlist_spawn_result(request, false, _last_spawn_failure)
+			else:
+				_spawn_timers[cell] = 0.25
 
 		# Whole spawner iteration. Build the (small) context only when over threshold.
 		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
 		if _over_garden_threshold_us(spawner_elapsed_us):
 			_warn_garden_task_lag_us("_process_spawners.spawner_total", spawner_elapsed_us,
-				"spawner_cell=%s spawned=%s" % [str(cell), str(spawned)])
+				"spawner_cell=%s mode=%s spawned=%s" % [str(cell), String(mode), str(spawned)])
 
 	_spawn_pass_stats["ready_queue_remaining"] = _ready_spawner_queue.size()
 	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
 
-func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
+
+func _report_playlist_spawn_result(request: Dictionary, success: bool, failure_reason: String = "") -> void:
+	var track_index: int = int(request.get("track_index", -1))
+	_spawn_playlist_controller.mark_spawn_result(track_index, success, failure_reason)
+	if not success:
+		var warning_key: String = "playlist:%d" % track_index
+		var now_ms: int = Time.get_ticks_msec()
+		var last_ms: int = int(_last_spawn_failure_at_ms.get(warning_key, -SPAWN_FAILURE_WARN_INTERVAL_MS))
+		if now_ms - last_ms >= SPAWN_FAILURE_WARN_INTERVAL_MS:
+			_last_spawn_failure_at_ms[warning_key] = now_ms
+			push_warning("BuildingManager: playlist spawn failed: %s reason=%s" % [
+				_spawn_playlist_controller.get_track_debug_context(track_index),
+				failure_reason,
+			])
+
+
+func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
+	var agent_scene: PackedScene = _resolve_monster_scene(monster_type)
+	if agent_scene == null:
+		return false
 	# Select target garden: iterates all gardens, checks targetable / edible plants,
 	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
 	var t_sel: int = Time.get_ticks_usec()
@@ -1836,7 +2068,7 @@ func _spawn_monster_from(spawner_cell: Vector2i) -> bool:
 
 	# Instantiate + add_child + group registration of the agent scene.
 	var t_inst: int = Time.get_ticks_usec()
-	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
+	var agent: Node2D = agent_scene.instantiate() as Node2D
 	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
 	parent.add_child(agent)
 	agent.global_position = _cell_center(spawn_cell)
