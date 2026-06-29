@@ -44,7 +44,7 @@ func _load_level() -> void:
 
 	# Instanced off-tree; we only keep its authored layers and discard the shell.
 	var level_root: Node = scene_to_load.instantiate()
-	_capture_level_spawn_config(level_root)
+	_capture_level_spawn_config(level_root, scene_to_load.resource_path)
 	_capture_level_spawner_bindings(level_root)
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
@@ -98,7 +98,7 @@ func _resolve_level_scene() -> PackedScene:
 	return level_scene
 
 
-func _capture_level_spawn_config(level_root: Node) -> void:
+func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> void:
 	_loaded_spawn_playlist = null
 	_loaded_spawner_bindings.clear()
 	if level_root == null:
@@ -106,9 +106,23 @@ func _capture_level_spawn_config(level_root: Node) -> void:
 	var config: LevelSpawnConfig = level_root as LevelSpawnConfig
 	if config == null:
 		config = level_root.get_node_or_null("LevelSpawnConfig") as LevelSpawnConfig
-	if config == null:
+	if config != null:
+		_loaded_spawn_playlist = config.spawn_playlist
+	if _loaded_spawn_playlist != null:
 		return
-	_loaded_spawn_playlist = config.spawn_playlist
+	var fallback_playlist: LevelSpawnPlaylist = _load_default_spawn_playlist(level_scene_path)
+	if fallback_playlist != null:
+		_loaded_spawn_playlist = fallback_playlist
+
+
+func _load_default_spawn_playlist(level_scene_path: String) -> LevelSpawnPlaylist:
+	if level_scene_path == "":
+		return null
+	var playlist_path: String = "res://scenes/levels/playlists/%s_spawn_playlist.tres" % level_scene_path.get_file().get_basename()
+	if not ResourceLoader.exists(playlist_path):
+		return null
+	var resource: Resource = load(playlist_path)
+	return resource as LevelSpawnPlaylist
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:

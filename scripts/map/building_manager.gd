@@ -282,6 +282,7 @@ var _spawn_limit_this_night: int = 0
 var _progression: Node = null
 var _level_spawn_playlist: LevelSpawnPlaylist
 var _level_spawner_bindings: Array[SpawnerBinding] = []
+var _loaded_level_scene_path: String = ""
 var _spawner_bindings_by_id: Dictionary = {}  # StringName -> Vector2i
 var _spawn_playlist_controller: SpawnPlaylistController = SpawnPlaylistController.new()
 var _playlist_spawning_enabled: bool = false
@@ -440,20 +441,35 @@ func _ready() -> void:
 func _load_level_spawn_config() -> void:
 	_level_spawn_playlist = null
 	_level_spawner_bindings.clear()
+	_loaded_level_scene_path = ""
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return
 	var loader: Node = scene.get_node_or_null("LevelLoader")
 	if loader == null:
 		return
+	if loader.has_method("get_loaded_level_scene_path"):
+		_loaded_level_scene_path = str(loader.call("get_loaded_level_scene_path"))
 	if loader.has_method("get_loaded_spawn_playlist"):
 		_level_spawn_playlist = loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
+	if _level_spawn_playlist == null:
+		_level_spawn_playlist = _load_default_spawn_playlist(_loaded_level_scene_path)
 	if loader.has_method("get_loaded_spawner_bindings"):
 		var raw_bindings: Array = loader.call("get_loaded_spawner_bindings") as Array
 		for raw_binding: Variant in raw_bindings:
 			var binding: SpawnerBinding = raw_binding as SpawnerBinding
 			if binding != null:
 				_level_spawner_bindings.append(binding)
+
+
+func _load_default_spawn_playlist(level_scene_path: String) -> LevelSpawnPlaylist:
+	if level_scene_path == "":
+		return null
+	var playlist_path: String = "res://scenes/levels/playlists/%s_spawn_playlist.tres" % level_scene_path.get_file().get_basename()
+	if not ResourceLoader.exists(playlist_path):
+		return null
+	var resource: Resource = load(playlist_path)
+	return resource as LevelSpawnPlaylist
 
 # floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
 # injected into MonTilemap before any _ready runs, so they are resolved by path
@@ -1266,6 +1282,10 @@ func _validate_playlist_after_spawner_scan() -> void:
 	_playlist_spawning_invalid = false
 	_spawner_bindings_by_id.clear()
 	if _level_spawn_playlist == null:
+		if not _level_spawner_bindings.is_empty():
+			_playlist_spawning_invalid = true
+			push_error("BuildingManager: level has spawner nodes but no spawn playlist was found for '%s'; playlist spawning disabled instead of falling back to legacy quota spawning." % _loaded_level_scene_path)
+			return
 		push_warning("BuildingManager: no level spawn playlist assigned; using legacy quota spawning.")
 		return
 	var binding_cells: Dictionary = {}
@@ -1307,6 +1327,11 @@ func _validate_playlist_after_spawner_scan() -> void:
 		push_error("BuildingManager: invalid level spawn playlist; playlist spawning disabled for safety.")
 		return
 	_playlist_spawning_enabled = true
+	print("BuildingManager: spawn playlist enabled for '%s' with %d night(s) and %d spawner binding(s)." % [
+		_loaded_level_scene_path,
+		_spawn_playlist_controller.get_total_night_count(),
+		_spawner_bindings_by_id.size(),
+	])
 	if debug_logs:
 		_log("Configured spawn playlist nights=%d bindings=%d" % [
 			_spawn_playlist_controller.get_total_night_count(),
@@ -1948,7 +1973,7 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 				break
 
 		var request: Dictionary = _ready_spawner_queue.pop_front()
-		var mode: StringName = request.get("mode", &"legacy") as StringName
+		var mode: StringName = StringName(str(request.get("mode", "legacy")))
 		var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
 		if mode == &"playlist":
 			_ready_spawner_queue_set.erase(int(request.get("track_index", -1)))
@@ -1965,7 +1990,7 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
 		processed += 1
 
-		var monster_type: StringName = request.get("monster_type", &"basic") as StringName
+		var monster_type: StringName = StringName(str(request.get("monster_type", "basic")))
 		var spawned: bool = _spawn_monster_from(cell, monster_type)
 		if spawned:
 			_spawned_this_night = true

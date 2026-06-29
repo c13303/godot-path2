@@ -87,7 +87,7 @@ func advance(delta: float) -> Array[Dictionary]:
 			track_state["time_until_next_spawn"] = time_left
 			if time_left > 0.0:
 				continue
-		var spawner_id: StringName = track_state.get("spawner_id", &"") as StringName
+		var spawner_id: StringName = StringName(str(track_state.get("spawner_id", "")))
 		var cell: Vector2i = _spawner_bindings_by_id.get(spawner_id, Vector2i.ZERO) as Vector2i
 		track_state["pending"] = true
 		requests.append({
@@ -195,7 +195,7 @@ func _validate_playlist(physical_spawner_cells: Dictionary) -> bool:
 	if _playlist.nights.is_empty():
 		_add_error("empty playlist")
 	for raw_id: Variant in _spawner_bindings_by_id.keys():
-		var spawner_id: StringName = raw_id as StringName
+		var spawner_id: StringName = StringName(str(raw_id))
 		var cell: Vector2i = _spawner_bindings_by_id[spawner_id] as Vector2i
 		if not physical_spawner_cells.has(cell):
 			_add_error("bound cell does not correspond to a scanned physical spawner: spawner_id=%s cell=%s" % [String(spawner_id), str(cell)])
