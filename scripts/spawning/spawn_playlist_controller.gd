@@ -42,6 +42,32 @@ func get_total_night_count() -> int:
 	return _playlist.get_night_count() if _playlist != null else 0
 
 
+func get_current_night_debug_lines() -> Array[String]:
+	var lines: Array[String] = []
+	if _current_night == null:
+		return lines
+	for track: SpawnerWaveTrack in _current_night.spawner_tracks:
+		if track == null:
+			lines.append("track=<null>")
+			continue
+		if track.waves.is_empty():
+			lines.append("spawner_id=%s waves=0" % String(track.spawner_id))
+			continue
+		var wave: SpawnWave = track.waves[0]
+		if wave == null:
+			lines.append("spawner_id=%s first_wave=<null>" % String(track.spawner_id))
+			continue
+		lines.append("spawner_id=%s first_wave_count=%d interval=%.2f wait=%s emit=%s wave_count=%d" % [
+			String(track.spawner_id),
+			wave.monster_count,
+			wave.spawn_interval_seconds,
+			String(wave.wait_for_event),
+			String(wave.emit_event),
+			track.waves.size(),
+		])
+	return lines
+
+
 func begin_night(night_index: int) -> bool:
 	_current_night_index = night_index
 	_current_night = null
@@ -91,7 +117,6 @@ func advance(delta: float) -> Array[Dictionary]:
 		var cell: Vector2i = _spawner_bindings_by_id.get(spawner_id, Vector2i.ZERO) as Vector2i
 		track_state["pending"] = true
 		requests.append({
-			"mode": &"playlist",
 			"track_index": int(track_state.get("track_index", -1)),
 			"spawner_id": spawner_id,
 			"spawner_cell": cell,

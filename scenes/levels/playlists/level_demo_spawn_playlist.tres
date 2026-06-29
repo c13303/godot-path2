@@ -10,18 +10,14 @@ script = ExtResource("4_wave")
 monster_count = 2
 spawn_interval_seconds = 2.0
 
-[sub_resource type="Resource" id="SpawnWave_n1_w2"]
-script = ExtResource("4_wave")
-spawn_interval_seconds = 2.5
-
 [sub_resource type="Resource" id="SpawnerWaveTrack_n1_spawner2"]
 script = ExtResource("3_track")
 spawner_id = &"spawner2"
-waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n1_w1"), SubResource("SpawnWave_n1_w2")])
+waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n1_w1")])
 
 [sub_resource type="Resource" id="SpawnWave_n1_spawner1_w1"]
 script = ExtResource("4_wave")
-monster_count = 500
+monster_count = 100
 spawn_interval_seconds = 0.1
 
 [sub_resource type="Resource" id="SpawnerWaveTrack_n1_spawner1"]
