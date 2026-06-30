@@ -39,6 +39,7 @@
 [ext_resource type="Script" uid="uid://bmti7g3rbm2dg" path="res://scripts/map/level_loader.gd" id="36_lvload"]
 [ext_resource type="PackedScene" uid="uid://bdi57o0hf3tu5" path="res://scenes/levels/level_demo.tscn" id="37_lvdemo"]
 [ext_resource type="Script" uid="uid://sfwpyffffhdb" path="res://scripts/ui/menus.gd" id="35_ikr28"]
+[ext_resource type="Script" path="res://scripts/ui/game_over_modal.gd" id="38_game_over"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1130,6 +1131,59 @@ layout_mode = 2
 theme_override_constants/separation = 6
 alignment = 1
 
+[node name="gameOverModal" type="Panel" parent="GameUI/Modals" unique_id=700000009]
+visible = false
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -190.0
+offset_top = -150.0
+offset_right = 190.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_modal")
+script = ExtResource("38_game_over")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/Modals/gameOverModal" unique_id=700000010]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 28
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 28
+
+[node name="Buttons" type="VBoxContainer" parent="GameUI/Modals/gameOverModal/MarginContainer" unique_id=700000011]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000012]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Recommencer"
+
+[node name="MainMenuButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000013]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Menu"
+
+[node name="QuitButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000014]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Quitter"
+
 [node name="notif" type="RichTextLabel" parent="GameUI" unique_id=835359556]
 anchors_preset = 5
 anchor_left = 0.5
@@ -1375,4 +1429,3 @@ text = "YES"
 custom_minimum_size = Vector2(120, 44)
 layout_mode = 2
 text = "NO"
-

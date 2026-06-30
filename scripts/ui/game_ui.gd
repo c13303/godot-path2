@@ -77,6 +77,11 @@ func _on_day_toggle_pressed() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
+	# Night: non-weapon quick items (build/unbuild tools, placeables) are disabled
+	# and the player is auto-armed with their first weapon. Day re-enables them; the
+	# shop re-selects the build tool once the seed harvest finishes.
+	if is_night:
+		select_first_weapon()
 	_refresh_all_slots()
 
 func _update_day_toggle_icon(is_night: bool) -> void:
@@ -149,39 +154,42 @@ func move_inventory_item(from_slot: int, to_slot: int) -> void:
 func select_quick_slot(index: int) -> void:
 	if index < 0 or index >= QUICK_SLOT_COUNT:
 		return
-	# If the chosen quick slot is empty, fall back to the nearest non-empty one.
-	# If every quick slot is empty (shouldn't happen, "spray" is non-removable),
-	# leave the selection on the requested slot.
-	if _is_quick_slot_empty(index):
+	# If the chosen quick slot can't be selected (empty, or a non-weapon disabled
+	# during the night), fall back to the nearest selectable slot. If none qualify
+	# (shouldn't happen, "spray" is non-removable), leave the requested slot.
+	if not _is_quick_slot_selectable(index):
 		var fallback: int = _nearest_valid_quick_slot(index)
 		if fallback >= 0:
 			index = fallback
 	selected_quick_index = index
 	_refresh_all_slots()
 
-# Re-selects the nearest non-empty quick slot when the current selection is empty
-# (e.g. after consuming the last item in the selected stack). Leaves the selection
-# untouched if every quick slot is empty.
+# Re-selects the nearest selectable quick slot when the current selection is no
+# longer valid (emptied by consuming its last item, or disabled at nightfall).
+# Leaves the selection untouched if no quick slot is selectable.
 func _ensure_valid_quick_selection() -> void:
-	if not _is_quick_slot_empty(selected_quick_index):
+	if _is_quick_slot_selectable(selected_quick_index):
 		return
 	var fallback: int = _nearest_valid_quick_slot(selected_quick_index)
 	if fallback >= 0:
 		selected_quick_index = fallback
 
-func _is_quick_slot_empty(index: int) -> bool:
+# A quick slot can be selected when it holds an item that isn't currently disabled
+# (non-weapon tools/placeables are disabled during the night).
+func _is_quick_slot_selectable(index: int) -> bool:
 	if index < 0 or index >= inventory_slots.size():
-		return true
-	return _slot_item_id(inventory_slots[index]) == ""
+		return false
+	var item_id: String = _slot_item_id(inventory_slots[index])
+	return item_id != "" and not is_quick_item_disabled(item_id)
 
 func _nearest_valid_quick_slot(index: int) -> int:
 	var limit: int = mini(QUICK_SLOT_COUNT, inventory_slots.size())
 	for distance: int in range(1, limit):
 		var left: int = index - distance
-		if left >= 0 and not _is_quick_slot_empty(left):
+		if left >= 0 and _is_quick_slot_selectable(left):
 			return left
 		var right: int = index + distance
-		if right < limit and not _is_quick_slot_empty(right):
+		if right < limit and _is_quick_slot_selectable(right):
 			return right
 	return -1
 
@@ -248,6 +256,21 @@ func selected_quick_item_places_tile() -> bool:
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
 	return GameState.is_night and ItemCatalog.is_placeable(item_id)
+
+## Whether a quick-bar item is disabled for selection/use. At night every
+## non-weapon (build/unbuild tools, placeables) is locked out so the player can
+## only wield weapons; during the day nothing is locked. Generalizes to any new
+## weapon (selectable at night) or non-weapon (locked at night) item.
+func is_quick_item_disabled(item_id: String) -> bool:
+	return item_id != "" and GameState.is_night and not ItemCatalog.is_weapon(item_id)
+
+## Selects the first quick-slot weapon, used to auto-arm the player when night
+## falls. No-op if the quick bar holds no weapon.
+func select_first_weapon() -> void:
+	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
+		if ItemCatalog.is_weapon(_slot_item_id(inventory_slots[i])):
+			select_quick_slot(i)
+			return
 
 # --- Build mode (shop-driven placement, paid directly from currency) ---------
 
@@ -343,10 +366,26 @@ func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)
 	for i in range(INVENTORY_SLOT_COUNT):
 		inventory_slots[i] = _empty_slot()
-	#add_inventory("sword", 1)
-	add_inventory("spray", 1)
+	for weapon_id: StringName in _get_level_starting_weapons():
+		add_inventory(String(weapon_id), 1)
 	add_inventory(BUILD_TOOL_ID, 1)
 	add_inventory(UNBUILD_TOOL_ID, 1)
+
+
+func _get_level_starting_weapons() -> Array[StringName]:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_starting_weapons"):
+		var raw_weapons: Variant = loader.call("get_loaded_starting_weapons")
+		if raw_weapons is Array:
+			var weapons: Array[StringName] = []
+			for raw_weapon: Variant in raw_weapons:
+				var weapon_id: StringName = StringName(str(raw_weapon))
+				if weapon_id != &"" and ItemCatalog.is_weapon(String(weapon_id)):
+					weapons.append(weapon_id)
+			return weapons
+	return [&"spray"]
+
 
 # Generic inventory add, reusable for purchases, pickups, and rewards.
 # Existing stacks are filled before new slots are used. The operation is
@@ -615,7 +654,7 @@ func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
 		slot.set_item(item_def, quantity)
 	else:
 		slot.set_item({}, 0)
-	slot.set_disabled(is_item_disabled_for_placement(item_id))
+	slot.set_disabled(is_quick_item_disabled(item_id))
 	slot.set_selected(slot_index == selected_quick_index)
 
 func _clear_container(container: Container) -> void:
@@ -624,12 +663,21 @@ func _clear_container(container: Container) -> void:
 		child.queue_free()
 
 func step_selected_quick_slot(direction: int) -> void:
-	var next_index := selected_quick_index + direction
-	if next_index < 0:
-		next_index = QUICK_SLOT_COUNT - 1
-	elif next_index >= QUICK_SLOT_COUNT:
-		next_index = 0
-	select_quick_slot(next_index)
+	if direction == 0:
+		return
+	# Walk in the scroll direction to the next selectable slot, skipping empty and
+	# disabled (non-weapon at night) ones and wrapping around. Keeps the current
+	# selection if no other slot can be selected.
+	var next_index := selected_quick_index
+	for _step: int in range(QUICK_SLOT_COUNT):
+		next_index += direction
+		if next_index < 0:
+			next_index = QUICK_SLOT_COUNT - 1
+		elif next_index >= QUICK_SLOT_COUNT:
+			next_index = 0
+		if _is_quick_slot_selectable(next_index):
+			select_quick_slot(next_index)
+			return
 
 func _quick_slot_index_from_event(event: InputEventKey) -> int:
 	if event.physical_keycode >= KEY_1 and event.physical_keycode <= KEY_8:

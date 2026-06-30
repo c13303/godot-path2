@@ -3,5 +3,8 @@
 	"tutorial.buy_roses": "Buy roses",
 	"tutorial.plant_roses": "Plant your roses",
 	"tutorial.water_roses": "Water your roses",
-	"tutorial.pass_night": "Pass the night"
+	"tutorial.pass_night": "Pass the night",
+	"game_over.restart": "Restart",
+	"game_over.main_menu": "Main Menu",
+	"game_over.quit": "Quit"
 }

@@ -6,6 +6,9 @@ const PLAYLISTS_DIR: String = "res://scenes/levels/playlists"
 const LEVEL_CONFIG_SCRIPT: Script = preload("res://scripts/spawning/level_spawn_config.gd")
 const WAVE_ROW_SCRIPT: Script = preload("res://addons/spawn_playlist_editor/wave_row.gd")
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
+const DEFAULT_STARTING_SEEDS: int = 20
+const DEFAULT_STARTING_GEMS: int = 1000
+const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 
 var editor_plugin: EditorPlugin
 
@@ -25,6 +28,11 @@ var _create_button: Button
 var _save_button: Button
 var _dirty_label: Label
 var _playlist_label: Label
+var _starting_controls: VBoxContainer
+var _starting_seeds: SpinBox
+var _starting_gems: SpinBox
+var _weapon_checks_box: HBoxContainer
+var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _night_option: OptionButton
 var _validation_label: RichTextLabel
 var _rename_row: HBoxContainer
@@ -62,10 +70,23 @@ func move_wave(spawner_id: StringName, from_index: int, to_index: int) -> void:
 		return
 	var wave: SpawnWave = track.waves[from_index]
 	track.waves.remove_at(from_index)
-	var insert_index: int = to_index
-	if from_index < to_index:
-		insert_index -= 1
-	track.waves.insert(insert_index, wave)
+	track.waves.insert(to_index, wave)
+	mark_dirty()
+	_rebuild_tracks()
+
+
+func move_spawner_track(spawner_id: StringName, to_index: int) -> void:
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null:
+		return
+	var from_index: int = _get_track_index(spawner_id)
+	if from_index < 0 or from_index >= night.spawner_tracks.size() or to_index < 0 or to_index >= night.spawner_tracks.size():
+		return
+	if from_index == to_index:
+		return
+	var track: SpawnerWaveTrack = night.spawner_tracks[from_index]
+	night.spawner_tracks.remove_at(from_index)
+	night.spawner_tracks.insert(to_index, track)
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -125,6 +146,10 @@ func _build_ui() -> void:
 	_playlist_label = Label.new()
 	_playlist_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_playlist_label)
+
+	_starting_controls = VBoxContainer.new()
+	add_child(_starting_controls)
+	_build_starting_controls()
 
 	var night_row: HBoxContainer = HBoxContainer.new()
 	add_child(night_row)
@@ -191,6 +216,55 @@ func _build_ui() -> void:
 
 	_loading_ui = false
 	_refresh_status()
+
+
+func _build_starting_controls() -> void:
+	var heading: Label = Label.new()
+	heading.text = "Starting Level"
+	heading.add_theme_font_size_override("font_size", 15)
+	_starting_controls.add_child(heading)
+
+	var currency_row: HBoxContainer = HBoxContainer.new()
+	_starting_controls.add_child(currency_row)
+
+	var seeds_label: Label = Label.new()
+	seeds_label.text = "Seeds"
+	currency_row.add_child(seeds_label)
+
+	_starting_seeds = SpinBox.new()
+	_starting_seeds.min_value = 0.0
+	_starting_seeds.max_value = 1000000.0
+	_starting_seeds.step = 1.0
+	_starting_seeds.custom_minimum_size = Vector2(86.0, 0.0)
+	_starting_seeds.value_changed.connect(_on_starting_seeds_changed)
+	currency_row.add_child(_starting_seeds)
+
+	var gems_label: Label = Label.new()
+	gems_label.text = "Gems"
+	currency_row.add_child(gems_label)
+
+	_starting_gems = SpinBox.new()
+	_starting_gems.min_value = 0.0
+	_starting_gems.max_value = 1000000.0
+	_starting_gems.step = 1.0
+	_starting_gems.custom_minimum_size = Vector2(86.0, 0.0)
+	_starting_gems.value_changed.connect(_on_starting_gems_changed)
+	currency_row.add_child(_starting_gems)
+
+	var weapons_label: Label = Label.new()
+	weapons_label.text = "Starting weapons"
+	_starting_controls.add_child(weapons_label)
+
+	_weapon_checks_box = HBoxContainer.new()
+	_starting_controls.add_child(_weapon_checks_box)
+	_weapon_checkboxes.clear()
+	for weapon_id: StringName in ItemCatalog.get_weapon_ids():
+		var checkbox: CheckBox = CheckBox.new()
+		checkbox.text = _item_display_name(weapon_id)
+		checkbox.tooltip_text = String(weapon_id)
+		checkbox.toggled.connect(_on_starting_weapon_toggled.bind(weapon_id))
+		_weapon_checks_box.add_child(checkbox)
+		_weapon_checkboxes[weapon_id] = checkbox
 
 
 func _refresh_levels() -> void:
@@ -281,6 +355,7 @@ func _capture_spawners() -> void:
 
 func _refresh_all() -> void:
 	_loading_ui = true
+	_refresh_starting_controls()
 	_refresh_nights()
 	_rebuild_tracks()
 	_loading_ui = false
@@ -294,7 +369,30 @@ func _refresh_status() -> void:
 	var playlist_path: String = _playlist.resource_path if _playlist != null else "<none>"
 	_playlist_label.text = "Level: %s\nPlaylist: %s" % [_current_level_path, playlist_path]
 	_create_button.disabled = _current_level_path == ""
-	_save_button.disabled = _current_level_path == "" or _playlist == null
+	_save_button.disabled = _current_level_path == ""
+
+
+func _refresh_starting_controls() -> void:
+	var config: LevelSpawnConfig = _get_level_config(_level_root)
+	var has_level: bool = _current_level_path != ""
+	_starting_controls.visible = has_level
+	_starting_seeds.editable = has_level
+	_starting_gems.editable = has_level
+	var seeds: int = DEFAULT_STARTING_SEEDS
+	var gems: int = DEFAULT_STARTING_GEMS
+	var weapons: Array[StringName] = _default_starting_weapons()
+	if config != null:
+		seeds = config.starting_seeds
+		gems = config.starting_gems
+		weapons = _valid_weapon_ids(config.starting_weapons)
+	_starting_seeds.value = float(seeds)
+	_starting_gems.value = float(gems)
+	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
+		var weapon_id: StringName = raw_weapon_id as StringName
+		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
+		if checkbox != null:
+			checkbox.button_pressed = weapons.has(weapon_id)
+			checkbox.disabled = not has_level
 
 
 func _refresh_nights() -> void:
@@ -328,7 +426,15 @@ func _rebuild_tracks() -> void:
 	if night == null:
 		return
 	var event_names: Array[StringName] = _collect_event_names(night)
+	var rendered_spawner_ids: Dictionary = {}
+	for track: SpawnerWaveTrack in night.spawner_tracks:
+		if track == null or track.spawner_id == &"" or not _spawner_ids.has(track.spawner_id) or rendered_spawner_ids.has(track.spawner_id):
+			continue
+		rendered_spawner_ids[track.spawner_id] = true
+		_tracks_box.add_child(_build_spawner_panel(track.spawner_id, event_names))
 	for spawner_id: StringName in _spawner_ids:
+		if rendered_spawner_ids.has(spawner_id):
+			continue
 		_tracks_box.add_child(_build_spawner_panel(spawner_id, event_names))
 
 
@@ -363,6 +469,22 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 		header.add_child(enable_button)
 		return panel
 
+	var track_index: int = _get_track_index(spawner_id)
+
+	var move_up_button: Button = Button.new()
+	move_up_button.text = "Up"
+	move_up_button.tooltip_text = "Move this spawner track above its previous neighbor."
+	move_up_button.disabled = track_index <= 0
+	move_up_button.pressed.connect(move_spawner_track.bind(spawner_id, track_index - 1))
+	header.add_child(move_up_button)
+
+	var move_down_button: Button = Button.new()
+	move_down_button.text = "Down"
+	move_down_button.tooltip_text = "Move this spawner track below its next neighbor."
+	move_down_button.disabled = track_index >= _get_active_track_count() - 1
+	move_down_button.pressed.connect(move_spawner_track.bind(spawner_id, track_index + 1))
+	header.add_child(move_down_button)
+
 	var add_wave_button: Button = Button.new()
 	add_wave_button.text = "Add Wave"
 	add_wave_button.pressed.connect(_add_wave.bind(spawner_id))
@@ -385,7 +507,7 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	var wave_index: int = 0
 	for wave: SpawnWave in track.waves:
 		var row: HBoxContainer = WAVE_ROW_SCRIPT.new() as HBoxContainer
-		row.call("setup", self, spawner_id, wave_index, wave, _monster_types(), event_names)
+		row.call("setup", self, spawner_id, wave_index, track.waves.size(), wave, _monster_types(), event_names)
 		outer.add_child(row)
 		wave_index += 1
 	if track.waves.is_empty():
@@ -408,7 +530,7 @@ func _header_width(label_text: String) -> Vector2:
 		"Wait Event", "Emit Event":
 			return Vector2(110.0, 0.0)
 		_:
-			return Vector2(38.0, 0.0)
+			return Vector2(76.0, 0.0)
 
 
 func _refresh_validation() -> void:
@@ -537,22 +659,23 @@ func _on_create_playlist_pressed() -> void:
 
 
 func _on_save_pressed() -> void:
-	if _playlist == null:
+	if _current_level_path == "":
 		return
-	var errors: PackedStringArray = PackedStringArray()
-	var warnings: PackedStringArray = PackedStringArray()
-	_validate(errors, warnings)
-	if not errors.is_empty():
-		_refresh_validation()
-		return
-	var save_path: String = _playlist.resource_path
-	if save_path == "":
-		save_path = _default_playlist_path_for_level(_current_level_path)
-		_playlist.take_over_path(save_path)
-	var save_error: Error = ResourceSaver.save(_playlist, save_path)
-	if save_error != OK:
-		_show_save_error("Could not save playlist", save_error)
-		return
+	if _playlist != null:
+		var errors: PackedStringArray = PackedStringArray()
+		var warnings: PackedStringArray = PackedStringArray()
+		_validate(errors, warnings)
+		if not errors.is_empty():
+			_refresh_validation()
+			return
+		var save_path: String = _playlist.resource_path
+		if save_path == "":
+			save_path = _default_playlist_path_for_level(_current_level_path)
+			_playlist.take_over_path(save_path)
+		var save_error: Error = ResourceSaver.save(_playlist, save_path)
+		if save_error != OK:
+			_show_save_error("Could not save playlist", save_error)
+			return
 	if not _assign_playlist_to_level_scene():
 		return
 	_dirty = false
@@ -580,6 +703,44 @@ func _on_rename_missing_id_pressed() -> void:
 				track.spawner_id = target_id
 	mark_dirty()
 	_refresh_all()
+
+
+func _on_starting_seeds_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.starting_seeds = int(value)
+	mark_dirty()
+
+
+func _on_starting_gems_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.starting_gems = int(value)
+	mark_dirty()
+
+
+func _on_starting_weapon_toggled(enabled: bool, weapon_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var weapons: Array[StringName] = _valid_weapon_ids(config.starting_weapons)
+	if enabled:
+		if not weapons.has(weapon_id):
+			weapons.append(weapon_id)
+	else:
+		var index: int = weapons.find(weapon_id)
+		if index >= 0:
+			weapons.remove_at(index)
+	config.starting_weapons = weapons
+	mark_dirty()
 
 
 func _on_add_night_pressed() -> void:
@@ -669,7 +830,7 @@ func _focus_spawner(spawner_id: StringName) -> void:
 
 
 func _assign_playlist_to_level_scene() -> bool:
-	if _current_level_path == "" or _playlist == null:
+	if _current_level_path == "":
 		return false
 	var packed: PackedScene = load(_current_level_path) as PackedScene
 	if packed == null:
@@ -678,6 +839,7 @@ func _assign_playlist_to_level_scene() -> bool:
 	var config: LevelSpawnConfig = _get_level_config(root)
 	if config != null:
 		config.spawn_playlist = _playlist
+		_apply_starting_values_to_config(config)
 	elif root.get_script() != null:
 		root.free()
 		_show_save_error("Level root already has a different script; assign LevelSpawnConfig manually or use a child LevelSpawnConfig node", ERR_ALREADY_EXISTS)
@@ -685,6 +847,9 @@ func _assign_playlist_to_level_scene() -> bool:
 	else:
 		root.set_script(LEVEL_CONFIG_SCRIPT)
 		root.set("spawn_playlist", _playlist)
+		root.set("starting_seeds", int(_starting_seeds.value))
+		root.set("starting_gems", int(_starting_gems.value))
+		root.set("starting_weapons", _selected_starting_weapons())
 	var new_scene: PackedScene = PackedScene.new()
 	var pack_error: Error = new_scene.pack(root)
 	root.free()
@@ -696,6 +861,12 @@ func _assign_playlist_to_level_scene() -> bool:
 		_show_save_error("Could not save level scene", save_error)
 		return false
 	return true
+
+
+func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
+	config.starting_seeds = int(_starting_seeds.value)
+	config.starting_gems = int(_starting_gems.value)
+	config.starting_weapons = _selected_starting_weapons()
 
 
 func _show_save_error(message: String, error: Error) -> void:
@@ -764,6 +935,13 @@ func _get_track_index(spawner_id: StringName) -> int:
 	return -1
 
 
+func _get_active_track_count() -> int:
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null:
+		return 0
+	return night.spawner_tracks.size()
+
+
 func _collect_event_names(night: NightSpawnPlaylist) -> Array[StringName]:
 	var events: Array[StringName] = []
 	var seen: Dictionary = {}
@@ -796,6 +974,57 @@ func _get_level_config(root: Node) -> LevelSpawnConfig:
 	if config != null:
 		return config
 	return root.get_node_or_null("LevelSpawnConfig") as LevelSpawnConfig
+
+
+func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
+	if _level_root == null:
+		return null
+	var config: LevelSpawnConfig = _get_level_config(_level_root)
+	if config != null:
+		return config
+	if _level_root.get_script() != null:
+		return null
+	_level_root.set_script(LEVEL_CONFIG_SCRIPT)
+	config = _level_root as LevelSpawnConfig
+	if config != null:
+		config.spawn_playlist = _playlist
+		config.starting_seeds = DEFAULT_STARTING_SEEDS
+		config.starting_gems = DEFAULT_STARTING_GEMS
+		config.starting_weapons = _default_starting_weapons()
+	return config
+
+
+func _selected_starting_weapons() -> Array[StringName]:
+	var weapons: Array[StringName] = []
+	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
+		var weapon_id: StringName = raw_weapon_id as StringName
+		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
+		if checkbox != null and checkbox.button_pressed:
+			weapons.append(weapon_id)
+	return weapons
+
+
+func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
+	var weapons: Array[StringName] = []
+	var seen: Dictionary = {}
+	for weapon_id: StringName in raw_weapons:
+		if weapon_id == &"" or seen.has(weapon_id) or not ItemCatalog.is_weapon(String(weapon_id)):
+			continue
+		seen[weapon_id] = true
+		weapons.append(weapon_id)
+	return weapons
+
+
+func _default_starting_weapons() -> Array[StringName]:
+	var weapons: Array[StringName] = []
+	for weapon_id: StringName in DEFAULT_STARTING_WEAPONS:
+		weapons.append(weapon_id)
+	return weapons
+
+
+func _item_display_name(item_id: StringName) -> String:
+	var item_def: Dictionary = ItemCatalog.get_item_def(String(item_id))
+	return str(item_def.get("name", String(item_id)))
 
 
 func _default_playlist_path_for_level(level_path: String) -> String:

@@ -27,6 +27,9 @@ const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []
+var _loaded_starting_seeds: int = 20
+var _loaded_starting_gems: int = 1000
+var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 
 func _enter_tree() -> void:
 	_load_level()
@@ -87,6 +90,21 @@ func get_loaded_spawner_bindings() -> Array[SpawnerBinding]:
 	return bindings
 
 
+func get_loaded_starting_seeds() -> int:
+	return _loaded_starting_seeds
+
+
+func get_loaded_starting_gems() -> int:
+	return _loaded_starting_gems
+
+
+func get_loaded_starting_weapons() -> Array[StringName]:
+	var weapons: Array[StringName] = []
+	for weapon_id: StringName in _loaded_starting_weapons:
+		weapons.append(weapon_id)
+	return weapons
+
+
 func _resolve_level_scene() -> PackedScene:
 	var selected_path: String = GameState.get_selected_level_scene_path()
 	if selected_path != "":
@@ -101,6 +119,9 @@ func _resolve_level_scene() -> PackedScene:
 func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> void:
 	_loaded_spawn_playlist = null
 	_loaded_spawner_bindings.clear()
+	_loaded_starting_seeds = 20
+	_loaded_starting_gems = 1000
+	_loaded_starting_weapons = [&"spray"]
 	if level_root == null:
 		return
 	var config: LevelSpawnConfig = level_root as LevelSpawnConfig
@@ -108,6 +129,9 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		config = level_root.get_node_or_null("LevelSpawnConfig") as LevelSpawnConfig
 	if config != null:
 		_loaded_spawn_playlist = config.spawn_playlist
+		_loaded_starting_seeds = config.starting_seeds
+		_loaded_starting_gems = config.starting_gems
+		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
 	if _loaded_spawn_playlist != null:
 		return
 	var fallback_playlist: LevelSpawnPlaylist = _load_default_spawn_playlist(level_scene_path)
@@ -123,6 +147,18 @@ func _load_default_spawn_playlist(level_scene_path: String) -> LevelSpawnPlaylis
 		return null
 	var resource: Resource = load(playlist_path)
 	return resource as LevelSpawnPlaylist
+
+
+func _valid_starting_weapons(raw_weapons: Array[StringName]) -> Array[StringName]:
+	var weapons: Array[StringName] = []
+	var seen: Dictionary = {}
+	for weapon_id: StringName in raw_weapons:
+		var item_id: String = String(weapon_id)
+		if item_id == "" or seen.has(weapon_id) or not ItemCatalog.is_weapon(item_id):
+			continue
+		seen[weapon_id] = true
+		weapons.append(weapon_id)
+	return weapons
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:

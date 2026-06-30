@@ -161,6 +161,7 @@ func update_gems(delta: int) -> bool:
 ## Copy the inspector-exposed Starting Props onto their matching progression props.
 ## One entry per ProgressionProp key; a key with no export keeps its class default.
 func _apply_starting_values() -> void:
+	_apply_level_starting_values()
 	var starting: Dictionary = {
 		&"nDays": starting_day,
 		&"monster_per_day": starting_monster_per_day,
@@ -175,6 +176,19 @@ func _apply_starting_values() -> void:
 		var prop: ProgressionProp = progression.get_prop(key)
 		if prop != null:
 			prop.value = int(starting[key])
+
+
+func _apply_level_starting_values() -> void:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var loader: Node = scene.get_node_or_null("LevelLoader")
+	if loader == null:
+		return
+	if loader.has_method("get_loaded_starting_seeds"):
+		starting_seeds = int(loader.call("get_loaded_starting_seeds"))
+	if loader.has_method("get_loaded_starting_gems"):
+		starting_gems = int(loader.call("get_loaded_starting_gems"))
 
 
 func _ready() -> void:

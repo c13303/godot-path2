@@ -151,6 +151,22 @@ static func get_place_tile(item_id: String) -> Dictionary:
 static func is_placeable(item_id: String) -> bool:
 	return str(get_item_def(item_id).get("type", "")) == "placeable"
 
+## Catalog types that count as combat weapons (fired by the fight system) rather
+## than tools/placeables. Quick-bar disabling and night auto-arming key off this.
+const WEAPON_TYPES: Array[String] = ["weapon", "gun"]
+
+static func is_weapon(item_id: String) -> bool:
+	return str(get_item_def(item_id).get("type", "")) in WEAPON_TYPES
+
+static func get_weapon_ids() -> Array[StringName]:
+	var weapon_ids: Array[StringName] = []
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		if is_weapon(item_id):
+			weapon_ids.append(StringName(item_id))
+	weapon_ids.sort()
+	return weapon_ids
+
 static func get_max_stack(item_id: String) -> int:
 	return maxi(1, int(get_item_def(item_id).get("max_stack", 999)))
 

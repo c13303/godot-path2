@@ -4,6 +4,7 @@ extends HBoxContainer
 var dock: Control
 var spawner_id: StringName = &""
 var wave_index: int = -1
+var wave_count: int = 0
 var wave: SpawnWave
 
 var _monster_type: OptionButton
@@ -13,21 +14,34 @@ var _wait_event: LineEdit
 var _emit_event: LineEdit
 
 
-func setup(p_dock: Control, p_spawner_id: StringName, p_wave_index: int, p_wave: SpawnWave, monster_types: Array[StringName], event_names: Array[StringName]) -> void:
+func setup(p_dock: Control, p_spawner_id: StringName, p_wave_index: int, p_wave_count: int, p_wave: SpawnWave, monster_types: Array[StringName], event_names: Array[StringName]) -> void:
 	dock = p_dock
 	spawner_id = p_spawner_id
 	wave_index = p_wave_index
+	wave_count = p_wave_count
 	wave = p_wave
 	custom_minimum_size = Vector2(0.0, 30.0)
 	_build(monster_types, event_names)
 
 
 func _build(monster_types: Array[StringName], event_names: Array[StringName]) -> void:
-	var drag_label: Label = Label.new()
-	drag_label.text = "drag"
-	drag_label.tooltip_text = "Drag to reorder this wave."
-	drag_label.custom_minimum_size = Vector2(38.0, 0.0)
-	add_child(drag_label)
+	var move_box: HBoxContainer = HBoxContainer.new()
+	move_box.custom_minimum_size = Vector2(76.0, 0.0)
+	add_child(move_box)
+
+	var up_button: Button = Button.new()
+	up_button.text = "Up"
+	up_button.tooltip_text = "Move this wave above its previous neighbor."
+	up_button.disabled = wave_index <= 0
+	up_button.pressed.connect(_on_move_up_pressed)
+	move_box.add_child(up_button)
+
+	var down_button: Button = Button.new()
+	down_button.text = "Down"
+	down_button.tooltip_text = "Move this wave below its next neighbor."
+	down_button.disabled = wave_index >= wave_count - 1
+	down_button.pressed.connect(_on_move_down_pressed)
+	move_box.add_child(down_button)
 
 	var number: Label = Label.new()
 	number.text = "%d" % (wave_index + 1)
@@ -97,34 +111,6 @@ func _event_placeholder(prefix: String, event_names: Array[StringName]) -> Strin
 	return "%s: %s" % [prefix, ", ".join(names)]
 
 
-func _get_drag_data(_at_position: Vector2) -> Variant:
-	var preview: Label = Label.new()
-	preview.text = "Wave %d" % (wave_index + 1)
-	set_drag_preview(preview)
-	return {
-		"type": &"spawn_wave",
-		"spawner_id": spawner_id,
-		"wave_index": wave_index,
-	}
-
-
-func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
-	if not data is Dictionary:
-		return false
-	var drag_data: Dictionary = data as Dictionary
-	var dragged_spawner_id: StringName = StringName(str(drag_data.get("spawner_id", "")))
-	return drag_data.get("type", &"") == &"spawn_wave" and dragged_spawner_id == spawner_id
-
-
-func _drop_data(_at_position: Vector2, data: Variant) -> void:
-	if dock == null or not data is Dictionary:
-		return
-	var drag_data: Dictionary = data as Dictionary
-	var from_index: int = int(drag_data.get("wave_index", -1))
-	if dock.has_method("move_wave"):
-		dock.call("move_wave", spawner_id, from_index, wave_index)
-
-
 func _on_monster_type_selected(index: int) -> void:
 	if wave == null:
 		return
@@ -163,6 +149,16 @@ func _on_emit_event_changed(value: String) -> void:
 func _on_delete_pressed() -> void:
 	if dock != null and dock.has_method("delete_wave"):
 		dock.call("delete_wave", spawner_id, wave_index)
+
+
+func _on_move_up_pressed() -> void:
+	if dock != null and dock.has_method("move_wave"):
+		dock.call("move_wave", spawner_id, wave_index, wave_index - 1)
+
+
+func _on_move_down_pressed() -> void:
+	if dock != null and dock.has_method("move_wave"):
+		dock.call("move_wave", spawner_id, wave_index, wave_index + 1)
 
 
 func _mark_dirty() -> void:

@@ -1,5 +1,5 @@
-[gd_scene load_steps=2 format=4 uid="uid://hwix5spp7crc"]
+[gd_scene format=3 uid="uid://hwix5spp7crc"]
 
 [ext_resource type="PackedScene" uid="uid://ct78mat36fwuc" path="res://scenes/main/mainRun.tscn" id="1_main_run"]
 
-[node name="mainRun" instance=ExtResource("1_main_run")]
+[node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
