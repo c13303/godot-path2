@@ -40,6 +40,8 @@
 [ext_resource type="PackedScene" uid="uid://bdi57o0hf3tu5" path="res://scenes/levels/level_demo.tscn" id="37_lvdemo"]
 [ext_resource type="Script" uid="uid://sfwpyffffhdb" path="res://scripts/ui/menus.gd" id="35_ikr28"]
 [ext_resource type="Script" path="res://scripts/ui/game_over_modal.gd" id="38_game_over"]
+[ext_resource type="Script" path="res://scripts/visual_fx/smoke_trail.gd" id="39_smktrl"]
+[ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -621,6 +623,10 @@ level_scene = ExtResource("37_lvdemo")
 
 [node name="lagMonitor" type="Node" parent="." unique_id=160659281]
 script = ExtResource("1_1iu6q")
+
+[node name="SmokeTrail" type="Node2D" parent="."]
+script = ExtResource("39_smktrl")
+smoke_scene = ExtResource("40_smkscn")
 
 [node name="Player" type="CharacterBody2D" parent="." unique_id=1977329300 groups=["player"]]
 z_index = 504

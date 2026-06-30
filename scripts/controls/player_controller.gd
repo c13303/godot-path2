@@ -14,6 +14,7 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
 
 @onready var camera_controller: CameraController = $"../../Camera2D"
+@onready var smoke_trail: SmokeTrail = $"../../SmokeTrail"
 
 
 
@@ -27,6 +28,8 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 @export var rush_duration: float = 0.1
 @export var rush_speed_mult: float = 3.0
 @export var rush_allow_direction: bool = false
+## Distance the player must travel between smoke trail puffs while rushing.
+@export var rush_trail_spacing: float = 18.0
 @export_group("")
 
 var global_config_node: Node = null
@@ -43,6 +46,7 @@ var _rush_shift_was_pressed: bool = false
 var _rush_time_left: float = 0.0
 var _rush_direction: Vector2 = Vector2.ZERO
 var _rush_sample_position: Vector2 = Vector2.ZERO
+var _trail_last_emit_pos: Vector2 = Vector2.ZERO
 var _last_move_direction: Vector2 = Vector2.ZERO
 var _player_in_water: bool = false
 
@@ -382,6 +386,8 @@ func _update_player_input(delta: float) -> void:
 		var rush_player: Node2D = _get_player_node()
 		if rush_player:
 			_rush_sample_position = rush_player.global_position
+			if rush_player.global_position.distance_to(_trail_last_emit_pos) >= rush_trail_spacing:
+				_emit_trail_puff(rush_player.global_position)
 	else:
 		if dir.length_squared() > 0.0:
 			_last_move_direction = dir.normalized()
@@ -396,7 +402,15 @@ func _start_rush(direction: Vector2) -> void:
 	var player: Node2D = _get_player_node()
 	if player:
 		_rush_sample_position = player.global_position
+		_emit_trail_puff(player.global_position)
 	_set_rush_speed(true)
+
+## Fires one pooled smoke puff at the player's feet and records the spot so the
+## next puff only spawns after [member rush_trail_spacing] more travel.
+func _emit_trail_puff(world_position: Vector2) -> void:
+	if smoke_trail:
+		smoke_trail.emit_at(world_position)
+	_trail_last_emit_pos = world_position
 
 func _stop_rush() -> void:
 	if not _rush_active:
