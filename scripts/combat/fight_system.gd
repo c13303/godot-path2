@@ -19,6 +19,7 @@ const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaba
 	preload("res://scripts/combat/weapons/bomb.tres"),
 	preload("res://scripts/combat/weapons/sword.tres"),
 	preload("res://scripts/combat/weapons/spray.tres"),
+	preload("res://scripts/combat/weapons/beam.tres"),
 ]
 @export var guns: Array[GunData] = [
 	preload("res://scripts/combat/weapons/water.tres"),
@@ -925,6 +926,8 @@ class SprayProjectileDrawer:
 	var _spray_type_ids: Dictionary = {}
 	var _weapons_by_id: Dictionary = {}
 	var _material: ShaderMaterial
+	var _fallback_shader: Shader
+	var _active_shader: Shader
 	var _shader_points: Array = []
 	var _shader_radii: PackedFloat32Array = PackedFloat32Array()
 	var _draw_bounds: Rect2 = Rect2()
@@ -937,7 +940,8 @@ class SprayProjectileDrawer:
 		z_as_relative = false
 		z_index = DRAW_Z_INDEX
 		_material = ShaderMaterial.new()
-		_material.shader = shader
+		_fallback_shader = shader
+		_set_shader(shader)
 		material = _material
 		_shader_points.resize(MAX_DROPLETS)
 		for index: int in range(MAX_DROPLETS):
@@ -986,6 +990,10 @@ class SprayProjectileDrawer:
 				point_count += 1
 
 		_has_points = point_count > 0
+		var shader: Shader = _fallback_shader
+		if active_weapon != null and active_weapon.spray_visual_shader != null:
+			shader = active_weapon.spray_visual_shader
+		_set_shader(shader)
 		_material.set_shader_parameter("droplet_count", point_count)
 		_material.set_shader_parameter("droplets", _shader_points)
 		_material.set_shader_parameter("droplet_radii", _shader_radii)
@@ -999,6 +1007,12 @@ class SprayProjectileDrawer:
 				padding = active_weapon.spray_visual_radius * 4.0
 			_draw_bounds = Rect2(min_pos - Vector2(padding, padding), (max_pos - min_pos) + Vector2(padding * 2.0, padding * 2.0))
 		queue_redraw()
+
+	func _set_shader(shader: Shader) -> void:
+		if shader == null or _active_shader == shader:
+			return
+		_active_shader = shader
+		_material.shader = shader
 
 	func _get_spray_projectile_states(type_id: int) -> Array:
 		var states: Array = []

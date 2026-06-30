@@ -7,7 +7,7 @@
 
 [sub_resource type="Resource" id="SpawnWave_n1_spawner1_w1"]
 script = ExtResource("4_wave")
-monster_count = 100
+monster_count = 10
 spawn_interval_seconds = 1.0
 
 [sub_resource type="Resource" id="SpawnerWaveTrack_n1_spawner1"]
@@ -17,7 +17,7 @@ waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n1_spawner1_w1")])
 
 [sub_resource type="Resource" id="SpawnWave_n1_w1"]
 script = ExtResource("4_wave")
-monster_count = 100
+monster_count = 10
 spawn_interval_seconds = 1.0
 
 [sub_resource type="Resource" id="SpawnerWaveTrack_n1_spawner2"]
@@ -29,30 +29,24 @@ waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n1_w1")])
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("SpawnerWaveTrack_n1_spawner1"), SubResource("SpawnerWaveTrack_n1_spawner2")])
 
-[sub_resource type="Resource" id="SpawnWave_n2_w1"]
+[sub_resource type="Resource" id="Resource_0k8ip"]
 script = ExtResource("4_wave")
-monster_count = 3
-spawn_interval_seconds = 1.75
-
-[sub_resource type="Resource" id="SpawnWave_n2_w2"]
-script = ExtResource("4_wave")
-monster_count = 2
-spawn_interval_seconds = 1.5
+monster_count = 20
+spawn_interval_seconds = 0.5
 
 [sub_resource type="Resource" id="SpawnerWaveTrack_n2_spawner2"]
 script = ExtResource("3_track")
 spawner_id = &"spawner2"
-waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n2_w1"), SubResource("SpawnWave_n2_w2")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_0k8ip")])
 
-[sub_resource type="Resource" id="SpawnWave_n2_spawner1_w1"]
+[sub_resource type="Resource" id="Resource_rk5yt"]
 script = ExtResource("4_wave")
-monster_count = 2
-spawn_interval_seconds = 2.0
+monster_count = 20
 
 [sub_resource type="Resource" id="SpawnerWaveTrack_n2_spawner1"]
 script = ExtResource("3_track")
 spawner_id = &"spawner1"
-waves = Array[ExtResource("4_wave")]([SubResource("SpawnWave_n2_spawner1_w1")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_rk5yt")])
 
 [sub_resource type="Resource" id="NightSpawnPlaylist_2"]
 script = ExtResource("2_night_playlist")

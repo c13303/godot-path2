@@ -25,7 +25,6 @@ var _loading_ui: bool = false
 
 var _level_option: OptionButton
 var _create_button: Button
-var _save_button: Button
 var _dirty_label: Label
 var _playlist_label: Label
 var _starting_controls: VBoxContainer
@@ -56,8 +55,12 @@ func mark_dirty() -> void:
 	if _loading_ui:
 		return
 	_dirty = true
+	var saved: bool = _save()
 	_refresh_status()
-	_refresh_validation()
+	# On a disk write failure _save() leaves an error message in the validation
+	# panel; keep it visible by only re-running validation when the save worked.
+	if saved:
+		_refresh_validation()
 
 
 func move_wave(spawner_id: StringName, from_index: int, to_index: int) -> void:
@@ -129,11 +132,6 @@ func _build_ui() -> void:
 	_create_button.text = "Create/Assign Playlist"
 	_create_button.pressed.connect(_on_create_playlist_pressed)
 	action_row.add_child(_create_button)
-
-	_save_button = Button.new()
-	_save_button.text = "Save"
-	_save_button.pressed.connect(_on_save_pressed)
-	action_row.add_child(_save_button)
 
 	var open_button: Button = Button.new()
 	open_button.text = "Open Level"
@@ -369,7 +367,6 @@ func _refresh_status() -> void:
 	var playlist_path: String = _playlist.resource_path if _playlist != null else "<none>"
 	_playlist_label.text = "Level: %s\nPlaylist: %s" % [_current_level_path, playlist_path]
 	_create_button.disabled = _current_level_path == ""
-	_save_button.disabled = _current_level_path == ""
 
 
 func _refresh_starting_controls() -> void:
@@ -658,16 +655,13 @@ func _on_create_playlist_pressed() -> void:
 	_refresh_all()
 
 
-func _on_save_pressed() -> void:
+# Autosaves the current playlist and level scene. Saves even when validation
+# reports errors so no edit is silently lost; the validation panel still
+# surfaces any issues. Returns false if a disk write failed.
+func _save() -> bool:
 	if _current_level_path == "":
-		return
+		return false
 	if _playlist != null:
-		var errors: PackedStringArray = PackedStringArray()
-		var warnings: PackedStringArray = PackedStringArray()
-		_validate(errors, warnings)
-		if not errors.is_empty():
-			_refresh_validation()
-			return
 		var save_path: String = _playlist.resource_path
 		if save_path == "":
 			save_path = _default_playlist_path_for_level(_current_level_path)
@@ -675,11 +669,11 @@ func _on_save_pressed() -> void:
 		var save_error: Error = ResourceSaver.save(_playlist, save_path)
 		if save_error != OK:
 			_show_save_error("Could not save playlist", save_error)
-			return
+			return false
 	if not _assign_playlist_to_level_scene():
-		return
+		return false
 	_dirty = false
-	_refresh_all()
+	return true
 
 
 func _on_open_level_pressed() -> void:

@@ -430,10 +430,11 @@ func load_on_start() -> void:
 
 
 ## Wipe the auto-save slot and restart a brand-new game (Day 1, defaults). The
-## fresh scene reload recreates progression at its defaults; deleting the
-## auto-save first stops the next launch (and the post-reload load_on_start)
-## from restoring it. The manual F5 slot is intentionally left untouched.
+## fresh scene reload recreates progression at its defaults; skipping the next
+## startup auto-load keeps the post-reload load_on_start from restoring the lost
+## run. The manual F5 slot is intentionally left untouched.
 func reset_game() -> void:
+	GameState.skip_startup_autosave_once()
 	if FileAccess.file_exists(AUTOSAVE_PATH):
 		var remove_error: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(AUTOSAVE_PATH))
 		if remove_error == OK:

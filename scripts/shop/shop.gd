@@ -60,7 +60,7 @@ func _ready() -> void:
 	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene != null else null
 	if plant_manager != null and plant_manager.has_signal("day_seed_harvest_finished"):
 		plant_manager.connect("day_seed_harvest_finished", _on_day_seed_harvest_finished)
-	visible = false
+	_set_shop_open(false)
 	set_process(true)
 
 
@@ -81,16 +81,21 @@ func _process(_delta: float) -> void:
 
 
 func _open_shop() -> void:
-	visible = true
+	_set_shop_open(true)
 	# Resume placing the building we were last on, if we can still afford it.
 	if _last_picked_item_id != "" and _can_afford(_last_picked_item_id):
 		_select_item(_last_picked_item_id)
 
 
 func _close_shop() -> void:
-	visible = false
+	_set_shop_open(false)
 	_deselect_active()
 	_reset_title()
+
+
+func _set_shop_open(is_open: bool) -> void:
+	visible = is_open
+	mouse_filter = Control.MOUSE_FILTER_STOP if is_open else Control.MOUSE_FILTER_IGNORE
 
 
 ## At night the shop is closed; on a new day it stays closed until the seed-harvest

@@ -41,6 +41,7 @@ class_name WeaponData
 @export var spray_visual_min_size: float = 1.0
 @export var spray_visual_threshold: float = 0.75
 @export var spray_visual_softness: float = 0.0
+@export var spray_visual_shader: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
 
 # --- AoE visual appearance (per-weapon; rendered by WeaponAOEDrawer) ---
 # The FightSystem.visualize_AOE_weapons flag is the global on/off; aoe_visual_enabled

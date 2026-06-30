@@ -853,7 +853,7 @@ offset_left = -225.0
 offset_top = 95.0
 offset_right = 304.0
 offset_bottom = 223.0
-text = "achetez des roses"
+text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
 
@@ -1225,6 +1225,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 0
 grow_vertical = 2
+mouse_filter = 2
 
 [node name="Shop" type="Panel" parent="GameUI/right anchor" unique_id=1347609121]
 visible = false
@@ -1234,6 +1235,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_shop")
 script = ExtResource("28_shop")
 

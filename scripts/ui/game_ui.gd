@@ -10,8 +10,10 @@ const GEM_KEY: StringName = &"gems"
 # Quick-slot tools that drive build/unbuild mode rather than acting as weapons.
 const BUILD_TOOL_ID: String = "build_tool"
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
+const ITEM_NAME_KEY_PREFIX: String = "item."
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
+@onready var toolbar_info: RichTextLabel = get_node_or_null("bottom anchor/toolbarInfo") as RichTextLabel
 @onready var toolbar_anchor: Control = $"bottom anchor"
 @onready var modals_root: Control = $Modals
 @onready var inventory_modal: Panel = $Modals/inventoryModal
@@ -48,6 +50,8 @@ func _ready() -> void:
 	_create_startup_loading_overlay()
 	_setup_starting_inventory()
 	close_button.pressed.connect(_hide_inventory)
+	if not Translations.locale_changed.is_connected(_on_locale_changed):
+		Translations.locale_changed.connect(_on_locale_changed)
 	_setup_day_toggle()
 	_build_toolbar()
 	_build_inventory()
@@ -83,6 +87,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
 		select_first_weapon()
 	_refresh_all_slots()
+
+func _on_locale_changed(_locale: String) -> void:
+	_refresh_toolbar_info()
 
 func _update_day_toggle_icon(is_night: bool) -> void:
 	# Icon reflects the current mode: sun during day, moon during night.
@@ -644,6 +651,25 @@ func _refresh_all_slots() -> void:
 
 	for i in range(_inventory_slot_nodes.size()):
 		_apply_slot_item(_inventory_slot_nodes[i], i)
+
+	_refresh_toolbar_info()
+
+func _refresh_toolbar_info() -> void:
+	if toolbar_info == null:
+		return
+	var item_id: String = get_selected_quick_item_id()
+	if item_id == "":
+		toolbar_info.text = ""
+		return
+	toolbar_info.text = _get_item_display_name(item_id)
+
+func _get_item_display_name(item_id: String) -> String:
+	var key: String = ITEM_NAME_KEY_PREFIX + item_id
+	var translated: String = Translations.t(key)
+	if translated != key:
+		return translated
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	return str(item_def.get("name", item_id))
 
 func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
 	var slot_data: Dictionary = inventory_slots[slot_index]

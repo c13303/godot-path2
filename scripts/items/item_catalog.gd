@@ -31,6 +31,13 @@ const ITEM_DEFS: Dictionary = {
 		"category": "tools",
 		"frame": 2,
 	},
+	"beam": {
+		"id": "beam",
+		"name": "Beam",
+		"type": "weapon",
+		"category": "tools",
+		"frame": 11,
+	},
 	# Selecting this quick-slot tool opens the shop (build mode). It is not a weapon
 	# or a placeable itself; the shop chooses which building to place.
 	"build_tool": {

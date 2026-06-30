@@ -1,10 +1,23 @@
 {
 	"tutorial.game_over": "Game Over",
-	"tutorial.buy_roses": "Buy roses",
+	"tutorial.refill_water": "Refill your water !",
+	"tutorial.buy_roses": "Buy roses with SHOP tool",
 	"tutorial.plant_roses": "Plant your roses",
 	"tutorial.water_roses": "Water your roses",
 	"tutorial.pass_night": "Pass the night",
 	"game_over.restart": "Restart",
 	"game_over.main_menu": "Main Menu",
-	"game_over.quit": "Quit"
+	"game_over.quit": "Quit",
+	"item.sword": "Sword",
+	"item.bomb": "Bomb",
+	"item.water": "Water",
+	"item.spray": "Spray",
+	"item.beam": "Beam",
+	"item.build_tool": "Shop",
+	"item.unbuild_tool": "Unbuild",
+	"item.wall": "Wall",
+	"item.rose": "Rose",
+	"item.debris": "Debris",
+	"item.lamp": "Lamp",
+	"item.turret1": "Turret"
 }

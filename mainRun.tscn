@@ -3,3 +3,11 @@
 [ext_resource type="PackedScene" uid="uid://ct78mat36fwuc" path="res://scenes/main/mainRun.tscn" id="1_main_run"]
 
 [node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
+
+[node name="toolbarInfo" type="RichTextLabel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="1" unique_id=1926956478]
+layout_mode = 0
+offset_left = 3.0
+offset_top = -46.0
+offset_right = 518.0
+offset_bottom = -6.0
+text = "toolbarinfo"
