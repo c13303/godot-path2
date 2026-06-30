@@ -1,0 +1,32 @@
+CPP Godot Extension: Flow Field / A*
+====================================
+
+This extension is fairly reusable for another Godot 4.5+ project, but it is not a drop-in black box.
+The core C++ navigation pieces are mostly game-agnostic, while the Godot wrapper side expects this
+project's setup: TileMapLayer floor/wall/blocking layers, native registration, and the existing
+godot-cpp/SCons build flow.
+
+What it handles:
+- Grid-based flow fields from a goal, with async rebuilds and per-group flow assignment.
+- A simple generic 8-direction A* pathfinder over caller-provided walkable/blocker tiles.
+- Agent groups, steering, crowd separation, wall repulsion, bottleneck handling, and arrival logic.
+- Spatial queries for nearby agents and static circular obstacles.
+- Optional path-follow override, directional cell fields, debug drawing, and native config values.
+- Extra combat/motion helpers such as smash/area impulses, AoE damage events, and projectile support.
+
+How reusable it is:
+Good if the next project also uses 2D tilemaps, many moving agents, and wants native performance.
+Medium effort if tile layers, build scripts, or gameplay states differ. The A* class is the easiest
+piece to reuse because it only needs walkable and blocker tile lists. The flow-field and steering stack
+are more powerful, but they are more coupled to this project's layer conventions, agent phases, and
+runtime config.
+
+Main things to adapt:
+- Rebuild or copy the GDExtension with the target project's Godot/godot-cpp version.
+- Wire the target project's TileMapLayer nodes into FlowFieldNative.
+- Decide which steering/combat/debug APIs are useful and ignore or trim the rest.
+- Review agent phases and gameplay names before exposing them to a different game.
+
+Short verdict:
+Reusable as a native 2D tile-grid navigation/crowd-movement module, especially for RTS-like groups or
+many enemies. Not fully plug-and-play, but the core is clean enough to port with moderate setup work.
