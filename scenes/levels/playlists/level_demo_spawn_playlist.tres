@@ -7,7 +7,7 @@
 
 [sub_resource type="Resource" id="Resource_rk5yt"]
 script = ExtResource("4_wave")
-monster_count = 3
+monster_count = 10
 spawn_interval_seconds = 0.5
 
 [sub_resource type="Resource" id="Resource_0k8ip"]
@@ -17,7 +17,7 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_rk5yt")])
 
 [sub_resource type="Resource" id="Resource_jab7j"]
 script = ExtResource("4_wave")
-monster_count = 3
+monster_count = 10
 spawn_interval_seconds = 0.5
 
 [sub_resource type="Resource" id="Resource_5vf1s"]

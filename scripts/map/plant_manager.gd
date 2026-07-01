@@ -8,7 +8,7 @@ signal new_day_finished
 signal day_seed_harvest_finished
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
-const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 0)
+const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 1)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 2)
 const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 2)
@@ -106,7 +106,7 @@ func is_rose_cell(cell: Vector2i) -> bool:
 	return _is_rose_atlas(atlas_coords)
 
 func _is_rose_atlas(atlas_coords: Vector2i) -> bool:
-	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_GREEN_ATLAS
+	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_GREEN_ATLAS or atlas_coords == ROSE_GROWNUP_ATLAS
 
 func wet_rose(cell: Vector2i) -> bool:
 	if not plantz or not _plants.has(cell):

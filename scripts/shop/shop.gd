@@ -44,6 +44,10 @@ var _waiting_for_seed_harvest: bool = false
 var _selected_item_id: String = ""
 # The last building the player picked; restored when the shop reopens if it still exists.
 var _last_picked_item_id: String = ""
+# Affordable count of the selected buildable on the previous refresh. Used to detect the
+# moment it runs dry through use (>0 -> 0) so we can auto-switch to the next buildable.
+# Deliberately clicking an already-empty slot leaves this at 0, so no auto-switch fires.
+var _selected_affordable_prev: int = -1
 
 var _shop_column: VBoxContainer
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
@@ -410,6 +414,9 @@ func _on_item_pressed(item_id: String) -> void:
 func _select_item(item_id: String) -> void:
 	_selected_item_id = item_id
 	_last_picked_item_id = item_id
+	# Seed the run-dry tracker with the new pick's current count, so the recursive
+	# refresh below (and a deliberately-empty pick) never mis-fires an auto-switch.
+	_selected_affordable_prev = _affordable_quantity(item_id)
 	if game_ui != null and game_ui.has_method("set_selected_build_item"):
 		game_ui.call("set_selected_build_item", item_id)
 	Sfx.play_sound(&"buy")
@@ -474,6 +481,41 @@ func _refresh_slots() -> void:
 			)
 	_update_selected_label()
 	_update_row_labels()
+	_maybe_auto_switch_from_empty()
+
+
+## When the selected buildable runs dry through use (its affordable/limit count drops from
+## >0 to 0), hop to the next available buildable in the vertical bar. Does nothing when the
+## player deliberately selected an already-empty slot (the count never transitioned from >0),
+## and stays put when no other buildable is available.
+func _maybe_auto_switch_from_empty() -> void:
+	if GameState.is_seed_merchant_phase:
+		return
+	if _selected_item_id == "":
+		_selected_affordable_prev = -1
+		return
+	var current: int = _affordable_quantity(_selected_item_id)
+	if _selected_affordable_prev > 0 and current <= 0 and not _is_item_locked(_selected_item_id):
+		var next_id: String = _next_available_buildable(_selected_item_id)
+		if next_id != "":
+			_select_item(next_id)
+			return
+	_selected_affordable_prev = current
+
+
+## The next buildable after `from_id` in the vertical bar (wrapping) that is shown, unlocked
+## and affordable, or "" if none. Skips the shop counter, mirroring _open_shop's auto-select.
+func _next_available_buildable(from_id: String) -> String:
+	var n: int = BUILD_ITEM_IDS.size()
+	var start: int = BUILD_ITEM_IDS.find(from_id)
+	for offset: int in range(1, n + 1):
+		var idx: int = ((start if start >= 0 else -1) + offset) % n
+		var candidate: String = BUILD_ITEM_IDS[idx]
+		if candidate == from_id or candidate == COUNTER_ID:
+			continue
+		if _should_show_item(candidate) and not _is_item_locked(candidate) and _affordable_quantity(candidate) > 0:
+			return candidate
+	return ""
 
 
 ## Fills in and positions the floating label for the selected slot only. It shows the
