@@ -132,7 +132,7 @@ func _update_monster_frame() -> void:
 	var frame: int = MONSTER_FRAME_IDLE
 	if status == "eating":
 		frame = MONSTER_FRAME_EATING
-	elif status == "flow_out" and _is_damage_immune_agent():
+	elif status == "flow_out" and _is_client_agent():
 		frame = MONSTER_FRAME_EATING
 	elif status == "drowning":
 		frame = MONSTER_FRAME_DROWNING

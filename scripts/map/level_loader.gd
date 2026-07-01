@@ -34,11 +34,12 @@ var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
-var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
+var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+	&"seed": 2,
 	&"spray": 100,
 	&"beam": 100,
 	&"sword": 100,
@@ -156,11 +157,12 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
-	_loaded_shop_available_items = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
+	_loaded_shop_available_items = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 	_loaded_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"wall": 100,
+		&"seed": 2,
 		&"spray": 100,
 		&"beam": 100,
 		&"sword": 100,
@@ -235,7 +237,7 @@ func _is_configurable_shop_item(item_id: StringName) -> bool:
 
 
 func _configurable_shop_item_ids() -> Array[StringName]:
-	return [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
+	return [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:

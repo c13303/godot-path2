@@ -11,7 +11,7 @@ const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
-const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
+const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 
 var editor_plugin: EditorPlugin
 

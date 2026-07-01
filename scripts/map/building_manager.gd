@@ -2385,6 +2385,8 @@ func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 	# the empty-garden machinery removes a counter-only garden like any other.
 	if previous == 0 and value > 0 and _plant_zone_built:
 		_rebuild_plant_zone_from_layer()
+	elif previous > 0 and value == 0 and _no_plants_remaining():
+		_force_escape_for_all_monsters()
 
 
 # Populates _counter_access_cells from every stocked counter and returns the access
@@ -5350,6 +5352,22 @@ func _queue_escape_for_all_monsters_budgeted() -> void:
 		if agent.has_meta("garden_id"):
 			garden_id = int(agent.get_meta("garden_id"))
 		_queue_agent_for_garden_retarget(nav_id, agent, "escape", spawner_cell, garden_id)
+
+
+func _force_escape_for_all_monsters() -> void:
+	for node: Node in get_tree().get_nodes_in_group("monsters"):
+		var agent: Node2D = node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0 or _drowning_agents.has(nav_id) or _escaping_agents.has(nav_id):
+			continue
+		_garden_retarget_queued.erase(nav_id)
+		for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
+			var item: Dictionary = _garden_retarget_queue[index]
+			if int(item.get("nav_id", -1)) == nav_id:
+				_garden_retarget_queue.remove_at(index)
+		_assign_agent_to_escape(agent)
 
 # Time-budgeted: spend at most garden_retarget_budget_ms per frame on the expensive
 # A*/escape work (in _retarget_single_waiting_agent), falling back on the count cap

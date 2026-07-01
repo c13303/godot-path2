@@ -354,7 +354,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "seed" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
 
 
 func get_build_price(item_id: String) -> int:
@@ -416,6 +416,16 @@ func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
 	if not try_purchase_build(item_id, count):
 		return false
 	return add_inventory(item_id, count)
+
+
+func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
+	if item_id != "seed" or count <= 0:
+		return false
+	if _progression_node == null or not _progression_node.has_method("update_seeds"):
+		return false
+	if not try_purchase_build(item_id, count):
+		return false
+	return bool(_progression_node.call("update_seeds", count))
 
 
 ## Public: how many more of item_id may still be placed given its per-world build

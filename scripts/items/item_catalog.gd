@@ -45,6 +45,14 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 11,
 		"price": 100,
 	},
+	"seed": {
+		"id": "seed",
+		"name": "Seed",
+		"currency": &"gem",
+		"type": "resource",
+		"category": "resources",
+		"price": 2,
+	},
 	# Selecting this quick-slot tool opens the shop (build mode). It is not a weapon
 	# or a placeable itself; the shop chooses which building to place.
 	"build_tool": {

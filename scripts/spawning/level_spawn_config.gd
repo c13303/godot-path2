@@ -11,11 +11,12 @@ class_name LevelSpawnConfig
 @export var starting_weapons: Array[StringName] = [&"spray"]
 
 @export_group("Shop")
-@export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
+@export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 @export var shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+	&"seed": 2,
 	&"spray": 100,
 	&"beam": 100,
 	&"sword": 100,

@@ -23,8 +23,9 @@ const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # its "Construction (…)" info label.
 const BAR_BOTTOM_OFFSET: float = -134.0
 const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
-const WEAPON_ITEM_IDS: Array[String] = ["sword", "bomb", "spray", "beam"]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, "sword", "bomb", "spray", "beam"]
+const SEED_ITEM_ID: String = "seed"
+const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
 const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
@@ -314,14 +315,17 @@ func _on_item_pressed(item_id: String) -> void:
 	if not visible or GameState.is_night:
 		return
 	if GameState.is_seed_merchant_phase:
-		if not ItemCatalog.is_weapon(item_id) or not _is_item_available(item_id):
+		if not _is_merchant_item(item_id) or not _is_item_available(item_id):
 			return
-		if game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
-			var purchased: bool = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
-			if purchased:
-				Sfx.play_sound(&"buy")
-				_refresh_slots()
-				_update_selected_label()
+		var purchased: bool = false
+		if item_id == SEED_ITEM_ID and game_ui != null and game_ui.has_method("try_purchase_seed_merchant_item"):
+			purchased = bool(game_ui.call("try_purchase_seed_merchant_item", item_id, 1))
+		elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
+			purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
+		if purchased:
+			Sfx.play_sound(&"buy")
+			_refresh_slots()
+			_update_selected_label()
 		return
 	if _is_item_locked(item_id) or not _is_item_available(item_id):
 		return
@@ -366,7 +370,7 @@ func _affordable_quantity(item_id: String) -> int:
 ## During the morning sale only the counter may be placed; everything else is locked.
 func _is_item_locked(item_id: String) -> bool:
 	if GameState.is_seed_merchant_phase:
-		return not ItemCatalog.is_weapon(item_id)
+		return not _is_merchant_item(item_id)
 	return GameState.is_morning_phase and item_id != COUNTER_ID
 
 
@@ -452,8 +456,12 @@ func _build_price(item_id: String) -> int:
 
 func _should_show_item(item_id: String) -> bool:
 	if GameState.is_seed_merchant_phase:
-		return item_id in WEAPON_ITEM_IDS and ItemCatalog.is_weapon(item_id) and _is_item_available(item_id)
+		return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_item_available(item_id)
 	return item_id in BUILD_ITEM_IDS and _is_item_available(item_id)
+
+
+func _is_merchant_item(item_id: String) -> bool:
+	return item_id == SEED_ITEM_ID or ItemCatalog.is_weapon(item_id)
 
 
 func _player_near_seed_merchant() -> bool:
@@ -535,6 +543,8 @@ func _display_name(item_id: String) -> String:
 
 
 func _item_frame_texture(item_def: Dictionary) -> AtlasTexture:
+	if str(item_def.get("id", "")) == SEED_ITEM_ID:
+		return _seed_icon
 	var frame: int = int(item_def.get("frame", 0))
 	return _region_texture(Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE))
 
