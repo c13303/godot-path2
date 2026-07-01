@@ -10,6 +10,7 @@ const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
+const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
 
 var editor_plugin: EditorPlugin
 
@@ -30,12 +31,15 @@ var _create_button: Button
 var _dirty_label: Label
 var _playlist_label: Label
 var _starting_controls: VBoxContainer
+var _shop_controls: VBoxContainer
 var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
 var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
+var _shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
+var _shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
 var _validation_label: RichTextLabel
 var _rename_row: HBoxContainer
@@ -112,7 +116,7 @@ func _build_ui() -> void:
 	size_flags_vertical = SIZE_EXPAND_FILL
 
 	var title: Label = Label.new()
-	title.text = "Spawn Playlist"
+	title.text = "Rose Level Editor"
 	title.add_theme_font_size_override("font_size", 18)
 	add_child(title)
 
@@ -152,6 +156,10 @@ func _build_ui() -> void:
 	_starting_controls = VBoxContainer.new()
 	add_child(_starting_controls)
 	_build_starting_controls()
+
+	_shop_controls = VBoxContainer.new()
+	add_child(_shop_controls)
+	_build_shop_controls()
 
 	_client_frequency_box = VBoxContainer.new()
 	add_child(_client_frequency_box)
@@ -256,21 +264,6 @@ func _build_starting_controls() -> void:
 	_starting_gems.value_changed.connect(_on_starting_gems_changed)
 	currency_row.add_child(_starting_gems)
 
-	var counter_limit_row: HBoxContainer = HBoxContainer.new()
-	_starting_controls.add_child(counter_limit_row)
-
-	var counter_limit_label: Label = Label.new()
-	counter_limit_label.text = "Rose shop counters"
-	counter_limit_row.add_child(counter_limit_label)
-
-	_rose_shop_counter_limit = SpinBox.new()
-	_rose_shop_counter_limit.min_value = 0.0
-	_rose_shop_counter_limit.max_value = 999.0
-	_rose_shop_counter_limit.step = 1.0
-	_rose_shop_counter_limit.custom_minimum_size = Vector2(86.0, 0.0)
-	_rose_shop_counter_limit.value_changed.connect(_on_rose_shop_counter_limit_changed)
-	counter_limit_row.add_child(_rose_shop_counter_limit)
-
 	var weapons_label: Label = Label.new()
 	weapons_label.text = "Starting weapons"
 	_starting_controls.add_child(weapons_label)
@@ -285,6 +278,70 @@ func _build_starting_controls() -> void:
 		checkbox.toggled.connect(_on_starting_weapon_toggled.bind(weapon_id))
 		_weapon_checks_box.add_child(checkbox)
 		_weapon_checkboxes[weapon_id] = checkbox
+
+
+func _build_shop_controls() -> void:
+	var heading: Label = Label.new()
+	heading.text = "Shop"
+	heading.add_theme_font_size_override("font_size", 15)
+	_shop_controls.add_child(heading)
+
+	var header: HBoxContainer = HBoxContainer.new()
+	_shop_controls.add_child(header)
+	var available_header: Label = Label.new()
+	available_header.text = "Available"
+	available_header.custom_minimum_size = Vector2(128.0, 0.0)
+	header.add_child(available_header)
+	var price_header: Label = Label.new()
+	price_header.text = "Price"
+	price_header.custom_minimum_size = Vector2(86.0, 0.0)
+	header.add_child(price_header)
+	var currency_header: Label = Label.new()
+	currency_header.text = "Currency"
+	header.add_child(currency_header)
+
+	_shop_available_checkboxes.clear()
+	_shop_price_spins.clear()
+	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+		var row: HBoxContainer = HBoxContainer.new()
+		_shop_controls.add_child(row)
+
+		var checkbox: CheckBox = CheckBox.new()
+		checkbox.text = _item_display_name(item_id)
+		checkbox.tooltip_text = String(item_id)
+		checkbox.custom_minimum_size = Vector2(128.0, 0.0)
+		checkbox.toggled.connect(_on_shop_item_available_toggled.bind(item_id))
+		row.add_child(checkbox)
+		_shop_available_checkboxes[item_id] = checkbox
+
+		var price_spin: SpinBox = SpinBox.new()
+		price_spin.min_value = 0.0
+		price_spin.max_value = 1000000.0
+		price_spin.step = 1.0
+		price_spin.custom_minimum_size = Vector2(86.0, 0.0)
+		price_spin.value_changed.connect(_on_shop_price_changed.bind(item_id))
+		row.add_child(price_spin)
+		_shop_price_spins[item_id] = price_spin
+
+		var currency_label: Label = Label.new()
+		currency_label.text = String(ItemCatalog.get_currency(String(item_id)))
+		row.add_child(currency_label)
+
+	var counter_limit_row: HBoxContainer = HBoxContainer.new()
+	_shop_controls.add_child(counter_limit_row)
+
+	var counter_limit_label: Label = Label.new()
+	counter_limit_label.text = "Rose shop counters"
+	counter_limit_label.custom_minimum_size = Vector2(128.0, 0.0)
+	counter_limit_row.add_child(counter_limit_label)
+
+	_rose_shop_counter_limit = SpinBox.new()
+	_rose_shop_counter_limit.min_value = 1.0
+	_rose_shop_counter_limit.max_value = 99.0
+	_rose_shop_counter_limit.step = 1.0
+	_rose_shop_counter_limit.custom_minimum_size = Vector2(86.0, 0.0)
+	_rose_shop_counter_limit.value_changed.connect(_on_rose_shop_counter_limit_changed)
+	counter_limit_row.add_child(_rose_shop_counter_limit)
 
 
 func _refresh_levels() -> void:
@@ -384,6 +441,7 @@ func _capture_spawners() -> void:
 func _refresh_all() -> void:
 	_loading_ui = true
 	_refresh_starting_controls()
+	_refresh_shop_controls()
 	_refresh_client_frequency_controls()
 	_refresh_nights()
 	_rebuild_tracks()
@@ -406,25 +464,48 @@ func _refresh_starting_controls() -> void:
 	_starting_controls.visible = has_level
 	_starting_seeds.editable = has_level
 	_starting_gems.editable = has_level
-	_rose_shop_counter_limit.editable = has_level
 	var seeds: int = DEFAULT_STARTING_SEEDS
 	var gems: int = DEFAULT_STARTING_GEMS
-	var counter_limit: int = 2
 	var weapons: Array[StringName] = _default_starting_weapons()
 	if config != null:
 		seeds = config.starting_seeds
 		gems = config.starting_gems
-		counter_limit = config.rose_shop_counter_limit
 		weapons = _valid_weapon_ids(config.starting_weapons)
 	_starting_seeds.value = float(seeds)
 	_starting_gems.value = float(gems)
-	_rose_shop_counter_limit.value = float(counter_limit)
 	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
 		var weapon_id: StringName = raw_weapon_id as StringName
 		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
 		if checkbox != null:
 			checkbox.button_pressed = weapons.has(weapon_id)
 			checkbox.disabled = not has_level
+
+
+func _refresh_shop_controls() -> void:
+	var config: LevelSpawnConfig = _get_level_config(_level_root)
+	var has_level: bool = _current_level_path != ""
+	_shop_controls.visible = has_level
+	_rose_shop_counter_limit.editable = has_level
+	var available_items: Array[StringName] = _default_shop_available_items()
+	var prices: Dictionary = _default_shop_prices()
+	var counter_limit: int = 2
+	if config != null:
+		available_items = _valid_shop_available_items(config.shop_available_items)
+		prices = _valid_shop_prices(config.shop_prices)
+		counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
+	for raw_item_id: Variant in _shop_available_checkboxes.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var checkbox: CheckBox = _shop_available_checkboxes[item_id] as CheckBox
+		if checkbox != null:
+			checkbox.button_pressed = available_items.has(item_id)
+			checkbox.disabled = not has_level
+	for raw_item_id: Variant in _shop_price_spins.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var price_spin: SpinBox = _shop_price_spins[item_id] as SpinBox
+		if price_spin != null:
+			price_spin.value = float(int(prices.get(item_id, ItemCatalog.get_price(String(item_id)))))
+			price_spin.editable = has_level
+	_rose_shop_counter_limit.value = float(counter_limit)
 
 
 func _refresh_client_frequency_controls() -> void:
@@ -790,7 +871,37 @@ func _on_rose_shop_counter_limit_changed(value: float) -> void:
 	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
 	if config == null:
 		return
-	config.rose_shop_counter_limit = int(value)
+	config.rose_shop_counter_limit = clampi(int(value), 1, 99)
+	mark_dirty()
+
+
+func _on_shop_item_available_toggled(enabled: bool, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items)
+	if enabled:
+		if not available_items.has(item_id):
+			available_items.append(item_id)
+	else:
+		var index: int = available_items.find(item_id)
+		if index >= 0:
+			available_items.remove_at(index)
+	config.shop_available_items = available_items
+	mark_dirty()
+
+
+func _on_shop_price_changed(value: float, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var prices: Dictionary = _valid_shop_prices(config.shop_prices)
+	prices[item_id] = maxi(0, int(value))
+	config.shop_prices = prices
 	mark_dirty()
 
 
@@ -936,7 +1047,9 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_seeds", int(_starting_seeds.value))
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_weapons", _selected_starting_weapons())
-		root.set("rose_shop_counter_limit", int(_rose_shop_counter_limit.value))
+		root.set("shop_available_items", _selected_shop_available_items())
+		root.set("shop_prices", _selected_shop_prices())
+		root.set("rose_shop_counter_limit", clampi(int(_rose_shop_counter_limit.value), 1, 99))
 	_apply_client_frequency_to_scene(root)
 	var new_scene: PackedScene = PackedScene.new()
 	var pack_error: Error = new_scene.pack(root)
@@ -955,7 +1068,9 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_seeds = int(_starting_seeds.value)
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_weapons = _selected_starting_weapons()
-	config.rose_shop_counter_limit = int(_rose_shop_counter_limit.value)
+	config.shop_available_items = _selected_shop_available_items()
+	config.shop_prices = _selected_shop_prices()
+	config.rose_shop_counter_limit = clampi(int(_rose_shop_counter_limit.value), 1, 99)
 
 
 func _apply_client_frequency_to_scene(root: Node) -> void:
@@ -1092,6 +1207,9 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_seeds = DEFAULT_STARTING_SEEDS
 		config.starting_gems = DEFAULT_STARTING_GEMS
 		config.starting_weapons = _default_starting_weapons()
+		config.shop_available_items = _default_shop_available_items()
+		config.shop_prices = _default_shop_prices()
+		config.rose_shop_counter_limit = 2
 	return config
 
 
@@ -1105,6 +1223,27 @@ func _selected_starting_weapons() -> Array[StringName]:
 	return weapons
 
 
+func _selected_shop_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for raw_item_id: Variant in _shop_available_checkboxes.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var checkbox: CheckBox = _shop_available_checkboxes[item_id] as CheckBox
+		if checkbox != null and checkbox.button_pressed and _is_configurable_shop_item(item_id):
+			item_ids.append(item_id)
+	return item_ids
+
+
+func _selected_shop_prices() -> Dictionary:
+	var prices: Dictionary = {}
+	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+		var price_spin: SpinBox = _shop_price_spins.get(item_id) as SpinBox
+		var price: int = ItemCatalog.get_price(String(item_id))
+		if price_spin != null:
+			price = maxi(0, int(price_spin.value))
+		prices[item_id] = price
+	return prices
+
+
 func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
 	var weapons: Array[StringName] = []
 	var seen: Dictionary = {}
@@ -1114,6 +1253,43 @@ func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
 		seen[weapon_id] = true
 		weapons.append(weapon_id)
 	return weapons
+
+
+func _valid_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	var seen: Dictionary = {}
+	for item_id: StringName in raw_item_ids:
+		if item_id == &"" or seen.has(item_id) or not _is_configurable_shop_item(item_id):
+			continue
+		seen[item_id] = true
+		item_ids.append(item_id)
+	return item_ids
+
+
+func _valid_shop_prices(raw_prices: Dictionary) -> Dictionary:
+	var prices: Dictionary = {}
+	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
+		prices[item_id] = maxi(0, int(raw_price))
+	return prices
+
+
+func _default_shop_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+		item_ids.append(item_id)
+	return item_ids
+
+
+func _default_shop_prices() -> Dictionary:
+	var prices: Dictionary = {}
+	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+		prices[item_id] = ItemCatalog.get_price(String(item_id))
+	return prices
+
+
+func _is_configurable_shop_item(item_id: StringName) -> bool:
+	return CONFIGURABLE_SHOP_ITEM_IDS.has(item_id)
 
 
 func _default_starting_weapons() -> Array[StringName]:

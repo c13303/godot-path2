@@ -33,6 +33,12 @@ var _loaded_spawner_bindings: Array[SpawnerBinding] = []
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
+var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
+var _loaded_shop_prices: Dictionary = {
+	&"rose": 1,
+	&"turret1": 5,
+	&"wall": 100,
+}
 var _loaded_rose_shop_counter_limit: int = 2
 
 func _enter_tree() -> void:
@@ -112,6 +118,16 @@ func get_loaded_starting_weapons() -> Array[StringName]:
 func get_loaded_rose_shop_counter_limit() -> int:
 	return _loaded_rose_shop_counter_limit
 
+func get_loaded_shop_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in _loaded_shop_available_items:
+		item_ids.append(item_id)
+	return item_ids
+
+
+func get_loaded_shop_prices() -> Dictionary:
+	return _loaded_shop_prices.duplicate()
+
 
 func _resolve_level_scene() -> PackedScene:
 	var selected_path: String = GameState.get_selected_level_scene_path()
@@ -130,6 +146,12 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_seeds = 20
 	_loaded_starting_gems = 1000
 	_loaded_starting_weapons = [&"spray"]
+	_loaded_shop_available_items = [&"rose", &"turret1", &"wall"]
+	_loaded_shop_prices = {
+		&"rose": 1,
+		&"turret1": 5,
+		&"wall": 100,
+	}
 	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
 		return
@@ -141,7 +163,9 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_seeds = config.starting_seeds
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
-		_loaded_rose_shop_counter_limit = maxi(0, config.rose_shop_counter_limit)
+		_loaded_shop_available_items = _valid_shop_available_items(config.shop_available_items)
+		_loaded_shop_prices = _valid_shop_prices(config.shop_prices)
+		_loaded_rose_shop_counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
 	if _loaded_spawn_playlist != null:
 		return
 	var fallback_playlist: LevelSpawnPlaylist = _load_default_spawn_playlist(level_scene_path)
@@ -169,6 +193,30 @@ func _valid_starting_weapons(raw_weapons: Array[StringName]) -> Array[StringName
 		seen[weapon_id] = true
 		weapons.append(weapon_id)
 	return weapons
+
+
+func _valid_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	var seen: Dictionary = {}
+	for item_id: StringName in raw_item_ids:
+		var item_id_string: String = String(item_id)
+		if item_id_string == "" or seen.has(item_id) or not _is_configurable_shop_item(item_id):
+			continue
+		seen[item_id] = true
+		item_ids.append(item_id)
+	return item_ids
+
+
+func _valid_shop_prices(raw_prices: Dictionary) -> Dictionary:
+	var prices: Dictionary = {}
+	for item_id: StringName in [&"rose", &"turret1", &"wall"]:
+		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
+		prices[item_id] = maxi(0, int(raw_price))
+	return prices
+
+
+func _is_configurable_shop_item(item_id: StringName) -> bool:
+	return item_id == &"rose" or item_id == &"turret1" or item_id == &"wall"
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:

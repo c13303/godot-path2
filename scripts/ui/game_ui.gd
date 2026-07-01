@@ -320,10 +320,41 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 		return GEM_KEY
 	return &""
 
+func is_build_item_available(item_id: String) -> bool:
+	if item_id == "rose_shop_counter":
+		return true
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_shop_available_items"):
+		var raw_item_ids: Variant = loader.call("get_loaded_shop_available_items")
+		if raw_item_ids is Array:
+			for raw_item_id: Variant in raw_item_ids:
+				if str(raw_item_id) == item_id:
+					return true
+			return false
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall"
+
+
+func get_build_price(item_id: String) -> int:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_shop_prices"):
+		var raw_prices: Variant = loader.call("get_loaded_shop_prices")
+		if raw_prices is Dictionary:
+			var prices: Dictionary = raw_prices as Dictionary
+			if prices.has(StringName(item_id)):
+				return maxi(0, int(prices[StringName(item_id)]))
+			if prices.has(item_id):
+				return maxi(0, int(prices[item_id]))
+	return ItemCatalog.get_price(item_id)
+
+
 ## How many of item_id the player can currently afford (floor(currency / price)).
 func get_build_affordable_quantity(item_id: String) -> int:
+	if not is_build_item_available(item_id):
+		return 0
 	var limit_remaining: int = _build_limit_remaining(item_id)
-	var price: int = ItemCatalog.get_price(item_id)
+	var price: int = get_build_price(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
 	if price <= 0:
 		return max(0, limit_remaining) if limit_remaining >= 0 else 0
@@ -344,7 +375,9 @@ func can_afford_build(item_id: String, count: int = 1) -> bool:
 func try_purchase_build(item_id: String, count: int) -> bool:
 	if count <= 0:
 		return false
-	var price: int = ItemCatalog.get_price(item_id)
+	if not is_build_item_available(item_id):
+		return false
+	var price: int = get_build_price(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
 	if price <= 0:
 		return true
@@ -373,7 +406,7 @@ func _build_limit_for_item(item_id: String) -> int:
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_rose_shop_counter_limit"):
-		return maxi(0, int(loader.call("get_loaded_rose_shop_counter_limit")))
+		return clampi(int(loader.call("get_loaded_rose_shop_counter_limit")), 1, 99)
 	return 2
 
 
@@ -391,7 +424,7 @@ func _placed_build_count(item_id: String) -> int:
 func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
 		return
-	var price: int = ItemCatalog.get_price(item_id)
+	var price: int = get_build_price(item_id)
 	var units: int = price * count
 	if units <= 0:
 		return

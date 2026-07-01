@@ -1,8 +1,47 @@
 [gd_scene format=3 uid="uid://hwix5spp7crc"]
 
 [ext_resource type="PackedScene" uid="uid://ct78mat36fwuc" path="res://scenes/main/mainRun.tscn" id="1_main_run"]
+[ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="3_lwixj"]
+
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_q3knr"]
+load_path = "res://.godot/imported/items.png-1a7135fef714c30bded34fa765930423.ctex"
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_7p5j8"]
+atlas = SubResource("CompressedTexture2D_q3knr")
+region = Rect2(416, 0, 32, 32)
 
 [node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
+
+[node name="seedIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="0" unique_id=1153248331]
+offset_top = 65.0
+offset_bottom = 105.0
+
+[node name="gemIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="1" unique_id=855508628]
+offset_top = 114.0
+offset_bottom = 154.0
+
+[node name="moneyIcon" type="TextureRect" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="2" unique_id=8700093]
+layout_mode = 0
+offset_left = -377.0
+offset_top = 13.0
+offset_right = -337.0
+offset_bottom = 53.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_7p5j8")
+script = ExtResource("3_lwixj")
+delay_between_seeds = 0.2
+animation_speed = 0.5
+curve_strength = 2.0
+
+[node name="moneyQT" type="RichTextLabel" parent="GameUI/top right/moneyIcon" index="0" unique_id=1319827880]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
+text = "x 999"
+fit_content = true
 
 [node name="toolbarInfo" type="RichTextLabel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="1" unique_id=1926956478]
 layout_mode = 0
@@ -11,3 +50,6 @@ offset_top = -46.0
 offset_right = 518.0
 offset_bottom = -6.0
 text = "toolbarinfo"
+
+[node name="Shop" parent="GameUI" parent_id_path=PackedInt32Array(1892661931) index="8"]
+metadata/_edit_lock_ = true

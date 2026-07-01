@@ -242,8 +242,11 @@ func _open_shop() -> void:
 	if _last_picked_item_id != "" and _can_afford(_last_picked_item_id):
 		_select_item(_last_picked_item_id)
 		return
-	# Never open empty: the rose is the default equipped building.
-	_select_item("rose")
+	for item_id: String in ITEM_IDS:
+		if item_id != COUNTER_ID and _is_item_available(item_id) and _can_afford(item_id):
+			_select_item(item_id)
+			return
+	_deselect_active()
 
 
 func _close_shop() -> void:
@@ -284,7 +287,7 @@ func _on_client_phase_changed(is_client_phase: bool) -> void:
 func _on_item_pressed(item_id: String) -> void:
 	if not visible or GameState.is_night:
 		return
-	if _is_item_locked(item_id):
+	if _is_item_locked(item_id) or not _is_item_available(item_id):
 		return
 	# Clicking the already-selected item toggles it back off and forgets it.
 	if _selected_item_id == item_id:
@@ -334,6 +337,10 @@ func _is_item_locked(item_id: String) -> bool:
 	return GameState.is_morning_phase and item_id != COUNTER_ID
 
 
+func _is_item_available(item_id: String) -> bool:
+	return game_ui == null or not game_ui.has_method("is_build_item_available") or bool(game_ui.call("is_build_item_available", item_id))
+
+
 func _show_insufficient_currency(currency: StringName) -> void:
 	_insufficient_currency = currency
 	_insufficient_until = Time.get_ticks_msec() / 1000.0 + 1.2
@@ -345,6 +352,9 @@ func _refresh_slots() -> void:
 	for item_id: String in ITEM_IDS:
 		var button: Button = _slot_buttons.get(item_id)
 		if button == null:
+			continue
+		button.visible = _is_item_available(item_id)
+		if not button.visible:
 			continue
 		var affordable: int = _affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
@@ -383,7 +393,7 @@ func _update_selected_label() -> void:
 		_selected_price.text = "%s : %d" % [Translations.t("ui.remaining"), remaining]
 		_selected_currency.visible = false
 		return
-	_selected_price.text = str(ItemCatalog.get_price(_selected_item_id))
+	_selected_price.text = str(_build_price(_selected_item_id))
 	var currency: StringName = ItemCatalog.get_currency(_selected_item_id)
 	if currency == &"gem":
 		_selected_currency.texture = _gem_icon
@@ -399,6 +409,12 @@ func _limit_remaining(item_id: String) -> int:
 	if game_ui != null and game_ui.has_method("get_build_limit_remaining"):
 		return int(game_ui.call("get_build_limit_remaining", item_id))
 	return -1
+
+
+func _build_price(item_id: String) -> int:
+	if game_ui != null and game_ui.has_method("get_build_price"):
+		return int(game_ui.call("get_build_price", item_id))
+	return ItemCatalog.get_price(item_id)
 
 
 # --- Styling / textures ------------------------------------------------------

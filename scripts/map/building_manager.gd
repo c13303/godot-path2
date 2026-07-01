@@ -497,8 +497,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_counter_agents.clear()
 		GameState.set_building_phase(false)
 		_morning_harvest_active = false
-		_clear_all_counter_piles()
-		_counter_stock_by_cell.clear()
+		# Roses left on the counters are NOT cleared at nightfall: they persist as
+		# edible targets monsters can eat during the night (see the monster-counter
+		# logic), and any survivors carry over as sellable stock into the next morning.
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false

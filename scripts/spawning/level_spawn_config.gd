@@ -9,5 +9,11 @@ class_name LevelSpawnConfig
 @export var starting_gems: int = 1000
 @export var starting_weapons: Array[StringName] = [&"spray"]
 
-@export_group("Build Limits")
-@export_range(0, 999, 1, "or_greater") var rose_shop_counter_limit: int = 2
+@export_group("Shop")
+@export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
+@export var shop_prices: Dictionary = {
+	&"rose": 1,
+	&"turret1": 5,
+	&"wall": 100,
+}
+@export_range(1, 99, 1) var rose_shop_counter_limit: int = 2
