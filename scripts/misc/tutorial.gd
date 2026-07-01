@@ -11,15 +11,17 @@ extends RichTextLabel
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
 ##   2. no roses anywhere + no seeds ................ Game Over
-##   3. seeds left to spend ......................... Buy roses
-##   4. planted roses still dry ..................... Water your roses
-##   5. all roses watered, nothing left ............. Pass the night (+ glow)
+##   3. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
+##   4. seeds left, shop tool equipped .............. Plant roses
+##   5. planted roses still dry ..................... Water your roses
+##   6. all roses watered, nothing left ............. Pass the night (+ glow)
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 
 const KEY_GAME_OVER: String = "tutorial.game_over"
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
+const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
@@ -30,6 +32,7 @@ const CHANGE_DELAY: float = 0.5
 
 var _plant_manager: Node
 var _progression: Node
+var _game_ui: Node
 var _day_toggle: Button
 var _displayed_key: String = ""  # key currently shown ("" while blank)
 var _pending_key: String = ""    # key we are waiting to reveal
@@ -58,6 +61,7 @@ func _resolve_nodes() -> void:
 	if scene != null:
 		_plant_manager = scene.get_node_or_null("Map/PlantManager")
 		_progression = scene.get_node_or_null("progression")
+		_game_ui = scene.get_node_or_null("GameUI")
 		if _plant_manager != null and _plant_manager.has_signal("day_seed_harvest_finished"):
 			var harvest_finished: Callable = Callable(self, "_on_day_seed_harvest_finished")
 			if not _plant_manager.is_connected("day_seed_harvest_finished", harvest_finished):
@@ -86,7 +90,7 @@ func _on_locale_changed(_locale: String) -> void:
 
 
 func _refresh(delta: float = 0.0) -> void:
-	if _plant_manager == null or _progression == null or _day_toggle == null:
+	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	var key: String = _current_message_key()
 	if _waiting_for_seed_harvest and key != KEY_REFILL_WATER:
@@ -142,14 +146,26 @@ func _current_message_key() -> String:
 	# Nothing growing and nothing to build with: the run is lost.
 	if planted == 0 and seeds == 0:
 		return KEY_GAME_OVER
-	# Seeds buy (and directly place) roses; that outranks watering.
+	# Seeds buy (and directly place) roses; that outranks watering. The player must
+	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
+		if _shop_tool_equipped():
+			return KEY_PLANT_ROSES
 		return KEY_BUY_ROSES
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES
 	# Every planted rose is watered and nothing is left to do: end the day.
 	return KEY_PASS_NIGHT
+
+
+## True while the quick-bar shop/build tool is the selected slot (the shop is open).
+func _shop_tool_equipped() -> bool:
+	return (
+		_game_ui != null
+		and _game_ui.has_method("is_build_tool_selected")
+		and bool(_game_ui.call("is_build_tool_selected"))
+	)
 
 
 ## Pulses the day/night button so the player notices they can end the day.

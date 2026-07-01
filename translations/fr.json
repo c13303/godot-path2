@@ -1,8 +1,8 @@
 {
 	"tutorial.game_over": "Game Over",
 	"tutorial.refill_water": "Rechargez votre eau !",
-	"tutorial.buy_roses": "Achetez des roses avec l'outil MAGASIN",
-	"tutorial.plant_roses": "Plantez vos roses",
+	"tutorial.buy_roses": "Equipez la pelle pour planter des roses",
+	"tutorial.plant_roses": "Plantez des roses",
 	"tutorial.water_roses": "Arrosez vos roses",
 	"tutorial.pass_night": "Passez la nuit",
 	"game_over.restart": "Recommencer",
