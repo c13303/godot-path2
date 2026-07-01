@@ -25,6 +25,7 @@ const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
+const KEY_NEW_DAY: String = "tutorial.new_day"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -62,10 +63,8 @@ func _resolve_nodes() -> void:
 		_plant_manager = scene.get_node_or_null("Map/PlantManager")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
-		if _plant_manager != null and _plant_manager.has_signal("day_seed_harvest_finished"):
-			var harvest_finished: Callable = Callable(self, "_on_day_seed_harvest_finished")
-			if not _plant_manager.is_connected("day_seed_harvest_finished", harvest_finished):
-				_plant_manager.connect("day_seed_harvest_finished", harvest_finished)
+		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
+			GameState.building_phase_changed.connect(_on_building_phase_changed)
 	_day_toggle = get_node_or_null("../dayToggle") as Button
 
 
@@ -78,8 +77,8 @@ func _on_mode_changed(is_night: bool) -> void:
 	_refresh()
 
 
-func _on_day_seed_harvest_finished() -> void:
-	_waiting_for_seed_harvest = false
+func _on_building_phase_changed(is_building_phase: bool) -> void:
+	_waiting_for_seed_harvest = not is_building_phase
 	_refresh()
 
 
@@ -94,9 +93,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_resolve_nodes()
 	var key: String = _current_message_key()
 	if _waiting_for_seed_harvest and key != KEY_REFILL_WATER:
-		visible = false
-		_set_glow(false)
-		return
+		key = KEY_NEW_DAY
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		_set_glow(false)
@@ -143,6 +140,8 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
+	if not GameState.is_building_phase:
+		return KEY_NEW_DAY
 	# Nothing growing and nothing to build with: the run is lost.
 	if planted == 0 and seeds == 0:
 		return KEY_GAME_OVER

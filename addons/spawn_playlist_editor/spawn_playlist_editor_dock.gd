@@ -6,6 +6,7 @@ const PLAYLISTS_DIR: String = "res://scenes/levels/playlists"
 const LEVEL_CONFIG_SCRIPT: Script = preload("res://scripts/spawning/level_spawn_config.gd")
 const WAVE_ROW_SCRIPT: Script = preload("res://addons/spawn_playlist_editor/wave_row.gd")
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
+const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
@@ -17,6 +18,7 @@ var _current_level_path: String = ""
 var _level_root: Node
 var _playlist: LevelSpawnPlaylist
 var _spawner_ids: Array[StringName] = []
+var _client_spawner_ids: Array[StringName] = []
 var _spawner_nodes: Dictionary = {}  # StringName -> NodePath
 var _duplicate_spawner_ids: Array[StringName] = []
 var _selected_night_index: int = 0
@@ -28,6 +30,7 @@ var _create_button: Button
 var _dirty_label: Label
 var _playlist_label: Label
 var _starting_controls: VBoxContainer
+var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
 var _weapon_checks_box: HBoxContainer
@@ -148,6 +151,9 @@ func _build_ui() -> void:
 	_starting_controls = VBoxContainer.new()
 	add_child(_starting_controls)
 	_build_starting_controls()
+
+	_client_frequency_box = VBoxContainer.new()
+	add_child(_client_frequency_box)
 
 	var night_row: HBoxContainer = HBoxContainer.new()
 	add_child(night_row)
@@ -310,6 +316,7 @@ func _load_level(level_path: String) -> void:
 	_selected_night_index = 0
 	_playlist = null
 	_spawner_ids.clear()
+	_client_spawner_ids.clear()
 	_spawner_nodes.clear()
 	_duplicate_spawner_ids.clear()
 	if _level_root != null:
@@ -342,18 +349,26 @@ func _capture_spawners() -> void:
 		var spawner_id: StringName = StringName(node_2d.name)
 		if spawner_id == &"":
 			continue
+		var spawner_name: String = String(spawner_id)
+		if not spawner_name.begins_with("monster") and not spawner_name.begins_with("client"):
+			continue
 		if seen.has(spawner_id):
 			_duplicate_spawner_ids.append(spawner_id)
 			continue
 		seen[spawner_id] = true
-		_spawner_ids.append(spawner_id)
+		if spawner_name.begins_with("client"):
+			_client_spawner_ids.append(spawner_id)
+		else:
+			_spawner_ids.append(spawner_id)
 		_spawner_nodes[spawner_id] = node_2d.get_path()
 	_spawner_ids.sort()
+	_client_spawner_ids.sort()
 
 
 func _refresh_all() -> void:
 	_loading_ui = true
 	_refresh_starting_controls()
+	_refresh_client_frequency_controls()
 	_refresh_nights()
 	_rebuild_tracks()
 	_loading_ui = false
@@ -390,6 +405,36 @@ func _refresh_starting_controls() -> void:
 		if checkbox != null:
 			checkbox.button_pressed = weapons.has(weapon_id)
 			checkbox.disabled = not has_level
+
+
+func _refresh_client_frequency_controls() -> void:
+	for child: Node in _client_frequency_box.get_children():
+		child.queue_free()
+	var has_level: bool = _current_level_path != ""
+	_client_frequency_box.visible = has_level and not _client_spawner_ids.is_empty()
+	if not _client_frequency_box.visible:
+		return
+	var heading: Label = Label.new()
+	heading.text = "Client Spawners"
+	heading.add_theme_font_size_override("font_size", 15)
+	_client_frequency_box.add_child(heading)
+	for spawner_id: StringName in _client_spawner_ids:
+		var row: HBoxContainer = HBoxContainer.new()
+		_client_frequency_box.add_child(row)
+		var label: Label = Label.new()
+		label.text = "%s frequency" % String(spawner_id)
+		label.custom_minimum_size = Vector2(140.0, 0.0)
+		row.add_child(label)
+		var spin: SpinBox = SpinBox.new()
+		spin.min_value = 0.0
+		spin.max_value = 3600.0
+		spin.step = 0.1
+		spin.suffix = "s"
+		spin.custom_minimum_size = Vector2(86.0, 0.0)
+		var node: Node = _node_for_spawner_id(spawner_id)
+		spin.value = float(node.get_meta(CLIENT_FREQUENCY_META, 1.0)) if node != null else 1.0
+		spin.value_changed.connect(_on_client_frequency_changed.bind(spawner_id))
+		row.add_child(spin)
 
 
 func _refresh_nights() -> void:
@@ -737,6 +782,16 @@ func _on_starting_weapon_toggled(enabled: bool, weapon_id: StringName) -> void:
 	mark_dirty()
 
 
+func _on_client_frequency_changed(value: float, spawner_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var node: Node = _node_for_spawner_id(spawner_id)
+	if node == null:
+		return
+	node.set_meta(CLIENT_FREQUENCY_META, maxf(0.0, value))
+	mark_dirty()
+
+
 func _on_add_night_pressed() -> void:
 	if _playlist == null:
 		return
@@ -823,6 +878,13 @@ func _focus_spawner(spawner_id: StringName) -> void:
 	selection.add_node(node)
 
 
+func _node_for_spawner_id(spawner_id: StringName) -> Node:
+	if _level_root == null or not _spawner_nodes.has(spawner_id):
+		return null
+	var node_path: NodePath = _spawner_nodes[spawner_id] as NodePath
+	return _level_root.get_node_or_null(node_path)
+
+
 func _assign_playlist_to_level_scene() -> bool:
 	if _current_level_path == "":
 		return false
@@ -844,6 +906,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_seeds", int(_starting_seeds.value))
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_weapons", _selected_starting_weapons())
+	_apply_client_frequency_to_scene(root)
 	var new_scene: PackedScene = PackedScene.new()
 	var pack_error: Error = new_scene.pack(root)
 	root.free()
@@ -861,6 +924,18 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_seeds = int(_starting_seeds.value)
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_weapons = _selected_starting_weapons()
+
+
+func _apply_client_frequency_to_scene(root: Node) -> void:
+	var container: Node = _find_spawner_container(root)
+	if container == null:
+		return
+	for spawner_id: StringName in _client_spawner_ids:
+		var source_node: Node = _node_for_spawner_id(spawner_id)
+		var target_node: Node = container.get_node_or_null(NodePath(String(spawner_id)))
+		if source_node == null or target_node == null:
+			continue
+		target_node.set_meta(CLIENT_FREQUENCY_META, float(source_node.get_meta(CLIENT_FREQUENCY_META, 1.0)))
 
 
 func _show_save_error(message: String, error: Error) -> void:

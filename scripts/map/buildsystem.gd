@@ -717,7 +717,7 @@ func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
 
 func _placement_disabled() -> bool:
-	return GameState.is_night
+	return GameState.is_night or not GameState.is_building_phase
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))

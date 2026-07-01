@@ -126,6 +126,8 @@ func _update_monster_frame() -> void:
 	var frame: int = MONSTER_FRAME_IDLE
 	if status == "eating":
 		frame = MONSTER_FRAME_EATING
+	elif status == "flow_out" and has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client":
+		frame = MONSTER_FRAME_EATING
 	elif status == "drowning":
 		frame = MONSTER_FRAME_DROWNING
 	if _monster_sprite.frame != frame:

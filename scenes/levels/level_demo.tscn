@@ -1270,6 +1270,7 @@ metadata/water = true
 position = Vector2(776, 1666)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
+metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/client1" unique_id=912409132]
 position = Vector2(1798, -52)
@@ -1300,6 +1301,7 @@ metadata/id = ""
 position = Vector2(2369, 1899)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
+metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/client2" unique_id=361216842]
 position = Vector2(-1599, -86)

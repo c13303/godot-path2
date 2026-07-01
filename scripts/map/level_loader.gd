@@ -23,6 +23,9 @@ extends Node
 ## The authored layers a level provides, in the order they should be hosted.
 const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz"]
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
+const SPAWNER_KIND_MONSTER: StringName = &"monster"
+const SPAWNER_KIND_CLIENT: StringName = &"client"
+const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -176,12 +179,32 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		var spawner_id: StringName = StringName(spawner_node.name)
 		if spawner_id == &"":
 			continue
+		var kind: StringName = _spawner_kind_from_name(String(spawner_id))
+		if kind == &"":
+			continue
 		var local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
 		var cell: Vector2i = floor_layer.local_to_map(local_pos)
+		var exit_cell: Vector2i = cell
+		var exit_node: Node2D = spawner_node.get_node_or_null("exit") as Node2D
+		if exit_node != null:
+			var exit_local_pos: Vector2 = floor_layer.to_local(exit_node.global_position)
+			exit_cell = floor_layer.local_to_map(exit_local_pos)
 		var binding: SpawnerBinding = SpawnerBinding.new()
 		binding.spawner_id = spawner_id
+		binding.kind = kind
 		binding.cell = cell
+		binding.exit_cell = exit_cell
+		if kind == SPAWNER_KIND_CLIENT:
+			binding.frequency_client = maxf(0.0, float(spawner_node.get_meta(CLIENT_FREQUENCY_META, 1.0)))
 		_loaded_spawner_bindings.append(binding)
+
+
+func _spawner_kind_from_name(spawner_name: String) -> StringName:
+	if spawner_name.begins_with("monster"):
+		return SPAWNER_KIND_MONSTER
+	if spawner_name.begins_with("client"):
+		return SPAWNER_KIND_CLIENT
+	return &""
 
 
 func _reparent_spawner_container(level_root: Node, host: Node) -> void:

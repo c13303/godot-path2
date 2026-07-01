@@ -54,12 +54,11 @@ func _ready() -> void:
 	turret_price_label.text = str(ItemCatalog.get_price("turret1"))
 	wall_price_label.text = str(ItemCatalog.get_price("wall"))
 
-	# The shop is closed during the night and during the day's seed-harvest animation.
+# The shop is closed during the night and during the morning sale phase.
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	_waiting_for_seed_harvest = false
-	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene != null else null
-	if plant_manager != null and plant_manager.has_signal("day_seed_harvest_finished"):
-		plant_manager.connect("day_seed_harvest_finished", _on_day_seed_harvest_finished)
+	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
+		GameState.building_phase_changed.connect(_on_building_phase_changed)
 	_set_shop_open(false)
 	set_process(true)
 
@@ -72,6 +71,7 @@ func _process(_delta: float) -> void:
 		and game_ui.has_method("is_build_tool_selected")
 		and bool(game_ui.call("is_build_tool_selected"))
 		and not GameState.is_night
+		and GameState.is_building_phase
 		and not _waiting_for_seed_harvest
 	)
 	if should_show and not visible:
@@ -98,15 +98,15 @@ func _set_shop_open(is_open: bool) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP if is_open else Control.MOUSE_FILTER_IGNORE
 
 
-## At night the shop is closed; on a new day it stays closed until the seed-harvest
-## animation finishes, after which the build tool is auto-selected to reopen it.
+## At night and during morning sale the shop is closed. Once building phase starts,
+## the build tool is auto-selected to reopen it.
 func _on_game_mode_changed(is_night: bool) -> void:
 	_waiting_for_seed_harvest = not is_night
 
 
-func _on_day_seed_harvest_finished() -> void:
-	_waiting_for_seed_harvest = false
-	if not GameState.is_night and game_ui != null and game_ui.has_method("select_build_tool"):
+func _on_building_phase_changed(is_building_phase: bool) -> void:
+	_waiting_for_seed_harvest = not is_building_phase
+	if is_building_phase and not GameState.is_night and game_ui != null and game_ui.has_method("select_build_tool"):
 		game_ui.call("select_build_tool")
 
 

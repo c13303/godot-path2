@@ -4,9 +4,11 @@ extends Node
 
 ## Emitted whenever the day/night mode changes. `is_night` is the new value.
 signal mode_changed(is_night: bool)
+signal building_phase_changed(is_building_phase: bool)
 
 ## True while night is active. The game starts in day mode.
 var is_night: bool = false
+var is_building_phase: bool = true
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
@@ -23,6 +25,13 @@ func start_day() -> void:
 	set_night(false)
 
 
+func set_building_phase(value: bool) -> void:
+	if is_building_phase == value:
+		return
+	is_building_phase = value
+	building_phase_changed.emit(is_building_phase)
+
+
 ## Toggle between day and night.
 func toggle() -> void:
 	# Manual toggles cannot end the night while monsters remain on the map.
@@ -36,6 +45,8 @@ func set_night(value: bool) -> void:
 	if is_night == value:
 		return
 	is_night = value
+	if is_night:
+		set_building_phase(false)
 	mode_changed.emit(is_night)
 
 

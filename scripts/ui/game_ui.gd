@@ -262,14 +262,14 @@ func selected_quick_item_places_tile() -> bool:
 	return ItemCatalog.is_placeable(item_id) and not is_item_disabled_for_placement(item_id)
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
-	return GameState.is_night and ItemCatalog.is_placeable(item_id)
+	return (GameState.is_night or not GameState.is_building_phase) and ItemCatalog.is_placeable(item_id)
 
 ## Whether a quick-bar item is disabled for selection/use. At night every
 ## non-weapon (build/unbuild tools, placeables) is locked out so the player can
 ## only wield weapons; during the day nothing is locked. Generalizes to any new
 ## weapon (selectable at night) or non-weapon (locked at night) item.
 func is_quick_item_disabled(item_id: String) -> bool:
-	return item_id != "" and GameState.is_night and not ItemCatalog.is_weapon(item_id)
+	return item_id != "" and (GameState.is_night or not GameState.is_building_phase) and not ItemCatalog.is_weapon(item_id)
 
 ## Selects the first quick-slot weapon, used to auto-arm the player when night
 ## falls. No-op if the quick bar holds no weapon.

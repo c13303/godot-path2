@@ -4,13 +4,16 @@ class_name PlantManager
 signal plant_added(cell: Vector2i)
 signal plant_removed(cell: Vector2i)
 signal plant_state_changed(cell: Vector2i, atlas_coords: Vector2i)
+signal new_day_finished
 signal day_seed_harvest_finished
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
-const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 1)
+const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 3)
+const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 3)
 const DEBRIS_ATLAS: Vector2i = Vector2i(1, 1)
-const SPAWNING_SEEDS_DELAY: int = 3000
+const NEW_DAY_DELAY: int = 3000
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
@@ -34,16 +37,10 @@ func _connect_day_started() -> void:
 			progression_node.connect("day_started", callback)
 
 func _on_day_started(_day_number: int) -> void:
-	var delay_seconds: float = float(SPAWNING_SEEDS_DELAY) / 1000.0
+	var delay_seconds: float = float(NEW_DAY_DELAY) / 1000.0
 	await get_tree().create_timer(delay_seconds).timeout
-	dry_all_roses()
-	var scene: Node = get_tree().current_scene
-	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
-	if seed_icon != null and seed_icon.has_method("has_active_harvest_animations"):
-		var has_active_animations: bool = bool(seed_icon.call("has_active_harvest_animations"))
-		if has_active_animations:
-			var animations_finished: Signal = Signal(seed_icon, &"harvest_animations_finished")
-			await animations_finished
+	grow_green_roses()
+	new_day_finished.emit()
 	day_seed_harvest_finished.emit()
 
 func initialize_from_layer() -> void:
@@ -90,7 +87,7 @@ func unwatered_rose_count() -> int:
 	var count: int = 0
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		if plantz.get_cell_atlas_coords(cell) == ROSE_DRY_ATLAS:
+		if not bool((_plants[cell] as Dictionary).get("watered_once", false)):
 			count += 1
 	return count
 
@@ -101,59 +98,57 @@ func is_rose_cell(cell: Vector2i) -> bool:
 	return _is_rose_atlas(atlas_coords)
 
 func _is_rose_atlas(atlas_coords: Vector2i) -> bool:
-	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_WET_ATLAS
+	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_GREEN_ATLAS
 
 func wet_rose(cell: Vector2i) -> bool:
 	if not plantz or not _plants.has(cell):
 		return false
-	if plantz.get_cell_atlas_coords(cell) != ROSE_DRY_ATLAS:
+	if is_rose_grownup(cell):
 		return false
+	var plant_data: Dictionary = _plants[cell] as Dictionary
+	if bool(plant_data.get("watered_once", false)):
+		return false
+	plant_data["watered_once"] = true
+	plant_data["grownup"] = false
+	_plants[cell] = plant_data
 	_set_rose_atlas(cell, ROSE_WET_ATLAS)
 	return true
 
-func dry_all_roses() -> int:
+func grow_green_roses() -> int:
 	if not plantz:
 		return 0
-	# Roses stay wet during their seed's flight; each one dries the instant its
-	# seed launches toward the UI (see _dry_rose_on_launch).
-	var dried_count: int = 0
+	var grown_count: int = 0
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
+		var plant_data: Dictionary = _plants[cell] as Dictionary
+		if not bool(plant_data.get("watered_once", false)) or bool(plant_data.get("grownup", false)):
 			continue
-		_spawn_seed_harvest(cell, dried_count)
-		dried_count += 1
-	return dried_count
+		plant_data["grownup"] = true
+		_plants[cell] = plant_data
+		_set_rose_atlas(cell, ROSE_GROWNUP_ATLAS)
+		grown_count += 1
+	return grown_count
 
-func _spawn_seed_harvest(cell: Vector2i, sequence_index: int) -> void:
-	var scene: Node = get_tree().current_scene
-	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
-	var world_position: Vector2 = plantz.to_global(plantz.map_to_local(cell))
-	var on_launch: Callable = Callable(self, "_dry_rose_on_launch").bind(cell)
-	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
-		var animation_started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, sequence_index, on_launch))
-		if animation_started:
-			return
-	# No animation available: dry immediately and credit the seed.
-	_dry_rose(cell)
-	_credit_seed_immediately()
+func grownup_rose_count() -> int:
+	var count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if is_rose_grownup(cell):
+			count += 1
+	return count
 
-func _dry_rose_on_launch(cell: Vector2i) -> void:
-	_dry_rose(cell)
+func is_rose_grownup(cell: Vector2i) -> bool:
+	if not _plants.has(cell):
+		return false
+	return bool((_plants[cell] as Dictionary).get("grownup", false))
 
-func _dry_rose(cell: Vector2i) -> void:
-	if not plantz:
-		return
-	# Guard against the cell being consumed/removed during the seed's flight.
-	if plantz.get_cell_atlas_coords(cell) != ROSE_WET_ATLAS:
-		return
-	_set_rose_atlas(cell, ROSE_DRY_ATLAS)
-
-func _credit_seed_immediately() -> void:
-	var scene: Node = get_tree().current_scene
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_seeds"):
-		progression_node.call("update_seeds", 1)
+func get_grownup_rose_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if is_rose_grownup(cell):
+			cells.append(cell)
+	return cells
 
 func _set_rose_atlas(cell: Vector2i, atlas_coords: Vector2i, flush_visuals: bool = true) -> void:
 	var source_id: int = plantz.get_cell_source_id(cell)
@@ -178,6 +173,10 @@ func add_plant(cell: Vector2i) -> void:
 	if _plants.has(cell):
 		return
 	_capture_tile_metadata(cell)
+	_plants[cell] = {
+		"watered_once": false,
+		"grownup": false,
+	}
 	_index_cell(cell)
 	plant_added.emit(cell)
 
@@ -209,9 +208,17 @@ func _capture_tile_metadata(cell: Vector2i) -> void:
 	if source_id < 0:
 		_plant_tiles.erase(cell)
 		return
+	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	var existing_data: Dictionary = _plants.get(cell, {}) as Dictionary
+	var watered_once: bool = bool(existing_data.get("watered_once", atlas_coords == ROSE_GREEN_ATLAS))
+	var grownup: bool = bool(existing_data.get("grownup", atlas_coords == ROSE_GROWNUP_ATLAS and not watered_once))
+	_plants[cell] = {
+		"watered_once": watered_once,
+		"grownup": grownup,
+	}
 	_plant_tiles[cell] = {
 		"source_id": source_id,
-		"atlas_coords": plantz.get_cell_atlas_coords(cell),
+		"atlas_coords": atlas_coords,
 		"alternative_tile": plantz.get_cell_alternative_tile(cell)
 	}
 
@@ -282,7 +289,8 @@ func nearest_plant_cell(from_cell: Vector2i, excluded_cell: Vector2i = INVALID_C
 	return best_cell
 
 func _index_cell(cell: Vector2i) -> void:
-	_plants[cell] = true
+	if not _plants.has(cell):
+		_plants[cell] = {"watered_once": false, "grownup": false}
 	var bucket: Vector2i = _bucket_for_cell(cell)
 	if not _buckets.has(bucket):
 		_buckets[bucket] = {}

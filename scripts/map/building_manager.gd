@@ -6,6 +6,7 @@ signal startup_loading_finished
 signal level_completed
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
+const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const EATING_COOLDOWN: float = 5.0
@@ -26,6 +27,9 @@ const TURRET_ID: String = "turret1"
 # reach while remaining wall-aware.
 const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
+const SPAWNER_KIND_MONSTER: StringName = &"monster"
+const SPAWNER_KIND_CLIENT: StringName = &"client"
+const CLIENT_PAYMENT_SECONDS: float = 1.0
 
 # Garden access-cell scoring penalties. Distance / escape cost stays the main
 # driver; these only nudge selection away from obviously bad local geometry (a
@@ -99,6 +103,10 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 
 var _tile_defs_by_atlas: Dictionary = {}
 var _spawners: Dictionary = {}
+var _spawner_kind_by_cell: Dictionary = {}  # Vector2i -> StringName
+var _spawner_exit_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
+var _client_spawners: Dictionary = {}  # Vector2i -> true
+var _client_frequency_by_cell: Dictionary = {}  # Vector2i -> float
 # Round-robin queue of playlist spawn requests ready to be drained. The playlist
 # controller owns wave timing; this queue only spreads spawn+assign work over frames.
 var _ready_spawner_queue: Array[Dictionary] = []
@@ -265,6 +273,10 @@ var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
 var _level_completed_emitted: bool = false
+var _client_sale_active: bool = false
+var _client_sale_pending_spawners: Array[Vector2i] = []
+var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
+var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
@@ -459,6 +471,11 @@ func _resolve_level_layers() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
+	if is_night:
+		_client_sale_active = false
+		_client_sale_pending_spawners.clear()
+		_client_sale_spawn_timers.clear()
+		GameState.set_building_phase(false)
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false
@@ -1028,6 +1045,7 @@ func _process(delta: float) -> void:
 	# (string-formatting) context is only built on a real spike, never every frame.
 	t = Time.get_ticks_usec()
 	_process_eating_agents(delta)
+	_process_client_paying_agents(delta)
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
@@ -1079,6 +1097,7 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_process_spawners(delta)
+	_process_client_sale(delta)
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
 		_warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
@@ -1246,6 +1265,8 @@ func _validate_playlist_after_spawner_scan() -> void:
 			push_error("BuildingManager: null spawner binding in level spawn config.")
 			bindings_valid = false
 			continue
+		if binding.kind != SPAWNER_KIND_MONSTER:
+			continue
 		if binding.spawner_id == &"":
 			push_error("BuildingManager: spawner binding has empty spawner_id for cell %s." % str(binding.cell))
 			bindings_valid = false
@@ -1311,9 +1332,11 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_added", Callable(self, "_on_plant_added"))
 	if plant_manager.has_signal("plant_removed") and not plant_manager.is_connected("plant_removed", Callable(self, "_on_plant_removed")):
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
+	if plant_manager.has_signal("new_day_finished") and not plant_manager.is_connected("new_day_finished", Callable(self, "_on_new_day_finished")):
+		plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 
 func _on_plant_added(_cell: Vector2i) -> void:
-	if not GameState.is_night:
+	if not _runtime_agents_active():
 		# Daytime placement only dirties the next night's snapshot. In particular,
 		# rectangle placement must not rebuild every existing garden per rose.
 		_plant_zone_built = false
@@ -1333,7 +1356,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
-	if not GameState.is_night:
+	if not _runtime_agents_active():
 		_plant_zone_built = false
 		_navigation_topology_dirty = true
 		if _zone_overlay:
@@ -1370,6 +1393,10 @@ func _on_plant_removed(cell: Vector2i) -> void:
 	_warn_garden_task_lag_us("_on_plant_removed", Time.get_ticks_usec() - removed_us,
 		"garden=%d empty=%s" % [garden_id, str(became_empty)])
 
+
+func _runtime_agents_active() -> bool:
+	return GameState.is_night or _client_sale_active
+
 func _scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:
 	if not layer:
 		return
@@ -1386,6 +1413,8 @@ func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 	for binding: SpawnerBinding in _level_spawner_bindings:
 		if binding == null:
 			continue
+		if binding.kind != SPAWNER_KIND_MONSTER and binding.kind != SPAWNER_KIND_CLIENT:
+			continue
 		_log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
 			String(binding.spawner_id),
 			binding.cell,
@@ -1393,7 +1422,7 @@ func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 			_has_wall(binding.cell),
 		])
 		seen_spawners[binding.cell] = true
-		_register_spawner(binding.cell)
+		_register_spawner(binding.cell, binding.kind, binding.exit_cell, binding.frequency_client)
 
 func _migrate_special_tiles_from_wallz() -> bool:
 	if not wallz or not traversable_buildings:
@@ -1477,9 +1506,18 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 	var atlas_key: String = _atlas_key(atlas)
 	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
 
-func _register_spawner(cell: Vector2i) -> void:
+func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, exit_cell: Vector2i = INVALID_CELL, frequency_client: float = 1.0) -> void:
 	var is_new: bool = not _spawners.has(cell)
 	_spawners[cell] = true
+	_spawner_kind_by_cell[cell] = kind
+	if exit_cell != INVALID_CELL:
+		_spawner_exit_cell_by_cell[cell] = exit_cell
+	if kind == SPAWNER_KIND_CLIENT:
+		_client_spawners[cell] = true
+		_client_frequency_by_cell[cell] = maxf(0.0, frequency_client)
+	else:
+		_client_spawners.erase(cell)
+		_client_frequency_by_cell.erase(cell)
 	if is_new and GameState.is_night and _night_preparation_ready and _flow_ready and _plant_zone_built and _startup_ready:
 		_initialize_spawner_route(cell)
 
@@ -1498,6 +1536,10 @@ func _release_spawner_route(spawner_cell: Vector2i) -> void:
 					agent_manager.call("dissolve_group", plant_group)
 	_spawner_routes.erase(spawner_cell)
 	_spawner_garden_routes.erase(spawner_cell)
+	_spawner_kind_by_cell.erase(spawner_cell)
+	_spawner_exit_cell_by_cell.erase(spawner_cell)
+	_client_spawners.erase(spawner_cell)
+	_client_frequency_by_cell.erase(spawner_cell)
 
 func _drain_dirty_routes() -> void:
 	if not _flow_ready:
@@ -1524,14 +1566,22 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 
 	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
 
-	# Exit wall tile (nearest atlas (13,0) on wallz by Manhattan distance).
-	var exit_wall_cell: Vector2i = _nearest_exit_wall_for_spawner(spawner_cell)
+	var bound_exit_cell: Vector2i = _spawner_exit_cell_by_cell.get(spawner_cell, INVALID_CELL) as Vector2i
+	# New authored spawners own a child "exit" marker. Legacy levels without that
+	# marker still fall back to the nearest exit-wall tile.
+	var exit_wall_cell: Vector2i = bound_exit_cell
+	if exit_wall_cell == INVALID_CELL:
+		exit_wall_cell = _nearest_exit_wall_for_spawner(spawner_cell)
 	route["exit_wall_cell"] = exit_wall_cell
+	route["has_bound_exit"] = bound_exit_cell != INVALID_CELL
 
 	# Floor tile adjacent to the exit wall that the FF can target.
 	var escape_wall_target_cell: Vector2i = INVALID_CELL
 	if exit_wall_cell != INVALID_CELL:
-		escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
+		if bound_exit_cell != INVALID_CELL and _is_walkable(exit_wall_cell):
+			escape_wall_target_cell = exit_wall_cell
+		else:
+			escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
 	if escape_wall_target_cell == INVALID_CELL:
 		# Fallback to spawner cell if no walkable adjacency to an exit wall.
 		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
@@ -1805,6 +1855,72 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 	_drain_ready_spawner_queue_budgeted()
 
 
+func _on_new_day_finished() -> void:
+	if GameState.is_night:
+		return
+	_begin_client_sale_phase()
+
+
+func _begin_client_sale_phase() -> void:
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	var grownup_count: int = _grownup_rose_count()
+	if grownup_count <= 0 or _client_spawners.is_empty():
+		GameState.set_building_phase(true)
+		return
+	var client_cells: Array[Vector2i] = []
+	for raw_cell: Variant in _client_spawners.keys():
+		client_cells.append(raw_cell as Vector2i)
+	if client_cells.is_empty():
+		GameState.set_building_phase(true)
+		return
+	for index: int in range(grownup_count):
+		var random_index: int = randi_range(0, client_cells.size() - 1)
+		_client_sale_pending_spawners.append(client_cells[random_index])
+	for cell: Vector2i in client_cells:
+		_client_sale_spawn_timers[cell] = 0.0
+	_client_sale_active = true
+	GameState.set_building_phase(false)
+
+
+func _process_client_sale(delta: float) -> void:
+	if GameState.is_night or not _client_sale_active:
+		return
+	if _grownup_rose_count() <= 0:
+		_client_sale_pending_spawners.clear()
+	for raw_cell: Variant in _client_sale_spawn_timers.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var time_left: float = maxf(0.0, float(_client_sale_spawn_timers[cell]) - delta)
+		_client_sale_spawn_timers[cell] = time_left
+	var spawned_this_frame: bool = false
+	for index: int in range(_client_sale_pending_spawners.size() - 1, -1, -1):
+		var spawner_cell: Vector2i = _client_sale_pending_spawners[index]
+		if float(_client_sale_spawn_timers.get(spawner_cell, 0.0)) > 0.0:
+			continue
+		if _spawn_client_from(spawner_cell):
+			_client_sale_pending_spawners.remove_at(index)
+			_client_sale_spawn_timers[spawner_cell] = maxf(0.0, float(_client_frequency_by_cell.get(spawner_cell, 1.0)))
+			spawned_this_frame = true
+			break
+		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+	if spawned_this_frame:
+		return
+	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty():
+		_client_sale_active = false
+		GameState.set_building_phase(true)
+
+
+func _client_count() -> int:
+	return get_tree().get_nodes_in_group("clients").size()
+
+
+func _grownup_rose_count() -> int:
+	if plant_manager != null and plant_manager.has_method("grownup_rose_count"):
+		return int(plant_manager.call("grownup_rose_count"))
+	return 0
+
+
 func _enqueue_playlist_spawn_requests(delta: float) -> void:
 	var requests: Array[Dictionary] = _spawn_playlist_controller.advance(delta)
 	for request: Dictionary in requests:
@@ -1880,13 +1996,21 @@ func _report_playlist_spawn_result(request: Dictionary, success: bool, failure_r
 
 
 func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
+	return _spawn_agent_from(spawner_cell, monster_type, SPAWNER_KIND_MONSTER)
+
+
+func _spawn_client_from(spawner_cell: Vector2i) -> bool:
+	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
+
+
+func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
 	var agent_scene: PackedScene = _resolve_monster_scene(monster_type)
 	if agent_scene == null:
 		return false
 	# Select target garden: iterates all gardens, checks targetable / edible plants,
 	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
 	var t_sel: int = Time.get_ticks_usec()
-	var garden_id: int = _select_garden_for_spawner(spawner_cell)
+	var garden_id: int = _select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _select_garden_for_spawner(spawner_cell)
 	var sel_us: int = Time.get_ticks_usec() - t_sel
 	if _over_garden_threshold_us(sel_us):
 		_warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
@@ -1944,7 +2068,14 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 	parent.add_child(agent)
 	agent.global_position = _cell_center(spawn_cell)
 	agent.z_index = int(agent.global_position.y)
-	agent.add_to_group("monsters")
+	if agent_kind == SPAWNER_KIND_CLIENT:
+		agent.add_to_group("clients")
+		var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+		if sprite != null:
+			sprite.texture = CLIENT_TEXTURE
+	else:
+		agent.add_to_group("monsters")
+	agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
 	if _over_garden_threshold_us(inst_us):
 		_warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
@@ -1974,7 +2105,8 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 		if not assigned:
 			if agent_manager.has_method("unregister_agent"):
 				agent_manager.call("unregister_agent", nav_id)
-			agent.remove_from_group("monsters")
+			var failed_group: StringName = &"clients" if agent_kind == SPAWNER_KIND_CLIENT else &"monsters"
+			agent.remove_from_group(failed_group)
 			agent.queue_free()
 			_log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
 			return false
@@ -2016,7 +2148,7 @@ func _process_astar_in_arrivals() -> void:
 			continue
 		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
 		var garden_id: int = int(data.get("garden_id", 0))
-		if not _garden_has_edible_plants(garden_id):
+		if not _garden_has_target_for_kind(garden_id, _agent_kind(agent)):
 			_entry_path_agents.erase(nav_id)
 			_retarget_agent_or_escape(agent, spawner_cell)
 			continue
@@ -2032,10 +2164,11 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	if not _garden_has_edible_plants(garden_id):
+	var agent_kind: StringName = _agent_kind(agent)
+	if not _garden_has_target_for_kind(garden_id, agent_kind):
 		_retarget_agent_or_escape(agent, spawner_cell)
 		return
-	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent_in_garden(agent_cell, garden_id)
+	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent_in_garden(agent_cell, garden_id, agent_kind)
 	if target_plant_cell == INVALID_CELL:
 		_retarget_agent_or_escape(agent, spawner_cell)
 		return
@@ -2292,6 +2425,11 @@ func _assert_retarget_index_matches_scan(cell: Vector2i) -> void:
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	var consume_us: int = Time.get_ticks_usec()
+	if _agent_kind(eater) == SPAWNER_KIND_CLIENT:
+		_start_client_payment(eater, plant_cell)
+		_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+			"client plant=%s" % str(plant_cell))
+		return
 	_start_agent_eating(eater, _eating_time, plant_cell)
 	Sfx.play_sound(&"crunsh")
 	# plant_manager.consume_plant() fires _on_plant_removed synchronously (garden
@@ -2309,6 +2447,62 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 		_flush_plant_layer_visuals()
 	_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
+
+
+func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	_client_paying_agents[nav_id] = {
+		"node": agent,
+		"timer": CLIENT_PAYMENT_SECONDS,
+		"plant_cell": plant_cell,
+	}
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	_entry_path_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
+	_spawn_client_payment_seed(agent.global_position)
+	if plant_manager and plant_manager.has_method("remove_plant"):
+		plant_manager.call("remove_plant", plant_cell, true)
+	elif plantz:
+		plantz.erase_cell(plant_cell)
+		_flush_plant_layer_visuals()
+	if agent.has_method("start_eating"):
+		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
+
+
+func _spawn_client_payment_seed(world_position: Vector2) -> void:
+	var scene: Node = get_tree().current_scene
+	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
+	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
+		var started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, 0, Callable()))
+		if started:
+			return
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node != null and progression_node.has_method("update_seeds"):
+		progression_node.call("update_seeds", 1)
+
+
+func _process_client_paying_agents(delta: float) -> void:
+	var finished: Array[int] = []
+	for raw_nav_id: Variant in _client_paying_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _client_paying_agents[nav_id] as Dictionary
+		var timer: float = float(data.get("timer", 0.0)) - delta
+		data["timer"] = timer
+		_client_paying_agents[nav_id] = data
+		if timer <= 0.0:
+			finished.append(nav_id)
+	for nav_id: int in finished:
+		var data: Dictionary = _client_paying_agents.get(nav_id, {}) as Dictionary
+		_client_paying_agents.erase(nav_id)
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent != null:
+			_assign_agent_to_escape(agent)
 
 func _process_turret_overlaps() -> void:
 	if blocking_buildings == null:
@@ -2685,7 +2879,7 @@ func _decide_after_eating(nav_id: int, agent: Node2D, data: Dictionary) -> void:
 		_escape_finished_eater(nav_id, agent)
 		return
 
-	if garden_id > 0 and _garden_has_edible_plants(garden_id):
+	if garden_id > 0 and _garden_has_target_for_kind(garden_id, _agent_kind(agent)):
 		agent.set_meta("garden_id", garden_id)
 		if spawner_cell != INVALID_CELL:
 			agent.set_meta("spawner_cell", spawner_cell)
@@ -2768,6 +2962,16 @@ func _start_escape_for_all_monsters() -> void:
 func _assign_agent_to_escape(agent: Node2D) -> bool:
 	if not agent_manager or not agent_manager.has_method("assign_agent"):
 		return false
+	var linked_spawner_cell: Vector2i = INVALID_CELL
+	if agent.has_meta("spawner_cell"):
+		linked_spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	if linked_spawner_cell != INVALID_CELL and _spawner_routes.has(linked_spawner_cell):
+		var linked_route: Dictionary = _spawner_routes[linked_spawner_cell] as Dictionary
+		if bool(linked_route.get("has_bound_exit", false)) and bool(linked_route.get("escape_ready", false)):
+			var linked_group: int = int(linked_route.get("escape_group", -1))
+			var linked_target: Vector2i = linked_route.get("escape_wall_target_cell", linked_spawner_cell) as Vector2i
+			if linked_group > IDLE_GROUP and linked_target != INVALID_CELL:
+				return _attach_agent_to_escape(agent, linked_group, linked_target, linked_spawner_cell)
 	# Prefer the nearest reachable per-exit-wall escape (chosen by walkable route
 	# cost from the monster), so monsters leave through the closest wall exit.
 	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
@@ -2857,6 +3061,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	_entry_path_agents.erase(nav_id)
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
+	agent.remove_from_group("clients")
 	agent.remove_from_group("monsters")
 	agent.queue_free()
 
@@ -3546,7 +3751,32 @@ func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 		return 0
 	return best_garden_id
 
-func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
+
+func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
+	var best_garden_id: int = 0
+	var best_dist: int = 2147483647
+	_gardens_iter_depth += 1
+	for raw_garden_id: Variant in _gardens.keys():
+		var garden_id: int = int(raw_garden_id)
+		var garden: Dictionary = _gardens[garden_id] as Dictionary
+		if not bool(garden.get("targetable", false)):
+			continue
+		if not _garden_has_grownup_roses(garden_id):
+			continue
+		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
+		if entry_cell == INVALID_CELL:
+			continue
+		var delta: Vector2i = entry_cell - spawner_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_garden_id = garden_id
+	_gardens_iter_depth -= 1
+	if best_garden_id > 0 and not _gardens.has(best_garden_id):
+		return 0
+	return best_garden_id
+
+func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
 	var best_pair: Dictionary = {}
 	var best_dist: int = 2147483647
 	# Reset the per-resolve cache tallies; each _nearest_garden_entry below adds in.
@@ -3555,6 +3785,8 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
 	_gardens_iter_depth += 1
 	for raw_spawner_cell in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell
+		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
+			continue
 		if not _spawner_routes.has(spawner_cell):
 			continue
 		for raw_garden_id in _gardens.keys():
@@ -3562,7 +3794,7 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
 			var garden: Dictionary = _gardens[garden_id] as Dictionary
 			if not bool(garden.get("targetable", false)):
 				continue
-			if not _garden_has_edible_plants(garden_id):
+			if not _garden_has_target_for_kind(garden_id, agent_kind):
 				continue
 			var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 			if _garden_entry_resolve_cache_hit:
@@ -3586,11 +3818,13 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i) -> Dictionary:
 		return {}
 	return best_pair
 
-func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fallback_spawner_cell: Vector2i) -> Vector2i:
+func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fallback_spawner_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
 	var best_spawner_cell: Vector2i = INVALID_CELL
 	var best_dist: int = 2147483647
 	for raw_spawner_cell in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell
+		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
+			continue
 		if not _spawner_routes.has(spawner_cell):
 			continue
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
@@ -3602,11 +3836,13 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 			best_dist = manhattan
 			best_spawner_cell = spawner_cell
 	if best_spawner_cell == INVALID_CELL and fallback_spawner_cell != INVALID_CELL and _spawner_routes.has(fallback_spawner_cell):
+		if (_spawner_kind_by_cell.get(fallback_spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
+			return INVALID_CELL
 		if _nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL:
 			best_spawner_cell = fallback_spawner_cell
 	return best_spawner_cell
 
-func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
+func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
 	# Start fresh so the parent breakdown never reads a stale plant/path profile when
 	# this returns early (or isn't reached at all this retarget).
 	_last_find_local_retarget_profile = {}
@@ -3644,12 +3880,14 @@ func _find_local_retarget_plant(from_cell: Vector2i) -> Dictionary:
 			var plant_cell: Vector2i = from_cell + Vector2i(dx, dy)
 			if not bool(plant_manager.call("has_plant", plant_cell)):
 				continue
+			if agent_kind == SPAWNER_KIND_CLIENT and not _is_grownup_rose_cell(plant_cell):
+				continue
 			plant_candidates += 1
 			if not _garden_by_plant_cell.has(plant_cell):
 				rejected_no_garden += 1
 				continue
 			var garden_id: int = int(_garden_by_plant_cell[plant_cell])
-			if not _garden_has_edible_plants(garden_id):
+			if not _garden_has_target_for_kind(garden_id, agent_kind):
 				rejected_not_edible += 1
 				continue
 			# Per-candidate path check. Time each one so a single dominating check is
@@ -3733,7 +3971,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 		"success": false,
 	}
 	var search_us: int = Time.get_ticks_usec()
-	var target: Dictionary = _find_local_retarget_plant(from_cell)
+	var target: Dictionary = _find_local_retarget_plant(from_cell, _agent_kind(agent))
 	var search_elapsed: int = Time.get_ticks_usec() - search_us
 	# Split the search time: path validation (the find_path calls) vs. the rest of the
 	# scan. Counts/path-check time come from the plant-search profile filled just above.
@@ -3754,7 +3992,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	if plant_cell == INVALID_CELL or garden_id <= 0 or path_cells.is_empty():
 		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
 		return false
-	var route_spawner_cell: Vector2i = _select_spawner_for_garden_from_cell(garden_id, from_cell, spawner_cell)
+	var route_spawner_cell: Vector2i = _select_spawner_for_garden_from_cell(garden_id, from_cell, spawner_cell, _agent_kind(agent))
 	if route_spawner_cell == INVALID_CELL:
 		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
 		return false
@@ -4040,7 +4278,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	# entry route. Cheap normally, but timed so a slow _select_spawner_garden_for_agent
 	# or route recompute is attributable rather than lumped into the parent total.
 	var t_res: int = Time.get_ticks_usec()
-	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell)
+	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell, _agent_kind(agent))
 	# Cache stats for this resolve (set by _select_spawner_garden_for_agent's loop).
 	_last_retarget_profile["entry_cache_hits"] = _garden_entry_resolve_hits
 	_last_retarget_profile["entry_cache_misses"] = _garden_entry_resolve_misses
@@ -4834,7 +5072,7 @@ func _tile_size() -> Vector2:
 		return Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
 	return Vector2(32, 32)
 
-func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int) -> Vector2i:
+func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
 	if not _gardens.has(garden_id):
 		return INVALID_CELL
 	var garden: Dictionary = _gardens[garden_id] as Dictionary
@@ -4848,12 +5086,44 @@ func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: i
 			continue
 		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", c)):
 			continue
+		if agent_kind == SPAWNER_KIND_CLIENT and not _is_grownup_rose_cell(c):
+			continue
 		var d: Vector2i = c - from_cell
 		var manhattan: int = abs(d.x) + abs(d.y)
 		if manhattan < best_dist:
 			best_dist = manhattan
 			best_cell = c
 	return best_cell
+
+
+func _agent_kind(agent: Node) -> StringName:
+	if agent != null and agent.has_meta("agent_kind"):
+		return StringName(str(agent.get_meta("agent_kind")))
+	return SPAWNER_KIND_MONSTER
+
+
+func _garden_has_target_for_kind(garden_id: int, agent_kind: StringName) -> bool:
+	if agent_kind == SPAWNER_KIND_CLIENT:
+		return _garden_has_grownup_roses(garden_id)
+	return _garden_has_edible_plants(garden_id)
+
+
+func _garden_has_grownup_roses(garden_id: int) -> bool:
+	if not _gardens.has(garden_id):
+		return false
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	if plant_cells.is_empty():
+		return false
+	for raw_cell: Variant in plant_cells.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if _is_grownup_rose_cell(cell):
+			return true
+	return false
+
+
+func _is_grownup_rose_cell(cell: Vector2i) -> bool:
+	return plant_manager != null and plant_manager.has_method("is_rose_grownup") and bool(plant_manager.call("is_rose_grownup", cell))
 
 # Truth is plant_cells (cross-checked against the plant_manager), never the cached
 # edible_count: that counter drifts on incremental removal and was flagging
