@@ -15,6 +15,10 @@ var is_building_phase: bool = true
 var is_morning_phase: bool = false
 var is_client_phase: bool = false
 var is_seed_merchant_phase: bool = false
+## True once the player has bought at least one item during the current seed-merchant
+## visit. Reset each time a new merchant phase begins; drives the "close the transaction"
+## tutorial prompt once the player walks away from the (now hidden) merchant shop.
+var seed_merchant_purchase_made: bool = false
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
@@ -74,6 +78,7 @@ func set_seed_merchant_phase(value: bool) -> void:
 		return
 	is_seed_merchant_phase = value
 	if value:
+		seed_merchant_purchase_made = false
 		set_morning_phase(false)
 		set_client_phase(false)
 		is_building_phase = false

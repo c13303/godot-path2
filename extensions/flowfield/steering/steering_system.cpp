@@ -1438,6 +1438,17 @@ void SteeringSystem::set_agent_never_rest(int id, bool value)
     agents[it->second].never_rest = value;
 }
 
+void SteeringSystem::set_agent_paused(int id, bool value)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    AgentData &a = agents[it->second];
+    a.paused = value;
+    if (value)
+        a.velocity = Vec2(0, 0);
+}
+
 void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seconds)
 {
     auto it = id_to_index.find(id);
@@ -1758,6 +1769,16 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        // Hard freeze: a paused agent holds its exact position and path/flow state.
+        // Zero the velocity and skip all integration so it neither drifts nor advances
+        // its waypoint/flow progress; it resumes seamlessly once unpaused.
+        if (a.paused)
+        {
+            a.velocity = Vec2(0, 0);
+            a.update_motion_state(delta, cfg);
+            continue;
+        }
+
         const bool is_manual = a.control_mode == AgentControlMode::Manual;
         FlowField *nav = a.flow ? a.flow : default_flow;
         if (nav && !nav->is_ready())

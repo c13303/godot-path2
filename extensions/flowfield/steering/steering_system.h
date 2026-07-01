@@ -117,6 +117,7 @@ namespace ffcore
         void apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage);
         std::vector<DamageEvent> take_damage_events();
         void set_agent_never_rest(int id, bool value);
+        void set_agent_paused(int id, bool value);
         void set_agent_phase(int id, AgentPhase phase, float eating_seconds);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 

@@ -107,6 +107,11 @@ namespace ffcore
         double lost_timer = 0.0;
         double stuck_in_wall_accum = 0.0;
         bool never_rest = false;
+        // Hard freeze pushed from game-side (e.g. the seed merchant halting while the
+        // player browses its shop). While set, the agent's velocity is zeroed every
+        // tick and it skips all movement/path/flow integration, but its path/flow
+        // assignment is preserved so it resumes exactly where it left off on unpause.
+        bool paused = false;
 
         // Path-follow override: when path_active is true, the desired direction comes
         // from "toward path_waypoints[path_index]" instead of the flow field. The flow

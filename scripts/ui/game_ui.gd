@@ -331,6 +331,18 @@ func select_build_tool() -> void:
 			select_quick_slot(i)
 			return
 
+## Global-space center X of the quick slot holding the build tool, or -1 if the
+## build tool is not currently in the quick bar. The Shop uses this to anchor its
+## column directly above the build/shop icon.
+func get_build_tool_slot_center_x() -> float:
+	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
+		if _slot_item_id(inventory_slots[i]) == BUILD_TOOL_ID:
+			if i < _toolbar_slot_nodes.size():
+				var rect: Rect2 = _toolbar_slot_nodes[i].get_global_rect()
+				return rect.position.x + rect.size.x * 0.5
+			return -1.0
+	return -1.0
+
 ## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:
 	var currency: StringName = ItemCatalog.get_currency(item_id)

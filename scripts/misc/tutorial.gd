@@ -25,9 +25,11 @@ const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
+const KEY_SUN_RISING: String = "tutorial.sun_rising"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_CLIENT_TIME: String = "tutorial.client_time"
 const KEY_SEED_MERCHANT: String = "tutorial.seed_merchant"
+const KEY_CLOSE_TRANSACTION: String = "tutorial.close_transaction"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
@@ -47,6 +49,10 @@ var _pending_remaining: float = 0.0
 var _glow_tween: Tween
 var _glow_active: bool = false
 var _waiting_for_seed_harvest: bool = false
+# True during the sunrise transition: night has just ended but the first day phase
+# (the morning harvest) has not begun yet. Set when night turns off, cleared once
+# the new day finishes growing / any real phase starts.
+var _sun_rising: bool = false
 
 
 func _ready() -> void:
@@ -67,6 +73,9 @@ func _resolve_nodes() -> void:
 	var scene: Node = get_tree().current_scene
 	if scene != null:
 		_plant_manager = scene.get_node_or_null("Map/PlantManager")
+		if _plant_manager != null and _plant_manager.has_signal("new_day_finished") \
+				and not _plant_manager.is_connected("new_day_finished", Callable(self, "_on_new_day_finished")):
+			_plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 		_building_manager = scene.get_node_or_null("Map/BuildingManager")
 		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
 		_progression = scene.get_node_or_null("progression")
@@ -84,6 +93,15 @@ func _process(delta: float) -> void:
 
 func _on_mode_changed(is_night: bool) -> void:
 	_waiting_for_seed_harvest = not is_night
+	# Night just ended: we are in the sunrise transition until the new day finishes.
+	_sun_rising = not is_night
+	_refresh()
+
+
+## The new day has finished growing; the morning phase is about to begin, so the
+## sunrise transition is over.
+func _on_new_day_finished() -> void:
+	_sun_rising = false
 	_refresh()
 
 
@@ -110,7 +128,12 @@ func _refresh(delta: float = 0.0) -> void:
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
 	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER:
-		key = KEY_SEED_MERCHANT
+		# Once the player has bought something and walked away from the merchant (its shop
+		# bar is hidden), prompt them to end the visit by clicking the moon/sun button.
+		if GameState.seed_merchant_purchase_made and not _player_near_seed_merchant():
+			key = KEY_CLOSE_TRANSACTION
+		else:
+			key = KEY_SEED_MERCHANT
 	if key == "":
 		_displayed_key = ""
 		text = ""
@@ -148,7 +171,7 @@ func _refresh(delta: float = 0.0) -> void:
 				text = Translations.t(key)
 
 	# Glow tracks the message actually on screen, so it stays in step with the text.
-	_set_glow(_displayed_key == KEY_PASS_NIGHT)
+	_set_glow(_displayed_key == KEY_PASS_NIGHT or _displayed_key == KEY_CLOSE_TRANSACTION)
 	_update_day_toggle_interactable()
 
 
@@ -175,6 +198,10 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
+	# Sunrise transition after a night: no day phase has begun yet, so fall through
+	# would wrongly show "pass the night". Announce the rising sun instead.
+	if _sun_rising and not GameState.is_night:
+		return KEY_SUN_RISING
 	if GameState.is_morning_phase:
 		if _rose_shop_counter_count() <= 0:
 			return KEY_PLACE_SHOP
@@ -199,6 +226,16 @@ func _current_message_key() -> String:
 		return KEY_WATER_ROSES
 	# Every planted rose is watered and nothing is left to do: end the day.
 	return KEY_PASS_NIGHT
+
+
+## True while the player stands next to the seed merchant, i.e. while its shop bar is
+## shown. When false during the merchant phase the bar is hidden (see shop.gd).
+func _player_near_seed_merchant() -> bool:
+	return (
+		_building_manager != null
+		and _building_manager.has_method("is_player_near_seed_merchant")
+		and bool(_building_manager.call("is_player_near_seed_merchant"))
+	)
 
 
 ## True while the quick-bar shop/build tool is the selected slot (the shop is open).

@@ -301,6 +301,14 @@ var _seed_merchant_nav_id: int = -1
 var _seed_merchant_counter_cell: Vector2i = INVALID_CELL
 var _seed_merchant_target_cell: Vector2i = INVALID_CELL
 var _seed_merchant_waiting: bool = false
+# True once the player has dismissed the merchant and it is walking back out to an
+# exit. The merchant phase stays active during this walk-out so re-approaching still
+# pauses it and reopens the shop; building phase only begins once it actually exits.
+var _seed_merchant_leaving: bool = false
+# True while the merchant is frozen because the player is within interaction range.
+# Mirrors the native per-agent pause; cleared when the player walks away so the
+# merchant resumes whatever it was doing (walking in, or walking back out).
+var _seed_merchant_paused: bool = false
 var _counter_stock_by_cell: Dictionary = {}  # Vector2i -> int
 var _counter_pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
@@ -1209,6 +1217,7 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_process_client_counter_arrivals()
+	_process_seed_merchant_proximity()
 	_process_seed_merchant_arrival()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
@@ -2240,6 +2249,8 @@ func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
 	_seed_merchant_counter_cell = counter_cell
 	_seed_merchant_target_cell = target_cell
 	_seed_merchant_waiting = false
+	_seed_merchant_leaving = false
+	_seed_merchant_paused = false
 	if agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
 	return true
@@ -2264,7 +2275,9 @@ func _select_counter_target(from_cell: Vector2i) -> Dictionary:
 
 
 func _process_seed_merchant_arrival() -> void:
-	if not _seed_merchant_active or _seed_merchant_waiting:
+	# Only the walk-IN toward the counter uses the A* path; while leaving (escape flow)
+	# or already parked at the counter there is nothing to arrive at here.
+	if not _seed_merchant_active or _seed_merchant_waiting or _seed_merchant_leaving:
 		return
 	if not is_instance_valid(_seed_merchant_agent):
 		_end_seed_merchant_phase()
@@ -2287,8 +2300,11 @@ func _process_seed_merchant_phase() -> void:
 		_end_seed_merchant_phase()
 
 
+# True whenever the player is within interaction range of the merchant, no matter what
+# the merchant is doing (walking in, parked at the counter, or walking back out). This
+# drives both the shop visibility (shop.gd) and the movement pause below.
 func is_player_near_seed_merchant() -> bool:
-	if not _seed_merchant_active or not _seed_merchant_waiting or not is_instance_valid(_seed_merchant_agent):
+	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
 		return false
 	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
 	if player == null or floorz == null:
@@ -2299,13 +2315,40 @@ func is_player_near_seed_merchant() -> bool:
 	return abs(delta.x) <= SEED_MERCHANT_INTERACT_RADIUS_TILES and abs(delta.y) <= SEED_MERCHANT_INTERACT_RADIUS_TILES
 
 
+# Freezes the merchant while the player is close and lets it resume the moment they
+# leave, so getting near always stops it (and opens the shop, via is_player_near_...).
+func _process_seed_merchant_proximity() -> void:
+	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
+		return
+	var near: bool = is_player_near_seed_merchant()
+	if near == _seed_merchant_paused:
+		return
+	_set_seed_merchant_paused(near)
+
+
+func _set_seed_merchant_paused(value: bool) -> void:
+	_seed_merchant_paused = value
+	if _seed_merchant_nav_id >= 0 and agent_manager and agent_manager.has_method("set_agent_paused"):
+		agent_manager.call("set_agent_paused", _seed_merchant_nav_id, value)
+
+
 func request_seed_merchant_leave() -> void:
 	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
 		_end_seed_merchant_phase()
 		return
+	# Unfreeze first so the merchant can actually walk out (the player is standing next
+	# to it to press the button, which had it paused).
+	if _seed_merchant_paused:
+		_set_seed_merchant_paused(false)
+	# The merchant walks back out to an exit but the phase stays active: if the player
+	# catches up to it mid-exit it pauses and the shop reopens. Building phase only
+	# starts once it fully leaves (_process_escape_arrivals -> _remove_escaped_monster).
 	if _assign_agent_to_escape(_seed_merchant_agent):
 		_seed_merchant_waiting = false
+		_seed_merchant_leaving = true
 		return
+	# No escape route available: fall back to removing it now, which ends the phase and
+	# switches to building (see the merchant branch of remove_dead_monster).
 	remove_dead_monster(_seed_merchant_agent, false)
 
 
@@ -2318,6 +2361,8 @@ func _clear_seed_merchant_phase(free_agent: bool) -> void:
 	_seed_merchant_counter_cell = INVALID_CELL
 	_seed_merchant_target_cell = INVALID_CELL
 	_seed_merchant_waiting = false
+	_seed_merchant_leaving = false
+	_seed_merchant_paused = false
 	GameState.set_seed_merchant_phase(false)
 
 
@@ -3782,6 +3827,10 @@ func _process_escape_arrivals() -> void:
 		if agent == null:
 			arrived.append(nav_id)
 			continue
+		# A paused merchant is frozen by the player standing next to it; never let it
+		# reach/vanish at the exit while held (that would end the phase behind the shop).
+		if agent == _seed_merchant_agent and _seed_merchant_paused:
+			continue
 		var target_cell: Vector2i = data.get("target_cell", INVALID_CELL) as Vector2i
 		if target_cell != INVALID_CELL and _agent_within_tiles(agent, target_cell, 1):
 			_remove_escaped_monster(agent)
@@ -3810,6 +3859,8 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 		_seed_merchant_counter_cell = INVALID_CELL
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
+		_seed_merchant_leaving = false
+		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(true)
 
@@ -3849,6 +3900,8 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		_seed_merchant_counter_cell = INVALID_CELL
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
+		_seed_merchant_leaving = false
+		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(true)
 

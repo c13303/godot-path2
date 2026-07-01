@@ -2,12 +2,14 @@ extends Control
 
 ## The shop is the building picker for build mode. It is open exactly while the
 ## quick-bar Build tool is selected (see game_ui.is_build_tool_selected) and during
-## the day; selecting any other quick slot closes it. It renders as a horizontal bar
-## sitting just above the quick-bar's "Construction (…)" label, styled like the quick
-## bar: one slot per buildable showing its icon and the quantity the player can still
-## afford. Unaffordable / unavailable buildables are greyed out like disabled quick
-## slots. Above the bar a label shows the selected buildable's name and either its
-## price (with the matching currency icon) or, for limited buildables, "remaining : n".
+## the day; selecting any other quick slot closes it. It renders as a vertical column
+## rising up out of the build/shop quick slot, like a dropdown that opens upward:
+## one icon per buildable, stacked with no per-row text. A single floating label sits
+## just to the right of the currently selected icon only, showing that buildable's name
+## plus either its price (with the matching currency icon) or, for limited buildables,
+## "remaining : n". The floating label has a transparent background and ignores all mouse
+## events. Unaffordable / unavailable buildables are greyed out like disabled quick slots,
+## and the floating label turns red when the selected buildable cannot be placed.
 ## Clicking a slot selects it so the build system places it when affordable; buildables are
 ## paid for directly from currency and never enter the inventory.
 
@@ -19,9 +21,15 @@ const SEED_ICON_REGION: Rect2 = Rect2(226.0, 0.0, 32.0, 32.0)
 const GEM_ICON_REGION: Rect2 = Rect2(256.0, 0.0, 32.0, 32.0)
 const MONEY_ICON_REGION: Rect2 = Rect2(416.0, 0.0, 32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
-# The bar sits this many pixels above the screen bottom, clearing the quick bar and
-# its "Construction (…)" info label.
+# The column's bottom sits this many pixels above the screen bottom, clearing the quick
+# bar and its "Construction (…)" info label; rows stack upward from there.
 const BAR_BOTTOM_OFFSET: float = -134.0
+# Left inset from the panel edge to the first slot (panel border + margin_left), so the
+# column's slots can be centred on the build/shop icon.
+const BAR_CONTENT_INSET: float = 10.0
+# Y offset (from the top) of the seed-merchant horizontal bar, placing it just below the
+# tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
+const SEED_MERCHANT_BAR_TOP: float = 250.0
 const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
@@ -37,18 +45,23 @@ var _selected_item_id: String = ""
 # The last building the player picked; restored when the shop reopens if it still exists.
 var _last_picked_item_id: String = ""
 
-var _selected_name: Label
-var _selected_price: Label
-var _selected_currency: TextureRect
 var _shop_column: VBoxContainer
-var _items_grid: GridContainer
+# A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
+# vertical stack for the build shop, horizontal bar for the seed-merchant sale.
+var _items_list: BoxContainer
 var _seed_icon: AtlasTexture
 var _gem_icon: AtlasTexture
 var _money_icon: AtlasTexture
-# item id -> its slot Button / icon TextureRect / affordable-count Label.
+# item id -> its row / slot Button / icon TextureRect / affordable-count Label.
+var _slot_rows: Dictionary = {}
 var _slot_buttons: Dictionary = {}
 var _slot_icons: Dictionary = {}
 var _slot_counts: Dictionary = {}
+# The single floating label shown to the right of the selected slot only.
+var _selected_label: HBoxContainer
+var _selected_name: Label
+var _selected_price: Label
+var _selected_currency: TextureRect
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
@@ -100,7 +113,8 @@ func _process(_delta: float) -> void:
 		_close_shop()
 	if visible:
 		_refresh_slots()
-		_update_selected_label()
+		if not GameState.is_seed_merchant_phase:
+			_update_build_column_anchor()
 
 
 # --- UI construction ---------------------------------------------------------
@@ -112,66 +126,51 @@ func _build_ui() -> void:
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 6)
 	column.alignment = BoxContainer.ALIGNMENT_END
-	# Full-width strip pinned to the bottom, growing upward so the bar hugs the quick
-	# bar; its rows shrink-centre to stay horizontally centred on screen.
-	column.anchor_left = 0.0
-	column.anchor_right = 1.0
-	column.anchor_top = 1.0
-	column.anchor_bottom = 1.0
-	column.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	column.offset_left = 0.0
-	column.offset_right = 0.0
-	column.offset_bottom = BAR_BOTTOM_OFFSET
 	add_child(column)
 
-	column.add_child(_build_selected_row())
 	column.add_child(_build_bar())
+	_build_selected_label()
 	_apply_phase_layout()
 
 
-func _build_selected_row() -> Control:
-	var row: HBoxContainer = HBoxContainer.new()
-	row.name = "SelectedRow"
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 6)
+## Builds the single floating label (name + price + currency icon) that sits to the
+## right of the selected slot. It has no background and ignores all mouse events.
+func _build_selected_label() -> void:
+	var group: HBoxContainer = HBoxContainer.new()
+	_selected_label = group
+	group.name = "SelectedItemLabel"
+	group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	group.add_theme_constant_override("separation", 8)
+	add_child(group)
 
-	_selected_name = Label.new()
-	_selected_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_selected_name.add_theme_font_size_override("font_size", 20)
-	_selected_name.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	_selected_name.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
-	_selected_name.add_theme_constant_override("shadow_offset_x", 1)
-	_selected_name.add_theme_constant_override("shadow_offset_y", 1)
-	row.add_child(_selected_name)
+	var name_label: Label = _make_row_label(18)
+	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	group.add_child(name_label)
+	_selected_name = name_label
 
-	_selected_price = Label.new()
-	_selected_price.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_selected_price.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_selected_price.add_theme_font_size_override("font_size", 20)
-	_selected_price.add_theme_color_override("font_color", Color.WHITE)
-	_selected_price.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
-	_selected_price.add_theme_constant_override("shadow_offset_x", 1)
-	_selected_price.add_theme_constant_override("shadow_offset_y", 1)
-	row.add_child(_selected_price)
+	var price_label: Label = _make_row_label(18)
+	price_label.add_theme_color_override("font_color", Color.WHITE)
+	group.add_child(price_label)
+	_selected_price = price_label
 
-	_selected_currency = TextureRect.new()
-	_selected_currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_selected_currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_selected_currency.custom_minimum_size = Vector2(20.0, 20.0)
-	_selected_currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_selected_currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_selected_currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_selected_currency)
-	return row
+	var currency: TextureRect = TextureRect.new()
+	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	currency.custom_minimum_size = Vector2(20.0, 20.0)
+	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_child(currency)
+	_selected_currency = currency
+
+	group.visible = false
 
 
 func _build_bar() -> Control:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "BarPanel"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	panel.add_theme_stylebox_override("panel", _bar_background_style())
 
 	var margin: MarginContainer = MarginContainer.new()
@@ -182,18 +181,42 @@ func _build_bar() -> Control:
 	margin.add_theme_constant_override("margin_bottom", 6)
 	panel.add_child(margin)
 
-	var items_grid: GridContainer = GridContainer.new()
-	_items_grid = items_grid
-	items_grid.name = "ItemsGrid"
-	items_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	items_grid.columns = BUILD_ITEM_IDS.size()
-	items_grid.add_theme_constant_override("h_separation", 6)
-	items_grid.add_theme_constant_override("v_separation", 6)
-	margin.add_child(items_grid)
+	var items_list: BoxContainer = BoxContainer.new()
+	_items_list = items_list
+	items_list.name = "ItemsList"
+	items_list.vertical = true
+	items_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	items_list.add_theme_constant_override("separation", 6)
+	margin.add_child(items_list)
 
 	for item_id: String in ITEM_IDS:
-		items_grid.add_child(_build_slot(item_id))
+		items_list.add_child(_build_slot_row(item_id))
 	return panel
+
+
+## One row of the column: just the slot button. The name / price / currency icon are
+## shown by the shared floating label next to the selected slot (see _build_selected_label).
+func _build_slot_row(item_id: String) -> HBoxContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.name = item_id + "Row"
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_build_slot(item_id))
+	_slot_rows[item_id] = row
+	return row
+
+
+func _make_row_label(font_size: int) -> Label:
+	var label: Label = Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	return label
 
 
 func _build_slot(item_id: String) -> Button:
@@ -323,9 +346,9 @@ func _on_item_pressed(item_id: String) -> void:
 		elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
 			purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
 		if purchased:
+			GameState.seed_merchant_purchase_made = true
 			Sfx.play_sound(&"buy")
 			_refresh_slots()
-			_update_selected_label()
 		return
 	if _is_item_locked(item_id) or not _is_item_available(item_id):
 		return
@@ -344,7 +367,6 @@ func _select_item(item_id: String) -> void:
 		game_ui.call("set_selected_build_item", item_id)
 	Sfx.play_sound(&"buy")
 	_refresh_slots()
-	_update_selected_label()
 
 
 ## Clears the active build pick (build mode) but remembers it for the next time the
@@ -354,7 +376,6 @@ func _deselect_active() -> void:
 	if game_ui != null and game_ui.has_method("clear_build_selection"):
 		game_ui.call("clear_build_selection")
 	_refresh_slots()
-	_update_selected_label()
 
 
 func _can_afford(item_id: String) -> bool:
@@ -382,12 +403,13 @@ func _is_item_available(item_id: String) -> bool:
 
 func _refresh_slots() -> void:
 	for item_id: String in ITEM_IDS:
-		var button: Button = _slot_buttons.get(item_id) as Button
-		if button == null:
+		var row: Control = _slot_rows.get(item_id) as Control
+		if row == null:
 			continue
-		button.visible = _should_show_item(item_id)
-		if not button.visible:
+		row.visible = _should_show_item(item_id)
+		if not row.visible:
 			continue
+		var button: Button = _slot_buttons[item_id] as Button
 		var affordable: int = _affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
 		var selected: bool = item_id == _selected_item_id
@@ -400,46 +422,57 @@ func _refresh_slots() -> void:
 			(_slot_icons[item_id] as TextureRect).modulate = (
 				Color(0.45, 0.45, 0.45, 0.55) if disabled else Color.WHITE
 			)
+	_update_selected_label()
 
 
+## Fills in and positions the floating label for the selected slot only. It shows the
+## buildable's name, price and currency icon, turning red when it cannot be placed.
+## During the merchant phase (no build pick) the label stays hidden — icons only.
 func _update_selected_label() -> void:
-	if _selected_name == null:
+	if _selected_label == null:
 		return
-	if GameState.is_seed_merchant_phase:
-		_selected_name.text = ""
-		_selected_price.text = ""
-		_selected_currency.visible = false
+	var item_id: String = _selected_item_id
+	if GameState.is_seed_merchant_phase or item_id == "" or not _slot_buttons.has(item_id):
+		_selected_label.visible = false
 		return
-	if _selected_item_id == "":
-		_selected_name.text = ""
-		_selected_price.text = ""
-		_selected_currency.visible = false
+	var button: Button = _slot_buttons[item_id] as Button
+	if not button.visible:
+		_selected_label.visible = false
 		return
-	var can_place_selected: bool = _can_afford(_selected_item_id) and not _is_item_locked(_selected_item_id)
-	var selected_color: Color = SELECTED_LABEL_COLOR if can_place_selected else SELECTED_DISABLED_LABEL_COLOR
-	_selected_name.add_theme_color_override("font_color", selected_color)
-	_selected_price.add_theme_color_override("font_color", selected_color)
-	_selected_currency.modulate = selected_color
-	var remaining: int = _limit_remaining(_selected_item_id)
+	_selected_label.visible = true
+	var can_place: bool = _can_afford(item_id) and not _is_item_locked(item_id)
+	var color: Color = SELECTED_LABEL_COLOR if can_place else SELECTED_DISABLED_LABEL_COLOR
+	_selected_name.add_theme_color_override("font_color", color)
+	_selected_price.add_theme_color_override("font_color", color)
+	_selected_currency.modulate = color
+	_selected_name.text = _display_name(item_id)
+	var remaining: int = _limit_remaining(item_id)
 	if remaining >= 0:
-		_selected_name.text = _display_name(_selected_item_id)
 		_selected_price.text = "%s : %d" % [Translations.t("ui.remaining"), remaining]
 		_selected_currency.visible = false
-		return
-	_selected_name.text = "%s :" % _display_name(_selected_item_id)
-	_selected_price.text = str(_build_price(_selected_item_id))
-	var currency: StringName = ItemCatalog.get_currency(_selected_item_id)
-	if currency == &"gem":
-		_selected_currency.texture = _gem_icon
-		_selected_currency.visible = true
-	elif currency == &"seed":
-		_selected_currency.texture = _seed_icon
-		_selected_currency.visible = true
-	elif currency == &"money":
-		_selected_currency.texture = _money_icon
-		_selected_currency.visible = true
 	else:
-		_selected_currency.visible = false
+		_selected_price.text = str(_build_price(item_id))
+		var currency_id: StringName = ItemCatalog.get_currency(item_id)
+		if currency_id == &"gem":
+			_selected_currency.texture = _gem_icon
+			_selected_currency.visible = true
+		elif currency_id == &"seed":
+			_selected_currency.texture = _seed_icon
+			_selected_currency.visible = true
+		elif currency_id == &"money":
+			_selected_currency.texture = _money_icon
+			_selected_currency.visible = true
+		else:
+			_selected_currency.visible = false
+	_position_selected_label(button)
+
+
+## Places the floating label just to the right of the selected slot, vertically centred.
+func _position_selected_label(button: Control) -> void:
+	const GAP: float = 12.0
+	var pos_x: float = button.global_position.x + button.size.x + GAP
+	var pos_y: float = button.global_position.y + (button.size.y - _selected_label.size.y) * 0.5
+	_selected_label.global_position = Vector2(pos_x, pos_y)
 
 
 func _limit_remaining(item_id: String) -> int:
@@ -474,33 +507,48 @@ func _apply_phase_layout() -> void:
 	if _shop_column == null:
 		return
 	if GameState.is_seed_merchant_phase:
-		_shop_column.anchor_left = 1.0
-		_shop_column.anchor_right = 1.0
-		_shop_column.anchor_top = 0.5
-		_shop_column.anchor_bottom = 0.5
-		_shop_column.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-		_shop_column.grow_vertical = Control.GROW_DIRECTION_BOTH
-		_shop_column.offset_left = -76.0
-		_shop_column.offset_right = -12.0
-		_shop_column.offset_top = -160.0
-		_shop_column.offset_bottom = 160.0
+		# Icon-only horizontal bar centred at the top, sitting just under the
+		# tutorial hint text (see GameUI/top anchor/tutorial), like the build shop bar.
+		if _items_list != null:
+			_items_list.vertical = false
+		_shop_column.anchor_left = 0.5
+		_shop_column.anchor_right = 0.5
+		_shop_column.anchor_top = 0.0
+		_shop_column.anchor_bottom = 0.0
+		_shop_column.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		_shop_column.grow_vertical = Control.GROW_DIRECTION_END
+		_shop_column.offset_left = 0.0
+		_shop_column.offset_right = 0.0
+		_shop_column.offset_top = SEED_MERCHANT_BAR_TOP
+		_shop_column.offset_bottom = SEED_MERCHANT_BAR_TOP
 		_shop_column.alignment = BoxContainer.ALIGNMENT_CENTER
-		if _items_grid != null:
-			_items_grid.columns = 1
 		return
+	# Build phase: vertical column pinned to the bottom, rising up out of the build/shop
+	# quick slot; grows rightward so the name/price labels extend past the slots.
+	if _items_list != null:
+		_items_list.vertical = true
 	_shop_column.anchor_left = 0.0
-	_shop_column.anchor_right = 1.0
+	_shop_column.anchor_right = 0.0
 	_shop_column.anchor_top = 1.0
 	_shop_column.anchor_bottom = 1.0
-	_shop_column.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_shop_column.grow_horizontal = Control.GROW_DIRECTION_END
 	_shop_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_shop_column.offset_left = 0.0
-	_shop_column.offset_right = 0.0
-	_shop_column.offset_top = 0.0
+	_shop_column.offset_top = BAR_BOTTOM_OFFSET
 	_shop_column.offset_bottom = BAR_BOTTOM_OFFSET
 	_shop_column.alignment = BoxContainer.ALIGNMENT_END
-	if _items_grid != null:
-		_items_grid.columns = BUILD_ITEM_IDS.size()
+	_update_build_column_anchor()
+
+
+## Aligns the build-phase column's slots horizontally over the build/shop quick slot.
+func _update_build_column_anchor() -> void:
+	if _shop_column == null or game_ui == null or not game_ui.has_method("get_build_tool_slot_center_x"):
+		return
+	var center_x: float = float(game_ui.call("get_build_tool_slot_center_x"))
+	if center_x < 0.0:
+		return
+	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
+	_shop_column.offset_left = left
+	_shop_column.offset_right = left
 
 
 # --- Styling / textures ------------------------------------------------------

@@ -5,16 +5,50 @@
 [node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
 
 [node name="CPP" parent="." index="4" unique_id=304113688]
-debug_enabled = true
 show_gardens = true
+show_enters_exits = true
+
+[node name="seedIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="0" unique_id=1153248331]
+offset_left = -79.0
+offset_top = 68.0
+offset_right = -39.0
+offset_bottom = 108.0
+
+[node name="gemIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="1" unique_id=855508628]
+offset_left = -80.0
+offset_top = 117.0
+offset_right = -40.0
+offset_bottom = 157.0
+
+[node name="moneyIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="2" unique_id=8700093]
+offset_left = -82.0
+offset_top = 16.0
+offset_right = -42.0
+offset_bottom = 56.0
+
+[node name="ToolbarPanel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="0" unique_id=2101533894]
+layout_mode = 1
+anchors_preset = 15
+offset_left = -5.0
+offset_top = -52.0
+offset_right = -5.0
+offset_bottom = -52.0
 
 [node name="toolbarInfo" type="RichTextLabel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="1" unique_id=1926956478]
 layout_mode = 0
+offset_left = -1.0
+offset_top = 27.0
+offset_right = 514.0
+offset_bottom = 67.0
+text = "toolbarinfo"
+
+[node name="toolbar" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="2" unique_id=1961685898]
+layout_mode = 1
+anchors_preset = 15
 offset_left = 3.0
 offset_top = -46.0
-offset_right = 518.0
-offset_bottom = -6.0
-text = "toolbarinfo"
+offset_right = -13.0
+offset_bottom = -58.0
 
 [node name="Shop" parent="GameUI" parent_id_path=PackedInt32Array(1892661931) index="8"]
 metadata/_edit_lock_ = true
