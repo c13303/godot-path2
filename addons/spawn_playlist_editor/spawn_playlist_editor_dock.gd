@@ -50,7 +50,7 @@ var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
 var _reward_box: VBoxContainer
 var _reward_one_time_check: CheckBox
-var _reward_rows_box: VBoxContainer
+var _reward_amount_spins: Dictionary = {}  # String currency -> SpinBox
 var _validation_label: RichTextLabel
 var _rename_row: HBoxContainer
 var _missing_id_option: OptionButton
@@ -434,67 +434,47 @@ func _build_reward_controls() -> void:
 	_reward_one_time_check.toggled.connect(_on_reward_one_time_toggled)
 	one_time_row.add_child(_reward_one_time_check)
 
-	_reward_rows_box = VBoxContainer.new()
-	_reward_box.add_child(_reward_rows_box)
+	# One fixed field per currency. Leave a currency at 0 to grant nothing of it.
+	_reward_amount_spins.clear()
+	for currency: String in REWARD_CURRENCIES:
+		var row: HBoxContainer = HBoxContainer.new()
+		_reward_box.add_child(row)
 
-	var add_button: Button = Button.new()
-	add_button.text = "Add Reward"
-	add_button.pressed.connect(_on_add_reward_pressed)
-	_reward_box.add_child(add_button)
+		var label: Label = Label.new()
+		label.text = currency.capitalize()
+		label.custom_minimum_size = Vector2(96.0, 0.0)
+		row.add_child(label)
+
+		var amount_spin: SpinBox = SpinBox.new()
+		amount_spin.min_value = 0.0
+		amount_spin.max_value = 1000000.0
+		amount_spin.step = 1.0
+		amount_spin.custom_minimum_size = Vector2(120.0, 0.0)
+		amount_spin.value_changed.connect(_on_reward_amount_changed.bind(currency))
+		row.add_child(amount_spin)
+		_reward_amount_spins[currency] = amount_spin
 
 
 func _rebuild_reward_controls() -> void:
-	if _reward_rows_box == null:
-		return
-	for child: Node in _reward_rows_box.get_children():
-		child.queue_free()
 	var night: NightSpawnPlaylist = _get_selected_night()
 	var has_night: bool = night != null
 	_reward_section.visible = has_night
 	if not has_night:
 		return
 	_reward_one_time_check.set_pressed_no_signal(night.special_reward_one_time)
-	var reward_index: int = 0
+	for raw_currency: Variant in _reward_amount_spins.keys():
+		var currency: String = String(raw_currency)
+		var amount_spin: SpinBox = _reward_amount_spins[currency] as SpinBox
+		if amount_spin != null:
+			amount_spin.set_value_no_signal(float(_reward_amount_for_currency(night, currency)))
+
+
+func _reward_amount_for_currency(night: NightSpawnPlaylist, currency: String) -> int:
+	var total: int = 0
 	for reward: NightReward in night.special_rewards:
-		_reward_rows_box.add_child(_build_reward_row(reward, reward_index))
-		reward_index += 1
-	if night.special_rewards.is_empty():
-		var empty: Label = Label.new()
-		empty.text = "No reward. The merchant hides the special reward slot this night."
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_reward_rows_box.add_child(empty)
-
-
-func _build_reward_row(reward: NightReward, reward_index: int) -> HBoxContainer:
-	var row: HBoxContainer = HBoxContainer.new()
-
-	var currency_option: OptionButton = OptionButton.new()
-	var selected: int = 0
-	for i: int in range(REWARD_CURRENCIES.size()):
-		currency_option.add_item(REWARD_CURRENCIES[i].capitalize())
-		currency_option.set_item_metadata(i, REWARD_CURRENCIES[i])
-		if reward != null and String(reward.currency) == REWARD_CURRENCIES[i]:
-			selected = i
-	currency_option.select(selected)
-	# Connect after selecting so the programmatic select() never triggers a save.
-	currency_option.item_selected.connect(_on_reward_currency_selected.bind(reward_index))
-	row.add_child(currency_option)
-
-	var amount_spin: SpinBox = SpinBox.new()
-	amount_spin.min_value = 0.0
-	amount_spin.max_value = 1000000.0
-	amount_spin.step = 1.0
-	amount_spin.custom_minimum_size = Vector2(96.0, 0.0)
-	amount_spin.value = float(reward.amount) if reward != null else 0.0
-	# Connect after setting value so the initial assignment never triggers a save.
-	amount_spin.value_changed.connect(_on_reward_amount_changed.bind(reward_index))
-	row.add_child(amount_spin)
-
-	var remove_button: Button = Button.new()
-	remove_button.text = "Remove"
-	remove_button.pressed.connect(_on_remove_reward_pressed.bind(reward_index))
-	row.add_child(remove_button)
-	return row
+		if reward != null and String(reward.currency) == currency:
+			total += reward.amount
+	return total
 
 
 func _on_reward_one_time_toggled(enabled: bool) -> void:
@@ -507,48 +487,39 @@ func _on_reward_one_time_toggled(enabled: bool) -> void:
 	mark_dirty()
 
 
-func _on_add_reward_pressed() -> void:
+func _on_reward_amount_changed(value: float, currency: String) -> void:
+	if _loading_ui:
+		return
 	var night: NightSpawnPlaylist = _get_selected_night()
 	if night == null:
 		return
-	night.special_rewards.append(NightReward.new())
-	mark_dirty()
-	_rebuild_reward_controls()
-
-
-func _on_reward_currency_selected(index: int, reward_index: int) -> void:
-	if _loading_ui:
-		return
-	var night: NightSpawnPlaylist = _get_selected_night()
-	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
-		return
-	var reward: NightReward = night.special_rewards[reward_index]
-	if reward == null:
-		return
-	reward.currency = REWARD_CURRENCIES[clampi(index, 0, REWARD_CURRENCIES.size() - 1)]
+	_set_reward_amount(night, currency, maxi(0, int(value)))
 	mark_dirty()
 
 
-func _on_reward_amount_changed(value: float, reward_index: int) -> void:
-	if _loading_ui:
+# Stores a single reward entry per currency: updates the existing one, creates it
+# when needed, or drops it entirely when the amount is zero. Also collapses any
+# legacy duplicate entries for the same currency into that single entry.
+func _set_reward_amount(night: NightSpawnPlaylist, currency: String, amount: int) -> void:
+	var existing: NightReward = null
+	var index: int = night.special_rewards.size() - 1
+	while index >= 0:
+		var reward: NightReward = night.special_rewards[index]
+		if reward != null and String(reward.currency) == currency:
+			if existing == null:
+				existing = reward
+			else:
+				night.special_rewards.remove_at(index)
+		index -= 1
+	if amount <= 0:
+		if existing != null:
+			night.special_rewards.erase(existing)
 		return
-	var night: NightSpawnPlaylist = _get_selected_night()
-	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
-		return
-	var reward: NightReward = night.special_rewards[reward_index]
-	if reward == null:
-		return
-	reward.amount = maxi(0, int(value))
-	mark_dirty()
-
-
-func _on_remove_reward_pressed(reward_index: int) -> void:
-	var night: NightSpawnPlaylist = _get_selected_night()
-	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
-		return
-	night.special_rewards.remove_at(reward_index)
-	mark_dirty()
-	_rebuild_reward_controls()
+	if existing == null:
+		existing = NightReward.new()
+		existing.currency = currency
+		night.special_rewards.append(existing)
+	existing.amount = amount
 
 
 func _refresh_levels() -> void:

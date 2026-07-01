@@ -1236,17 +1236,17 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 0
-merchant_available_items = Array[StringName]([&"spray", &"beam", &"sword", &"bomb"])
+merchant_available_items = Array[StringName]([&"spray", &"beam"])
 merchant_prices = {
-&"beam": 10,
+&"beam": 100,
 &"bomb": 10,
 &"seed": 2,
 &"spray": 10,
 &"sword": 10
 }
-shop_available_items = Array[StringName]([&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"])
+shop_available_items = Array[StringName]([&"rose", &"turret1", &"wall", &"spray", &"beam"])
 shop_prices = {
-&"beam": 10,
+&"beam": 100,
 &"bomb": 10,
 &"rose": 1,
 &"seed": 2,
