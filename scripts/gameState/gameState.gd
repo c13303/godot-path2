@@ -20,6 +20,15 @@ var is_seed_merchant_phase: bool = false
 ## tutorial prompt once the player walks away from the (now hidden) merchant shop.
 var seed_merchant_purchase_made: bool = false
 
+## Night special-reward claim tracking. Keyed by playlist night index.
+## `_claimed_one_time_night_rewards` holds indices whose one-time-only reward has
+## been permanently collected (never offered again this run). `_special_reward_claim_day`
+## is the nDays value the current reward was collected on, so a repeatable reward stays
+## hidden for the rest of that day but returns after the playlist loops. Both persist in
+## the save file (see progression.gd) and reset on any fresh start.
+var _claimed_one_time_night_rewards: Dictionary = {}
+var _special_reward_claim_day: int = -1
+
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
 const SKIP_STARTUP_AUTOSAVE_META: StringName = &"skip_startup_autosave"
@@ -132,6 +141,49 @@ func consume_startup_save_load_path(default_save_path: String) -> String:
 
 func skip_startup_autosave_once() -> void:
 	set_meta(SKIP_STARTUP_AUTOSAVE_META, true)
+	# Every fresh start (reset, level select, game-over restart) routes through here,
+	# so this is the single place that clears carried-over night-reward claims.
+	reset_special_reward_claims()
+
+
+## True when the current night's special reward can still be collected: a one-time
+## reward not yet claimed this run, and not already collected earlier today.
+func is_special_reward_available(night_index: int, day_number: int, one_time: bool) -> bool:
+	if one_time and _claimed_one_time_night_rewards.has(night_index):
+		return false
+	if _special_reward_claim_day == day_number:
+		return false
+	return true
+
+
+## Record that the current night's special reward was collected on `day_number`.
+func record_special_reward_claim(night_index: int, day_number: int, one_time: bool) -> void:
+	_special_reward_claim_day = day_number
+	if one_time:
+		_claimed_one_time_night_rewards[night_index] = true
+
+
+func reset_special_reward_claims() -> void:
+	_claimed_one_time_night_rewards.clear()
+	_special_reward_claim_day = -1
+
+
+## Serialize claim state for the save file.
+func get_special_reward_claim_save_data() -> Dictionary:
+	var claimed: Array[int] = []
+	for raw_index: Variant in _claimed_one_time_night_rewards.keys():
+		claimed.append(int(raw_index))
+	return {"claimed_one_time": claimed, "claim_day": _special_reward_claim_day}
+
+
+## Restore claim state from a save file (missing/invalid data resets to empty).
+func apply_special_reward_claim_save_data(data: Dictionary) -> void:
+	reset_special_reward_claims()
+	var raw_claimed: Variant = data.get("claimed_one_time", [])
+	if raw_claimed is Array:
+		for raw_index: Variant in raw_claimed as Array:
+			_claimed_one_time_night_rewards[int(raw_index)] = true
+	_special_reward_claim_day = int(data.get("claim_day", -1))
 
 
 func consume_skip_startup_autosave() -> bool:

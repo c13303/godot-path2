@@ -213,6 +213,29 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         profile.smash_class = ffcore::SMASH_CLASS_MONSTER;
     else if (node->is_in_group(StringName("main_chars")))
         profile.smash_class = ffcore::SMASH_CLASS_MAIN_CHAR;
+
+    // Per-agent stat overrides pushed from the game side (see MonsterData / the
+    // "monster bible"). Absent metas leave the profile defaults untouched, so
+    // non-monster agents are unaffected.
+    if (node->has_meta(StringName("monster_speed_scale")))
+    {
+        double scale = (double)node->get_meta(StringName("monster_speed_scale"));
+        if (std::isfinite(scale) && scale > 0.0 && scale != 1.0)
+            profile.max_speed = max_speed * scale;
+    }
+    if (node->has_meta(StringName("monster_crowd_resist")))
+    {
+        double resist = (double)node->get_meta(StringName("monster_crowd_resist"));
+        if (std::isfinite(resist) && resist > 0.0)
+            profile.crowd_resist_strength = resist;
+    }
+    if (node->has_meta(StringName("monster_smash_resist")))
+    {
+        double resist = (double)node->get_meta(StringName("monster_smash_resist"));
+        if (std::isfinite(resist) && resist > 0.0)
+            profile.smash_resist = resist;
+    }
+
     steering->set_agent_profile(nav_id, profile);
     core_mgr->add_agent_to_group(nav_id, group_id);
 

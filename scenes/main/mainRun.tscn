@@ -43,6 +43,7 @@
 [ext_resource type="Script" path="res://scripts/ui/game_over_modal.gd" id="38_game_over"]
 [ext_resource type="Script" path="res://scripts/visual_fx/smoke_trail.gd" id="39_smktrl"]
 [ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
+[ext_resource type="Script" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -730,6 +731,11 @@ script = ExtResource("31_desire")
 z_index = -60
 tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
+
+[node name="GrownupRoseDance" type="Node2D" parent="Map/MonTilemap/plantz"]
+script = ExtResource("41_rosedance")
+plant_manager_path = NodePath("../../../PlantManager")
+plantz_path = NodePath("..")
 
 [node name="traversable_buildings" type="TileMapLayer" parent="Map/MonTilemap" unique_id=784302091]
 z_index = -48

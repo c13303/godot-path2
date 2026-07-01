@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="MonsterData" format=3 uid="uid://cmb0nsterbasic0"]
+
+[ext_resource type="Script" path="res://scripts/entities/monster_data.gd" id="1_monster_data"]
+[ext_resource type="Texture2D" uid="uid://ch6eoqidb06ck" path="res://assets/sprites/legval/monster.png" id="2_texture"]
+
+[resource]
+script = ExtResource("1_monster_data")
+id = &"basic"
+display_name = "Monster"
+texture = ExtResource("2_texture")
+sprite_hframes = 4
+sprite_scale = Vector2(0.75, 0.75)
+sprite_offset = Vector2(0, -16)
+max_health = 100
+speed_scale = 1.0
+crowd_resist_scale = 1.0
+smash_resist_scale = 1.0

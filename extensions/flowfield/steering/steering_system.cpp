@@ -108,6 +108,7 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
 
     sanitized.crowd_push_strength = std::isfinite(sanitized.crowd_push_strength) ? std::max(0.0, sanitized.crowd_push_strength) : 1.0;
     sanitized.crowd_resist_strength = std::isfinite(sanitized.crowd_resist_strength) ? std::max(0.001, sanitized.crowd_resist_strength) : 1.0;
+    sanitized.smash_resist = (std::isfinite(sanitized.smash_resist) && sanitized.smash_resist > 0.0) ? sanitized.smash_resist : 1.0;
     sanitized.world_radius = std::isfinite(sanitized.world_radius) && sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
     sanitized.foot_offset_y = std::isfinite(sanitized.foot_offset_y) ? sanitized.foot_offset_y : cfg.agent_offset_y;
     if (!std::isfinite(sanitized.foot_offset_y))
@@ -1109,7 +1110,10 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
         return;
     }
     Vec2 dir = safe_normalize(direction.is_zero() ? hashed_unit_dir(agent.id) : direction);
-    Vec2 smash = dir * std::max(0.0, force);
+    // Per-agent inertia: heavier monsters divide the incoming impulse so they are
+    // launched less far (smash_resist = 2.0 => half the knockback).
+    double resist = std::max(0.001, agent.profile.smash_resist);
+    Vec2 smash = dir * (std::max(0.0, force) / resist);
 
     const auto &cfg = globalconfig();
     double len = safe_len(smash);

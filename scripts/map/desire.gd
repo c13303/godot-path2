@@ -1,7 +1,14 @@
 extends Sprite2D
 
 const MARK_TEXTURE: Texture2D = preload("res://assets/sprites/legval/desire.png")
+# Monsters can number in the hundreds, so they are stamped from a random sample
+# each update to keep the per-update cost bounded.
 const MONSTER_GROUP: StringName = &"monsters"
+# Clients and merchants are few and short-lived. They get stamped in full every
+# update so their trail is as reliable as a monster's — otherwise the bounded
+# random monster sample would almost never pick them. The player is deliberately
+# excluded (it lives in its own "player" group and never marks the ground).
+const PRIORITY_CREATURE_GROUPS: Array[StringName] = [&"clients", &"merchants"]
 
 @export var update_freq_min: float = 0.75
 @export var update_freq_max: float = 1.25
@@ -78,19 +85,23 @@ func _rebuild_canvas() -> void:
 
 
 func _stamp_random_agents() -> void:
-	var agents: Array[Node] = get_tree().get_nodes_in_group(MONSTER_GROUP)
-	if agents.is_empty():
-		return
-
-	var count: int = mini(agents_per_update, agents.size())
 	var stamped: bool = false
-	for i: int in range(count):
-		var agent_index: int = randi_range(0, agents.size() - 1)
-		var agent: Node2D = agents[agent_index] as Node2D
-		if not is_instance_valid(agent):
-			continue
-		if _stamp_agent(agent):
-			stamped = true
+
+	# Clients and merchants: stamp every one so they always leave a trail.
+	for group_name: StringName in PRIORITY_CREATURE_GROUPS:
+		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_agent as Node2D
+			if is_instance_valid(agent) and _stamp_agent(agent):
+				stamped = true
+
+	# Monsters: bounded random sample to cap per-update cost with large hordes.
+	var monsters: Array[Node] = get_tree().get_nodes_in_group(MONSTER_GROUP)
+	if not monsters.is_empty():
+		var count: int = mini(agents_per_update, monsters.size())
+		for i: int in range(count):
+			var agent: Node2D = monsters[randi_range(0, monsters.size() - 1)] as Node2D
+			if is_instance_valid(agent) and _stamp_agent(agent):
+				stamped = true
 
 	if stamped:
 		_canvas_texture.update(_canvas_image)

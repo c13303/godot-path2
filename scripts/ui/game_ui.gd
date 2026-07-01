@@ -8,6 +8,9 @@ const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png"
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const PURCHASE_FLIGHT_SIZE: Vector2 = Vector2(28.0, 28.0)
 const PURCHASE_FLIGHT_DURATION: float = 0.72
+# Cap on how many currency sprites fly for one night-reward payout; any overflow is
+# credited instantly so huge bonuses never spawn thousands of sprites.
+const REWARD_ANIM_CAP: int = 15
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
@@ -602,6 +605,102 @@ func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
 	if not try_purchase_merchant_item(item_id, count):
 		return false
 	return bool(_progression_node.call("update_seeds", count))
+
+
+## Describes the special reward the merchant should offer right now, or {} when the
+## row must stay hidden (no upcoming-night reward, or already collected). Returned dict:
+## { "rewards": [{ "currency": String, "amount": int }, ...], "night_index": int,
+##   "day": int, "one_time": bool }. Drives the shop's top "special reward" merchant row.
+func get_active_night_reward() -> Dictionary:
+	var scene: Node = get_tree().current_scene
+	if scene == null or _progression_node == null:
+		return {}
+	var loader: Node = scene.get_node_or_null("LevelLoader")
+	if loader == null or not loader.has_method("get_loaded_spawn_playlist"):
+		return {}
+	var playlist: LevelSpawnPlaylist = loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
+	if playlist == null:
+		return {}
+	var total_nights: int = playlist.get_night_count()
+	if total_nights <= 0:
+		return {}
+	var day: int = int(_progression_node.call("get_value", &"nDays"))
+	# The upcoming night uses the same day->night mapping the spawner does at nightfall.
+	var night_index: int = maxi(0, day - 1) % total_nights
+	var night: NightSpawnPlaylist = playlist.nights[night_index]
+	if night == null:
+		return {}
+	var rewards: Array[Dictionary] = []
+	for reward: NightReward in night.special_rewards:
+		if reward == null or reward.amount <= 0:
+			continue
+		rewards.append({"currency": String(reward.currency), "amount": int(reward.amount)})
+	if rewards.is_empty():
+		return {}
+	var one_time: bool = bool(night.special_reward_one_time)
+	if not GameState.is_special_reward_available(night_index, day, one_time):
+		return {}
+	return {"rewards": rewards, "night_index": night_index, "day": day, "one_time": one_time}
+
+
+## Collect the current night's special reward: records the claim (so the row hides) and
+## grants every currency with a fly-to-HUD animation. Returns false when nothing is
+## claimable. `start_global_position` is where the reward sprites launch from.
+func claim_active_night_reward(start_global_position: Vector2) -> bool:
+	var info: Dictionary = get_active_night_reward()
+	if info.is_empty():
+		return false
+	GameState.record_special_reward_claim(int(info["night_index"]), int(info["day"]), bool(info["one_time"]))
+	for raw_reward: Variant in info["rewards"] as Array:
+		var reward: Dictionary = raw_reward as Dictionary
+		_award_reward_currency(String(reward["currency"]), int(reward["amount"]), start_global_position)
+	return true
+
+
+func _award_reward_currency(currency: String, amount: int, start_global_position: Vector2) -> void:
+	if amount <= 0:
+		return
+	var icon: Node = _reward_icon_node(currency)
+	var animated: int = mini(amount, REWARD_ANIM_CAP) if icon != null else 0
+	# Overflow past the animation cap (and everything when the icon is missing) is
+	# credited straight away; each flying sprite credits one unit as it lands.
+	var immediate: int = amount - animated
+	if immediate > 0:
+		_credit_reward_currency(currency, immediate)
+	if animated <= 0:
+		return
+	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
+	for i: int in range(animated):
+		match currency:
+			"seed":
+				icon.call("animate_seed_harvest", world_position, i, Callable(), true)
+			"gem":
+				icon.call("animate_gem_harvest", world_position, i)
+			"money":
+				icon.call("animate_money_harvest", world_position, i)
+
+
+func _credit_reward_currency(currency: String, amount: int) -> void:
+	if _progression_node == null or amount <= 0:
+		return
+	match currency:
+		"seed":
+			_progression_node.call("update_seeds", amount)
+		"gem":
+			_progression_node.call("update_gems", amount)
+		"money":
+			_progression_node.call("update_money", amount)
+
+
+func _reward_icon_node(currency: String) -> Node:
+	match currency:
+		"seed":
+			return get_node_or_null("top right/seedIcon")
+		"gem":
+			return get_node_or_null("top right/gemIcon")
+		"money":
+			return get_node_or_null("top right/moneyIcon")
+	return null
 
 
 ## Public: how many more of item_id may still be placed given its per-world build

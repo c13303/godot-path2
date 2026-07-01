@@ -89,6 +89,15 @@ var _merchant_row_names: Dictionary = {}
 var _merchant_row_prices: Dictionary = {}
 var _merchant_row_currencies: Dictionary = {}
 var _merchant_slot_state: Dictionary = {}
+# The free "special reward" row pinned to the top of the merchant column.
+var _special_reward_row: HBoxContainer
+var _special_reward_button: Button
+var _special_reward_icon: TextureRect
+var _special_reward_name: Label
+var _special_reward_contents: HBoxContainer
+# Signature of the currently rendered reward contents, so they are only rebuilt when
+# the offered reward changes instead of every frame.
+var _special_reward_signature: String = ""
 
 
 func _ready() -> void:
@@ -190,9 +199,71 @@ func _build_merchant_ui() -> void:
 	items_list.add_theme_constant_override("separation", 6)
 	margin.add_child(items_list)
 
+	items_list.add_child(_build_special_reward_row())
 	for item_id: String in WEAPON_ITEM_IDS:
 		items_list.add_child(_build_merchant_slot_row(item_id))
 	column.visible = false
+
+
+## The free reward slot pinned above the merchant's purchasable items. Its icon shows
+## the first granted currency; the label group lists every "amount + currency icon".
+func _build_special_reward_row() -> HBoxContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.name = "SpecialRewardRow"
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	row.add_theme_constant_override("separation", 8)
+
+	var button: Button = Button.new()
+	button.name = "SpecialReward"
+	button.custom_minimum_size = SLOT_SIZE
+	button.tooltip_text = _special_reward_label()
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(_on_special_reward_pressed)
+
+	var icon: TextureRect = TextureRect.new()
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 8.0
+	icon.offset_top = 8.0
+	icon.offset_right = -8.0
+	icon.offset_bottom = -8.0
+	button.add_child(icon)
+	row.add_child(button)
+	_special_reward_button = button
+	_special_reward_icon = icon
+
+	var label_group: HBoxContainer = HBoxContainer.new()
+	label_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label_group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	label_group.add_theme_constant_override("separation", 8)
+
+	var name_label: Label = _make_row_label(18)
+	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	name_label.text = _special_reward_label()
+	label_group.add_child(name_label)
+	_special_reward_name = name_label
+
+	var contents: HBoxContainer = HBoxContainer.new()
+	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	contents.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	contents.add_theme_constant_override("separation", 6)
+	label_group.add_child(contents)
+	_special_reward_contents = contents
+
+	row.add_child(label_group)
+	_special_reward_row = row
+	row.visible = false
+	return row
+
+
+func _special_reward_label() -> String:
+	var key: String = "merchant.special_reward"
+	var translated: String = Translations.t(key)
+	return "Special reward" if translated == key else translated
 
 
 func _build_merchant_slot_row(item_id: String) -> HBoxContainer:
@@ -773,6 +844,7 @@ func _is_seed_merchant_shop_active() -> bool:
 
 
 func _refresh_merchant_slots() -> void:
+	_refresh_special_reward_row()
 	for item_id: String in WEAPON_ITEM_IDS:
 		var row: Control = _merchant_slot_rows.get(item_id) as Control
 		if row == null:
@@ -806,6 +878,77 @@ func _refresh_merchant_slots() -> void:
 		var currency_texture: AtlasTexture = _currency_texture(item_id)
 		currency.texture = currency_texture
 		currency.visible = currency_texture != null
+
+
+## Shows/hides and fills the top special-reward row from game_ui's current offer.
+func _refresh_special_reward_row() -> void:
+	if _special_reward_row == null:
+		return
+	var info: Dictionary = {}
+	if game_ui != null and game_ui.has_method("get_active_night_reward"):
+		info = game_ui.call("get_active_night_reward")
+	var show: bool = not info.is_empty()
+	_special_reward_row.visible = show
+	if not show:
+		_special_reward_signature = ""
+		return
+	var rewards: Array = info.get("rewards", []) as Array
+	var signature: String = ""
+	for raw_reward: Variant in rewards:
+		var reward: Dictionary = raw_reward as Dictionary
+		signature += "%s:%d|" % [str(reward.get("currency", "")), int(reward.get("amount", 0))]
+	# Only rebuild the label/icons when the offered reward actually changes.
+	if signature == _special_reward_signature:
+		return
+	_special_reward_signature = signature
+	_apply_slot_style(_special_reward_button, false, false)
+	_special_reward_name.text = _special_reward_label()
+	_special_reward_name.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	if not rewards.is_empty():
+		var first: Dictionary = rewards[0] as Dictionary
+		_special_reward_icon.texture = _currency_icon_for(str(first.get("currency", "")))
+		_special_reward_icon.modulate = Color.WHITE
+	for child: Node in _special_reward_contents.get_children():
+		child.queue_free()
+	for raw_reward: Variant in rewards:
+		var reward: Dictionary = raw_reward as Dictionary
+		var amount_label: Label = _make_row_label(18)
+		amount_label.add_theme_color_override("font_color", Color.WHITE)
+		amount_label.text = "x%d" % int(reward.get("amount", 0))
+		_special_reward_contents.add_child(amount_label)
+		var currency_icon: TextureRect = TextureRect.new()
+		currency_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		currency_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		currency_icon.custom_minimum_size = Vector2(20.0, 20.0)
+		currency_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		currency_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		currency_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		currency_icon.texture = _currency_icon_for(str(reward.get("currency", "")))
+		_special_reward_contents.add_child(currency_icon)
+
+
+## Maps a currency id ("seed"/"gem"/"money") straight to its HUD icon texture. Unlike
+## _currency_texture (which takes an item id), this takes the currency itself.
+func _currency_icon_for(currency: String) -> AtlasTexture:
+	match currency:
+		"gem":
+			return _gem_icon
+		"seed":
+			return _seed_icon
+		"money":
+			return _money_icon
+	return null
+
+
+func _on_special_reward_pressed() -> void:
+	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
+		return
+	if game_ui == null or not game_ui.has_method("claim_active_night_reward"):
+		return
+	var start_position: Vector2 = _special_reward_button.get_global_rect().get_center() if _special_reward_button != null else Vector2.ZERO
+	if bool(game_ui.call("claim_active_night_reward", start_position)):
+		Sfx.play_sound(&"buy")
+		_refresh_special_reward_row()
 
 
 func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) -> void:

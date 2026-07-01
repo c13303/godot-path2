@@ -14,6 +14,7 @@ const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const REWARD_CURRENCIES: Array[String] = ["seed", "money", "gem"]
 
 var editor_plugin: EditorPlugin
 
@@ -47,11 +48,18 @@ var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _merchant_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
+var _reward_box: VBoxContainer
+var _reward_one_time_check: CheckBox
+var _reward_rows_box: VBoxContainer
 var _validation_label: RichTextLabel
 var _rename_row: HBoxContainer
 var _missing_id_option: OptionButton
 var _target_id_option: OptionButton
 var _tracks_box: VBoxContainer
+var _starting_section: FoldableContainer
+var _shop_section: FoldableContainer
+var _client_frequency_section: FoldableContainer
+var _reward_section: FoldableContainer
 
 
 func _ready() -> void:
@@ -121,11 +129,8 @@ func _build_ui() -> void:
 	_loading_ui = true
 	size_flags_vertical = SIZE_EXPAND_FILL
 
-	var title: Label = Label.new()
-	title.text = "Rose Level Editor"
-	title.add_theme_font_size_override("font_size", 18)
-	add_child(title)
-
+	# Persistent header shared by both tabs: pick a level, run level actions and
+	# see the save status regardless of which tab is open.
 	var level_row: HBoxContainer = HBoxContainer.new()
 	add_child(level_row)
 
@@ -153,46 +158,22 @@ func _build_ui() -> void:
 	action_row.add_child(open_button)
 
 	_dirty_label = Label.new()
-	add_child(_dirty_label)
+	action_row.add_child(_dirty_label)
 
 	_playlist_label = Label.new()
 	_playlist_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_playlist_label)
 
-	_starting_controls = VBoxContainer.new()
-	add_child(_starting_controls)
-	_build_starting_controls()
+	var tabs: TabContainer = TabContainer.new()
+	tabs.size_flags_vertical = SIZE_EXPAND_FILL
+	tabs.size_flags_horizontal = SIZE_EXPAND_FILL
+	add_child(tabs)
 
-	_shop_controls = VBoxContainer.new()
-	add_child(_shop_controls)
-	_build_shop_controls()
+	_build_level_tab(tabs)
+	_build_nights_tab(tabs)
 
-	_client_frequency_box = VBoxContainer.new()
-	add_child(_client_frequency_box)
-
-	var night_row: HBoxContainer = HBoxContainer.new()
-	add_child(night_row)
-
-	_night_option = OptionButton.new()
-	_night_option.size_flags_horizontal = SIZE_EXPAND_FILL
-	_night_option.item_selected.connect(_on_night_selected)
-	night_row.add_child(_night_option)
-
-	var add_night_button: Button = Button.new()
-	add_night_button.text = "Add Night"
-	add_night_button.pressed.connect(_on_add_night_pressed)
-	night_row.add_child(add_night_button)
-
-	var duplicate_night_button: Button = Button.new()
-	duplicate_night_button.text = "Duplicate Night"
-	duplicate_night_button.pressed.connect(_on_duplicate_night_pressed)
-	night_row.add_child(duplicate_night_button)
-
-	var delete_night_button: Button = Button.new()
-	delete_night_button.text = "Delete Night"
-	delete_night_button.pressed.connect(_on_delete_night_pressed)
-	night_row.add_child(delete_night_button)
-
+	# Validation and the missing-id rename tool sit under the tabs so save errors
+	# and warnings stay visible no matter which tab is selected.
 	_validation_label = RichTextLabel.new()
 	_validation_label.custom_minimum_size = Vector2(0.0, 95.0)
 	_validation_label.fit_content = false
@@ -224,25 +205,93 @@ func _build_ui() -> void:
 	_rename_row.add_child(rename_button)
 	_rename_row.visible = false
 
+	_loading_ui = false
+	_refresh_status()
+
+
+# Rose Level tab: level-wide configuration, grouped into collapsible sections.
+func _build_level_tab(tabs: TabContainer) -> void:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.name = "Rose Level"
+	scroll.size_flags_vertical = SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
+	tabs.add_child(scroll)
+
+	var body: VBoxContainer = VBoxContainer.new()
+	body.size_flags_horizontal = SIZE_EXPAND_FILL
+	scroll.add_child(body)
+
+	_starting_controls = VBoxContainer.new()
+	_build_starting_controls()
+	_starting_section = _make_section("Starting Level", _starting_controls)
+	body.add_child(_starting_section)
+
+	_shop_controls = VBoxContainer.new()
+	_build_shop_controls()
+	_shop_section = _make_section("Shop", _shop_controls)
+	body.add_child(_shop_section)
+
+	_client_frequency_box = VBoxContainer.new()
+	_client_frequency_section = _make_section("Client Spawners", _client_frequency_box)
+	body.add_child(_client_frequency_section)
+
+
+# Nights tab: per-night options, special reward and the wave tracks.
+func _build_nights_tab(tabs: TabContainer) -> void:
+	var body: VBoxContainer = VBoxContainer.new()
+	body.name = "Nights"
+	body.size_flags_vertical = SIZE_EXPAND_FILL
+	body.size_flags_horizontal = SIZE_EXPAND_FILL
+	tabs.add_child(body)
+
+	var night_row: HBoxContainer = HBoxContainer.new()
+	body.add_child(night_row)
+
+	_night_option = OptionButton.new()
+	_night_option.size_flags_horizontal = SIZE_EXPAND_FILL
+	_night_option.item_selected.connect(_on_night_selected)
+	night_row.add_child(_night_option)
+
+	var add_night_button: Button = Button.new()
+	add_night_button.text = "Add Night"
+	add_night_button.pressed.connect(_on_add_night_pressed)
+	night_row.add_child(add_night_button)
+
+	var duplicate_night_button: Button = Button.new()
+	duplicate_night_button.text = "Duplicate Night"
+	duplicate_night_button.pressed.connect(_on_duplicate_night_pressed)
+	night_row.add_child(duplicate_night_button)
+
+	var delete_night_button: Button = Button.new()
+	delete_night_button.text = "Delete Night"
+	delete_night_button.pressed.connect(_on_delete_night_pressed)
+	night_row.add_child(delete_night_button)
+
+	_reward_box = VBoxContainer.new()
+	_build_reward_controls()
+	_reward_section = _make_section("Special Reward (this night)", _reward_box)
+	body.add_child(_reward_section)
+
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
-	add_child(scroll)
+	body.add_child(scroll)
 
 	_tracks_box = VBoxContainer.new()
 	_tracks_box.size_flags_horizontal = SIZE_EXPAND_FILL
 	scroll.add_child(_tracks_box)
 
-	_loading_ui = false
-	_refresh_status()
+
+# Wraps a content control in a collapsible titled section (accordion panel).
+func _make_section(title_text: String, content: Control) -> FoldableContainer:
+	var section: FoldableContainer = FoldableContainer.new()
+	section.title = title_text
+	section.size_flags_horizontal = SIZE_EXPAND_FILL
+	section.add_child(content)
+	return section
 
 
 func _build_starting_controls() -> void:
-	var heading: Label = Label.new()
-	heading.text = "Starting Level"
-	heading.add_theme_font_size_override("font_size", 15)
-	_starting_controls.add_child(heading)
-
 	var currency_row: HBoxContainer = HBoxContainer.new()
 	_starting_controls.add_child(currency_row)
 
@@ -377,6 +426,131 @@ func _build_shop_item_controls(
 		row.add_child(currency_label)
 
 
+func _build_reward_controls() -> void:
+	var one_time_row: HBoxContainer = HBoxContainer.new()
+	_reward_box.add_child(one_time_row)
+	_reward_one_time_check = CheckBox.new()
+	_reward_one_time_check.text = "One-time only (skip when the night loops)"
+	_reward_one_time_check.toggled.connect(_on_reward_one_time_toggled)
+	one_time_row.add_child(_reward_one_time_check)
+
+	_reward_rows_box = VBoxContainer.new()
+	_reward_box.add_child(_reward_rows_box)
+
+	var add_button: Button = Button.new()
+	add_button.text = "Add Reward"
+	add_button.pressed.connect(_on_add_reward_pressed)
+	_reward_box.add_child(add_button)
+
+
+func _rebuild_reward_controls() -> void:
+	if _reward_rows_box == null:
+		return
+	for child: Node in _reward_rows_box.get_children():
+		child.queue_free()
+	var night: NightSpawnPlaylist = _get_selected_night()
+	var has_night: bool = night != null
+	_reward_section.visible = has_night
+	if not has_night:
+		return
+	_reward_one_time_check.set_pressed_no_signal(night.special_reward_one_time)
+	var reward_index: int = 0
+	for reward: NightReward in night.special_rewards:
+		_reward_rows_box.add_child(_build_reward_row(reward, reward_index))
+		reward_index += 1
+	if night.special_rewards.is_empty():
+		var empty: Label = Label.new()
+		empty.text = "No reward. The merchant hides the special reward slot this night."
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_reward_rows_box.add_child(empty)
+
+
+func _build_reward_row(reward: NightReward, reward_index: int) -> HBoxContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+
+	var currency_option: OptionButton = OptionButton.new()
+	var selected: int = 0
+	for i: int in range(REWARD_CURRENCIES.size()):
+		currency_option.add_item(REWARD_CURRENCIES[i].capitalize())
+		currency_option.set_item_metadata(i, REWARD_CURRENCIES[i])
+		if reward != null and String(reward.currency) == REWARD_CURRENCIES[i]:
+			selected = i
+	currency_option.select(selected)
+	# Connect after selecting so the programmatic select() never triggers a save.
+	currency_option.item_selected.connect(_on_reward_currency_selected.bind(reward_index))
+	row.add_child(currency_option)
+
+	var amount_spin: SpinBox = SpinBox.new()
+	amount_spin.min_value = 0.0
+	amount_spin.max_value = 1000000.0
+	amount_spin.step = 1.0
+	amount_spin.custom_minimum_size = Vector2(96.0, 0.0)
+	amount_spin.value = float(reward.amount) if reward != null else 0.0
+	# Connect after setting value so the initial assignment never triggers a save.
+	amount_spin.value_changed.connect(_on_reward_amount_changed.bind(reward_index))
+	row.add_child(amount_spin)
+
+	var remove_button: Button = Button.new()
+	remove_button.text = "Remove"
+	remove_button.pressed.connect(_on_remove_reward_pressed.bind(reward_index))
+	row.add_child(remove_button)
+	return row
+
+
+func _on_reward_one_time_toggled(enabled: bool) -> void:
+	if _loading_ui:
+		return
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null:
+		return
+	night.special_reward_one_time = enabled
+	mark_dirty()
+
+
+func _on_add_reward_pressed() -> void:
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null:
+		return
+	night.special_rewards.append(NightReward.new())
+	mark_dirty()
+	_rebuild_reward_controls()
+
+
+func _on_reward_currency_selected(index: int, reward_index: int) -> void:
+	if _loading_ui:
+		return
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
+		return
+	var reward: NightReward = night.special_rewards[reward_index]
+	if reward == null:
+		return
+	reward.currency = REWARD_CURRENCIES[clampi(index, 0, REWARD_CURRENCIES.size() - 1)]
+	mark_dirty()
+
+
+func _on_reward_amount_changed(value: float, reward_index: int) -> void:
+	if _loading_ui:
+		return
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
+		return
+	var reward: NightReward = night.special_rewards[reward_index]
+	if reward == null:
+		return
+	reward.amount = maxi(0, int(value))
+	mark_dirty()
+
+
+func _on_remove_reward_pressed(reward_index: int) -> void:
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null or reward_index < 0 or reward_index >= night.special_rewards.size():
+		return
+	night.special_rewards.remove_at(reward_index)
+	mark_dirty()
+	_rebuild_reward_controls()
+
+
 func _refresh_levels() -> void:
 	var previous_path: String = _current_level_path
 	_level_paths.clear()
@@ -477,6 +651,7 @@ func _refresh_all() -> void:
 	_refresh_shop_controls()
 	_refresh_client_frequency_controls()
 	_refresh_nights()
+	_rebuild_reward_controls()
 	_rebuild_tracks()
 	_loading_ui = false
 	_refresh_status()
@@ -494,7 +669,7 @@ func _refresh_status() -> void:
 func _refresh_starting_controls() -> void:
 	var config: LevelSpawnConfig = _get_level_config(_level_root)
 	var has_level: bool = _current_level_path != ""
-	_starting_controls.visible = has_level
+	_starting_section.visible = has_level
 	_starting_seeds.editable = has_level
 	_starting_gems.editable = has_level
 	_starting_money.editable = has_level
@@ -521,7 +696,7 @@ func _refresh_starting_controls() -> void:
 func _refresh_shop_controls() -> void:
 	var config: LevelSpawnConfig = _get_level_config(_level_root)
 	var has_level: bool = _current_level_path != ""
-	_shop_controls.visible = has_level
+	_shop_section.visible = has_level
 	_rose_shop_counter_limit.editable = has_level
 	var tool_available_items: Array[StringName] = _default_tool_shop_available_items()
 	var tool_prices: Dictionary = _default_tool_shop_prices()
@@ -576,13 +751,9 @@ func _refresh_client_frequency_controls() -> void:
 	for child: Node in _client_frequency_box.get_children():
 		child.queue_free()
 	var has_level: bool = _current_level_path != ""
-	_client_frequency_box.visible = has_level and not _client_spawner_ids.is_empty()
-	if not _client_frequency_box.visible:
+	_client_frequency_section.visible = has_level and not _client_spawner_ids.is_empty()
+	if not _client_frequency_section.visible:
 		return
-	var heading: Label = Label.new()
-	heading.text = "Client Spawners"
-	heading.add_theme_font_size_override("font_size", 15)
-	_client_frequency_box.add_child(heading)
 	for spawner_id: StringName in _client_spawner_ids:
 		var row: HBoxContainer = HBoxContainer.new()
 		_client_frequency_box.add_child(row)
@@ -841,6 +1012,7 @@ func _on_level_selected(index: int) -> void:
 
 func _on_night_selected(index: int) -> void:
 	_selected_night_index = index
+	_rebuild_reward_controls()
 	_rebuild_tracks()
 
 
@@ -1517,4 +1689,9 @@ func _default_playlist_path_for_level(level_path: String) -> String:
 
 
 func _monster_types() -> Array[StringName]:
-	return [&"basic"]
+	# Enumerated from the monster bible so new .tres definitions appear in the wave
+	# dropdown automatically.
+	var ids: Array[StringName] = MonsterCatalog.get_ids()
+	if ids.is_empty():
+		return [&"basic"]
+	return ids

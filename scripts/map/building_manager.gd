@@ -1195,6 +1195,7 @@ func _process(delta: float) -> void:
 	t = Time.get_ticks_usec()
 	_process_eating_agents(delta)
 	_process_client_paying_agents(delta)
+	_process_creature_rose_trampling()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
@@ -1483,16 +1484,44 @@ func _validate_playlist_after_spawner_scan() -> void:
 
 
 func _valid_monster_types() -> Dictionary:
-	return {
-		&"basic": true,
-	}
+	var types: Dictionary = {}
+	for monster_id: StringName in MonsterCatalog.get_ids():
+		types[monster_id] = true
+	return types
 
 
 func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
-	if monster_type == &"basic":
+	# Every monster type shares character.tscn; MonsterData (applied at spawn via
+	# _apply_monster_data) drives the per-type sprite and stats.
+	if MonsterCatalog.has_monster(monster_type):
 		return AGENT_SCENE
 	_log_spawn_failure("unknown monster_type '%s'" % String(monster_type))
 	return null
+
+
+# Apply a MonsterData bible entry to a freshly instantiated monster agent: swaps the
+# sprite, sets health, and stashes the per-agent stat overrides as metadata that the
+# native agent manager reads in spawn_agent (speed/crowd/smash scales). The
+# "monster_type" meta is also kept so the corpse can reuse the same sprite.
+func _apply_monster_data(agent: Node2D, monster_type: StringName) -> void:
+	agent.set_meta("monster_type", monster_type)
+	var data: MonsterData = MonsterCatalog.get_monster(monster_type)
+	if data == null:
+		return
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		if data.texture != null:
+			sprite.texture = data.texture
+		sprite.hframes = data.sprite_hframes
+		sprite.scale = data.sprite_scale
+		sprite.position = data.sprite_offset
+	# _ready() already ran (add_child), so override both the exported cap and the
+	# live pool.
+	agent.set("max_health", data.max_health)
+	agent.set("health", data.max_health)
+	agent.set_meta("monster_speed_scale", data.speed_scale)
+	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
+	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -2123,6 +2152,27 @@ func _process_morning_harvest_walkover() -> void:
 	_check_morning_harvest_finished()
 
 
+# Clients and merchants crush any rose they walk over, leaving debris behind.
+# Monsters reach roses through the garden targeting/eating system; this covers the
+# shop-bound creatures that cross the garden without ever targeting a plant. The
+# player is exempt (it harvests roses instead). consume_plant() swaps the rose tile
+# for the debris tile and fires plant_removed, so any monster targeting that cell
+# retargets synchronously — the same path a normal eat takes.
+func _process_creature_rose_trampling() -> void:
+	if plant_manager == null or floorz == null:
+		return
+	if not plant_manager.has_method("is_rose_cell") or not plant_manager.has_method("consume_plant"):
+		return
+	for group_name: StringName in [&"clients", &"merchants"]:
+		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_agent as Node2D
+			if not is_instance_valid(agent):
+				continue
+			var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+			if bool(plant_manager.call("is_rose_cell", cell)):
+				plant_manager.call("consume_plant", cell)
+
+
 func _player_grownup_rose_cell() -> Vector2i:
 	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
 	if player == null or floorz == null:
@@ -2356,6 +2406,13 @@ func _process_seed_merchant_phase() -> void:
 		return
 	if not is_instance_valid(_seed_merchant_agent):
 		_end_seed_merchant_phase()
+		return
+	# The client sale can finish before the player has watered every rose. When that
+	# happens _process_client_sale does NOT start the night and the merchant lingers,
+	# leaving the day stuck on "le marchand est là". Re-check here so that finishing the
+	# watering afterwards still ends the day (the merchant walks out via night prep).
+	if not GameState.is_night and can_start_night_after_clients():
+		GameState.start_night()
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near_seed_merchant():
 		GameState.set_seed_merchant_phase(false)
@@ -2884,6 +2941,10 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			sprite.texture = CLIENT_TEXTURE
 	else:
 		agent.add_to_group("monsters")
+		# Apply the monster bible entry (sprite + health + speed/inertia metas)
+		# before the agent is registered with the native manager, which reads the
+		# metas in spawn_agent.
+		_apply_monster_data(agent, monster_type)
 	agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
 	if _over_garden_threshold_us(inst_us):
@@ -4068,6 +4129,15 @@ func _spawn_monster_corpse(agent: Node2D) -> void:
 	corpse.global_position = agent.global_position
 	var corpse_sprite: Sprite2D = corpse.get_node_or_null("Sprite2D") as Sprite2D
 	if corpse_sprite:
+		# Match the corpse to the monster's bible sprite (keep the corpse frame set by
+		# the scene). Non-bible/legacy monsters keep the default monster.png corpse.
+		var data: MonsterData = MonsterCatalog.get_monster(agent.get_meta("monster_type", &"basic")) if agent.has_meta("monster_type") else null
+		if data != null:
+			if data.texture != null:
+				corpse_sprite.texture = data.texture
+			corpse_sprite.hframes = data.sprite_hframes
+			corpse_sprite.scale = data.sprite_scale
+			corpse_sprite.position = data.sprite_offset
 		corpse_sprite.rotation = randf() * TAU
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:

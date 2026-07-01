@@ -41,6 +41,9 @@ namespace ffcore
     {
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
+        // Resistance to smash/knockback impulses (see apply_smash_impulse). 1.0 =
+        // normal; 2.0 halves the received impulse velocity (twice the inertia).
+        double smash_resist = 1.0;
         double world_radius = 0.0;
         double max_speed = std::numeric_limits<double>::quiet_NaN(); // NaN => inherit global agent_max_speed
         double foot_offset_y = std::numeric_limits<double>::quiet_NaN();

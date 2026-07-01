@@ -407,6 +407,7 @@ func save_progression(save_path: String = SAVE_PATH) -> void:
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
+		"night_rewards": GameState.get_special_reward_claim_save_data(),
 		"layers": layer_data,
 		"counter_stock": _get_counter_stock(scene),
 		"player": {
@@ -549,6 +550,12 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	var progression_data: Dictionary = data.get("progression", {}) as Dictionary
 	progression.from_dict(progression_data)
 	_log("Progression restored: %s" % str(progression.to_dict()))
+
+	var raw_night_rewards: Variant = data.get("night_rewards", {})
+	var night_reward_data: Dictionary = {}
+	if raw_night_rewards is Dictionary:
+		night_reward_data = raw_night_rewards as Dictionary
+	GameState.apply_special_reward_claim_save_data(night_reward_data)
 
 	var saved_layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:

@@ -5,7 +5,7 @@
 	"tutorial.plant_roses": "Plantez des roses",
 	"tutorial.water_roses": "Arrosez vos roses",
 	"tutorial.client_time": "Laissez les clients acheter vos roses",
-	"tutorial.seed_merchant": "le marchand des graines et d'armes est là",
+	"tutorial.seed_merchant": "Le Marchant est là",
 	"tutorial.close_transaction": "terminez la transaction en cliquant",
 	"tutorial.place_shop": "Placez les comptoirs du magasin",
 	"tutorial.harvest_rose": "Cueillez vos roses",
@@ -28,5 +28,6 @@
 	"item.lamp": "Lampe",
 	"item.turret1": "Cracheuse",
 	"item.rose_shop_counter": "Comptoir de roses",
-	"ui.remaining": "restant"
+	"ui.remaining": "restant",
+	"merchant.special_reward": "Récompense spéciale"
 }
