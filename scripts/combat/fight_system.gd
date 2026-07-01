@@ -166,7 +166,6 @@ func _water_roses_under_spray_projectiles() -> void:
 						_plant_manager.call("wet_rose", cell)
 
 func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
-	_spawn_gem_harvest(enemy.global_position)
 	if _building_manager and _building_manager.has_method("remove_dead_monster"):
 		_building_manager.call("remove_dead_monster", enemy)
 		return
@@ -174,19 +173,6 @@ func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
 		_agent_manager.call("unregister_agent", agent_id)
 	enemy.remove_from_group("monsters")
 	enemy.queue_free()
-
-
-func _spawn_gem_harvest(world_position: Vector2) -> void:
-	Sfx.play_sound(&"gem")
-	var scene: Node = get_tree().current_scene
-	var gem_icon: Node = scene.get_node_or_null("GameUI/top right/gemIcon") if scene != null else null
-	if gem_icon != null and gem_icon.has_method("animate_gem_harvest"):
-		var animation_started: bool = bool(gem_icon.call("animate_gem_harvest", world_position))
-		if animation_started:
-			return
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_gems"):
-		progression_node.call("update_gems", 1)
 
 class DamageNumberDrawer:
 	extends Node2D

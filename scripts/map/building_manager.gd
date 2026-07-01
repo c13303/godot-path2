@@ -32,6 +32,8 @@ const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
+const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
@@ -3883,8 +3885,12 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		return
 	var is_client: bool = agent.is_in_group("clients")
 	var is_merchant: bool = agent.is_in_group("merchants")
+	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not is_merchant
+	var death_position: Vector2 = agent.global_position
 	if spawn_corpse and not is_client and not is_merchant:
 		_spawn_monster_corpse(agent)
+	if awards_monster_drop:
+		_spawn_monster_death_drop(death_position)
 	var nav_id: int = int(agent.get("nav_id"))
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
@@ -3915,6 +3921,38 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(true)
+
+func _spawn_monster_death_drop(world_position: Vector2) -> void:
+	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < 0.5 else MONSTER_DEATH_DROP_GEM
+	var scene: Node = get_tree().current_scene
+	var icon: Node = null
+	var animate_method: String = ""
+	if scene != null:
+		if drop_type == MONSTER_DEATH_DROP_SEED:
+			icon = scene.get_node_or_null("GameUI/top right/seedIcon")
+			animate_method = "animate_seed_harvest"
+		else:
+			icon = scene.get_node_or_null("GameUI/top right/gemIcon")
+			animate_method = "animate_gem_harvest"
+	if icon != null and icon.has_method(animate_method):
+		var animation_started: bool = bool(icon.call(animate_method, world_position))
+		if animation_started:
+			if drop_type == MONSTER_DEATH_DROP_GEM:
+				Sfx.play_sound(&"gem")
+			return
+	_credit_monster_death_drop(drop_type)
+
+func _credit_monster_death_drop(drop_type: StringName) -> void:
+	var scene: Node = get_tree().current_scene
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node == null:
+		return
+	if drop_type == MONSTER_DEATH_DROP_SEED:
+		if progression_node.has_method("update_seeds"):
+			progression_node.call("update_seeds", 1)
+	elif drop_type == MONSTER_DEATH_DROP_GEM:
+		if progression_node.has_method("update_gems"):
+			progression_node.call("update_gems", 1)
 
 func _spawn_monster_corpse(agent: Node2D) -> void:
 	var corpse: Node2D = MONSTER_CORPSE_SCENE.instantiate() as Node2D

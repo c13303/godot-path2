@@ -331,9 +331,15 @@ func _open_shop() -> void:
 		else:
 			_deselect_active()
 		return
-	# Resume placing the building we were last on, even if it is currently too
-	# expensive; the selected row makes that unaffordable state explicit.
-	if _last_picked_item_id != "" and _is_item_available(_last_picked_item_id) and not _is_item_locked(_last_picked_item_id):
+	# Resume the last buildable. If it ran out while the player was away from the
+	# build tool, move to another currently usable buildable; otherwise leave the
+	# empty one selected so its price/remaining label stays visible.
+	if _last_picked_item_id != "" and _should_show_item(_last_picked_item_id) and not _is_item_locked(_last_picked_item_id):
+		if _affordable_quantity(_last_picked_item_id) <= 0:
+			var next_id: String = _next_available_buildable(_last_picked_item_id)
+			if next_id != "":
+				_select_item(next_id)
+				return
 		_select_item(_last_picked_item_id)
 		return
 	for item_id: String in ITEM_IDS:
@@ -401,7 +407,7 @@ func _on_item_pressed(item_id: String) -> void:
 			Sfx.play_sound(&"buy")
 			_refresh_slots()
 		return
-	if _is_item_locked(item_id) or not _is_item_available(item_id):
+	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
 	# Clicking the already-selected item toggles it back off and forgets it.
 	if _selected_item_id == item_id:
