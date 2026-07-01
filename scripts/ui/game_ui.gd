@@ -7,7 +7,7 @@ const INVENTORY_COLUMNS: int = 8
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
-# Quick-slot tools that drive build/unbuild mode rather than acting as weapons.
+# Quick-slot tool that drives build/unbuild mode rather than acting as a weapon.
 const BUILD_TOOL_ID: String = "build_tool"
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
 const ITEM_NAME_KEY_PREFIX: String = "item."
@@ -376,7 +376,6 @@ func _setup_starting_inventory() -> void:
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
 	add_inventory(BUILD_TOOL_ID, 1)
-	add_inventory(UNBUILD_TOOL_ID, 1)
 
 
 func _get_level_starting_weapons() -> Array[StringName]:
@@ -646,6 +645,7 @@ func _build_inventory() -> void:
 			_inventory_slot_nodes.append(slot)
 
 func _refresh_all_slots() -> void:
+	_remove_unbuild_tool_from_inventory()
 	for i in range(_toolbar_slot_nodes.size()):
 		_apply_slot_item(_toolbar_slot_nodes[i], i)
 
@@ -653,6 +653,15 @@ func _refresh_all_slots() -> void:
 		_apply_slot_item(_inventory_slot_nodes[i], i)
 
 	_refresh_toolbar_info()
+
+func _remove_unbuild_tool_from_inventory() -> void:
+	var changed: bool = false
+	for i: int in range(inventory_slots.size()):
+		if _slot_item_id(inventory_slots[i]) == UNBUILD_TOOL_ID:
+			inventory_slots[i] = _empty_slot()
+			changed = true
+	if changed:
+		_ensure_valid_quick_selection()
 
 func _refresh_toolbar_info() -> void:
 	if toolbar_info == null:

@@ -5,6 +5,7 @@ const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
+const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
@@ -41,11 +42,12 @@ var _drag_build_end_cell: Vector2i = Vector2i.ZERO
 var _drag_build_preview_limit: int = 0
 var _plant_layer_flush_queued: bool = false
 var _remove_active: bool = false
-var _remove_cell: Vector2i = Vector2i.ZERO
-var _remove_item_id: String = ""
-var _remove_layer: TileMapLayer
 var _remove_elapsed: float = 0.0
-var _remove_progress: ProgressBar
+var _remove_queue: Array[Dictionary] = []
+var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
+var _remove_drag_active: bool = false
+var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
+var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
 
 func _ready() -> void:
 	_resolve_level_layers()
@@ -75,7 +77,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 
 func _process(delta: float) -> void:
 	_process_removal(delta)
-	if _remove_active:
+	if _remove_drag_active:
 		_clear_hover()
 		return
 
@@ -112,19 +114,24 @@ func _process(delta: float) -> void:
 	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
-	# With the Unbuild tool selected, holding left-click over a building removes it
-	# (with a full refund). No placement happens while the unbuild tool is active.
-	if _unbuild_tool_selected():
-		if event is InputEventMouseButton:
-			var unbuild_event: InputEventMouseButton = event as InputEventMouseButton
-			if unbuild_event.button_index == MOUSE_BUTTON_LEFT:
-				var was_removing: bool = _remove_active
-				if unbuild_event.pressed:
-					_try_start_removal()
-				else:
-					_cancel_removal()
-				if was_removing or _remove_active:
-					get_viewport().set_input_as_handled()
+	if event is InputEventMouseButton:
+		var remove_event: InputEventMouseButton = event as InputEventMouseButton
+		if remove_event.button_index == MOUSE_BUTTON_RIGHT:
+			var removal_input_active: bool = _build_tool_selected() or _remove_drag_active or _remove_active
+			if remove_event.pressed and _build_tool_selected():
+				_start_remove_drag()
+			elif not remove_event.pressed and _remove_drag_active:
+				_finish_remove_drag()
+			if removal_input_active:
+				get_viewport().set_input_as_handled()
+				return
+
+	if event is InputEventMouseMotion and _remove_drag_active:
+		var current_cell: Vector2i = _hovered_cell()
+		if current_cell != _remove_drag_end_cell:
+			_remove_drag_end_cell = current_cell
+			_preview_remove_drag()
+		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventMouseButton:
@@ -147,43 +154,63 @@ func _input(event: InputEvent) -> void:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
-func _unbuild_tool_selected() -> bool:
-	return game_ui and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
+func _build_tool_selected() -> bool:
+	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
 
-func _try_start_removal() -> void:
+func _start_remove_drag() -> void:
 	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
-	var cell: Vector2i = _hovered_cell()
-	var removal: Dictionary = _removable_at_cell(cell)
-	if removal.is_empty():
+	if _placement_disabled() or not _build_tool_selected():
 		return
-	var item_id: String = str(removal.get("item_id", ""))
-	if item_id == "":
+	_cancel_removal()
+	_remove_drag_active = true
+	_remove_drag_start_cell = _hovered_cell()
+	_remove_drag_end_cell = _remove_drag_start_cell
+	_preview_remove_drag()
+
+func _preview_remove_drag() -> void:
+	_clear_remove_progress_bars()
+	var removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _remove_drag_end_cell)
+	for removal: Dictionary in removals:
+		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+		_create_remove_progress(cell, 0.0)
+
+func _finish_remove_drag() -> void:
+	if not _remove_drag_active:
 		return
+	_remove_drag_active = false
+	_remove_queue = _remove_rectangle_cells(_remove_drag_start_cell, _hovered_cell())
+	_clear_remove_progress_bars()
+	if _remove_queue.is_empty():
+		_cancel_removal()
+		return
+	for removal: Dictionary in _remove_queue:
+		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+		_create_remove_progress(cell, 0.0)
 	_remove_active = true
-	_remove_cell = cell
-	_remove_item_id = item_id
-	_remove_layer = removal.get("layer") as TileMapLayer
 	_remove_elapsed = 0.0
 	_clear_hover()
-	_create_remove_progress()
 
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _unbuild_tool_selected() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
 		_cancel_removal()
 		return
-	if _hovered_cell() != _remove_cell:
+	if _remove_queue.is_empty():
 		_cancel_removal()
 		return
-	var current_removal: Dictionary = _removable_at_cell(_remove_cell)
-	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != _remove_item_id:
+	var active_removal: Dictionary = _remove_queue[0] as Dictionary
+	var active_cell: Vector2i = active_removal.get("cell", Vector2i.ZERO) as Vector2i
+	var active_item_id: String = str(active_removal.get("item_id", ""))
+	var current_removal: Dictionary = _removable_at_cell(active_cell)
+	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != active_item_id:
 		_cancel_removal()
 		return
 	_remove_elapsed = minf(_remove_elapsed + delta, REMOVE_HOLD_SECONDS)
-	if _remove_progress:
-		_remove_progress.value = (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0
+	var active_progress: ProgressBar = _remove_progress_by_cell.get(active_cell, null) as ProgressBar
+	if active_progress != null:
+		active_progress.value = (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0
 	if _remove_elapsed >= REMOVE_HOLD_SECONDS:
 		_finish_removal()
 
@@ -191,21 +218,28 @@ func _finish_removal() -> void:
 	if not _remove_active or GameState.is_night:
 		_cancel_removal()
 		return
-	var current_removal: Dictionary = _removable_at_cell(_remove_cell)
-	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != _remove_item_id:
+	if _remove_queue.is_empty():
+		_cancel_removal()
+		return
+	var removal: Dictionary = _remove_queue.pop_front() as Dictionary
+	var removed_cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+	var removed_item_id: String = str(removal.get("item_id", ""))
+	var removed_layer: TileMapLayer = removal.get("layer") as TileMapLayer
+	var current_removal: Dictionary = _removable_at_cell(removed_cell)
+	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != removed_item_id:
 		_cancel_removal()
 		return
 
-	var removed_cell: Vector2i = _remove_cell
-	var removed_item_id: String = _remove_item_id
-	var removed_layer: TileMapLayer = _remove_layer
-	_cancel_removal()
+	_free_remove_progress_for_cell(removed_cell)
 	var refund_world_position: Vector2 = previewbuild.to_global(previewbuild.map_to_local(removed_cell))
 	_remove_tile(removed_layer, removed_cell)
 	# Refund the building's full price back to its currency, flying the seeds/gems
 	# to the HUD like a harvest (priceless items refund nothing).
 	if game_ui and game_ui.has_method("refund_build"):
 		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
+	_remove_elapsed = 0.0
+	if _remove_queue.is_empty():
+		_cancel_removal()
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
@@ -234,27 +268,49 @@ func _removable_at_cell(cell: Vector2i) -> Dictionary:
 			continue
 		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
 		if item_id != "":
-			return {"item_id": item_id, "layer": layer}
+			return {"item_id": item_id, "layer": layer, "cell": cell}
 	return {}
 
-func _create_remove_progress() -> void:
-	_free_remove_progress()
+func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:
+	var removals: Array[Dictionary] = []
+	var seen_cells: Dictionary = {}
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if not seen_cells.has(cell):
+				var removal: Dictionary = _removable_at_cell(cell)
+				if not removal.is_empty():
+					removals.append(removal)
+					seen_cells[cell] = true
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return removals
+
+func _create_remove_progress(cell: Vector2i, value: float) -> void:
 	if not previewbuild or not previewbuild.tile_set:
 		return
 	var tile_size: Vector2i = previewbuild.tile_set.tile_size
 	var progress_height: float = float(tile_size.y) * REMOVE_PROGRESS_HEIGHT_RATIO
-	_remove_progress = ProgressBar.new()
-	_remove_progress.name = "BuildingRemovalProgress"
-	_remove_progress.min_value = 0.0
-	_remove_progress.max_value = 100.0
-	_remove_progress.value = 0.0
-	_remove_progress.show_percentage = false
-	_remove_progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
-	_remove_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_remove_progress.z_index = 100
-	_remove_progress.size = Vector2(REMOVE_PROGRESS_WIDTH, progress_height)
-	var cell_center: Vector2 = previewbuild.map_to_local(_remove_cell)
-	_remove_progress.position = cell_center - Vector2(REMOVE_PROGRESS_WIDTH * 0.5, progress_height * 0.5)
+	var remove_progress: ProgressBar = ProgressBar.new()
+	remove_progress.name = "BuildingRemovalProgress"
+	remove_progress.min_value = 0.0
+	remove_progress.max_value = 100.0
+	remove_progress.value = value
+	remove_progress.show_percentage = false
+	remove_progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
+	remove_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	remove_progress.z_index = 100
+	remove_progress.size = Vector2(REMOVE_PROGRESS_WIDTH, progress_height)
+	var cell_center: Vector2 = previewbuild.map_to_local(cell)
+	remove_progress.position = cell_center - Vector2(REMOVE_PROGRESS_WIDTH * 0.5, progress_height * 0.5)
 
 	var background: StyleBoxFlat = StyleBoxFlat.new()
 	background.bg_color = Color(0.05, 0.05, 0.05, 0.8)
@@ -265,21 +321,30 @@ func _create_remove_progress() -> void:
 	background.border_color = Color(0.9, 0.9, 0.9, 0.9)
 	var fill: StyleBoxFlat = StyleBoxFlat.new()
 	fill.bg_color = Color(0.85, 0.75, 0.25, 1.0)
-	_remove_progress.add_theme_stylebox_override("background", background)
-	_remove_progress.add_theme_stylebox_override("fill", fill)
-	previewbuild.add_child(_remove_progress)
+	remove_progress.add_theme_stylebox_override("background", background)
+	remove_progress.add_theme_stylebox_override("fill", fill)
+	previewbuild.add_child(remove_progress)
+	_remove_progress_by_cell[cell] = remove_progress
 
 func _cancel_removal() -> void:
 	_remove_active = false
+	_remove_drag_active = false
 	_remove_elapsed = 0.0
-	_remove_item_id = ""
-	_remove_layer = null
-	_free_remove_progress()
+	_remove_queue.clear()
+	_clear_remove_progress_bars()
 
-func _free_remove_progress() -> void:
-	if _remove_progress:
-		_remove_progress.queue_free()
-		_remove_progress = null
+func _clear_remove_progress_bars() -> void:
+	for raw_progress: Variant in _remove_progress_by_cell.values():
+		var progress: ProgressBar = raw_progress as ProgressBar
+		if progress != null and is_instance_valid(progress):
+			progress.queue_free()
+	_remove_progress_by_cell.clear()
+
+func _free_remove_progress_for_cell(cell: Vector2i) -> void:
+	var progress: ProgressBar = _remove_progress_by_cell.get(cell, null) as ProgressBar
+	if progress != null and is_instance_valid(progress):
+		progress.queue_free()
+	_remove_progress_by_cell.erase(cell)
 
 func _resolve_atlas_source_id() -> void:
 	var ref: TileMapLayer = previewbuild if previewbuild else wallz
@@ -549,11 +614,22 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
 	if _is_water_source_cell(cell):
 		return false
+	if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(cell):
+		return false
 	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(cell):
 		return false
 	if not _turret_range_blocker_for_cell(cell, placeable_def).is_empty():
 		return false
 	return not _is_placeable_occupied(cell, target_layer, placeable_def)
+
+func _requires_grass_green_floor(placeable_def: Dictionary) -> bool:
+	var item_id: String = str(placeable_def.get("id", ""))
+	return item_id == "rose" or item_id == "turret1"
+
+func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
+	if floorz == null or floorz.get_cell_source_id(cell) < 0:
+		return false
+	return floorz.get_cell_atlas_coords(cell) == GRASS_GREEN_FLOOR_ATLAS
 
 func _is_water_source_cell(cell: Vector2i) -> bool:
 	return watersources != null and watersources.get_cell_source_id(cell) >= 0

@@ -1831,6 +1831,7 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 				_level_completed_emitted = true
 				if debug_logs:
 					_log("Final playlist night survived; level completed.")
+				GameState.start_day()
 				level_completed.emit()
 				return
 			GameState.start_day()

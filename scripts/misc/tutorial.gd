@@ -6,7 +6,8 @@ extends RichTextLabel
 ## through the Translations singleton. Empty water stays visible at night; other
 ## hints are hidden at night. When every planted rose is watered and the player
 ## has nothing left to plant or buy, it prompts them to pass the night and makes
-## the day/night button glow.
+## the day/night button glow. Until then the day/night button is disabled, so the
+## night cannot be triggered while roses are still unplanted or unwatered.
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
@@ -97,6 +98,7 @@ func _refresh(delta: float = 0.0) -> void:
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		_set_glow(false)
+		_update_day_toggle_interactable()
 		return
 	visible = true
 
@@ -124,6 +126,16 @@ func _refresh(delta: float = 0.0) -> void:
 
 	# Glow tracks the message actually on screen, so it stays in step with the text.
 	_set_glow(_displayed_key == KEY_PASS_NIGHT)
+	_update_day_toggle_interactable()
+
+
+## The player can only trigger the night once every rose is planted and watered,
+## i.e. exactly when the "pass the night" prompt (and its glow) is on screen. The
+## night is left interactable so GameState can still guard the night->day return.
+func _update_day_toggle_interactable() -> void:
+	if _day_toggle == null:
+		return
+	_day_toggle.disabled = not (GameState.is_night or _displayed_key == KEY_PASS_NIGHT)
 
 
 func _current_message_key() -> String:
