@@ -343,6 +343,13 @@ func get_build_tool_slot_center_x() -> float:
 			return -1.0
 	return -1.0
 
+## Global-space left X of the leftmost quick slot, or -1 if the quick bar has no
+## slots yet. The seed/weapon merchant column left-aligns its rows to this.
+func get_quick_bar_left_x() -> float:
+	if _toolbar_slot_nodes.is_empty():
+		return -1.0
+	return _toolbar_slot_nodes[0].get_global_rect().position.x
+
 ## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:
 	var currency: StringName = ItemCatalog.get_currency(item_id)

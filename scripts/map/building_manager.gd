@@ -2057,6 +2057,10 @@ func _begin_morning_phase() -> void:
 	if not _morning_harvest_active:
 		_begin_client_sale_phase()
 		return
+	# Green (watered) roses only open into full-bloom "rose-rose" now, at the start
+	# of the harvest phase, so they must become full grown before being harvested.
+	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
+		plant_manager.call("bloom_grownup_roses")
 	GameState.set_morning_phase(true)
 	if _rose_shop_counter_cells().is_empty():
 		_auto_select_shop_tool()
@@ -2318,7 +2322,10 @@ func is_player_near_seed_merchant() -> bool:
 # Freezes the merchant while the player is close and lets it resume the moment they
 # leave, so getting near always stops it (and opens the shop, via is_player_near_...).
 func _process_seed_merchant_proximity() -> void:
-	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
+	# Once the merchant is leaving it must never re-pause: building phase has already
+	# started and walking back into the departing merchant should not freeze it or
+	# reopen the shop.
+	if not _seed_merchant_active or _seed_merchant_leaving or not is_instance_valid(_seed_merchant_agent):
 		return
 	var near: bool = is_player_near_seed_merchant()
 	if near == _seed_merchant_paused:
@@ -2340,16 +2347,20 @@ func request_seed_merchant_leave() -> void:
 	# to it to press the button, which had it paused).
 	if _seed_merchant_paused:
 		_set_seed_merchant_paused(false)
-	# The merchant walks back out to an exit but the phase stays active: if the player
-	# catches up to it mid-exit it pauses and the shop reopens. Building phase only
-	# starts once it fully leaves (_process_escape_arrivals -> _remove_escaped_monster).
-	if _assign_agent_to_escape(_seed_merchant_agent):
-		_seed_merchant_waiting = false
-		_seed_merchant_leaving = true
+	_seed_merchant_leaving = true
+	_seed_merchant_waiting = false
+	# Building starts the instant the player dismisses the merchant. Switch to building
+	# phase right now so the merchant sale shop closes and the build shop is available
+	# immediately. The agent keeps walking out to an exit purely as a departing visual;
+	# because the merchant phase is no longer active, the shop can never reopen even if
+	# the player catches back up to it (_process_seed_merchant_proximity bails while
+	# leaving, and shop.gd only tracks the merchant while is_seed_merchant_phase is true).
+	if not _assign_agent_to_escape(_seed_merchant_agent):
+		# No escape route available: remove it now (its merchant branch also switches to
+		# building), so nothing is left waiting behind the closed shop.
+		remove_dead_monster(_seed_merchant_agent, false)
 		return
-	# No escape route available: fall back to removing it now, which ends the phase and
-	# switches to building (see the merchant branch of remove_dead_monster).
-	remove_dead_monster(_seed_merchant_agent, false)
+	GameState.set_building_phase(true)
 
 
 func _clear_seed_merchant_phase(free_agent: bool) -> void:

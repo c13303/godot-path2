@@ -27,7 +27,7 @@ const BAR_BOTTOM_OFFSET: float = -134.0
 # Left inset from the panel edge to the first slot (panel border + margin_left), so the
 # column's slots can be centred on the build/shop icon.
 const BAR_CONTENT_INSET: float = 10.0
-# Y offset (from the top) of the seed-merchant horizontal bar, placing it just below the
+# Y offset (from the top) of the seed-merchant column's top, placing it just below the
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
@@ -57,6 +57,13 @@ var _slot_rows: Dictionary = {}
 var _slot_buttons: Dictionary = {}
 var _slot_icons: Dictionary = {}
 var _slot_counts: Dictionary = {}
+# item id -> its persistent per-row label group (name + price + currency icon) and its
+# parts. Only shown during the seed/weapon merchant column; hidden in build phase, which
+# uses the single floating label below instead.
+var _row_labels: Dictionary = {}
+var _row_names: Dictionary = {}
+var _row_prices: Dictionary = {}
+var _row_currencies: Dictionary = {}
 # The single floating label shown to the right of the selected slot only.
 var _selected_label: HBoxContainer
 var _selected_name: Label
@@ -113,7 +120,9 @@ func _process(_delta: float) -> void:
 		_close_shop()
 	if visible:
 		_refresh_slots()
-		if not GameState.is_seed_merchant_phase:
+		if GameState.is_seed_merchant_phase:
+			_update_merchant_column_anchor()
+		else:
 			_update_build_column_anchor()
 
 
@@ -194,8 +203,10 @@ func _build_bar() -> Control:
 	return panel
 
 
-## One row of the column: just the slot button. The name / price / currency icon are
-## shown by the shared floating label next to the selected slot (see _build_selected_label).
+## One row of the column: the slot button plus a persistent name / price / currency-icon
+## label group. In build phase the label group is hidden and the shared floating label
+## next to the selected slot is used instead (see _build_selected_label); in the seed/weapon
+## merchant column the per-row label group is shown for every item.
 func _build_slot_row(item_id: String) -> HBoxContainer:
 	var row: HBoxContainer = HBoxContainer.new()
 	row.name = item_id + "Row"
@@ -203,8 +214,44 @@ func _build_slot_row(item_id: String) -> HBoxContainer:
 	row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	row.add_theme_constant_override("separation", 8)
 	row.add_child(_build_slot(item_id))
+	row.add_child(_build_row_label(item_id))
 	_slot_rows[item_id] = row
 	return row
+
+
+## Builds the persistent per-row label group (name + price + currency icon) shown beside the
+## slot in the seed/weapon merchant column. Hidden by default; _refresh_slots reveals and
+## fills it during the merchant phase.
+func _build_row_label(item_id: String) -> HBoxContainer:
+	var group: HBoxContainer = HBoxContainer.new()
+	group.name = item_id + "Label"
+	group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_theme_constant_override("separation", 8)
+
+	var name_label: Label = _make_row_label(18)
+	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	group.add_child(name_label)
+
+	var price_label: Label = _make_row_label(18)
+	price_label.add_theme_color_override("font_color", Color.WHITE)
+	group.add_child(price_label)
+
+	var currency: TextureRect = TextureRect.new()
+	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	currency.custom_minimum_size = Vector2(20.0, 20.0)
+	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_child(currency)
+
+	group.visible = false
+	_row_labels[item_id] = group
+	_row_names[item_id] = name_label
+	_row_prices[item_id] = price_label
+	_row_currencies[item_id] = currency
+	return group
 
 
 func _make_row_label(font_size: int) -> Label:
@@ -415,14 +462,18 @@ func _refresh_slots() -> void:
 		var selected: bool = item_id == _selected_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = str(affordable)
-		var state: Array[bool] = [selected, disabled]
+		# The merchant column signals unaffordability through the per-row label colour, so its
+		# slots stay at full colour; the build column greys unaffordable/locked slots.
+		var visual_disabled: bool = disabled and not GameState.is_seed_merchant_phase
+		var state: Array[bool] = [selected, visual_disabled]
 		if _slot_state.get(item_id) != state:
 			_slot_state[item_id] = state
-			_apply_slot_style(button, selected, disabled)
+			_apply_slot_style(button, selected, visual_disabled)
 			(_slot_icons[item_id] as TextureRect).modulate = (
-				Color(0.45, 0.45, 0.45, 0.55) if disabled else Color.WHITE
+				Color(0.45, 0.45, 0.45, 0.55) if visual_disabled else Color.WHITE
 			)
 	_update_selected_label()
+	_update_row_labels()
 
 
 ## Fills in and positions the floating label for the selected slot only. It shows the
@@ -452,19 +503,51 @@ func _update_selected_label() -> void:
 		_selected_currency.visible = false
 	else:
 		_selected_price.text = str(_build_price(item_id))
-		var currency_id: StringName = ItemCatalog.get_currency(item_id)
-		if currency_id == &"gem":
-			_selected_currency.texture = _gem_icon
-			_selected_currency.visible = true
-		elif currency_id == &"seed":
-			_selected_currency.texture = _seed_icon
-			_selected_currency.visible = true
-		elif currency_id == &"money":
-			_selected_currency.texture = _money_icon
-			_selected_currency.visible = true
-		else:
-			_selected_currency.visible = false
+		var currency_texture: AtlasTexture = _currency_texture(item_id)
+		_selected_currency.texture = currency_texture
+		_selected_currency.visible = currency_texture != null
 	_position_selected_label(button)
+
+
+## Maps an item's catalog currency to its HUD icon texture, or null if it has none.
+func _currency_texture(item_id: String) -> AtlasTexture:
+	match ItemCatalog.get_currency(item_id):
+		&"gem":
+			return _gem_icon
+		&"seed":
+			return _seed_icon
+		&"money":
+			return _money_icon
+	return null
+
+
+## Fills and colours the persistent per-row label groups for the seed/weapon merchant column
+## (name + price + currency icon), reddening items the player cannot currently afford. In build
+## phase every row label stays hidden (the floating selected label is used instead).
+func _update_row_labels() -> void:
+	var show_rows: bool = GameState.is_seed_merchant_phase
+	for item_id: String in ITEM_IDS:
+		var group: HBoxContainer = _row_labels.get(item_id) as HBoxContainer
+		if group == null:
+			continue
+		var row: Control = _slot_rows.get(item_id) as Control
+		var row_visible: bool = show_rows and row != null and row.visible
+		group.visible = row_visible
+		if not row_visible:
+			continue
+		var can_buy: bool = _can_afford(item_id) and not _is_item_locked(item_id)
+		var color: Color = SELECTED_LABEL_COLOR if can_buy else SELECTED_DISABLED_LABEL_COLOR
+		var name_label: Label = _row_names[item_id] as Label
+		var price_label: Label = _row_prices[item_id] as Label
+		var currency: TextureRect = _row_currencies[item_id] as TextureRect
+		name_label.add_theme_color_override("font_color", color)
+		price_label.add_theme_color_override("font_color", color)
+		currency.modulate = color
+		name_label.text = _display_name(item_id)
+		price_label.text = str(_build_price(item_id))
+		var currency_texture: AtlasTexture = _currency_texture(item_id)
+		currency.texture = currency_texture
+		currency.visible = currency_texture != null
 
 
 ## Places the floating label just to the right of the selected slot, vertically centred.
@@ -507,21 +590,21 @@ func _apply_phase_layout() -> void:
 	if _shop_column == null:
 		return
 	if GameState.is_seed_merchant_phase:
-		# Icon-only horizontal bar centred at the top, sitting just under the
-		# tutorial hint text (see GameUI/top anchor/tutorial), like the build shop bar.
+		# Vertical column sitting just under the tutorial hint text (see GameUI/top
+		# anchor/tutorial) and left-aligned to the leftmost quick slot; each row carries
+		# its own name/price/currency label (see _update_row_labels). Grows down and right.
 		if _items_list != null:
-			_items_list.vertical = false
-		_shop_column.anchor_left = 0.5
-		_shop_column.anchor_right = 0.5
+			_items_list.vertical = true
+		_shop_column.anchor_left = 0.0
+		_shop_column.anchor_right = 0.0
 		_shop_column.anchor_top = 0.0
 		_shop_column.anchor_bottom = 0.0
-		_shop_column.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		_shop_column.grow_horizontal = Control.GROW_DIRECTION_END
 		_shop_column.grow_vertical = Control.GROW_DIRECTION_END
-		_shop_column.offset_left = 0.0
-		_shop_column.offset_right = 0.0
 		_shop_column.offset_top = SEED_MERCHANT_BAR_TOP
 		_shop_column.offset_bottom = SEED_MERCHANT_BAR_TOP
-		_shop_column.alignment = BoxContainer.ALIGNMENT_CENTER
+		_shop_column.alignment = BoxContainer.ALIGNMENT_BEGIN
+		_update_merchant_column_anchor()
 		return
 	# Build phase: vertical column pinned to the bottom, rising up out of the build/shop
 	# quick slot; grows rightward so the name/price labels extend past the slots.
@@ -537,6 +620,19 @@ func _apply_phase_layout() -> void:
 	_shop_column.offset_bottom = BAR_BOTTOM_OFFSET
 	_shop_column.alignment = BoxContainer.ALIGNMENT_END
 	_update_build_column_anchor()
+
+
+## Aligns the merchant column's slots to the left edge of the leftmost quick slot, so the
+## column sits flush with the start of the quick bar.
+func _update_merchant_column_anchor() -> void:
+	if _shop_column == null or game_ui == null or not game_ui.has_method("get_quick_bar_left_x"):
+		return
+	var left_x: float = float(game_ui.call("get_quick_bar_left_x"))
+	if left_x < 0.0:
+		return
+	var left: float = left_x - BAR_CONTENT_INSET
+	_shop_column.offset_left = left
+	_shop_column.offset_right = left
 
 
 ## Aligns the build-phase column's slots horizontally over the build/shop quick slot.

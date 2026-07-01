@@ -134,11 +134,31 @@ func grow_green_roses() -> int:
 		plant_data["grownup"] = true
 		_plants[cell] = plant_data
 		# Grown roses keep their watered (green) look through the night and morning;
-		# they only revert to the dry tile once the next build phase begins (see
-		# dry_all_roses), so a watered rose never appears to dry out overnight.
+		# they only open into the full-bloom "rose-rose" tile once the harvest phase
+		# begins (see bloom_grownup_roses), and revert to the dry tile at the next
+		# build phase (see dry_all_roses), so a watered rose never appears to dry out
+		# overnight.
 		_set_rose_atlas(cell, ROSE_WET_ATLAS)
 		grown_count += 1
 	return grown_count
+
+
+## Opens every grown rose into its full-bloom "rose-rose" tile. Called when the
+## morning harvest phase begins so watered roses (still green from overnight
+## growth) visibly bloom into full roses before the player can collect them.
+func bloom_grownup_roses() -> int:
+	if not plantz:
+		return 0
+	var bloomed_count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if not is_rose_grownup(cell):
+			continue
+		if plantz.get_cell_atlas_coords(cell) == ROSE_GROWNUP_ATLAS:
+			continue
+		_set_rose_atlas(cell, ROSE_GROWNUP_ATLAS)
+		bloomed_count += 1
+	return bloomed_count
 
 
 ## Reverts every rose to its dry, unwatered state (dry tile, needs watering again to
