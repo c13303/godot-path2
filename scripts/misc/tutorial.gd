@@ -220,6 +220,12 @@ func _current_message_key() -> String:
 func _should_start_night_automatically() -> bool:
 	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase or GameState.is_seed_merchant_phase:
 		return false
+	# During the sunrise transition the new day has not begun yet: no phase flag is set
+	# and the roses are still wet from overnight (they only dry when the build phase
+	# starts). Without this guard the just-ended night would immediately restart, looping
+	# the night forever. Auto-night may only begin once the real day is under way.
+	if _sun_rising:
+		return false
 	return _can_start_night_after_clients()
 
 

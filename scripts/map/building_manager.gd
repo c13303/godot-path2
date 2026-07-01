@@ -294,7 +294,6 @@ var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
 var _client_sale_active: bool = false
-var _clients_visited_this_day: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
@@ -519,7 +518,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	_client_preparing = false
 	if is_night:
-		_clients_visited_this_day = false
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
@@ -2090,7 +2088,6 @@ func _on_new_day_finished() -> void:
 func _begin_morning_phase() -> void:
 	_client_preparing = false
 	_client_sale_active = false
-	_clients_visited_this_day = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
@@ -2162,7 +2159,6 @@ func _check_morning_harvest_finished() -> void:
 
 func _begin_client_sale_phase() -> void:
 	_client_sale_active = false
-	_clients_visited_this_day = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	var sale_stock: int = _total_counter_stock()
@@ -2238,7 +2234,12 @@ func _client_count() -> int:
 
 
 func can_start_night_after_clients() -> bool:
-	return _clients_visited_this_day and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
+	# Gate on "no client sale is still pending" rather than "a client actually
+	# visited": on days with no counter stock the sale is skipped and no client ever
+	# spawns, yet the player must still be able to water their roses and end the day.
+	# _client_preparing covers the deferred window before clients spawn, so night
+	# can't jump ahead of a sale that is genuinely coming.
+	return not _client_preparing and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
 
 
 func _clients_are_finished_for_day() -> bool:
@@ -2808,10 +2809,7 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
-	var spawned: bool = _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
-	if spawned:
-		_clients_visited_this_day = true
-	return spawned
+	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
