@@ -1491,7 +1491,8 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 			if is_instance_valid(raw_agent):
 				var agent: Node2D = raw_agent as Node2D
 				if agent != null:
-					_retarget_client_to_counter_or_escape(agent)
+					var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+					_retarget_agent_or_escape(agent, spawner_cell)
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not _runtime_agents_active():
@@ -2487,12 +2488,10 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
-	return _spawn_client_to_counter_from(spawner_cell)
+	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
-	if agent_kind == SPAWNER_KIND_CLIENT:
-		return _spawn_client_to_counter_from(spawner_cell)
 	var agent_scene: PackedScene = _resolve_monster_scene(monster_type)
 	if agent_scene == null:
 		return false
@@ -2600,62 +2599,13 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			_log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
 			return false
 		_spawn_pass_stats["assigned_count"] = int(_spawn_pass_stats.get("assigned_count", 0)) + 1
-		_log("spawned monster nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
-			nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
+		var kind_label: String = "client" if agent_kind == SPAWNER_KIND_CLIENT else "monster"
+		_log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
+			kind_label, nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
 	return true
 
-
-func _spawn_client_to_counter_from(spawner_cell: Vector2i) -> bool:
-	var target: Dictionary = _select_stocked_counter_target(spawner_cell)
-	if target.is_empty():
-		_log_spawn_failure("client spawner %s has no stocked counter" % spawner_cell)
-		return false
-	var agent_scene: PackedScene = _resolve_monster_scene(&"basic")
-	if agent_scene == null:
-		return false
-	var occupied: Array[Vector2i] = _occupied_cells()
-	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
-	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
-		_log_spawn_failure("client spawner %s could not find a sane walkable spawn cell" % spawner_cell)
-		return false
-	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
-	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
-	var path_cells: PackedVector2Array = _find_path_on_walkable_map(spawn_cell, target_cell)
-	if path_cells.is_empty():
-		_log_spawn_failure("client spawner %s cannot path to counter %s" % [spawner_cell, counter_cell])
-		return false
-	var agent: Node2D = agent_scene.instantiate() as Node2D
-	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
-	parent.add_child(agent)
-	agent.global_position = _cell_center(spawn_cell)
-	agent.z_index = int(agent.global_position.y)
-	agent.add_to_group("clients")
-	agent.set_meta("agent_kind", SPAWNER_KIND_CLIENT)
-	agent.set_meta("spawner_cell", spawner_cell)
-	agent.set_meta("counter_cell", counter_cell)
-	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
-	if sprite != null:
-		sprite.texture = CLIENT_TEXTURE
-	if agent_manager and agent_manager.has_method("spawn_agent"):
-		var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
-		agent.set("nav_id", nav_id)
-		if agent_manager.has_method("set_agent_never_rest"):
-			agent_manager.call("set_agent_never_rest", nav_id, true)
-		var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
-		if agent_manager.has_method("assign_agent_path"):
-			agent_manager.call("assign_agent_path", nav_id, path_world)
-		_client_counter_agents[nav_id] = {
-			"node": agent,
-			"spawner_cell": spawner_cell,
-			"counter_cell": counter_cell,
-			"target_cell": target_cell,
-			"path_world": path_world,
-		}
-		if agent.has_method("start_astar_in"):
-			agent.call("start_astar_in")
-	return true
 
 # Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
 # A* to a plant target inside that garden and attach that path.
@@ -2765,8 +2715,11 @@ func _process_plant_arrivals() -> void:
 		# contract as an already-eaten plant.
 		if _counter_access_cells.has(plant_cell):
 			_erase_astar_in_agent(nav_id)
-			if _counter_stock(_counter_access_cells[plant_cell] as Vector2i) <= 0:
+			var counter_cell: Vector2i = _counter_access_cells[plant_cell] as Vector2i
+			if _counter_stock(counter_cell) <= 0:
 				_retarget_agent_or_escape(agent, spawner_cell)
+			elif _agent_kind(agent) == SPAWNER_KIND_CLIENT:
+				_start_client_counter_payment(agent, counter_cell)
 			else:
 				_consume_counter_rose(agent, spawner_cell, plant_cell)
 			continue
@@ -3045,14 +2998,16 @@ func _process_client_counter_arrivals() -> void:
 		if agent.has_method("stop_astar_in"):
 			agent.call("stop_astar_in")
 		if _counter_stock(counter_cell) <= 0:
-			_retarget_client_to_counter_or_escape(agent)
+			var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+			_retarget_agent_or_escape(agent, spawner_cell)
 			continue
 		_start_client_counter_payment(agent, counter_cell)
 
 
 func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:
 	if _counter_stock(counter_cell) <= 0:
-		_retarget_client_to_counter_or_escape(agent)
+		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+		_retarget_agent_or_escape(agent, spawner_cell)
 		return
 	var nav_id: int = int(agent.get("nav_id"))
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
@@ -3068,38 +3023,6 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 	_spawn_client_payment_money(agent.global_position)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
-
-
-func _retarget_client_to_counter_or_escape(agent: Node2D) -> void:
-	if not is_instance_valid(agent):
-		return
-	var nav_id: int = int(agent.get("nav_id"))
-	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz != null else INVALID_CELL
-	var target: Dictionary = _select_stocked_counter_target(agent_cell)
-	if target.is_empty():
-		_assign_agent_to_escape(agent)
-		return
-	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
-	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
-	var path_cells: PackedVector2Array = _find_path_on_walkable_map(agent_cell, target_cell)
-	if path_cells.is_empty():
-		_assign_agent_to_escape(agent)
-		return
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
-	if agent_manager and agent_manager.has_method("assign_agent_path"):
-		agent_manager.call("assign_agent_path", nav_id, path_world)
-	_client_counter_agents[nav_id] = {
-		"node": agent,
-		"spawner_cell": spawner_cell,
-		"counter_cell": counter_cell,
-		"target_cell": target_cell,
-		"path_world": path_world,
-	}
-	if agent.has_method("start_astar_in"):
-		agent.call("start_astar_in")
 
 
 func _spawn_client_payment_money(world_position: Vector2) -> void:
@@ -3413,7 +3336,8 @@ func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state:
 	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 	if _agent_kind(agent) == SPAWNER_KIND_CLIENT:
-		_retarget_client_to_counter_or_escape(agent)
+		if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
+			agent.call("start_waiting_new_status")
 		return
 	if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
 		agent.call("start_waiting_new_status")
@@ -4427,7 +4351,7 @@ func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 		var garden: Dictionary = _gardens[garden_id] as Dictionary
 		if not bool(garden.get("targetable", false)):
 			continue
-		if not _garden_has_grownup_roses(garden_id):
+		if not _garden_has_target_for_kind(garden_id, SPAWNER_KIND_CLIENT):
 			continue
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
@@ -4545,11 +4469,7 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 			cells_scanned += 1
 			var plant_cell: Vector2i = from_cell + Vector2i(dx, dy)
 			if agent_kind == SPAWNER_KIND_CLIENT:
-				if _counter_access_cells.has(plant_cell):
-					continue
-				if not bool(plant_manager.call("has_plant", plant_cell)):
-					continue
-				if not _is_grownup_rose_cell(plant_cell):
+				if not _is_client_target_cell(plant_cell):
 					continue
 			elif not _is_eatable_for_monster(plant_cell):
 				continue
@@ -4915,8 +4835,9 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	if not is_instance_valid(agent):
 		return false
 	var nav_id_dbg: int = int(agent.get("nav_id"))
-	# Agent validity / target precondition: no plants left anywhere -> straight to escape.
-	var no_plants: bool = _no_plants_remaining()
+	var agent_kind: StringName = _agent_kind(agent)
+	# Agent validity / target precondition: no valid targets left -> straight to escape.
+	var no_plants: bool = _no_targets_remaining_for_kind(agent_kind)
 	var from_cell: Vector2i = INVALID_CELL
 	if not no_plants:
 		from_cell = floorz.local_to_map(floorz.to_local(agent.global_position))
@@ -4949,7 +4870,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	# entry route. Cheap normally, but timed so a slow _select_spawner_garden_for_agent
 	# or route recompute is attributable rather than lumped into the parent total.
 	var t_res: int = Time.get_ticks_usec()
-	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell, _agent_kind(agent))
+	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell, agent_kind)
 	# Cache stats for this resolve (set by _select_spawner_garden_for_agent's loop).
 	_last_retarget_profile["entry_cache_hits"] = _garden_entry_resolve_hits
 	_last_retarget_profile["entry_cache_misses"] = _garden_entry_resolve_misses
@@ -5756,13 +5677,7 @@ func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: i
 		if not zone_tiles.has(c):
 			continue
 		if agent_kind == SPAWNER_KIND_CLIENT:
-			# Clients buy grownup roses from real plants; counters are served by the
-			# dedicated client-counter flow, never as garden food.
-			if _counter_access_cells.has(c):
-				continue
-			if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", c)):
-				continue
-			if not _is_grownup_rose_cell(c):
+			if not _is_client_target_cell(c):
 				continue
 		elif not _is_eatable_for_monster(c):
 			continue
@@ -5782,8 +5697,45 @@ func _agent_kind(agent: Node) -> StringName:
 
 func _garden_has_target_for_kind(garden_id: int, agent_kind: StringName) -> bool:
 	if agent_kind == SPAWNER_KIND_CLIENT:
-		return _garden_has_grownup_roses(garden_id)
+		return _garden_has_client_targets(garden_id)
 	return _garden_has_edible_plants(garden_id)
+
+
+func _no_targets_remaining_for_kind(agent_kind: StringName) -> bool:
+	if agent_kind == SPAWNER_KIND_CLIENT:
+		return not _has_client_targets_remaining()
+	return _no_plants_remaining()
+
+
+func _has_client_targets_remaining() -> bool:
+	if _total_counter_stock() > 0:
+		return true
+	for raw_garden_id: Variant in _gardens.keys():
+		if _garden_has_client_targets(int(raw_garden_id)):
+			return true
+	return false
+
+
+func _garden_has_client_targets(garden_id: int) -> bool:
+	if not _gardens.has(garden_id):
+		return false
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	if plant_cells.is_empty():
+		return false
+	for raw_cell: Variant in plant_cells.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if _is_client_target_cell(cell):
+			return true
+	return false
+
+
+func _is_client_target_cell(cell: Vector2i) -> bool:
+	if _counter_access_cells.has(cell):
+		return _counter_stock(_counter_access_cells[cell] as Vector2i) > 0
+	if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", cell)):
+		return false
+	return _is_grownup_rose_cell(cell)
 
 
 func _garden_has_grownup_roses(garden_id: int) -> bool:
