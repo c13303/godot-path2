@@ -99,7 +99,7 @@ func _process(delta: float) -> void:
 	var cell: Vector2i = _hovered_cell()
 	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
 	var item_id: String = str(placeable_def.get("id", ""))
-	if atlas_coords == Vector2i(-1, -1):
+	if atlas_coords == Vector2i(-1, -1) or not _can_afford(item_id):
 		_clear_hover()
 		return
 
@@ -624,7 +624,7 @@ func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placea
 
 func _requires_grass_green_floor(placeable_def: Dictionary) -> bool:
 	var item_id: String = str(placeable_def.get("id", ""))
-	return item_id == "rose" or item_id == "turret1"
+	return item_id == "rose" or item_id == "turret1" or bool(placeable_def.get("requires_grass_green_floor", false))
 
 func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null or floorz.get_cell_source_id(cell) < 0:
@@ -704,7 +704,7 @@ func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
 	var light_source: float = float(placeable_def.get("light_source", 0.0))
 	if light_source > 0.0:
 		return true
-	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap"
+	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter"
 
 func _is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
 	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz
@@ -793,7 +793,16 @@ func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
 
 func _placement_disabled() -> bool:
-	return GameState.is_night or not GameState.is_building_phase
+	if GameState.is_night:
+		return true
+	if GameState.is_building_phase:
+		return false
+	if not GameState.is_morning_phase:
+		return true
+	if not game_ui or not game_ui.has_method("get_selected_build_item_id"):
+		return true
+	var selected_id: String = String(game_ui.call("get_selected_build_item_id"))
+	return selected_id != "rose_shop_counter"
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))

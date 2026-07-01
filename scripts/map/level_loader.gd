@@ -33,6 +33,7 @@ var _loaded_spawner_bindings: Array[SpawnerBinding] = []
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
+var _loaded_rose_shop_counter_limit: int = 2
 
 func _enter_tree() -> void:
 	_load_level()
@@ -108,6 +109,10 @@ func get_loaded_starting_weapons() -> Array[StringName]:
 	return weapons
 
 
+func get_loaded_rose_shop_counter_limit() -> int:
+	return _loaded_rose_shop_counter_limit
+
+
 func _resolve_level_scene() -> PackedScene:
 	var selected_path: String = GameState.get_selected_level_scene_path()
 	if selected_path != "":
@@ -125,6 +130,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_seeds = 20
 	_loaded_starting_gems = 1000
 	_loaded_starting_weapons = [&"spray"]
+	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
 		return
 	var config: LevelSpawnConfig = level_root as LevelSpawnConfig
@@ -135,6 +141,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_seeds = config.starting_seeds
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
+		_loaded_rose_shop_counter_limit = maxi(0, config.rose_shop_counter_limit)
 	if _loaded_spawn_playlist != null:
 		return
 	var fallback_playlist: LevelSpawnPlaylist = _load_default_spawn_playlist(level_scene_path)

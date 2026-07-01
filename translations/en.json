@@ -4,7 +4,9 @@
 	"tutorial.buy_roses": "Buy roses with SHOP tool",
 	"tutorial.plant_roses": "Plant roses",
 	"tutorial.water_roses": "Water your roses",
-	"tutorial.new_day": "new day",
+	"tutorial.client_time": "client time",
+	"tutorial.place_shop": "Place the Shop",
+	"tutorial.harvest_rose": "Press E to harvest",
 	"tutorial.pass_night": "Pass the night",
 	"game_over.restart": "Restart",
 	"game_over.main_menu": "Main Menu",
@@ -20,5 +22,6 @@
 	"item.rose": "Rose",
 	"item.debris": "Debris",
 	"item.lamp": "Lamp",
-	"item.turret1": "Turret"
+	"item.turret1": "Turret",
+	"item.rose_shop_counter": "Rose Shop Counter"
 }

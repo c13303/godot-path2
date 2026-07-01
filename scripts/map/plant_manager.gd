@@ -150,6 +150,13 @@ func get_grownup_rose_cells() -> Array[Vector2i]:
 			cells.append(cell)
 	return cells
 
+
+func harvest_grownup_rose(cell: Vector2i) -> bool:
+	if not is_rose_grownup(cell):
+		return false
+	remove_plant(cell, true)
+	return true
+
 func _set_rose_atlas(cell: Vector2i, atlas_coords: Vector2i, flush_visuals: bool = true) -> void:
 	var source_id: int = plantz.get_cell_source_id(cell)
 	if source_id < 0:

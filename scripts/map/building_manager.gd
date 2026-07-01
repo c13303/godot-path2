@@ -7,6 +7,7 @@ signal level_completed
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const EATING_COOLDOWN: float = 5.0
@@ -30,6 +31,10 @@ const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
+const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
+const CLIENT_COUNTER_RADIUS_TILES: int = 2
+const HARVEST_INTERACT_RADIUS_TILES: int = 2
+const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
 
 # Garden access-cell scoring penalties. Distance / escape cost stays the main
 # driver; these only nudge selection away from obviously bad local geometry (a
@@ -277,6 +282,10 @@ var _client_sale_active: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
+var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
+var _counter_stock_by_cell: Dictionary = {}  # Vector2i -> int
+var _counter_pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
+var _morning_harvest_active: bool = false
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
@@ -420,9 +429,11 @@ func _ready() -> void:
 	_load_tile_definitions()
 	_migrate_special_tiles_from_wallz()
 	_setup_plant_manager()
+	_setup_building_object_manager()
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
+	set_process_input(true)
 
 
 func _load_level_spawn_config() -> void:
@@ -475,7 +486,11 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
+		_client_counter_agents.clear()
 		GameState.set_building_phase(false)
+		_morning_harvest_active = false
+		_clear_all_counter_piles()
+		_counter_stock_by_cell.clear()
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false
@@ -1078,6 +1093,12 @@ func _process(delta: float) -> void:
 			"astar_in=%d eating=%d" % [_astar_in_agents.size(), _eating_agents.size()])
 
 	t = Time.get_ticks_usec()
+	_process_client_counter_arrivals()
+	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
+			"counter_agents=%d paying=%d" % [_client_counter_agents.size(), _client_paying_agents.size()])
+
+	t = Time.get_ticks_usec()
 	_process_escape_arrivals()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_escape_arrivals", Time.get_ticks_usec() - t,
@@ -1334,6 +1355,40 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
 	if plant_manager.has_signal("new_day_finished") and not plant_manager.is_connected("new_day_finished", Callable(self, "_on_new_day_finished")):
 		plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
+
+
+func _setup_building_object_manager() -> void:
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects == null:
+		return
+	if building_objects.has_signal("building_added") and not building_objects.is_connected("building_added", Callable(self, "_on_building_added")):
+		building_objects.connect("building_added", Callable(self, "_on_building_added"))
+	if building_objects.has_signal("building_removed") and not building_objects.is_connected("building_removed", Callable(self, "_on_building_removed")):
+		building_objects.connect("building_removed", Callable(self, "_on_building_removed"))
+
+
+func _on_building_added(cell: Vector2i, item_id: String) -> void:
+	if item_id != ROSE_SHOP_COUNTER_ID:
+		return
+	if _morning_harvest_active and _rose_shop_counter_cells().size() > 0:
+		_auto_select_shop_tool()
+
+
+func _on_building_removed(cell: Vector2i, item_id: String) -> void:
+	if item_id != ROSE_SHOP_COUNTER_ID:
+		return
+	_counter_stock_by_cell.erase(cell)
+	_clear_counter_pile(cell)
+	for raw_nav_id: Variant in _client_counter_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _client_counter_agents[nav_id] as Dictionary
+		if (data.get("counter_cell", INVALID_CELL) as Vector2i) == cell:
+			var raw_agent: Variant = data.get("node", null)
+			_client_counter_agents.erase(nav_id)
+			if is_instance_valid(raw_agent):
+				var agent: Node2D = raw_agent as Node2D
+				if agent != null:
+					_retarget_client_to_counter_or_escape(agent)
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not _runtime_agents_active():
@@ -1859,6 +1914,88 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 func _on_new_day_finished() -> void:
 	if GameState.is_night:
 		return
+	_begin_morning_phase()
+
+
+func _input(event: InputEvent) -> void:
+	if not _morning_harvest_active:
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
+		return
+	if key_event.keycode != KEY_E:
+		return
+	if _try_harvest_nearby_grownup_rose():
+		get_viewport().set_input_as_handled()
+
+
+func _begin_morning_phase() -> void:
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	_client_counter_agents.clear()
+	_client_paying_agents.clear()
+	_morning_harvest_active = _grownup_rose_count() > 0
+	if not _morning_harvest_active:
+		_begin_client_sale_phase()
+		return
+	GameState.set_morning_phase(true)
+	if _rose_shop_counter_cells().is_empty():
+		_auto_select_shop_tool()
+
+
+func _try_harvest_nearby_grownup_rose() -> bool:
+	if plant_manager == null or not plant_manager.has_method("harvest_grownup_rose"):
+		return false
+	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
+	if counter_cells.is_empty():
+		_auto_select_shop_tool()
+		return false
+	var rose_cell: Vector2i = _nearest_harvestable_grownup_rose_cell()
+	if rose_cell == INVALID_CELL:
+		_check_morning_harvest_finished()
+		return false
+	var target_counter: Vector2i = counter_cells[randi_range(0, counter_cells.size() - 1)]
+	var rose_world: Vector2 = _cell_center(rose_cell)
+	if not bool(plant_manager.call("harvest_grownup_rose", rose_cell)):
+		return false
+	_add_counter_stock(target_counter, 1)
+	_animate_harvested_rose_to_counter(rose_world, target_counter)
+	_check_morning_harvest_finished()
+	return true
+
+
+func _nearest_harvestable_grownup_rose_cell() -> Vector2i:
+	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
+	if player == null or plant_manager == null or not plant_manager.has_method("get_grownup_rose_cells"):
+		return INVALID_CELL
+	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position)) if floorz != null else INVALID_CELL
+	if player_cell == INVALID_CELL:
+		return INVALID_CELL
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	var cells: Array = plant_manager.call("get_grownup_rose_cells") as Array
+	for raw_cell: Variant in cells:
+		var cell: Vector2i = raw_cell as Vector2i
+		var delta: Vector2i = cell - player_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan > HARVEST_INTERACT_RADIUS_TILES:
+			continue
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = cell
+	return best_cell
+
+
+func has_harvestable_grownup_rose_near_player() -> bool:
+	return _nearest_harvestable_grownup_rose_cell() != INVALID_CELL
+
+
+func _check_morning_harvest_finished() -> void:
+	if _grownup_rose_count() > 0:
+		return
+	_morning_harvest_active = false
+	GameState.set_morning_phase(false)
 	_begin_client_sale_phase()
 
 
@@ -1866,8 +2003,8 @@ func _begin_client_sale_phase() -> void:
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
-	var grownup_count: int = _grownup_rose_count()
-	if grownup_count <= 0 or _client_spawners.is_empty():
+	var sale_stock: int = _total_counter_stock()
+	if sale_stock <= 0 or _client_spawners.is_empty():
 		GameState.set_building_phase(true)
 		return
 	var client_cells: Array[Vector2i] = []
@@ -1876,19 +2013,19 @@ func _begin_client_sale_phase() -> void:
 	if client_cells.is_empty():
 		GameState.set_building_phase(true)
 		return
-	for index: int in range(grownup_count):
+	for index: int in range(sale_stock):
 		var random_index: int = randi_range(0, client_cells.size() - 1)
 		_client_sale_pending_spawners.append(client_cells[random_index])
 	for cell: Vector2i in client_cells:
 		_client_sale_spawn_timers[cell] = 0.0
 	_client_sale_active = true
-	GameState.set_building_phase(false)
+	GameState.set_client_phase(true)
 
 
 func _process_client_sale(delta: float) -> void:
 	if GameState.is_night or not _client_sale_active:
 		return
-	if _grownup_rose_count() <= 0:
+	if _total_counter_stock() <= 0:
 		_client_sale_pending_spawners.clear()
 	for raw_cell: Variant in _client_sale_spawn_timers.keys():
 		var cell: Vector2i = raw_cell as Vector2i
@@ -1907,8 +2044,9 @@ func _process_client_sale(delta: float) -> void:
 		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
 	if spawned_this_frame:
 		return
-	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty():
+	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty():
 		_client_sale_active = false
+		GameState.set_client_phase(false)
 		GameState.set_building_phase(true)
 
 
@@ -1920,6 +2058,189 @@ func _grownup_rose_count() -> int:
 	if plant_manager != null and plant_manager.has_method("grownup_rose_count"):
 		return int(plant_manager.call("grownup_rose_count"))
 	return 0
+
+
+func _rose_shop_counter_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects != null and building_objects.has_method("get_building_cells_by_item_id"):
+		var raw_cells: Array = building_objects.call("get_building_cells_by_item_id", ROSE_SHOP_COUNTER_ID) as Array
+		for raw_cell: Variant in raw_cells:
+			cells.append(raw_cell as Vector2i)
+		return cells
+	if traversable_buildings == null:
+		return cells
+	var item_def: Dictionary = ItemCatalog.get_item_def(ROSE_SHOP_COUNTER_ID)
+	var atlas: Vector2i = item_def.get("atlas", Vector2i(-1, -1)) as Vector2i
+	for raw_cell: Variant in traversable_buildings.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		if traversable_buildings.get_cell_atlas_coords(cell) == atlas:
+			cells.append(cell)
+	return cells
+
+
+func _total_counter_stock() -> int:
+	var total: int = 0
+	for raw_count: Variant in _counter_stock_by_cell.values():
+		total += int(raw_count)
+	return total
+
+
+func _counter_stock(counter_cell: Vector2i) -> int:
+	return int(_counter_stock_by_cell.get(counter_cell, 0))
+
+
+func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	_set_counter_stock(counter_cell, _counter_stock(counter_cell) + amount)
+
+
+func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	var value: int = maxi(0, amount)
+	if value <= 0:
+		_counter_stock_by_cell.erase(counter_cell)
+	else:
+		_counter_stock_by_cell[counter_cell] = value
+	_rebuild_counter_pile(counter_cell)
+
+
+func _select_stocked_counter_target(from_cell: Vector2i) -> Dictionary:
+	var best: Dictionary = {}
+	var best_dist: int = 2147483647
+	for raw_cell: Variant in _counter_stock_by_cell.keys():
+		var counter_cell: Vector2i = raw_cell as Vector2i
+		if _counter_stock(counter_cell) <= 0:
+			continue
+		var target_cell: Vector2i = _nearest_counter_access_cell(counter_cell, from_cell)
+		if target_cell == INVALID_CELL:
+			continue
+		var delta: Vector2i = target_cell - from_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best = {
+				"counter_cell": counter_cell,
+				"target_cell": target_cell,
+			}
+	return best
+
+
+func _nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) -> Vector2i:
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for y: int in range(counter_cell.y - CLIENT_COUNTER_RADIUS_TILES, counter_cell.y + CLIENT_COUNTER_RADIUS_TILES + 1):
+		for x: int in range(counter_cell.x - CLIENT_COUNTER_RADIUS_TILES, counter_cell.x + CLIENT_COUNTER_RADIUS_TILES + 1):
+			var cell: Vector2i = Vector2i(x, y)
+			var to_counter: Vector2i = cell - counter_cell
+			if abs(to_counter.x) + abs(to_counter.y) > CLIENT_COUNTER_RADIUS_TILES:
+				continue
+			if not _is_walkable(cell):
+				continue
+			var from_delta: Vector2i = cell - from_cell
+			var manhattan: int = abs(from_delta.x) + abs(from_delta.y)
+			if manhattan < best_dist:
+				best_dist = manhattan
+				best_cell = cell
+	return best_cell
+
+
+func _animate_harvested_rose_to_counter(start_world: Vector2, counter_cell: Vector2i) -> void:
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.texture = ROSE_TEXTURE
+	sprite.hframes = 2
+	sprite.frame = 0
+	sprite.centered = true
+	sprite.scale = Vector2(0.75, 0.75)
+	sprite.global_position = start_world
+	sprite.z_index = int(start_world.y) + 10
+	_rose_pile_parent().add_child(sprite)
+	var end_world: Vector2 = _cell_center(counter_cell) + _counter_pile_offset(counter_cell, maxi(0, _counter_stock(counter_cell) - 1))
+	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -64.0)
+	var tween: Tween = create_tween()
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_method(
+		Callable(self, "_update_harvest_rose_flight").bind(sprite, start_world, mid_world, end_world),
+		0.0,
+		1.0,
+		HARVEST_ROSE_FLIGHT_SECONDS
+	)
+	tween.parallel().tween_property(sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
+	tween.tween_callback(Callable(sprite, "queue_free"))
+
+
+func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:
+	if not is_instance_valid(sprite):
+		return
+	var inverse_progress: float = 1.0 - progress
+	var pos: Vector2 = (
+		inverse_progress * inverse_progress * start_world
+		+ 2.0 * inverse_progress * progress * mid_world
+		+ progress * progress * end_world
+	)
+	sprite.global_position = pos
+	sprite.z_index = int(pos.y) + 10
+
+
+func _rebuild_counter_pile(counter_cell: Vector2i) -> void:
+	_clear_counter_pile(counter_cell)
+	var count: int = _counter_stock(counter_cell)
+	if count <= 0:
+		return
+	var nodes: Array[Node2D] = []
+	for index: int in range(count):
+		var sprite: Sprite2D = Sprite2D.new()
+		sprite.texture = ROSE_TEXTURE
+		sprite.hframes = 2
+		sprite.frame = 0
+		sprite.centered = true
+		sprite.scale = Vector2(0.56, 0.56)
+		sprite.global_position = _cell_center(counter_cell) + _counter_pile_offset(counter_cell, index)
+		sprite.z_index = int(sprite.global_position.y) + index
+		_rose_pile_parent().add_child(sprite)
+		nodes.append(sprite)
+	_counter_pile_nodes_by_cell[counter_cell] = nodes
+
+
+func _clear_counter_pile(counter_cell: Vector2i) -> void:
+	var nodes: Array = _counter_pile_nodes_by_cell.get(counter_cell, []) as Array
+	for raw_node: Variant in nodes:
+		var node: Node = raw_node as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+	_counter_pile_nodes_by_cell.erase(counter_cell)
+
+
+func _clear_all_counter_piles() -> void:
+	var cells: Array = _counter_pile_nodes_by_cell.keys()
+	for raw_cell: Variant in cells:
+		var cell: Vector2i = raw_cell as Vector2i
+		_clear_counter_pile(cell)
+	_counter_pile_nodes_by_cell.clear()
+
+
+func _rose_pile_parent() -> Node:
+	if parent_for_agents != null:
+		return parent_for_agents
+	var scene: Node = get_tree().current_scene
+	return scene if scene != null else self
+
+
+func _counter_pile_offset(counter_cell: Vector2i, index: int) -> Vector2:
+	var h: int = index * 1103515245 + counter_cell.x * 73856093 + counter_cell.y * 19349663
+	var x_slot: int = _positive_mod(h, 7) - 3
+	@warning_ignore("integer_division")
+	var y_slot: int = _positive_mod(h / 7, 5) - 2
+	@warning_ignore("integer_division")
+	var layer: int = index / 5
+	return Vector2(float(x_slot) * 3.0, float(y_slot) * 2.0 - float(layer) * 3.0 - 8.0)
+
+
+func _auto_select_shop_tool() -> void:
+	var scene: Node = get_tree().current_scene
+	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui != null and game_ui.has_method("select_build_tool"):
+		game_ui.call("select_build_tool")
+	if GameState.is_morning_phase and game_ui != null and game_ui.has_method("set_selected_build_item"):
+		game_ui.call("set_selected_build_item", ROSE_SHOP_COUNTER_ID)
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:
@@ -2001,10 +2322,12 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
-	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
+	return _spawn_client_to_counter_from(spawner_cell)
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
+	if agent_kind == SPAWNER_KIND_CLIENT:
+		return _spawn_client_to_counter_from(spawner_cell)
 	var agent_scene: PackedScene = _resolve_monster_scene(monster_type)
 	if agent_scene == null:
 		return false
@@ -2116,6 +2439,57 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
+	return true
+
+
+func _spawn_client_to_counter_from(spawner_cell: Vector2i) -> bool:
+	var target: Dictionary = _select_stocked_counter_target(spawner_cell)
+	if target.is_empty():
+		_log_spawn_failure("client spawner %s has no stocked counter" % spawner_cell)
+		return false
+	var agent_scene: PackedScene = _resolve_monster_scene(&"basic")
+	if agent_scene == null:
+		return false
+	var occupied: Array[Vector2i] = _occupied_cells()
+	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
+	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
+		_log_spawn_failure("client spawner %s could not find a sane walkable spawn cell" % spawner_cell)
+		return false
+	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
+	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
+	var path_cells: PackedVector2Array = _find_path_on_walkable_map(spawn_cell, target_cell)
+	if path_cells.is_empty():
+		_log_spawn_failure("client spawner %s cannot path to counter %s" % [spawner_cell, counter_cell])
+		return false
+	var agent: Node2D = agent_scene.instantiate() as Node2D
+	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
+	parent.add_child(agent)
+	agent.global_position = _cell_center(spawn_cell)
+	agent.z_index = int(agent.global_position.y)
+	agent.add_to_group("clients")
+	agent.set_meta("agent_kind", SPAWNER_KIND_CLIENT)
+	agent.set_meta("spawner_cell", spawner_cell)
+	agent.set_meta("counter_cell", counter_cell)
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = CLIENT_TEXTURE
+	if agent_manager and agent_manager.has_method("spawn_agent"):
+		var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
+		agent.set("nav_id", nav_id)
+		if agent_manager.has_method("set_agent_never_rest"):
+			agent_manager.call("set_agent_never_rest", nav_id, true)
+		var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
+		if agent_manager.has_method("assign_agent_path"):
+			agent_manager.call("assign_agent_path", nav_id, path_world)
+		_client_counter_agents[nav_id] = {
+			"node": agent,
+			"spawner_cell": spawner_cell,
+			"counter_cell": counter_cell,
+			"target_cell": target_cell,
+			"path_world": path_world,
+		}
+		if agent.has_method("start_astar_in"):
+			agent.call("start_astar_in")
 	return true
 
 # Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
@@ -2473,6 +2847,86 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
 
 
+func _process_client_counter_arrivals() -> void:
+	for raw_nav_id: Variant in _client_counter_agents.keys():
+		var nav_id: int = int(raw_nav_id)
+		if not _client_counter_agents.has(nav_id):
+			continue
+		var data: Dictionary = _client_counter_agents[nav_id] as Dictionary
+		var raw_agent: Variant = data.get("node", null)
+		if not is_instance_valid(raw_agent):
+			_client_counter_agents.erase(nav_id)
+			continue
+		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+			continue
+		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
+			continue
+		var agent: Node2D = raw_agent as Node2D
+		if agent == null:
+			_client_counter_agents.erase(nav_id)
+			continue
+		var counter_cell: Vector2i = data.get("counter_cell", INVALID_CELL) as Vector2i
+		_client_counter_agents.erase(nav_id)
+		if agent.has_method("stop_astar_in"):
+			agent.call("stop_astar_in")
+		if _counter_stock(counter_cell) <= 0:
+			_retarget_client_to_counter_or_escape(agent)
+			continue
+		_start_client_counter_payment(agent, counter_cell)
+
+
+func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:
+	if _counter_stock(counter_cell) <= 0:
+		_retarget_client_to_counter_or_escape(agent)
+		return
+	var nav_id: int = int(agent.get("nav_id"))
+	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+	_client_paying_agents[nav_id] = {
+		"node": agent,
+		"timer": CLIENT_PAYMENT_SECONDS,
+		"counter_cell": counter_cell,
+	}
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if agent_manager and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	_spawn_client_payment_seed(agent.global_position)
+	if agent.has_method("start_eating"):
+		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
+
+
+func _retarget_client_to_counter_or_escape(agent: Node2D) -> void:
+	if not is_instance_valid(agent):
+		return
+	var nav_id: int = int(agent.get("nav_id"))
+	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz != null else INVALID_CELL
+	var target: Dictionary = _select_stocked_counter_target(agent_cell)
+	if target.is_empty():
+		_assign_agent_to_escape(agent)
+		return
+	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
+	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
+	var path_cells: PackedVector2Array = _find_path_on_walkable_map(agent_cell, target_cell)
+	if path_cells.is_empty():
+		_assign_agent_to_escape(agent)
+		return
+	if agent_manager and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
+	if agent_manager and agent_manager.has_method("assign_agent_path"):
+		agent_manager.call("assign_agent_path", nav_id, path_world)
+	_client_counter_agents[nav_id] = {
+		"node": agent,
+		"spawner_cell": spawner_cell,
+		"counter_cell": counter_cell,
+		"target_cell": target_cell,
+		"path_world": path_world,
+	}
+	if agent.has_method("start_astar_in"):
+		agent.call("start_astar_in")
+
+
 func _spawn_client_payment_seed(world_position: Vector2) -> void:
 	var scene: Node = get_tree().current_scene
 	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
@@ -2568,21 +3022,22 @@ func _process_drowning_agents(delta: float) -> void:
 	if watersources == null:
 		return
 
-	for raw_node: Node in get_tree().get_nodes_in_group("monsters"):
-		var agent: Node2D = raw_node as Node2D
-		if agent == null or not is_instance_valid(agent):
-			continue
-		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0:
-			continue
-		_update_monster_splash(agent, delta)
-		if _turret_eating_agents.has(nav_id):
-			continue
-		var in_water: bool = _agent_over_drowning_water(agent)
-		if _drowning_agents.has(nav_id):
-			continue
-		if in_water and _agent_can_drown(agent):
-			_start_agent_drowning(nav_id, agent)
+	for group_name: String in ["monsters", "clients"]:
+		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_node as Node2D
+			if agent == null or not is_instance_valid(agent):
+				continue
+			var nav_id: int = int(agent.get("nav_id"))
+			if nav_id < 0:
+				continue
+			_update_monster_splash(agent, delta)
+			if _turret_eating_agents.has(nav_id):
+				continue
+			var in_water: bool = _agent_over_drowning_water(agent)
+			if _drowning_agents.has(nav_id):
+				continue
+			if in_water and _agent_can_drown(agent):
+				_start_agent_drowning(nav_id, agent)
 
 	var dead_agents: Array[Node2D] = []
 	var drowning_ids: Array = _drowning_agents.keys()
@@ -2703,6 +3158,7 @@ func _suspend_agent_for_drowning(nav_id: int) -> void:
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
 	_escaping_agents.erase(nav_id)
+	_client_counter_agents.erase(nav_id)
 
 func _resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
 	_resume_agent_after_turret_eating(nav_id, agent, resume_state)
@@ -2723,6 +3179,11 @@ func _capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 			"kind": "escape",
 			"data": (_escaping_agents[nav_id] as Dictionary).duplicate(),
 		}
+	if _client_counter_agents.has(nav_id):
+		return {
+			"kind": "client_counter",
+			"data": (_client_counter_agents[nav_id] as Dictionary).duplicate(),
+		}
 	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
 	return {
@@ -2739,6 +3200,7 @@ func _suspend_agent_for_turret_eating(nav_id: int) -> void:
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
 	_escaping_agents.erase(nav_id)
+	_client_counter_agents.erase(nav_id)
 
 func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
 	var kind: String = str(resume_state.get("kind", "retarget"))
@@ -2762,10 +3224,22 @@ func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state:
 	elif kind == "escape":
 		if _assign_agent_to_escape(agent):
 			return
+	elif kind == "client_counter":
+		if _resume_agent_path(nav_id, agent, data):
+			_client_counter_agents[nav_id] = data
+			_entry_path_agents.erase(nav_id)
+			_erase_astar_in_agent(nav_id)
+			_escaping_agents.erase(nav_id)
+			if agent.has_method("start_astar_in"):
+				agent.call("start_astar_in")
+			return
 
 	var spawner_cell: Vector2i = resume_state.get("spawner_cell", INVALID_CELL) as Vector2i
 	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
+	if _agent_kind(agent) == SPAWNER_KIND_CLIENT:
+		_retarget_client_to_counter_or_escape(agent)
+		return
 	if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
 		agent.call("start_waiting_new_status")
 
@@ -3072,7 +3546,8 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if not is_instance_valid(agent):
 		return
-	if spawn_corpse:
+	var is_client: bool = agent.is_in_group("clients")
+	if spawn_corpse and not is_client:
 		_spawn_monster_corpse(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	_entry_path_agents.erase(nav_id)
@@ -3080,6 +3555,8 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	_erase_eating_agent(nav_id)
 	_drowning_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
+	_client_counter_agents.erase(nav_id)
+	_client_paying_agents.erase(nav_id)
 	_garden_retarget_queued.erase(nav_id)
 	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
 		var item: Dictionary = _garden_retarget_queue[index]
@@ -3088,6 +3565,7 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if agent_manager and agent_manager.has_method("unregister_agent") and nav_id >= 0:
 		agent_manager.call("unregister_agent", nav_id)
 	agent.remove_from_group("monsters")
+	agent.remove_from_group("clients")
 	agent.queue_free()
 
 func _spawn_monster_corpse(agent: Node2D) -> void:

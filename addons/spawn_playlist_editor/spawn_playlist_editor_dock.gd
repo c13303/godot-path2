@@ -33,6 +33,7 @@ var _starting_controls: VBoxContainer
 var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
+var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _night_option: OptionButton
@@ -255,6 +256,21 @@ func _build_starting_controls() -> void:
 	_starting_gems.value_changed.connect(_on_starting_gems_changed)
 	currency_row.add_child(_starting_gems)
 
+	var counter_limit_row: HBoxContainer = HBoxContainer.new()
+	_starting_controls.add_child(counter_limit_row)
+
+	var counter_limit_label: Label = Label.new()
+	counter_limit_label.text = "Rose shop counters"
+	counter_limit_row.add_child(counter_limit_label)
+
+	_rose_shop_counter_limit = SpinBox.new()
+	_rose_shop_counter_limit.min_value = 0.0
+	_rose_shop_counter_limit.max_value = 999.0
+	_rose_shop_counter_limit.step = 1.0
+	_rose_shop_counter_limit.custom_minimum_size = Vector2(86.0, 0.0)
+	_rose_shop_counter_limit.value_changed.connect(_on_rose_shop_counter_limit_changed)
+	counter_limit_row.add_child(_rose_shop_counter_limit)
+
 	var weapons_label: Label = Label.new()
 	weapons_label.text = "Starting weapons"
 	_starting_controls.add_child(weapons_label)
@@ -390,15 +406,19 @@ func _refresh_starting_controls() -> void:
 	_starting_controls.visible = has_level
 	_starting_seeds.editable = has_level
 	_starting_gems.editable = has_level
+	_rose_shop_counter_limit.editable = has_level
 	var seeds: int = DEFAULT_STARTING_SEEDS
 	var gems: int = DEFAULT_STARTING_GEMS
+	var counter_limit: int = 2
 	var weapons: Array[StringName] = _default_starting_weapons()
 	if config != null:
 		seeds = config.starting_seeds
 		gems = config.starting_gems
+		counter_limit = config.rose_shop_counter_limit
 		weapons = _valid_weapon_ids(config.starting_weapons)
 	_starting_seeds.value = float(seeds)
 	_starting_gems.value = float(gems)
+	_rose_shop_counter_limit.value = float(counter_limit)
 	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
 		var weapon_id: StringName = raw_weapon_id as StringName
 		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
@@ -764,6 +784,16 @@ func _on_starting_gems_changed(value: float) -> void:
 	mark_dirty()
 
 
+func _on_rose_shop_counter_limit_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.rose_shop_counter_limit = int(value)
+	mark_dirty()
+
+
 func _on_starting_weapon_toggled(enabled: bool, weapon_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -906,6 +936,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_seeds", int(_starting_seeds.value))
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_weapons", _selected_starting_weapons())
+		root.set("rose_shop_counter_limit", int(_rose_shop_counter_limit.value))
 	_apply_client_frequency_to_scene(root)
 	var new_scene: PackedScene = PackedScene.new()
 	var pack_error: Error = new_scene.pack(root)
@@ -924,6 +955,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_seeds = int(_starting_seeds.value)
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_weapons = _selected_starting_weapons()
+	config.rose_shop_counter_limit = int(_rose_shop_counter_limit.value)
 
 
 func _apply_client_frequency_to_scene(root: Node) -> void:

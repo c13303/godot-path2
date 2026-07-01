@@ -97,6 +97,20 @@ func get_building_cells() -> Array[Vector2i]:
 		cells.append(raw_cell as Vector2i)
 	return cells
 
+
+func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for raw_cell: Variant in _buildings_by_cell.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var data: Dictionary = _buildings_by_cell[cell] as Dictionary
+		if str(data.get("item_id", "")) == item_id:
+			cells.append(cell)
+	return cells
+
+
+func count_buildings_by_item_id(item_id: String) -> int:
+	return get_building_cells_by_item_id(item_id).size()
+
 func clear() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()

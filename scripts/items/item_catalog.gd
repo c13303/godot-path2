@@ -142,6 +142,23 @@ const ITEM_DEFS: Dictionary = {
 		"build_in_range": false,
 		"max_stack": 999,
 	},
+	"rose_shop_counter": {
+		"id": "rose_shop_counter",
+		"name": "Rose Shop Counter",
+		"currency": &"",
+		"type": "placeable",
+		"category": "shop_counter",
+		"frame": 12,
+		"price": 0,
+		"target_layer": "traversable_buildings",
+		"atlas": Vector2i(4, 0),
+		"occupies_cell": true,
+		"blocks_movement": false,
+		"blocks_projectiles": false,
+		"requires_grass_green_floor": true,
+		"runtime_id": "rose_shop_counter",
+		"max_stack": 999,
+	},
 }
 
 static func get_item_def(item_id: String) -> Dictionary:

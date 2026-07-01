@@ -26,7 +26,9 @@ const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
-const KEY_NEW_DAY: String = "tutorial.new_day"
+const KEY_CLIENT_TIME: String = "tutorial.client_time"
+const KEY_PLACE_SHOP: String = "tutorial.place_shop"
+const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -35,6 +37,8 @@ const CHANGE_DELAY: float = 0.5
 var _plant_manager: Node
 var _progression: Node
 var _game_ui: Node
+var _building_manager: Node
+var _building_object_manager: Node
 var _day_toggle: Button
 var _displayed_key: String = ""  # key currently shown ("" while blank)
 var _pending_key: String = ""    # key we are waiting to reveal
@@ -62,6 +66,8 @@ func _resolve_nodes() -> void:
 	var scene: Node = get_tree().current_scene
 	if scene != null:
 		_plant_manager = scene.get_node_or_null("Map/PlantManager")
+		_building_manager = scene.get_node_or_null("Map/BuildingManager")
+		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
@@ -93,8 +99,15 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	var key: String = _current_message_key()
-	if _waiting_for_seed_harvest and key != KEY_REFILL_WATER:
-		key = KEY_NEW_DAY
+	if _waiting_for_seed_harvest and not GameState.is_morning_phase and key != KEY_REFILL_WATER:
+		key = KEY_CLIENT_TIME
+	if key == "":
+		_displayed_key = ""
+		text = ""
+		visible = false
+		_set_glow(false)
+		_update_day_toggle_interactable()
+		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		_set_glow(false)
@@ -152,8 +165,14 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
+	if GameState.is_morning_phase:
+		if _rose_shop_counter_count() <= 0:
+			return KEY_PLACE_SHOP
+		if _building_manager != null and _building_manager.has_method("has_harvestable_grownup_rose_near_player") and bool(_building_manager.call("has_harvestable_grownup_rose_near_player")):
+			return KEY_HARVEST_ROSE
+		return ""
 	if not GameState.is_building_phase:
-		return KEY_NEW_DAY
+		return KEY_CLIENT_TIME
 	# Nothing growing and nothing to build with: the run is lost.
 	if planted == 0 and seeds == 0:
 		return KEY_GAME_OVER
@@ -177,6 +196,12 @@ func _shop_tool_equipped() -> bool:
 		and _game_ui.has_method("is_build_tool_selected")
 		and bool(_game_ui.call("is_build_tool_selected"))
 	)
+
+
+func _rose_shop_counter_count() -> int:
+	if _building_object_manager != null and _building_object_manager.has_method("count_buildings_by_item_id"):
+		return int(_building_object_manager.call("count_buildings_by_item_id", "rose_shop_counter"))
+	return 0
 
 
 ## Pulses the day/night button so the player notices they can end the day.

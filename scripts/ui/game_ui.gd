@@ -262,6 +262,8 @@ func selected_quick_item_places_tile() -> bool:
 	return ItemCatalog.is_placeable(item_id) and not is_item_disabled_for_placement(item_id)
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
+	if GameState.is_morning_phase and item_id == "rose_shop_counter":
+		return false
 	return (GameState.is_night or not GameState.is_building_phase) and ItemCatalog.is_placeable(item_id)
 
 ## Whether a quick-bar item is disabled for selection/use. At night every
@@ -269,6 +271,8 @@ func is_item_disabled_for_placement(item_id: String) -> bool:
 ## only wield weapons; during the day nothing is locked. Generalizes to any new
 ## weapon (selectable at night) or non-weapon (locked at night) item.
 func is_quick_item_disabled(item_id: String) -> bool:
+	if GameState.is_morning_phase and item_id == BUILD_TOOL_ID:
+		return false
 	return item_id != "" and (GameState.is_night or not GameState.is_building_phase) and not ItemCatalog.is_weapon(item_id)
 
 ## Selects the first quick-slot weapon, used to auto-arm the player when night
@@ -318,13 +322,19 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 
 ## How many of item_id the player can currently afford (floor(currency / price)).
 func get_build_affordable_quantity(item_id: String) -> int:
+	var limit_remaining: int = _build_limit_remaining(item_id)
 	var price: int = ItemCatalog.get_price(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
-	if price <= 0 or key == &"" or _progression_node == null:
+	if price <= 0:
+		return max(0, limit_remaining) if limit_remaining >= 0 else 0
+	if key == &"" or _progression_node == null:
 		return 0
 	var owned: int = int(_progression_node.call("get_value", key))
 	@warning_ignore("integer_division")
-	return owned / price
+	var affordable: int = owned / price
+	if limit_remaining >= 0:
+		return mini(affordable, limit_remaining)
+	return affordable
 
 func can_afford_build(item_id: String, count: int = 1) -> bool:
 	return count > 0 and get_build_affordable_quantity(item_id) >= count
@@ -336,9 +346,37 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 		return false
 	var price: int = ItemCatalog.get_price(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
-	if price <= 0 or key == &"" or _progression_node == null:
+	if price <= 0:
+		return true
+	if key == &"" or _progression_node == null:
 		return false
 	return bool(_progression_node.call("spend", key, price * count))
+
+
+func _build_limit_remaining(item_id: String) -> int:
+	var limit: int = _build_limit_for_item(item_id)
+	if limit < 0:
+		return -1
+	var built_count: int = _placed_build_count(item_id)
+	return maxi(0, limit - built_count)
+
+
+func _build_limit_for_item(item_id: String) -> int:
+	if item_id != "rose_shop_counter":
+		return -1
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_rose_shop_counter_limit"):
+		return maxi(0, int(loader.call("get_loaded_rose_shop_counter_limit")))
+	return 2
+
+
+func _placed_build_count(item_id: String) -> int:
+	var scene: Node = get_tree().current_scene
+	var manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene != null else null
+	if manager != null and manager.has_method("count_buildings_by_item_id"):
+		return int(manager.call("count_buildings_by_item_id", item_id))
+	return 0
 
 ## Refund the full price of `count` removed units back to the matching currency,
 ## flying one currency icon per unit from `world_position` to the HUD and crediting

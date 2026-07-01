@@ -10,17 +10,22 @@ const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const SEED_CURRENCY: StringName = &"seed"
 const GEM_CURRENCY: StringName = &"gem"
+const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
+const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 
 @onready var title_label: Label = $MarginContainer/Content/Title
 @onready var rose_button: Button = $MarginContainer/Content/Items/RoseItem/Rose
 @onready var turret_button: Button = $MarginContainer/Content/Items/TurretItem/Turret
 @onready var wall_button: Button = $MarginContainer/Content/Items/WallItem/Wall
+@onready var items_box: HBoxContainer = $MarginContainer/Content/Items
 @onready var rose_price_label: Label = $MarginContainer/Content/Items/RoseItem/Price/Amount
 @onready var turret_price_label: Label = $MarginContainer/Content/Items/TurretItem/Price/Amount
 @onready var wall_price_label: Label = $MarginContainer/Content/Items/WallItem/Price/Amount
 
 var progression_node: Node
 var game_ui: Node
+var counter_button: Button
+var counter_price_label: Label
 var _waiting_for_seed_harvest: bool = false
 # The building currently picked for placement (drives the green frame + build mode).
 var _selected_item_id: String = ""
@@ -41,6 +46,8 @@ func _ready() -> void:
 		"turret1": turret_button,
 		"wall": wall_button,
 	}
+	_ensure_counter_item()
+	_item_buttons["rose_shop_counter"] = counter_button
 	for raw_item_id: Variant in _item_buttons:
 		var item_id: String = String(raw_item_id)
 		var button: Button = _item_buttons[item_id]
@@ -53,12 +60,17 @@ func _ready() -> void:
 	rose_price_label.text = str(ItemCatalog.get_price("rose"))
 	turret_price_label.text = str(ItemCatalog.get_price("turret1"))
 	wall_price_label.text = str(ItemCatalog.get_price("wall"))
+	counter_price_label.text = str(ItemCatalog.get_price("rose_shop_counter"))
 
 # The shop is closed during the night and during the morning sale phase.
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	_waiting_for_seed_harvest = false
 	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 		GameState.building_phase_changed.connect(_on_building_phase_changed)
+	if not GameState.morning_phase_changed.is_connected(_on_morning_phase_changed):
+		GameState.morning_phase_changed.connect(_on_morning_phase_changed)
+	if not GameState.client_phase_changed.is_connected(_on_client_phase_changed):
+		GameState.client_phase_changed.connect(_on_client_phase_changed)
 	_set_shop_open(false)
 	set_process(true)
 
@@ -71,7 +83,7 @@ func _process(_delta: float) -> void:
 		and game_ui.has_method("is_build_tool_selected")
 		and bool(game_ui.call("is_build_tool_selected"))
 		and not GameState.is_night
-		and GameState.is_building_phase
+		and (GameState.is_building_phase or GameState.is_morning_phase)
 		and not _waiting_for_seed_harvest
 	)
 	if should_show and not visible:
@@ -82,6 +94,9 @@ func _process(_delta: float) -> void:
 
 func _open_shop() -> void:
 	_set_shop_open(true)
+	if GameState.is_morning_phase and _can_afford("rose_shop_counter"):
+		_select_item("rose_shop_counter")
+		return
 	# Resume placing the building we were last on, if we can still afford it.
 	if _last_picked_item_id != "" and _can_afford(_last_picked_item_id):
 		_select_item(_last_picked_item_id)
@@ -110,8 +125,64 @@ func _on_building_phase_changed(is_building_phase: bool) -> void:
 		game_ui.call("select_build_tool")
 
 
+func _on_morning_phase_changed(is_morning_phase: bool) -> void:
+	if is_morning_phase:
+		_waiting_for_seed_harvest = false
+
+
+func _on_client_phase_changed(is_client_phase: bool) -> void:
+	if is_client_phase:
+		_waiting_for_seed_harvest = true
+
+
+func _ensure_counter_item() -> void:
+	if counter_button != null:
+		return
+	var item_box: VBoxContainer = VBoxContainer.new()
+	item_box.name = "RoseShopCounterItem"
+	item_box.theme_override_constants/separation = 4
+	items_box.add_child(item_box)
+
+	counter_button = Button.new()
+	counter_button.name = "RoseShopCounter"
+	counter_button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	counter_button.custom_minimum_size = Vector2(48.0, 48.0)
+	counter_button.tooltip_text = "Rose Shop Counter"
+	counter_button.expand_icon = true
+	_copy_button_style(rose_button, counter_button)
+	counter_button.icon = _item_frame_texture(ItemCatalog.get_item_def("rose_shop_counter"))
+	item_box.add_child(counter_button)
+
+	var price_row: HBoxContainer = HBoxContainer.new()
+	price_row.name = "Price"
+	price_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	price_row.theme_override_constants/separation = 2
+	item_box.add_child(price_row)
+
+	counter_price_label = Label.new()
+	counter_price_label.name = "Amount"
+	price_row.add_child(counter_price_label)
+
+
+func _copy_button_style(source: Button, target: Button) -> void:
+	for style_name: StringName in [&"normal", &"pressed", &"hover"]:
+		var style: StyleBox = source.get_theme_stylebox(String(style_name))
+		if style != null:
+			target.add_theme_stylebox_override(String(style_name), style)
+
+
+func _item_frame_texture(item_def: Dictionary) -> AtlasTexture:
+	var frame: int = int(item_def.get("frame", 0))
+	var atlas_texture: AtlasTexture = AtlasTexture.new()
+	atlas_texture.atlas = ITEMS_TEXTURE
+	atlas_texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
+	return atlas_texture
+
+
 func _on_item_pressed(item_id: String) -> void:
 	if not visible or GameState.is_night:
+		return
+	if GameState.is_morning_phase and item_id != "rose_shop_counter":
 		return
 	# Clicking the already-selected item toggles it back off and forgets it.
 	if _selected_item_id == item_id:

@@ -4,7 +4,9 @@
 	"tutorial.buy_roses": "Equipez la pelle pour planter des roses",
 	"tutorial.plant_roses": "Plantez des roses",
 	"tutorial.water_roses": "Arrosez vos roses",
-	"tutorial.new_day": "nouveau jour",
+	"tutorial.client_time": "temps client",
+	"tutorial.place_shop": "Placez le magasin",
+	"tutorial.harvest_rose": "Pressez E pour cueillir",
 	"tutorial.pass_night": "Passez la nuit",
 	"game_over.restart": "Recommencer",
 	"game_over.main_menu": "Menu",
@@ -20,5 +22,6 @@
 	"item.rose": "Rose",
 	"item.debris": "Débris",
 	"item.lamp": "Lampe",
-	"item.turret1": "Tourelle"
+	"item.turret1": "Tourelle",
+	"item.rose_shop_counter": "Comptoir de roses"
 }

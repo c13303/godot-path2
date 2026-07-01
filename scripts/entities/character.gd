@@ -87,6 +87,10 @@ func _process(delta: float) -> void:
 func take_damage(amount: int) -> bool:
 	if _dead or amount <= 0:
 		return false
+	if _is_client_agent() and status != "drowning":
+		_flash_time_left = FLASH_DURATION
+		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
+		return false
 	health = max(0, health - amount)
 	_flash_time_left = FLASH_DURATION
 	_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
@@ -97,6 +101,8 @@ func take_damage(amount: int) -> bool:
 	return false
 
 func _draw() -> void:
+	if _is_client_agent():
+		return
 	var background_rect: Rect2 = Rect2(HEALTH_BAR_POSITION, HEALTH_BAR_SIZE)
 	draw_rect(background_rect, Color.BLACK)
 	var health_ratio: float = float(health) / float(max(1, max_health))
@@ -132,6 +138,10 @@ func _update_monster_frame() -> void:
 		frame = MONSTER_FRAME_DROWNING
 	if _monster_sprite.frame != frame:
 		_monster_sprite.frame = frame
+
+
+func _is_client_agent() -> bool:
+	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client"
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

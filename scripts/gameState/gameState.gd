@@ -5,10 +5,14 @@ extends Node
 ## Emitted whenever the day/night mode changes. `is_night` is the new value.
 signal mode_changed(is_night: bool)
 signal building_phase_changed(is_building_phase: bool)
+signal morning_phase_changed(is_morning_phase: bool)
+signal client_phase_changed(is_client_phase: bool)
 
 ## True while night is active. The game starts in day mode.
 var is_night: bool = false
 var is_building_phase: bool = true
+var is_morning_phase: bool = false
+var is_client_phase: bool = false
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
@@ -17,6 +21,8 @@ const SKIP_STARTUP_AUTOSAVE_META: StringName = &"skip_startup_autosave"
 
 ## Switch to night: monsters are allowed to spawn.
 func start_night() -> void:
+	set_morning_phase(false)
+	set_client_phase(false)
 	set_night(true)
 
 
@@ -29,7 +35,32 @@ func set_building_phase(value: bool) -> void:
 	if is_building_phase == value:
 		return
 	is_building_phase = value
+	if value:
+		set_morning_phase(false)
+		set_client_phase(false)
 	building_phase_changed.emit(is_building_phase)
+
+
+func set_morning_phase(value: bool) -> void:
+	if is_morning_phase == value:
+		return
+	is_morning_phase = value
+	if value:
+		set_client_phase(false)
+		is_building_phase = false
+		building_phase_changed.emit(is_building_phase)
+	morning_phase_changed.emit(is_morning_phase)
+
+
+func set_client_phase(value: bool) -> void:
+	if is_client_phase == value:
+		return
+	is_client_phase = value
+	if value:
+		set_morning_phase(false)
+		is_building_phase = false
+		building_phase_changed.emit(is_building_phase)
+	client_phase_changed.emit(is_client_phase)
 
 
 ## Toggle between day and night.
@@ -47,6 +78,8 @@ func set_night(value: bool) -> void:
 	is_night = value
 	if is_night:
 		set_building_phase(false)
+		set_morning_phase(false)
+		set_client_phase(false)
 	mode_changed.emit(is_night)
 
 
