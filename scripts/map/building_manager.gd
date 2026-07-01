@@ -853,7 +853,7 @@ func _rebuild_walkable_map_cache_budgeted(token: int) -> bool:
 	for cell: Vector2i in floor_cells:
 		if not _night_preparation_is_current(token):
 			return false
-		if _is_walkable(cell) and not _has_water(cell):
+		if _is_walkable(cell):
 			_walkable_map_tiles[cell] = true
 		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
 			await get_tree().process_frame
@@ -877,6 +877,8 @@ func _build_gardens_from_plants_budgeted(token: int) -> bool:
 	source_cells.append_array(_collect_counter_access_cells())
 	for raw_cell: Variant in source_cells:
 		var source_cell: Vector2i = raw_cell as Vector2i
+		if not _is_walkable(source_cell):
+			continue
 		unassigned[source_cell] = true
 
 	var slice_started_us: int = Time.get_ticks_usec()
@@ -3742,7 +3744,7 @@ func _find_walkable_cell_near(start_cell: Vector2i, max_radius: int = 8) -> Vect
 	return INVALID_CELL
 
 func _is_walkable(cell: Vector2i) -> bool:
-	return _has_floor(cell) and not _has_wall(cell)
+	return _has_floor(cell) and not _has_wall(cell) and not _has_water(cell)
 
 func _rebuild_walkable_map_cache() -> void:
 	_walkable_map_tiles.clear()
@@ -3750,7 +3752,7 @@ func _rebuild_walkable_map_cache() -> void:
 		return
 	for raw_cell in floorz.get_used_cells():
 		var cell: Vector2i = raw_cell
-		if _is_walkable(cell) and not _has_water(cell):
+		if _is_walkable(cell):
 			_walkable_map_tiles[cell] = true
 
 func _has_floor(cell: Vector2i) -> bool:
@@ -3761,10 +3763,10 @@ func _has_wall(cell: Vector2i) -> bool:
 		return true
 	return _building_cell_blocks_movement(cell)
 
-# Water tiles are impassable for client A* paths. Monsters get this for free from
-# the native flow field (it treats the water layer as a navigation blocker, see
-# FlowFieldCode.set_navigation_blocking_layer); clients follow an assigned A* path
-# on _walkable_map_tiles, so water must be excluded from that set explicitly.
+# Water tiles are impassable for all gameplay navigation and garden geometry.
+# Keeping this inside _is_walkable ensures garden interiors, borders, entry/exit
+# cells, client A* paths, spawner reachability, and fallback targets all reject
+# water from the same source of truth.
 func _has_water(cell: Vector2i) -> bool:
 	return watersources != null and watersources.get_cell_source_id(cell) != -1
 
@@ -3855,6 +3857,8 @@ func _cluster_plants_by_walkable_reachability(plant_cells_from_manager: Array) -
 	var unassigned: Dictionary = {}  # Vector2i -> true
 	for raw_cell in plant_cells_from_manager:
 		var cell: Vector2i = raw_cell
+		if not _is_walkable(cell):
+			continue
 		unassigned[cell] = true
 
 	while not unassigned.is_empty():
@@ -5496,11 +5500,11 @@ func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> Packe
 		return PackedVector2Array()
 	var path_tiles: Dictionary = _walkable_map_tiles
 	var path_tiles_copied: bool = false
-	if _is_walkable(from_tile) and not _has_water(from_tile) and not path_tiles.has(from_tile):
+	if _is_walkable(from_tile) and not path_tiles.has(from_tile):
 		path_tiles = _walkable_map_tiles.duplicate()
 		path_tiles_copied = true
 		path_tiles[from_tile] = true
-	if _is_walkable(to_tile) and not _has_water(to_tile) and not path_tiles.has(to_tile):
+	if _is_walkable(to_tile) and not path_tiles.has(to_tile):
 		if not path_tiles_copied:
 			path_tiles = _walkable_map_tiles.duplicate()
 			path_tiles_copied = true
