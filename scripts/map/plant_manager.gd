@@ -27,6 +27,14 @@ var _plant_layer_flush_queued: bool = false
 func _ready() -> void:
 	initialize_from_layer()
 	_connect_day_started()
+	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
+		GameState.building_phase_changed.connect(_on_building_phase_changed)
+
+func _on_building_phase_changed(is_building_phase: bool) -> void:
+	# A fresh build phase resets the garden: every rose dries out and must be
+	# re-watered. Overnight growth (grow_green_roses) leaves roses green until here.
+	if is_building_phase:
+		dry_all_roses()
 
 func _connect_day_started() -> void:
 	var scene: Node = get_tree().current_scene
@@ -125,9 +133,29 @@ func grow_green_roses() -> int:
 			continue
 		plant_data["grownup"] = true
 		_plants[cell] = plant_data
-		_set_rose_atlas(cell, ROSE_GROWNUP_ATLAS)
+		# Grown roses keep their watered (green) look through the night and morning;
+		# they only revert to the dry tile once the next build phase begins (see
+		# dry_all_roses), so a watered rose never appears to dry out overnight.
+		_set_rose_atlas(cell, ROSE_WET_ATLAS)
 		grown_count += 1
 	return grown_count
+
+
+## Reverts every rose to its dry, unwatered state (dry tile, needs watering again to
+## grow). Called when a new build phase starts so the player re-waters each day; not
+## called overnight, so watered roses stay green until then.
+func dry_all_roses() -> void:
+	if not plantz:
+		return
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var plant_data: Dictionary = _plants[cell] as Dictionary
+		plant_data["watered_once"] = false
+		plant_data["grownup"] = false
+		_plants[cell] = plant_data
+		_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
+	_flush_plant_layer_now()
+	_queue_plant_layer_flush()
 
 func grownup_rose_count() -> int:
 	var count: int = 0

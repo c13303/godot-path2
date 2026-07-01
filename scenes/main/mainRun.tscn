@@ -1218,149 +1218,15 @@ script = ExtResource("11_62xsw")
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
 
-[node name="right anchor" type="Control" parent="GameUI" unique_id=722604844]
+[node name="Shop" type="Control" parent="GameUI"]
 layout_mode = 3
-anchor_left = 0.85
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 0
-grow_vertical = 2
-mouse_filter = 2
-
-[node name="Shop" type="Panel" parent="GameUI/right anchor" unique_id=1347609121]
-visible = false
-layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_shop")
 script = ExtResource("28_shop")
-
-[node name="MarginContainer" type="MarginContainer" parent="GameUI/right anchor/Shop" unique_id=547436022]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 16
-
-[node name="Content" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer" unique_id=304500496]
-layout_mode = 2
-theme_override_constants/separation = 16
-
-[node name="Title" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content" unique_id=1135021942]
-layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "Shop"
-horizontal_alignment = 1
-
-[node name="Items" type="HBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content" unique_id=1655392915]
-layout_mode = 2
-theme_override_constants/separation = 12
-alignment = 1
-
-[node name="RoseItem" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=1768142111]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Rose" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/RoseItem" unique_id=215278853]
-texture_filter = 1
-custom_minimum_size = Vector2(48, 48)
-layout_mode = 2
-tooltip_text = "Rose"
-theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
-theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
-icon = SubResource("AtlasTexture_shop_rose")
-expand_icon = true
-
-[node name="Price" type="HBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/RoseItem" unique_id=1150831313]
-layout_mode = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/RoseItem/Price" unique_id=658534223]
-layout_mode = 2
-
-[node name="Seed" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/RoseItem/Price" unique_id=2020582600]
-texture_filter = 1
-custom_minimum_size = Vector2(16, 16)
-layout_mode = 2
-size_flags_vertical = 4
-texture = SubResource("AtlasTexture_seed_icon")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="TurretItem" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=973702365]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Turret" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem" unique_id=1023829755]
-texture_filter = 1
-custom_minimum_size = Vector2(48, 48)
-layout_mode = 2
-tooltip_text = "Turret"
-theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
-theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
-icon = SubResource("AtlasTexture_shop_turret")
-expand_icon = true
-
-[node name="Price" type="HBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem" unique_id=1289805807]
-layout_mode = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem/Price" unique_id=2095674811]
-layout_mode = 2
-
-[node name="Gem" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/TurretItem/Price" unique_id=1066191394]
-texture_filter = 1
-custom_minimum_size = Vector2(16, 16)
-layout_mode = 2
-size_flags_vertical = 4
-texture = SubResource("AtlasTexture_gem_icon")
-expand_mode = 1
-stretch_mode = 5
-
-[node name="WallItem" type="VBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items" unique_id=1198186592]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="Wall" type="Button" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem" unique_id=2101666100]
-texture_filter = 1
-custom_minimum_size = Vector2(48, 48)
-layout_mode = 2
-tooltip_text = "Wall"
-theme_override_styles/normal = SubResource("StyleBoxFlat_shop_item")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_shop_item_hover")
-theme_override_styles/hover = SubResource("StyleBoxFlat_shop_item_hover")
-icon = SubResource("AtlasTexture_shop_wall")
-expand_icon = true
-
-[node name="Price" type="HBoxContainer" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem" unique_id=1552174172]
-layout_mode = 2
-theme_override_constants/separation = 2
-alignment = 1
-
-[node name="Amount" type="Label" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem/Price" unique_id=1795573404]
-layout_mode = 2
-
-[node name="Gem" type="TextureRect" parent="GameUI/right anchor/Shop/MarginContainer/Content/Items/WallItem/Price" unique_id=25244716]
-texture_filter = 1
-custom_minimum_size = Vector2(16, 16)
-layout_mode = 2
-size_flags_vertical = 4
-texture = SubResource("AtlasTexture_gem_icon")
-expand_mode = 1
-stretch_mode = 5
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")

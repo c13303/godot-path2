@@ -5,8 +5,8 @@
 	"tutorial.plant_roses": "Plantez des roses",
 	"tutorial.water_roses": "Arrosez vos roses",
 	"tutorial.client_time": "temps client",
-	"tutorial.place_shop": "Placez le magasin",
-	"tutorial.harvest_rose": "Pressez E pour cueillir",
+	"tutorial.place_shop": "Placez les comptoirs du magasin",
+	"tutorial.harvest_rose": "Cueillez vos roses",
 	"tutorial.pass_night": "Passez la nuit",
 	"game_over.restart": "Recommencer",
 	"game_over.main_menu": "Menu",
@@ -16,12 +16,13 @@
 	"item.water": "Eau",
 	"item.spray": "Spray",
 	"item.beam": "Jet",
-	"item.build_tool": "Magasin",
+	"item.build_tool": "Construction (click droit pour déconstruire)",
 	"item.unbuild_tool": "Démonter",
 	"item.wall": "Mur",
 	"item.rose": "Rose",
 	"item.debris": "Débris",
 	"item.lamp": "Lampe",
-	"item.turret1": "Tourelle",
-	"item.rose_shop_counter": "Comptoir de roses"
+	"item.turret1": "Cracheuse",
+	"item.rose_shop_counter": "Comptoir de roses",
+	"ui.remaining": "restant"
 }

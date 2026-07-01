@@ -116,7 +116,7 @@ const ITEM_DEFS: Dictionary = {
 	},
 	"turret1": {
 		"id": "turret1",
-		"name": "Turret",
+		"name": "Spitter",
 		"currency": &"gem",
 		"type": "placeable",
 		"category": "turret",
@@ -150,11 +150,16 @@ const ITEM_DEFS: Dictionary = {
 		"category": "shop_counter",
 		"frame": 12,
 		"price": 0,
-		"target_layer": "traversable_buildings",
+		# Solid like a wall: placed on the blocking layer so the player's hard
+		# collision (driven by _refresh_cell_collision) and the monster steering
+		# obstacle both treat the counter cell as impassable. Clients still buy from
+		# an adjacent access cell, so the sale flow is unaffected.
+		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(4, 0),
 		"occupies_cell": true,
-		"blocks_movement": false,
-		"blocks_projectiles": false,
+		"isWall": true,
+		"blocks_movement": true,
+		"blocks_projectiles": true,
 		"requires_grass_green_floor": true,
 		"runtime_id": "rose_shop_counter",
 		"max_stack": 999,

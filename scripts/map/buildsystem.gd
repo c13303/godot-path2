@@ -6,6 +6,9 @@ const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
+# Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
+const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
+const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
@@ -48,6 +51,8 @@ var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _remove_drag_active: bool = false
 var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
+# Green outline panel that frames the active drag rectangle (built lazily).
+var _drag_selection_rect: Panel = null
 
 func _ready() -> void:
 	_resolve_level_layers()
@@ -162,33 +167,53 @@ func _start_remove_drag() -> void:
 		return
 	if _placement_disabled() or not _build_tool_selected():
 		return
-	_cancel_removal()
+	# A new drag stacks onto any in-progress removal instead of cancelling it, so
+	# only clear leftover preview bars here (committed queue bars are preserved).
+	_clear_preview_remove_progress_bars()
 	_remove_drag_active = true
 	_remove_drag_start_cell = _hovered_cell()
 	_remove_drag_end_cell = _remove_drag_start_cell
 	_preview_remove_drag()
 
 func _preview_remove_drag() -> void:
-	_clear_remove_progress_bars()
+	_clear_preview_remove_progress_bars()
+	_show_drag_selection_rect(_remove_drag_start_cell, _remove_drag_end_cell)
+	var committed: Dictionary = _committed_cell_set()
 	var removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _remove_drag_end_cell)
 	for removal: Dictionary in removals:
 		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+		# Cells already queued keep their committed bar; don't preview over them.
+		if committed.has(cell):
+			continue
 		_create_remove_progress(cell, 0.0)
 
 func _finish_remove_drag() -> void:
 	if not _remove_drag_active:
 		return
 	_remove_drag_active = false
-	_remove_queue = _remove_rectangle_cells(_remove_drag_start_cell, _hovered_cell())
-	_clear_remove_progress_bars()
+	_hide_drag_selection_rect()
+	var was_active: bool = _remove_active
+	var new_removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _hovered_cell())
+	_clear_preview_remove_progress_bars()
+	# Stack the new selection behind whatever is already being removed instead of
+	# replacing it: append to the queue so removals run one after another (a waiting
+	# line), each keeping its own progress bar.
+	var committed: Dictionary = _committed_cell_set()
+	for removal: Dictionary in new_removals:
+		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+		if committed.has(cell):
+			continue
+		committed[cell] = true
+		_remove_queue.append(removal)
+		_create_remove_progress(cell, 0.0)
 	if _remove_queue.is_empty():
 		_cancel_removal()
 		return
-	for removal: Dictionary in _remove_queue:
-		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
-		_create_remove_progress(cell, 0.0)
 	_remove_active = true
-	_remove_elapsed = 0.0
+	# Preserve the in-progress head's elapsed time when stacking; only reset for a
+	# brand-new removal run.
+	if not was_active:
+		_remove_elapsed = 0.0
 	_clear_hover()
 
 func _process_removal(delta: float) -> void:
@@ -331,6 +356,7 @@ func _cancel_removal() -> void:
 	_remove_drag_active = false
 	_remove_elapsed = 0.0
 	_remove_queue.clear()
+	_hide_drag_selection_rect()
 	_clear_remove_progress_bars()
 
 func _clear_remove_progress_bars() -> void:
@@ -339,6 +365,26 @@ func _clear_remove_progress_bars() -> void:
 		if progress != null and is_instance_valid(progress):
 			progress.queue_free()
 	_remove_progress_by_cell.clear()
+
+# Cells committed to the active removal queue (drives dedup + bar preservation when
+# a fresh drag stacks onto an in-progress removal).
+func _committed_cell_set() -> Dictionary:
+	var cells: Dictionary = {}
+	for removal: Dictionary in _remove_queue:
+		cells[removal.get("cell", Vector2i.ZERO) as Vector2i] = true
+	return cells
+
+# Free only transient drag-preview bars, keeping the bars for cells already
+# committed to the active removal queue.
+func _clear_preview_remove_progress_bars() -> void:
+	var committed: Dictionary = _committed_cell_set()
+	for cell: Variant in _remove_progress_by_cell.keys():
+		if committed.has(cell):
+			continue
+		var progress: ProgressBar = _remove_progress_by_cell[cell] as ProgressBar
+		if progress != null and is_instance_valid(progress):
+			progress.queue_free()
+		_remove_progress_by_cell.erase(cell)
 
 func _free_remove_progress_for_cell(cell: Vector2i) -> void:
 	var progress: ProgressBar = _remove_progress_by_cell.get(cell, null) as ProgressBar
@@ -442,6 +488,7 @@ func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void
 	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
 	_hover_atlas_coords = atlas_coords
 	_clear_forbidden_turret_range_preview()
+	_show_drag_selection_rect(_drag_build_start_cell, _drag_build_end_cell)
 	previewbuild.update_internals()
 
 func _drag_build_rectangle_cells(
@@ -487,6 +534,7 @@ func _finish_drag_build() -> void:
 	if target_layer and atlas_coords != Vector2i(-1, -1):
 		cells = _drag_build_rectangle_cells(_drag_build_start_cell, _drag_build_end_cell, target_layer, placeable_def, available)
 	_clear_hover()
+	_hide_drag_selection_rect()
 	_drag_build_active = false
 	_drag_build_item_id = ""
 	if cells.is_empty():
@@ -510,6 +558,7 @@ func _finish_drag_build() -> void:
 func _cancel_drag_build() -> void:
 	_drag_build_active = false
 	_drag_build_item_id = ""
+	_hide_drag_selection_rect()
 	_clear_hover()
 
 # How many of item_id the player can currently afford. Replaces the old inventory
@@ -746,6 +795,41 @@ func _clear_hover() -> void:
 func _hovered_cell() -> Vector2i:
 	var world: Vector2 = previewbuild.get_global_mouse_position()
 	return previewbuild.local_to_map(previewbuild.to_local(world))
+
+func _ensure_drag_selection_rect() -> void:
+	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
+		return
+	_drag_selection_rect = Panel.new()
+	_drag_selection_rect.name = "DragSelectionRect"
+	_drag_selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_drag_selection_rect.z_index = 60
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = DRAG_SELECT_FILL_COLOR
+	style.set_border_width_all(2)
+	style.border_color = DRAG_SELECT_BORDER_COLOR
+	style.set_corner_radius_all(2)
+	_drag_selection_rect.add_theme_stylebox_override("panel", style)
+	# Parented to previewbuild so it shares the tilemap's transform (cell-aligned).
+	previewbuild.add_child(_drag_selection_rect)
+
+# Frames the bounding box spanning start_cell..end_cell with the green outline.
+func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
+	if previewbuild == null or previewbuild.tile_set == null:
+		return
+	_ensure_drag_selection_rect()
+	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
+	var min_cell: Vector2i = Vector2i(mini(start_cell.x, end_cell.x), mini(start_cell.y, end_cell.y))
+	var max_cell: Vector2i = Vector2i(maxi(start_cell.x, end_cell.x), maxi(start_cell.y, end_cell.y))
+	# map_to_local returns cell centers; expand by half a tile to cover the full cells.
+	var top_left: Vector2 = previewbuild.map_to_local(min_cell) - tile_size * 0.5
+	var bottom_right: Vector2 = previewbuild.map_to_local(max_cell) + tile_size * 0.5
+	_drag_selection_rect.position = top_left
+	_drag_selection_rect.size = bottom_right - top_left
+	_drag_selection_rect.visible = true
+
+func _hide_drag_selection_rect() -> void:
+	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
+		_drag_selection_rect.visible = false
 
 func has_single_tile_preview() -> bool:
 	return _hover_active and _preview_cells.size() == 1

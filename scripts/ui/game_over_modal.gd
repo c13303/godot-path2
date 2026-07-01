@@ -13,6 +13,7 @@ const KEY_QUIT: String = "game_over.quit"
 
 var _plant_manager: Node
 var _progression: Node
+var _building_manager: Node
 var _game_over_shown: bool = false
 
 
@@ -43,14 +44,22 @@ func _resolve_nodes() -> void:
 		return
 	_plant_manager = scene.get_node_or_null("Map/PlantManager")
 	_progression = scene.get_node_or_null("progression")
+	_building_manager = scene.get_node_or_null("Map/BuildingManager")
 
 
 func _is_game_over() -> bool:
 	if _plant_manager == null or _progression == null:
 		return false
+	# Never end the run while the player is placing the shop (morning) or selling
+	# to clients: roses may still be waiting on the counters to convert into seeds.
+	if GameState.is_morning_phase or GameState.is_client_phase:
+		return false
 	var planted: int = int(_plant_manager.call("rose_count"))
 	var seeds: int = int(_progression.call("get_value", SEED_KEY))
-	return planted == 0 and seeds == 0
+	var counter_stock: int = 0
+	if _building_manager != null and _building_manager.has_method("total_counter_stock"):
+		counter_stock = int(_building_manager.call("total_counter_stock"))
+	return planted == 0 and seeds == 0 and counter_stock == 0
 
 
 func _show() -> void:

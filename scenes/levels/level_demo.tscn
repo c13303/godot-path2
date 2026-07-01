@@ -1234,8 +1234,8 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 [node name="level_demo" type="Node2D" unique_id=584686861]
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
+starting_gems = 0
 starting_weapons = Array[StringName]([&"beam", &"spray"])
-rose_shop_counter_limit = 2
 
 [node name="floor" type="TileMapLayer" parent="." unique_id=1840971265]
 z_index = -100

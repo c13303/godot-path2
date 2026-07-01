@@ -31,8 +31,8 @@ spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_0k8ip"), S
 
 [sub_resource type="Resource" id="Resource_sn0du"]
 script = ExtResource("4_wave")
-monster_count = 10
-spawn_interval_seconds = 0.5
+monster_count = 20
+spawn_interval_seconds = 0.3
 
 [sub_resource type="Resource" id="Resource_hy6by"]
 script = ExtResource("3_track")
@@ -41,8 +41,8 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_sn0du")])
 
 [sub_resource type="Resource" id="Resource_n0tjj"]
 script = ExtResource("4_wave")
-monster_count = 10
-spawn_interval_seconds = 0.5
+monster_count = 20
+spawn_interval_seconds = 0.3
 
 [sub_resource type="Resource" id="Resource_h7pf8"]
 script = ExtResource("3_track")
@@ -53,6 +53,30 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_n0tjj")])
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_hy6by"), SubResource("Resource_h7pf8")])
 
+[sub_resource type="Resource" id="Resource_fonl1"]
+script = ExtResource("4_wave")
+monster_count = 40
+spawn_interval_seconds = 0.2
+
+[sub_resource type="Resource" id="Resource_gfhbg"]
+script = ExtResource("3_track")
+spawner_id = &"monster1"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_fonl1")])
+
+[sub_resource type="Resource" id="Resource_5rl8i"]
+script = ExtResource("4_wave")
+monster_count = 40
+spawn_interval_seconds = 0.2
+
+[sub_resource type="Resource" id="Resource_81hrt"]
+script = ExtResource("3_track")
+spawner_id = &"monster2"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_5rl8i")])
+
+[sub_resource type="Resource" id="Resource_amu54"]
+script = ExtResource("2_night_playlist")
+spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_gfhbg"), SubResource("Resource_81hrt")])
+
 [resource]
 script = ExtResource("1_level_playlist")
-nights = Array[ExtResource("2_night_playlist")]([SubResource("Resource_1hais"), SubResource("Resource_bhx0a")])
+nights = Array[ExtResource("2_night_playlist")]([SubResource("Resource_1hais"), SubResource("Resource_bhx0a"), SubResource("Resource_amu54")])

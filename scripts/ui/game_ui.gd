@@ -353,6 +353,12 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 	return bool(_progression_node.call("spend", key, price * count))
 
 
+## Public: how many more of item_id may still be placed given its per-world build
+## limit, or -1 when the item has no limit. Used by the shop to show "remaining : x".
+func get_build_limit_remaining(item_id: String) -> int:
+	return _build_limit_remaining(item_id)
+
+
 func _build_limit_remaining(item_id: String) -> int:
 	var limit: int = _build_limit_for_item(item_id)
 	if limit < 0:
