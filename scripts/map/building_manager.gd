@@ -7,6 +7,7 @@ signal level_completed
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
@@ -30,9 +31,11 @@ const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
+const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
+const SEED_MERCHANT_INTERACT_RADIUS_TILES: int = 2
 const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
 # Chebyshev tile radius around the player from which grown roses can be harvested
 # during the morning walkover. 1 = the player's cell plus the surrounding 3x3 ring.
@@ -292,6 +295,12 @@ var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
+var _seed_merchant_active: bool = false
+var _seed_merchant_agent: Node2D
+var _seed_merchant_nav_id: int = -1
+var _seed_merchant_counter_cell: Vector2i = INVALID_CELL
+var _seed_merchant_target_cell: Vector2i = INVALID_CELL
+var _seed_merchant_waiting: bool = false
 var _counter_stock_by_cell: Dictionary = {}  # Vector2i -> int
 var _counter_pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
@@ -503,6 +512,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
 		_client_counter_agents.clear()
+		_clear_seed_merchant_phase(true)
 		GameState.set_building_phase(false)
 		_morning_harvest_active = false
 		# Roses left on the counters are NOT cleared at nightfall: they persist as
@@ -1199,6 +1209,7 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_process_client_counter_arrivals()
+	_process_seed_merchant_arrival()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
 			"counter_agents=%d paying=%d" % [_client_counter_agents.size(), _client_paying_agents.size()])
@@ -1224,6 +1235,7 @@ func _process(delta: float) -> void:
 	t = Time.get_ticks_usec()
 	_process_spawners(delta)
 	_process_client_sale(delta)
+	_process_seed_merchant_phase()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
 		_warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
@@ -2160,11 +2172,158 @@ func _process_client_sale(delta: float) -> void:
 	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
-		GameState.set_building_phase(true)
+		_begin_seed_merchant_phase()
 
 
 func _client_count() -> int:
 	return get_tree().get_nodes_in_group("clients").size()
+
+
+func _begin_seed_merchant_phase() -> void:
+	_clear_seed_merchant_phase(false)
+	if GameState.is_night or _client_spawners.is_empty() or _rose_shop_counter_cells().is_empty():
+		GameState.set_building_phase(true)
+		return
+	var client_cells: Array[Vector2i] = []
+	for raw_cell: Variant in _client_spawners.keys():
+		client_cells.append(raw_cell as Vector2i)
+	if client_cells.is_empty():
+		GameState.set_building_phase(true)
+		return
+	var spawner_cell: Vector2i = client_cells[randi_range(0, client_cells.size() - 1)]
+	if not _spawn_seed_merchant_from(spawner_cell):
+		GameState.set_building_phase(true)
+		return
+	_seed_merchant_active = true
+	GameState.set_seed_merchant_phase(true)
+
+
+func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
+	if agent_manager == null or not agent_manager.has_method("spawn_agent") or not agent_manager.has_method("assign_agent_path"):
+		return false
+	var occupied: Array[Vector2i] = _occupied_cells()
+	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
+	if spawn_cell == INVALID_CELL:
+		return false
+	var target: Dictionary = _select_counter_target(spawn_cell)
+	if target.is_empty():
+		return false
+	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
+	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
+	if target_cell == INVALID_CELL or counter_cell == INVALID_CELL:
+		return false
+	var path_cells: PackedVector2Array = _find_path_on_walkable_map(spawn_cell, target_cell)
+	if path_cells.is_empty():
+		return false
+	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
+	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
+	if parent == null:
+		agent.queue_free()
+		return false
+	parent.add_child(agent)
+	agent.global_position = _cell_center(spawn_cell)
+	agent.z_index = int(agent.global_position.y)
+	agent.add_to_group("merchants")
+	agent.set_meta("agent_kind", SPAWNER_KIND_MERCHANT)
+	agent.set_meta("spawner_cell", spawner_cell)
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = MERCHANT_TEXTURE
+	var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
+	agent.set("nav_id", nav_id)
+	if agent_manager.has_method("set_agent_never_rest"):
+		agent_manager.call("set_agent_never_rest", nav_id, true)
+	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
+	agent_manager.call("assign_agent_path", nav_id, path_world)
+	_seed_merchant_agent = agent
+	_seed_merchant_nav_id = nav_id
+	_seed_merchant_counter_cell = counter_cell
+	_seed_merchant_target_cell = target_cell
+	_seed_merchant_waiting = false
+	if agent.has_method("start_astar_in"):
+		agent.call("start_astar_in")
+	return true
+
+
+func _select_counter_target(from_cell: Vector2i) -> Dictionary:
+	var best: Dictionary = {}
+	var best_dist: int = 2147483647
+	for counter_cell: Vector2i in _rose_shop_counter_cells():
+		var target_cell: Vector2i = _nearest_counter_access_cell(counter_cell, from_cell)
+		if target_cell == INVALID_CELL:
+			continue
+		var delta: Vector2i = target_cell - from_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best = {
+				"counter_cell": counter_cell,
+				"target_cell": target_cell,
+			}
+	return best
+
+
+func _process_seed_merchant_arrival() -> void:
+	if not _seed_merchant_active or _seed_merchant_waiting:
+		return
+	if not is_instance_valid(_seed_merchant_agent):
+		_end_seed_merchant_phase()
+		return
+	if _seed_merchant_nav_id < 0 or not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+		return
+	if not bool(agent_manager.call("agent_path_arrived", _seed_merchant_nav_id)):
+		return
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", _seed_merchant_nav_id)
+	if _seed_merchant_agent.has_method("stop_astar_in"):
+		_seed_merchant_agent.call("stop_astar_in")
+	_seed_merchant_waiting = true
+
+
+func _process_seed_merchant_phase() -> void:
+	if not _seed_merchant_active:
+		return
+	if not is_instance_valid(_seed_merchant_agent):
+		_end_seed_merchant_phase()
+
+
+func is_player_near_seed_merchant() -> bool:
+	if not _seed_merchant_active or not _seed_merchant_waiting or not is_instance_valid(_seed_merchant_agent):
+		return false
+	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
+	if player == null or floorz == null:
+		return false
+	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
+	var merchant_cell: Vector2i = floorz.local_to_map(floorz.to_local(_seed_merchant_agent.global_position))
+	var delta: Vector2i = player_cell - merchant_cell
+	return abs(delta.x) <= SEED_MERCHANT_INTERACT_RADIUS_TILES and abs(delta.y) <= SEED_MERCHANT_INTERACT_RADIUS_TILES
+
+
+func request_seed_merchant_leave() -> void:
+	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
+		_end_seed_merchant_phase()
+		return
+	if _assign_agent_to_escape(_seed_merchant_agent):
+		_seed_merchant_waiting = false
+		return
+	remove_dead_monster(_seed_merchant_agent, false)
+
+
+func _clear_seed_merchant_phase(free_agent: bool) -> void:
+	if free_agent and is_instance_valid(_seed_merchant_agent):
+		remove_dead_monster(_seed_merchant_agent, false)
+	_seed_merchant_active = false
+	_seed_merchant_agent = null
+	_seed_merchant_nav_id = -1
+	_seed_merchant_counter_cell = INVALID_CELL
+	_seed_merchant_target_cell = INVALID_CELL
+	_seed_merchant_waiting = false
+	GameState.set_seed_merchant_phase(false)
+
+
+func _end_seed_merchant_phase() -> void:
+	_clear_seed_merchant_phase(false)
+	GameState.set_building_phase(true)
 
 
 func _grownup_rose_count() -> int:
@@ -3122,7 +3281,7 @@ func _process_drowning_agents(delta: float) -> void:
 	if watersources == null:
 		return
 
-	for group_name: String in ["monsters", "clients"]:
+	for group_name: String in ["monsters", "clients", "merchants"]:
 		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
 			if agent == null or not is_instance_valid(agent):
@@ -3631,6 +3790,7 @@ func _process_escape_arrivals() -> void:
 		_erase_eating_agent(nav_id)
 
 func _remove_escaped_monster(agent: Node2D) -> void:
+	var is_merchant: bool = agent.is_in_group("merchants")
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager and agent_manager.has_method("unregister_agent"):
 		agent_manager.call("unregister_agent", nav_id)
@@ -3638,8 +3798,18 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
 	agent.remove_from_group("clients")
+	agent.remove_from_group("merchants")
 	agent.remove_from_group("monsters")
 	agent.queue_free()
+	if is_merchant:
+		_seed_merchant_active = false
+		_seed_merchant_agent = null
+		_seed_merchant_nav_id = -1
+		_seed_merchant_counter_cell = INVALID_CELL
+		_seed_merchant_target_cell = INVALID_CELL
+		_seed_merchant_waiting = false
+		GameState.set_seed_merchant_phase(false)
+		GameState.set_building_phase(true)
 
 # Combat death uses the same authoritative owner that created and routed monsters.
 # Clear every phase/index before unregistering the native agent so no deferred
@@ -3648,7 +3818,8 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if not is_instance_valid(agent):
 		return
 	var is_client: bool = agent.is_in_group("clients")
-	if spawn_corpse and not is_client:
+	var is_merchant: bool = agent.is_in_group("merchants")
+	if spawn_corpse and not is_client and not is_merchant:
 		_spawn_monster_corpse(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	_entry_path_agents.erase(nav_id)
@@ -3667,7 +3838,17 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		agent_manager.call("unregister_agent", nav_id)
 	agent.remove_from_group("monsters")
 	agent.remove_from_group("clients")
+	agent.remove_from_group("merchants")
 	agent.queue_free()
+	if is_merchant:
+		_seed_merchant_active = false
+		_seed_merchant_agent = null
+		_seed_merchant_nav_id = -1
+		_seed_merchant_counter_cell = INVALID_CELL
+		_seed_merchant_target_cell = INVALID_CELL
+		_seed_merchant_waiting = false
+		GameState.set_seed_merchant_phase(false)
+		GameState.set_building_phase(true)
 
 func _spawn_monster_corpse(agent: Node2D) -> void:
 	var corpse: Node2D = MONSTER_CORPSE_SCENE.instantiate() as Node2D
@@ -3714,7 +3895,7 @@ func _agent_within_tiles(agent: Node2D, cell: Vector2i, tiles: int) -> bool:
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []
-	for group_name in ["main_chars", "monsters", "player"]:
+	for group_name in ["main_chars", "monsters", "clients", "merchants", "player"]:
 		for node in get_tree().get_nodes_in_group(group_name):
 			if node is Node2D:
 				var unit: Node2D = node

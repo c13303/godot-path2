@@ -22,8 +22,9 @@ const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The bar sits this many pixels above the screen bottom, clearing the quick bar and
 # its "Construction (…)" info label.
 const BAR_BOTTOM_OFFSET: float = -134.0
-# Buildable buttons shown in the bar, left to right.
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
+const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
+const WEAPON_ITEM_IDS: Array[String] = ["sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, "sword", "bomb", "spray", "beam"]
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
 const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
@@ -38,6 +39,8 @@ var _last_picked_item_id: String = ""
 var _selected_name: Label
 var _selected_price: Label
 var _selected_currency: TextureRect
+var _shop_column: VBoxContainer
+var _items_grid: GridContainer
 var _seed_icon: AtlasTexture
 var _gem_icon: AtlasTexture
 var _money_icon: AtlasTexture
@@ -71,6 +74,8 @@ func _ready() -> void:
 		GameState.morning_phase_changed.connect(_on_morning_phase_changed)
 	if not GameState.client_phase_changed.is_connected(_on_client_phase_changed):
 		GameState.client_phase_changed.connect(_on_client_phase_changed)
+	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
+		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_set_shop_open(false)
 	set_process(true)
 
@@ -86,6 +91,8 @@ func _process(_delta: float) -> void:
 		and (GameState.is_building_phase or GameState.is_morning_phase)
 		and not _waiting_for_seed_harvest
 	)
+	if GameState.is_seed_merchant_phase:
+		should_show = _player_near_seed_merchant()
 	if should_show and not visible:
 		_open_shop()
 	elif not should_show and visible:
@@ -99,6 +106,7 @@ func _process(_delta: float) -> void:
 
 func _build_ui() -> void:
 	var column: VBoxContainer = VBoxContainer.new()
+	_shop_column = column
 	column.name = "ShopColumn"
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 6)
@@ -117,6 +125,7 @@ func _build_ui() -> void:
 
 	column.add_child(_build_selected_row())
 	column.add_child(_build_bar())
+	_apply_phase_layout()
 
 
 func _build_selected_row() -> Control:
@@ -172,14 +181,17 @@ func _build_bar() -> Control:
 	margin.add_theme_constant_override("margin_bottom", 6)
 	panel.add_child(margin)
 
-	var items_row: HBoxContainer = HBoxContainer.new()
-	items_row.name = "ItemsRow"
-	items_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	items_row.add_theme_constant_override("separation", 6)
-	margin.add_child(items_row)
+	var items_grid: GridContainer = GridContainer.new()
+	_items_grid = items_grid
+	items_grid.name = "ItemsGrid"
+	items_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	items_grid.columns = BUILD_ITEM_IDS.size()
+	items_grid.add_theme_constant_override("h_separation", 6)
+	items_grid.add_theme_constant_override("v_separation", 6)
+	margin.add_child(items_grid)
 
 	for item_id: String in ITEM_IDS:
-		items_row.add_child(_build_slot(item_id))
+		items_grid.add_child(_build_slot(item_id))
 	return panel
 
 
@@ -231,8 +243,12 @@ func _build_slot(item_id: String) -> Button:
 # --- Open / close ------------------------------------------------------------
 
 func _open_shop() -> void:
+	_apply_phase_layout()
 	_set_shop_open(true)
 	_refresh_slots()
+	if GameState.is_seed_merchant_phase:
+		_deselect_active()
+		return
 	# During the morning sale only the counter can be picked; leave it at that.
 	if GameState.is_morning_phase:
 		if _is_item_available(COUNTER_ID):
@@ -285,10 +301,27 @@ func _on_client_phase_changed(is_client_phase: bool) -> void:
 		_waiting_for_seed_harvest = true
 
 
+func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
+	_waiting_for_seed_harvest = is_seed_merchant_phase
+	_apply_phase_layout()
+	if not is_seed_merchant_phase:
+		_close_shop()
+
+
 # --- Selection ---------------------------------------------------------------
 
 func _on_item_pressed(item_id: String) -> void:
 	if not visible or GameState.is_night:
+		return
+	if GameState.is_seed_merchant_phase:
+		if not ItemCatalog.is_weapon(item_id) or not _is_item_available(item_id):
+			return
+		if game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
+			var purchased: bool = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
+			if purchased:
+				Sfx.play_sound(&"buy")
+				_refresh_slots()
+				_update_selected_label()
 		return
 	if _is_item_locked(item_id) or not _is_item_available(item_id):
 		return
@@ -332,6 +365,8 @@ func _affordable_quantity(item_id: String) -> int:
 
 ## During the morning sale only the counter may be placed; everything else is locked.
 func _is_item_locked(item_id: String) -> bool:
+	if GameState.is_seed_merchant_phase:
+		return not ItemCatalog.is_weapon(item_id)
 	return GameState.is_morning_phase and item_id != COUNTER_ID
 
 
@@ -343,18 +378,18 @@ func _is_item_available(item_id: String) -> bool:
 
 func _refresh_slots() -> void:
 	for item_id: String in ITEM_IDS:
-		var button: Button = _slot_buttons.get(item_id)
+		var button: Button = _slot_buttons.get(item_id) as Button
 		if button == null:
 			continue
-		button.visible = _is_item_available(item_id)
+		button.visible = _should_show_item(item_id)
 		if not button.visible:
 			continue
 		var affordable: int = _affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
 		var selected: bool = item_id == _selected_item_id
-		var count_label: Label = _slot_counts[item_id]
+		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = str(affordable)
-		var state: Array = [selected, disabled]
+		var state: Array[bool] = [selected, disabled]
 		if _slot_state.get(item_id) != state:
 			_slot_state[item_id] = state
 			_apply_slot_style(button, selected, disabled)
@@ -365,6 +400,11 @@ func _refresh_slots() -> void:
 
 func _update_selected_label() -> void:
 	if _selected_name == null:
+		return
+	if GameState.is_seed_merchant_phase:
+		_selected_name.text = ""
+		_selected_price.text = ""
+		_selected_currency.visible = false
 		return
 	if _selected_item_id == "":
 		_selected_name.text = ""
@@ -408,6 +448,51 @@ func _build_price(item_id: String) -> int:
 	if game_ui != null and game_ui.has_method("get_build_price"):
 		return int(game_ui.call("get_build_price", item_id))
 	return ItemCatalog.get_price(item_id)
+
+
+func _should_show_item(item_id: String) -> bool:
+	if GameState.is_seed_merchant_phase:
+		return item_id in WEAPON_ITEM_IDS and ItemCatalog.is_weapon(item_id) and _is_item_available(item_id)
+	return item_id in BUILD_ITEM_IDS and _is_item_available(item_id)
+
+
+func _player_near_seed_merchant() -> bool:
+	var scene: Node = get_tree().current_scene
+	var manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
+	return manager != null and manager.has_method("is_player_near_seed_merchant") and bool(manager.call("is_player_near_seed_merchant"))
+
+
+func _apply_phase_layout() -> void:
+	if _shop_column == null:
+		return
+	if GameState.is_seed_merchant_phase:
+		_shop_column.anchor_left = 1.0
+		_shop_column.anchor_right = 1.0
+		_shop_column.anchor_top = 0.5
+		_shop_column.anchor_bottom = 0.5
+		_shop_column.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		_shop_column.grow_vertical = Control.GROW_DIRECTION_BOTH
+		_shop_column.offset_left = -76.0
+		_shop_column.offset_right = -12.0
+		_shop_column.offset_top = -160.0
+		_shop_column.offset_bottom = 160.0
+		_shop_column.alignment = BoxContainer.ALIGNMENT_CENTER
+		if _items_grid != null:
+			_items_grid.columns = 1
+		return
+	_shop_column.anchor_left = 0.0
+	_shop_column.anchor_right = 1.0
+	_shop_column.anchor_top = 1.0
+	_shop_column.anchor_bottom = 1.0
+	_shop_column.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_shop_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_shop_column.offset_left = 0.0
+	_shop_column.offset_right = 0.0
+	_shop_column.offset_top = 0.0
+	_shop_column.offset_bottom = BAR_BOTTOM_OFFSET
+	_shop_column.alignment = BoxContainer.ALIGNMENT_END
+	if _items_grid != null:
+		_items_grid.columns = BUILD_ITEM_IDS.size()
 
 
 # --- Styling / textures ------------------------------------------------------

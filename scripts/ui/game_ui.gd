@@ -27,6 +27,7 @@ const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.
 const MOONSUN_TILE_SIZE: int = 64
 var _sun_icon: AtlasTexture
 var _moon_icon: AtlasTexture
+var _merchant_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
 var selected_quick_index: int = 0
@@ -72,12 +73,23 @@ func _setup_day_toggle() -> void:
 	_moon_icon = AtlasTexture.new()
 	_moon_icon.atlas = MOONSUN_TEXTURE
 	_moon_icon.region = Rect2(MOONSUN_TILE_SIZE, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
+	_merchant_icon = AtlasTexture.new()
+	_merchant_icon.atlas = MOONSUN_TEXTURE
+	_merchant_icon.region = Rect2(MOONSUN_TILE_SIZE * 2, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
 
 	day_toggle.pressed.connect(_on_day_toggle_pressed)
 	GameState.mode_changed.connect(_on_game_mode_changed)
+	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
+		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_update_day_toggle_icon(GameState.is_night)
 
 func _on_day_toggle_pressed() -> void:
+	if GameState.is_seed_merchant_phase:
+		var scene: Node = get_tree().current_scene
+		var manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
+		if manager != null and manager.has_method("request_seed_merchant_leave"):
+			manager.call("request_seed_merchant_leave")
+		return
 	GameState.toggle()
 
 func _on_game_mode_changed(is_night: bool) -> void:
@@ -89,12 +101,19 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		select_first_weapon()
 	_refresh_all_slots()
 
+func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
+	_update_day_toggle_icon(GameState.is_night)
+	_refresh_all_slots()
+
 func _on_locale_changed(_locale: String) -> void:
 	_refresh_toolbar_info()
 
 func _update_day_toggle_icon(is_night: bool) -> void:
 	# Icon reflects the current mode: sun during day, moon during night.
-	day_toggle.icon = _moon_icon if is_night else _sun_icon
+	if GameState.is_seed_merchant_phase:
+		day_toggle.icon = _merchant_icon
+	else:
+		day_toggle.icon = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:

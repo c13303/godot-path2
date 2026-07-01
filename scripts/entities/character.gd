@@ -87,7 +87,7 @@ func _process(delta: float) -> void:
 func take_damage(amount: int) -> bool:
 	if _dead or amount <= 0:
 		return false
-	if _is_client_agent() and status != "drowning":
+	if _is_damage_immune_agent() and status != "drowning":
 		_flash_time_left = FLASH_DURATION
 		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 		return false
@@ -101,7 +101,7 @@ func take_damage(amount: int) -> bool:
 	return false
 
 func _draw() -> void:
-	if _is_client_agent():
+	if _is_damage_immune_agent():
 		return
 	var background_rect: Rect2 = Rect2(HEALTH_BAR_POSITION, HEALTH_BAR_SIZE)
 	draw_rect(background_rect, Color.BLACK)
@@ -132,7 +132,7 @@ func _update_monster_frame() -> void:
 	var frame: int = MONSTER_FRAME_IDLE
 	if status == "eating":
 		frame = MONSTER_FRAME_EATING
-	elif status == "flow_out" and has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client":
+	elif status == "flow_out" and _is_damage_immune_agent():
 		frame = MONSTER_FRAME_EATING
 	elif status == "drowning":
 		frame = MONSTER_FRAME_DROWNING
@@ -142,6 +142,13 @@ func _update_monster_frame() -> void:
 
 func _is_client_agent() -> bool:
 	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client"
+
+
+func _is_damage_immune_agent() -> bool:
+	if not has_meta("agent_kind"):
+		return false
+	var agent_kind: StringName = StringName(str(get_meta("agent_kind")))
+	return agent_kind == &"client" or agent_kind == &"merchant"
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

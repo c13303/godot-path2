@@ -50,9 +50,9 @@ func _resolve_nodes() -> void:
 func _is_game_over() -> bool:
 	if _plant_manager == null or _progression == null:
 		return false
-	# Never end the run while the player is placing the shop (morning) or selling
-	# to clients: roses may still be waiting on the counters to convert into seeds.
-	if GameState.is_morning_phase or GameState.is_client_phase:
+	# Game over is checked only once the next build phase starts; morning, client,
+	# and merchant phases can still change the rose/seed economy.
+	if not GameState.is_building_phase:
 		return false
 	var planted: int = int(_plant_manager.call("rose_count"))
 	var seeds: int = int(_progression.call("get_value", SEED_KEY))

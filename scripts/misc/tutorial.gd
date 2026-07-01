@@ -27,6 +27,7 @@ const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_CLIENT_TIME: String = "tutorial.client_time"
+const KEY_SEED_MERCHANT: String = "tutorial.seed_merchant"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
@@ -72,6 +73,8 @@ func _resolve_nodes() -> void:
 		_game_ui = scene.get_node_or_null("GameUI")
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 			GameState.building_phase_changed.connect(_on_building_phase_changed)
+		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
+			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_day_toggle = get_node_or_null("../dayToggle") as Button
 
 
@@ -89,6 +92,11 @@ func _on_building_phase_changed(is_building_phase: bool) -> void:
 	_refresh()
 
 
+func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
+	_waiting_for_seed_harvest = is_seed_merchant_phase
+	_refresh()
+
+
 func _on_locale_changed(_locale: String) -> void:
 	# Same message, new language: re-translate in place without re-blanking.
 	if _displayed_key != "":
@@ -101,6 +109,8 @@ func _refresh(delta: float = 0.0) -> void:
 	var key: String = _current_message_key()
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
+	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER:
+		key = KEY_SEED_MERCHANT
 	if key == "":
 		_displayed_key = ""
 		text = ""
@@ -148,7 +158,7 @@ func _refresh(delta: float = 0.0) -> void:
 func _update_day_toggle_interactable() -> void:
 	if _day_toggle == null:
 		return
-	_day_toggle.disabled = not (GameState.is_night or _displayed_key == KEY_PASS_NIGHT)
+	_day_toggle.disabled = not (GameState.is_night or GameState.is_seed_merchant_phase or _displayed_key == KEY_PASS_NIGHT)
 
 
 func _current_message_key() -> String:
@@ -173,6 +183,8 @@ func _current_message_key() -> String:
 		return ""
 	if GameState.is_client_phase:
 		return KEY_CLIENT_TIME
+	if GameState.is_seed_merchant_phase:
+		return KEY_SEED_MERCHANT
 	# Nothing growing, no seeds, and no roses left on the counters: the run is lost.
 	if planted == 0 and seeds == 0 and _counter_stock() <= 0:
 		return KEY_GAME_OVER
