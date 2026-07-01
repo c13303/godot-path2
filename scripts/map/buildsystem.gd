@@ -32,9 +32,6 @@ var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_item_id: String = ""
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
-var _has_forbidden_turret_range_preview: bool = false
-var _forbidden_turret_range_cell: Vector2i = Vector2i.ZERO
-var _forbidden_turret_range: float = 0.0
 var _preview_cells: Array[Vector2i] = []
 # Generic click-drag chunk build (roses and walls). _drag_build_item_id records which
 # item the active drag is placing so inventory/sound are resolved per item.
@@ -487,7 +484,6 @@ func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void
 	_hover_active = not _preview_cells.is_empty()
 	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
 	_hover_atlas_coords = atlas_coords
-	_clear_forbidden_turret_range_preview()
 	_show_drag_selection_rect(_drag_build_start_cell, _drag_build_end_cell)
 	previewbuild.update_internals()
 
@@ -719,20 +715,8 @@ func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -
 	return best_blocker
 
 func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
-	var blocker: Dictionary = _turret_range_blocker_for_cell(_hover_cell, placeable_def)
-	if blocker.is_empty():
-		_clear_forbidden_turret_range_preview()
-		previewbuild.modulate = PREVIEW_NORMAL_COLOR
-		return
-	_has_forbidden_turret_range_preview = true
-	_forbidden_turret_range_cell = blocker.get("cell", Vector2i.ZERO) as Vector2i
-	_forbidden_turret_range = float(blocker.get("range", 0.0))
-	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR
-
-func _clear_forbidden_turret_range_preview() -> void:
-	_has_forbidden_turret_range_preview = false
-	_forbidden_turret_range_cell = Vector2i.ZERO
-	_forbidden_turret_range = 0.0
+	var blocked: bool = not _turret_range_blocker_for_cell(_hover_cell, placeable_def).is_empty()
+	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR if blocked else PREVIEW_NORMAL_COLOR
 
 func _turret_item_id_at_cell(cell: Vector2i) -> String:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
@@ -785,7 +769,6 @@ func _notify(message: String) -> void:
 
 func _clear_hover() -> void:
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
-	_clear_forbidden_turret_range_preview()
 	if not _hover_active and _preview_cells.is_empty():
 		_hover_item_id = ""
 		return
@@ -844,15 +827,6 @@ func get_preview_item_id() -> String:
 
 func get_preview_cell() -> Vector2i:
 	return _hover_cell
-
-func has_forbidden_turret_range_preview() -> bool:
-	return _has_forbidden_turret_range_preview
-
-func get_forbidden_turret_range_cell() -> Vector2i:
-	return _forbidden_turret_range_cell
-
-func get_forbidden_turret_range() -> float:
-	return _forbidden_turret_range
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:

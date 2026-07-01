@@ -685,6 +685,8 @@ func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 			})
 	game_ui.set("inventory_slots", inventory)
 	game_ui.set("selected_quick_index", int(player_data.get("selected_quick_index", 0)))
+	if game_ui.has_method("reset_possessed_weapons_from_inventory"):
+		game_ui.call("reset_possessed_weapons_from_inventory")
 	if game_ui.has_method("_refresh_all_slots"):
 		game_ui.call("_refresh_all_slots")
 	_log("Inventory restored: %d slots, selected=%d" % [

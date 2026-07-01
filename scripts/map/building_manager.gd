@@ -294,6 +294,7 @@ var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
 var _client_sale_active: bool = false
+var _clients_visited_this_day: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
@@ -518,6 +519,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	_client_preparing = false
 	if is_night:
+		_clients_visited_this_day = false
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
@@ -2088,6 +2090,7 @@ func _on_new_day_finished() -> void:
 func _begin_morning_phase() -> void:
 	_client_preparing = false
 	_client_sale_active = false
+	_clients_visited_this_day = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
@@ -2159,6 +2162,7 @@ func _check_morning_harvest_finished() -> void:
 
 func _begin_client_sale_phase() -> void:
 	_client_sale_active = false
+	_clients_visited_this_day = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	var sale_stock: int = _total_counter_stock()
@@ -2222,12 +2226,40 @@ func _process_client_sale(delta: float) -> void:
 	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
+		if can_start_night_after_clients():
+			GameState.start_night()
+			return
 		if not GameState.is_seed_merchant_phase:
 			GameState.set_building_phase(true)
 
 
 func _client_count() -> int:
 	return get_tree().get_nodes_in_group("clients").size()
+
+
+func can_start_night_after_clients() -> bool:
+	return _clients_visited_this_day and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
+
+
+func _clients_are_finished_for_day() -> bool:
+	return (
+		not _client_sale_active
+		and not GameState.is_client_phase
+		and _client_sale_pending_spawners.is_empty()
+		and _client_count() == 0
+		and _client_paying_agents.is_empty()
+		and _client_counter_agents.is_empty()
+	)
+
+
+func _all_planted_roses_are_wet() -> bool:
+	if plant_manager == null or not plant_manager.has_method("rose_count") or not plant_manager.has_method("unwatered_rose_count"):
+		return false
+	var planted: int = int(plant_manager.call("rose_count"))
+	if planted <= 0:
+		return false
+	var unwatered: int = int(plant_manager.call("unwatered_rose_count"))
+	return unwatered <= 0
 
 
 func _begin_seed_merchant_phase() -> void:
@@ -2776,7 +2808,10 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
-	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
+	var spawned: bool = _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
+	if spawned:
+		_clients_visited_this_day = true
+	return spawned
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:

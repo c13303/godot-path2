@@ -31,7 +31,6 @@ const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.
 const MOONSUN_TILE_SIZE: int = 64
 var _sun_icon: AtlasTexture
 var _moon_icon: AtlasTexture
-var _merchant_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
 var selected_quick_index: int = 0
@@ -43,6 +42,7 @@ var selected_build_item_id: String = ""
 var _progression_node: Node
 var _toolbar_slot_nodes: Array[ItemSlot] = []
 var _inventory_slot_nodes: Array[ItemSlot] = []
+var _possessed_weapon_ids: Dictionary = {}
 var _startup_loading_overlay: Control
 var _startup_loading_label: Label
 var _startup_loading_bar: ProgressBar
@@ -77,13 +77,8 @@ func _setup_day_toggle() -> void:
 	_moon_icon = AtlasTexture.new()
 	_moon_icon.atlas = MOONSUN_TEXTURE
 	_moon_icon.region = Rect2(MOONSUN_TILE_SIZE, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
-	_merchant_icon = AtlasTexture.new()
-	_merchant_icon.atlas = MOONSUN_TEXTURE
-	_merchant_icon.region = Rect2(MOONSUN_TILE_SIZE * 2, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
 
 	GameState.mode_changed.connect(_on_game_mode_changed)
-	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
-		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_update_day_toggle_icon(GameState.is_night)
 
 func _on_game_mode_changed(is_night: bool) -> void:
@@ -95,19 +90,12 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		select_first_weapon()
 	_refresh_all_slots()
 
-func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
-	_update_day_toggle_icon(GameState.is_night)
-	_refresh_all_slots()
-
 func _on_locale_changed(_locale: String) -> void:
 	_refresh_toolbar_info()
 
 func _update_day_toggle_icon(is_night: bool) -> void:
 	# Icon reflects the current mode: sun during day, moon during night.
-	if GameState.is_seed_merchant_phase:
-		day_toggle.texture = _merchant_icon
-	else:
-		day_toggle.texture = _moon_icon if is_night else _sun_icon
+	day_toggle.texture = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -486,6 +474,8 @@ func get_build_price(item_id: String) -> int:
 
 
 func is_merchant_item_available(item_id: String) -> bool:
+	if ItemCatalog.is_weapon(item_id) and _has_possessed_weapon(item_id):
+		return false
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_merchant_available_items"):
@@ -595,7 +585,7 @@ func try_purchase_merchant_item(item_id: String, count: int = 1) -> bool:
 
 
 func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
-	if count <= 0 or not ItemCatalog.is_weapon(item_id):
+	if count != 1 or not ItemCatalog.is_weapon(item_id) or _has_possessed_weapon(item_id):
 		return false
 	if not can_add_inventory(item_id, count):
 		return false
@@ -738,6 +728,8 @@ func add_inventory(item_id: String, quantity: int = 1) -> bool:
 func can_add_inventory(item_id: String, quantity: int = 1) -> bool:
 	if item_id == "" or quantity <= 0:
 		return false
+	if ItemCatalog.is_weapon(item_id):
+		return quantity == 1 and not _has_possessed_weapon(item_id) and _first_free_slot() >= 0
 	var capacity: int = 0
 	var max_stack: int = ItemCatalog.get_max_stack(item_id)
 	for slot_data: Dictionary in inventory_slots:
@@ -775,6 +767,19 @@ func _slot_item_id(slot_data: Dictionary) -> String:
 
 func _slot_quantity(slot_data: Dictionary) -> int:
 	return int(slot_data.get("quantity", 0))
+
+func _has_inventory_weapon(item_id: String) -> bool:
+	return ItemCatalog.is_weapon(item_id) and get_inventory_item_quantity(item_id) > 0
+
+func _has_possessed_weapon(item_id: String) -> bool:
+	return ItemCatalog.is_weapon(item_id) and (_possessed_weapon_ids.has(item_id) or _has_inventory_weapon(item_id))
+
+func reset_possessed_weapons_from_inventory() -> void:
+	_possessed_weapon_ids.clear()
+	for slot_data: Dictionary in inventory_slots:
+		var item_id: String = _slot_item_id(slot_data)
+		if item_id != "" and ItemCatalog.is_weapon(item_id):
+			_possessed_weapon_ids[item_id] = true
 
 func _show_inventory() -> void:
 	_set_inventory_open(true)
@@ -953,6 +958,7 @@ func _build_inventory() -> void:
 			_inventory_slot_nodes.append(slot)
 
 func _refresh_all_slots() -> void:
+	_normalize_unique_weapons()
 	_remove_unbuild_tool_from_inventory()
 	for i in range(_toolbar_slot_nodes.size()):
 		_apply_slot_item(_toolbar_slot_nodes[i], i)
@@ -967,6 +973,26 @@ func _remove_unbuild_tool_from_inventory() -> void:
 	for i: int in range(inventory_slots.size()):
 		if _slot_item_id(inventory_slots[i]) == UNBUILD_TOOL_ID:
 			inventory_slots[i] = _empty_slot()
+			changed = true
+	if changed:
+		_ensure_valid_quick_selection()
+
+func _normalize_unique_weapons() -> void:
+	var seen: Dictionary = {}
+	var changed: bool = false
+	for i: int in range(inventory_slots.size()):
+		var slot_data: Dictionary = inventory_slots[i]
+		var item_id: String = _slot_item_id(slot_data)
+		if item_id == "" or not ItemCatalog.is_weapon(item_id):
+			continue
+		_possessed_weapon_ids[item_id] = true
+		if seen.has(item_id):
+			inventory_slots[i] = _empty_slot()
+			changed = true
+			continue
+		seen[item_id] = true
+		if _slot_quantity(slot_data) != 1:
+			inventory_slots[i] = _make_slot(item_id, 1)
 			changed = true
 	if changed:
 		_ensure_valid_quick_selection()

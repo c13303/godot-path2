@@ -210,24 +210,23 @@ func _current_message_key() -> String:
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES
-	# Every planted rose is watered and nothing is left to do: end the day.
-	return KEY_PASS_NIGHT
+	# Every planted rose is watered, and the client sale has actually completed:
+	# end the day.
+	if _can_start_night_after_clients():
+		return KEY_PASS_NIGHT
+	return ""
 
 
 func _should_start_night_automatically() -> bool:
-	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase:
+	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase or GameState.is_seed_merchant_phase:
 		return false
-	var planted: int = 0
-	var unwatered: int = 0
-	if _plant_manager != null:
-		planted = int(_plant_manager.call("rose_count"))
-		unwatered = int(_plant_manager.call("unwatered_rose_count"))
-	var seeds: int = 0
-	if _progression != null:
-		seeds = int(_progression.call("get_value", SEED_KEY))
-	if planted == 0:
+	return _can_start_night_after_clients()
+
+
+func _can_start_night_after_clients() -> bool:
+	if _building_manager == null or not _building_manager.has_method("can_start_night_after_clients"):
 		return false
-	return seeds <= 0 and unwatered <= 0
+	return bool(_building_manager.call("can_start_night_after_clients"))
 
 
 func _start_night_automatically() -> void:

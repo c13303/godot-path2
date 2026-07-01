@@ -3,14 +3,15 @@ class_name TurretSystem
 
 const TURRET_ID: String = "turret1"
 const TURRET_SHOW_RADIUS: bool = true
-const RADIUS_COLOR: Color = Color(0.55, 0.55, 0.55, 0.8)
-const FORBIDDEN_RADIUS_COLOR: Color = Color(1.0, 0.1, 0.1, 0.9)
-const RADIUS_LINE_WIDTH: float = 1.0
-const RADIUS_SEGMENTS: int = 96
-const COVERAGE_FILL_COLOR: Color = Color(0.55, 0.55, 0.55, 0.22)
 const LOS_PRECOMPUTE_BUDGET_MS: float = 1.5
 const LOS_PENDING: int = 0
 const LOS_READY: int = 1
+
+# Fill drawn over every tile within a turret's range (the coverage / no-build zone).
+@export var overlay_color: Color = Color(0.55, 0.55, 0.55, 0.2)
+# Fill drawn over a turret's range tiles when the current build preview cell falls
+# inside that turret's range (i.e. placing there would be forbidden).
+@export var forbidden_color: Color = Color(1.0, 0.1, 0.1, 0.35)
 
 var _fight_system: FightSystem
 var _building_objects: BuildingObjectManager
@@ -22,9 +23,6 @@ var _has_hovered_turret: bool = false
 var _hovered_turret_cell: Vector2i = Vector2i.ZERO
 var _has_preview_turret: bool = false
 var _preview_turret_cell: Vector2i = Vector2i.ZERO
-var _has_forbidden_preview_range: bool = false
-var _forbidden_preview_range_cell: Vector2i = Vector2i.ZERO
-var _forbidden_preview_range: float = 0.0
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
@@ -93,42 +91,66 @@ func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, a
 	else:
 		state["spray_time_left"] = time_left
 
+# Draws a semi-transparent fill over every tile within range of any turret (the
+# coverage / no-build zone). When a turret is being placed, the tiles of any turret
+# whose range contains the preview cell are drawn in `forbidden_color` instead, so the
+# player sees exactly which turret is blocking the placement.
 func _draw() -> void:
-	if not TURRET_SHOW_RADIUS:
+	if not _overlay_active():
 		return
-	if _has_forbidden_preview_range:
-		_draw_turret_range(_forbidden_preview_range_cell, _forbidden_preview_range, FORBIDDEN_RADIUS_COLOR)
-		return
-	if _has_hovered_turret:
-		var state: Dictionary = _turrets.get(_hovered_turret_cell, {}) as Dictionary
-		if int(state.get("los_status", LOS_PENDING)) == LOS_READY:
-			_draw_turret_coverage(state, COVERAGE_FILL_COLOR)
-		else:
-			_draw_turret_range(_hovered_turret_cell, float(state.get("range", 0.0)), RADIUS_COLOR)
-	if _has_preview_turret and (not _has_hovered_turret or _preview_turret_cell != _hovered_turret_cell):
-		var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
-		_draw_turret_range(_preview_turret_cell, float(turret_def.get("range", 200.0)), RADIUS_COLOR)
-
-func _draw_turret_range(cell: Vector2i, activation_range: float, color: Color) -> void:
-	if activation_range <= 0.0:
-		return
-	draw_arc(to_local(_turret_world_position(cell)), activation_range, 0.0, TAU, RADIUS_SEGMENTS, color, RADIUS_LINE_WIDTH, true)
-
-func _draw_turret_coverage(state: Dictionary, color: Color) -> void:
 	var layer: TileMapLayer = _building_objects.blocking_buildings
 	if layer == null:
 		return
-	var raw_visible_cells: Variant = state.get("visible_cells", {})
-	if not (raw_visible_cells is Dictionary):
-		return
-	var visible_cells: Dictionary = raw_visible_cells as Dictionary
-	if visible_cells.is_empty():
-		return
+	# Merge every turret's range tiles into one color map (forbidden wins over overlay)
+	# so overlapping ranges are drawn once without double-blending the transparency.
+	var cell_colors: Dictionary = {}
+	for raw_cell: Variant in _turrets.keys():
+		var turret_cell: Vector2i = raw_cell as Vector2i
+		var activation_range: float = float((_turrets[turret_cell] as Dictionary).get("range", 0.0))
+		_accumulate_range_cells(layer, turret_cell, activation_range, _preview_blocked_by_turret(layer, turret_cell, activation_range), cell_colors)
+	# The turret being placed shows its own prospective coverage in the overlay color.
+	if _has_preview_turret:
+		var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
+		_accumulate_range_cells(layer, _preview_turret_cell, float(turret_def.get("range", 200.0)), false, cell_colors)
 	var half_size: Vector2 = Vector2.ONE * (_tile_size_pixels(layer) * 0.5)
-	for raw_cell: Variant in visible_cells.keys():
+	for raw_cell: Variant in cell_colors.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		var center: Vector2 = to_local(layer.to_global(layer.map_to_local(cell)))
-		draw_rect(Rect2(center - half_size, half_size * 2.0), color, true)
+		draw_rect(Rect2(center - half_size, half_size * 2.0), cell_colors[cell] as Color, true)
+
+func _overlay_active() -> bool:
+	return TURRET_SHOW_RADIUS and (_has_hovered_turret or _has_preview_turret)
+
+func _accumulate_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range: float, forbidden: bool, out_colors: Dictionary) -> void:
+	if activation_range <= 0.0:
+		return
+	var tile_size: float = _tile_size_pixels(layer)
+	var radius_cells: int = ceili(activation_range / maxf(1.0, tile_size))
+	var origin: Vector2 = _turret_world_position(cell)
+	var range_squared: float = activation_range * activation_range
+	for y_offset: int in range(-radius_cells, radius_cells + 1):
+		for x_offset: int in range(-radius_cells, radius_cells + 1):
+			var target_cell: Vector2i = cell + Vector2i(x_offset, y_offset)
+			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
+			if origin.distance_squared_to(target_world) > range_squared:
+				continue
+			if forbidden:
+				out_colors[target_cell] = forbidden_color
+			elif not out_colors.has(target_cell):
+				out_colors[target_cell] = overlay_color
+
+# True when a turret is being placed and the preview cell lies inside this turret's
+# range, mirroring the placement rule in buildsystem (`_turret_range_blocker_for_cell`).
+# Hovering directly on an existing turret is pure inspection (you can't place there), so
+# no zone is reddened then — every zone stays in the neutral overlay color.
+func _preview_blocked_by_turret(layer: TileMapLayer, turret_cell: Vector2i, activation_range: float) -> bool:
+	if _has_hovered_turret or not _has_preview_turret or activation_range <= 0.0:
+		return false
+	if bool(ItemCatalog.get_item_def(TURRET_ID).get("build_in_range", true)):
+		return false
+	var origin: Vector2 = _turret_world_position(turret_cell)
+	var preview_world: Vector2 = layer.to_global(layer.map_to_local(_preview_turret_cell))
+	return origin.distance_squared_to(preview_world) <= activation_range * activation_range
 
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	if item_id == TURRET_ID:
@@ -186,9 +208,6 @@ func _update_preview_turret() -> void:
 		return
 	var has_preview_turret: bool = false
 	var preview_cell: Vector2i = Vector2i.ZERO
-	var has_forbidden_preview_range: bool = false
-	var forbidden_preview_range_cell: Vector2i = Vector2i.ZERO
-	var forbidden_preview_range: float = 0.0
 	if _build_system != null and _build_system.has_method("has_single_tile_preview") and bool(_build_system.call("has_single_tile_preview")):
 		var preview_item_id: String = str(_build_system.call("get_preview_item_id"))
 		if preview_item_id == TURRET_ID and _build_system.has_method("get_preview_cell"):
@@ -196,24 +215,10 @@ func _update_preview_turret() -> void:
 			if raw_preview_cell is Vector2i:
 				has_preview_turret = true
 				preview_cell = raw_preview_cell as Vector2i
-			if _build_system.has_method("has_forbidden_turret_range_preview") and bool(_build_system.call("has_forbidden_turret_range_preview")):
-				var raw_forbidden_cell: Variant = _build_system.call("get_forbidden_turret_range_cell")
-				if raw_forbidden_cell is Vector2i:
-					has_forbidden_preview_range = true
-					forbidden_preview_range_cell = raw_forbidden_cell as Vector2i
-					forbidden_preview_range = float(_build_system.call("get_forbidden_turret_range"))
-	if (
-		has_preview_turret == _has_preview_turret
-		and (not has_preview_turret or preview_cell == _preview_turret_cell)
-		and has_forbidden_preview_range == _has_forbidden_preview_range
-		and (not has_forbidden_preview_range or (forbidden_preview_range_cell == _forbidden_preview_range_cell and forbidden_preview_range == _forbidden_preview_range))
-	):
+	if has_preview_turret == _has_preview_turret and (not has_preview_turret or preview_cell == _preview_turret_cell):
 		return
 	_has_preview_turret = has_preview_turret
 	_preview_turret_cell = preview_cell
-	_has_forbidden_preview_range = has_forbidden_preview_range
-	_forbidden_preview_range_cell = forbidden_preview_range_cell
-	_forbidden_preview_range = forbidden_preview_range
 	queue_redraw()
 
 func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_range: float) -> Node2D:
@@ -298,8 +303,6 @@ func _finish_turret_los(cell: Vector2i, generation: int, visible_cells: Dictiona
 		return
 	state["visible_cells"] = visible_cells
 	state["los_status"] = LOS_READY
-	if _has_hovered_turret and _hovered_turret_cell == cell:
-		queue_redraw()
 
 func _has_line_of_sight_cells(from_cell: Vector2i, to_cell: Vector2i) -> bool:
 	var x0: int = from_cell.x
