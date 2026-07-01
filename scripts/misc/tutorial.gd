@@ -121,14 +121,12 @@ func _on_locale_changed(_locale: String) -> void:
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
+	if _should_start_night_automatically():
+		_start_night_automatically()
+		return
 	var key: String = _current_message_key()
 	if key == KEY_PASS_NIGHT and not GameState.is_night:
-		_displayed_key = ""
-		_pending_key = ""
-		text = ""
-		visible = false
-		_set_glow(false)
-		GameState.start_night()
+		_start_night_automatically()
 		return
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
@@ -214,6 +212,31 @@ func _current_message_key() -> String:
 		return KEY_WATER_ROSES
 	# Every planted rose is watered and nothing is left to do: end the day.
 	return KEY_PASS_NIGHT
+
+
+func _should_start_night_automatically() -> bool:
+	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase:
+		return false
+	var planted: int = 0
+	var unwatered: int = 0
+	if _plant_manager != null:
+		planted = int(_plant_manager.call("rose_count"))
+		unwatered = int(_plant_manager.call("unwatered_rose_count"))
+	var seeds: int = 0
+	if _progression != null:
+		seeds = int(_progression.call("get_value", SEED_KEY))
+	if planted == 0:
+		return false
+	return seeds <= 0 and unwatered <= 0
+
+
+func _start_night_automatically() -> void:
+	_displayed_key = ""
+	_pending_key = ""
+	text = ""
+	visible = false
+	_set_glow(false)
+	GameState.start_night()
 
 
 ## True while the player stands next to the seed merchant, i.e. while its shop bar is

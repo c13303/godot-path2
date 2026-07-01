@@ -408,6 +408,7 @@ func save_progression(save_path: String = SAVE_PATH) -> void:
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"layers": layer_data,
+		"counter_stock": _get_counter_stock(scene),
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
@@ -566,6 +567,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	player.set("velocity", Vector2.ZERO)
 	_restore_inventory(game_ui, player_data)
 	_reindex_loaded_layers(scene)
+	_restore_counter_stock(scene, data.get("counter_stock", []))
 	_save_applied = true
 	_log("Load complete: player=%s inventory_slots=%d" % [
 		str(player.global_position), (player_data["inventory"] as Array).size()
@@ -622,6 +624,20 @@ func _get_inventory(game_ui: Node) -> Array[Dictionary]:
 	return inventory
 
 
+func _get_counter_stock(scene: Node) -> Array[Dictionary]:
+	var stock: Array[Dictionary] = []
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_counter_stock"):
+		return stock
+	var raw_stock: Variant = building_manager.call("serialize_counter_stock")
+	if raw_stock is Array:
+		var stock_data: Array = raw_stock as Array
+		for raw_entry: Variant in stock_data:
+			if raw_entry is Dictionary:
+				stock.append(raw_entry as Dictionary)
+	return stock
+
+
 func _serialize_layer(layer: TileMapLayer) -> Array[Dictionary]:
 	var cells: Array[Dictionary] = []
 	for raw_cell: Variant in layer.get_used_cells():
@@ -674,6 +690,17 @@ func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 	_log("Inventory restored: %d slots, selected=%d" % [
 		inventory.size(), int(player_data.get("selected_quick_index", 0))
 	])
+
+
+func _restore_counter_stock(scene: Node, raw_stock: Variant) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_counter_stock"):
+		return
+	var stock: Array = []
+	if raw_stock is Array:
+		stock = raw_stock as Array
+	building_manager.call("restore_counter_stock", stock)
+	_log("Counter stock restored: %d entries" % stock.size())
 
 
 func _reindex_loaded_layers(scene: Node) -> void:
@@ -738,6 +765,19 @@ func _validate_save(data: Dictionary) -> String:
 			return "invalid player inventory quantity"
 		if (item_id == "") != (quantity == 0):
 			return "invalid player inventory slot"
+	if data.has("counter_stock"):
+		if not (data["counter_stock"] is Array):
+			return "invalid counter stock"
+		var counter_stock: Array = data["counter_stock"] as Array
+		for raw_entry: Variant in counter_stock:
+			if not (raw_entry is Dictionary):
+				return "invalid counter stock entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "count"]:
+				if not entry.has(field):
+					return "invalid counter stock entry"
+			if int(entry["count"]) < 0:
+				return "invalid counter stock count"
 	return ""
 
 

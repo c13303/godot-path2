@@ -25,7 +25,11 @@ const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz"]
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
+const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
+const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -34,11 +38,14 @@ var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
-var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
-var _loaded_shop_prices: Dictionary = {
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
+var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+}
+var _loaded_merchant_available_items: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+var _loaded_merchant_prices: Dictionary = {
 	&"seed": 2,
 	&"spray": 100,
 	&"beam": 100,
@@ -128,15 +135,43 @@ func get_loaded_starting_weapons() -> Array[StringName]:
 func get_loaded_rose_shop_counter_limit() -> int:
 	return _loaded_rose_shop_counter_limit
 
-func get_loaded_shop_available_items() -> Array[StringName]:
+func get_loaded_tool_shop_available_items() -> Array[StringName]:
 	var item_ids: Array[StringName] = []
-	for item_id: StringName in _loaded_shop_available_items:
+	for item_id: StringName in _loaded_tool_shop_available_items:
 		item_ids.append(item_id)
 	return item_ids
 
 
+func get_loaded_tool_shop_prices() -> Dictionary:
+	return _loaded_tool_shop_prices.duplicate()
+
+
+func get_loaded_merchant_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in _loaded_merchant_available_items:
+		item_ids.append(item_id)
+	return item_ids
+
+
+func get_loaded_merchant_prices() -> Dictionary:
+	return _loaded_merchant_prices.duplicate()
+
+
+func get_loaded_shop_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in _loaded_tool_shop_available_items:
+		item_ids.append(item_id)
+	for item_id: StringName in _loaded_merchant_available_items:
+		if not item_ids.has(item_id):
+			item_ids.append(item_id)
+	return item_ids
+
+
 func get_loaded_shop_prices() -> Dictionary:
-	return _loaded_shop_prices.duplicate()
+	var prices: Dictionary = _loaded_tool_shop_prices.duplicate()
+	for item_id: StringName in MERCHANT_ITEM_IDS:
+		prices[item_id] = int(_loaded_merchant_prices.get(item_id, ItemCatalog.get_price(String(item_id))))
+	return prices.duplicate()
 
 
 func _resolve_level_scene() -> PackedScene:
@@ -157,11 +192,14 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
-	_loaded_shop_available_items = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
-	_loaded_shop_prices = {
+	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"wall"]
+	_loaded_tool_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"wall": 100,
+	}
+	_loaded_merchant_available_items = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+	_loaded_merchant_prices = {
 		&"seed": 2,
 		&"spray": 100,
 		&"beam": 100,
@@ -180,8 +218,22 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_money = config.starting_money
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
-		_loaded_shop_available_items = _valid_shop_available_items(config.shop_available_items)
-		_loaded_shop_prices = _valid_shop_prices(config.shop_prices)
+		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
+		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
+		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, MERCHANT_ITEM_IDS)
+		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, MERCHANT_ITEM_IDS)
+		var legacy_available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items, LEGACY_SHOP_ITEM_IDS)
+		var legacy_prices: Dictionary = _valid_shop_prices(config.shop_prices, LEGACY_SHOP_ITEM_IDS)
+		if not _same_string_name_array(legacy_available_items, _default_shop_available_items(LEGACY_SHOP_ITEM_IDS)):
+			if _same_string_name_array(_loaded_tool_shop_available_items, _default_shop_available_items(TOOL_SHOP_ITEM_IDS)):
+				_loaded_tool_shop_available_items = _valid_shop_available_items(legacy_available_items, TOOL_SHOP_ITEM_IDS)
+			if _same_string_name_array(_loaded_merchant_available_items, _default_shop_available_items(MERCHANT_ITEM_IDS)):
+				_loaded_merchant_available_items = _valid_shop_available_items(legacy_available_items, MERCHANT_ITEM_IDS)
+		if legacy_prices != _default_shop_prices(LEGACY_SHOP_ITEM_IDS):
+			if _loaded_tool_shop_prices == _default_shop_prices(TOOL_SHOP_ITEM_IDS):
+				_loaded_tool_shop_prices = _valid_shop_prices(legacy_prices, TOOL_SHOP_ITEM_IDS)
+			if _loaded_merchant_prices == _default_shop_prices(MERCHANT_ITEM_IDS):
+				_loaded_merchant_prices = _valid_shop_prices(legacy_prices, MERCHANT_ITEM_IDS)
 		_loaded_rose_shop_counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
 	if _loaded_spawn_playlist != null:
 		return
@@ -212,32 +264,47 @@ func _valid_starting_weapons(raw_weapons: Array[StringName]) -> Array[StringName
 	return weapons
 
 
-func _valid_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids: Array[StringName]) -> Array[StringName]:
 	var item_ids: Array[StringName] = []
 	var seen: Dictionary = {}
 	for item_id: StringName in raw_item_ids:
 		var item_id_string: String = String(item_id)
-		if item_id_string == "" or seen.has(item_id) or not _is_configurable_shop_item(item_id):
+		if item_id_string == "" or seen.has(item_id) or not valid_item_ids.has(item_id):
 			continue
 		seen[item_id] = true
 		item_ids.append(item_id)
 	return item_ids
 
 
-func _valid_shop_prices(raw_prices: Dictionary) -> Dictionary:
+func _valid_shop_prices(raw_prices: Dictionary, item_ids: Array[StringName]) -> Dictionary:
 	var prices: Dictionary = {}
-	for item_id: StringName in _configurable_shop_item_ids():
+	for item_id: StringName in item_ids:
 		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
 		prices[item_id] = maxi(0, int(raw_price))
 	return prices
 
 
-func _is_configurable_shop_item(item_id: StringName) -> bool:
-	return _configurable_shop_item_ids().has(item_id)
+func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in item_ids_source:
+		item_ids.append(item_id)
+	return item_ids
 
 
-func _configurable_shop_item_ids() -> Array[StringName]:
-	return [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+func _default_shop_prices(item_ids_source: Array[StringName]) -> Dictionary:
+	var prices: Dictionary = {}
+	for item_id: StringName in item_ids_source:
+		prices[item_id] = ItemCatalog.get_price(String(item_id))
+	return prices
+
+
+func _same_string_name_array(left: Array[StringName], right: Array[StringName]) -> bool:
+	if left.size() != right.size():
+		return false
+	for item_id: StringName in left:
+		if not right.has(item_id):
+			return false
+	return true
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:
@@ -265,11 +332,17 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		if exit_node != null:
 			var exit_local_pos: Vector2 = floor_layer.to_local(exit_node.global_position)
 			exit_cell = floor_layer.local_to_map(exit_local_pos)
+		var spot_cell: Vector2i = Vector2i(2147483647, 2147483647)
+		var spot_node: Node2D = spawner_node.get_node_or_null("spot") as Node2D
+		if spot_node != null:
+			var spot_local_pos: Vector2 = floor_layer.to_local(spot_node.global_position)
+			spot_cell = floor_layer.local_to_map(spot_local_pos)
 		var binding: SpawnerBinding = SpawnerBinding.new()
 		binding.spawner_id = spawner_id
 		binding.kind = kind
 		binding.cell = cell
 		binding.exit_cell = exit_cell
+		binding.spot_cell = spot_cell
 		if kind == SPAWNER_KIND_CLIENT:
 			binding.frequency_client = maxf(0.0, float(spawner_node.get_meta(CLIENT_FREQUENCY_META, 1.0)))
 		_loaded_spawner_bindings.append(binding)
@@ -280,6 +353,8 @@ func _spawner_kind_from_name(spawner_name: String) -> StringName:
 		return SPAWNER_KIND_MONSTER
 	if spawner_name.begins_with("client"):
 		return SPAWNER_KIND_CLIENT
+	if spawner_name.begins_with("seedmerchant") or spawner_name.begins_with("seedmerchent"):
+		return SPAWNER_KIND_MERCHANT
 	return &""
 
 

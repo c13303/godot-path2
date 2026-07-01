@@ -11,7 +11,9 @@ const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
-const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
+const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 
 var editor_plugin: EditorPlugin
 
@@ -40,8 +42,10 @@ var _starting_money: SpinBox
 var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
-var _shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
-var _shop_price_spins: Dictionary = {}  # StringName -> SpinBox
+var _tool_shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
+var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
+var _merchant_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
+var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
 var _validation_label: RichTextLabel
 var _rename_row: HBoxContainer
@@ -296,50 +300,10 @@ func _build_starting_controls() -> void:
 
 func _build_shop_controls() -> void:
 	var heading: Label = Label.new()
-	heading.text = "Shop"
+	heading.text = "Tool Shop"
 	heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(heading)
-
-	var header: HBoxContainer = HBoxContainer.new()
-	_shop_controls.add_child(header)
-	var available_header: Label = Label.new()
-	available_header.text = "Available"
-	available_header.custom_minimum_size = Vector2(128.0, 0.0)
-	header.add_child(available_header)
-	var price_header: Label = Label.new()
-	price_header.text = "Price"
-	price_header.custom_minimum_size = Vector2(86.0, 0.0)
-	header.add_child(price_header)
-	var currency_header: Label = Label.new()
-	currency_header.text = "Currency"
-	header.add_child(currency_header)
-
-	_shop_available_checkboxes.clear()
-	_shop_price_spins.clear()
-	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
-		var row: HBoxContainer = HBoxContainer.new()
-		_shop_controls.add_child(row)
-
-		var checkbox: CheckBox = CheckBox.new()
-		checkbox.text = _item_display_name(item_id)
-		checkbox.tooltip_text = String(item_id)
-		checkbox.custom_minimum_size = Vector2(128.0, 0.0)
-		checkbox.toggled.connect(_on_shop_item_available_toggled.bind(item_id))
-		row.add_child(checkbox)
-		_shop_available_checkboxes[item_id] = checkbox
-
-		var price_spin: SpinBox = SpinBox.new()
-		price_spin.min_value = 0.0
-		price_spin.max_value = 1000000.0
-		price_spin.step = 1.0
-		price_spin.custom_minimum_size = Vector2(86.0, 0.0)
-		price_spin.value_changed.connect(_on_shop_price_changed.bind(item_id))
-		row.add_child(price_spin)
-		_shop_price_spins[item_id] = price_spin
-
-		var currency_label: Label = Label.new()
-		currency_label.text = String(ItemCatalog.get_currency(String(item_id)))
-		row.add_child(currency_label)
+	_build_shop_item_controls(TOOL_SHOP_ITEM_IDS, _tool_shop_available_checkboxes, _tool_shop_price_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed)
 
 	var counter_limit_row: HBoxContainer = HBoxContainer.new()
 	_shop_controls.add_child(counter_limit_row)
@@ -356,6 +320,61 @@ func _build_shop_controls() -> void:
 	_rose_shop_counter_limit.custom_minimum_size = Vector2(86.0, 0.0)
 	_rose_shop_counter_limit.value_changed.connect(_on_rose_shop_counter_limit_changed)
 	counter_limit_row.add_child(_rose_shop_counter_limit)
+
+	var merchant_heading: Label = Label.new()
+	merchant_heading.text = "Merchent"
+	merchant_heading.add_theme_font_size_override("font_size", 15)
+	_shop_controls.add_child(merchant_heading)
+	_build_shop_item_controls(MERCHANT_ITEM_IDS, _merchant_available_checkboxes, _merchant_price_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed)
+
+
+func _build_shop_item_controls(
+	item_ids: Array[StringName],
+	available_checkboxes: Dictionary,
+	price_spins: Dictionary,
+	toggled_handler: Callable,
+	price_handler: Callable
+) -> void:
+	var header: HBoxContainer = HBoxContainer.new()
+	_shop_controls.add_child(header)
+	var available_header: Label = Label.new()
+	available_header.text = "Available"
+	available_header.custom_minimum_size = Vector2(128.0, 0.0)
+	header.add_child(available_header)
+	var price_header: Label = Label.new()
+	price_header.text = "Price"
+	price_header.custom_minimum_size = Vector2(86.0, 0.0)
+	header.add_child(price_header)
+	var currency_header: Label = Label.new()
+	currency_header.text = "Currency"
+	header.add_child(currency_header)
+
+	available_checkboxes.clear()
+	price_spins.clear()
+	for item_id: StringName in item_ids:
+		var row: HBoxContainer = HBoxContainer.new()
+		_shop_controls.add_child(row)
+
+		var checkbox: CheckBox = CheckBox.new()
+		checkbox.text = _item_display_name(item_id)
+		checkbox.tooltip_text = String(item_id)
+		checkbox.custom_minimum_size = Vector2(128.0, 0.0)
+		checkbox.toggled.connect(toggled_handler.bind(item_id))
+		row.add_child(checkbox)
+		available_checkboxes[item_id] = checkbox
+
+		var price_spin: SpinBox = SpinBox.new()
+		price_spin.min_value = 0.0
+		price_spin.max_value = 1000000.0
+		price_spin.step = 1.0
+		price_spin.custom_minimum_size = Vector2(86.0, 0.0)
+		price_spin.value_changed.connect(price_handler.bind(item_id))
+		row.add_child(price_spin)
+		price_spins[item_id] = price_spin
+
+		var currency_label: Label = Label.new()
+		currency_label.text = String(ItemCatalog.get_currency(String(item_id)))
+		row.add_child(currency_label)
 
 
 func _refresh_levels() -> void:
@@ -504,26 +523,53 @@ func _refresh_shop_controls() -> void:
 	var has_level: bool = _current_level_path != ""
 	_shop_controls.visible = has_level
 	_rose_shop_counter_limit.editable = has_level
-	var available_items: Array[StringName] = _default_shop_available_items()
-	var prices: Dictionary = _default_shop_prices()
+	var tool_available_items: Array[StringName] = _default_tool_shop_available_items()
+	var tool_prices: Dictionary = _default_tool_shop_prices()
+	var merchant_available_items: Array[StringName] = _default_merchant_available_items()
+	var merchant_prices: Dictionary = _default_merchant_prices()
 	var counter_limit: int = 2
 	if config != null:
-		available_items = _valid_shop_available_items(config.shop_available_items)
-		prices = _valid_shop_prices(config.shop_prices)
+		tool_available_items = _valid_tool_shop_available_items(config.tool_shop_available_items)
+		tool_prices = _valid_tool_shop_prices(config.tool_shop_prices)
+		merchant_available_items = _valid_merchant_available_items(config.merchant_available_items)
+		merchant_prices = _valid_merchant_prices(config.merchant_prices)
+		var legacy_available_items: Array[StringName] = _valid_legacy_shop_available_items(config.shop_available_items)
+		var legacy_prices: Dictionary = _valid_legacy_shop_prices(config.shop_prices)
+		if not _same_string_name_array(legacy_available_items, _default_legacy_shop_available_items()):
+			if _same_string_name_array(tool_available_items, _default_tool_shop_available_items()):
+				tool_available_items = _valid_tool_shop_available_items(legacy_available_items)
+			if _same_string_name_array(merchant_available_items, _default_merchant_available_items()):
+				merchant_available_items = _valid_merchant_available_items(legacy_available_items)
+		if legacy_prices != _default_legacy_shop_prices():
+			if tool_prices == _default_tool_shop_prices():
+				tool_prices = _valid_tool_shop_prices(legacy_prices)
+			if merchant_prices == _default_merchant_prices():
+				merchant_prices = _valid_merchant_prices(legacy_prices)
 		counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
-	for raw_item_id: Variant in _shop_available_checkboxes.keys():
+	_refresh_shop_item_controls(_tool_shop_available_checkboxes, _tool_shop_price_spins, tool_available_items, tool_prices, has_level)
+	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, merchant_available_items, merchant_prices, has_level)
+	_rose_shop_counter_limit.value = float(counter_limit)
+
+
+func _refresh_shop_item_controls(
+	available_checkboxes: Dictionary,
+	price_spins: Dictionary,
+	available_items: Array[StringName],
+	prices: Dictionary,
+	has_level: bool
+) -> void:
+	for raw_item_id: Variant in available_checkboxes.keys():
 		var item_id: StringName = raw_item_id as StringName
-		var checkbox: CheckBox = _shop_available_checkboxes[item_id] as CheckBox
+		var checkbox: CheckBox = available_checkboxes[item_id] as CheckBox
 		if checkbox != null:
 			checkbox.button_pressed = available_items.has(item_id)
 			checkbox.disabled = not has_level
-	for raw_item_id: Variant in _shop_price_spins.keys():
+	for raw_item_id: Variant in price_spins.keys():
 		var item_id: StringName = raw_item_id as StringName
-		var price_spin: SpinBox = _shop_price_spins[item_id] as SpinBox
+		var price_spin: SpinBox = price_spins[item_id] as SpinBox
 		if price_spin != null:
 			price_spin.value = float(int(prices.get(item_id, ItemCatalog.get_price(String(item_id)))))
 			price_spin.editable = has_level
-	_rose_shop_counter_limit.value = float(counter_limit)
 
 
 func _refresh_client_frequency_controls() -> void:
@@ -903,13 +949,13 @@ func _on_rose_shop_counter_limit_changed(value: float) -> void:
 	mark_dirty()
 
 
-func _on_shop_item_available_toggled(enabled: bool, item_id: StringName) -> void:
+func _on_tool_shop_item_available_toggled(enabled: bool, item_id: StringName) -> void:
 	if _loading_ui:
 		return
 	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
 	if config == null:
 		return
-	var available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items)
+	var available_items: Array[StringName] = _valid_tool_shop_available_items(config.tool_shop_available_items)
 	if enabled:
 		if not available_items.has(item_id):
 			available_items.append(item_id)
@@ -917,19 +963,53 @@ func _on_shop_item_available_toggled(enabled: bool, item_id: StringName) -> void
 		var index: int = available_items.find(item_id)
 		if index >= 0:
 			available_items.remove_at(index)
-	config.shop_available_items = available_items
+	config.tool_shop_available_items = available_items
+	config.shop_available_items = _selected_legacy_shop_available_items()
 	mark_dirty()
 
 
-func _on_shop_price_changed(value: float, item_id: StringName) -> void:
+func _on_tool_shop_price_changed(value: float, item_id: StringName) -> void:
 	if _loading_ui:
 		return
 	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
 	if config == null:
 		return
-	var prices: Dictionary = _valid_shop_prices(config.shop_prices)
+	var prices: Dictionary = _valid_tool_shop_prices(config.tool_shop_prices)
 	prices[item_id] = maxi(0, int(value))
-	config.shop_prices = prices
+	config.tool_shop_prices = prices
+	config.shop_prices = _selected_legacy_shop_prices()
+	mark_dirty()
+
+
+func _on_merchant_item_available_toggled(enabled: bool, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var available_items: Array[StringName] = _valid_merchant_available_items(config.merchant_available_items)
+	if enabled:
+		if not available_items.has(item_id):
+			available_items.append(item_id)
+	else:
+		var index: int = available_items.find(item_id)
+		if index >= 0:
+			available_items.remove_at(index)
+	config.merchant_available_items = available_items
+	config.shop_available_items = _selected_legacy_shop_available_items()
+	mark_dirty()
+
+
+func _on_merchant_price_changed(value: float, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var prices: Dictionary = _valid_merchant_prices(config.merchant_prices)
+	prices[item_id] = maxi(0, int(value))
+	config.merchant_prices = prices
+	config.shop_prices = _selected_legacy_shop_prices()
 	mark_dirty()
 
 
@@ -1076,8 +1156,12 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_money", int(_starting_money.value))
 		root.set("starting_weapons", _selected_starting_weapons())
-		root.set("shop_available_items", _selected_shop_available_items())
-		root.set("shop_prices", _selected_shop_prices())
+		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
+		root.set("tool_shop_prices", _selected_tool_shop_prices())
+		root.set("merchant_available_items", _selected_merchant_available_items())
+		root.set("merchant_prices", _selected_merchant_prices())
+		root.set("shop_available_items", _selected_legacy_shop_available_items())
+		root.set("shop_prices", _selected_legacy_shop_prices())
 		root.set("rose_shop_counter_limit", clampi(int(_rose_shop_counter_limit.value), 1, 99))
 	_apply_client_frequency_to_scene(root)
 	var new_scene: PackedScene = PackedScene.new()
@@ -1098,8 +1182,12 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_money = int(_starting_money.value)
 	config.starting_weapons = _selected_starting_weapons()
-	config.shop_available_items = _selected_shop_available_items()
-	config.shop_prices = _selected_shop_prices()
+	config.tool_shop_available_items = _selected_tool_shop_available_items()
+	config.tool_shop_prices = _selected_tool_shop_prices()
+	config.merchant_available_items = _selected_merchant_available_items()
+	config.merchant_prices = _selected_merchant_prices()
+	config.shop_available_items = _selected_legacy_shop_available_items()
+	config.shop_prices = _selected_legacy_shop_prices()
 	config.rose_shop_counter_limit = clampi(int(_rose_shop_counter_limit.value), 1, 99)
 
 
@@ -1238,8 +1326,12 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_gems = DEFAULT_STARTING_GEMS
 		config.starting_money = DEFAULT_STARTING_MONEY
 		config.starting_weapons = _default_starting_weapons()
-		config.shop_available_items = _default_shop_available_items()
-		config.shop_prices = _default_shop_prices()
+		config.tool_shop_available_items = _default_tool_shop_available_items()
+		config.tool_shop_prices = _default_tool_shop_prices()
+		config.merchant_available_items = _default_merchant_available_items()
+		config.merchant_prices = _default_merchant_prices()
+		config.shop_available_items = _default_legacy_shop_available_items()
+		config.shop_prices = _default_legacy_shop_prices()
 		config.rose_shop_counter_limit = 2
 	return config
 
@@ -1254,20 +1346,52 @@ func _selected_starting_weapons() -> Array[StringName]:
 	return weapons
 
 
-func _selected_shop_available_items() -> Array[StringName]:
-	var item_ids: Array[StringName] = []
-	for raw_item_id: Variant in _shop_available_checkboxes.keys():
-		var item_id: StringName = raw_item_id as StringName
-		var checkbox: CheckBox = _shop_available_checkboxes[item_id] as CheckBox
-		if checkbox != null and checkbox.button_pressed and _is_configurable_shop_item(item_id):
+func _selected_tool_shop_available_items() -> Array[StringName]:
+	return _selected_shop_available_items_from(_tool_shop_available_checkboxes, TOOL_SHOP_ITEM_IDS)
+
+
+func _selected_merchant_available_items() -> Array[StringName]:
+	return _selected_shop_available_items_from(_merchant_available_checkboxes, MERCHANT_ITEM_IDS)
+
+
+func _selected_legacy_shop_available_items() -> Array[StringName]:
+	var item_ids: Array[StringName] = _selected_tool_shop_available_items()
+	for item_id: StringName in _selected_merchant_available_items():
+		if not item_ids.has(item_id):
 			item_ids.append(item_id)
 	return item_ids
 
 
-func _selected_shop_prices() -> Dictionary:
+func _selected_shop_available_items_from(available_checkboxes: Dictionary, valid_item_ids: Array[StringName]) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for raw_item_id: Variant in available_checkboxes.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var checkbox: CheckBox = available_checkboxes[item_id] as CheckBox
+		if checkbox != null and checkbox.button_pressed and valid_item_ids.has(item_id):
+			item_ids.append(item_id)
+	return item_ids
+
+
+func _selected_tool_shop_prices() -> Dictionary:
+	return _selected_shop_prices_from(_tool_shop_price_spins, TOOL_SHOP_ITEM_IDS)
+
+
+func _selected_merchant_prices() -> Dictionary:
+	return _selected_shop_prices_from(_merchant_price_spins, MERCHANT_ITEM_IDS)
+
+
+func _selected_legacy_shop_prices() -> Dictionary:
+	var prices: Dictionary = _selected_tool_shop_prices()
+	var merchant_prices: Dictionary = _selected_merchant_prices()
+	for item_id: StringName in MERCHANT_ITEM_IDS:
+		prices[item_id] = int(merchant_prices.get(item_id, ItemCatalog.get_price(String(item_id))))
+	return prices
+
+
+func _selected_shop_prices_from(price_spins: Dictionary, item_ids: Array[StringName]) -> Dictionary:
 	var prices: Dictionary = {}
-	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
-		var price_spin: SpinBox = _shop_price_spins.get(item_id) as SpinBox
+	for item_id: StringName in item_ids:
+		var price_spin: SpinBox = price_spins.get(item_id) as SpinBox
 		var price: int = ItemCatalog.get_price(String(item_id))
 		if price_spin != null:
 			price = maxi(0, int(price_spin.value))
@@ -1286,41 +1410,94 @@ func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
 	return weapons
 
 
-func _valid_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+func _valid_tool_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+	return _valid_shop_available_items(raw_item_ids, TOOL_SHOP_ITEM_IDS)
+
+
+func _valid_merchant_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+	return _valid_shop_available_items(raw_item_ids, MERCHANT_ITEM_IDS)
+
+
+func _valid_legacy_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
+	return _valid_shop_available_items(raw_item_ids, LEGACY_SHOP_ITEM_IDS)
+
+
+func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids: Array[StringName]) -> Array[StringName]:
 	var item_ids: Array[StringName] = []
 	var seen: Dictionary = {}
 	for item_id: StringName in raw_item_ids:
-		if item_id == &"" or seen.has(item_id) or not _is_configurable_shop_item(item_id):
+		if item_id == &"" or seen.has(item_id) or not valid_item_ids.has(item_id):
 			continue
 		seen[item_id] = true
 		item_ids.append(item_id)
 	return item_ids
 
 
-func _valid_shop_prices(raw_prices: Dictionary) -> Dictionary:
+func _valid_tool_shop_prices(raw_prices: Dictionary) -> Dictionary:
+	return _valid_shop_prices(raw_prices, TOOL_SHOP_ITEM_IDS)
+
+
+func _valid_merchant_prices(raw_prices: Dictionary) -> Dictionary:
+	return _valid_shop_prices(raw_prices, MERCHANT_ITEM_IDS)
+
+
+func _valid_legacy_shop_prices(raw_prices: Dictionary) -> Dictionary:
+	return _valid_shop_prices(raw_prices, LEGACY_SHOP_ITEM_IDS)
+
+
+func _valid_shop_prices(raw_prices: Dictionary, item_ids: Array[StringName]) -> Dictionary:
 	var prices: Dictionary = {}
-	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+	for item_id: StringName in item_ids:
 		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
 		prices[item_id] = maxi(0, int(raw_price))
 	return prices
 
 
-func _default_shop_available_items() -> Array[StringName]:
+func _default_tool_shop_available_items() -> Array[StringName]:
+	return _default_shop_available_items(TOOL_SHOP_ITEM_IDS)
+
+
+func _default_merchant_available_items() -> Array[StringName]:
+	return _default_shop_available_items(MERCHANT_ITEM_IDS)
+
+
+func _default_legacy_shop_available_items() -> Array[StringName]:
+	return _default_shop_available_items(LEGACY_SHOP_ITEM_IDS)
+
+
+func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[StringName]:
 	var item_ids: Array[StringName] = []
-	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+	for item_id: StringName in item_ids_source:
 		item_ids.append(item_id)
 	return item_ids
 
 
-func _default_shop_prices() -> Dictionary:
+func _default_tool_shop_prices() -> Dictionary:
+	return _default_shop_prices(TOOL_SHOP_ITEM_IDS)
+
+
+func _default_merchant_prices() -> Dictionary:
+	return _default_shop_prices(MERCHANT_ITEM_IDS)
+
+
+func _default_legacy_shop_prices() -> Dictionary:
+	return _default_shop_prices(LEGACY_SHOP_ITEM_IDS)
+
+
+func _default_shop_prices(item_ids_source: Array[StringName]) -> Dictionary:
 	var prices: Dictionary = {}
-	for item_id: StringName in CONFIGURABLE_SHOP_ITEM_IDS:
+	for item_id: StringName in item_ids_source:
 		prices[item_id] = ItemCatalog.get_price(String(item_id))
 	return prices
 
 
-func _is_configurable_shop_item(item_id: StringName) -> bool:
-	return CONFIGURABLE_SHOP_ITEM_IDS.has(item_id)
+func _same_string_name_array(left: Array[StringName], right: Array[StringName]) -> bool:
+	if left.size() != right.size():
+		return false
+	for item_id: StringName in left:
+		if not right.has(item_id):
+			return false
+	return true
 
 
 func _default_starting_weapons() -> Array[StringName]:

@@ -521,7 +521,7 @@ func _on_item_pressed(item_id: String) -> void:
 func _on_merchant_item_pressed(item_id: String) -> void:
 	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
 		return
-	if not _is_merchant_item(item_id) or not _is_item_available(item_id):
+	if not _is_merchant_item(item_id) or not _is_merchant_item_available(item_id):
 		return
 	var purchased: bool = false
 	var button: Button = _merchant_slot_buttons.get(item_id) as Button
@@ -569,12 +569,22 @@ func _affordable_quantity(item_id: String) -> int:
 	return 0
 
 
+func _merchant_affordable_quantity(item_id: String) -> int:
+	if game_ui != null and game_ui.has_method("get_merchant_affordable_quantity"):
+		return int(game_ui.call("get_merchant_affordable_quantity", item_id))
+	return 0
+
+
 func _is_item_locked(_item_id: String) -> bool:
 	return false
 
 
 func _is_item_available(item_id: String) -> bool:
 	return game_ui == null or not game_ui.has_method("is_build_item_available") or bool(game_ui.call("is_build_item_available", item_id))
+
+
+func _is_merchant_item_available(item_id: String) -> bool:
+	return game_ui == null or not game_ui.has_method("is_merchant_item_available") or bool(game_ui.call("is_merchant_item_available", item_id))
 
 
 # --- Per-frame refresh -------------------------------------------------------
@@ -626,14 +636,14 @@ func _maybe_auto_switch_from_empty() -> void:
 
 
 ## The next buildable after `from_id` in the vertical bar (wrapping) that is shown, unlocked
-## and affordable, or "" if none. Skips the shop counter, mirroring _open_shop's auto-select.
+## and affordable, or "" if none.
 func _next_available_buildable(from_id: String) -> String:
 	var n: int = BUILD_ITEM_IDS.size()
 	var start: int = BUILD_ITEM_IDS.find(from_id)
 	for offset: int in range(1, n + 1):
 		var idx: int = ((start if start >= 0 else -1) + offset) % n
 		var candidate: String = BUILD_ITEM_IDS[idx]
-		if candidate == from_id or candidate == COUNTER_ID:
+		if candidate == from_id:
 			continue
 		if _should_show_item(candidate) and not _is_item_locked(candidate) and _affordable_quantity(candidate) > 0:
 			return candidate
@@ -734,12 +744,18 @@ func _build_price(item_id: String) -> int:
 	return ItemCatalog.get_price(item_id)
 
 
+func _merchant_price(item_id: String) -> int:
+	if game_ui != null and game_ui.has_method("get_merchant_price"):
+		return int(game_ui.call("get_merchant_price", item_id))
+	return ItemCatalog.get_price(item_id)
+
+
 func _should_show_item(item_id: String) -> bool:
 	return item_id in BUILD_ITEM_IDS and _is_item_available(item_id)
 
 
 func _should_show_merchant_item(item_id: String) -> bool:
-	return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_item_available(item_id)
+	return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_merchant_item_available(item_id)
 
 
 func _is_merchant_item(item_id: String) -> bool:
@@ -765,7 +781,7 @@ func _refresh_merchant_slots() -> void:
 		if not row.visible:
 			continue
 		var button: Button = _merchant_slot_buttons[item_id] as Button
-		var affordable: int = _affordable_quantity(item_id)
+		var affordable: int = _merchant_affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0
 		var count_label: Label = _merchant_slot_counts[item_id] as Label
 		count_label.text = str(affordable)
@@ -786,7 +802,7 @@ func _refresh_merchant_slots() -> void:
 		price_label.add_theme_color_override("font_color", color)
 		currency.modulate = color
 		name_label.text = _display_name(item_id)
-		price_label.text = str(_build_price(item_id))
+		price_label.text = str(_merchant_price(item_id))
 		var currency_texture: AtlasTexture = _currency_texture(item_id)
 		currency.texture = currency_texture
 		currency.visible = currency_texture != null

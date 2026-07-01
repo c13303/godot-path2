@@ -446,6 +446,13 @@ func is_build_item_available(item_id: String) -> bool:
 		return true
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
+		var raw_tool_item_ids: Variant = loader.call("get_loaded_tool_shop_available_items")
+		if raw_tool_item_ids is Array:
+			for raw_item_id: Variant in raw_tool_item_ids:
+				if str(raw_item_id) == item_id:
+					return true
+			return false
 	if loader != null and loader.has_method("get_loaded_shop_available_items"):
 		var raw_item_ids: Variant = loader.call("get_loaded_shop_available_items")
 		if raw_item_ids is Array:
@@ -453,12 +460,20 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "seed" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall"
 
 
 func get_build_price(item_id: String) -> int:
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_tool_shop_prices"):
+		var raw_tool_prices: Variant = loader.call("get_loaded_tool_shop_prices")
+		if raw_tool_prices is Dictionary:
+			var tool_prices: Dictionary = raw_tool_prices as Dictionary
+			if tool_prices.has(StringName(item_id)):
+				return maxi(0, int(tool_prices[StringName(item_id)]))
+			if tool_prices.has(item_id):
+				return maxi(0, int(tool_prices[item_id]))
 	if loader != null and loader.has_method("get_loaded_shop_prices"):
 		var raw_prices: Variant = loader.call("get_loaded_shop_prices")
 		if raw_prices is Dictionary:
@@ -467,6 +482,48 @@ func get_build_price(item_id: String) -> int:
 				return maxi(0, int(prices[StringName(item_id)]))
 			if prices.has(item_id):
 				return maxi(0, int(prices[item_id]))
+	return ItemCatalog.get_price(item_id)
+
+
+func is_merchant_item_available(item_id: String) -> bool:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_merchant_available_items"):
+		var raw_item_ids: Variant = loader.call("get_loaded_merchant_available_items")
+		if raw_item_ids is Array:
+			for raw_item_id: Variant in raw_item_ids:
+				if str(raw_item_id) == item_id:
+					return true
+			return false
+	if loader != null and loader.has_method("get_loaded_shop_available_items"):
+		var raw_legacy_item_ids: Variant = loader.call("get_loaded_shop_available_items")
+		if raw_legacy_item_ids is Array:
+			for raw_item_id: Variant in raw_legacy_item_ids:
+				if str(raw_item_id) == item_id:
+					return true
+			return false
+	return item_id == "seed" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
+
+
+func get_merchant_price(item_id: String) -> int:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_merchant_prices"):
+		var raw_prices: Variant = loader.call("get_loaded_merchant_prices")
+		if raw_prices is Dictionary:
+			var prices: Dictionary = raw_prices as Dictionary
+			if prices.has(StringName(item_id)):
+				return maxi(0, int(prices[StringName(item_id)]))
+			if prices.has(item_id):
+				return maxi(0, int(prices[item_id]))
+	if loader != null and loader.has_method("get_loaded_shop_prices"):
+		var raw_legacy_prices: Variant = loader.call("get_loaded_shop_prices")
+		if raw_legacy_prices is Dictionary:
+			var legacy_prices: Dictionary = raw_legacy_prices as Dictionary
+			if legacy_prices.has(StringName(item_id)):
+				return maxi(0, int(legacy_prices[StringName(item_id)]))
+			if legacy_prices.has(item_id):
+				return maxi(0, int(legacy_prices[item_id]))
 	return ItemCatalog.get_price(item_id)
 
 
@@ -488,8 +545,26 @@ func get_build_affordable_quantity(item_id: String) -> int:
 		return mini(affordable, limit_remaining)
 	return affordable
 
+
+func get_merchant_affordable_quantity(item_id: String) -> int:
+	if not is_merchant_item_available(item_id):
+		return 0
+	var price: int = get_merchant_price(item_id)
+	var key: StringName = _build_currency_prog_key(item_id)
+	if price <= 0 or key == &"" or _progression_node == null:
+		return 0
+	var owned: int = int(_progression_node.call("get_value", key))
+	@warning_ignore("integer_division")
+	var affordable: int = owned / price
+	return affordable
+
+
 func can_afford_build(item_id: String, count: int = 1) -> bool:
 	return count > 0 and get_build_affordable_quantity(item_id) >= count
+
+
+func can_afford_merchant_item(item_id: String, count: int = 1) -> bool:
+	return count > 0 and get_merchant_affordable_quantity(item_id) >= count
 
 ## Spend the cost of `count` units of item_id. Returns false (spending nothing)
 ## when unaffordable, so callers can place only what was actually paid for.
@@ -507,12 +582,24 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 	return bool(_progression_node.call("spend", key, price * count))
 
 
+func try_purchase_merchant_item(item_id: String, count: int = 1) -> bool:
+	if count <= 0:
+		return false
+	if not is_merchant_item_available(item_id):
+		return false
+	var price: int = get_merchant_price(item_id)
+	var key: StringName = _build_currency_prog_key(item_id)
+	if price <= 0 or key == &"" or _progression_node == null:
+		return false
+	return bool(_progression_node.call("spend", key, price * count))
+
+
 func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
 	if count <= 0 or not ItemCatalog.is_weapon(item_id):
 		return false
 	if not can_add_inventory(item_id, count):
 		return false
-	if not try_purchase_build(item_id, count):
+	if not try_purchase_merchant_item(item_id, count):
 		return false
 	return add_inventory(item_id, count)
 
@@ -522,7 +609,7 @@ func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
 		return false
 	if _progression_node == null or not _progression_node.has_method("update_seeds"):
 		return false
-	if not try_purchase_build(item_id, count):
+	if not try_purchase_merchant_item(item_id, count):
 		return false
 	return bool(_progression_node.call("update_seeds", count))
 

@@ -123,8 +123,10 @@ var _tile_defs_by_atlas: Dictionary = {}
 var _spawners: Dictionary = {}
 var _spawner_kind_by_cell: Dictionary = {}  # Vector2i -> StringName
 var _spawner_exit_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
+var _spawner_spot_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
 var _client_spawners: Dictionary = {}  # Vector2i -> true
 var _client_frequency_by_cell: Dictionary = {}  # Vector2i -> float
+var _merchant_spawners: Dictionary = {}  # Vector2i -> true
 # Round-robin queue of playlist spawn requests ready to be drained. The playlist
 # controller owns wave timing; this queue only spreads spawn+assign work over frames.
 var _ready_spawner_queue: Array[Dictionary] = []
@@ -299,7 +301,6 @@ var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
 var _seed_merchant_active: bool = false
 var _seed_merchant_agent: Node2D
 var _seed_merchant_nav_id: int = -1
-var _seed_merchant_counter_cell: Vector2i = INVALID_CELL
 var _seed_merchant_target_cell: Vector2i = INVALID_CELL
 var _seed_merchant_waiting: bool = false
 # True once the merchant is walking back out to an exit. This now only happens when
@@ -1552,9 +1553,10 @@ func _building_item_blocks_flow(item_id: String) -> bool:
 	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 func _on_plant_added(_cell: Vector2i) -> void:
-	if not _runtime_agents_active():
-		# Daytime placement only dirties the next night's snapshot. In particular,
-		# rectangle placement must not rebuild every existing garden per rose.
+	if not GameState.is_night:
+		# Day/client placement only dirties the next prepared snapshot. Freshly planted
+		# roses are not valid client targets, so client sale must not rebuild every
+		# existing garden per rose during rectangle placement.
 		_plant_zone_built = false
 		_navigation_topology_dirty = true
 		if _zone_overlay:
@@ -1629,7 +1631,7 @@ func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 	for binding: SpawnerBinding in _level_spawner_bindings:
 		if binding == null:
 			continue
-		if binding.kind != SPAWNER_KIND_MONSTER and binding.kind != SPAWNER_KIND_CLIENT:
+		if binding.kind != SPAWNER_KIND_MONSTER and binding.kind != SPAWNER_KIND_CLIENT and binding.kind != SPAWNER_KIND_MERCHANT:
 			continue
 		_log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
 			String(binding.spawner_id),
@@ -1638,7 +1640,7 @@ func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 			_has_wall(binding.cell),
 		])
 		seen_spawners[binding.cell] = true
-		_register_spawner(binding.cell, binding.kind, binding.exit_cell, binding.frequency_client)
+		_register_spawner(binding.cell, binding.kind, binding.exit_cell, binding.frequency_client, binding.spot_cell)
 
 func _migrate_special_tiles_from_wallz() -> bool:
 	if not wallz or not traversable_buildings:
@@ -1722,18 +1724,28 @@ func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictiona
 	var atlas_key: String = _atlas_key(atlas)
 	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
 
-func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, exit_cell: Vector2i = INVALID_CELL, frequency_client: float = 1.0) -> void:
+func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, exit_cell: Vector2i = INVALID_CELL, frequency_client: float = 1.0, spot_cell: Vector2i = INVALID_CELL) -> void:
 	var is_new: bool = not _spawners.has(cell)
 	_spawners[cell] = true
 	_spawner_kind_by_cell[cell] = kind
 	if exit_cell != INVALID_CELL:
 		_spawner_exit_cell_by_cell[cell] = exit_cell
+	else:
+		_spawner_exit_cell_by_cell.erase(cell)
+	if spot_cell != INVALID_CELL:
+		_spawner_spot_cell_by_cell[cell] = spot_cell
+	else:
+		_spawner_spot_cell_by_cell.erase(cell)
 	if kind == SPAWNER_KIND_CLIENT:
 		_client_spawners[cell] = true
 		_client_frequency_by_cell[cell] = maxf(0.0, frequency_client)
 	else:
 		_client_spawners.erase(cell)
 		_client_frequency_by_cell.erase(cell)
+	if kind == SPAWNER_KIND_MERCHANT:
+		_merchant_spawners[cell] = true
+	else:
+		_merchant_spawners.erase(cell)
 	if is_new and GameState.is_night and _night_preparation_ready and _flow_ready and _plant_zone_built and _startup_ready:
 		_initialize_spawner_route(cell)
 
@@ -1754,8 +1766,10 @@ func _release_spawner_route(spawner_cell: Vector2i) -> void:
 	_spawner_garden_routes.erase(spawner_cell)
 	_spawner_kind_by_cell.erase(spawner_cell)
 	_spawner_exit_cell_by_cell.erase(spawner_cell)
+	_spawner_spot_cell_by_cell.erase(spawner_cell)
 	_client_spawners.erase(spawner_cell)
 	_client_frequency_by_cell.erase(spawner_cell)
+	_merchant_spawners.erase(spawner_cell)
 
 func _drain_dirty_routes() -> void:
 	if not _flow_ready:
@@ -2178,6 +2192,7 @@ func _activate_client_sale_phase() -> void:
 		_client_sale_pending_spawners.append(client_cells[random_index])
 	for cell: Vector2i in client_cells:
 		_client_sale_spawn_timers[cell] = 0.0
+	_begin_seed_merchant_phase()
 	_client_sale_active = true
 	GameState.set_client_phase(true)
 
@@ -2207,7 +2222,8 @@ func _process_client_sale(delta: float) -> void:
 	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
-		_begin_seed_merchant_phase()
+		if not GameState.is_seed_merchant_phase:
+			GameState.set_building_phase(true)
 
 
 func _client_count() -> int:
@@ -2216,18 +2232,19 @@ func _client_count() -> int:
 
 func _begin_seed_merchant_phase() -> void:
 	_clear_seed_merchant_phase(false)
-	if GameState.is_night or _client_spawners.is_empty() or _rose_shop_counter_cells().is_empty():
-		GameState.set_building_phase(true)
+	if GameState.is_night:
 		return
-	var client_cells: Array[Vector2i] = []
-	for raw_cell: Variant in _client_spawners.keys():
-		client_cells.append(raw_cell as Vector2i)
-	if client_cells.is_empty():
-		GameState.set_building_phase(true)
+	if _merchant_spawners.is_empty():
+		push_warning("BuildingManager: seed merchant phase skipped; no seedmerchent spawner node was registered.")
 		return
-	var spawner_cell: Vector2i = client_cells[randi_range(0, client_cells.size() - 1)]
+	var merchant_cells: Array[Vector2i] = []
+	for raw_cell: Variant in _merchant_spawners.keys():
+		merchant_cells.append(raw_cell as Vector2i)
+	if merchant_cells.is_empty():
+		push_warning("BuildingManager: seed merchant phase skipped; no usable seedmerchent spawner cell was registered.")
+		return
+	var spawner_cell: Vector2i = merchant_cells[randi_range(0, merchant_cells.size() - 1)]
 	if not _spawn_seed_merchant_from(spawner_cell):
-		GameState.set_building_phase(true)
 		return
 	_seed_merchant_active = true
 	GameState.set_seed_merchant_phase(true)
@@ -2240,15 +2257,16 @@ func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
 	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
 	if spawn_cell == INVALID_CELL:
 		return false
-	var target: Dictionary = _select_counter_target(spawn_cell)
-	if target.is_empty():
+	var target_cell: Vector2i = _spawner_spot_cell_by_cell.get(spawner_cell, INVALID_CELL) as Vector2i
+	if target_cell == INVALID_CELL:
+		push_warning("BuildingManager: seed merchant spawner %s has no authored spot child; merchant not spawned." % spawner_cell)
 		return false
-	var target_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
-	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
-	if target_cell == INVALID_CELL or counter_cell == INVALID_CELL:
+	if not _is_walkable(target_cell):
+		push_warning("BuildingManager: seed merchant spot %s is not walkable; merchant not spawned." % target_cell)
 		return false
 	var path_cells: PackedVector2Array = _find_path_on_walkable_map(spawn_cell, target_cell)
 	if path_cells.is_empty():
+		push_warning("BuildingManager: seed merchant cannot path from %s to spot %s." % [spawn_cell, target_cell])
 		return false
 	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
 	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
@@ -2272,7 +2290,6 @@ func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
 	agent_manager.call("assign_agent_path", nav_id, path_world)
 	_seed_merchant_agent = agent
 	_seed_merchant_nav_id = nav_id
-	_seed_merchant_counter_cell = counter_cell
 	_seed_merchant_target_cell = target_cell
 	_seed_merchant_waiting = false
 	_seed_merchant_leaving = false
@@ -2282,27 +2299,9 @@ func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
 	return true
 
 
-func _select_counter_target(from_cell: Vector2i) -> Dictionary:
-	var best: Dictionary = {}
-	var best_dist: int = 2147483647
-	for counter_cell: Vector2i in _rose_shop_counter_cells():
-		var target_cell: Vector2i = _nearest_counter_access_cell(counter_cell, from_cell)
-		if target_cell == INVALID_CELL:
-			continue
-		var delta: Vector2i = target_cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best = {
-				"counter_cell": counter_cell,
-				"target_cell": target_cell,
-			}
-	return best
-
-
 func _process_seed_merchant_arrival() -> void:
-	# Only the walk-IN toward the counter uses the A* path; while leaving (escape flow)
-	# or already parked at the counter there is nothing to arrive at here.
+	# Only the walk-in toward the authored spot uses the A* path; while leaving
+	# (escape flow) or already parked at the spot there is nothing to arrive at here.
 	if not _seed_merchant_active or _seed_merchant_waiting or _seed_merchant_leaving:
 		return
 	if not is_instance_valid(_seed_merchant_agent):
@@ -2327,11 +2326,12 @@ func _process_seed_merchant_phase() -> void:
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near_seed_merchant():
 		GameState.set_seed_merchant_phase(false)
-		GameState.set_building_phase(true)
+		if not _client_sale_active:
+			GameState.set_building_phase(true)
 
 
 # True whenever the player is within interaction range of the merchant, no matter what
-# the merchant is doing (walking in, parked at the counter, or walking back out). This
+# the merchant is doing (walking in, parked at the spot, or walking back out). This
 # drives both the shop visibility (shop.gd) and the movement pause below.
 func is_player_near_seed_merchant() -> bool:
 	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
@@ -2405,7 +2405,6 @@ func _clear_seed_merchant_phase(free_agent: bool) -> void:
 	_seed_merchant_active = false
 	_seed_merchant_agent = null
 	_seed_merchant_nav_id = -1
-	_seed_merchant_counter_cell = INVALID_CELL
 	_seed_merchant_target_cell = INVALID_CELL
 	_seed_merchant_waiting = false
 	_seed_merchant_leaving = false
@@ -2454,6 +2453,41 @@ func _total_counter_stock() -> int:
 ## Public accessor: total number of harvested roses waiting on shop counters.
 func total_counter_stock() -> int:
 	return _total_counter_stock()
+
+
+func serialize_counter_stock() -> Array[Dictionary]:
+	var data: Array[Dictionary] = []
+	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
+	for raw_cell: Variant in _counter_stock_by_cell.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var count: int = _counter_stock(cell)
+		if count <= 0 or not counter_cells.has(cell):
+			continue
+		data.append({
+			"x": cell.x,
+			"y": cell.y,
+			"count": count,
+		})
+	return data
+
+
+func restore_counter_stock(saved_stock: Array) -> void:
+	_clear_all_counter_piles()
+	_counter_stock_by_cell.clear()
+	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
+	for raw_entry: Variant in saved_stock:
+		if not (raw_entry is Dictionary):
+			continue
+		var entry: Dictionary = raw_entry as Dictionary
+		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
+		var count: int = maxi(0, int(entry.get("count", 0)))
+		if count <= 0 or not counter_cells.has(cell):
+			continue
+		_counter_stock_by_cell[cell] = count
+		_rebuild_counter_pile(cell)
+	_counter_access_cells.clear()
+	_plant_zone_built = false
+	_navigation_topology_dirty = true
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:
@@ -3902,7 +3936,6 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 		_seed_merchant_active = false
 		_seed_merchant_agent = null
 		_seed_merchant_nav_id = -1
-		_seed_merchant_counter_cell = INVALID_CELL
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
 		_seed_merchant_leaving = false
@@ -3949,7 +3982,6 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		_seed_merchant_active = false
 		_seed_merchant_agent = null
 		_seed_merchant_nav_id = -1
-		_seed_merchant_counter_cell = INVALID_CELL
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
 		_seed_merchant_leaving = false
@@ -4010,6 +4042,8 @@ func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_dist_sq: int = 2147483647
 	for raw_spawner_cell in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell
+		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
+			continue
 		var d: Vector2i = spawner_cell - from_cell
 		var dist_sq: int = d.x * d.x + d.y * d.y
 		if dist_sq < best_dist_sq:

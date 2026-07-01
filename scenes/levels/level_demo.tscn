@@ -2,6 +2,7 @@
 
 [ext_resource type="Texture2D" uid="uid://qfcwuejlefje" path="res://assets/sprites/legval/spawner.png" id="4_drkbx"]
 [ext_resource type="Texture2D" uid="uid://d32dojhmc8fdl" path="res://assets/sprites/legval/exitmonster.png" id="5_drkbx"]
+[ext_resource type="Texture2D" uid="uid://bg6v2il1ebodj" path="res://assets/sprites/legval/merchentspot.png" id="7_wyhb5"]
 [ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
 [ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
 [ext_resource type="Script" uid="uid://cg6n61v6iuit1" path="res://scripts/spawning/level_spawn_config.gd" id="34_spawn_config"]
@@ -1243,7 +1244,6 @@ tile_set = SubResource("TileSet_egp0g")
 collision_enabled = false
 navigation_enabled = false
 metadata/water = false
-metadata/_edit_lock_ = true
 
 [node name="watersources" type="TileMapLayer" parent="." unique_id=1380434763]
 z_index = -100
@@ -1273,7 +1273,7 @@ metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/client1" unique_id=912409132]
-position = Vector2(1798, -52)
+position = Vector2(730, 1417)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
@@ -1305,6 +1305,22 @@ metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/client2" unique_id=361216842]
-position = Vector2(-1599, -86)
+position = Vector2(-430, -1532)
 texture = ExtResource("5_drkbx")
+metadata/id = ""
+
+[node name="seedmerchent" type="Sprite2D" parent="spawners" unique_id=655819204]
+position = Vector2(768, 1751)
+texture = ExtResource("4_drkbx")
+metadata/id = ""
+metadata/frequency_client = 1.0
+
+[node name="exit" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1151164943]
+position = Vector2(1615, -80)
+texture = ExtResource("5_drkbx")
+metadata/id = ""
+
+[node name="spot" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1455932304]
+position = Vector2(903, -368)
+texture = ExtResource("7_wyhb5")
 metadata/id = ""

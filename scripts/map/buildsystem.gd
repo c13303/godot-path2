@@ -546,7 +546,8 @@ func _finish_drag_build() -> void:
 		return
 	for cell: Vector2i in cells:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
-		_refresh_cell_collision(cell)
+		if _target_layer_affects_collision(target_layer):
+			_refresh_cell_collision(cell)
 		_after_placeable_placed(cell, placeable_def, false)
 	target_layer.update_internals()
 	if target_layer == plantz:
@@ -600,7 +601,8 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		0
 	)
 	target_layer.update_internals()
-	_refresh_cell_collision(_hover_cell)
+	if _target_layer_affects_collision(target_layer):
+		_refresh_cell_collision(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
 	if game_ui and game_ui.has_method("try_purchase_build"):
 		game_ui.call("try_purchase_build", item_id, 1)
@@ -616,6 +618,9 @@ func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "buildings":
 		return traversable_buildings
 	return wallz
+
+func _target_layer_affects_collision(target_layer: TileMapLayer) -> bool:
+	return target_layer == wallz or target_layer == blocking_buildings
 
 func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
 	if target_layer != wallz and wallz:
