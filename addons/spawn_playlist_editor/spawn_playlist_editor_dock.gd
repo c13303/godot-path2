@@ -9,8 +9,9 @@ const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
+const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
-const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
+const CONFIGURABLE_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
 
 var editor_plugin: EditorPlugin
 
@@ -35,6 +36,7 @@ var _shop_controls: VBoxContainer
 var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
+var _starting_money: SpinBox
 var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
@@ -264,6 +266,18 @@ func _build_starting_controls() -> void:
 	_starting_gems.value_changed.connect(_on_starting_gems_changed)
 	currency_row.add_child(_starting_gems)
 
+	var money_label: Label = Label.new()
+	money_label.text = "Money"
+	currency_row.add_child(money_label)
+
+	_starting_money = SpinBox.new()
+	_starting_money.min_value = 0.0
+	_starting_money.max_value = 1000000.0
+	_starting_money.step = 1.0
+	_starting_money.custom_minimum_size = Vector2(86.0, 0.0)
+	_starting_money.value_changed.connect(_on_starting_money_changed)
+	currency_row.add_child(_starting_money)
+
 	var weapons_label: Label = Label.new()
 	weapons_label.text = "Starting weapons"
 	_starting_controls.add_child(weapons_label)
@@ -464,15 +478,19 @@ func _refresh_starting_controls() -> void:
 	_starting_controls.visible = has_level
 	_starting_seeds.editable = has_level
 	_starting_gems.editable = has_level
+	_starting_money.editable = has_level
 	var seeds: int = DEFAULT_STARTING_SEEDS
 	var gems: int = DEFAULT_STARTING_GEMS
+	var money: int = DEFAULT_STARTING_MONEY
 	var weapons: Array[StringName] = _default_starting_weapons()
 	if config != null:
 		seeds = config.starting_seeds
 		gems = config.starting_gems
+		money = config.starting_money
 		weapons = _valid_weapon_ids(config.starting_weapons)
 	_starting_seeds.value = float(seeds)
 	_starting_gems.value = float(gems)
+	_starting_money.value = float(money)
 	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
 		var weapon_id: StringName = raw_weapon_id as StringName
 		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
@@ -865,6 +883,16 @@ func _on_starting_gems_changed(value: float) -> void:
 	mark_dirty()
 
 
+func _on_starting_money_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.starting_money = int(value)
+	mark_dirty()
+
+
 func _on_rose_shop_counter_limit_changed(value: float) -> void:
 	if _loading_ui:
 		return
@@ -1046,6 +1074,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("spawn_playlist", _playlist)
 		root.set("starting_seeds", int(_starting_seeds.value))
 		root.set("starting_gems", int(_starting_gems.value))
+		root.set("starting_money", int(_starting_money.value))
 		root.set("starting_weapons", _selected_starting_weapons())
 		root.set("shop_available_items", _selected_shop_available_items())
 		root.set("shop_prices", _selected_shop_prices())
@@ -1067,6 +1096,7 @@ func _assign_playlist_to_level_scene() -> bool:
 func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_seeds = int(_starting_seeds.value)
 	config.starting_gems = int(_starting_gems.value)
+	config.starting_money = int(_starting_money.value)
 	config.starting_weapons = _selected_starting_weapons()
 	config.shop_available_items = _selected_shop_available_items()
 	config.shop_prices = _selected_shop_prices()
@@ -1206,6 +1236,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.spawn_playlist = _playlist
 		config.starting_seeds = DEFAULT_STARTING_SEEDS
 		config.starting_gems = DEFAULT_STARTING_GEMS
+		config.starting_money = DEFAULT_STARTING_MONEY
 		config.starting_weapons = _default_starting_weapons()
 		config.shop_available_items = _default_shop_available_items()
 		config.shop_prices = _default_shop_prices()

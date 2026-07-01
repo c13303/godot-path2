@@ -32,12 +32,17 @@ var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
+var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
-var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
+var _loaded_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+	&"spray": 100,
+	&"beam": 100,
+	&"sword": 100,
+	&"bomb": 100,
 }
 var _loaded_rose_shop_counter_limit: int = 2
 
@@ -108,6 +113,10 @@ func get_loaded_starting_gems() -> int:
 	return _loaded_starting_gems
 
 
+func get_loaded_starting_money() -> int:
+	return _loaded_starting_money
+
+
 func get_loaded_starting_weapons() -> Array[StringName]:
 	var weapons: Array[StringName] = []
 	for weapon_id: StringName in _loaded_starting_weapons:
@@ -145,12 +154,17 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_spawner_bindings.clear()
 	_loaded_starting_seeds = 20
 	_loaded_starting_gems = 1000
+	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
-	_loaded_shop_available_items = [&"rose", &"turret1", &"wall"]
+	_loaded_shop_available_items = [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
 	_loaded_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"wall": 100,
+		&"spray": 100,
+		&"beam": 100,
+		&"sword": 100,
+		&"bomb": 100,
 	}
 	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
@@ -162,6 +176,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_spawn_playlist = config.spawn_playlist
 		_loaded_starting_seeds = config.starting_seeds
 		_loaded_starting_gems = config.starting_gems
+		_loaded_starting_money = config.starting_money
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
 		_loaded_shop_available_items = _valid_shop_available_items(config.shop_available_items)
 		_loaded_shop_prices = _valid_shop_prices(config.shop_prices)
@@ -209,14 +224,18 @@ func _valid_shop_available_items(raw_item_ids: Array[StringName]) -> Array[Strin
 
 func _valid_shop_prices(raw_prices: Dictionary) -> Dictionary:
 	var prices: Dictionary = {}
-	for item_id: StringName in [&"rose", &"turret1", &"wall"]:
+	for item_id: StringName in _configurable_shop_item_ids():
 		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
 		prices[item_id] = maxi(0, int(raw_price))
 	return prices
 
 
 func _is_configurable_shop_item(item_id: StringName) -> bool:
-	return item_id == &"rose" or item_id == &"turret1" or item_id == &"wall"
+	return _configurable_shop_item_ids().has(item_id)
+
+
+func _configurable_shop_item_ids() -> Array[StringName]:
+	return [&"rose", &"turret1", &"wall", &"spray", &"beam", &"sword", &"bomb"]
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:

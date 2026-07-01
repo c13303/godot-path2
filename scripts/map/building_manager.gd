@@ -211,6 +211,7 @@ var _startup_ready: bool = false
 var _night_preparing: bool = false
 var _night_preparation_ready: bool = false
 var _night_preparation_token: int = 0
+var _client_preparing: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
 # One escape flow field per exit-wall tile, shared by all monsters. Keyed by the
 # exit-wall cell. Each value: { "escape_group": int, "escape_target_cell":
@@ -293,6 +294,12 @@ var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
 var _counter_stock_by_cell: Dictionary = {}  # Vector2i -> int
 var _counter_pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
+# Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
+# These are fed into the garden clustering as ordinary "plant cells" so a stocked
+# counter becomes a kind of garden: monsters path to one of these tiles and eat a
+# rose from the counter (decrementing its stock) instead of a plant. Rebuilt every
+# time the gardens are (re)built (see _collect_counter_access_cells).
+var _counter_access_cells: Dictionary = {}  # access_cell (Vector2i) -> counter_cell (Vector2i)
 var _morning_harvest_active: bool = false
 
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
@@ -490,6 +497,7 @@ func _resolve_level_layers() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
+	_client_preparing = false
 	if is_night:
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
@@ -607,7 +615,9 @@ func _run_startup_after_flow_ready() -> void:
 	startup_loading_finished.emit()
 
 func _night_preparation_is_current(token: int) -> bool:
-	return token == _night_preparation_token and GameState.is_night
+	if token != _night_preparation_token:
+		return false
+	return GameState.is_night or (_client_preparing and not GameState.is_night)
 
 func _night_preparation_budget_us() -> int:
 	return maxi(500, int(night_preparation_budget_ms * 1000.0))
@@ -676,6 +686,86 @@ func _run_night_preparation(token: int) -> void:
 	_night_preparing = false
 	_night_preparation_ready = true
 	print("ff & gardens computed, monster night starts now")
+
+
+func _run_client_preparation(token: int) -> void:
+	await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+
+	_scan_buildings()
+	_rebuild_waterpool_directional_field()
+	_navigation_topology_dirty = false
+	await get_tree().process_frame
+	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
+	prep_result = await _build_gardens_from_plants_budgeted(token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
+	prep_result = await _validate_gardens_budgeted(token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
+
+	_rebuild_spawner_garden_route_cache()
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		if not _night_preparation_is_current(token):
+			return
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		_initialize_spawner_route(spawner_cell)
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+
+	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
+	await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+
+	var scene: Node = get_tree().current_scene
+	var fight_system: Node = scene.get_node_or_null("fightSystem") if scene else null
+	if fight_system and fight_system.has_method("prepare_night_static_colliders_budgeted"):
+		prep_result = await fight_system.call("prepare_night_static_colliders_budgeted", night_preparation_budget_ms)
+		if not bool(prep_result):
+			_abort_client_preparation(token)
+			return
+	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
+		fight_system.call("prepare_night_static_colliders")
+
+	if not flow or not flow.has_method("are_async_flows_idle"):
+		push_error("BuildingManager: rebuilt FlowFieldNative is required for safe client preparation")
+		_abort_client_preparation(token)
+		return
+	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+		await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return
+	if not _night_flow_fields_are_ready():
+		push_error("BuildingManager: client flow-field preparation completed with an unusable route")
+		_abort_client_preparation(token)
+		return
+
+	_client_preparing = false
+	_activate_client_sale_phase()
+
+
+func _abort_client_preparation(token: int) -> void:
+	if token != _night_preparation_token:
+		return
+	if GameState.is_night:
+		return
+	_client_preparing = false
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	GameState.set_building_phase(true)
 
 func _night_flow_fields_are_ready() -> bool:
 	if not flow or not flow.has_method("group_route_cost_at_world") or not flow.has_method("is_group_flow_request_ready"):
@@ -773,6 +863,7 @@ func _rebuild_walkable_map_cache_budgeted(token: int) -> bool:
 func _build_gardens_from_plants_budgeted(token: int) -> bool:
 	_gardens.clear()
 	_garden_by_plant_cell.clear()
+	_counter_access_cells.clear()
 	_dirty_gardens.clear()
 	_pending_empty_gardens.clear()
 	_clear_garden_entry_resolve_cache("night_prepare_gardens")
@@ -783,6 +874,7 @@ func _build_gardens_from_plants_budgeted(token: int) -> bool:
 
 	var unassigned: Dictionary = {}
 	var source_cells: Array = plant_manager.call("get_plant_cells") as Array
+	source_cells.append_array(_collect_counter_access_cells())
 	for raw_cell: Variant in source_cells:
 		var source_cell: Vector2i = raw_cell as Vector2i
 		unassigned[source_cell] = true
@@ -1044,7 +1136,7 @@ func _process(delta: float) -> void:
 	if _paused:
 		_sync_plant_zone_debug_visibility()
 		return
-	if _night_preparing:
+	if _night_preparing or _client_preparing:
 		_sync_plant_zone_debug_visibility()
 		return
 	if _morning_harvest_active:
@@ -1929,6 +2021,7 @@ func _on_new_day_finished() -> void:
 
 
 func _begin_morning_phase() -> void:
+	_client_preparing = false
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
@@ -1999,6 +2092,22 @@ func _check_morning_harvest_finished() -> void:
 
 
 func _begin_client_sale_phase() -> void:
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	var sale_stock: int = _total_counter_stock()
+	if sale_stock <= 0 or _client_spawners.is_empty():
+		GameState.set_building_phase(true)
+		return
+	_night_preparation_token += 1
+	_client_preparing = true
+	_night_preparation_ready = false
+	call_deferred("_run_client_preparation", _night_preparation_token)
+
+
+func _activate_client_sale_phase() -> void:
+	if GameState.is_night:
+		return
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
@@ -2099,12 +2208,65 @@ func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 
 
 func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	var previous: int = _counter_stock(counter_cell)
 	var value: int = maxi(0, amount)
 	if value <= 0:
 		_counter_stock_by_cell.erase(counter_cell)
 	else:
 		_counter_stock_by_cell[counter_cell] = value
 	_rebuild_counter_pile(counter_cell)
+	# A counter gaining its first rose turns it into an edible garden, which requires
+	# folding its access tiles into the garden topology (a full rebuild). Depletion
+	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
+	# the empty-garden machinery removes a counter-only garden like any other.
+	if previous == 0 and value > 0 and _plant_zone_built:
+		_rebuild_plant_zone_from_layer()
+
+
+# Populates _counter_access_cells from every stocked counter and returns the access
+# tiles as an array to seed the garden clustering. An access tile is a walkable cell
+# 8-adjacent to the counter that does not already hold a plant (the flower keeps its
+# own cell). Called from _build_gardens_from_plants, which clears the map first.
+func _collect_counter_access_cells() -> Array[Vector2i]:
+	var access_cells: Array[Vector2i] = []
+	for raw_counter: Variant in _counter_stock_by_cell.keys():
+		var counter_cell: Vector2i = raw_counter as Vector2i
+		if _counter_stock(counter_cell) <= 0:
+			continue
+		for dy: int in range(-1, 2):
+			for dx: int in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var cell: Vector2i = counter_cell + Vector2i(dx, dy)
+				if _counter_access_cells.has(cell):
+					continue
+				if not _is_walkable(cell):
+					continue
+				if plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell)):
+					continue
+				_counter_access_cells[cell] = counter_cell
+				access_cells.append(cell)
+	return access_cells
+
+
+# A cell a monster can eat from: a real plant, or an access tile of a still-stocked
+# counter. This is the counter-aware generalization of plant_manager.has_plant used
+# throughout monster garden targeting so a stocked counter behaves like a garden.
+func _is_eatable_for_monster(cell: Vector2i) -> bool:
+	if _counter_access_cells.has(cell):
+		return _counter_stock(_counter_access_cells[cell] as Vector2i) > 0
+	return plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell))
+
+
+# Eating from a counter: the monster grabs one rose off the counter (decrementing its
+# sellable stock) and chews at the access tile. No plant is removed; when the counter
+# hits zero its access tiles stop being edible and its garden empties out normally.
+func _consume_counter_rose(eater: Node2D, _spawner_cell: Vector2i, access_cell: Vector2i) -> void:
+	var counter_cell: Vector2i = _counter_access_cells[access_cell] as Vector2i
+	_start_agent_eating(eater, _eating_time, access_cell)
+	Sfx.play_sound(&"crunsh")
+	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+
 
 
 func _select_stocked_counter_target(from_cell: Vector2i) -> Dictionary:
@@ -2596,6 +2758,16 @@ func _process_plant_arrivals() -> void:
 		if plant_cell == INVALID_CELL:
 			finished.append(nav_id)
 			continue
+		# Counter access tile: grab a rose if the counter still has stock, otherwise
+		# retarget (another monster emptied it first) — same "arrive, check, retarget"
+		# contract as an already-eaten plant.
+		if _counter_access_cells.has(plant_cell):
+			_erase_astar_in_agent(nav_id)
+			if _counter_stock(_counter_access_cells[plant_cell] as Vector2i) <= 0:
+				_retarget_agent_or_escape(agent, spawner_cell)
+			else:
+				_consume_counter_rose(agent, spawner_cell, plant_cell)
+			continue
 		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
 			_erase_astar_in_agent(nav_id)
 			_retarget_agent_or_escape(agent, spawner_cell)
@@ -2838,7 +3010,7 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 		agent_manager.call("detach_agent_path", nav_id)
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
-	_spawn_client_payment_seed(agent.global_position)
+	_spawn_client_payment_money(agent.global_position)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
@@ -2891,7 +3063,7 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 		agent_manager.call("detach_agent_flow", nav_id)
 	if agent_manager and agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
-	_spawn_client_payment_seed(agent.global_position)
+	_spawn_client_payment_money(agent.global_position)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
 
@@ -2928,16 +3100,16 @@ func _retarget_client_to_counter_or_escape(agent: Node2D) -> void:
 		agent.call("start_astar_in")
 
 
-func _spawn_client_payment_seed(world_position: Vector2) -> void:
+func _spawn_client_payment_money(world_position: Vector2) -> void:
 	var scene: Node = get_tree().current_scene
-	var seed_icon: Node = scene.get_node_or_null("GameUI/top right/seedIcon") if scene != null else null
-	if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
-		var started: bool = bool(seed_icon.call("animate_seed_harvest", world_position, 0, Callable()))
+	var money_icon: Node = scene.get_node_or_null("GameUI/top right/moneyIcon") if scene != null else null
+	if money_icon != null and money_icon.has_method("animate_money_harvest"):
+		var started: bool = bool(money_icon.call("animate_money_harvest", world_position, 0))
 		if started:
 			return
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_seeds"):
-		progression_node.call("update_seeds", 1)
+	if progression_node != null and progression_node.has_method("update_money"):
+		progression_node.call("update_money", 1)
 
 
 func _process_client_paying_agents(delta: float) -> void:
@@ -3727,6 +3899,7 @@ func _build_gardens_from_plants() -> void:
 		push_warning("GARDEN-CRASH-GUARD: full rebuild requested mid-iteration (depth=%d)!" % _gardens_iter_depth)
 	_gardens.clear()
 	_garden_by_plant_cell.clear()
+	_counter_access_cells.clear()
 	_dirty_gardens.clear()
 	_pending_empty_gardens.clear()
 	_clear_garden_entry_resolve_cache("build_gardens")
@@ -3739,7 +3912,11 @@ func _build_gardens_from_plants() -> void:
 		_plant_zone_built = true
 		return
 	var plant_cells_from_manager: Array = plant_manager.call("get_plant_cells") as Array
-	_cluster_plants_by_walkable_reachability(plant_cells_from_manager)
+	# Stocked counters join the same clustering as flowers, so their access tiles merge
+	# generically into nearby gardens (and nearby counters into one garden).
+	var eatable_cells: Array = plant_cells_from_manager.duplicate()
+	eatable_cells.append_array(_collect_counter_access_cells())
+	_cluster_plants_by_walkable_reachability(eatable_cells)
 	_plant_zone_built = true
 
 # Wall-aware clustering. Plants share a garden only if they are walkably
@@ -4365,9 +4542,14 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 				continue
 			cells_scanned += 1
 			var plant_cell: Vector2i = from_cell + Vector2i(dx, dy)
-			if not bool(plant_manager.call("has_plant", plant_cell)):
-				continue
-			if agent_kind == SPAWNER_KIND_CLIENT and not _is_grownup_rose_cell(plant_cell):
+			if agent_kind == SPAWNER_KIND_CLIENT:
+				if _counter_access_cells.has(plant_cell):
+					continue
+				if not bool(plant_manager.call("has_plant", plant_cell)):
+					continue
+				if not _is_grownup_rose_cell(plant_cell):
+					continue
+			elif not _is_eatable_for_monster(plant_cell):
 				continue
 			plant_candidates += 1
 			if not _garden_by_plant_cell.has(plant_cell):
@@ -5571,9 +5753,16 @@ func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: i
 		var c: Vector2i = raw_cell
 		if not zone_tiles.has(c):
 			continue
-		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", c)):
-			continue
-		if agent_kind == SPAWNER_KIND_CLIENT and not _is_grownup_rose_cell(c):
+		if agent_kind == SPAWNER_KIND_CLIENT:
+			# Clients buy grownup roses from real plants; counters are served by the
+			# dedicated client-counter flow, never as garden food.
+			if _counter_access_cells.has(c):
+				continue
+			if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", c)):
+				continue
+			if not _is_grownup_rose_cell(c):
+				continue
+		elif not _is_eatable_for_monster(c):
 			continue
 		var d: Vector2i = c - from_cell
 		var manhattan: int = abs(d.x) + abs(d.y)
@@ -5628,10 +5817,10 @@ func _garden_has_edible_plants(garden_id: int) -> bool:
 		return true
 	for raw_cell in plant_cells.keys():
 		var cell: Vector2i = raw_cell
-		if bool(plant_manager.call("has_plant", cell)):
+		if _is_eatable_for_monster(cell):
 			return true
-	# plant_cells is non-empty but the plant_manager confirms none survive: stale
-	# cache, genuinely empty. Queue for removal outside any garden iteration.
+	# plant_cells is non-empty but nothing edible survives (plants eaten, counters
+	# emptied): stale cache, genuinely empty. Queue for removal outside iteration.
 	_pending_empty_gardens[garden_id] = true
 	return false
 

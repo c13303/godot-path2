@@ -99,7 +99,7 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	var key: String = _current_message_key()
-	if _waiting_for_seed_harvest and not GameState.is_morning_phase and key != KEY_REFILL_WATER:
+	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
 	if key == "":
 		_displayed_key = ""
@@ -171,7 +171,7 @@ func _current_message_key() -> String:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			return KEY_HARVEST_ROSE
 		return ""
-	if not GameState.is_building_phase:
+	if GameState.is_client_phase:
 		return KEY_CLIENT_TIME
 	# Nothing growing, no seeds, and no roses left on the counters: the run is lost.
 	if planted == 0 and seeds == 0 and _counter_stock() <= 0:

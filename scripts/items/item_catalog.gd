@@ -5,17 +5,20 @@ const ITEM_DEFS: Dictionary = {
 	"sword": {
 		"id": "sword",
 		"name": "Sword",
-		"currency": &"gem",
+		"currency": &"money",
 		"type": "weapon",
 		"category": "tools",
 		"frame": 0,
+		"price": 100,
 	},
 	"bomb": {
 		"id": "bomb",
 		"name": "Bomb",
+		"currency": &"money",
 		"type": "weapon",
 		"category": "tools",
 		"frame": 1,
+		"price": 100,
 	},
 	"water": {
 		"id": "water",
@@ -27,16 +30,20 @@ const ITEM_DEFS: Dictionary = {
 	"spray": {
 		"id": "spray",
 		"name": "Spray",
+		"currency": &"money",
 		"type": "weapon",
 		"category": "tools",
 		"frame": 2,
+		"price": 100,
 	},
 	"beam": {
 		"id": "beam",
 		"name": "Beam",
+		"currency": &"money",
 		"type": "weapon",
 		"category": "tools",
 		"frame": 11,
+		"price": 100,
 	},
 	# Selecting this quick-slot tool opens the shop (build mode). It is not a weapon
 	# or a placeable itself; the shop chooses which building to place.

@@ -14,15 +14,16 @@ extends Control
 const COUNTER_ID: String = "rose_shop_counter"
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
-# Currency icon regions inside items.png (match the HUD seed/gem icons).
+# Currency icon regions inside items.png (match the HUD seed/gem/money icons).
 const SEED_ICON_REGION: Rect2 = Rect2(226.0, 0.0, 32.0, 32.0)
 const GEM_ICON_REGION: Rect2 = Rect2(256.0, 0.0, 32.0, 32.0)
+const MONEY_ICON_REGION: Rect2 = Rect2(416.0, 0.0, 32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The bar sits this many pixels above the screen bottom, clearing the quick bar and
 # its "Construction (…)" info label.
 const BAR_BOTTOM_OFFSET: float = -134.0
 # Building buttons shown in the bar, left to right.
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "spray", "beam", "sword", "bomb", COUNTER_ID]
 
 var progression_node: Node
 var game_ui: Node
@@ -40,6 +41,7 @@ var _selected_price: Label
 var _selected_currency: TextureRect
 var _seed_icon: AtlasTexture
 var _gem_icon: AtlasTexture
+var _money_icon: AtlasTexture
 # item id -> its slot Button / icon TextureRect / affordable-count Label.
 var _slot_buttons: Dictionary = {}
 var _slot_icons: Dictionary = {}
@@ -59,6 +61,7 @@ func _ready() -> void:
 
 	_seed_icon = _region_texture(SEED_ICON_REGION)
 	_gem_icon = _region_texture(GEM_ICON_REGION)
+	_money_icon = _region_texture(MONEY_ICON_REGION)
 	_build_ui()
 
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -243,7 +246,7 @@ func _open_shop() -> void:
 		_select_item(_last_picked_item_id)
 		return
 	for item_id: String in ITEM_IDS:
-		if item_id != COUNTER_ID and _is_item_available(item_id) and _can_afford(item_id):
+		if item_id != COUNTER_ID and not ItemCatalog.is_weapon(item_id) and _is_item_available(item_id) and _can_afford(item_id):
 			_select_item(item_id)
 			return
 	_deselect_active()
@@ -298,6 +301,9 @@ func _on_item_pressed(item_id: String) -> void:
 	if not _can_afford(item_id):
 		_show_insufficient_currency(ItemCatalog.get_currency(item_id))
 		return
+	if ItemCatalog.is_weapon(item_id):
+		_purchase_weapon(item_id)
+		return
 	_select_item(item_id)
 
 
@@ -324,6 +330,17 @@ func _deselect_active() -> void:
 
 func _can_afford(item_id: String) -> bool:
 	return game_ui != null and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
+
+
+func _purchase_weapon(item_id: String) -> void:
+	if game_ui == null or not game_ui.has_method("try_purchase_shop_inventory_item"):
+		return
+	var purchased: bool = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
+	if not purchased:
+		return
+	_insufficient_until = 0.0
+	_refresh_slots()
+	_update_selected_label()
 
 
 func _affordable_quantity(item_id: String) -> int:
@@ -400,6 +417,9 @@ func _update_selected_label() -> void:
 		_selected_currency.visible = true
 	elif currency == &"seed":
 		_selected_currency.texture = _seed_icon
+		_selected_currency.visible = true
+	elif currency == &"money":
+		_selected_currency.texture = _money_icon
 		_selected_currency.visible = true
 	else:
 		_selected_currency.visible = false

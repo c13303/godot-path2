@@ -1,0 +1,95 @@
+extends TextureRect
+
+const MONEY_FLIGHT_SIZE: Vector2 = Vector2(28.0, 28.0)
+const BASE_FLIGHT_DURATION: float = 0.72
+
+@export_group("Money Harvest Animation")
+@export_range(0.0, 1.0, 0.01, "suffix:s") var delay_between_money: float = 0.06
+@export_range(0.1, 5.0, 0.05, "or_greater", "suffix:x") var animation_speed: float = 1.0
+@export_range(0.0, 5.0, 0.05, "or_greater", "suffix:x") var curve_strength: float = 1.0
+
+
+func animate_money_harvest(world_position: Vector2, sequence_index: int = 0) -> bool:
+	if texture == null:
+		return false
+	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
+	if game_ui == null:
+		return false
+	var start_delay: float = float(sequence_index) * delay_between_money
+	if start_delay <= 0.0:
+		_start_money_flight(world_position)
+		return true
+	var delay_tween: Tween = create_tween()
+	delay_tween.tween_interval(start_delay)
+	delay_tween.tween_callback(Callable(self, "_start_money_flight").bind(world_position))
+	return true
+
+
+func _start_money_flight(world_position: Vector2) -> void:
+	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
+	if game_ui == null or texture == null:
+		_credit_money()
+		return
+	var money_sprite: TextureRect = TextureRect.new()
+	money_sprite.texture = texture
+	money_sprite.custom_minimum_size = MONEY_FLIGHT_SIZE
+	money_sprite.size = MONEY_FLIGHT_SIZE
+	money_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	money_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	money_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	money_sprite.pivot_offset = MONEY_FLIGHT_SIZE * 0.5
+	game_ui.add_child(money_sprite)
+
+	var start_position: Vector2 = get_viewport().get_canvas_transform() * world_position
+	var end_position: Vector2 = get_global_rect().get_center()
+	var distance: float = start_position.distance_to(end_position)
+	var base_arc_height: float = clampf(distance * 0.22, 70.0, 180.0)
+	var arc_height: float = base_arc_height * curve_strength
+	var curve_position: Vector2 = (start_position + end_position) * 0.5 + Vector2(0.0, -arc_height)
+	var flight_duration: float = BASE_FLIGHT_DURATION / animation_speed
+	money_sprite.position = start_position - MONEY_FLIGHT_SIZE * 0.5
+	money_sprite.scale = Vector2(0.45, 0.45)
+
+	var flight_tween: Tween = create_tween()
+	flight_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	flight_tween.tween_method(
+		Callable(self, "_update_money_flight").bind(money_sprite, start_position, curve_position, end_position),
+		0.0,
+		1.0,
+		flight_duration
+	)
+	flight_tween.parallel().tween_property(money_sprite, "scale", Vector2.ONE, 0.18 / animation_speed)
+	flight_tween.parallel().tween_property(money_sprite, "rotation", TAU, flight_duration)
+	flight_tween.tween_callback(Callable(self, "_finish_money_flight").bind(money_sprite))
+
+
+func _update_money_flight(
+	progress: float,
+	money_sprite: TextureRect,
+	start_position: Vector2,
+	curve_position: Vector2,
+	end_position: Vector2
+) -> void:
+	if not is_instance_valid(money_sprite):
+		return
+	var inverse_progress: float = 1.0 - progress
+	var curved_position: Vector2 = (
+		inverse_progress * inverse_progress * start_position
+		+ 2.0 * inverse_progress * progress * curve_position
+		+ progress * progress * end_position
+	)
+	money_sprite.position = curved_position - MONEY_FLIGHT_SIZE * 0.5
+
+
+func _finish_money_flight(money_sprite: TextureRect) -> void:
+	if is_instance_valid(money_sprite):
+		money_sprite.queue_free()
+	_credit_money()
+
+
+func _credit_money() -> void:
+	var scene: Node = get_tree().current_scene
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node != null and progression_node.has_method("update_money"):
+		progression_node.call("update_money", 1)
+		Sfx.play_sound(&"bag")

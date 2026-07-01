@@ -33,6 +33,7 @@
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
+[ext_resource type="Script" uid="uid://bmoneyicon13q" path="res://scripts/ui/money_icon.gd" id="31_money_icon"]
 [ext_resource type="Script" uid="uid://b4mvldtd7kft4" path="res://scripts/map/desire.gd" id="31_desire"]
 [ext_resource type="Script" uid="uid://ddklovsi2tle0" path="res://scripts/animations/characterAnimation.gd" id="32_anim"]
 [ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
@@ -544,6 +545,10 @@ region = Rect2(226, 0, 32, 32)
 atlas = ExtResource("27_shop_items")
 region = Rect2(256, 0, 32, 32)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_money_icon"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(416, 0, 32, 32)
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_toolbar"]
 bg_color = Color(0.055, 0.058, 0.06, 0.86)
 border_width_left = 2
@@ -869,9 +874,9 @@ grow_horizontal = 0
 [node name="seedIcon" type="TextureRect" parent="GameUI/top right" unique_id=1153248331]
 layout_mode = 0
 offset_left = -374.0
-offset_top = 17.0
+offset_top = 65.0
 offset_right = -334.0
-offset_bottom = 57.0
+offset_bottom = 105.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_seed_icon")
 script = ExtResource("29_seed_icon")
@@ -892,9 +897,9 @@ fit_content = true
 [node name="gemIcon" type="TextureRect" parent="GameUI/top right" unique_id=855508628]
 layout_mode = 0
 offset_left = -375.0
-offset_top = 66.0
+offset_top = 114.0
 offset_right = -335.0
-offset_bottom = 106.0
+offset_bottom = 154.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_gem_icon")
 script = ExtResource("30_gem_icon")
@@ -903,6 +908,29 @@ animation_speed = 0.5
 curve_strength = 2.0
 
 [node name="gemQT" type="RichTextLabel" parent="GameUI/top right/gemIcon" unique_id=1609902140]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
+text = "x 0"
+fit_content = true
+
+[node name="moneyIcon" type="TextureRect" parent="GameUI/top right" unique_id=8700093]
+layout_mode = 0
+offset_left = -377.0
+offset_top = 13.0
+offset_right = -337.0
+offset_bottom = 53.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_money_icon")
+script = ExtResource("31_money_icon")
+delay_between_money = 0.2
+animation_speed = 0.5
+curve_strength = 2.0
+
+[node name="moneyQT" type="RichTextLabel" parent="GameUI/top right/moneyIcon" unique_id=1319827880]
 layout_mode = 0
 offset_left = 40.0
 offset_top = 5.0

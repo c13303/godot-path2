@@ -6,7 +6,7 @@ extends Node
 		debug_enabled = value
 		_apply_debug_settings()
 
-## When ON, dev cheat keys are active: Numpad + grants 100 seeds + 100 gems.
+## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, and money.
 @export var dev_keys: bool = false:
 	set(value):
 		dev_keys = value
@@ -206,7 +206,7 @@ func _input(event: InputEvent) -> void:
 	_log_clicked_agent_debug_snapshot()
 
 
-## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds + 100 gems.
+## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds, gems, and money.
 func _unhandled_input(event: InputEvent) -> void:
 	if not dev_keys or not (event is InputEventKey):
 		return
@@ -226,6 +226,7 @@ func _grant_dev_currency() -> void:
 		return
 	_call_if_available(progression, "update_seeds", 100)
 	_call_if_available(progression, "update_gems", 100)
+	_call_if_available(progression, "update_money", 100)
 
 func _log_clicked_agent_debug_snapshot() -> void:
 	var steering: Node = get_node_or_null("SteeringSystemNative")

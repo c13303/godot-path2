@@ -7,6 +7,7 @@ const INVENTORY_COLUMNS: int = 8
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
+const MONEY_KEY: StringName = &"money"
 # Quick-slot tool that drives build/unbuild mode rather than acting as a weapon.
 const BUILD_TOOL_ID: String = "build_tool"
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
@@ -318,6 +319,8 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 		return SEED_KEY
 	if currency == &"gem":
 		return GEM_KEY
+	if currency == &"money":
+		return MONEY_KEY
 	return &""
 
 func is_build_item_available(item_id: String) -> bool:
@@ -332,7 +335,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
 
 
 func get_build_price(item_id: String) -> int:
@@ -386,6 +389,16 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 	return bool(_progression_node.call("spend", key, price * count))
 
 
+func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
+	if count <= 0 or not ItemCatalog.is_weapon(item_id):
+		return false
+	if not can_add_inventory(item_id, count):
+		return false
+	if not try_purchase_build(item_id, count):
+		return false
+	return add_inventory(item_id, count)
+
+
 ## Public: how many more of item_id may still be placed given its per-world build
 ## limit, or -1 when the item has no limit. Used by the shop to show "remaining : x".
 func get_build_limit_remaining(item_id: String) -> int:
@@ -419,7 +432,7 @@ func _placed_build_count(item_id: String) -> int:
 
 ## Refund the full price of `count` removed units back to the matching currency,
 ## flying one currency icon per unit from `world_position` to the HUD and crediting
-## on arrival — exactly like the seed/gem harvest. Falls back to an instant credit
+## on arrival — exactly like the seed/gem/money harvest. Falls back to an instant credit
 ## if the HUD icon is unavailable so a refund is never lost.
 func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
@@ -437,6 +450,9 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	elif currency == &"gem":
 		icon = get_node_or_null("top right/gemIcon")
 		animate_method = "animate_gem_harvest"
+	elif currency == &"money":
+		icon = get_node_or_null("top right/moneyIcon")
+		animate_method = "animate_money_harvest"
 	if icon != null and icon.has_method(animate_method):
 		for i: int in range(units):
 			icon.call(animate_method, world_position, i)

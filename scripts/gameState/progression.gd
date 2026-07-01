@@ -10,6 +10,7 @@ const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 const SAVE_VERSION: int = 2
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
+const MONEY_KEY: StringName = &"money"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
@@ -29,6 +30,7 @@ const LAYER_NAMES: Array[String] = [
 @export var starting_monster_per_rose: int = 1
 @export var starting_seeds: int = 20
 @export var starting_gems: int = 100
+@export var starting_money: int = 0
 @export var starting_water_reserve: int = 100
 @export var starting_water_reserve_max: int = 100
 @export_group("")
@@ -63,6 +65,7 @@ class Progression:
 		ProgressionProp.new(&"monster_per_rose", "Monster per rose", 1),
 		ProgressionProp.new(&"seeds", "Seeds", 20),
 		ProgressionProp.new(&"gems", "Gems", 100),
+		ProgressionProp.new(&"money", "Money", 0),
 		ProgressionProp.new(&"water_reserve", "Water reserve", 100),
 		ProgressionProp.new(&"water_reserve_max", "Water reserve max", 100),
 	]
@@ -98,6 +101,7 @@ class Progression:
 var progression: Progression = Progression.new()
 var _seed_label_tween: Tween
 var _gem_label_tween: Tween
+var _money_label_tween: Tween
 # True once a save has been applied to this scene instance (pending-load during
 # _ready or startup auto-load). Prevents the auto-save from being applied twice.
 var _save_applied: bool = false
@@ -115,7 +119,7 @@ func spend(key: StringName, amount: int) -> bool:
 	if amount <= 0 or progression.get_value(key) < amount:
 		return false
 	progression.add(key, -amount)
-	_update_progression_ui(key == SEED_KEY, key == GEM_KEY)
+	_update_progression_ui(key == SEED_KEY, key == GEM_KEY, key == MONEY_KEY)
 	return true
 
 
@@ -129,7 +133,7 @@ func update_value(key: StringName, delta: int, minimum: int = -2147483648, maxim
 	if next_value == prop.value:
 		return false
 	prop.value = next_value
-	_update_progression_ui(key == SEED_KEY, key == GEM_KEY)
+	_update_progression_ui(key == SEED_KEY, key == GEM_KEY, key == MONEY_KEY)
 	return true
 
 
@@ -158,6 +162,17 @@ func update_gems(delta: int) -> bool:
 	return true
 
 
+## Single entry point for changing the money count. Clients pay money when their
+## payment animation reaches the HUD icon.
+func update_money(delta: int) -> bool:
+	if delta < 0 and progression.get_value(MONEY_KEY) < -delta:
+		return false
+	if delta != 0:
+		progression.add(MONEY_KEY, delta)
+		_update_progression_ui(false, false, true)
+	return true
+
+
 ## Copy the inspector-exposed Starting Props onto their matching progression props.
 ## One entry per ProgressionProp key; a key with no export keeps its class default.
 func _apply_starting_values() -> void:
@@ -168,6 +183,7 @@ func _apply_starting_values() -> void:
 		&"monster_per_rose": starting_monster_per_rose,
 		&"seeds": starting_seeds,
 		&"gems": starting_gems,
+		&"money": starting_money,
 		&"water_reserve": starting_water_reserve,
 		&"water_reserve_max": starting_water_reserve_max,
 	}
@@ -189,6 +205,8 @@ func _apply_level_starting_values() -> void:
 		starting_seeds = int(loader.call("get_loaded_starting_seeds"))
 	if loader.has_method("get_loaded_starting_gems"):
 		starting_gems = int(loader.call("get_loaded_starting_gems"))
+	if loader.has_method("get_loaded_starting_money"):
+		starting_money = int(loader.call("get_loaded_starting_money"))
 
 
 func _ready() -> void:
@@ -262,6 +280,13 @@ func _get_gem_label() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/top right/gemIcon/gemQT") as RichTextLabel
 
 
+func _get_money_label() -> RichTextLabel:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top right/moneyIcon/moneyQT") as RichTextLabel
+
+
 func _get_water_reserve_bar() -> ProgressBar:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
@@ -271,7 +296,7 @@ func _get_water_reserve_bar() -> ProgressBar:
 
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
-func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false) -> void:
+func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false, animate_money_label: bool = false) -> void:
 	var seed_label: RichTextLabel = _get_seed_label()
 	if seed_label != null:
 		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
@@ -282,6 +307,11 @@ func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label:
 		gem_label.text = "x %d" % progression.get_value(GEM_KEY)
 		if animate_gem_label:
 			_animate_gem_label(gem_label)
+	var money_label: RichTextLabel = _get_money_label()
+	if money_label != null:
+		money_label.text = "x %d" % progression.get_value(MONEY_KEY)
+		if animate_money_label:
+			_animate_money_label(money_label)
 
 	_update_day_label(progression.get_value(&"nDays"))
 	var water_reserve_bar: ProgressBar = _get_water_reserve_bar()
@@ -322,6 +352,18 @@ func _animate_gem_label(gem_label: RichTextLabel) -> void:
 	_gem_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_gem_label_tween.tween_property(gem_label, "scale", Vector2.ONE, 0.42)
 	_gem_label_tween.tween_property(gem_label, "modulate", Color.WHITE, 0.5)
+
+
+func _animate_money_label(money_label: RichTextLabel) -> void:
+	if _money_label_tween != null and _money_label_tween.is_valid():
+		_money_label_tween.kill()
+	money_label.pivot_offset = money_label.size * 0.5
+	money_label.scale = Vector2(1.55, 1.55)
+	money_label.modulate = Color(1.0, 0.82, 0.22, 1.0)
+	_money_label_tween = create_tween().set_parallel(true)
+	_money_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_money_label_tween.tween_property(money_label, "scale", Vector2.ONE, 0.42)
+	_money_label_tween.tween_property(money_label, "modulate", Color.WHITE, 0.5)
 
 
 func _unhandled_input(event: InputEvent) -> void:
