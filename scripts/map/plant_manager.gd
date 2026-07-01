@@ -10,8 +10,8 @@ signal day_seed_harvest_finished
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
-const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 3)
-const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 3)
+const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 2)
+const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 2)
 const DEBRIS_ATLAS: Vector2i = Vector2i(1, 1)
 const NEW_DAY_DELAY: int = 3000
 

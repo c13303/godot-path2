@@ -82,7 +82,7 @@ const ITEM_DEFS: Dictionary = {
 		"target_layer": "plantz",
 		"atlas": Vector2i(0, 0),
 		# A watered rose is still the same inventory item when picked back up.
-		"tile_atlases": [Vector2i(0, 0), Vector2i(0, 3)],
+		"tile_atlases": [Vector2i(0, 0), Vector2i(0, 2)],
 		"occupies_cell": true,
 		"blocks_movement": false,
 		"blocks_projectiles": false,
