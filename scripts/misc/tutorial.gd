@@ -5,9 +5,7 @@ extends RichTextLabel
 ## rose/seed economy and shows the single most relevant next step, translated
 ## through the Translations singleton. Empty water stays visible at night; other
 ## hints are hidden at night. When every planted rose is watered and the player
-## has nothing left to plant or buy, it prompts them to pass the night and makes
-## the day/night button glow. Until then the day/night button is disabled, so the
-## night cannot be triggered while roses are still unplanted or unwatered.
+## has nothing left to plant or buy, night starts automatically.
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
@@ -15,7 +13,7 @@ extends RichTextLabel
 ##   3. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
 ##   4. seeds left, shop tool equipped .............. Plant roses
 ##   5. planted roses still dry ..................... Water your roses
-##   6. all roses watered, nothing left ............. Pass the night (+ glow)
+##   6. all roses watered, nothing left ............. Start night automatically
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -29,7 +27,6 @@ const KEY_SUN_RISING: String = "tutorial.sun_rising"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_CLIENT_TIME: String = "tutorial.client_time"
 const KEY_SEED_MERCHANT: String = "tutorial.seed_merchant"
-const KEY_CLOSE_TRANSACTION: String = "tutorial.close_transaction"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
@@ -42,7 +39,7 @@ var _progression: Node
 var _game_ui: Node
 var _building_manager: Node
 var _building_object_manager: Node
-var _day_toggle: Button
+var _day_toggle: Control
 var _displayed_key: String = ""  # key currently shown ("" while blank)
 var _pending_key: String = ""    # key we are waiting to reveal
 var _pending_remaining: float = 0.0
@@ -84,7 +81,7 @@ func _resolve_nodes() -> void:
 			GameState.building_phase_changed.connect(_on_building_phase_changed)
 		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
-	_day_toggle = get_node_or_null("../dayToggle") as Button
+	_day_toggle = get_node_or_null("../dayToggle") as Control
 
 
 func _process(delta: float) -> void:
@@ -125,26 +122,27 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	var key: String = _current_message_key()
+	if key == KEY_PASS_NIGHT and not GameState.is_night:
+		_displayed_key = ""
+		_pending_key = ""
+		text = ""
+		visible = false
+		_set_glow(false)
+		GameState.start_night()
+		return
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
 	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER:
-		# Once the player has bought something and walked away from the merchant (its shop
-		# bar is hidden), prompt them to end the visit by clicking the moon/sun button.
-		if GameState.seed_merchant_purchase_made and not _player_near_seed_merchant():
-			key = KEY_CLOSE_TRANSACTION
-		else:
-			key = KEY_SEED_MERCHANT
+		key = KEY_SEED_MERCHANT
 	if key == "":
 		_displayed_key = ""
 		text = ""
 		visible = false
 		_set_glow(false)
-		_update_day_toggle_interactable()
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		_set_glow(false)
-		_update_day_toggle_interactable()
 		return
 	visible = true
 
@@ -171,17 +169,7 @@ func _refresh(delta: float = 0.0) -> void:
 				text = Translations.t(key)
 
 	# Glow tracks the message actually on screen, so it stays in step with the text.
-	_set_glow(_displayed_key == KEY_PASS_NIGHT or _displayed_key == KEY_CLOSE_TRANSACTION)
-	_update_day_toggle_interactable()
-
-
-## The player can only trigger the night once every rose is planted and watered,
-## i.e. exactly when the "pass the night" prompt (and its glow) is on screen. The
-## night is left interactable so GameState can still guard the night->day return.
-func _update_day_toggle_interactable() -> void:
-	if _day_toggle == null:
-		return
-	_day_toggle.disabled = not (GameState.is_night or GameState.is_seed_merchant_phase or _displayed_key == KEY_PASS_NIGHT)
+	_set_glow(false)
 
 
 func _current_message_key() -> String:

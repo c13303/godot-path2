@@ -291,7 +291,6 @@ var _playlist_spawning_enabled: bool = false
 var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
-var _level_completed_emitted: bool = false
 var _client_sale_active: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
@@ -303,10 +302,10 @@ var _seed_merchant_nav_id: int = -1
 var _seed_merchant_counter_cell: Vector2i = INVALID_CELL
 var _seed_merchant_target_cell: Vector2i = INVALID_CELL
 var _seed_merchant_waiting: bool = false
-# True once the player has dismissed the merchant and it is walking back out to an
-# exit. The merchant phase stays active during this walk-out so re-approaching still
-# pauses it and reopens the shop; building phase only begins once it actually exits.
+# True once the merchant is walking back out to an exit. This now only happens when
+# night starts; finishing a merchant visit keeps the sprite parked until nightfall.
 var _seed_merchant_leaving: bool = false
+var _seed_merchant_leave_at_night_pending: bool = false
 # True while the merchant is frozen because the player is within interaction range.
 # Mirrors the native per-agent pause; cleared when the player walks away so the
 # merchant resumes whatever it was doing (walking in, or walking back out).
@@ -522,7 +521,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
 		_client_counter_agents.clear()
-		_clear_seed_merchant_phase(true)
+		_seed_merchant_leave_at_night_pending = _seed_merchant_active and is_instance_valid(_seed_merchant_agent)
+		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(false)
 		_morning_harvest_active = false
 		# Roses left on the counters are NOT cleared at nightfall: they persist as
@@ -565,11 +565,15 @@ func _on_game_mode_changed(is_night: bool) -> void:
 
 
 func _get_playlist_night_index_from_progression() -> int:
+	var total_nights: int = _spawn_playlist_controller.get_total_night_count()
+	if total_nights <= 0:
+		return 0
 	var prog: Node = _get_progression()
 	if prog == null:
 		return 0
 	var day_number: int = int(prog.call("get_value", &"nDays"))
-	return maxi(0, day_number - 1)
+	var day_index: int = maxi(0, day_number - 1)
+	return day_index % total_nights
 
 func _get_progression() -> Node:
 	if _progression != null and is_instance_valid(_progression):
@@ -649,6 +653,7 @@ func _run_night_preparation(token: int) -> void:
 		return
 
 	_scan_buildings()
+	_sync_flow_extra_blocking_cells()
 	_rebuild_waterpool_directional_field()
 	_navigation_topology_dirty = false
 	await get_tree().process_frame
@@ -705,6 +710,8 @@ func _run_night_preparation(token: int) -> void:
 
 	_night_preparing = false
 	_night_preparation_ready = true
+	if _seed_merchant_leave_at_night_pending:
+		_start_seed_merchant_leave_for_night()
 	print("ff & gardens computed, monster night starts now")
 
 
@@ -714,6 +721,7 @@ func _run_client_preparation(token: int) -> void:
 		return
 
 	_scan_buildings()
+	_sync_flow_extra_blocking_cells()
 	_rebuild_waterpool_directional_field()
 	_navigation_topology_dirty = false
 	await get_tree().process_frame
@@ -1357,6 +1365,7 @@ func _apply_navigation_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
 		return
 	_navigation_topology_dirty = false
+	_sync_flow_extra_blocking_cells()
 	_rebuild_waterpool_directional_field()
 	_rebuild_walkable_map_cache()
 	if _plant_zone_built:
@@ -1370,6 +1379,18 @@ func _apply_navigation_topology_rebuild() -> void:
 	_rebuild_exit_wall_escapes()
 	_warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
 		"exits=%d" % _exit_wall_escapes.size())
+
+func _sync_flow_extra_blocking_cells() -> void:
+	if flow == null or not flow.has_method("set_extra_blocking_cells"):
+		return
+	var cells: PackedVector2Array = PackedVector2Array()
+	if blocking_buildings != null:
+		for raw_cell: Variant in blocking_buildings.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
+			if not _building_cell_blocks_movement(cell):
+				continue
+			cells.append(Vector2(float(cell.x), float(cell.y)))
+	flow.call("set_extra_blocking_cells", cells)
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
@@ -1495,14 +1516,16 @@ func _setup_building_object_manager() -> void:
 		building_objects.connect("building_removed", Callable(self, "_on_building_removed"))
 
 
-func _on_building_added(cell: Vector2i, item_id: String) -> void:
+func _on_building_added(_cell: Vector2i, item_id: String) -> void:
+	if _building_item_blocks_flow(item_id):
+		_navigation_topology_dirty = true
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
-	if _morning_harvest_active and _rose_shop_counter_cells().size() > 0:
-		_auto_select_shop_tool()
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
+	if _building_item_blocks_flow(item_id):
+		_navigation_topology_dirty = true
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 	_counter_stock_by_cell.erase(cell)
@@ -1518,6 +1541,15 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 				if agent != null:
 					var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 					_retarget_agent_or_escape(agent, spawner_cell)
+
+
+func _building_item_blocks_flow(item_id: String) -> bool:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if item_def.is_empty():
+		return false
+	if str(item_def.get("target_layer", "")) != "blocking_buildings":
+		return false
+	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not _runtime_agents_active():
@@ -2009,17 +2041,8 @@ func _process_spawners(delta: float) -> void:
 
 
 func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
-	if _level_completed_emitted:
-		return
 	if _spawn_playlist_controller.is_current_night_schedule_complete():
 		if active_monsters == 0:
-			if _current_playlist_night_index >= _spawn_playlist_controller.get_total_night_count() - 1:
-				_level_completed_emitted = true
-				if debug_logs:
-					_log("Final playlist night survived; level completed.")
-				GameState.start_day()
-				level_completed.emit()
-				return
 			GameState.start_day()
 		return
 	var t_np: int = Time.get_ticks_usec()
@@ -2064,8 +2087,6 @@ func _begin_morning_phase() -> void:
 	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
 		plant_manager.call("bloom_grownup_roses")
 	GameState.set_morning_phase(true)
-	if _rose_shop_counter_cells().is_empty():
-		_auto_select_shop_tool()
 
 
 func _process_morning_harvest_walkover() -> void:
@@ -2075,7 +2096,6 @@ func _process_morning_harvest_walkover() -> void:
 		return
 	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
 	if counter_cells.is_empty():
-		_auto_select_shop_tool()
 		return
 	var rose_cell: Vector2i = _player_grownup_rose_cell()
 	if rose_cell == INVALID_CELL:
@@ -2304,6 +2324,10 @@ func _process_seed_merchant_phase() -> void:
 		return
 	if not is_instance_valid(_seed_merchant_agent):
 		_end_seed_merchant_phase()
+		return
+	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near_seed_merchant():
+		GameState.set_seed_merchant_phase(false)
+		GameState.set_building_phase(true)
 
 
 # True whenever the player is within interaction range of the merchant, no matter what
@@ -2324,9 +2348,8 @@ func is_player_near_seed_merchant() -> bool:
 # Freezes the merchant while the player is close and lets it resume the moment they
 # leave, so getting near always stops it (and opens the shop, via is_player_near_...).
 func _process_seed_merchant_proximity() -> void:
-	# Once the merchant is leaving it must never re-pause: building phase has already
-	# started and walking back into the departing merchant should not freeze it or
-	# reopen the shop.
+	# Once the merchant is leaving it must never re-pause: night has already started,
+	# and walking back into the departing merchant should not freeze it.
 	if not _seed_merchant_active or _seed_merchant_leaving or not is_instance_valid(_seed_merchant_agent):
 		return
 	var near: bool = is_player_near_seed_merchant()
@@ -2345,24 +2368,35 @@ func request_seed_merchant_leave() -> void:
 	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
 		_end_seed_merchant_phase()
 		return
-	# Unfreeze first so the merchant can actually walk out (the player is standing next
-	# to it to press the button, which had it paused).
+	if not GameState.is_night:
+		GameState.set_seed_merchant_phase(false)
+		GameState.set_building_phase(true)
+		return
+	_start_seed_merchant_leave_for_night()
+
+
+func _start_seed_merchant_leave_for_night() -> void:
+	if not _seed_merchant_active:
+		_seed_merchant_leave_at_night_pending = false
+		GameState.set_seed_merchant_phase(false)
+		return
+	if not is_instance_valid(_seed_merchant_agent):
+		_seed_merchant_leave_at_night_pending = false
+		_clear_seed_merchant_phase(false)
+		return
+	if GameState.is_night and not _night_preparation_ready:
+		_seed_merchant_leave_at_night_pending = true
+		GameState.set_seed_merchant_phase(false)
+		return
+	_seed_merchant_leave_at_night_pending = false
+	# Unfreeze first so the merchant can actually walk out if the player paused it.
 	if _seed_merchant_paused:
 		_set_seed_merchant_paused(false)
 	_seed_merchant_leaving = true
 	_seed_merchant_waiting = false
-	# Building starts the instant the player dismisses the merchant. Switch to building
-	# phase right now so the merchant sale shop closes and the build shop is available
-	# immediately. The agent keeps walking out to an exit purely as a departing visual;
-	# because the merchant phase is no longer active, the shop can never reopen even if
-	# the player catches back up to it (_process_seed_merchant_proximity bails while
-	# leaving, and shop.gd only tracks the merchant while is_seed_merchant_phase is true).
+	GameState.set_seed_merchant_phase(false)
 	if not _assign_agent_to_escape(_seed_merchant_agent):
-		# No escape route available: remove it now (its merchant branch also switches to
-		# building), so nothing is left waiting behind the closed shop.
 		remove_dead_monster(_seed_merchant_agent, false)
-		return
-	GameState.set_building_phase(true)
 
 
 func _clear_seed_merchant_phase(free_agent: bool) -> void:
@@ -2375,6 +2409,7 @@ func _clear_seed_merchant_phase(free_agent: bool) -> void:
 	_seed_merchant_target_cell = INVALID_CELL
 	_seed_merchant_waiting = false
 	_seed_merchant_leaving = false
+	_seed_merchant_leave_at_night_pending = false
 	_seed_merchant_paused = false
 	GameState.set_seed_merchant_phase(false)
 
@@ -2626,8 +2661,6 @@ func _auto_select_shop_tool() -> void:
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
 	if game_ui != null and game_ui.has_method("select_build_tool"):
 		game_ui.call("select_build_tool")
-	if GameState.is_morning_phase and game_ui != null and game_ui.has_method("set_selected_build_item"):
-		game_ui.call("set_selected_build_item", ROSE_SHOP_COUNTER_ID)
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:
@@ -3873,11 +3906,13 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
 		_seed_merchant_leaving = false
+		_seed_merchant_leave_at_night_pending = false
 		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
-		GameState.set_building_phase(true)
+		if not GameState.is_night:
+			GameState.set_building_phase(true)
 
-# Combat death uses the same authoritative owner that created and routed monsters.
+# Monster death uses the same authoritative owner that created and routed monsters.
 # Clear every phase/index before unregistering the native agent so no deferred
 # garden work can retain or later re-route a dead nav_id.
 func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
@@ -3918,9 +3953,11 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		_seed_merchant_target_cell = INVALID_CELL
 		_seed_merchant_waiting = false
 		_seed_merchant_leaving = false
+		_seed_merchant_leave_at_night_pending = false
 		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
-		GameState.set_building_phase(true)
+		if not GameState.is_night:
+			GameState.set_building_phase(true)
 
 func _spawn_monster_death_drop(world_position: Vector2) -> void:
 	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < 0.5 else MONSTER_DEATH_DROP_GEM

@@ -4,6 +4,10 @@ const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
+const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
+const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
+const PURCHASE_FLIGHT_SIZE: Vector2 = Vector2(28.0, 28.0)
+const PURCHASE_FLIGHT_DURATION: float = 0.72
 
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
@@ -21,7 +25,7 @@ const ITEM_NAME_KEY_PREFIX: String = "item."
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
-@onready var day_toggle: Button = $"top anchor/dayToggle"
+@onready var day_toggle: TextureRect = $"top anchor/dayToggle"
 
 const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.png")
 const MOONSUN_TILE_SIZE: int = 64
@@ -77,26 +81,16 @@ func _setup_day_toggle() -> void:
 	_merchant_icon.atlas = MOONSUN_TEXTURE
 	_merchant_icon.region = Rect2(MOONSUN_TILE_SIZE * 2, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
 
-	day_toggle.pressed.connect(_on_day_toggle_pressed)
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_update_day_toggle_icon(GameState.is_night)
 
-func _on_day_toggle_pressed() -> void:
-	if GameState.is_seed_merchant_phase:
-		var scene: Node = get_tree().current_scene
-		var manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
-		if manager != null and manager.has_method("request_seed_merchant_leave"):
-			manager.call("request_seed_merchant_leave")
-		return
-	GameState.toggle()
-
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
 	# Night: non-weapon quick items (build/unbuild tools, placeables) are disabled
-	# and the player is auto-armed with their first weapon. Day re-enables them; the
-	# shop re-selects the build tool once the seed harvest finishes.
+	# and the player is auto-armed with their first weapon. Day re-enables them without
+	# changing the player's selected quick slot.
 	if is_night:
 		select_first_weapon()
 	_refresh_all_slots()
@@ -111,9 +105,9 @@ func _on_locale_changed(_locale: String) -> void:
 func _update_day_toggle_icon(is_night: bool) -> void:
 	# Icon reflects the current mode: sun during day, moon during night.
 	if GameState.is_seed_merchant_phase:
-		day_toggle.icon = _merchant_icon
+		day_toggle.texture = _merchant_icon
 	else:
-		day_toggle.icon = _moon_icon if is_night else _sun_icon
+		day_toggle.texture = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -282,18 +276,14 @@ func selected_quick_item_places_tile() -> bool:
 	return ItemCatalog.is_placeable(item_id) and not is_item_disabled_for_placement(item_id)
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
-	if GameState.is_morning_phase and item_id == "rose_shop_counter":
-		return false
-	return (GameState.is_night or not GameState.is_building_phase) and ItemCatalog.is_placeable(item_id)
+	return GameState.is_night and ItemCatalog.is_placeable(item_id)
 
 ## Whether a quick-bar item is disabled for selection/use. At night every
 ## non-weapon (build/unbuild tools, placeables) is locked out so the player can
 ## only wield weapons; during the day nothing is locked. Generalizes to any new
 ## weapon (selectable at night) or non-weapon (locked at night) item.
 func is_quick_item_disabled(item_id: String) -> bool:
-	if GameState.is_morning_phase and item_id == BUILD_TOOL_ID:
-		return false
-	return item_id != "" and (GameState.is_night or not GameState.is_building_phase) and not ItemCatalog.is_weapon(item_id)
+	return item_id != "" and GameState.is_night and not ItemCatalog.is_weapon(item_id)
 
 ## Selects the first quick-slot weapon, used to auto-arm the player when night
 ## falls. No-op if the quick bar holds no weapon.
@@ -349,6 +339,96 @@ func get_quick_bar_left_x() -> float:
 	if _toolbar_slot_nodes.is_empty():
 		return -1.0
 	return _toolbar_slot_nodes[0].get_global_rect().position.x
+
+
+## Global-space left X of a quick slot, or -1 if that slot has not been built yet.
+func get_quick_slot_left_x(index: int) -> float:
+	if index < 0 or index >= _toolbar_slot_nodes.size():
+		return -1.0
+	return _toolbar_slot_nodes[index].get_global_rect().position.x
+
+
+func animate_inventory_item_to_slot(item_id: String, start_global_position: Vector2) -> bool:
+	var target_slot: Control = _find_inventory_item_slot(item_id)
+	if target_slot == null:
+		return false
+	var texture: AtlasTexture = _inventory_item_texture(item_id)
+	if texture == null:
+		return false
+	var item_sprite: TextureRect = TextureRect.new()
+	item_sprite.texture = texture
+	item_sprite.custom_minimum_size = PURCHASE_FLIGHT_SIZE
+	item_sprite.size = PURCHASE_FLIGHT_SIZE
+	item_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	item_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	item_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	item_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	item_sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
+	add_child(item_sprite)
+
+	var end_position: Vector2 = target_slot.get_global_rect().get_center()
+	var distance: float = start_global_position.distance_to(end_position)
+	var arc_height: float = clampf(distance * 0.22, 70.0, 180.0)
+	var curve_position: Vector2 = (start_global_position + end_position) * 0.5 + Vector2(0.0, -arc_height)
+	item_sprite.position = start_global_position - PURCHASE_FLIGHT_SIZE * 0.5
+	item_sprite.scale = Vector2(0.45, 0.45)
+
+	var flight_tween: Tween = create_tween()
+	flight_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	flight_tween.tween_method(
+		Callable(self, "_update_purchase_flight").bind(item_sprite, start_global_position, curve_position, end_position),
+		0.0,
+		1.0,
+		PURCHASE_FLIGHT_DURATION
+	)
+	flight_tween.parallel().tween_property(item_sprite, "scale", Vector2.ONE, 0.18)
+	flight_tween.parallel().tween_property(item_sprite, "rotation", TAU, PURCHASE_FLIGHT_DURATION)
+	flight_tween.tween_callback(Callable(self, "_finish_purchase_flight").bind(item_sprite))
+	return true
+
+
+func _find_inventory_item_slot(item_id: String) -> Control:
+	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
+		if _slot_item_id(inventory_slots[i]) == item_id and i < _toolbar_slot_nodes.size():
+			return _toolbar_slot_nodes[i]
+	for i: int in range(inventory_slots.size()):
+		if _slot_item_id(inventory_slots[i]) == item_id and i < _inventory_slot_nodes.size():
+			return _inventory_slot_nodes[i]
+	return null
+
+
+func _inventory_item_texture(item_id: String) -> AtlasTexture:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var frame: int = int(item_def.get("frame", -1))
+	if frame < 0:
+		return null
+	var atlas_texture: AtlasTexture = AtlasTexture.new()
+	atlas_texture.atlas = ITEMS_TEXTURE
+	atlas_texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
+	return atlas_texture
+
+
+func _update_purchase_flight(
+	progress: float,
+	item_sprite: TextureRect,
+	start_position: Vector2,
+	curve_position: Vector2,
+	end_position: Vector2
+) -> void:
+	if not is_instance_valid(item_sprite):
+		return
+	var inverse_progress: float = 1.0 - progress
+	var curved_position: Vector2 = (
+		inverse_progress * inverse_progress * start_position
+		+ 2.0 * inverse_progress * progress * curve_position
+		+ progress * progress * end_position
+	)
+	item_sprite.position = curved_position - PURCHASE_FLIGHT_SIZE * 0.5
+
+
+func _finish_purchase_flight(item_sprite: TextureRect) -> void:
+	if is_instance_valid(item_sprite):
+		item_sprite.queue_free()
 
 ## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:

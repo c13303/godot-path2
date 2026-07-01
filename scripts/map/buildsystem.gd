@@ -879,14 +879,7 @@ func _is_inventory_open() -> bool:
 func _placement_disabled() -> bool:
 	if GameState.is_night:
 		return true
-	if GameState.is_building_phase:
-		return false
-	if not GameState.is_morning_phase:
-		return true
-	if not game_ui or not game_ui.has_method("get_selected_build_item_id"):
-		return true
-	var selected_id: String = String(game_ui.call("get_selected_build_item_id"))
-	return selected_id != "rose_shop_counter"
+	return false
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))

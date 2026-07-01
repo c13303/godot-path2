@@ -92,6 +92,8 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_navigation_blocking_layer", "node"), &FlowFieldNative::set_navigation_blocking_layer);
     ClassDB::bind_method(D_METHOD("set_water_layer", "node"), &FlowFieldNative::set_water_layer);
     ClassDB::bind_method(D_METHOD("set_blocking_layer", "node"), &FlowFieldNative::set_blocking_layer);
+    ClassDB::bind_method(D_METHOD("set_extra_blocking_cells", "cells"), &FlowFieldNative::set_extra_blocking_cells);
+    ClassDB::bind_method(D_METHOD("clear_extra_blocking_cells"), &FlowFieldNative::clear_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("get_navigation_blocking_layer"), &FlowFieldNative::get_navigation_blocking_layer);
@@ -108,6 +110,17 @@ void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_t
 void FlowFieldNative::set_navigation_blocking_layer(Object *node) { navigation_blocking_layer = Object::cast_to<TileMapLayer>(node); }
 void FlowFieldNative::set_water_layer(Object *node) { set_navigation_blocking_layer(node); }
 void FlowFieldNative::set_blocking_layer(Object *node) { blocking_layer = Object::cast_to<TileMapLayer>(node); }
+void FlowFieldNative::set_extra_blocking_cells(const PackedVector2Array &cells)
+{
+    extra_blocking_cells.clear();
+    extra_blocking_cells.reserve(cells.size());
+    for (int i = 0; i < cells.size(); i++)
+    {
+        Vector2 cell = cells[i];
+        extra_blocking_cells.insert(Vector2i((int)cell.x, (int)cell.y));
+    }
+}
+void FlowFieldNative::clear_extra_blocking_cells() { extra_blocking_cells.clear(); }
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 Object *FlowFieldNative::get_navigation_blocking_layer() const { return navigation_blocking_layer; }
@@ -180,6 +193,12 @@ void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &phy
             physical_wall_set.insert(cell);
             navigation_blocked_set.insert(cell);
         }
+    }
+
+    for (const Vector2i &cell : extra_blocking_cells)
+    {
+        physical_wall_set.insert(cell);
+        navigation_blocked_set.insert(cell);
     }
 
     for (int i = 0; i < floors.size(); i++)
@@ -864,7 +883,7 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     if (blocking_layer)
         blockers = blocking_layer->get_used_cells();
     Array floors = floor_layer->get_used_cells();
-    snapshot.walls.reserve(walls.size() + blockers.size());
+    snapshot.walls.reserve(walls.size() + blockers.size() + extra_blocking_cells.size());
     snapshot.navigation_blockers.reserve(floors.size());
     for (int i = 0; i < walls.size(); i++)
     {
@@ -878,6 +897,12 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     for (int i = 0; i < blockers.size(); i++)
     {
         Vector2i cell = blockers[i];
+        navigation_blocked_set.insert(cell);
+        if (wall_set.insert(cell).second)
+            snapshot.walls.push_back(cell);
+    }
+    for (const Vector2i &cell : extra_blocking_cells)
+    {
         navigation_blocked_set.insert(cell);
         if (wall_set.insert(cell).second)
             snapshot.walls.push_back(cell);

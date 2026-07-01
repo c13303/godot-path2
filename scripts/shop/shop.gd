@@ -2,7 +2,9 @@ extends Control
 
 ## The shop is the building picker for build mode. It is open exactly while the
 ## quick-bar Build tool is selected (see game_ui.is_build_tool_selected) and during
-## the day; selecting any other quick slot closes it. It renders as a vertical column
+## the day; selecting any other quick slot closes it. The seed merchant column still
+## takes over while the player is near the merchant without the build tool selected.
+## It renders as a vertical column
 ## rising up out of the build/shop quick slot, like a dropdown that opens upward:
 ## one icon per buildable, stacked with no per-row text. A single floating label sits
 ## just to the right of the currently selected icon only, showing that buildable's name
@@ -30,6 +32,7 @@ const BAR_CONTENT_INSET: float = 10.0
 # Y offset (from the top) of the seed-merchant column's top, placing it just below the
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
+const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
 const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
@@ -39,7 +42,6 @@ const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
 var progression_node: Node
 var game_ui: Node
-var _waiting_for_seed_harvest: bool = false
 # The building currently picked for placement (drives build mode).
 var _selected_item_id: String = ""
 # The last building the player picked; restored when the shop reopens if it still exists.
@@ -50,9 +52,11 @@ var _last_picked_item_id: String = ""
 var _selected_affordable_prev: int = -1
 
 var _shop_column: VBoxContainer
+var _merchant_column: VBoxContainer
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
 # vertical stack for the build shop, horizontal bar for the seed-merchant sale.
 var _items_list: BoxContainer
+var _merchant_items_list: BoxContainer
 var _seed_icon: AtlasTexture
 var _gem_icon: AtlasTexture
 var _money_icon: AtlasTexture
@@ -76,6 +80,15 @@ var _selected_currency: TextureRect
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
+var _merchant_slot_rows: Dictionary = {}
+var _merchant_slot_buttons: Dictionary = {}
+var _merchant_slot_icons: Dictionary = {}
+var _merchant_slot_counts: Dictionary = {}
+var _merchant_row_labels: Dictionary = {}
+var _merchant_row_names: Dictionary = {}
+var _merchant_row_prices: Dictionary = {}
+var _merchant_row_currencies: Dictionary = {}
+var _merchant_slot_state: Dictionary = {}
 
 
 func _ready() -> void:
@@ -92,13 +105,8 @@ func _ready() -> void:
 	_build_ui()
 
 	GameState.mode_changed.connect(_on_game_mode_changed)
-	_waiting_for_seed_harvest = false
 	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 		GameState.building_phase_changed.connect(_on_building_phase_changed)
-	if not GameState.morning_phase_changed.is_connected(_on_morning_phase_changed):
-		GameState.morning_phase_changed.connect(_on_morning_phase_changed)
-	if not GameState.client_phase_changed.is_connected(_on_client_phase_changed):
-		GameState.client_phase_changed.connect(_on_client_phase_changed)
 	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_set_shop_open(false)
@@ -106,28 +114,31 @@ func _ready() -> void:
 
 
 ## Shop visibility is derived from the quick-bar selection: open only while the
-## Build tool is the selected quick slot (and it is daytime, past the harvest).
+## Build tool is the selected quick slot and it is daytime.
 func _process(_delta: float) -> void:
-	var should_show: bool = (
+	var build_should_show: bool = (
 		game_ui != null
 		and game_ui.has_method("is_build_tool_selected")
 		and bool(game_ui.call("is_build_tool_selected"))
 		and not GameState.is_night
-		and (GameState.is_building_phase or GameState.is_morning_phase)
-		and not _waiting_for_seed_harvest
 	)
-	if GameState.is_seed_merchant_phase:
-		should_show = _player_near_seed_merchant()
-	if should_show and not visible:
+	var merchant_should_show: bool = _is_seed_merchant_shop_active()
+	visible = build_should_show or merchant_should_show
+	if build_should_show and _shop_column != null and not _shop_column.visible:
 		_open_shop()
-	elif not should_show and visible:
-		_close_shop()
-	if visible:
+	elif not build_should_show and _shop_column != null and _shop_column.visible:
+		_close_build_shop()
+	if merchant_should_show:
+		_open_merchant_shop()
+	elif _merchant_column != null and _merchant_column.visible:
+		_close_merchant_shop()
+	if _shop_column != null and _shop_column.visible:
+		_apply_phase_layout()
 		_refresh_slots()
-		if GameState.is_seed_merchant_phase:
-			_update_merchant_column_anchor()
-		else:
-			_update_build_column_anchor()
+		_update_build_column_anchor()
+	if _merchant_column != null and _merchant_column.visible:
+		_apply_merchant_layout()
+		_refresh_merchant_slots()
 
 
 # --- UI construction ---------------------------------------------------------
@@ -143,7 +154,110 @@ func _build_ui() -> void:
 
 	column.add_child(_build_bar())
 	_build_selected_label()
+	_build_merchant_ui()
 	_apply_phase_layout()
+
+
+func _build_merchant_ui() -> void:
+	var column: VBoxContainer = VBoxContainer.new()
+	_merchant_column = column
+	column.name = "MerchantColumn"
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 6)
+	column.alignment = BoxContainer.ALIGNMENT_BEGIN
+	add_child(column)
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.name = "MerchantBarPanel"
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	panel.add_theme_stylebox_override("panel", _bar_background_style())
+	column.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	panel.add_child(margin)
+
+	var items_list: BoxContainer = BoxContainer.new()
+	_merchant_items_list = items_list
+	items_list.name = "MerchantItemsList"
+	items_list.vertical = true
+	items_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	items_list.add_theme_constant_override("separation", 6)
+	margin.add_child(items_list)
+
+	for item_id: String in WEAPON_ITEM_IDS:
+		items_list.add_child(_build_merchant_slot_row(item_id))
+	column.visible = false
+
+
+func _build_merchant_slot_row(item_id: String) -> HBoxContainer:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.name = item_id + "MerchantRow"
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	row.add_theme_constant_override("separation", 8)
+	row.add_child(_build_merchant_slot(item_id))
+	row.add_child(_build_merchant_row_label(item_id))
+	_merchant_slot_rows[item_id] = row
+	return row
+
+
+func _build_merchant_slot(item_id: String) -> Button:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var button: Button = Button.new()
+	button.name = item_id
+	button.custom_minimum_size = SLOT_SIZE
+	button.tooltip_text = _display_name(item_id)
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(_on_merchant_item_pressed.bind(item_id))
+
+	var icon: TextureRect = TextureRect.new()
+	icon.texture = _item_frame_texture(item_def)
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 8.0
+	icon.offset_top = 8.0
+	icon.offset_right = -8.0
+	icon.offset_bottom = -8.0
+	button.add_child(icon)
+
+	var count: Label = Label.new()
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	count.add_theme_font_size_override("font_size", 14)
+	count.add_theme_color_override("font_color", Color.WHITE)
+	count.add_theme_color_override("font_shadow_color", Color.BLACK)
+	count.add_theme_constant_override("shadow_offset_x", 1)
+	count.add_theme_constant_override("shadow_offset_y", 1)
+	count.set_anchors_preset(Control.PRESET_FULL_RECT)
+	count.offset_left = 2.0
+	count.offset_top = 2.0
+	count.offset_right = -4.0
+	count.offset_bottom = -2.0
+	button.add_child(count)
+
+	_merchant_slot_buttons[item_id] = button
+	_merchant_slot_icons[item_id] = icon
+	_merchant_slot_counts[item_id] = count
+	return button
+
+
+func _build_merchant_row_label(item_id: String) -> HBoxContainer:
+	var group: HBoxContainer = _build_row_label(item_id)
+	_merchant_row_labels[item_id] = group
+	_merchant_row_names[item_id] = group.get_child(0)
+	_merchant_row_prices[item_id] = group.get_child(1)
+	_merchant_row_currencies[item_id] = group.get_child(2)
+	return group
 
 
 ## Builds the single floating label (name + price + currency icon) that sits to the
@@ -321,16 +435,6 @@ func _open_shop() -> void:
 	_apply_phase_layout()
 	_set_shop_open(true)
 	_refresh_slots()
-	if GameState.is_seed_merchant_phase:
-		_deselect_active()
-		return
-	# During the morning sale only the counter can be picked; leave it at that.
-	if GameState.is_morning_phase:
-		if _is_item_available(COUNTER_ID):
-			_select_item(COUNTER_ID)
-		else:
-			_deselect_active()
-		return
 	# Resume the last buildable. If it ran out while the player was away from the
 	# build tool, move to another currently usable buildable; otherwise leave the
 	# empty one selected so its price/remaining label stays visible.
@@ -350,62 +454,59 @@ func _open_shop() -> void:
 
 
 func _close_shop() -> void:
+	_close_build_shop()
+	_close_merchant_shop()
+
+
+func _close_build_shop() -> void:
 	_set_shop_open(false)
 	_deselect_active()
 
 
 func _set_shop_open(is_open: bool) -> void:
-	visible = is_open
+	if _shop_column != null:
+		_shop_column.visible = is_open
+	visible = is_open or (_merchant_column != null and _merchant_column.visible)
+
+
+func _open_merchant_shop() -> void:
+	if _merchant_column == null:
+		return
+	_merchant_column.visible = true
+	visible = true
+	_apply_merchant_layout()
+	_refresh_merchant_slots()
+
+
+func _close_merchant_shop() -> void:
+	if _merchant_column != null:
+		_merchant_column.visible = false
+	visible = _shop_column != null and _shop_column.visible
 
 
 # --- Phase handling ----------------------------------------------------------
 
-## At night and during morning sale the shop is closed. Once building phase starts,
-## the build tool is auto-selected to reopen it.
+## Night closes the shop. Day/building phase no longer changes the selected quick slot.
 func _on_game_mode_changed(is_night: bool) -> void:
-	_waiting_for_seed_harvest = not is_night
+	if is_night:
+		_close_shop()
 
 
 func _on_building_phase_changed(is_building_phase: bool) -> void:
-	_waiting_for_seed_harvest = not is_building_phase
-	if is_building_phase and not GameState.is_night and game_ui != null and game_ui.has_method("select_build_tool"):
-		game_ui.call("select_build_tool")
-
-
-func _on_morning_phase_changed(is_morning_phase: bool) -> void:
-	if is_morning_phase:
-		_waiting_for_seed_harvest = false
-
-
-func _on_client_phase_changed(is_client_phase: bool) -> void:
-	if is_client_phase:
-		_waiting_for_seed_harvest = true
+	if not is_building_phase:
+		_close_build_shop()
 
 
 func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
-	_waiting_for_seed_harvest = is_seed_merchant_phase
 	_apply_phase_layout()
 	if not is_seed_merchant_phase:
-		_close_shop()
+		_close_merchant_shop()
 
 
 # --- Selection ---------------------------------------------------------------
 
 func _on_item_pressed(item_id: String) -> void:
-	if not visible or GameState.is_night:
-		return
-	if GameState.is_seed_merchant_phase:
-		if not _is_merchant_item(item_id) or not _is_item_available(item_id):
-			return
-		var purchased: bool = false
-		if item_id == SEED_ITEM_ID and game_ui != null and game_ui.has_method("try_purchase_seed_merchant_item"):
-			purchased = bool(game_ui.call("try_purchase_seed_merchant_item", item_id, 1))
-		elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
-			purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
-		if purchased:
-			GameState.seed_merchant_purchase_made = true
-			Sfx.play_sound(&"buy")
-			_refresh_slots()
+	if _shop_column == null or not _shop_column.visible or GameState.is_night:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
@@ -415,6 +516,26 @@ func _on_item_pressed(item_id: String) -> void:
 		_last_picked_item_id = ""
 		return
 	_select_item(item_id)
+
+
+func _on_merchant_item_pressed(item_id: String) -> void:
+	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
+		return
+	if not _is_merchant_item(item_id) or not _is_item_available(item_id):
+		return
+	var purchased: bool = false
+	var button: Button = _merchant_slot_buttons.get(item_id) as Button
+	var start_position: Vector2 = button.get_global_rect().get_center() if button != null else Vector2.ZERO
+	if item_id == SEED_ITEM_ID and game_ui != null and game_ui.has_method("try_purchase_seed_merchant_item"):
+		purchased = bool(game_ui.call("try_purchase_seed_merchant_item", item_id, 1))
+	elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
+		purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
+	if purchased:
+		GameState.seed_merchant_purchase_made = true
+		Sfx.play_sound(&"buy")
+		_animate_purchase_to_ui(item_id, start_position)
+		_refresh_merchant_slots()
+		_refresh_slots()
 
 
 func _select_item(item_id: String) -> void:
@@ -448,11 +569,8 @@ func _affordable_quantity(item_id: String) -> int:
 	return 0
 
 
-## During the morning sale only the counter may be placed; everything else is locked.
-func _is_item_locked(item_id: String) -> bool:
-	if GameState.is_seed_merchant_phase:
-		return not _is_merchant_item(item_id)
-	return GameState.is_morning_phase and item_id != COUNTER_ID
+func _is_item_locked(_item_id: String) -> bool:
+	return false
 
 
 func _is_item_available(item_id: String) -> bool:
@@ -477,7 +595,7 @@ func _refresh_slots() -> void:
 		count_label.text = str(affordable)
 		# The merchant column signals unaffordability through the per-row label colour, so its
 		# slots stay at full colour; the build column greys unaffordable/locked slots.
-		var visual_disabled: bool = disabled and not GameState.is_seed_merchant_phase
+		var visual_disabled: bool = disabled
 		var state: Array[bool] = [selected, visual_disabled]
 		if _slot_state.get(item_id) != state:
 			_slot_state[item_id] = state
@@ -495,8 +613,6 @@ func _refresh_slots() -> void:
 ## player deliberately selected an already-empty slot (the count never transitioned from >0),
 ## and stays put when no other buildable is available.
 func _maybe_auto_switch_from_empty() -> void:
-	if GameState.is_seed_merchant_phase:
-		return
 	if _selected_item_id == "":
 		_selected_affordable_prev = -1
 		return
@@ -531,7 +647,7 @@ func _update_selected_label() -> void:
 	if _selected_label == null:
 		return
 	var item_id: String = _selected_item_id
-	if GameState.is_seed_merchant_phase or item_id == "" or not _slot_buttons.has(item_id):
+	if item_id == "" or not _slot_buttons.has(item_id):
 		_selected_label.visible = false
 		return
 	var button: Button = _slot_buttons[item_id] as Button
@@ -573,7 +689,7 @@ func _currency_texture(item_id: String) -> AtlasTexture:
 ## (name + price + currency icon), reddening items the player cannot currently afford. In build
 ## phase every row label stays hidden (the floating selected label is used instead).
 func _update_row_labels() -> void:
-	var show_rows: bool = GameState.is_seed_merchant_phase
+	var show_rows: bool = false
 	for item_id: String in ITEM_IDS:
 		var group: HBoxContainer = _row_labels.get(item_id) as HBoxContainer
 		if group == null:
@@ -619,9 +735,11 @@ func _build_price(item_id: String) -> int:
 
 
 func _should_show_item(item_id: String) -> bool:
-	if GameState.is_seed_merchant_phase:
-		return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_item_available(item_id)
 	return item_id in BUILD_ITEM_IDS and _is_item_available(item_id)
+
+
+func _should_show_merchant_item(item_id: String) -> bool:
+	return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_item_available(item_id)
 
 
 func _is_merchant_item(item_id: String) -> bool:
@@ -634,25 +752,61 @@ func _player_near_seed_merchant() -> bool:
 	return manager != null and manager.has_method("is_player_near_seed_merchant") and bool(manager.call("is_player_near_seed_merchant"))
 
 
+func _is_seed_merchant_shop_active() -> bool:
+	return GameState.is_seed_merchant_phase and _player_near_seed_merchant()
+
+
+func _refresh_merchant_slots() -> void:
+	for item_id: String in WEAPON_ITEM_IDS:
+		var row: Control = _merchant_slot_rows.get(item_id) as Control
+		if row == null:
+			continue
+		row.visible = _should_show_merchant_item(item_id)
+		if not row.visible:
+			continue
+		var button: Button = _merchant_slot_buttons[item_id] as Button
+		var affordable: int = _affordable_quantity(item_id)
+		var disabled: bool = affordable <= 0
+		var count_label: Label = _merchant_slot_counts[item_id] as Label
+		count_label.text = str(affordable)
+		var state: Array[bool] = [false, false]
+		if _merchant_slot_state.get(item_id) != state:
+			_merchant_slot_state[item_id] = state
+			_apply_slot_style(button, false, false)
+			(_merchant_slot_icons[item_id] as TextureRect).modulate = Color.WHITE
+		var group: HBoxContainer = _merchant_row_labels.get(item_id) as HBoxContainer
+		if group == null:
+			continue
+		group.visible = true
+		var color: Color = SELECTED_DISABLED_LABEL_COLOR if disabled else SELECTED_LABEL_COLOR
+		var name_label: Label = _merchant_row_names[item_id] as Label
+		var price_label: Label = _merchant_row_prices[item_id] as Label
+		var currency: TextureRect = _merchant_row_currencies[item_id] as TextureRect
+		name_label.add_theme_color_override("font_color", color)
+		price_label.add_theme_color_override("font_color", color)
+		currency.modulate = color
+		name_label.text = _display_name(item_id)
+		price_label.text = str(_build_price(item_id))
+		var currency_texture: AtlasTexture = _currency_texture(item_id)
+		currency.texture = currency_texture
+		currency.visible = currency_texture != null
+
+
+func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) -> void:
+	if game_ui == null:
+		return
+	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
+	if item_id == SEED_ITEM_ID:
+		var seed_icon_node: Node = game_ui.get_node_or_null("top right/seedIcon")
+		if seed_icon_node != null and seed_icon_node.has_method("animate_seed_harvest"):
+			seed_icon_node.call("animate_seed_harvest", world_position, 0, Callable(), false)
+		return
+	if game_ui.has_method("animate_inventory_item_to_slot"):
+		game_ui.call("animate_inventory_item_to_slot", item_id, start_global_position)
+
+
 func _apply_phase_layout() -> void:
 	if _shop_column == null:
-		return
-	if GameState.is_seed_merchant_phase:
-		# Vertical column sitting just under the tutorial hint text (see GameUI/top
-		# anchor/tutorial) and left-aligned to the leftmost quick slot; each row carries
-		# its own name/price/currency label (see _update_row_labels). Grows down and right.
-		if _items_list != null:
-			_items_list.vertical = true
-		_shop_column.anchor_left = 0.0
-		_shop_column.anchor_right = 0.0
-		_shop_column.anchor_top = 0.0
-		_shop_column.anchor_bottom = 0.0
-		_shop_column.grow_horizontal = Control.GROW_DIRECTION_END
-		_shop_column.grow_vertical = Control.GROW_DIRECTION_END
-		_shop_column.offset_top = SEED_MERCHANT_BAR_TOP
-		_shop_column.offset_bottom = SEED_MERCHANT_BAR_TOP
-		_shop_column.alignment = BoxContainer.ALIGNMENT_BEGIN
-		_update_merchant_column_anchor()
 		return
 	# Build phase: vertical column pinned to the bottom, rising up out of the build/shop
 	# quick slot; grows rightward so the name/price labels extend past the slots.
@@ -670,17 +824,37 @@ func _apply_phase_layout() -> void:
 	_update_build_column_anchor()
 
 
-## Aligns the merchant column's slots to the left edge of the leftmost quick slot, so the
-## column sits flush with the start of the quick bar.
-func _update_merchant_column_anchor() -> void:
-	if _shop_column == null or game_ui == null or not game_ui.has_method("get_quick_bar_left_x"):
+func _apply_merchant_layout() -> void:
+	if _merchant_column == null:
 		return
-	var left_x: float = float(game_ui.call("get_quick_bar_left_x"))
+	if _merchant_items_list != null:
+		_merchant_items_list.vertical = true
+	_merchant_column.anchor_left = 0.0
+	_merchant_column.anchor_right = 0.0
+	_merchant_column.anchor_top = 0.0
+	_merchant_column.anchor_bottom = 0.0
+	_merchant_column.grow_horizontal = Control.GROW_DIRECTION_END
+	_merchant_column.grow_vertical = Control.GROW_DIRECTION_END
+	_merchant_column.offset_top = SEED_MERCHANT_BAR_TOP
+	_merchant_column.offset_bottom = SEED_MERCHANT_BAR_TOP
+	_merchant_column.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_update_merchant_column_anchor()
+
+
+## Aligns the merchant column's slots to the X of the 7th quick slot.
+func _update_merchant_column_anchor() -> void:
+	if _merchant_column == null or game_ui == null:
+		return
+	var left_x: float = -1.0
+	if game_ui.has_method("get_quick_slot_left_x"):
+		left_x = float(game_ui.call("get_quick_slot_left_x", SEED_MERCHANT_QUICK_SLOT_INDEX))
+	elif game_ui.has_method("get_quick_bar_left_x"):
+		left_x = float(game_ui.call("get_quick_bar_left_x"))
 	if left_x < 0.0:
 		return
 	var left: float = left_x - BAR_CONTENT_INSET
-	_shop_column.offset_left = left
-	_shop_column.offset_right = left
+	_merchant_column.offset_left = left
+	_merchant_column.offset_right = left
 
 
 ## Aligns the build-phase column's slots horizontally over the build/shop quick slot.

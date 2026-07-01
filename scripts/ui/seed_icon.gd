@@ -12,7 +12,12 @@ const BASE_FLIGHT_DURATION: float = 0.72
 
 var _active_harvest_animation_count: int = 0
 
-func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0, on_launch: Callable = Callable()) -> bool:
+func animate_seed_harvest(
+	world_position: Vector2,
+	sequence_index: int = 0,
+	on_launch: Callable = Callable(),
+	credit_on_finish: bool = true
+) -> bool:
 	if texture == null:
 		return false
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
@@ -21,21 +26,22 @@ func animate_seed_harvest(world_position: Vector2, sequence_index: int = 0, on_l
 	_active_harvest_animation_count += 1
 	var start_delay: float = float(sequence_index) * delay_between_seeds
 	if start_delay <= 0.0:
-		_start_seed_flight(world_position, on_launch)
+		_start_seed_flight(world_position, on_launch, credit_on_finish)
 		return true
 	var delay_tween: Tween = create_tween()
 	delay_tween.tween_interval(start_delay)
-	delay_tween.tween_callback(Callable(self, "_start_seed_flight").bind(world_position, on_launch))
+	delay_tween.tween_callback(Callable(self, "_start_seed_flight").bind(world_position, on_launch, credit_on_finish))
 	return true
 
-func _start_seed_flight(world_position: Vector2, on_launch: Callable = Callable()) -> void:
+func _start_seed_flight(world_position: Vector2, on_launch: Callable = Callable(), credit_on_finish: bool = true) -> void:
 	# The seed pops off the rose now: let the caller dry the source rose.
 	if on_launch.is_valid():
 		on_launch.call()
 	Sfx.play_random_pop()
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
 	if game_ui == null or texture == null:
-		_credit_seed()
+		if credit_on_finish:
+			_credit_seed()
 		_complete_harvest_animation()
 		return
 	var seed_sprite: TextureRect = TextureRect.new()
@@ -68,7 +74,7 @@ func _start_seed_flight(world_position: Vector2, on_launch: Callable = Callable(
 	)
 	flight_tween.parallel().tween_property(seed_sprite, "scale", Vector2.ONE, 0.18 / animation_speed)
 	flight_tween.parallel().tween_property(seed_sprite, "rotation", TAU, flight_duration)
-	flight_tween.tween_callback(Callable(self, "_finish_seed_flight").bind(seed_sprite))
+	flight_tween.tween_callback(Callable(self, "_finish_seed_flight").bind(seed_sprite, credit_on_finish))
 
 func _update_seed_flight(
 	progress: float,
@@ -87,10 +93,11 @@ func _update_seed_flight(
 	)
 	seed_sprite.position = curved_position - SEED_FLIGHT_SIZE * 0.5
 
-func _finish_seed_flight(seed_sprite: TextureRect) -> void:
+func _finish_seed_flight(seed_sprite: TextureRect, credit_on_finish: bool = true) -> void:
 	if is_instance_valid(seed_sprite):
 		seed_sprite.queue_free()
-	_credit_seed()
+	if credit_on_finish:
+		_credit_seed()
 	_complete_harvest_animation()
 
 func has_active_harvest_animations() -> bool:

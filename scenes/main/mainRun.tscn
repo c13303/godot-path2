@@ -821,17 +821,17 @@ offset_bottom = 80.0
 grow_horizontal = 2
 grow_vertical = 0
 
-[node name="dayToggle" type="Button" parent="GameUI/top anchor" unique_id=2071789185]
+[node name="dayToggle" type="TextureRect" parent="GameUI/top anchor" unique_id=2071789185]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-tooltip_text = "Toggle day / night"
-icon = SubResource("AtlasTexture_sun")
-icon_alignment = 1
-expand_icon = true
+mouse_filter = 2
+texture = SubResource("AtlasTexture_sun")
+expand_mode = 1
+stretch_mode = 5
 
 [node name="dayLabel" type="RichTextLabel" parent="GameUI/top anchor" unique_id=2071789186]
 layout_mode = 1

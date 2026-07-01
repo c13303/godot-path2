@@ -6,6 +6,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include "../flow/flow_field.h"
 #include <cstdint>
 #include <unordered_set>
@@ -41,6 +42,7 @@ namespace godot
         TileMapLayer *wall_layer = nullptr;
         TileMapLayer *navigation_blocking_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
+        std::unordered_set<Vector2i, Vector2iHash> extra_blocking_cells;
 
         struct AsyncFlowSnapshot
         {
@@ -151,6 +153,8 @@ namespace godot
 
         void set_blocking_layer(Object *node);
         Object *get_blocking_layer() const;
+        void set_extra_blocking_cells(const PackedVector2Array &cells);
+        void clear_extra_blocking_cells();
 
         bool rebuild_async(Vector2 goal);
         void request_flow_to_group(int group_id, Vector2 goal);
