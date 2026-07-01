@@ -4,11 +4,11 @@ extends Control
 ## quick-bar Build tool is selected (see game_ui.is_build_tool_selected) and during
 ## the day; selecting any other quick slot closes it. It renders as a horizontal bar
 ## sitting just above the quick-bar's "Construction (…)" label, styled like the quick
-## bar: one slot per building showing its icon and the quantity the player can still
-## afford. Unaffordable / unavailable buildings are greyed out like disabled quick
-## slots. Above the bar a label shows the selected building's name and either its
-## price (with the matching currency icon) or, for limited buildings, "remaining : n".
-## Clicking an affordable slot selects it so the build system places it; buildings are
+## bar: one slot per buildable showing its icon and the quantity the player can still
+## afford. Unaffordable / unavailable buildables are greyed out like disabled quick
+## slots. Above the bar a label shows the selected buildable's name and either its
+## price (with the matching currency icon) or, for limited buildables, "remaining : n".
+## Clicking a slot selects it so the build system places it when affordable; buildables are
 ## paid for directly from currency and never enter the inventory.
 
 const COUNTER_ID: String = "rose_shop_counter"
@@ -22,19 +22,18 @@ const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The bar sits this many pixels above the screen bottom, clearing the quick bar and
 # its "Construction (…)" info label.
 const BAR_BOTTOM_OFFSET: float = -134.0
-# Building buttons shown in the bar, left to right.
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "spray", "beam", "sword", "bomb", COUNTER_ID]
+# Buildable buttons shown in the bar, left to right.
+const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
+const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
+const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
 var progression_node: Node
 var game_ui: Node
 var _waiting_for_seed_harvest: bool = false
 # The building currently picked for placement (drives build mode).
 var _selected_item_id: String = ""
-# The last building the player picked; restored when the shop reopens (if affordable).
+# The last building the player picked; restored when the shop reopens if it still exists.
 var _last_picked_item_id: String = ""
-# Until this time (seconds) the selected label shows a red "no <currency>" warning.
-var _insufficient_until: float = 0.0
-var _insufficient_currency: StringName = &""
 
 var _selected_name: Label
 var _selected_price: Label
@@ -131,7 +130,7 @@ func _build_selected_row() -> Control:
 	_selected_name = Label.new()
 	_selected_name.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_selected_name.add_theme_font_size_override("font_size", 20)
-	_selected_name.add_theme_color_override("font_color", Color(0.92, 0.88, 0.78))
+	_selected_name.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
 	_selected_name.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
 	_selected_name.add_theme_constant_override("shadow_offset_x", 1)
 	_selected_name.add_theme_constant_override("shadow_offset_y", 1)
@@ -236,17 +235,18 @@ func _open_shop() -> void:
 	_refresh_slots()
 	# During the morning sale only the counter can be picked; leave it at that.
 	if GameState.is_morning_phase:
-		if _can_afford(COUNTER_ID):
+		if _is_item_available(COUNTER_ID):
 			_select_item(COUNTER_ID)
 		else:
 			_deselect_active()
 		return
-	# Resume placing the building we were last on, if we can still afford it.
-	if _last_picked_item_id != "" and _can_afford(_last_picked_item_id):
+	# Resume placing the building we were last on, even if it is currently too
+	# expensive; the selected row makes that unaffordable state explicit.
+	if _last_picked_item_id != "" and _is_item_available(_last_picked_item_id) and not _is_item_locked(_last_picked_item_id):
 		_select_item(_last_picked_item_id)
 		return
 	for item_id: String in ITEM_IDS:
-		if item_id != COUNTER_ID and not ItemCatalog.is_weapon(item_id) and _is_item_available(item_id) and _can_afford(item_id):
+		if item_id != COUNTER_ID and _is_item_available(item_id) and not _is_item_locked(item_id):
 			_select_item(item_id)
 			return
 	_deselect_active()
@@ -297,20 +297,12 @@ func _on_item_pressed(item_id: String) -> void:
 		_deselect_active()
 		_last_picked_item_id = ""
 		return
-	# Build placement is only armed when the player can afford at least one.
-	if not _can_afford(item_id):
-		_show_insufficient_currency(ItemCatalog.get_currency(item_id))
-		return
-	if ItemCatalog.is_weapon(item_id):
-		_purchase_weapon(item_id)
-		return
 	_select_item(item_id)
 
 
 func _select_item(item_id: String) -> void:
 	_selected_item_id = item_id
 	_last_picked_item_id = item_id
-	_insufficient_until = 0.0
 	if game_ui != null and game_ui.has_method("set_selected_build_item"):
 		game_ui.call("set_selected_build_item", item_id)
 	Sfx.play_sound(&"buy")
@@ -332,17 +324,6 @@ func _can_afford(item_id: String) -> bool:
 	return game_ui != null and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
 
 
-func _purchase_weapon(item_id: String) -> void:
-	if game_ui == null or not game_ui.has_method("try_purchase_shop_inventory_item"):
-		return
-	var purchased: bool = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
-	if not purchased:
-		return
-	_insufficient_until = 0.0
-	_refresh_slots()
-	_update_selected_label()
-
-
 func _affordable_quantity(item_id: String) -> int:
 	if game_ui != null and game_ui.has_method("get_build_affordable_quantity"):
 		return int(game_ui.call("get_build_affordable_quantity", item_id))
@@ -356,11 +337,6 @@ func _is_item_locked(item_id: String) -> bool:
 
 func _is_item_available(item_id: String) -> bool:
 	return game_ui == null or not game_ui.has_method("is_build_item_available") or bool(game_ui.call("is_build_item_available", item_id))
-
-
-func _show_insufficient_currency(currency: StringName) -> void:
-	_insufficient_currency = currency
-	_insufficient_until = Time.get_ticks_msec() / 1000.0 + 1.2
 
 
 # --- Per-frame refresh -------------------------------------------------------
@@ -390,26 +366,23 @@ func _refresh_slots() -> void:
 func _update_selected_label() -> void:
 	if _selected_name == null:
 		return
-	var now: float = Time.get_ticks_msec() / 1000.0
-	if now < _insufficient_until:
-		_selected_name.text = "no %s" % String(_insufficient_currency)
-		_selected_name.add_theme_color_override("font_color", Color(0.85, 0.25, 0.25))
-		_selected_price.text = ""
-		_selected_currency.visible = false
-		return
-	_selected_name.remove_theme_color_override("font_color")
-	_selected_name.add_theme_color_override("font_color", Color(0.92, 0.88, 0.78))
 	if _selected_item_id == "":
 		_selected_name.text = ""
 		_selected_price.text = ""
 		_selected_currency.visible = false
 		return
-	_selected_name.text = _display_name(_selected_item_id)
+	var can_place_selected: bool = _can_afford(_selected_item_id) and not _is_item_locked(_selected_item_id)
+	var selected_color: Color = SELECTED_LABEL_COLOR if can_place_selected else SELECTED_DISABLED_LABEL_COLOR
+	_selected_name.add_theme_color_override("font_color", selected_color)
+	_selected_price.add_theme_color_override("font_color", selected_color)
+	_selected_currency.modulate = selected_color
 	var remaining: int = _limit_remaining(_selected_item_id)
 	if remaining >= 0:
+		_selected_name.text = _display_name(_selected_item_id)
 		_selected_price.text = "%s : %d" % [Translations.t("ui.remaining"), remaining]
 		_selected_currency.visible = false
 		return
+	_selected_name.text = "%s :" % _display_name(_selected_item_id)
 	_selected_price.text = str(_build_price(_selected_item_id))
 	var currency: StringName = ItemCatalog.get_currency(_selected_item_id)
 	if currency == &"gem":
@@ -452,6 +425,9 @@ func _apply_slot_style(button: Button, selected: bool, disabled: bool) -> void:
 	if disabled:
 		style.bg_color = Color(0.055, 0.06, 0.065, 0.88)
 		style.border_color = Color(0.15, 0.16, 0.17, 0.9)
+		if selected:
+			style.set_border_width_all(4)
+			style.border_color = SELECTED_DISABLED_LABEL_COLOR
 	for state_name: String in ["normal", "hover", "pressed", "focus", "disabled"]:
 		button.add_theme_stylebox_override(state_name, style)
 

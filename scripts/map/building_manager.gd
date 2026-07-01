@@ -1926,6 +1926,8 @@ func _is_finite_world(p: Vector2) -> bool:
 	return abs(p.x) <= limit and abs(p.y) <= limit
 
 func _no_plants_remaining() -> bool:
+	if _total_counter_stock() > 0:
+		return false
 	if plant_manager and plant_manager.has_method("is_empty"):
 		return bool(plant_manager.call("is_empty"))
 	return true
