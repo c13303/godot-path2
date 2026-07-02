@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="TurretData" format=3 uid="uid://cw6tf6ld2cewu"]
+
+[ext_resource type="Script" path="res://scripts/combat/turrets/turret_data.gd" id="1_turret_data"]
+[ext_resource type="Resource" uid="uid://bs67ji5wuue4h" path="res://scripts/combat/weapons/spray.tres" id="2_weapon"]
+
+[resource]
+script = ExtResource("1_turret_data")
+id = "turret1"
+weapon = ExtResource("2_weapon")
+build_in_range = true

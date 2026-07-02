@@ -1,7 +1,6 @@
 extends Node2D
 class_name TurretSystem
 
-const TURRET_ID: String = "turret1"
 const TURRET_SHOW_RADIUS: bool = true
 const LOS_PRECOMPUTE_BUDGET_MS: float = 1.5
 const LOS_PENDING: int = 0
@@ -10,8 +9,8 @@ const LOS_READY: int = 1
 # Fill drawn over the tiles a hovered turret can actually see (LOS-aware coverage),
 # shown only while hovering a single turret and never for all turrets at once.
 @export var visible_by_turret_color: Color = Color(0.55, 0.55, 0.55, 0.2)
-# Fill drawn over the union of every existing turret's range while placing a turret:
-# the whole no-build zone (placing inside any turret's range is forbidden).
+# Fill drawn over the union of every existing turret's build range while placing a
+# turret: the whole no-build zone that matches the placement rule in BuildSystem.
 @export var forbidden_color: Color = Color(1.0, 0.1, 0.1, 0.35)
 
 var _fight_system: FightSystem
@@ -39,8 +38,9 @@ func _ready() -> void:
 	_building_objects.building_removed.connect(_on_building_removed)
 	for cell: Vector2i in _building_objects.get_building_cells():
 		var building: Dictionary = _building_objects.get_building(cell)
-		if str(building.get("item_id", "")) == TURRET_ID:
-			_register_turret(cell)
+		var item_id: String = str(building.get("item_id", ""))
+		if _is_turret_item(item_id):
+			_register_turret(cell, item_id)
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
 
@@ -53,7 +53,7 @@ func _process(delta: float) -> void:
 		var cell: Vector2i = raw_cell as Vector2i
 		var state: Dictionary = _turrets[cell] as Dictionary
 		var origin: Vector2 = _turret_world_position(cell)
-		var activation_range: float = float(state.get("range", 0.0))
+		var activation_range: float = float(state.get("shooting_range", 0.0))
 		# A spray burst is in progress: keep aiming at (and damaging) the nearest enemy
 		# until the duration elapses. `elapsed` keeps counting so the next burst starts
 		# exactly shoot_frequency seconds after this one began.
@@ -93,7 +93,7 @@ func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, a
 
 # Two mutually exclusive overlays:
 #  - While placing a turret, the whole no-build zone (union of every existing turret's
-#    range) is filled red, matching the placement rule in buildsystem.
+#    build range) is filled red, matching the placement rule in buildsystem.
 #  - Otherwise, hovering a single turret fills only that turret's visible tiles
 #    (LOS-aware), so you can inspect exactly what one turret covers.
 func _draw() -> void:
@@ -108,13 +108,20 @@ func _draw() -> void:
 		_draw_visible_by_turret(layer)
 
 func _draw_forbidden_zone(layer: TileMapLayer) -> void:
-	# Merge every turret's range into one cell set so overlapping ranges are filled once
-	# and the transparency doesn't double-blend where zones overlap.
+	var preview_data: TurretData = _preview_turret_data()
+	if preview_data != null and preview_data.build_in_range:
+		return
+	# Merge every turret's build range into one cell set so overlapping ranges are
+	# filled once and the transparency doesn't double-blend where zones overlap.
 	var cells: Dictionary = {}
 	for raw_cell: Variant in _turrets.keys():
 		var turret_cell: Vector2i = raw_cell as Vector2i
-		var activation_range: float = float((_turrets[turret_cell] as Dictionary).get("range", 0.0))
-		_collect_range_cells(layer, turret_cell, activation_range, cells)
+		var state: Dictionary = _turrets[turret_cell] as Dictionary
+		var turret_data: TurretData = state.get("data", null) as TurretData
+		if turret_data != null and turret_data.build_in_range:
+			continue
+		var build_range: float = float(state.get("build_range", 0.0))
+		_collect_range_cells(layer, turret_cell, build_range, cells)
 	_fill_cells(layer, cells.keys(), forbidden_color)
 
 func _draw_visible_by_turret(layer: TileMapLayer) -> void:
@@ -126,7 +133,7 @@ func _draw_visible_by_turret(layer: TileMapLayer) -> void:
 			_fill_cells(layer, (raw_visible_cells as Dictionary).keys(), visible_by_turret_color)
 		return
 	var cells: Dictionary = {}
-	_collect_range_cells(layer, _hovered_turret_cell, float(state.get("range", 0.0)), cells)
+	_collect_range_cells(layer, _hovered_turret_cell, float(state.get("shooting_range", 0.0)), cells)
 	_fill_cells(layer, cells.keys(), visible_by_turret_color)
 
 func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range: float, out_cells: Dictionary) -> void:
@@ -151,11 +158,11 @@ func _fill_cells(layer: TileMapLayer, cells: Array, color: Color) -> void:
 		draw_rect(Rect2(center - half_size, half_size * 2.0), color, true)
 
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
-	if item_id == TURRET_ID:
-		_register_turret(cell)
+	if _is_turret_item(item_id):
+		_register_turret(cell, item_id)
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
-	if item_id != TURRET_ID:
+	if not _is_turret_item(item_id):
 		return
 	_fight_system.remove_turret_spray(cell)
 	_turrets.erase(cell)
@@ -164,15 +171,22 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
 
-func _register_turret(cell: Vector2i) -> void:
-	var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
-	var shoot_frequency: float = maxf(0.001, float(turret_def.get("shoot_frequency", 3.0)))
+func _register_turret(cell: Vector2i, item_id: String) -> void:
+	var turret_data: TurretData = ItemCatalog.get_turret_data(item_id)
+	if turret_data == null:
+		push_warning("TurretSystem: missing TurretData for %s." % item_id)
+		return
+	var weapon_id: String = turret_data.weapon.id if turret_data.weapon != null else ""
+	var shoot_frequency: float = maxf(0.001, turret_data.shoot_frequency)
 	_turrets[cell] = {
+		"item_id": item_id,
+		"data": turret_data,
 		"elapsed": shoot_frequency,
 		"shoot_frequency": shoot_frequency,
-		"shoot_duration": maxf(0.0, float(turret_def.get("shoot_duration", 1.0))),
-		"weapon": str(turret_def.get("weapon", "spray")),
-		"range": float(turret_def.get("range", 200.0)),
+		"shoot_duration": maxf(0.0, turret_data.shoot_duration),
+		"weapon": weapon_id,
+		"shooting_range": turret_data.shooting_range,
+		"build_range": turret_data.build_range,
 		"spraying": false,
 		"spray_time_left": 0.0,
 		"last_direction": Vector2.RIGHT,
@@ -185,6 +199,12 @@ func _register_turret(cell: Vector2i) -> void:
 	call_deferred("_compute_turret_los_async", cell, int((_turrets[cell] as Dictionary).get("los_generation", 0)))
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
+
+func _is_turret_item(item_id: String) -> bool:
+	if item_id == "":
+		return false
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	return str(item_def.get("category", "")) == "turret" and ItemCatalog.get_turret_data(item_id) != null
 
 func _update_hovered_turret() -> void:
 	if not TURRET_SHOW_RADIUS:
@@ -206,11 +226,17 @@ func _update_preview_turret() -> void:
 		return
 	var has_preview_turret: bool = false
 	if _build_system != null and _build_system.has_method("has_single_tile_preview") and bool(_build_system.call("has_single_tile_preview")):
-		has_preview_turret = str(_build_system.call("get_preview_item_id")) == TURRET_ID
+		has_preview_turret = _is_turret_item(str(_build_system.call("get_preview_item_id")))
 	if has_preview_turret == _has_preview_turret:
 		return
 	_has_preview_turret = has_preview_turret
 	queue_redraw()
+
+func _preview_turret_data() -> TurretData:
+	if _build_system == null or not _build_system.has_method("get_preview_item_id"):
+		return null
+	var item_id: String = str(_build_system.call("get_preview_item_id"))
+	return ItemCatalog.get_turret_data(item_id)
 
 func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_range: float) -> Node2D:
 	var nearest: Node2D = null
@@ -252,7 +278,7 @@ func _compute_turret_los_async(cell: Vector2i, generation: int) -> void:
 	var layer: TileMapLayer = _building_objects.blocking_buildings
 	if layer == null:
 		return
-	var activation_range: float = float(state.get("range", 0.0))
+	var activation_range: float = float(state.get("shooting_range", 0.0))
 	var visible_cells: Dictionary = {}
 	if activation_range <= 0.0:
 		_finish_turret_los(cell, generation, visible_cells)

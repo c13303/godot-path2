@@ -11,7 +11,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not key_event.pressed or key_event.echo:
 		return
 
-	if key_event.keycode == KEY_F1:
+	if key_event.keycode == KEY_F3:
 		_apply_hardcore_preset()
 		get_viewport().set_input_as_handled()
 	elif key_event.keycode == KEY_F2:
@@ -20,7 +20,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _apply_hardcore_preset() -> void:
-	# Keep these values explicit so F1 always restores the intended baseline,
+	# Keep these values explicit so F3 always restores the intended baseline,
 	# even after another preset changes the shared weapon resource at runtime.
 	_spray.throw_offset = 16.0
 	_spray.directional_area_angle = 86.0
@@ -50,7 +50,7 @@ func _apply_hardcore_preset() -> void:
 	_spray.spray_visual_min_size = 1.0
 	_spray.spray_visual_threshold = 0.75
 	_spray.spray_visual_softness = 0.0
-	print("Difficulty changed: hardcore (F1)")
+	print("Difficulty changed: hardcore (F3)")
 
 
 func _apply_easy_preset() -> void:

@@ -207,6 +207,7 @@ func _input(event: InputEvent) -> void:
 
 
 ## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds, gems, and money.
+## F1 advances the current day, but only while daytime is active.
 func _unhandled_input(event: InputEvent) -> void:
 	if not dev_keys or not (event is InputEventKey):
 		return
@@ -216,6 +217,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key_event.keycode == KEY_KP_ADD:
 		get_viewport().set_input_as_handled()
 		_grant_dev_currency()
+	elif key_event.keycode == KEY_F1 and not GameState.is_night:
+		get_viewport().set_input_as_handled()
+		_advance_dev_day()
 
 
 func _grant_dev_currency() -> void:
@@ -227,6 +231,16 @@ func _grant_dev_currency() -> void:
 	_call_if_available(progression, "update_seeds", 100)
 	_call_if_available(progression, "update_gems", 100)
 	_call_if_available(progression, "update_money", 100)
+
+
+func _advance_dev_day() -> void:
+	var scene: Node = get_tree().current_scene if is_inside_tree() else null
+	var progression: Node = scene.get_node_or_null("progression") if scene else null
+	if progression == null:
+		push_warning("dev_keys: progression node not found")
+		return
+	if progression.has_method("advance_day"):
+		progression.call("advance_day")
 
 func _log_clicked_agent_debug_snapshot() -> void:
 	var steering: Node = get_node_or_null("SteeringSystemNative")

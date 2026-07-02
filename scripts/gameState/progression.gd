@@ -137,6 +137,18 @@ func update_value(key: StringName, delta: int, minimum: int = -2147483648, maxim
 	return true
 
 
+func advance_day(amount: int = 1) -> bool:
+	if amount <= 0:
+		return false
+	progression.add(&"nDays", amount)
+	var day_number: int = progression.get_value(&"nDays")
+	_update_day_label(day_number)
+	day_started.emit(day_number)
+	_log("Day advanced: Day %d" % day_number)
+	_update_progression_ui()
+	return true
+
+
 ## Single entry point for changing the seed count. Pass a positive `delta` to
 ## grant seeds, a negative `delta` to spend them. Spending more seeds than the
 ## player owns fails and leaves the count untouched. Refreshes the seed UI on
@@ -237,12 +249,7 @@ func _ready() -> void:
 func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
 		return
-	progression.add(&"nDays", 1)
-	var day_number: int = progression.get_value(&"nDays")
-	_update_day_label(day_number)
-	day_started.emit(day_number)
-	_log("New day started: Day %d" % day_number)
-	_update_progression_ui()
+	advance_day()
 
 
 ## Show the current day on the dedicated day label, e.g. "day 3".

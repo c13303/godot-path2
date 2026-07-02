@@ -25,7 +25,7 @@ var _level_root: Node
 var _playlist: LevelSpawnPlaylist
 var _spawner_ids: Array[StringName] = []
 var _client_spawner_ids: Array[StringName] = []
-var _spawner_nodes: Dictionary = {}  # StringName -> NodePath
+var _spawner_nodes: Dictionary = {}  # StringName -> NodePath relative to the spawner container
 var _duplicate_spawner_ids: Array[StringName] = []
 var _selected_night_index: int = 0
 var _dirty: bool = false
@@ -669,7 +669,7 @@ func _capture_spawners() -> void:
 			_client_spawner_ids.append(spawner_id)
 		else:
 			_spawner_ids.append(spawner_id)
-		_spawner_nodes[spawner_id] = node_2d.get_path()
+		_spawner_nodes[spawner_id] = NodePath(String(node_2d.name))
 	_spawner_ids.sort()
 	_client_spawner_ids.sort()
 
@@ -1429,8 +1429,11 @@ func _focus_spawner(spawner_id: StringName) -> void:
 func _node_for_spawner_id(spawner_id: StringName) -> Node:
 	if _level_root == null or not _spawner_nodes.has(spawner_id):
 		return null
+	var container: Node = _find_spawner_container(_level_root)
+	if container == null:
+		return null
 	var node_path: NodePath = _spawner_nodes[spawner_id] as NodePath
-	return _level_root.get_node_or_null(node_path)
+	return container.get_node_or_null(node_path)
 
 
 func _assign_playlist_to_level_scene() -> bool:

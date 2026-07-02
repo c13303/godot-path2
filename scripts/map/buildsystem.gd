@@ -687,7 +687,10 @@ func _is_water_source_cell(cell: Vector2i) -> bool:
 func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
 	if str(placeable_def.get("category", "")) != "turret":
 		return {}
-	if bool(placeable_def.get("build_in_range", true)):
+	var candidate_turret_data: TurretData = _turret_data_from_placeable(placeable_def)
+	if candidate_turret_data == null:
+		return {}
+	if candidate_turret_data.build_in_range:
 		return {}
 	if blocking_buildings == null:
 		return {}
@@ -699,20 +702,28 @@ func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -
 		var turret_item_id: String = _turret_item_id_at_cell(turret_cell)
 		if turret_item_id == "":
 			continue
-		var turret_def: Dictionary = ItemCatalog.get_item_def(turret_item_id)
-		var turret_range: float = float(turret_def.get("range", 0.0))
-		if turret_range <= 0.0:
+		var turret_data: TurretData = ItemCatalog.get_turret_data(turret_item_id)
+		if turret_data == null or turret_data.build_in_range:
 			continue
-		var range_squared: float = turret_range * turret_range
+		var build_range: float = turret_data.build_range
+		if build_range <= 0.0:
+			continue
+		var range_squared: float = build_range * build_range
 		var turret_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(turret_cell))
 		var distance_squared: float = candidate_world_position.distance_squared_to(turret_world_position)
 		if distance_squared <= range_squared and distance_squared < best_distance_squared:
 			best_distance_squared = distance_squared
 			best_blocker = {
 				"cell": turret_cell,
-				"range": turret_range,
+				"range": build_range,
 			}
 	return best_blocker
+
+func _turret_data_from_placeable(placeable_def: Dictionary) -> TurretData:
+	var item_id: String = str(placeable_def.get("id", ""))
+	if item_id == "":
+		return null
+	return ItemCatalog.get_turret_data(item_id)
 
 func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 	var blocked: bool = not _turret_range_blocker_for_cell(_hover_cell, placeable_def).is_empty()

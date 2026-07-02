@@ -1,6 +1,8 @@
 extends RefCounted
 class_name ItemCatalog
 
+const TURRET1_DATA: TurretData = preload("res://scripts/combat/turrets/turret1.tres")
+
 const ITEM_DEFS: Dictionary = {
 	"sword": {
 		"id": "sword",
@@ -148,13 +150,7 @@ const ITEM_DEFS: Dictionary = {
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"runtime_id": "turret1",
-		"shoot_frequency": 3.0,
-		"shoot_duration": 0.2,
-		"weapon": "spray",
-		# Enemy-detection radius. Kept equal to spray.tres's cone radius so the turret
-		# only targets enemies the spray can actually reach.
-		"range": 200.0,
-		"build_in_range": false,
+		"turret_data": TURRET1_DATA,
 		"max_stack": 999,
 	},
 	"rose_shop_counter": {
@@ -185,6 +181,11 @@ static func get_item_def(item_id: String) -> Dictionary:
 	if ITEM_DEFS.has(item_id):
 		return ITEM_DEFS[item_id]
 	return {}
+
+static func get_turret_data(item_id: String) -> TurretData:
+	var item_def: Dictionary = get_item_def(item_id)
+	var raw_data: Variant = item_def.get("turret_data", null)
+	return raw_data as TurretData
 
 static func item_places_tile(item_id: String) -> bool:
 	return is_placeable(item_id)
