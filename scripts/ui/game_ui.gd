@@ -608,7 +608,7 @@ func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
 
 
 ## Describes the special reward the merchant should offer right now, or {} when the
-## row must stay hidden (no upcoming-night reward, or already collected). Returned dict:
+## row must stay hidden (no survived-night reward, or already collected). Returned dict:
 ## { "rewards": [{ "currency": String, "amount": int }, ...], "night_index": int,
 ##   "day": int, "one_time": bool }. Drives the shop's top "special reward" merchant row.
 func get_active_night_reward() -> Dictionary:
@@ -625,8 +625,12 @@ func get_active_night_reward() -> Dictionary:
 	if total_nights <= 0:
 		return {}
 	var day: int = int(_progression_node.call("get_value", &"nDays"))
-	# The upcoming night uses the same day->night mapping the spawner does at nightfall.
-	var night_index: int = maxi(0, day - 1) % total_nights
+	# Rewards are paid by the merchant after a night is survived. nDays has already
+	# advanced on the night->day transition, so Day 2 pays playlist Night 1.
+	var completed_night_index: int = day - 2
+	if completed_night_index < 0:
+		return {}
+	var night_index: int = completed_night_index % total_nights
 	var night: NightSpawnPlaylist = playlist.nights[night_index]
 	if night == null:
 		return {}

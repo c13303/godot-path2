@@ -1,6 +1,6 @@
 extends Node
 
-const REMOVE_HOLD_SECONDS: float = 1.0
+const REMOVE_HOLD_SECONDS: float = 0.2
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)

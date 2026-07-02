@@ -26,7 +26,7 @@ const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_SUN_RISING: String = "tutorial.sun_rising"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_CLIENT_TIME: String = "tutorial.client_time"
-const KEY_SEED_MERCHANT: String = "tutorial.seed_merchant"
+const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
@@ -130,8 +130,8 @@ func _refresh(delta: float = 0.0) -> void:
 		return
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
-	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER:
-		key = KEY_SEED_MERCHANT
+	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
+		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
 		_displayed_key = ""
 		text = ""
@@ -196,8 +196,8 @@ func _current_message_key() -> String:
 		return ""
 	if GameState.is_client_phase:
 		return KEY_CLIENT_TIME
-	if GameState.is_seed_merchant_phase:
-		return KEY_SEED_MERCHANT
+	if GameState.is_seed_merchant_phase and _has_active_night_reward():
+		return KEY_SEED_MERCHANT_REWARD
 	# Nothing growing, no seeds, and no roses left on the counters: the run is lost.
 	if planted == 0 and seeds == 0 and _counter_stock() <= 0:
 		return KEY_GAME_OVER
@@ -273,6 +273,13 @@ func _counter_stock() -> int:
 	if _building_manager != null and _building_manager.has_method("total_counter_stock"):
 		return int(_building_manager.call("total_counter_stock"))
 	return 0
+
+
+func _has_active_night_reward() -> bool:
+	if _game_ui == null or not _game_ui.has_method("get_active_night_reward"):
+		return false
+	var reward_info: Dictionary = _game_ui.call("get_active_night_reward") as Dictionary
+	return not reward_info.is_empty()
 
 
 ## Pulses the day/night button so the player notices they can end the day.

@@ -27,9 +27,15 @@ script = ExtResource("3_track")
 spawner_id = &"monster2"
 waves = Array[ExtResource("4_wave")]([SubResource("Resource_jab7j")])
 
+[sub_resource type="Resource" id="Resource_night1_seed_reward"]
+script = ExtResource("4_rk5yt")
+currency = "seed"
+amount = 10
+
 [sub_resource type="Resource" id="Resource_1hais"]
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_0k8ip"), SubResource("Resource_5vf1s")])
+special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_night1_seed_reward")])
 special_reward_one_time = true
 
 [sub_resource type="Resource" id="Resource_sn0du"]

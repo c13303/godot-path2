@@ -3442,21 +3442,31 @@ func _process_client_paying_agents(delta: float) -> void:
 func _process_turret_overlaps() -> void:
 	if blocking_buildings == null:
 		return
-	for raw_node: Node in get_tree().get_nodes_in_group("monsters"):
-		var agent: Node2D = raw_node as Node2D
-		if agent == null or not is_instance_valid(agent):
-			continue
-		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0 or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or _drowning_agents.has(nav_id):
-			continue
-		var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
-		if not _is_turret_cell(agent_cell):
-			continue
-		_consume_turret(agent, agent_cell)
+	var agent_groups: Array[String] = ["monsters", "clients", "merchants"]
+	var checked_nav_ids: Dictionary = {}
+	for group_name: String in agent_groups:
+		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_node as Node2D
+			if agent == null or not is_instance_valid(agent):
+				continue
+			var nav_id: int = int(agent.get("nav_id"))
+			if nav_id < 0 or checked_nav_ids.has(nav_id) or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or _drowning_agents.has(nav_id):
+				continue
+			checked_nav_ids[nav_id] = true
+			var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
+			if not _is_turret_cell(agent_cell):
+				continue
+			_consume_turret(agent, agent_cell)
 
 func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
+		return
+	var agent_kind: StringName = _agent_kind(agent)
+	if agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT:
+		_leave_turret_debris(turret_cell)
+		_remove_turret_cell(turret_cell)
+		Sfx.play_sound(&"crunsh")
 		return
 	var resume_state: Dictionary = _capture_agent_resume_state(nav_id, agent)
 	_turret_eating_agents[nav_id] = {
