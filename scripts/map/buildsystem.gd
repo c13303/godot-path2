@@ -33,8 +33,9 @@ var _hover_cell: Vector2i
 var _hover_item_id: String = ""
 var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
 var _preview_cells: Array[Vector2i] = []
-# Generic click-drag chunk build (roses and walls). _drag_build_item_id records which
-# item the active drag is placing so inventory/sound are resolved per item.
+# Generic click-drag chunk build. _drag_build_item_id records which item the
+# active drag is placing so affordability, validation, runtime objects, and sound
+# are resolved per item.
 var _drag_build_active: bool = false
 var _drag_build_item_id: String = ""
 var _drag_build_start_cell: Vector2i = Vector2i.ZERO
@@ -440,14 +441,15 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 	_refresh_preview_visual_state(placeable_def)
 	previewbuild.update_internals()
 
-# Items that build as a click-drag rectangle chunk (placed up to the available
-# inventory count, skipping occupied/invalid cells) rather than one tile per click.
+# Placeables build as a click-drag rectangle chunk by default, placed up to the
+# affordable/limited count while skipping occupied or invalid cells. Specific
+# future placeables can opt out with `"drag_buildable": false`.
 func _is_drag_buildable(placeable_def: Dictionary) -> bool:
-	var item_id: String = str(placeable_def.get("id", ""))
-	return item_id == "rose" or item_id == "wall"
+	return bool(placeable_def.get("drag_buildable", true))
 
-# Placement sound for a finished chunk build. Walls have no dedicated build sound,
-# so they stay silent (matching single-wall placement); roses keep the plant sound.
+# Placement sound for a finished chunk build. This preserves the old per-item
+# behavior: roses play the plant sound, other buildings stay silent unless they
+# define a build sound later.
 func _drag_build_sound(item_id: String) -> StringName:
 	return &"plant" if item_id == "rose" else &""
 
@@ -504,7 +506,10 @@ func _drag_build_rectangle_cells(
 		var x: int = start_cell.x
 		while true:
 			var cell: Vector2i = Vector2i(x, y)
-			if _is_valid_placeable_cell(cell, target_layer, placeable_def):
+			if (
+				_is_valid_placeable_cell(cell, target_layer, placeable_def)
+				and not _drag_build_candidate_blocked_by_batch(cell, target_layer, placeable_def, cells)
+			):
 				cells.append(cell)
 				if cells.size() >= limit:
 					return cells
@@ -515,6 +520,32 @@ func _drag_build_rectangle_cells(
 			break
 		y += y_step
 	return cells
+
+func _drag_build_candidate_blocked_by_batch(
+	cell: Vector2i,
+	target_layer: TileMapLayer,
+	placeable_def: Dictionary,
+	accepted_cells: Array[Vector2i]
+) -> bool:
+	if accepted_cells.is_empty():
+		return false
+	if str(placeable_def.get("category", "")) != "turret":
+		return false
+	var candidate_turret_data: TurretData = _turret_data_from_placeable(placeable_def)
+	if candidate_turret_data == null:
+		return false
+	if candidate_turret_data.build_in_range:
+		return false
+	var build_range: float = candidate_turret_data.build_range
+	if build_range <= 0.0:
+		return false
+	var candidate_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(cell))
+	var range_squared: float = build_range * build_range
+	for accepted_cell: Vector2i in accepted_cells:
+		var accepted_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(accepted_cell))
+		if candidate_world_position.distance_squared_to(accepted_world_position) <= range_squared:
+			return true
+	return false
 
 func _finish_drag_build() -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()

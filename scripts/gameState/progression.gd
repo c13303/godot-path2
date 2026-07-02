@@ -438,8 +438,7 @@ func save_progression(save_path: String = SAVE_PATH) -> void:
 
 
 func load_progression() -> void:
-	if _reject_during_night():
-		return
+	# F9 reload is allowed anytime, including during night.
 	_log("Load started: %s" % ProjectSettings.globalize_path(SAVE_PATH))
 	var data: Dictionary = _read_save_data()
 	if data.is_empty():
