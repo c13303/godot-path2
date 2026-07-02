@@ -20,6 +20,7 @@ class_name LevelSpawnConfig
 	&"turret1": 5,
 	&"wall": 100,
 }
+@export var tool_shop_days: Dictionary = {}
 @export_range(1, 99, 1) var rose_shop_counter_limit: int = 2
 
 @export_group("Merchent")
@@ -31,6 +32,7 @@ class_name LevelSpawnConfig
 	&"sword": 100,
 	&"bomb": 100,
 }
+@export var merchant_days: Dictionary = {}
 
 @export_group("Legacy Shop")
 @export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]

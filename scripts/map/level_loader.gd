@@ -45,6 +45,7 @@ var _loaded_tool_shop_prices: Dictionary = {
 	&"turret1": 5,
 	&"wall": 100,
 }
+var _loaded_tool_shop_days: Dictionary = {}
 var _loaded_merchant_available_items: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_merchant_prices: Dictionary = {
 	&"seed": 2,
@@ -53,6 +54,7 @@ var _loaded_merchant_prices: Dictionary = {
 	&"sword": 100,
 	&"bomb": 100,
 }
+var _loaded_merchant_days: Dictionary = {}
 var _loaded_rose_shop_counter_limit: int = 2
 
 func _enter_tree() -> void:
@@ -151,6 +153,10 @@ func get_loaded_tool_shop_prices() -> Dictionary:
 	return _loaded_tool_shop_prices.duplicate()
 
 
+func get_loaded_tool_shop_days() -> Dictionary:
+	return _loaded_tool_shop_days.duplicate()
+
+
 func get_loaded_merchant_available_items() -> Array[StringName]:
 	var item_ids: Array[StringName] = []
 	for item_id: StringName in _loaded_merchant_available_items:
@@ -160,6 +166,10 @@ func get_loaded_merchant_available_items() -> Array[StringName]:
 
 func get_loaded_merchant_prices() -> Dictionary:
 	return _loaded_merchant_prices.duplicate()
+
+
+func get_loaded_merchant_days() -> Dictionary:
+	return _loaded_merchant_days.duplicate()
 
 
 func get_loaded_shop_available_items() -> Array[StringName]:
@@ -204,6 +214,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		&"turret1": 5,
 		&"wall": 100,
 	}
+	_loaded_tool_shop_days = {}
 	_loaded_merchant_available_items = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 	_loaded_merchant_prices = {
 		&"seed": 2,
@@ -212,6 +223,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		&"sword": 100,
 		&"bomb": 100,
 	}
+	_loaded_merchant_days = {}
 	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
 		return
@@ -227,8 +239,10 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
 		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
+		_loaded_tool_shop_days = _valid_shop_days(config.tool_shop_days, TOOL_SHOP_ITEM_IDS)
 		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, MERCHANT_ITEM_IDS)
 		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, MERCHANT_ITEM_IDS)
+		_loaded_merchant_days = _valid_shop_days(config.merchant_days, MERCHANT_ITEM_IDS)
 		var legacy_available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items, LEGACY_SHOP_ITEM_IDS)
 		var legacy_prices: Dictionary = _valid_shop_prices(config.shop_prices, LEGACY_SHOP_ITEM_IDS)
 		if not _same_string_name_array(legacy_available_items, _default_shop_available_items(LEGACY_SHOP_ITEM_IDS)):
@@ -289,6 +303,16 @@ func _valid_shop_prices(raw_prices: Dictionary, item_ids: Array[StringName]) -> 
 		var raw_price: Variant = raw_prices.get(item_id, raw_prices.get(String(item_id), ItemCatalog.get_price(String(item_id))))
 		prices[item_id] = maxi(0, int(raw_price))
 	return prices
+
+
+func _valid_shop_days(raw_days: Dictionary, item_ids: Array[StringName]) -> Dictionary:
+	var days: Dictionary = {}
+	for item_id: StringName in item_ids:
+		var raw_day: Variant = raw_days.get(item_id, raw_days.get(String(item_id), 1))
+		var day: int = maxi(1, int(raw_day))
+		if day > 1:
+			days[item_id] = day
+	return days
 
 
 func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[StringName]:

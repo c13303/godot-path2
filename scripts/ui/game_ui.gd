@@ -442,7 +442,7 @@ func is_build_item_available(item_id: String) -> bool:
 		if raw_tool_item_ids is Array:
 			for raw_item_id: Variant in raw_tool_item_ids:
 				if str(raw_item_id) == item_id:
-					return true
+					return _shop_item_unlock_day_reached(loader, "get_loaded_tool_shop_days", item_id)
 			return false
 	if loader != null and loader.has_method("get_loaded_shop_available_items"):
 		var raw_item_ids: Variant = loader.call("get_loaded_shop_available_items")
@@ -486,7 +486,7 @@ func is_merchant_item_available(item_id: String) -> bool:
 		if raw_item_ids is Array:
 			for raw_item_id: Variant in raw_item_ids:
 				if str(raw_item_id) == item_id:
-					return true
+					return _shop_item_unlock_day_reached(loader, "get_loaded_merchant_days", item_id)
 			return false
 	if loader != null and loader.has_method("get_loaded_shop_available_items"):
 		var raw_legacy_item_ids: Variant = loader.call("get_loaded_shop_available_items")
@@ -496,6 +496,24 @@ func is_merchant_item_available(item_id: String) -> bool:
 					return true
 			return false
 	return item_id == "seed" or item_id == "spray" or item_id == "beam" or item_id == "sword" or item_id == "bomb"
+
+
+func _shop_item_unlock_day_reached(loader: Node, getter_name: String, item_id: String) -> bool:
+	if loader == null or not loader.has_method(getter_name):
+		return true
+	var raw_days: Variant = loader.call(getter_name)
+	if not (raw_days is Dictionary):
+		return true
+	var days: Dictionary = raw_days as Dictionary
+	var raw_day: Variant = days.get(StringName(item_id), days.get(item_id, 1))
+	var unlock_day: int = maxi(1, int(raw_day))
+	return _current_day_number() >= unlock_day
+
+
+func _current_day_number() -> int:
+	if _progression_node == null or not _progression_node.has_method("get_value"):
+		return 1
+	return maxi(1, int(_progression_node.call("get_value", &"nDays")))
 
 
 func get_merchant_price(item_id: String) -> int:
