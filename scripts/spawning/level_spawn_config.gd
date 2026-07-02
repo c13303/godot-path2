@@ -10,6 +10,9 @@ class_name LevelSpawnConfig
 @export var starting_money: int = 0
 @export var starting_weapons: Array[StringName] = [&"spray"]
 
+@export_group("Monster Drop")
+@export_range(0, 100, 1, "suffix:%") var monster_drop_seed_chance_percent: int = 0
+
 @export_group("Tool Shop")
 @export var tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
 @export var tool_shop_prices: Dictionary = {

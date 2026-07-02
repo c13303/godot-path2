@@ -11,6 +11,7 @@ const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
+const DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT: int = 0
 const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
@@ -29,17 +30,21 @@ var _duplicate_spawner_ids: Array[StringName] = []
 var _selected_night_index: int = 0
 var _dirty: bool = false
 var _loading_ui: bool = false
+var _status_hide_token: int = 0
 
 var _level_option: OptionButton
+var _save_button: Button
 var _create_button: Button
 var _dirty_label: Label
 var _playlist_label: Label
 var _starting_controls: VBoxContainer
+var _monster_drop_controls: VBoxContainer
 var _shop_controls: VBoxContainer
 var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
 var _starting_money: SpinBox
+var _monster_drop_seed_chance: SpinBox
 var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
@@ -57,6 +62,7 @@ var _missing_id_option: OptionButton
 var _target_id_option: OptionButton
 var _tracks_box: VBoxContainer
 var _starting_section: FoldableContainer
+var _monster_drop_section: FoldableContainer
 var _shop_section: FoldableContainer
 var _client_frequency_section: FoldableContainer
 var _reward_section: FoldableContainer
@@ -77,12 +83,8 @@ func mark_dirty() -> void:
 	if _loading_ui:
 		return
 	_dirty = true
-	var saved: bool = _save()
 	_refresh_status()
-	# On a disk write failure _save() leaves an error message in the validation
-	# panel; keep it visible by only re-running validation when the save worked.
-	if saved:
-		_refresh_validation()
+	_refresh_validation()
 
 
 func move_wave(spawner_id: StringName, from_index: int, to_index: int) -> void:
@@ -93,9 +95,11 @@ func move_wave(spawner_id: StringName, from_index: int, to_index: int) -> void:
 		return
 	if from_index == to_index:
 		return
-	var wave: SpawnWave = track.waves[from_index]
-	track.waves.remove_at(from_index)
-	track.waves.insert(to_index, wave)
+	var waves: Array[SpawnWave] = _copy_waves(track)
+	var wave: SpawnWave = waves[from_index]
+	waves.remove_at(from_index)
+	waves.insert(to_index, wave)
+	track.waves = waves
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -109,9 +113,11 @@ func move_spawner_track(spawner_id: StringName, to_index: int) -> void:
 		return
 	if from_index == to_index:
 		return
-	var track: SpawnerWaveTrack = night.spawner_tracks[from_index]
-	night.spawner_tracks.remove_at(from_index)
-	night.spawner_tracks.insert(to_index, track)
+	var tracks: Array[SpawnerWaveTrack] = _copy_spawner_tracks(night)
+	var track: SpawnerWaveTrack = tracks[from_index]
+	tracks.remove_at(from_index)
+	tracks.insert(to_index, track)
+	night.spawner_tracks = tracks
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -120,7 +126,9 @@ func delete_wave(spawner_id: StringName, wave_index: int) -> void:
 	var track: SpawnerWaveTrack = _get_track(spawner_id)
 	if track == null or wave_index < 0 or wave_index >= track.waves.size():
 		return
-	track.waves.remove_at(wave_index)
+	var waves: Array[SpawnWave] = _copy_waves(track)
+	waves.remove_at(wave_index)
+	track.waves = waves
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -138,6 +146,11 @@ func _build_ui() -> void:
 	_level_option.size_flags_horizontal = SIZE_EXPAND_FILL
 	_level_option.item_selected.connect(_on_level_selected)
 	level_row.add_child(_level_option)
+
+	_save_button = Button.new()
+	_save_button.text = "Save"
+	_save_button.pressed.connect(_on_save_pressed)
+	level_row.add_child(_save_button)
 
 	var refresh_button: Button = Button.new()
 	refresh_button.text = "Refresh"
@@ -225,6 +238,11 @@ func _build_level_tab(tabs: TabContainer) -> void:
 	_build_starting_controls()
 	_starting_section = _make_section("Starting Level", _starting_controls)
 	body.add_child(_starting_section)
+
+	_monster_drop_controls = VBoxContainer.new()
+	_build_monster_drop_controls()
+	_monster_drop_section = _make_section("Monster Drop", _monster_drop_controls)
+	body.add_child(_monster_drop_section)
 
 	_shop_controls = VBoxContainer.new()
 	_build_shop_controls()
@@ -345,6 +363,25 @@ func _build_starting_controls() -> void:
 		checkbox.toggled.connect(_on_starting_weapon_toggled.bind(weapon_id))
 		_weapon_checks_box.add_child(checkbox)
 		_weapon_checkboxes[weapon_id] = checkbox
+
+
+func _build_monster_drop_controls() -> void:
+	var row: HBoxContainer = HBoxContainer.new()
+	_monster_drop_controls.add_child(row)
+
+	var seed_chance_label: Label = Label.new()
+	seed_chance_label.text = "Seed chance"
+	seed_chance_label.custom_minimum_size = Vector2(128.0, 0.0)
+	row.add_child(seed_chance_label)
+
+	_monster_drop_seed_chance = SpinBox.new()
+	_monster_drop_seed_chance.min_value = 0.0
+	_monster_drop_seed_chance.max_value = 100.0
+	_monster_drop_seed_chance.step = 1.0
+	_monster_drop_seed_chance.suffix = "%"
+	_monster_drop_seed_chance.custom_minimum_size = Vector2(86.0, 0.0)
+	_monster_drop_seed_chance.value_changed.connect(_on_monster_drop_seed_chance_changed)
+	row.add_child(_monster_drop_seed_chance)
 
 
 func _build_shop_controls() -> void:
@@ -502,24 +539,27 @@ func _on_reward_amount_changed(value: float, currency: String) -> void:
 # legacy duplicate entries for the same currency into that single entry.
 func _set_reward_amount(night: NightSpawnPlaylist, currency: String, amount: int) -> void:
 	var existing: NightReward = null
-	var index: int = night.special_rewards.size() - 1
+	var rewards: Array[NightReward] = _copy_special_rewards(night)
+	var index: int = rewards.size() - 1
 	while index >= 0:
-		var reward: NightReward = night.special_rewards[index]
+		var reward: NightReward = rewards[index]
 		if reward != null and String(reward.currency) == currency:
 			if existing == null:
 				existing = reward
 			else:
-				night.special_rewards.remove_at(index)
+				rewards.remove_at(index)
 		index -= 1
 	if amount <= 0:
 		if existing != null:
-			night.special_rewards.erase(existing)
+			rewards.erase(existing)
+			night.special_rewards = rewards
 		return
 	if existing == null:
 		existing = NightReward.new()
 		existing.currency = currency
-		night.special_rewards.append(existing)
+		rewards.append(existing)
 	existing.amount = amount
+	night.special_rewards = rewards
 
 
 func _refresh_levels() -> void:
@@ -619,6 +659,7 @@ func _capture_spawners() -> void:
 func _refresh_all() -> void:
 	_loading_ui = true
 	_refresh_starting_controls()
+	_refresh_monster_drop_controls()
 	_refresh_shop_controls()
 	_refresh_client_frequency_controls()
 	_refresh_nights()
@@ -630,11 +671,22 @@ func _refresh_all() -> void:
 
 
 func _refresh_status() -> void:
+	_status_hide_token += 1
 	_dirty_label.text = "Unsaved changes" if _dirty else "Saved"
 	_dirty_label.modulate = Color(1.0, 0.72, 0.2) if _dirty else Color(0.65, 0.9, 0.65)
+	_dirty_label.visible = true
 	var playlist_path: String = _playlist.resource_path if _playlist != null else "<none>"
 	_playlist_label.text = "Level: %s\nPlaylist: %s" % [_current_level_path, playlist_path]
+	_save_button.disabled = _current_level_path == ""
 	_create_button.disabled = _current_level_path == ""
+	if not _dirty:
+		_hide_saved_status_after_delay(_status_hide_token)
+
+
+func _hide_saved_status_after_delay(token: int) -> void:
+	await get_tree().create_timer(2.0).timeout
+	if token == _status_hide_token and not _dirty:
+		_dirty_label.visible = false
 
 
 func _refresh_starting_controls() -> void:
@@ -662,6 +714,17 @@ func _refresh_starting_controls() -> void:
 		if checkbox != null:
 			checkbox.button_pressed = weapons.has(weapon_id)
 			checkbox.disabled = not has_level
+
+
+func _refresh_monster_drop_controls() -> void:
+	var config: LevelSpawnConfig = _get_level_config(_level_root)
+	var has_level: bool = _current_level_path != ""
+	_monster_drop_section.visible = has_level
+	_monster_drop_seed_chance.editable = has_level
+	var seed_chance_percent: int = DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT
+	if config != null:
+		seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
+	_monster_drop_seed_chance.value = float(seed_chance_percent)
 
 
 func _refresh_shop_controls() -> void:
@@ -749,7 +812,8 @@ func _refresh_nights() -> void:
 	if _playlist == null:
 		return
 	if _playlist.nights.is_empty():
-		_playlist.nights.append(NightSpawnPlaylist.new())
+		var nights: Array[NightSpawnPlaylist] = [NightSpawnPlaylist.new()]
+		_playlist.nights = nights
 	var night_count: int = _playlist.nights.size()
 	_selected_night_index = clampi(_selected_night_index, 0, night_count - 1)
 	for night_index: int in range(night_count):
@@ -992,7 +1056,8 @@ func _on_create_playlist_pressed() -> void:
 		return
 	if _playlist == null:
 		_playlist = LevelSpawnPlaylist.new()
-		_playlist.nights.append(NightSpawnPlaylist.new())
+		var nights: Array[NightSpawnPlaylist] = [NightSpawnPlaylist.new()]
+		_playlist.nights = nights
 		var playlist_path: String = _default_playlist_path_for_level(_current_level_path)
 		var dir_error: Error = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PLAYLISTS_DIR))
 		if dir_error != OK:
@@ -1008,8 +1073,8 @@ func _on_create_playlist_pressed() -> void:
 	_refresh_all()
 
 
-# Autosaves the current playlist and level scene. Saves even when validation
-# reports errors so no edit is silently lost; the validation panel still
+# Saves the current playlist and level scene. Saves even when validation reports
+# errors so explicit Save never silently drops an edit; the validation panel still
 # surfaces any issues. Returns false if a disk write failed.
 func _save() -> bool:
 	if _current_level_path == "":
@@ -1027,6 +1092,13 @@ func _save() -> bool:
 		return false
 	_dirty = false
 	return true
+
+
+func _on_save_pressed() -> void:
+	var saved: bool = _save()
+	_refresh_status()
+	if saved:
+		_refresh_validation()
 
 
 func _on_open_level_pressed() -> void:
@@ -1079,6 +1151,16 @@ func _on_starting_money_changed(value: float) -> void:
 	if config == null:
 		return
 	config.starting_money = int(value)
+	mark_dirty()
+
+
+func _on_monster_drop_seed_chance_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.monster_drop_seed_chance_percent = clampi(int(value), 0, 100)
 	mark_dirty()
 
 
@@ -1187,8 +1269,10 @@ func _on_client_frequency_changed(value: float, spawner_id: StringName) -> void:
 func _on_add_night_pressed() -> void:
 	if _playlist == null:
 		return
-	_playlist.nights.append(NightSpawnPlaylist.new())
-	_selected_night_index = _playlist.nights.size() - 1
+	var nights: Array[NightSpawnPlaylist] = _copy_nights(_playlist)
+	nights.append(NightSpawnPlaylist.new())
+	_playlist.nights = nights
+	_selected_night_index = nights.size() - 1
 	mark_dirty()
 	_refresh_all()
 
@@ -1198,7 +1282,9 @@ func _on_duplicate_night_pressed() -> void:
 	if _playlist == null or night == null:
 		return
 	var duplicate: NightSpawnPlaylist = night.duplicate(true) as NightSpawnPlaylist
-	_playlist.nights.insert(_selected_night_index + 1, duplicate)
+	var nights: Array[NightSpawnPlaylist] = _copy_nights(_playlist)
+	nights.insert(_selected_night_index + 1, duplicate)
+	_playlist.nights = nights
 	_selected_night_index += 1
 	mark_dirty()
 	_refresh_all()
@@ -1207,10 +1293,12 @@ func _on_duplicate_night_pressed() -> void:
 func _on_delete_night_pressed() -> void:
 	if _playlist == null or _playlist.nights.is_empty():
 		return
-	_playlist.nights.remove_at(_selected_night_index)
-	if _playlist.nights.is_empty():
-		_playlist.nights.append(NightSpawnPlaylist.new())
-	_selected_night_index = clampi(_selected_night_index, 0, _playlist.nights.size() - 1)
+	var nights: Array[NightSpawnPlaylist] = _copy_nights(_playlist)
+	nights.remove_at(_selected_night_index)
+	if nights.is_empty():
+		nights.append(NightSpawnPlaylist.new())
+	_playlist.nights = nights
+	_selected_night_index = clampi(_selected_night_index, 0, nights.size() - 1)
 	mark_dirty()
 	_refresh_all()
 
@@ -1221,7 +1309,9 @@ func _enable_track(spawner_id: StringName) -> void:
 		return
 	var track: SpawnerWaveTrack = SpawnerWaveTrack.new()
 	track.spawner_id = spawner_id
-	night.spawner_tracks.append(track)
+	var tracks: Array[SpawnerWaveTrack] = _copy_spawner_tracks(night)
+	tracks.append(track)
+	night.spawner_tracks = tracks
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -1233,7 +1323,9 @@ func _disable_track(spawner_id: StringName) -> void:
 	var index: int = _get_track_index(spawner_id)
 	if index < 0:
 		return
-	night.spawner_tracks.remove_at(index)
+	var tracks: Array[SpawnerWaveTrack] = _copy_spawner_tracks(night)
+	tracks.remove_at(index)
+	night.spawner_tracks = tracks
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -1247,7 +1339,9 @@ func _add_wave(spawner_id: StringName) -> void:
 		return
 	var wave: SpawnWave = SpawnWave.new()
 	wave.monster_type = _monster_types()[0]
-	track.waves.append(wave)
+	var waves: Array[SpawnWave] = _copy_waves(track)
+	waves.append(wave)
+	track.waves = waves
 	mark_dirty()
 	_rebuild_tracks()
 
@@ -1299,6 +1393,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_money", int(_starting_money.value))
 		root.set("starting_weapons", _selected_starting_weapons())
+		root.set("monster_drop_seed_chance_percent", clampi(int(_monster_drop_seed_chance.value), 0, 100))
 		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
 		root.set("tool_shop_prices", _selected_tool_shop_prices())
 		root.set("merchant_available_items", _selected_merchant_available_items())
@@ -1325,6 +1420,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_money = int(_starting_money.value)
 	config.starting_weapons = _selected_starting_weapons()
+	config.monster_drop_seed_chance_percent = clampi(int(_monster_drop_seed_chance.value), 0, 100)
 	config.tool_shop_available_items = _selected_tool_shop_available_items()
 	config.tool_shop_prices = _selected_tool_shop_prices()
 	config.merchant_available_items = _selected_merchant_available_items()
@@ -1469,6 +1565,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_gems = DEFAULT_STARTING_GEMS
 		config.starting_money = DEFAULT_STARTING_MONEY
 		config.starting_weapons = _default_starting_weapons()
+		config.monster_drop_seed_chance_percent = DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT
 		config.tool_shop_available_items = _default_tool_shop_available_items()
 		config.tool_shop_prices = _default_tool_shop_prices()
 		config.merchant_available_items = _default_merchant_available_items()
@@ -1477,6 +1574,42 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.shop_prices = _default_legacy_shop_prices()
 		config.rose_shop_counter_limit = 2
 	return config
+
+
+func _copy_nights(playlist: LevelSpawnPlaylist) -> Array[NightSpawnPlaylist]:
+	var nights: Array[NightSpawnPlaylist] = []
+	if playlist == null:
+		return nights
+	for night: NightSpawnPlaylist in playlist.nights:
+		nights.append(night)
+	return nights
+
+
+func _copy_spawner_tracks(night: NightSpawnPlaylist) -> Array[SpawnerWaveTrack]:
+	var tracks: Array[SpawnerWaveTrack] = []
+	if night == null:
+		return tracks
+	for track: SpawnerWaveTrack in night.spawner_tracks:
+		tracks.append(track)
+	return tracks
+
+
+func _copy_waves(track: SpawnerWaveTrack) -> Array[SpawnWave]:
+	var waves: Array[SpawnWave] = []
+	if track == null:
+		return waves
+	for wave: SpawnWave in track.waves:
+		waves.append(wave)
+	return waves
+
+
+func _copy_special_rewards(night: NightSpawnPlaylist) -> Array[NightReward]:
+	var rewards: Array[NightReward] = []
+	if night == null:
+		return rewards
+	for reward: NightReward in night.special_rewards:
+		rewards.append(reward)
+	return rewards
 
 
 func _selected_starting_weapons() -> Array[StringName]:

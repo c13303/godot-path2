@@ -44,6 +44,7 @@
 [ext_resource type="Script" path="res://scripts/visual_fx/smoke_trail.gd" id="39_smktrl"]
 [ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
 [ext_resource type="Script" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
+[ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -706,6 +707,11 @@ script = ExtResource("10_8g1qu")
 [node name="Camera2D" type="Camera2D" parent="." unique_id=1494994299]
 position = Vector2(1628, 1507)
 script = ExtResource("4_jptjp")
+
+[node name="arros" type="CanvasLayer" parent="."]
+script = ExtResource("42_arros")
+maximum_arros = 100
+distance_from_edge = 50.0
 
 [node name="dayNightColors" type="Node" parent="." unique_id=683992596]
 script = ExtResource("25_day_night_colors")

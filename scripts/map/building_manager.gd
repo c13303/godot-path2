@@ -287,6 +287,7 @@ var _progression: Node = null
 var _level_spawn_playlist: LevelSpawnPlaylist
 var _level_spawner_bindings: Array[SpawnerBinding] = []
 var _loaded_level_scene_path: String = ""
+var _monster_drop_seed_chance_percent: int = 0
 var _spawner_bindings_by_id: Dictionary = {}  # StringName -> Vector2i
 var _spawn_playlist_controller: SpawnPlaylistController = SpawnPlaylistController.new()
 var _playlist_spawning_enabled: bool = false
@@ -326,6 +327,7 @@ var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
 var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
 var _plant_zone_built: bool = false
 var _zone_overlay: Node2D
+var _desire: Node
 var _show_enters_exits: bool = false
 # When on, prints "x gardens recomputed with y entry points" every time gardens
 # (and their entry points) are recomputed. Pushed from CppDebugOptions.verbose;
@@ -458,6 +460,7 @@ func set_paused(value: bool) -> void:
 
 func _ready() -> void:
 	_resolve_level_layers()
+	_resolve_desire()
 	_load_level_spawn_config()
 	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
@@ -484,6 +487,8 @@ func _load_level_spawn_config() -> void:
 		_loaded_level_scene_path = str(loader.call("get_loaded_level_scene_path"))
 	if loader.has_method("get_loaded_spawn_playlist"):
 		_level_spawn_playlist = loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
+	if loader.has_method("get_loaded_monster_drop_seed_chance_percent"):
+		_monster_drop_seed_chance_percent = clampi(int(loader.call("get_loaded_monster_drop_seed_chance_percent")), 0, 100)
 	if _level_spawn_playlist == null:
 		_level_spawn_playlist = _load_default_spawn_playlist(_loaded_level_scene_path)
 	if loader.has_method("get_loaded_spawner_bindings"):
@@ -513,6 +518,20 @@ func _resolve_level_layers() -> void:
 		watersources = get_node_or_null("../MonTilemap/watersources") as WaterSources
 	if wallz == null:
 		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
+
+
+func _resolve_desire() -> void:
+	_desire = get_node_or_null("../MonTilemap/Desire")
+
+
+func _register_desire_agent(agent: Node2D, group_name: StringName) -> void:
+	if _desire != null and _desire.has_method("register_agent"):
+		_desire.call("register_agent", agent, group_name)
+
+
+func _unregister_desire_agent(agent: Node2D) -> void:
+	if _desire != null and _desire.has_method("unregister_agent"):
+		_desire.call("unregister_agent", agent)
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
@@ -2369,6 +2388,7 @@ func _spawn_seed_merchant_from(spawner_cell: Vector2i) -> bool:
 	agent.global_position = _cell_center(spawn_cell)
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group("merchants")
+	_register_desire_agent(agent, &"merchants")
 	agent.set_meta("agent_kind", SPAWNER_KIND_MERCHANT)
 	agent.set_meta("spawner_cell", spawner_cell)
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
@@ -2945,11 +2965,13 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	agent.z_index = int(agent.global_position.y)
 	if agent_kind == SPAWNER_KIND_CLIENT:
 		agent.add_to_group("clients")
+		_register_desire_agent(agent, &"clients")
 		var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 		if sprite != null:
 			sprite.texture = CLIENT_TEXTURE
 	else:
 		agent.add_to_group("monsters")
+		_register_desire_agent(agent, &"monsters")
 		# Apply the monster bible entry (sprite + health + speed/inertia metas)
 		# before the agent is registered with the native manager, which reads the
 		# metas in spawn_agent.
@@ -2972,8 +2994,8 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			_warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
 				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
 
-			# Assign the garden-entry route: attaches the monster to the entry flow
-			# group. Usually the heaviest leg when the route/flow is first created.
+		# Assign the garden-entry route: attaches the monster to the entry flow
+		# group. Usually the heaviest leg when the route/flow is first created.
 		var t_assign: int = Time.get_ticks_usec()
 		var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 		var assign_us: int = Time.get_ticks_usec() - t_assign
@@ -2985,6 +3007,7 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			if agent_manager.has_method("unregister_agent"):
 				agent_manager.call("unregister_agent", nav_id)
 			var failed_group: StringName = &"clients" if agent_kind == SPAWNER_KIND_CLIENT else &"monsters"
+			_unregister_desire_agent(agent)
 			agent.remove_from_group(failed_group)
 			agent.queue_free()
 			_log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
@@ -4041,6 +4064,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	_entry_path_agents.erase(nav_id)
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
+	_unregister_desire_agent(agent)
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.remove_from_group("monsters")
@@ -4087,6 +4111,7 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 			_garden_retarget_queue.remove_at(index)
 	if agent_manager and agent_manager.has_method("unregister_agent") and nav_id >= 0:
 		agent_manager.call("unregister_agent", nav_id)
+	_unregister_desire_agent(agent)
 	agent.remove_from_group("monsters")
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
@@ -4105,7 +4130,8 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 			GameState.set_building_phase(true)
 
 func _spawn_monster_death_drop(world_position: Vector2) -> void:
-	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < 0.5 else MONSTER_DEATH_DROP_GEM
+	var seed_chance: float = float(clampi(_monster_drop_seed_chance_percent, 0, 100)) / 100.0
+	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
 	var scene: Node = get_tree().current_scene
 	var icon: Node = null
 	var animate_method: String = ""

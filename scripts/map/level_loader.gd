@@ -38,6 +38,7 @@ var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
+var _loaded_monster_drop_seed_chance_percent: int = 0
 var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
@@ -132,6 +133,10 @@ func get_loaded_starting_weapons() -> Array[StringName]:
 	return weapons
 
 
+func get_loaded_monster_drop_seed_chance_percent() -> int:
+	return _loaded_monster_drop_seed_chance_percent
+
+
 func get_loaded_rose_shop_counter_limit() -> int:
 	return _loaded_rose_shop_counter_limit
 
@@ -192,6 +197,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
+	_loaded_monster_drop_seed_chance_percent = 0
 	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"wall"]
 	_loaded_tool_shop_prices = {
 		&"rose": 1,
@@ -218,6 +224,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_money = config.starting_money
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
+		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
 		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
 		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, MERCHANT_ITEM_IDS)
