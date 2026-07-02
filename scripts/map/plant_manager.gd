@@ -14,6 +14,7 @@ const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 2)
 const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 2)
 const DEBRIS_ATLAS: Vector2i = Vector2i(1, 1)
 const NEW_DAY_DELAY: int = 3000
+const GROWNUP_BLOOM_TOTAL_SECONDS: float = 1.5
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
@@ -21,6 +22,7 @@ const NEW_DAY_DELAY: int = 3000
 var _plants: Dictionary = {}
 var _plant_tiles: Dictionary = {}
 var _buckets: Dictionary = {}
+var _hidden_visual_cells: Dictionary = {}
 var _initialized: bool = false
 var _plant_layer_flush_queued: bool = false
 
@@ -55,6 +57,7 @@ func initialize_from_layer() -> void:
 	_plants.clear()
 	_plant_tiles.clear()
 	_buckets.clear()
+	_hidden_visual_cells.clear()
 	if not plantz:
 		_initialized = true
 		return
@@ -100,10 +103,7 @@ func unwatered_rose_count() -> int:
 	return count
 
 func is_rose_cell(cell: Vector2i) -> bool:
-	if not plantz or not _plants.has(cell):
-		return false
-	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
-	return _is_rose_atlas(atlas_coords)
+	return _plants.has(cell)
 
 func _is_rose_atlas(atlas_coords: Vector2i) -> bool:
 	return atlas_coords == ROSE_DRY_ATLAS or atlas_coords == ROSE_GREEN_ATLAS or atlas_coords == ROSE_GROWNUP_ATLAS
@@ -143,22 +143,44 @@ func grow_green_roses() -> int:
 	return grown_count
 
 
-## Opens every grown rose into its full-bloom "rose-rose" tile. Called when the
-## morning harvest phase begins so watered roses (still green from overnight
-## growth) visibly bloom into full roses before the player can collect them.
-func bloom_grownup_roses() -> int:
+## Opens every grown rose into its full-bloom "rose-rose" tile one by one. Called
+## when the morning harvest phase begins so watered roses (still green from
+## overnight growth) visibly bloom into full roses before the player can collect
+## them. The full map completes in total_duration_seconds, so more roses bloom
+## faster per rose.
+func bloom_grownup_roses(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SECONDS) -> int:
+	await get_tree().process_frame
 	if not plantz:
 		return 0
-	var bloomed_count: int = 0
+	var cells: Array[Vector2i] = []
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		if not is_rose_grownup(cell):
 			continue
 		if plantz.get_cell_atlas_coords(cell) == ROSE_GROWNUP_ATLAS:
 			continue
+		cells.append(cell)
+	cells.sort_custom(Callable(self, "_sort_cells_top_left"))
+	var bloom_count: int = cells.size()
+	if bloom_count <= 0:
+		return 0
+	var delay_seconds: float = maxf(0.0, total_duration_seconds) / float(bloom_count)
+	var bloomed_count: int = 0
+	for cell: Vector2i in cells:
+		if delay_seconds > 0.0:
+			await get_tree().create_timer(delay_seconds).timeout
+		if not plantz or not is_rose_grownup(cell):
+			continue
+		if plantz.get_cell_atlas_coords(cell) == ROSE_GROWNUP_ATLAS:
+			continue
 		_set_rose_atlas(cell, ROSE_GROWNUP_ATLAS)
 		bloomed_count += 1
 	return bloomed_count
+
+func _sort_cells_top_left(a: Vector2i, b: Vector2i) -> bool:
+	if a.y == b.y:
+		return a.x < b.x
+	return a.y < b.y
 
 
 ## Reverts every rose to its dry, unwatered state (dry tile, needs watering again to
@@ -205,13 +227,47 @@ func harvest_grownup_rose(cell: Vector2i) -> bool:
 	remove_plant(cell, true)
 	return true
 
+func set_rose_visual_hidden(cell: Vector2i, hidden: bool) -> void:
+	if not plantz or not _plants.has(cell):
+		return
+	if hidden:
+		if _hidden_visual_cells.has(cell):
+			return
+		_capture_tile_metadata(cell)
+		_hidden_visual_cells[cell] = true
+		plantz.erase_cell(cell)
+	else:
+		if not _hidden_visual_cells.has(cell):
+			return
+		var tile_data: Dictionary = _plant_tiles.get(cell, {}) as Dictionary
+		if tile_data.is_empty():
+			return
+		_hidden_visual_cells.erase(cell)
+		var source_id: int = int(tile_data.get("source_id", -1))
+		var atlas_coords: Vector2i = tile_data.get("atlas_coords", ROSE_DRY_ATLAS) as Vector2i
+		var alternative_tile: int = int(tile_data.get("alternative_tile", 0))
+		if source_id >= 0:
+			plantz.set_cell(cell, source_id, atlas_coords, alternative_tile)
+	_flush_plant_layer_now()
+	_queue_plant_layer_flush()
+
 func _set_rose_atlas(cell: Vector2i, atlas_coords: Vector2i, flush_visuals: bool = true) -> void:
 	var source_id: int = plantz.get_cell_source_id(cell)
+	var alternative_tile: int = plantz.get_cell_alternative_tile(cell)
+	if source_id < 0:
+		var tile_data: Dictionary = _plant_tiles.get(cell, {}) as Dictionary
+		source_id = int(tile_data.get("source_id", -1))
+		alternative_tile = int(tile_data.get("alternative_tile", 0))
 	if source_id < 0:
 		return
-	var alternative_tile: int = plantz.get_cell_alternative_tile(cell)
-	plantz.set_cell(cell, source_id, atlas_coords, alternative_tile)
-	_capture_tile_metadata(cell)
+	_plant_tiles[cell] = {
+		"source_id": source_id,
+		"atlas_coords": atlas_coords,
+		"alternative_tile": alternative_tile
+	}
+	if not _hidden_visual_cells.has(cell):
+		plantz.set_cell(cell, source_id, atlas_coords, alternative_tile)
+		_capture_tile_metadata(cell)
 	if flush_visuals:
 		_flush_plant_layer_now()
 		_queue_plant_layer_flush()
@@ -356,6 +412,7 @@ func _index_cell(cell: Vector2i) -> void:
 func _unindex_cell(cell: Vector2i) -> void:
 	_plants.erase(cell)
 	_plant_tiles.erase(cell)
+	_hidden_visual_cells.erase(cell)
 	var bucket: Vector2i = _bucket_for_cell(cell)
 	if not _buckets.has(bucket):
 		return

@@ -29,7 +29,6 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_jab7j")])
 
 [sub_resource type="Resource" id="Resource_night1_seed_reward"]
 script = ExtResource("4_rk5yt")
-currency = "seed"
 amount = 10
 
 [sub_resource type="Resource" id="Resource_1hais"]

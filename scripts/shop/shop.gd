@@ -23,6 +23,8 @@ const SEED_ICON_REGION: Rect2 = Rect2(226.0, 0.0, 32.0, 32.0)
 const GEM_ICON_REGION: Rect2 = Rect2(256.0, 0.0, 32.0, 32.0)
 const MONEY_ICON_REGION: Rect2 = Rect2(416.0, 0.0, 32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
+# The merchant column is laid out as an aligned grid: icon | name | price.
+const MERCHANT_COLUMNS: int = 3
 # The column's bottom sits this many pixels above the screen bottom, clearing the quick
 # bar and its "Construction (…)" info label; rows stack upward from there.
 const BAR_BOTTOM_OFFSET: float = -134.0
@@ -56,7 +58,7 @@ var _merchant_column: VBoxContainer
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
 # vertical stack for the build shop, horizontal bar for the seed-merchant sale.
 var _items_list: BoxContainer
-var _merchant_items_list: BoxContainer
+var _merchant_items_list: GridContainer
 var _seed_icon: AtlasTexture
 var _gem_icon: AtlasTexture
 var _money_icon: AtlasTexture
@@ -80,21 +82,19 @@ var _selected_currency: TextureRect
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
-var _merchant_slot_rows: Dictionary = {}
+# Per item id: the four aligned grid cells (icon button, name, quantity, price group) so a
+# whole row's visibility can be toggled together, plus the parts refilled each refresh.
+var _merchant_row_cells: Dictionary = {}
 var _merchant_slot_buttons: Dictionary = {}
 var _merchant_slot_icons: Dictionary = {}
-var _merchant_slot_counts: Dictionary = {}
-var _merchant_row_labels: Dictionary = {}
 var _merchant_row_names: Dictionary = {}
 var _merchant_row_prices: Dictionary = {}
 var _merchant_row_currencies: Dictionary = {}
 var _merchant_slot_state: Dictionary = {}
-# The free "special reward" row pinned to the top of the merchant column.
-var _special_reward_row: HBoxContainer
-var _special_reward_button: Button
-var _special_reward_icon: TextureRect
-var _special_reward_name: Label
-var _special_reward_contents: HBoxContainer
+# The free "special reward" is rendered as one grid row per granted currency, pinned above
+# the item rows. These cells are rebuilt whenever the offer changes and moved ahead of the
+# item rows; _reward_cells tracks them so they can be removed on the next rebuild.
+var _reward_cells: Array[Control] = []
 # Signature of the currently rendered reward contents, so they are only rebuilt when
 # the offered reward changes instead of every frame.
 var _special_reward_signature: String = ""
@@ -191,73 +191,18 @@ func _build_merchant_ui() -> void:
 	margin.add_theme_constant_override("margin_bottom", 6)
 	panel.add_child(margin)
 
-	var items_list: BoxContainer = BoxContainer.new()
-	_merchant_items_list = items_list
-	items_list.name = "MerchantItemsList"
-	items_list.vertical = true
-	items_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	items_list.add_theme_constant_override("separation", 6)
-	margin.add_child(items_list)
+	var grid: GridContainer = GridContainer.new()
+	_merchant_items_list = grid
+	grid.name = "MerchantItemsGrid"
+	grid.columns = MERCHANT_COLUMNS
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 6)
+	margin.add_child(grid)
 
-	items_list.add_child(_build_special_reward_row())
 	for item_id: String in WEAPON_ITEM_IDS:
-		items_list.add_child(_build_merchant_slot_row(item_id))
+		_build_merchant_item_cells(grid, item_id)
 	column.visible = false
-
-
-## The free reward slot pinned above the merchant's purchasable items. Its icon shows
-## the first granted currency; the label group lists every "amount + currency icon".
-func _build_special_reward_row() -> HBoxContainer:
-	var row: HBoxContainer = HBoxContainer.new()
-	row.name = "SpecialRewardRow"
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.alignment = BoxContainer.ALIGNMENT_BEGIN
-	row.add_theme_constant_override("separation", 8)
-
-	var button: Button = Button.new()
-	button.name = "SpecialReward"
-	button.custom_minimum_size = SLOT_SIZE
-	button.tooltip_text = _special_reward_label()
-	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(_on_special_reward_pressed)
-
-	var icon: TextureRect = TextureRect.new()
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 8.0
-	icon.offset_top = 8.0
-	icon.offset_right = -8.0
-	icon.offset_bottom = -8.0
-	button.add_child(icon)
-	row.add_child(button)
-	_special_reward_button = button
-	_special_reward_icon = icon
-
-	var label_group: HBoxContainer = HBoxContainer.new()
-	label_group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label_group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	label_group.add_theme_constant_override("separation", 8)
-
-	var name_label: Label = _make_row_label(18)
-	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	name_label.text = _special_reward_label()
-	label_group.add_child(name_label)
-	_special_reward_name = name_label
-
-	var contents: HBoxContainer = HBoxContainer.new()
-	contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	contents.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	contents.add_theme_constant_override("separation", 6)
-	label_group.add_child(contents)
-	_special_reward_contents = contents
-
-	row.add_child(label_group)
-	_special_reward_row = row
-	row.visible = false
-	return row
 
 
 func _special_reward_label() -> String:
@@ -266,16 +211,54 @@ func _special_reward_label() -> String:
 	return "Special reward" if translated == key else translated
 
 
-func _build_merchant_slot_row(item_id: String) -> HBoxContainer:
-	var row: HBoxContainer = HBoxContainer.new()
-	row.name = item_id + "MerchantRow"
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.alignment = BoxContainer.ALIGNMENT_BEGIN
-	row.add_theme_constant_override("separation", 8)
-	row.add_child(_build_merchant_slot(item_id))
-	row.add_child(_build_merchant_row_label(item_id))
-	_merchant_slot_rows[item_id] = row
-	return row
+## Appends one item's three aligned grid cells (icon button, name, price group) to the
+## merchant grid. All three cells are tracked together so the whole row is shown or hidden
+## as one, keeping every visible row an exact multiple of the column count so the grid stays
+## aligned.
+func _build_merchant_item_cells(grid: GridContainer, item_id: String) -> void:
+	var button: Button = _build_merchant_slot(item_id)
+	grid.add_child(button)
+
+	var name_label: Label = _make_row_label(18)
+	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	name_label.text = _display_name(item_id)
+	grid.add_child(name_label)
+
+	var price_group: HBoxContainer = _build_price_group()
+	grid.add_child(price_group)
+
+	_merchant_row_names[item_id] = name_label
+	_merchant_row_prices[item_id] = price_group.get_child(0)
+	_merchant_row_currencies[item_id] = price_group.get_child(2)
+	_merchant_row_cells[item_id] = [button, name_label, price_group] as Array[Control]
+
+
+## A price-column cell rendering "<price> x <currency icon>". The children are ordered
+## [price label, "x" label, currency icon] so callers can address them by index.
+func _build_price_group() -> HBoxContainer:
+	var group: HBoxContainer = HBoxContainer.new()
+	group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_theme_constant_override("separation", 4)
+
+	var price_label: Label = _make_row_label(18)
+	price_label.add_theme_color_override("font_color", Color.WHITE)
+	group.add_child(price_label)
+
+	var x_label: Label = _make_row_label(18)
+	x_label.add_theme_color_override("font_color", Color.WHITE)
+	x_label.text = "x"
+	group.add_child(x_label)
+
+	var currency: TextureRect = TextureRect.new()
+	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	currency.custom_minimum_size = Vector2(20.0, 20.0)
+	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_child(currency)
+	return group
 
 
 func _build_merchant_slot(item_id: String) -> Button:
@@ -300,6 +283,13 @@ func _build_merchant_slot(item_id: String) -> Button:
 	icon.offset_bottom = -8.0
 	button.add_child(icon)
 
+	_merchant_slot_buttons[item_id] = button
+	_merchant_slot_icons[item_id] = icon
+	return button
+
+
+## A small number badge overlaid on the bottom-right of a slot icon.
+func _make_icon_count_label(text: String) -> Label:
 	var count: Label = Label.new()
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -314,21 +304,8 @@ func _build_merchant_slot(item_id: String) -> Button:
 	count.offset_top = 2.0
 	count.offset_right = -4.0
 	count.offset_bottom = -2.0
-	button.add_child(count)
-
-	_merchant_slot_buttons[item_id] = button
-	_merchant_slot_icons[item_id] = icon
-	_merchant_slot_counts[item_id] = count
-	return button
-
-
-func _build_merchant_row_label(item_id: String) -> HBoxContainer:
-	var group: HBoxContainer = _build_row_label(item_id)
-	_merchant_row_labels[item_id] = group
-	_merchant_row_names[item_id] = group.get_child(0)
-	_merchant_row_prices[item_id] = group.get_child(1)
-	_merchant_row_currencies[item_id] = group.get_child(2)
-	return group
+	count.text = text
+	return count
 
 
 ## Builds the single floating label (name + price + currency icon) that sits to the
@@ -846,85 +823,107 @@ func _is_seed_merchant_shop_active() -> bool:
 func _refresh_merchant_slots() -> void:
 	_refresh_special_reward_row()
 	for item_id: String in WEAPON_ITEM_IDS:
-		var row: Control = _merchant_slot_rows.get(item_id) as Control
-		if row == null:
+		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
+		if cells.is_empty():
 			continue
-		row.visible = _should_show_merchant_item(item_id)
-		if not row.visible:
+		var show: bool = _should_show_merchant_item(item_id)
+		for cell: Control in cells:
+			cell.visible = show
+		if not show:
 			continue
 		var button: Button = _merchant_slot_buttons[item_id] as Button
 		var affordable: int = _merchant_affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0
-		var count_label: Label = _merchant_slot_counts[item_id] as Label
-		count_label.text = str(affordable)
 		var state: Array[bool] = [false, false]
 		if _merchant_slot_state.get(item_id) != state:
 			_merchant_slot_state[item_id] = state
 			_apply_slot_style(button, false, false)
 			(_merchant_slot_icons[item_id] as TextureRect).modulate = Color.WHITE
-		var group: HBoxContainer = _merchant_row_labels.get(item_id) as HBoxContainer
-		if group == null:
-			continue
-		group.visible = true
 		var color: Color = SELECTED_DISABLED_LABEL_COLOR if disabled else SELECTED_LABEL_COLOR
 		var name_label: Label = _merchant_row_names[item_id] as Label
 		var price_label: Label = _merchant_row_prices[item_id] as Label
 		var currency: TextureRect = _merchant_row_currencies[item_id] as TextureRect
+		var x_label: Label = (cells[2] as HBoxContainer).get_child(1) as Label
 		name_label.add_theme_color_override("font_color", color)
 		price_label.add_theme_color_override("font_color", color)
+		x_label.add_theme_color_override("font_color", color)
 		currency.modulate = color
 		name_label.text = _display_name(item_id)
 		price_label.text = str(_merchant_price(item_id))
 		var currency_texture: AtlasTexture = _currency_texture(item_id)
 		currency.texture = currency_texture
 		currency.visible = currency_texture != null
+		x_label.visible = currency_texture != null
 
 
-## Shows/hides and fills the top special-reward row from game_ui's current offer.
+## Rebuilds the free reward rows pinned to the top of the merchant grid from game_ui's current
+## offer as one grid row per granted currency, then moves them ahead of the item rows.
+## Only rebuilds when the offered payout changes.
 func _refresh_special_reward_row() -> void:
-	if _special_reward_row == null:
+	if _merchant_items_list == null:
 		return
 	var info: Dictionary = {}
 	if game_ui != null and game_ui.has_method("get_active_night_reward"):
 		info = game_ui.call("get_active_night_reward")
-	var show: bool = not info.is_empty()
-	_special_reward_row.visible = show
-	if not show:
-		_special_reward_signature = ""
-		return
-	var rewards: Array = info.get("rewards", []) as Array
+	var rewards: Array = (info.get("rewards", []) as Array) if not info.is_empty() else []
 	var signature: String = ""
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
 		signature += "%s:%d|" % [str(reward.get("currency", "")), int(reward.get("amount", 0))]
-	# Only rebuild the label/icons when the offered reward actually changes.
 	if signature == _special_reward_signature:
 		return
 	_special_reward_signature = signature
-	_apply_slot_style(_special_reward_button, false, false)
-	_special_reward_name.text = _special_reward_label()
-	_special_reward_name.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	if not rewards.is_empty():
-		var first: Dictionary = rewards[0] as Dictionary
-		_special_reward_icon.texture = _currency_icon_for(str(first.get("currency", "")))
-		_special_reward_icon.modulate = Color.WHITE
-	for child: Node in _special_reward_contents.get_children():
-		child.queue_free()
+	for cell: Control in _reward_cells:
+		_merchant_items_list.remove_child(cell)
+		cell.queue_free()
+	_reward_cells.clear()
+	var insert_index: int = 0
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
-		var amount_label: Label = _make_row_label(18)
-		amount_label.add_theme_color_override("font_color", Color.WHITE)
-		amount_label.text = "x%d" % int(reward.get("amount", 0))
-		_special_reward_contents.add_child(amount_label)
-		var currency_icon: TextureRect = TextureRect.new()
-		currency_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		currency_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		currency_icon.custom_minimum_size = Vector2(20.0, 20.0)
-		currency_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		currency_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		currency_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		currency_icon.texture = _currency_icon_for(str(reward.get("currency", "")))
-		_special_reward_contents.add_child(currency_icon)
+		var reward_cells: Array[Control] = _build_reward_row_cells(
+			str(reward.get("currency", "")), int(reward.get("amount", 0))
+		)
+		for cell: Control in reward_cells:
+			_merchant_items_list.add_child(cell)
+			_merchant_items_list.move_child(cell, insert_index)
+			insert_index += 1
+			_reward_cells.append(cell)
+
+
+## The three cells for one free-reward currency payout: the currency icon (a claim button)
+## with the granted amount overlaid as a count badge, the reward name, and an empty price
+## column.
+func _build_reward_row_cells(currency: String, amount: int) -> Array[Control]:
+	var button: Button = Button.new()
+	button.custom_minimum_size = SLOT_SIZE
+	button.tooltip_text = _special_reward_label()
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(_on_special_reward_pressed.bind(button))
+	_apply_slot_style(button, false, false)
+
+	var icon: TextureRect = TextureRect.new()
+	icon.texture = _currency_icon_for(currency)
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 8.0
+	icon.offset_top = 8.0
+	icon.offset_right = -8.0
+	icon.offset_bottom = -8.0
+	button.add_child(icon)
+	button.add_child(_make_icon_count_label(str(amount)))
+
+	var name_label: Label = _make_row_label(18)
+	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	name_label.text = _special_reward_label()
+
+	var free_label: Label = _make_row_label(18)
+	free_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	free_label.text = ""
+
+	return [button, name_label, free_label] as Array[Control]
 
 
 ## Maps a currency id ("seed"/"gem"/"money") straight to its HUD icon texture. Unlike
@@ -940,12 +939,12 @@ func _currency_icon_for(currency: String) -> AtlasTexture:
 	return null
 
 
-func _on_special_reward_pressed() -> void:
+func _on_special_reward_pressed(source: Button = null) -> void:
 	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
 		return
 	if game_ui == null or not game_ui.has_method("claim_active_night_reward"):
 		return
-	var start_position: Vector2 = _special_reward_button.get_global_rect().get_center() if _special_reward_button != null else Vector2.ZERO
+	var start_position: Vector2 = source.get_global_rect().get_center() if source != null else Vector2.ZERO
 	if bool(game_ui.call("claim_active_night_reward", start_position)):
 		Sfx.play_sound(&"buy")
 		_refresh_special_reward_row()
@@ -986,8 +985,6 @@ func _apply_phase_layout() -> void:
 func _apply_merchant_layout() -> void:
 	if _merchant_column == null:
 		return
-	if _merchant_items_list != null:
-		_merchant_items_list.vertical = true
 	_merchant_column.anchor_left = 0.0
 	_merchant_column.anchor_right = 0.0
 	_merchant_column.anchor_top = 0.0

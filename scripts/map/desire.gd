@@ -16,9 +16,16 @@ const PRIORITY_CREATURE_GROUPS: Array[StringName] = [&"clients", &"merchants"]
 @export_range(0.0, 1.0, 0.01) var mark_alpha: float = 0.25
 @export var min_distance_between_marks: float = 10.0
 @export var random_offset_px: int = 4
+# Marks drawn per stamp event for each stamped agent. Every mark is a normal stamp
+# (fresh random offset + rotation); only the first respects min_distance_between_marks.
+# All marks for the whole event are blended into the CPU image first and pushed to
+# the GPU in a SINGLE texture upload, so raising this stays cheap.
+@export var repetition: int = 3
 @export var floor_path: NodePath = NodePath("../floor")
+@export var watersources_path: NodePath = NodePath("../watersources")
 
 var _floor: TileMapLayer
+var _watersources: WaterSources
 var _canvas_image: Image
 var _canvas_texture: ImageTexture
 var _mark_image: Image
@@ -37,6 +44,9 @@ func _ready() -> void:
 		push_warning("Desire: floor TileMapLayer not found.")
 		set_process(false)
 		return
+
+	# Marks must never land on water; skip stamping for agents over a water tile.
+	_watersources = get_node_or_null(watersources_path) as WaterSources
 
 	_mark_image = MARK_TEXTURE.get_image()
 	if _mark_image == null or _mark_image.is_empty():
@@ -91,8 +101,9 @@ func _stamp_random_agents() -> void:
 	for group_name: StringName in PRIORITY_CREATURE_GROUPS:
 		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_agent as Node2D
-			if is_instance_valid(agent) and _stamp_agent(agent):
-				stamped = true
+			if is_instance_valid(agent) and _should_stamp(agent):
+				if _stamp_agent_marks(agent):
+					stamped = true
 
 	# Monsters: bounded random sample to cap per-update cost with large hordes.
 	var monsters: Array[Node] = get_tree().get_nodes_in_group(MONSTER_GROUP)
@@ -100,9 +111,12 @@ func _stamp_random_agents() -> void:
 		var count: int = mini(agents_per_update, monsters.size())
 		for i: int in range(count):
 			var agent: Node2D = monsters[randi_range(0, monsters.size() - 1)] as Node2D
-			if is_instance_valid(agent) and _stamp_agent(agent):
-				stamped = true
+			if is_instance_valid(agent) and _should_stamp(agent):
+				if _stamp_agent_marks(agent):
+					stamped = true
 
+	# One GPU upload per event, never one per mark: every mark above was blended
+	# into the CPU image, so a single update() pushes them all at once.
 	if stamped:
 		_canvas_texture.update(_canvas_image)
 
@@ -113,13 +127,39 @@ func _next_update_delay() -> float:
 	return randf_range(min_delay, max_delay)
 
 
-func _stamp_agent(agent: Node2D) -> bool:
-	var agent_id: int = agent.get_instance_id()
+# Gate for a stamp event: skips agents over water or too close to their last
+# mark. Records the position so the min-distance rule holds until the agent moves.
+func _should_stamp(agent: Node2D) -> bool:
 	var agent_pos: Vector2 = agent.global_position
+	if _watersources != null and _watersources.has_water_at_foot_position(agent_pos):
+		return false
+	var agent_id: int = agent.get_instance_id()
 	if _last_mark_positions.has(agent_id):
 		var previous_pos: Vector2 = _last_mark_positions[agent_id] as Vector2
 		if previous_pos.distance_to(agent_pos) < min_distance_between_marks:
 			return false
+	_last_mark_positions[agent_id] = agent_pos
+	return true
+
+
+# Blends `repetition` marks for one agent into the CPU image (no GPU upload here;
+# the caller does a single update() for the whole event). The gate was already
+# checked once by _should_stamp, so all marks land. Returns true if any was drawn.
+func _stamp_agent_marks(agent: Node2D) -> bool:
+	var reps: int = maxi(1, repetition)
+	var drew: bool = false
+	for i: int in range(reps):
+		if _blend_agent_mark(agent):
+			drew = true
+	return drew
+
+
+# Blends one mark onto the canvas image at the agent's current position with a
+# fresh random offset and rotation. Skips marks that would land on a water tile.
+func _blend_agent_mark(agent: Node2D) -> bool:
+	var agent_pos: Vector2 = agent.global_position
+	if _watersources != null and _watersources.has_water_at_foot_position(agent_pos):
+		return false
 
 	var floor_local: Vector2 = _floor.to_local(agent_pos)
 	var pixel_center: Vector2 = floor_local - _origin_floor_local
@@ -135,11 +175,7 @@ func _stamp_agent(agent: Node2D) -> bool:
 		int(round(pixel_center.y)) + mark_offset.y
 	)
 	var angle: float = randf_range(0.0, TAU)
-	if not _blend_mark(draw_center, angle):
-		return false
-
-	_last_mark_positions[agent_id] = agent_pos
-	return true
+	return _blend_mark(draw_center, angle)
 
 
 func _blend_mark(draw_center: Vector2i, angle: float) -> bool:

@@ -30,5 +30,6 @@
 	"item.turret1": "Spitter",
 	"item.rose_shop_counter": "Rose Shop Counter",
 	"ui.remaining": "remaining",
-	"merchant.special_reward": "Special reward"
+	"merchant.special_reward": "Special reward",
+	"merchant.free": "free"
 }

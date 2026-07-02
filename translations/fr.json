@@ -30,5 +30,6 @@
 	"item.turret1": "Cracheuse",
 	"item.rose_shop_counter": "Comptoir de roses",
 	"ui.remaining": "restant",
-	"merchant.special_reward": "Récompense spéciale"
+	"merchant.special_reward": "Récompense spéciale",
+	"merchant.free": "cadeau"
 }

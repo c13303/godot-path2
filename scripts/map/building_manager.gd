@@ -2121,15 +2121,24 @@ func _begin_morning_phase() -> void:
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
 	_client_paying_agents.clear()
-	_morning_harvest_active = _grownup_rose_count() > 0
-	if not _morning_harvest_active:
+	var has_grownup_roses: bool = _grownup_rose_count() > 0
+	_morning_harvest_active = false
+	if not has_grownup_roses:
 		_begin_client_sale_phase()
 		return
-	# Green (watered) roses only open into full-bloom "rose-rose" now, at the start
-	# of the harvest phase, so they must become full grown before being harvested.
-	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
-		plant_manager.call("bloom_grownup_roses")
 	GameState.set_morning_phase(true)
+	# Green (watered) roses open into full-bloom "rose-rose" one by one at the
+	# start of the harvest phase, so wait until the visual bloom sequence is done
+	# before the player can collect them.
+	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
+		await plant_manager.call("bloom_grownup_roses")
+	if GameState.is_night:
+		return
+	if _grownup_rose_count() <= 0:
+		GameState.set_morning_phase(false)
+		_begin_client_sale_phase()
+		return
+	_morning_harvest_active = true
 
 
 func _process_morning_harvest_walkover() -> void:
