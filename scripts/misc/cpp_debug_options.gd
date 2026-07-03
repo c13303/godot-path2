@@ -12,6 +12,8 @@ extends Node
 		dev_keys = value
 		_apply_debug_settings()
 
+@export var level_selection: bool = false
+
 @export var draw_world_hitboxes: bool = false:
 	set(value):
 		draw_world_hitboxes = value

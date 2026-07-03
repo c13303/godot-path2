@@ -11,10 +11,13 @@ extends Node
 ## script only drives its message and YES/NO behaviour. The actual save / load /
 ## reset work lives in the sibling `progression` node.
 
+const LEVEL_MENU_SCENE: String = "res://scenes/menus/level_loader.tscn"
+
 @onready var _progression: Node = get_node("../progression")
 @onready var _prompts: CanvasLayer = $Prompts
 @onready var _message_label: Label = $Prompts/Panel/VBox/Message
 @onready var _yes_button: Button = $Prompts/Panel/VBox/Buttons/YesButton
+@onready var _level_selection_button: Button = $Prompts/Panel/VBox/Buttons/LevelSelectionButton
 @onready var _no_button: Button = $Prompts/Panel/VBox/Buttons/NoButton
 
 # Action run when the player confirms the currently shown prompt with YES.
@@ -24,6 +27,7 @@ var _on_confirm: Callable = Callable()
 func _ready() -> void:
 	_prompts.visible = false
 	_yes_button.pressed.connect(_on_yes_pressed)
+	_level_selection_button.pressed.connect(_on_level_selection_pressed)
 	_no_button.pressed.connect(_on_no_pressed)
 
 	# Restore the auto-save into the freshly loaded scene. Runs after the
@@ -52,13 +56,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			_show_prompt("Reset game?\nThis erases your save.", _confirm_reset)
 		KEY_ESCAPE:
 			get_viewport().set_input_as_handled()
-			_show_prompt("Quit game?\nProgress will be saved.", _confirm_quit)
+			_show_prompt("Quit game?\nProgress will be saved.", _confirm_quit, "Return", "Quit", true)
 
 
 ## Show the reusable prompt with `message`; `on_confirm` runs if YES is chosen.
-func _show_prompt(message: String, on_confirm: Callable) -> void:
+func _show_prompt(
+	message: String,
+	on_confirm: Callable,
+	no_text: String = "NO",
+	yes_text: String = "YES",
+	show_level_selection: bool = false
+) -> void:
 	_message_label.text = message
 	_on_confirm = on_confirm
+	_no_button.text = no_text
+	_yes_button.text = yes_text
+	_level_selection_button.visible = show_level_selection
 	_prompts.visible = true
 	_no_button.grab_focus()
 
@@ -77,6 +90,15 @@ func _on_yes_pressed() -> void:
 
 func _on_no_pressed() -> void:
 	_close_prompt()
+
+
+func _on_level_selection_pressed() -> void:
+	_close_prompt()
+	GameState.force_level_selection_once()
+	GameState.set_night(false)
+	var change_error: Error = get_tree().change_scene_to_file(LEVEL_MENU_SCENE)
+	if change_error != OK:
+		push_error("Menus: failed to load %s (error %d)" % [LEVEL_MENU_SCENE, int(change_error)])
 
 
 ## YES on the reset prompt: wipe the save and start a brand-new game.

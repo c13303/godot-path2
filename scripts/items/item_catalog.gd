@@ -149,6 +149,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
+		"pad_skip_preview": true,
 		"runtime_id": "turret1",
 		"turret_data": TURRET1_DATA,
 		"max_stack": 999,
@@ -172,6 +173,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": true,
 		"blocks_projectiles": true,
 		"requires_grass_green_floor": true,
+		"pad_skip_preview": true,
 		"runtime_id": "rose_shop_counter",
 		"max_stack": 999,
 	},

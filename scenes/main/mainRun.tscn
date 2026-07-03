@@ -754,7 +754,7 @@ tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 
 [node name="previewbuild" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1848235087]
-z_index = -49
+z_index = 4095
 tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 
@@ -1299,9 +1299,9 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -220.0
+offset_left = -310.0
 offset_top = -110.0
-offset_right = 220.0
+offset_right = 310.0
 offset_bottom = 110.0
 grow_horizontal = 2
 grow_vertical = 2
@@ -1334,12 +1334,18 @@ layout_mode = 2
 theme_override_constants/separation = 24
 alignment = 1
 
-[node name="YesButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000007]
-custom_minimum_size = Vector2(120, 44)
-layout_mode = 2
-text = "YES"
-
 [node name="NoButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000008]
 custom_minimum_size = Vector2(120, 44)
 layout_mode = 2
 text = "NO"
+
+[node name="LevelSelectionButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000009]
+visible = false
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Level Selection"
+
+[node name="YesButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000007]
+custom_minimum_size = Vector2(120, 44)
+layout_mode = 2
+text = "YES"

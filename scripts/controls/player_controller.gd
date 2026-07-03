@@ -27,6 +27,8 @@ const INPUT_MODE_KMOUSE: String = "kmouse"
 @export var gamepad_stick_deadzone: float = 0.2
 @export var gamepad_cursor_speed: float = 900.0
 @export var gamepad_trigger_threshold: float = 0.5
+@export var gamepad_cursor_initial_repeat_delay: float = 0.20
+@export var gamepad_cursor_repeat_interval: float = 0.075
 
 @export_group("Rush", "rush_")
 @export var rush_duration: float = 0.1
@@ -47,6 +49,8 @@ var _dpad_left_pressed: bool = false
 var _dpad_right_pressed: bool = false
 var _dpad_up_pressed: bool = false
 var _dpad_down_pressed: bool = false
+var _pad_cursor_repeat_direction: Vector2i = Vector2i.ZERO
+var _pad_cursor_repeat_time: float = 0.0
 var _right_stick_weapon_active: bool = false
 var _rush_active: bool = false
 var _rush_shift_was_pressed: bool = false
@@ -111,7 +115,7 @@ func _input(event: InputEvent) -> void:
 			# In build mode the click belongs to the build system, not the weapon.
 			if _in_build_mode():
 				return
-			var weapon_id := _selected_item_id()
+			var weapon_id: String = _selected_item_id()
 			if fight_system and fight_system.is_held_weapon(weapon_id):
 				if fight_system.is_gun(weapon_id):
 					fight_system.reset_gun_cooldown(weapon_id)
@@ -141,27 +145,80 @@ func _set_control_mode(mode: String) -> void:
 		Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN)
 	else:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		_deactivate_pad_build_cursor()
 
 func get_control_mode() -> String:
 	return _control_mode
 
 func _update_pad_cursor(delta: float) -> void:
-	if _control_mode != INPUT_MODE_PAD or not _in_build_mode():
+	if _control_mode != INPUT_MODE_PAD or not _build_controls_active():
+		_reset_pad_cursor_repeat()
+		_deactivate_pad_build_cursor()
 		return
 	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
+	if _pad_build_preview_active():
+		var left_stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
+		if left_stick != Vector2.ZERO:
+			stick = left_stick
+		var dpad_direction: Vector2i = _dpad_cell_direction()
+		if dpad_direction != Vector2i.ZERO:
+			_update_pad_cursor_repeat(dpad_direction, delta)
+			return
 	if stick == Vector2.ZERO:
+		_reset_pad_cursor_repeat()
 		return
-	# Work entirely in window-pixel space. The viewport uses canvas_items "expand"
-	# stretch, so get_viewport().get_mouse_position() (stretched/base coords) and
-	# Input.warp_mouse() (window pixels) live in different spaces; mixing them makes
-	# the cursor contract into the top-left corner. DisplayServer-relative coords
-	# match warp_mouse, giving a stable read/write loop.
-	var window_size: Vector2 = Vector2(DisplayServer.window_get_size())
-	var max_position: Vector2 = (window_size - Vector2.ONE).max(Vector2.ZERO)
-	var mouse_window: Vector2 = Vector2(DisplayServer.mouse_get_position()) - Vector2(get_window().position)
-	var cursor_position: Vector2 = mouse_window + stick * gamepad_cursor_speed * delta
-	cursor_position = cursor_position.clamp(Vector2.ZERO, max_position)
-	Input.warp_mouse(cursor_position)
+	var step_direction: Vector2i = _stick_to_cell_direction(stick)
+	if step_direction == Vector2i.ZERO:
+		_reset_pad_cursor_repeat()
+		return
+	_update_pad_cursor_repeat(step_direction, delta)
+
+func _update_pad_cursor_repeat(step_direction: Vector2i, delta: float) -> void:
+	if step_direction != _pad_cursor_repeat_direction:
+		_move_pad_build_cursor(step_direction)
+		_pad_cursor_repeat_direction = step_direction
+		_pad_cursor_repeat_time = maxf(gamepad_cursor_initial_repeat_delay, 0.0)
+		return
+	_pad_cursor_repeat_time -= delta
+	while _pad_cursor_repeat_time <= 0.0:
+		_move_pad_build_cursor(step_direction)
+		_pad_cursor_repeat_time += maxf(gamepad_cursor_repeat_interval, 0.001)
+
+func _stick_to_cell_direction(stick: Vector2) -> Vector2i:
+	if absf(stick.x) >= absf(stick.y):
+		return Vector2i(1 if stick.x > 0.0 else -1, 0)
+	return Vector2i(0, 1 if stick.y > 0.0 else -1)
+
+func _dpad_cell_direction() -> Vector2i:
+	if _active_gamepad_device < 0:
+		return Vector2i.ZERO
+	var x: int = 0
+	var y: int = 0
+	if Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_LEFT):
+		x -= 1
+	if Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_RIGHT):
+		x += 1
+	if Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_UP):
+		y -= 1
+	if Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_DOWN):
+		y += 1
+	if x != 0:
+		return Vector2i(x, 0)
+	if y != 0:
+		return Vector2i(0, y)
+	return Vector2i.ZERO
+
+func _move_pad_build_cursor(direction: Vector2i) -> void:
+	if build_system != null and build_system.has_method("pad_move_cursor"):
+		build_system.call("pad_move_cursor", direction)
+
+func _reset_pad_cursor_repeat() -> void:
+	_pad_cursor_repeat_direction = Vector2i.ZERO
+	_pad_cursor_repeat_time = 0.0
+
+func _deactivate_pad_build_cursor() -> void:
+	if build_system != null and build_system.has_method("pad_set_cursor_active"):
+		build_system.call("pad_set_cursor_active", false)
 
 func _update_pad_navigation_input() -> void:
 	if _active_gamepad_device < 0:
@@ -175,6 +232,12 @@ func _update_pad_navigation_input() -> void:
 	var right_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_RIGHT)
 	var up_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_UP)
 	var down_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_DOWN)
+	if _pad_build_preview_active():
+		_dpad_left_pressed = left_pressed
+		_dpad_right_pressed = right_pressed
+		_dpad_up_pressed = up_pressed
+		_dpad_down_pressed = down_pressed
+		return
 	if left_pressed and not _dpad_left_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
 		game_ui.call("step_selected_quick_slot", -1)
 	if right_pressed and not _dpad_right_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
@@ -203,8 +266,15 @@ func _handle_pad_accept() -> void:
 func _handle_pad_cancel() -> void:
 	if _paused or _is_inventory_open():
 		return
-	if _in_build_mode() and build_system != null and build_system.has_method("pad_unbuild_at_cursor"):
+	if not _build_controls_active() or build_system == null:
+		return
+	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
+		return
+	if build_system.has_method("pad_unbuild_at_cursor"):
 		build_system.call("pad_unbuild_at_cursor")
+
+func _pad_build_preview_active() -> bool:
+	return build_system != null and build_system.has_method("pad_is_build_preview_active") and bool(build_system.call("pad_is_build_preview_active"))
 
 func _gamepad_stick_vector(x_axis: JoyAxis, y_axis: JoyAxis) -> Vector2:
 	if _active_gamepad_device < 0:
@@ -330,7 +400,7 @@ func _startup_loading_active() -> bool:
 	return false
 
 func _get_player_node() -> Node2D:
-	var parent := get_parent()
+	var parent: Node = get_parent()
 	if parent is Node2D:
 		return parent
 	# Fallback for legacy placement (not nested under Player).
@@ -411,7 +481,8 @@ func _update_player_input(delta: float) -> void:
 			dir.x -= 1.0
 		if _is_any_key_pressed([KEY_D, KEY_RIGHT]):
 			dir.x += 1.0
-		dir += _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
+		if not (_control_mode == INPUT_MODE_PAD and _pad_build_preview_active()):
+			dir += _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
 
 	if dir.length_squared() > 1.0:
 		dir = dir.normalized()
@@ -538,6 +609,16 @@ func _selected_item_id() -> String:
 func _in_build_mode() -> bool:
 	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
+func _build_tool_selected() -> bool:
+	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
+
+func _build_controls_active() -> bool:
+	if not _build_tool_selected():
+		return false
+	if shop != null and shop.has_method("is_merchant_shop_open") and bool(shop.call("is_merchant_shop_open")):
+		return false
+	return true
+
 func _selected_item_disabled_for_placement(item_id: String) -> bool:
 	return game_ui and game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id))
 
@@ -549,11 +630,11 @@ func _try_use_equipped_item() -> void:
 		return
 	if weapon_id == "":
 		return
-	var player := _get_player_node()
+	var player: Node2D = _get_player_node()
 	if not player or not fight_system:
 		return
-	var origin := _weapon_origin(player)
-	var direction := get_global_mouse_position() - origin
+	var origin: Vector2 = _weapon_origin(player)
+	var direction: Vector2 = get_global_mouse_position() - origin
 	if bool(fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))):
 		get_viewport().set_input_as_handled()
 

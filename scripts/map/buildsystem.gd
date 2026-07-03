@@ -3,8 +3,9 @@ extends Node
 const REMOVE_HOLD_SECONDS: float = 0.2
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
-const PREVIEW_NORMAL_COLOR: Color = Color(1.0, 1.0, 1.0, 1.0)
+const PREVIEW_NORMAL_COLOR: Color = Color(0.30, 0.62, 1.0, 0.70)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
+const PREVIEW_Z_INDEX: int = 4095
 const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
 # Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
 const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
@@ -49,12 +50,15 @@ var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _remove_drag_active: bool = false
 var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
+var _pad_cursor_active: bool = false
+var _pad_cursor_offset: Vector2i = Vector2i.ZERO
 # Green outline panel that frames the active drag rectangle (built lazily).
 var _drag_selection_rect: Panel = null
 
 func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
+	_configure_preview_layer()
 	set_process(true)
 	set_process_input(true)
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -69,6 +73,12 @@ func _resolve_level_layers() -> void:
 		watersources = get_node_or_null("../MonTilemap/watersources") as TileMapLayer
 	if wallz == null:
 		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
+
+func _configure_preview_layer() -> void:
+	if previewbuild == null:
+		return
+	previewbuild.z_index = PREVIEW_Z_INDEX
+	previewbuild.modulate = PREVIEW_NORMAL_COLOR
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if not is_night:
@@ -263,6 +273,81 @@ func _finish_removal() -> void:
 	_remove_elapsed = 0.0
 	if _remove_queue.is_empty():
 		_cancel_removal()
+
+
+func pad_place_selected_at_cursor() -> void:
+	if _placement_disabled() or _is_inventory_open():
+		return
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if placeable_def.is_empty():
+		return
+	_cancel_removal()
+	if _drag_build_active:
+		_finish_drag_build()
+		return
+	if _is_drag_buildable(placeable_def) and not _pad_skips_preview(placeable_def):
+		_start_drag_build(placeable_def)
+	else:
+		_apply_placeable(placeable_def)
+
+
+func pad_cancel_build_preview() -> bool:
+	if not _drag_build_active:
+		return false
+	_cancel_drag_build()
+	return true
+
+
+func _pad_skips_preview(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("pad_skip_preview", false))
+
+
+func pad_is_build_preview_active() -> bool:
+	return _drag_build_active
+
+
+func pad_is_cursor_active() -> bool:
+	return _pad_cursor_active
+
+
+func pad_get_cursor_cell() -> Vector2i:
+	return _hovered_cell()
+
+
+func pad_set_cursor_active(active: bool) -> void:
+	_pad_cursor_active = active
+	if not active:
+		return
+	_pad_cursor_offset = _mouse_hovered_cell() - _player_cell()
+
+
+func pad_move_cursor(direction: Vector2i) -> void:
+	if direction == Vector2i.ZERO:
+		return
+	if not _pad_cursor_active:
+		_pad_cursor_offset = _mouse_hovered_cell() - _player_cell()
+		_pad_cursor_active = true
+	_pad_cursor_offset += direction
+
+
+func pad_unbuild_at_cursor() -> void:
+	if _placement_disabled() or _is_inventory_open():
+		return
+	_cancel_drag_build()
+	_cancel_removal()
+	var cell: Vector2i = _hovered_cell()
+	var removal: Dictionary = _removable_at_cell(cell)
+	if removal.is_empty():
+		return
+	var removed_item_id: String = str(removal.get("item_id", ""))
+	var removed_layer: TileMapLayer = removal.get("layer") as TileMapLayer
+	if removed_layer == null:
+		return
+	var refund_world_position: Vector2 = previewbuild.to_global(previewbuild.map_to_local(cell))
+	_remove_tile(removed_layer, cell)
+	if game_ui and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
+	_clear_hover()
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
@@ -481,7 +566,7 @@ func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void
 	)
 	for cell: Vector2i in valid_cells:
 		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, 0)
-	previewbuild.modulate.a = 0.5
+	previewbuild.modulate = PREVIEW_NORMAL_COLOR
 	_preview_cells = valid_cells
 	_hover_active = not _preview_cells.is_empty()
 	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
@@ -823,8 +908,19 @@ func _clear_hover() -> void:
 	_hover_atlas_coords = Vector2i(-1, -1)
 
 func _hovered_cell() -> Vector2i:
+	if _pad_cursor_active:
+		return _player_cell() + _pad_cursor_offset
+	return _mouse_hovered_cell()
+
+func _mouse_hovered_cell() -> Vector2i:
 	var world: Vector2 = previewbuild.get_global_mouse_position()
 	return previewbuild.local_to_map(previewbuild.to_local(world))
+
+func _player_cell() -> Vector2i:
+	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
+	if player == null:
+		return _mouse_hovered_cell()
+	return previewbuild.local_to_map(previewbuild.to_local(player.global_position))
 
 func _ensure_drag_selection_rect() -> void:
 	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):

@@ -32,6 +32,7 @@ var _special_reward_claim_day: int = -1
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
 const SKIP_STARTUP_AUTOSAVE_META: StringName = &"skip_startup_autosave"
+const FORCE_LEVEL_SELECTION_META: StringName = &"force_level_selection"
 
 
 ## Switch to night: monsters are allowed to spawn.
@@ -144,6 +145,17 @@ func skip_startup_autosave_once() -> void:
 	# Every fresh start (reset, level select, game-over restart) routes through here,
 	# so this is the single place that clears carried-over night-reward claims.
 	reset_special_reward_claims()
+
+
+func force_level_selection_once() -> void:
+	set_meta(FORCE_LEVEL_SELECTION_META, true)
+
+
+func consume_force_level_selection() -> bool:
+	if not has_meta(FORCE_LEVEL_SELECTION_META):
+		return false
+	remove_meta(FORCE_LEVEL_SELECTION_META)
+	return true
 
 
 ## True when the current night's special reward can still be collected: a one-time

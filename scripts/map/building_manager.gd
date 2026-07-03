@@ -687,15 +687,9 @@ func _run_night_preparation(token: int) -> void:
 		return
 
 	_rebuild_spawner_garden_route_cache()
-	var slice_started_us: int = Time.get_ticks_usec()
-	for raw_spawner_cell: Variant in _spawners.keys():
-		if not _night_preparation_is_current(token):
-			return
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		_initialize_spawner_route(spawner_cell)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-			await get_tree().process_frame
-			slice_started_us = Time.get_ticks_usec()
+	prep_result = await _initialize_spawner_routes_for_kinds([SPAWNER_KIND_MONSTER], token)
+	if not bool(prep_result):
+		return
 
 	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_MONSTER, token)
 	if not bool(prep_result):
@@ -727,7 +721,7 @@ func _run_night_preparation(token: int) -> void:
 		await get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return
-	if not _night_flow_fields_are_ready():
+	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_MONSTER], true):
 		push_error("BuildingManager: night flow-field preparation completed with an unusable route")
 		return
 
@@ -762,27 +756,14 @@ func _run_client_preparation(token: int) -> void:
 		return
 
 	_rebuild_spawner_garden_route_cache()
-	var slice_started_us: int = Time.get_ticks_usec()
-	for raw_spawner_cell: Variant in _spawners.keys():
-		if not _night_preparation_is_current(token):
-			return
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		_initialize_spawner_route(spawner_cell)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-			await get_tree().process_frame
-			slice_started_us = Time.get_ticks_usec()
+	prep_result = await _initialize_spawner_routes_for_kinds([SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT], token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
 
 	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_CLIENT, token)
 	if not bool(prep_result):
 		_abort_client_preparation(token)
-		return
-
-	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-	await get_tree().process_frame
-	if not _night_preparation_is_current(token):
 		return
 
 	var scene: Node = get_tree().current_scene
@@ -803,7 +784,7 @@ func _run_client_preparation(token: int) -> void:
 		await get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return
-	if not _night_flow_fields_are_ready():
+	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT], false):
 		push_error("BuildingManager: client flow-field preparation completed with an unusable route")
 		_abort_client_preparation(token)
 		return
@@ -823,11 +804,31 @@ func _abort_client_preparation(token: int) -> void:
 	_client_sale_spawn_timers.clear()
 	GameState.set_building_phase(true)
 
-func _night_flow_fields_are_ready() -> bool:
+func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringName]) -> bool:
+	var spawner_kind: StringName = _spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
+	return agent_kinds.has(spawner_kind)
+
+func _initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: int) -> bool:
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		if not _night_preparation_is_current(token):
+			return false
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
+			continue
+		_initialize_spawner_route(spawner_cell)
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+	return true
+
+func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check_exit_wall_escapes: bool) -> bool:
 	if not flow or not flow.has_method("group_route_cost_at_world") or not flow.has_method("is_group_flow_request_ready"):
 		return false
 	for raw_spawner_cell: Variant in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
+			continue
 		if not _spawner_routes.has(spawner_cell):
 			return false
 		var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
@@ -840,6 +841,8 @@ func _night_flow_fields_are_ready() -> bool:
 		var cost: float = float(flow.call("group_route_cost_at_world", group_id, goal_world))
 		if not is_finite(cost):
 			return false
+	if not check_exit_wall_escapes:
+		return true
 	for raw_escape: Variant in _exit_wall_escapes.values():
 		var escape: Dictionary = raw_escape as Dictionary
 		var exit_group_id: int = int(escape.get("escape_group", -1))

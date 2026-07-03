@@ -7,6 +7,7 @@ var fps_label: Label
 var flow_node: Node
 var game_ui: Node
 var building_manager: Node
+var build_system: Node
 var mouse_outline: Line2D
 var monster_path_line: Line2D
 var _line_parent: Node2D
@@ -27,6 +28,8 @@ func setup(
 	flow_node = flow_in
 	game_ui = game_ui_in
 	building_manager = building_manager_in
+	var scene: Node = get_tree().get_current_scene()
+	build_system = scene.get_node_or_null("Map/BuildSystem") if scene != null else null
 
 	mouse_outline = Line2D.new()
 	mouse_outline.default_color = Color(1, 1, 1, 1)
@@ -64,18 +67,11 @@ func process() -> void:
 	if not floorz:
 		return
 
-	var mouse_world: Vector2
-	if floorz is Node2D:
-		var floor_node: Node2D = floorz
-		mouse_world = floor_node.get_global_mouse_position()
-	else:
-		var cam: Camera2D = get_viewport().get_camera_2d()
-		if cam:
-			mouse_world = cam.get_global_mouse_position()
-		else:
-			mouse_world = Vector2.ZERO
-	var cell: Vector2i = floorz.local_to_map(floorz.to_local(mouse_world))
+	var mouse_world: Vector2 = _hover_world_position()
+	var cell: Vector2i = _hover_cell(mouse_world)
 	var center: Vector2 = floorz.to_global(floorz.map_to_local(cell))
+	if _pad_cursor_active():
+		mouse_world = center
 
 	var hovered_monster: Node2D = _hovered_monster(cell, mouse_world)
 	if fps_label and fps_label.has_method("set_hover_cell_text"):
@@ -116,6 +112,24 @@ func _selected_item_places_tile() -> bool:
 	if game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id)):
 		return false
 	return ItemCatalog.item_places_tile(item_id)
+
+func _hover_world_position() -> Vector2:
+	if floorz is Node2D:
+		var floor_node: Node2D = floorz
+		return floor_node.get_global_mouse_position()
+	var cam: Camera2D = get_viewport().get_camera_2d()
+	if cam:
+		return cam.get_global_mouse_position()
+	return Vector2.ZERO
+
+func _hover_cell(mouse_world: Vector2) -> Vector2i:
+	if _pad_cursor_active():
+		if build_system.has_method("pad_get_cursor_cell"):
+			return build_system.call("pad_get_cursor_cell") as Vector2i
+	return floorz.local_to_map(floorz.to_local(mouse_world))
+
+func _pad_cursor_active() -> bool:
+	return build_system != null and build_system.has_method("pad_is_cursor_active") and bool(build_system.call("pad_is_cursor_active"))
 
 func set_enabled(value: bool) -> void:
 	enabled = value

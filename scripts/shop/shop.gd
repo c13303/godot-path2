@@ -39,6 +39,7 @@ const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
 const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
@@ -48,6 +49,7 @@ var game_ui: Node
 var _selected_item_id: String = ""
 # The last building the player picked; restored when the shop reopens if it still exists.
 var _last_picked_item_id: String = ""
+var _selected_merchant_item_id: String = ""
 # Affordable count of the selected buildable on the previous refresh. Used to detect the
 # moment it runs dry through use (>0 -> 0) so we can auto-switch to the next buildable.
 # Deliberately clicking an already-empty slot leaves this at 0, so no auto-switch fires.
@@ -125,13 +127,14 @@ func _ready() -> void:
 ## Shop visibility is derived from the quick-bar selection: open only while the
 ## Build tool is the selected quick slot and it is daytime.
 func _process(_delta: float) -> void:
+	var merchant_should_show: bool = _is_seed_merchant_shop_active()
 	var build_should_show: bool = (
 		game_ui != null
 		and game_ui.has_method("is_build_tool_selected")
 		and bool(game_ui.call("is_build_tool_selected"))
 		and not GameState.is_night
+		and not merchant_should_show
 	)
-	var merchant_should_show: bool = _is_seed_merchant_shop_active()
 	visible = build_should_show or merchant_should_show
 	if build_should_show and _shop_column != null and not _shop_column.visible:
 		_open_shop()
@@ -527,15 +530,19 @@ func _set_shop_open(is_open: bool) -> void:
 func _open_merchant_shop() -> void:
 	if _merchant_column == null:
 		return
+	if _shop_column != null and _shop_column.visible:
+		_close_build_shop()
 	_merchant_column.visible = true
 	visible = true
 	_apply_merchant_layout()
 	_refresh_merchant_slots()
+	_ensure_merchant_pad_selection()
 
 
 func _close_merchant_shop() -> void:
 	if _merchant_column != null:
 		_merchant_column.visible = false
+	_selected_merchant_item_id = ""
 	visible = _shop_column != null and _shop_column.visible
 
 
@@ -591,6 +598,93 @@ func _on_merchant_item_pressed(item_id: String) -> void:
 		_animate_purchase_to_ui(item_id, start_position)
 		_refresh_merchant_slots()
 		_refresh_slots()
+
+
+func step_pad_selection(direction: int) -> void:
+	if direction == 0 or GameState.is_night:
+		return
+	if _merchant_column != null and _merchant_column.visible:
+		_step_merchant_pad_selection(direction)
+		return
+	if _shop_column != null and _shop_column.visible:
+		_step_build_pad_selection(direction)
+
+
+func activate_pad_selection() -> bool:
+	if GameState.is_night:
+		return false
+	if _merchant_column != null and _merchant_column.visible:
+		_ensure_merchant_pad_selection()
+		if _selected_merchant_item_id == SPECIAL_REWARD_PAD_ID:
+			_on_special_reward_pressed()
+			return true
+		if _selected_merchant_item_id != "":
+			_on_merchant_item_pressed(_selected_merchant_item_id)
+			return true
+	return false
+
+
+func is_merchant_shop_open() -> bool:
+	return _merchant_column != null and _merchant_column.visible
+
+
+func _step_build_pad_selection(direction: int) -> void:
+	var ids: Array[String] = _visible_build_item_ids()
+	if ids.is_empty():
+		_deselect_active()
+		return
+	var index: int = ids.find(_selected_item_id)
+	if index < 0:
+		index = 0 if direction >= 0 else ids.size() - 1
+	else:
+		index = (index + direction) % ids.size()
+		if index < 0:
+			index += ids.size()
+	_select_item(ids[index])
+
+
+func _visible_build_item_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for item_id: String in BUILD_ITEM_IDS:
+		if _should_show_item(item_id) and not _is_item_locked(item_id):
+			ids.append(item_id)
+	return ids
+
+
+func _step_merchant_pad_selection(direction: int) -> void:
+	var ids: Array[String] = _visible_merchant_pad_item_ids()
+	if ids.is_empty():
+		_selected_merchant_item_id = ""
+		return
+	var index: int = ids.find(_selected_merchant_item_id)
+	if index < 0:
+		index = 0 if direction >= 0 else ids.size() - 1
+	else:
+		index = (index + direction) % ids.size()
+		if index < 0:
+			index += ids.size()
+	_selected_merchant_item_id = ids[index]
+	_refresh_merchant_slots()
+
+
+func _ensure_merchant_pad_selection() -> void:
+	var ids: Array[String] = _visible_merchant_pad_item_ids()
+	if ids.is_empty():
+		_selected_merchant_item_id = ""
+		return
+	if not ids.has(_selected_merchant_item_id):
+		_selected_merchant_item_id = ids[0]
+	_refresh_merchant_slots()
+
+
+func _visible_merchant_pad_item_ids() -> Array[String]:
+	var ids: Array[String] = []
+	if _has_active_special_reward():
+		ids.append(SPECIAL_REWARD_PAD_ID)
+	for item_id: String in WEAPON_ITEM_IDS:
+		if _should_show_merchant_item(item_id):
+			ids.append(item_id)
+	return ids
 
 
 func _select_item(item_id: String) -> void:
@@ -848,6 +942,7 @@ func _is_seed_merchant_shop_active() -> bool:
 
 func _refresh_merchant_slots() -> void:
 	_refresh_special_reward_row()
+	_refresh_special_reward_selection_style()
 	for item_id: String in WEAPON_ITEM_IDS:
 		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
 		if cells.is_empty():
@@ -860,10 +955,11 @@ func _refresh_merchant_slots() -> void:
 		var button: Button = _merchant_slot_buttons[item_id] as Button
 		var affordable: int = _merchant_affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0
-		var state: Array[bool] = [false, false]
+		var selected: bool = _selected_merchant_item_id == item_id
+		var state: Array[bool] = [selected, false]
 		if _merchant_slot_state.get(item_id) != state:
 			_merchant_slot_state[item_id] = state
-			_apply_slot_style(button, false, false)
+			_apply_slot_style(button, selected, false)
 			(_merchant_slot_icons[item_id] as TextureRect).modulate = Color.WHITE
 		var color: Color = SELECTED_DISABLED_LABEL_COLOR if disabled else SELECTED_LABEL_COLOR
 		var name_label: Label = _merchant_row_names[item_id] as Label
@@ -880,6 +976,23 @@ func _refresh_merchant_slots() -> void:
 		currency.texture = currency_texture
 		currency.visible = currency_texture != null
 		x_label.visible = currency_texture != null
+
+
+func _has_active_special_reward() -> bool:
+	if game_ui == null or not game_ui.has_method("get_active_night_reward"):
+		return false
+	var info: Dictionary = game_ui.call("get_active_night_reward") as Dictionary
+	return not info.is_empty()
+
+
+func _refresh_special_reward_selection_style() -> void:
+	var selected: bool = _selected_merchant_item_id == SPECIAL_REWARD_PAD_ID
+	var index: int = 0
+	while index < _reward_cells.size():
+		var button: Button = _reward_cells[index] as Button
+		if button != null:
+			_apply_slot_style(button, selected, false)
+		index += MERCHANT_COLUMNS
 
 
 ## Rebuilds the free reward rows pinned to the top of the merchant grid from game_ui's current
@@ -970,10 +1083,21 @@ func _on_special_reward_pressed(source: Button = null) -> void:
 		return
 	if game_ui == null or not game_ui.has_method("claim_active_night_reward"):
 		return
-	var start_position: Vector2 = source.get_global_rect().get_center() if source != null else Vector2.ZERO
+	var reward_source: Button = source if source != null else _first_reward_button()
+	var start_position: Vector2 = reward_source.get_global_rect().get_center() if reward_source != null else Vector2.ZERO
 	if bool(game_ui.call("claim_active_night_reward", start_position)):
 		Sfx.play_sound(&"buy")
 		_refresh_special_reward_row()
+
+
+func _first_reward_button() -> Button:
+	var index: int = 0
+	while index < _reward_cells.size():
+		var button: Button = _reward_cells[index] as Button
+		if button != null:
+			return button
+		index += MERCHANT_COLUMNS
+	return null
 
 
 func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) -> void:
