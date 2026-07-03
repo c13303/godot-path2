@@ -30,7 +30,7 @@
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
 [ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
 [ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
-[ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/shop.gd" id="28_shop"]
+[ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
 [ext_resource type="Script" uid="uid://bmoneyicon13q" path="res://scripts/ui/money_icon.gd" id="31_money_icon"]
@@ -45,6 +45,7 @@
 [ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
 [ext_resource type="Script" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
 [ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
+[ext_resource type="Script" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -1258,7 +1259,7 @@ script = ExtResource("11_62xsw")
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
 
-[node name="Shop" type="Control" parent="GameUI"]
+[node name="Toolbuild" type="Control" parent="GameUI"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -1267,6 +1268,18 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("28_shop")
+
+[node name="BuildFrame" type="Control" parent="GameUI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("43_build_frame")
+border_width = 10.0
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")

@@ -16,7 +16,7 @@ const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
 # Quick-slot tool that drives build/unbuild mode rather than acting as a weapon.
-const BUILD_TOOL_ID: String = "build_tool"
+const TOOLBUILD_ID: String = "toolbuild"
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
 const ITEM_NAME_KEY_PREFIX: String = "item."
 
@@ -29,6 +29,7 @@ const ITEM_NAME_KEY_PREFIX: String = "item."
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
 @onready var day_toggle: TextureRect = $"top anchor/dayToggle"
+@onready var toolbuild: Control = get_node_or_null("Toolbuild") as Control
 
 const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.png")
 const MOONSUN_TILE_SIZE: int = 64
@@ -37,7 +38,7 @@ var _moon_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
 var selected_quick_index: int = 0
-# The building the shop has selected for placement (rose/wall/turret), or "" when
+# The building the toolbuild picker has selected for placement (rose/wall/turret), or "" when
 # nothing is selected. While non-empty the player is in build mode: the build
 # system places this item and the player's weapon is suppressed. Buildings are
 # paid for directly from currency on placement and never enter the inventory.
@@ -67,11 +68,11 @@ func _ready() -> void:
 	_refresh_all_slots()
 	_set_inventory_open(false)
 	call_deferred("_connect_startup_loading_signals")
-	# Day 1 starts in build mode (the shop is open). Later days re-select the build
-	# tool when the day's seed-harvest finishes (driven from the shop). A loaded save
+	# Day 1 starts in build mode (the toolbuild picker is open). Later days re-select the
+	# toolbuild when the day's seed-harvest finishes (driven from the picker). A loaded save
 	# overrides this afterwards via its restored selected_quick_index.
 	if not GameState.is_night:
-		call_deferred("select_build_tool")
+		call_deferred("select_toolbuild")
 
 func _setup_day_toggle() -> void:
 	_sun_icon = AtlasTexture.new()
@@ -105,11 +106,11 @@ func _input(event: InputEvent) -> void:
 		var mouse_event: InputEventMouseButton = event
 		if not inventory_modal.visible and mouse_event.pressed and not mouse_event.ctrl_pressed:
 			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				step_selected_quick_slot(-1)
-				get_viewport().set_input_as_handled()
+				if _step_open_toolbuild_selection(-1):
+					get_viewport().set_input_as_handled()
 			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				step_selected_quick_slot(1)
-				get_viewport().set_input_as_handled()
+				if _step_open_toolbuild_selection(1):
+					get_viewport().set_input_as_handled()
 		return
 
 	if not (event is InputEventKey):
@@ -131,10 +132,18 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	var slot_index := _quick_slot_index_from_event(key_event)
+	var slot_index: int = _quick_slot_index_from_event(key_event)
 	if slot_index >= 0:
 		select_quick_slot(slot_index)
 		get_viewport().set_input_as_handled()
+
+func _step_open_toolbuild_selection(direction: int) -> bool:
+	if direction == 0 or toolbuild == null or not toolbuild.visible:
+		return false
+	if not toolbuild.has_method("step_pad_selection"):
+		return false
+	toolbuild.call("step_pad_selection", direction)
+	return true
 
 func move_inventory_item(from_slot: int, to_slot: int) -> void:
 	if from_slot < 0 or from_slot >= inventory_slots.size():
@@ -284,7 +293,7 @@ func select_first_weapon() -> void:
 			select_quick_slot(i)
 			return
 
-# --- Build mode (shop-driven placement, paid directly from currency) ---------
+# --- Build mode (toolbuild-driven placement, paid directly from currency) ---------
 
 func get_selected_build_item_id() -> String:
 	return selected_build_item_id
@@ -298,26 +307,26 @@ func clear_build_selection() -> void:
 func is_build_mode_active() -> bool:
 	return selected_build_item_id != ""
 
-func is_build_tool_selected() -> bool:
-	return get_selected_quick_item_id() == BUILD_TOOL_ID
+func is_toolbuild_selected() -> bool:
+	return get_selected_quick_item_id() == TOOLBUILD_ID
 
 func is_unbuild_tool_selected() -> bool:
 	return get_selected_quick_item_id() == UNBUILD_TOOL_ID
 
-## Select the quick slot holding the build tool (opens the shop). No-op if the
-## build tool is not in the quick bar.
-func select_build_tool() -> void:
+## Select the quick slot holding the toolbuild (opens the toolbuild picker). No-op if
+## the toolbuild is not in the quick bar.
+func select_toolbuild() -> void:
 	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == BUILD_TOOL_ID:
+		if _slot_item_id(inventory_slots[i]) == TOOLBUILD_ID:
 			select_quick_slot(i)
 			return
 
-## Global-space center X of the quick slot holding the build tool, or -1 if the
-## build tool is not currently in the quick bar. The Shop uses this to anchor its
-## column directly above the build/shop icon.
-func get_build_tool_slot_center_x() -> float:
+## Global-space center X of the quick slot holding the toolbuild, or -1 if the
+## toolbuild is not currently in the quick bar. The Toolbuild picker uses this to anchor
+## its column directly above the toolbuild icon.
+func get_toolbuild_slot_center_x() -> float:
 	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == BUILD_TOOL_ID:
+		if _slot_item_id(inventory_slots[i]) == TOOLBUILD_ID:
 			if i < _toolbar_slot_nodes.size():
 				var rect: Rect2 = _toolbar_slot_nodes[i].get_global_rect()
 				return rect.position.x + rect.size.x * 0.5
@@ -627,8 +636,8 @@ func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
 
 ## Describes the special reward the merchant should offer right now, or {} when the
 ## row must stay hidden (no survived-night reward, or already collected). Returned dict:
-## { "rewards": [{ "currency": String, "amount": int }, ...], "night_index": int,
-##   "day": int, "one_time": bool }. Drives the shop's top "special reward" merchant row.
+## { "rewards": [{ "currency": String, "amount": int, "key": String }, ...], "night_index": int,
+##   "day": int, "one_time": bool }. Drives the merchant's top "special reward" row.
 func get_active_night_reward() -> Dictionary:
 	var scene: Node = get_tree().current_scene
 	if scene == null or _progression_node == null:
@@ -653,30 +662,39 @@ func get_active_night_reward() -> Dictionary:
 	if night == null:
 		return {}
 	var rewards: Array[Dictionary] = []
+	var one_time: bool = bool(night.special_reward_one_time)
+	var reward_index: int = 0
 	for reward: NightReward in night.special_rewards:
+		var reward_key: String = str(reward_index)
+		reward_index += 1
 		if reward == null or reward.amount <= 0:
 			continue
-		rewards.append({"currency": String(reward.currency), "amount": int(reward.amount)})
+		if not GameState.is_special_reward_available(night_index, day, one_time, reward_key):
+			continue
+		rewards.append({"currency": String(reward.currency), "amount": int(reward.amount), "key": reward_key})
 	if rewards.is_empty():
-		return {}
-	var one_time: bool = bool(night.special_reward_one_time)
-	if not GameState.is_special_reward_available(night_index, day, one_time):
 		return {}
 	return {"rewards": rewards, "night_index": night_index, "day": day, "one_time": one_time}
 
 
-## Collect the current night's special reward: records the claim (so the row hides) and
-## grants every currency with a fly-to-HUD animation. Returns false when nothing is
-## claimable. `start_global_position` is where the reward sprites launch from.
-func claim_active_night_reward(start_global_position: Vector2) -> bool:
+## Collect one current-night special reward row: records the claim (so that row hides) and
+## grants its currency with a fly-to-HUD animation. Returns false when nothing is claimable.
+## `start_global_position` is where the reward sprites launch from.
+func claim_active_night_reward(start_global_position: Vector2, reward_key: String = "") -> bool:
 	var info: Dictionary = get_active_night_reward()
 	if info.is_empty():
 		return false
-	GameState.record_special_reward_claim(int(info["night_index"]), int(info["day"]), bool(info["one_time"]))
 	for raw_reward: Variant in info["rewards"] as Array:
 		var reward: Dictionary = raw_reward as Dictionary
+		var current_key: String = str(reward.get("key", ""))
+		if reward_key != "" and current_key != reward_key:
+			continue
+		GameState.record_special_reward_claim(
+			int(info["night_index"]), int(info["day"]), bool(info["one_time"]), current_key
+		)
 		_award_reward_currency(String(reward["currency"]), int(reward["amount"]), start_global_position)
-	return true
+		return true
+	return false
 
 
 func _award_reward_currency(currency: String, amount: int, start_global_position: Vector2) -> void:
@@ -726,7 +744,7 @@ func _reward_icon_node(currency: String) -> Node:
 
 
 ## Public: how many more of item_id may still be placed given its per-world build
-## limit, or -1 when the item has no limit. Used by the shop to show "remaining : x".
+## limit, or -1 when the item has no limit. Used by the toolbuild picker to show "remaining : x".
 func get_build_limit_remaining(item_id: String) -> int:
 	return _build_limit_remaining(item_id)
 
@@ -794,7 +812,7 @@ func _setup_starting_inventory() -> void:
 		inventory_slots[i] = _empty_slot()
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
-	add_inventory(BUILD_TOOL_ID, 1)
+	add_inventory(TOOLBUILD_ID, 1)
 
 
 func _get_level_starting_weapons() -> Array[StringName]:
@@ -1158,7 +1176,7 @@ func step_selected_quick_slot(direction: int) -> void:
 	# Walk in the scroll direction to the next selectable slot, skipping empty and
 	# disabled (non-weapon at night) ones and wrapping around. Keeps the current
 	# selection if no other slot can be selected.
-	var next_index := selected_quick_index
+	var next_index: int = selected_quick_index
 	for _step: int in range(QUICK_SLOT_COUNT):
 		next_index += direction
 		if next_index < 0:

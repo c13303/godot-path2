@@ -1,6 +1,14 @@
 @tool
 extends HBoxContainer
 
+const MOVE_WIDTH: float = 94.0
+const NUMBER_WIDTH: float = 28.0
+const TYPE_WIDTH: float = 112.0
+const COUNT_WIDTH: float = 84.0
+const TIME_WIDTH: float = 96.0
+const EVENT_WIDTH: float = 124.0
+const DELETE_WIDTH: float = 74.0
+
 var dock: Control
 var spawner_id: StringName = &""
 var wave_index: int = -1
@@ -22,12 +30,15 @@ func setup(p_dock: Control, p_spawner_id: StringName, p_wave_index: int, p_wave_
 	wave_count = p_wave_count
 	wave = p_wave
 	custom_minimum_size = Vector2(0.0, 30.0)
+	size_flags_horizontal = SIZE_EXPAND_FILL
+	add_theme_constant_override("separation", 6)
 	_build(monster_types, event_names)
 
 
 func _build(monster_types: Array[StringName], event_names: Array[StringName]) -> void:
 	var move_box: HBoxContainer = HBoxContainer.new()
-	move_box.custom_minimum_size = Vector2(76.0, 0.0)
+	move_box.custom_minimum_size = Vector2(MOVE_WIDTH, 0.0)
+	move_box.add_theme_constant_override("separation", 4)
 	add_child(move_box)
 
 	var up_button: Button = Button.new()
@@ -47,11 +58,12 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	var number: Label = Label.new()
 	number.text = "%d" % (wave_index + 1)
 	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	number.custom_minimum_size = Vector2(24.0, 0.0)
+	number.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	number.custom_minimum_size = Vector2(NUMBER_WIDTH, 0.0)
 	add_child(number)
 
 	_monster_type = OptionButton.new()
-	_monster_type.custom_minimum_size = Vector2(90.0, 0.0)
+	_monster_type.custom_minimum_size = Vector2(TYPE_WIDTH, 0.0)
 	var selected_index: int = 0
 	var index: int = 0
 	for monster_type: StringName in monster_types:
@@ -68,7 +80,7 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_count.max_value = 100000.0
 	_count.step = 1.0
 	_count.value = float(wave.monster_count)
-	_count.custom_minimum_size = Vector2(74.0, 0.0)
+	_count.custom_minimum_size = Vector2(COUNT_WIDTH, 0.0)
 	_count.tooltip_text = "Monster count. Zero can be used for event-only waves."
 	_count.value_changed.connect(_on_count_changed)
 	add_child(_count)
@@ -78,7 +90,7 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_interval.max_value = 3600.0
 	_interval.step = 0.1
 	_interval.value = wave.spawn_interval_seconds
-	_interval.custom_minimum_size = Vector2(86.0, 0.0)
+	_interval.custom_minimum_size = Vector2(TIME_WIDTH, 0.0)
 	_interval.tooltip_text = "Seconds between successful spawns."
 	_interval.value_changed.connect(_on_interval_changed)
 	add_child(_interval)
@@ -86,14 +98,16 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_wait_event = LineEdit.new()
 	_wait_event.text = String(wave.wait_for_event)
 	_wait_event.placeholder_text = _event_placeholder("wait event", event_names)
-	_wait_event.custom_minimum_size = Vector2(110.0, 0.0)
+	_wait_event.custom_minimum_size = Vector2(EVENT_WIDTH, 0.0)
+	_wait_event.size_flags_horizontal = SIZE_EXPAND_FILL
 	_wait_event.text_changed.connect(_on_wait_event_changed)
 	add_child(_wait_event)
 
 	_emit_event = LineEdit.new()
 	_emit_event.text = String(wave.emit_event)
 	_emit_event.placeholder_text = _event_placeholder("emit event", event_names)
-	_emit_event.custom_minimum_size = Vector2(110.0, 0.0)
+	_emit_event.custom_minimum_size = Vector2(EVENT_WIDTH, 0.0)
+	_emit_event.size_flags_horizontal = SIZE_EXPAND_FILL
 	_emit_event.text_changed.connect(_on_emit_event_changed)
 	add_child(_emit_event)
 
@@ -103,13 +117,14 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_emit_delay.step = 0.1
 	_emit_delay.value = wave.emit_delay_seconds
 	_emit_delay.suffix = "s"
-	_emit_delay.custom_minimum_size = Vector2(86.0, 0.0)
+	_emit_delay.custom_minimum_size = Vector2(TIME_WIDTH, 0.0)
 	_emit_delay.tooltip_text = "Seconds to wait after the wave finishes before emitting its Emit Event."
 	_emit_delay.value_changed.connect(_on_emit_delay_changed)
 	add_child(_emit_delay)
 
 	var delete_button: Button = Button.new()
 	delete_button.text = "Delete"
+	delete_button.custom_minimum_size = Vector2(DELETE_WIDTH, 0.0)
 	delete_button.pressed.connect(_on_delete_pressed)
 	add_child(delete_button)
 

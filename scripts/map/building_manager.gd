@@ -2226,10 +2226,10 @@ func _begin_morning_phase() -> void:
 	_morning_harvest_active = true
 	# Grown roses can only be harvested onto shop counters. If none are placed the
 	# player must build them first ("placez les comptoirs du magasin"): auto-equip the
-	# build tool so the shop opens with the counter pre-selected (see shop._open_shop),
-	# leaving the player ready to build straight away.
+	# toolbuild so the toolbuild picker opens with the counter pre-selected (see
+	# toolbuild._open_toolbuild), leaving the player ready to build straight away.
 	if _rose_shop_counter_cells().is_empty():
-		_auto_select_shop_tool()
+		_auto_select_toolbuild()
 
 
 func _process_morning_harvest_walkover() -> void:
@@ -2566,7 +2566,7 @@ func _process_seed_merchant_phase() -> void:
 
 # True whenever the player is within interaction range of the merchant, no matter what
 # the merchant is doing (walking in, parked at the spot, or walking back out). This
-# drives both the shop visibility (shop.gd) and the movement pause below.
+# drives both the toolbuild picker visibility (toolbuild.gd) and the movement pause below.
 func is_player_near_seed_merchant() -> bool:
 	if not _seed_merchant_active or not is_instance_valid(_seed_merchant_agent):
 		return false
@@ -2929,11 +2929,11 @@ func _counter_pile_offset(_counter_cell: Vector2i, index: int) -> Vector2:
 	return Vector2(0.0, COUNTER_PILE_BASE_Y - float(index) * step)
 
 
-func _auto_select_shop_tool() -> void:
+func _auto_select_toolbuild() -> void:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui != null and game_ui.has_method("select_build_tool"):
-		game_ui.call("select_build_tool")
+	if game_ui != null and game_ui.has_method("select_toolbuild"):
+		game_ui.call("select_toolbuild")
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:

@@ -20,14 +20,12 @@ var is_seed_merchant_phase: bool = false
 ## tutorial prompt once the player walks away from the (now hidden) merchant shop.
 var seed_merchant_purchase_made: bool = false
 
-## Night special-reward claim tracking. Keyed by playlist night index.
-## `_claimed_one_time_night_rewards` holds indices whose one-time-only reward has
-## been permanently collected (never offered again this run). `_special_reward_claim_day`
-## is the nDays value the current reward was collected on, so a repeatable reward stays
-## hidden for the rest of that day but returns after the playlist loops. Both persist in
-## the save file (see progression.gd) and reset on any fresh start.
+## Night special-reward claim tracking. Per-reward keys are "night_index:reward_key".
+## `_claimed_one_time_night_rewards` also accepts legacy integer night indices from older
+## saves, which still hide the whole old reward bundle for that night.
 var _claimed_one_time_night_rewards: Dictionary = {}
-var _special_reward_claim_day: int = -1
+var _special_reward_claim_days: Dictionary = {}
+var _special_reward_legacy_claim_day: int = -1
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
@@ -160,32 +158,48 @@ func consume_force_level_selection() -> bool:
 
 ## True when the current night's special reward can still be collected: a one-time
 ## reward not yet claimed this run, and not already collected earlier today.
-func is_special_reward_available(night_index: int, day_number: int, one_time: bool) -> bool:
+func is_special_reward_available(night_index: int, day_number: int, one_time: bool, reward_key: String = "") -> bool:
 	if one_time and _claimed_one_time_night_rewards.has(night_index):
 		return false
-	if _special_reward_claim_day == day_number:
+	if _special_reward_legacy_claim_day == day_number:
+		return false
+	if reward_key == "":
+		return true
+	var claim_key: String = _special_reward_claim_key(night_index, reward_key)
+	if one_time and _claimed_one_time_night_rewards.has(claim_key):
+		return false
+	if int(_special_reward_claim_days.get(claim_key, -1)) == day_number:
 		return false
 	return true
 
 
 ## Record that the current night's special reward was collected on `day_number`.
-func record_special_reward_claim(night_index: int, day_number: int, one_time: bool) -> void:
-	_special_reward_claim_day = day_number
+func record_special_reward_claim(night_index: int, day_number: int, one_time: bool, reward_key: String = "") -> void:
+	if reward_key == "":
+		_special_reward_legacy_claim_day = day_number
+		return
+	var claim_key: String = _special_reward_claim_key(night_index, reward_key)
+	_special_reward_claim_days[claim_key] = day_number
 	if one_time:
-		_claimed_one_time_night_rewards[night_index] = true
+		_claimed_one_time_night_rewards[claim_key] = true
 
 
 func reset_special_reward_claims() -> void:
 	_claimed_one_time_night_rewards.clear()
-	_special_reward_claim_day = -1
+	_special_reward_claim_days.clear()
+	_special_reward_legacy_claim_day = -1
 
 
 ## Serialize claim state for the save file.
 func get_special_reward_claim_save_data() -> Dictionary:
-	var claimed: Array[int] = []
+	var claimed: Array = []
 	for raw_index: Variant in _claimed_one_time_night_rewards.keys():
-		claimed.append(int(raw_index))
-	return {"claimed_one_time": claimed, "claim_day": _special_reward_claim_day}
+		claimed.append(raw_index)
+	return {
+		"claimed_one_time": claimed,
+		"claim_day": _special_reward_legacy_claim_day,
+		"claim_days": _special_reward_claim_days.duplicate(),
+	}
 
 
 ## Restore claim state from a save file (missing/invalid data resets to empty).
@@ -194,8 +208,16 @@ func apply_special_reward_claim_save_data(data: Dictionary) -> void:
 	var raw_claimed: Variant = data.get("claimed_one_time", [])
 	if raw_claimed is Array:
 		for raw_index: Variant in raw_claimed as Array:
-			_claimed_one_time_night_rewards[int(raw_index)] = true
-	_special_reward_claim_day = int(data.get("claim_day", -1))
+			_claimed_one_time_night_rewards[raw_index] = true
+	var raw_claim_days: Variant = data.get("claim_days", {})
+	if raw_claim_days is Dictionary:
+		for raw_key: Variant in (raw_claim_days as Dictionary).keys():
+			_special_reward_claim_days[str(raw_key)] = int((raw_claim_days as Dictionary)[raw_key])
+	_special_reward_legacy_claim_day = int(data.get("claim_day", -1))
+
+
+func _special_reward_claim_key(night_index: int, reward_key: String) -> String:
+	return "%d:%s" % [night_index, reward_key]
 
 
 func consume_skip_startup_autosave() -> bool:

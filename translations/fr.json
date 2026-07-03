@@ -21,7 +21,7 @@
 	"item.seed": "Graine",
 	"item.spray": "Spray",
 	"item.beam": "Jet",
-	"item.build_tool": "Construction (click droit pour déconstruire)",
+	"item.toolbuild": "Construction (click droit pour déconstruire)",
 	"item.unbuild_tool": "Démonter",
 	"item.wall": "Mur",
 	"item.rose": "Rose",

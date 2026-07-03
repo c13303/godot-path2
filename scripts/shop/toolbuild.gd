@@ -1,11 +1,11 @@
 extends Control
 
-## The shop is the building picker for build mode. It is open exactly while the
-## quick-bar Build tool is selected (see game_ui.is_build_tool_selected) and during
+## The toolbuild picker is the building picker for build mode. It is open exactly while
+## the quick-bar toolbuild is selected (see game_ui.is_toolbuild_selected) and during
 ## the day; selecting any other quick slot closes it. The seed merchant column still
-## takes over while the player is near the merchant without the build tool selected.
+## takes over while the player is near the merchant without the toolbuild selected.
 ## It renders as a vertical column
-## rising up out of the build/shop quick slot, like a dropdown that opens upward:
+## rising up out of the toolbuild quick slot, like a dropdown that opens upward:
 ## one icon per buildable, stacked with no per-row text. A single floating label sits
 ## just to the right of the currently selected icon only, showing that buildable's name
 ## plus either its price (with the matching currency icon) or, for limited buildables,
@@ -29,7 +29,7 @@ const MERCHANT_COLUMNS: int = 3
 # bar and its "Construction (…)" info label; rows stack upward from there.
 const BAR_BOTTOM_OFFSET: float = -134.0
 # Left inset from the panel edge to the first slot (panel border + margin_left), so the
-# column's slots can be centred on the build/shop icon.
+# column's slots can be centred on the toolbuild icon.
 const BAR_CONTENT_INSET: float = 10.0
 # Y offset (from the top) of the seed-merchant column's top, placing it just below the
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
@@ -40,6 +40,7 @@ const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
+const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
 const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
@@ -47,18 +48,21 @@ var progression_node: Node
 var game_ui: Node
 # The building currently picked for placement (drives build mode).
 var _selected_item_id: String = ""
-# The last building the player picked; restored when the shop reopens if it still exists.
+# The last building the player picked; restored when the toolbuild picker reopens if it still exists.
 var _last_picked_item_id: String = ""
 var _selected_merchant_item_id: String = ""
+# The level must open with the toolbuild showing rose. Consumed on the first toolbuild picker
+# open so the counter-preference / last-picked logic resumes on every later open.
+var _level_start_default_pending: bool = true
 # Affordable count of the selected buildable on the previous refresh. Used to detect the
 # moment it runs dry through use (>0 -> 0) so we can auto-switch to the next buildable.
 # Deliberately clicking an already-empty slot leaves this at 0, so no auto-switch fires.
 var _selected_affordable_prev: int = -1
 
-var _shop_column: VBoxContainer
+var _toolbuild_column: VBoxContainer
 var _merchant_column: VBoxContainer
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
-# vertical stack for the build shop, horizontal bar for the seed-merchant sale.
+# vertical stack for the toolbuild picker, horizontal bar for the seed-merchant sale.
 var _items_list: BoxContainer
 var _merchant_items_list: GridContainer
 var _seed_icon: AtlasTexture
@@ -120,31 +124,31 @@ func _ready() -> void:
 		GameState.building_phase_changed.connect(_on_building_phase_changed)
 	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
-	_set_shop_open(false)
+	_set_toolbuild_open(false)
 	set_process(true)
 
 
-## Shop visibility is derived from the quick-bar selection: open only while the
+## Toolbuild picker visibility is derived from the quick-bar selection: open only while the
 ## Build tool is the selected quick slot and it is daytime.
 func _process(_delta: float) -> void:
 	var merchant_should_show: bool = _is_seed_merchant_shop_active()
 	var build_should_show: bool = (
 		game_ui != null
-		and game_ui.has_method("is_build_tool_selected")
-		and bool(game_ui.call("is_build_tool_selected"))
+		and game_ui.has_method("is_toolbuild_selected")
+		and bool(game_ui.call("is_toolbuild_selected"))
 		and not GameState.is_night
 		and not merchant_should_show
 	)
 	visible = build_should_show or merchant_should_show
-	if build_should_show and _shop_column != null and not _shop_column.visible:
-		_open_shop()
-	elif not build_should_show and _shop_column != null and _shop_column.visible:
-		_close_build_shop()
+	if build_should_show and _toolbuild_column != null and not _toolbuild_column.visible:
+		_open_toolbuild()
+	elif not build_should_show and _toolbuild_column != null and _toolbuild_column.visible:
+		_close_toolbuild()
 	if merchant_should_show:
 		_open_merchant_shop()
 	elif _merchant_column != null and _merchant_column.visible:
 		_close_merchant_shop()
-	if _shop_column != null and _shop_column.visible:
+	if _toolbuild_column != null and _toolbuild_column.visible:
 		_apply_phase_layout()
 		_refresh_slots()
 		_update_build_column_anchor()
@@ -157,8 +161,8 @@ func _process(_delta: float) -> void:
 
 func _build_ui() -> void:
 	var column: VBoxContainer = VBoxContainer.new()
-	_shop_column = column
-	column.name = "ShopColumn"
+	_toolbuild_column = column
+	column.name = "ToolbuildColumn"
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 6)
 	column.alignment = BoxContainer.ALIGNMENT_END
@@ -482,10 +486,18 @@ func _build_slot(item_id: String) -> Button:
 
 # --- Open / close ------------------------------------------------------------
 
-func _open_shop() -> void:
+func _open_toolbuild() -> void:
 	_apply_phase_layout()
-	_set_shop_open(true)
+	_set_toolbuild_open(true)
 	_refresh_slots()
+	# At level start the Build tool must come up with rose equipped, ahead of every
+	# other resume rule. Consumed on this first open so later opens fall through to the
+	# usual counter-preference / last-picked logic.
+	if _level_start_default_pending:
+		_level_start_default_pending = false
+		if _should_show_item("rose") and not _is_item_locked("rose"):
+			_select_item("rose")
+			return
 	# No counters placed yet: the shop can't do anything until the player builds them
 	# (roses are harvested onto counters, clients buy from them). Pre-select the counter
 	# so the "place the shop counters" prompt is immediately actionable, ahead of the
@@ -511,27 +523,27 @@ func _open_shop() -> void:
 	_deselect_active()
 
 
-func _close_shop() -> void:
-	_close_build_shop()
+func _close_all() -> void:
+	_close_toolbuild()
 	_close_merchant_shop()
 
 
-func _close_build_shop() -> void:
-	_set_shop_open(false)
+func _close_toolbuild() -> void:
+	_set_toolbuild_open(false)
 	_deselect_active()
 
 
-func _set_shop_open(is_open: bool) -> void:
-	if _shop_column != null:
-		_shop_column.visible = is_open
+func _set_toolbuild_open(is_open: bool) -> void:
+	if _toolbuild_column != null:
+		_toolbuild_column.visible = is_open
 	visible = is_open or (_merchant_column != null and _merchant_column.visible)
 
 
 func _open_merchant_shop() -> void:
 	if _merchant_column == null:
 		return
-	if _shop_column != null and _shop_column.visible:
-		_close_build_shop()
+	if _toolbuild_column != null and _toolbuild_column.visible:
+		_close_toolbuild()
 	_merchant_column.visible = true
 	visible = true
 	_apply_merchant_layout()
@@ -543,20 +555,20 @@ func _close_merchant_shop() -> void:
 	if _merchant_column != null:
 		_merchant_column.visible = false
 	_selected_merchant_item_id = ""
-	visible = _shop_column != null and _shop_column.visible
+	visible = _toolbuild_column != null and _toolbuild_column.visible
 
 
 # --- Phase handling ----------------------------------------------------------
 
-## Night closes the shop. Day/building phase no longer changes the selected quick slot.
+## Night closes the toolbuild picker. Day/building phase no longer changes the selected quick slot.
 func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
-		_close_shop()
+		_close_all()
 
 
 func _on_building_phase_changed(is_building_phase: bool) -> void:
 	if not is_building_phase:
-		_close_build_shop()
+		_close_toolbuild()
 
 
 func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
@@ -568,7 +580,7 @@ func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
 # --- Selection ---------------------------------------------------------------
 
 func _on_item_pressed(item_id: String) -> void:
-	if _shop_column == null or not _shop_column.visible or GameState.is_night:
+	if _toolbuild_column == null or not _toolbuild_column.visible or GameState.is_night:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
@@ -606,7 +618,7 @@ func step_pad_selection(direction: int) -> void:
 	if _merchant_column != null and _merchant_column.visible:
 		_step_merchant_pad_selection(direction)
 		return
-	if _shop_column != null and _shop_column.visible:
+	if _toolbuild_column != null and _toolbuild_column.visible:
 		_step_build_pad_selection(direction)
 
 
@@ -615,8 +627,8 @@ func activate_pad_selection() -> bool:
 		return false
 	if _merchant_column != null and _merchant_column.visible:
 		_ensure_merchant_pad_selection()
-		if _selected_merchant_item_id == SPECIAL_REWARD_PAD_ID:
-			_on_special_reward_pressed()
+		if _is_special_reward_pad_id(_selected_merchant_item_id):
+			_on_special_reward_pressed(null, _special_reward_key_from_pad_id(_selected_merchant_item_id))
 			return true
 		if _selected_merchant_item_id != "":
 			_on_merchant_item_pressed(_selected_merchant_item_id)
@@ -679,8 +691,9 @@ func _ensure_merchant_pad_selection() -> void:
 
 func _visible_merchant_pad_item_ids() -> Array[String]:
 	var ids: Array[String] = []
-	if _has_active_special_reward():
-		ids.append(SPECIAL_REWARD_PAD_ID)
+	var reward_keys: Array[String] = _active_special_reward_keys()
+	for reward_key: String in reward_keys:
+		ids.append(_special_reward_pad_id(reward_key))
 	for item_id: String in WEAPON_ITEM_IDS:
 		if _should_show_merchant_item(item_id):
 			ids.append(item_id)
@@ -700,7 +713,7 @@ func _select_item(item_id: String) -> void:
 
 
 ## Clears the active build pick (build mode) but remembers it for the next time the
-## shop opens.
+## toolbuild picker opens.
 func _deselect_active() -> void:
 	_selected_item_id = ""
 	if game_ui != null and game_ui.has_method("clear_build_selection"):
@@ -985,12 +998,43 @@ func _has_active_special_reward() -> bool:
 	return not info.is_empty()
 
 
+func _active_special_reward_keys() -> Array[String]:
+	var keys: Array[String] = []
+	if game_ui == null or not game_ui.has_method("get_active_night_reward"):
+		return keys
+	var info: Dictionary = game_ui.call("get_active_night_reward") as Dictionary
+	if info.is_empty():
+		return keys
+	var rewards: Array = info.get("rewards", []) as Array
+	for raw_reward: Variant in rewards:
+		var reward: Dictionary = raw_reward as Dictionary
+		keys.append(str(reward.get("key", "")))
+	return keys
+
+
+## The pad-selection id for a single special reward: the shared prefix plus the reward's
+## key, so each granted reward row gets its own selectable pad id.
+func _special_reward_pad_id(reward_key: String) -> String:
+	return SPECIAL_REWARD_PAD_PREFIX + reward_key
+
+
+## True when a merchant pad id refers to a special-reward row (rather than a weapon/seed item).
+func _is_special_reward_pad_id(pad_id: String) -> bool:
+	return pad_id.begins_with(SPECIAL_REWARD_PAD_PREFIX)
+
+
+## The reward key encoded in a special-reward pad id (inverse of _special_reward_pad_id).
+func _special_reward_key_from_pad_id(pad_id: String) -> String:
+	return pad_id.substr(SPECIAL_REWARD_PAD_PREFIX.length())
+
+
 func _refresh_special_reward_selection_style() -> void:
-	var selected: bool = _selected_merchant_item_id == SPECIAL_REWARD_PAD_ID
 	var index: int = 0
 	while index < _reward_cells.size():
 		var button: Button = _reward_cells[index] as Button
 		if button != null:
+			var pad_id: String = str(button.get_meta(&"reward_pad_id", ""))
+			var selected: bool = _selected_merchant_item_id == pad_id
 			_apply_slot_style(button, selected, false)
 		index += MERCHANT_COLUMNS
 
@@ -1008,7 +1052,9 @@ func _refresh_special_reward_row() -> void:
 	var signature: String = ""
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
-		signature += "%s:%d|" % [str(reward.get("currency", "")), int(reward.get("amount", 0))]
+		signature += "%s:%s:%d|" % [
+			str(reward.get("key", "")), str(reward.get("currency", "")), int(reward.get("amount", 0))
+		]
 	if signature == _special_reward_signature:
 		return
 	_special_reward_signature = signature
@@ -1020,7 +1066,7 @@ func _refresh_special_reward_row() -> void:
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
 		var reward_cells: Array[Control] = _build_reward_row_cells(
-			str(reward.get("currency", "")), int(reward.get("amount", 0))
+			str(reward.get("currency", "")), int(reward.get("amount", 0)), str(reward.get("key", ""))
 		)
 		for cell: Control in reward_cells:
 			_merchant_items_list.add_child(cell)
@@ -1032,12 +1078,13 @@ func _refresh_special_reward_row() -> void:
 ## The three cells for one free-reward currency payout: the currency icon (a claim button)
 ## with the granted amount overlaid as a count badge, the reward name, and an empty price
 ## column.
-func _build_reward_row_cells(currency: String, amount: int) -> Array[Control]:
+func _build_reward_row_cells(currency: String, amount: int, reward_key: String) -> Array[Control]:
 	var button: Button = Button.new()
 	button.custom_minimum_size = SLOT_SIZE
 	button.tooltip_text = _special_reward_label()
 	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(_on_special_reward_pressed.bind(button))
+	button.set_meta(&"reward_pad_id", _special_reward_pad_id(reward_key))
+	button.pressed.connect(_on_special_reward_pressed.bind(button, reward_key))
 	_apply_slot_style(button, false, false)
 
 	var icon: TextureRect = TextureRect.new()
@@ -1078,14 +1125,14 @@ func _currency_icon_for(currency: String) -> AtlasTexture:
 	return null
 
 
-func _on_special_reward_pressed(source: Button = null) -> void:
+func _on_special_reward_pressed(source: Button = null, reward_key: String = "") -> void:
 	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
 		return
 	if game_ui == null or not game_ui.has_method("claim_active_night_reward"):
 		return
 	var reward_source: Button = source if source != null else _first_reward_button()
 	var start_position: Vector2 = reward_source.get_global_rect().get_center() if reward_source != null else Vector2.ZERO
-	if bool(game_ui.call("claim_active_night_reward", start_position)):
+	if bool(game_ui.call("claim_active_night_reward", start_position, reward_key)):
 		Sfx.play_sound(&"buy")
 		_refresh_special_reward_row()
 
@@ -1114,21 +1161,21 @@ func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) ->
 
 
 func _apply_phase_layout() -> void:
-	if _shop_column == null:
+	if _toolbuild_column == null:
 		return
-	# Build phase: vertical column pinned to the bottom, rising up out of the build/shop
+	# Build phase: vertical column pinned to the bottom, rising up out of the toolbuild
 	# quick slot; grows rightward so the name/price labels extend past the slots.
 	if _items_list != null:
 		_items_list.vertical = true
-	_shop_column.anchor_left = 0.0
-	_shop_column.anchor_right = 0.0
-	_shop_column.anchor_top = 1.0
-	_shop_column.anchor_bottom = 1.0
-	_shop_column.grow_horizontal = Control.GROW_DIRECTION_END
-	_shop_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_shop_column.offset_top = BAR_BOTTOM_OFFSET
-	_shop_column.offset_bottom = BAR_BOTTOM_OFFSET
-	_shop_column.alignment = BoxContainer.ALIGNMENT_END
+	_toolbuild_column.anchor_left = 0.0
+	_toolbuild_column.anchor_right = 0.0
+	_toolbuild_column.anchor_top = 1.0
+	_toolbuild_column.anchor_bottom = 1.0
+	_toolbuild_column.grow_horizontal = Control.GROW_DIRECTION_END
+	_toolbuild_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_toolbuild_column.offset_top = BAR_BOTTOM_OFFSET
+	_toolbuild_column.offset_bottom = BAR_BOTTOM_OFFSET
+	_toolbuild_column.alignment = BoxContainer.ALIGNMENT_END
 	_update_build_column_anchor()
 
 
@@ -1163,16 +1210,16 @@ func _update_merchant_column_anchor() -> void:
 	_merchant_column.offset_right = left
 
 
-## Aligns the build-phase column's slots horizontally over the build/shop quick slot.
+## Aligns the build-phase column's slots horizontally over the toolbuild quick slot.
 func _update_build_column_anchor() -> void:
-	if _shop_column == null or game_ui == null or not game_ui.has_method("get_build_tool_slot_center_x"):
+	if _toolbuild_column == null or game_ui == null or not game_ui.has_method("get_toolbuild_slot_center_x"):
 		return
-	var center_x: float = float(game_ui.call("get_build_tool_slot_center_x"))
+	var center_x: float = float(game_ui.call("get_toolbuild_slot_center_x"))
 	if center_x < 0.0:
 		return
 	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
-	_shop_column.offset_left = left
-	_shop_column.offset_right = left
+	_toolbuild_column.offset_left = left
+	_toolbuild_column.offset_right = left
 
 
 # --- Styling / textures ------------------------------------------------------

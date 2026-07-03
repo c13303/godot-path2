@@ -1,0 +1,30 @@
+[gd_scene format=3 uid="uid://w8o6xipx4swf"]
+
+[ext_resource type="Texture2D" uid="uid://dgykykm287tj" path="res://assets/sprites/legval/smoke_circle.png" id="1_t2fun"]
+
+[sub_resource type="Curve" id="Curve_scale"]
+_data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.7, 1), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[node name="BuildFX" type="Node2D" unique_id=2000243844]
+
+[node name="smokeParticle2D" type="CPUParticles2D" parent="." unique_id=404040503]
+z_index = 1
+modulate = Color(0.43, 0.27, 0.13, 0.72)
+emitting = false
+amount = 16
+texture = ExtResource("1_t2fun")
+one_shot = true
+lifetime = 0.42
+explosiveness = 0.95
+randomness = 0.55
+emission_shape = 1
+emission_sphere_radius = 7.0
+direction = Vector2(0, -1)
+spread = 80.0
+gravity = Vector2(0, -18)
+initial_velocity_min = 10.0
+initial_velocity_max = 34.0
+scale_amount_min = 0.45
+scale_amount_max = 1.15
+scale_amount_curve = SubResource("Curve_scale")

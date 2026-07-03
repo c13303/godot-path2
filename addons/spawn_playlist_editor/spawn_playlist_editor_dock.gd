@@ -16,6 +16,13 @@ const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const REWARD_CURRENCIES: Array[String] = ["seed", "money", "gem"]
+const WAVE_MOVE_WIDTH: float = 94.0
+const WAVE_NUMBER_WIDTH: float = 28.0
+const WAVE_TYPE_WIDTH: float = 112.0
+const WAVE_COUNT_WIDTH: float = 84.0
+const WAVE_TIME_WIDTH: float = 96.0
+const WAVE_EVENT_WIDTH: float = 124.0
+const WAVE_DELETE_WIDTH: float = 74.0
 
 var editor_plugin: EditorPlugin
 
@@ -138,10 +145,12 @@ func delete_wave(spawner_id: StringName, wave_index: int) -> void:
 func _build_ui() -> void:
 	_loading_ui = true
 	size_flags_vertical = SIZE_EXPAND_FILL
+	add_theme_constant_override("separation", 6)
 
 	# Persistent header shared by both tabs: pick a level, run level actions and
 	# see the save status regardless of which tab is open.
 	var level_row: HBoxContainer = HBoxContainer.new()
+	level_row.add_theme_constant_override("separation", 6)
 	add_child(level_row)
 
 	_level_option = OptionButton.new()
@@ -160,6 +169,7 @@ func _build_ui() -> void:
 	level_row.add_child(refresh_button)
 
 	var action_row: HBoxContainer = HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 6)
 	add_child(action_row)
 
 	_create_button = Button.new()
@@ -173,6 +183,8 @@ func _build_ui() -> void:
 	action_row.add_child(open_button)
 
 	_dirty_label = Label.new()
+	_dirty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_dirty_label.size_flags_horizontal = SIZE_EXPAND_FILL
 	action_row.add_child(_dirty_label)
 
 	_playlist_label = Label.new()
@@ -196,6 +208,7 @@ func _build_ui() -> void:
 	add_child(_validation_label)
 
 	_rename_row = HBoxContainer.new()
+	_rename_row.add_theme_constant_override("separation", 6)
 	add_child(_rename_row)
 
 	var rename_label: Label = Label.new()
@@ -262,9 +275,11 @@ func _build_nights_tab(tabs: TabContainer) -> void:
 	body.name = "Nights"
 	body.size_flags_vertical = SIZE_EXPAND_FILL
 	body.size_flags_horizontal = SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", 8)
 	tabs.add_child(body)
 
 	var night_row: HBoxContainer = HBoxContainer.new()
+	night_row.add_theme_constant_override("separation", 6)
 	body.add_child(night_row)
 
 	_night_option = OptionButton.new()
@@ -299,6 +314,7 @@ func _build_nights_tab(tabs: TabContainer) -> void:
 
 	_tracks_box = VBoxContainer.new()
 	_tracks_box.size_flags_horizontal = SIZE_EXPAND_FILL
+	_tracks_box.add_theme_constant_override("separation", 8)
 	scroll.add_child(_tracks_box)
 
 
@@ -482,31 +498,37 @@ func _build_shop_item_controls(
 
 
 func _build_reward_controls() -> void:
-	var one_time_row: HBoxContainer = HBoxContainer.new()
-	_reward_box.add_child(one_time_row)
+	_reward_box.add_theme_constant_override("separation", 8)
 	_reward_one_time_check = CheckBox.new()
 	_reward_one_time_check.text = "One-time only (skip when the night loops)"
 	_reward_one_time_check.toggled.connect(_on_reward_one_time_toggled)
-	one_time_row.add_child(_reward_one_time_check)
+	_reward_box.add_child(_reward_one_time_check)
+
+	var amount_grid: GridContainer = GridContainer.new()
+	amount_grid.columns = REWARD_CURRENCIES.size()
+	amount_grid.add_theme_constant_override("h_separation", 12)
+	amount_grid.add_theme_constant_override("v_separation", 4)
+	_reward_box.add_child(amount_grid)
 
 	# One fixed field per currency. Leave a currency at 0 to grant nothing of it.
 	_reward_amount_spins.clear()
 	for currency: String in REWARD_CURRENCIES:
-		var row: HBoxContainer = HBoxContainer.new()
-		_reward_box.add_child(row)
+		var field: VBoxContainer = VBoxContainer.new()
+		field.custom_minimum_size = Vector2(130.0, 0.0)
+		amount_grid.add_child(field)
 
 		var label: Label = Label.new()
 		label.text = currency.capitalize()
-		label.custom_minimum_size = Vector2(96.0, 0.0)
-		row.add_child(label)
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		field.add_child(label)
 
 		var amount_spin: SpinBox = SpinBox.new()
 		amount_spin.min_value = 0.0
 		amount_spin.max_value = 1000000.0
 		amount_spin.step = 1.0
-		amount_spin.custom_minimum_size = Vector2(120.0, 0.0)
+		amount_spin.custom_minimum_size = Vector2(130.0, 0.0)
 		amount_spin.value_changed.connect(_on_reward_amount_changed.bind(currency))
-		row.add_child(amount_spin)
+		field.add_child(amount_spin)
 		_reward_amount_spins[currency] = amount_spin
 
 
@@ -884,16 +906,27 @@ func _rebuild_tracks() -> void:
 func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]) -> Control:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_horizontal = SIZE_EXPAND_FILL
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
 	var outer: VBoxContainer = VBoxContainer.new()
-	panel.add_child(outer)
+	outer.size_flags_horizontal = SIZE_EXPAND_FILL
+	outer.add_theme_constant_override("separation", 6)
+	margin.add_child(outer)
 
 	var header: HBoxContainer = HBoxContainer.new()
+	header.add_theme_constant_override("separation", 6)
 	outer.add_child(header)
 
 	var title: Label = Label.new()
 	title.text = String(spawner_id)
 	title.add_theme_font_size_override("font_size", 15)
 	title.size_flags_horizontal = SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(title)
 
 	var focus_button: Button = Button.new()
@@ -905,6 +938,7 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	if track == null:
 		var inactive: Label = Label.new()
 		inactive.text = "Inactive this night"
+		inactive.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		header.add_child(inactive)
 		var enable_button: Button = Button.new()
 		enable_button.text = "Enable Track"
@@ -939,13 +973,17 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	header.add_child(disable_button)
 
 	var labels: HBoxContainer = HBoxContainer.new()
+	labels.add_theme_constant_override("separation", 6)
 	outer.add_child(labels)
-	for raw_label_text in ["", "#", "Type", "Count", "Interval", "Wait Event", "Emit Event", "Emit Delay", ""]:
-		var label_text: String = str(raw_label_text)
-		var label: Label = Label.new()
-		label.text = label_text
-		label.custom_minimum_size = _header_width(label_text)
-		labels.add_child(label)
+	_add_wave_header_label(labels, "", WAVE_MOVE_WIDTH, false)
+	_add_wave_header_label(labels, "#", WAVE_NUMBER_WIDTH, false)
+	_add_wave_header_label(labels, "Type", WAVE_TYPE_WIDTH, false)
+	_add_wave_header_label(labels, "Count", WAVE_COUNT_WIDTH, false)
+	_add_wave_header_label(labels, "Interval", WAVE_TIME_WIDTH, false)
+	_add_wave_header_label(labels, "Wait Event", WAVE_EVENT_WIDTH, true)
+	_add_wave_header_label(labels, "Emit Event", WAVE_EVENT_WIDTH, true)
+	_add_wave_header_label(labels, "Emit Delay", WAVE_TIME_WIDTH, false)
+	_add_wave_header_label(labels, "", WAVE_DELETE_WIDTH, false)
 
 	var wave_index: int = 0
 	for wave: SpawnWave in track.waves:
@@ -960,20 +998,16 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	return panel
 
 
-func _header_width(label_text: String) -> Vector2:
-	match label_text:
-		"#":
-			return Vector2(24.0, 0.0)
-		"Type":
-			return Vector2(90.0, 0.0)
-		"Count":
-			return Vector2(74.0, 0.0)
-		"Interval", "Emit Delay":
-			return Vector2(86.0, 0.0)
-		"Wait Event", "Emit Event":
-			return Vector2(110.0, 0.0)
-		_:
-			return Vector2(76.0, 0.0)
+func _add_wave_header_label(labels: HBoxContainer, text: String, width: float, expand: bool) -> void:
+	var label: Label = Label.new()
+	label.text = text
+	label.custom_minimum_size = Vector2(width, 0.0)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if text == "#":
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	if expand:
+		label.size_flags_horizontal = SIZE_EXPAND_FILL
+	labels.add_child(label)
 
 
 func _refresh_validation() -> void:

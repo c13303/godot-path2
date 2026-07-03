@@ -243,6 +243,12 @@ func _apply_saved_level_path(save_path: String) -> void:
 
 
 func _load_main_run() -> void:
+	# Defer so the scene swap doesn't run while the tree is still busy adding
+	# this menu's children (e.g. when called from _ready()).
+	_change_to_main_run.call_deferred()
+
+
+func _change_to_main_run() -> void:
 	var change_error: Error = get_tree().change_scene_to_file(MAIN_RUN_SCENE)
 	if change_error != OK:
 		push_error("Level menu: failed to load %s (error %d)" % [MAIN_RUN_SCENE, int(change_error)])

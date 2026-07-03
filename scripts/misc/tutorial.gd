@@ -204,7 +204,7 @@ func _current_message_key() -> String:
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
 	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
-		if _shop_tool_equipped():
+		if _toolbuild_equipped():
 			return KEY_PLANT_ROSES
 		return KEY_BUY_ROSES
 	# Some planted roses are still dry.
@@ -244,8 +244,8 @@ func _start_night_automatically() -> void:
 	GameState.start_night()
 
 
-## True while the player stands next to the seed merchant, i.e. while its shop bar is
-## shown. When false during the merchant phase the bar is hidden (see shop.gd).
+## True while the player stands next to the seed merchant, i.e. while its merchant bar is
+## shown. When false during the merchant phase the bar is hidden (see toolbuild.gd).
 func _player_near_seed_merchant() -> bool:
 	return (
 		_building_manager != null
@@ -254,12 +254,12 @@ func _player_near_seed_merchant() -> bool:
 	)
 
 
-## True while the quick-bar shop/build tool is the selected slot (the shop is open).
-func _shop_tool_equipped() -> bool:
+## True while the quick-bar toolbuild is the selected slot (the toolbuild picker is open).
+func _toolbuild_equipped() -> bool:
 	return (
 		_game_ui != null
-		and _game_ui.has_method("is_build_tool_selected")
-		and bool(_game_ui.call("is_build_tool_selected"))
+		and _game_ui.has_method("is_toolbuild_selected")
+		and bool(_game_ui.call("is_toolbuild_selected"))
 	)
 
 

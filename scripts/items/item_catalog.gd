@@ -55,10 +55,10 @@ const ITEM_DEFS: Dictionary = {
 		"category": "resources",
 		"price": 2,
 	},
-	# Selecting this quick-slot tool opens the shop (build mode). It is not a weapon
-	# or a placeable itself; the shop chooses which building to place.
-	"build_tool": {
-		"id": "build_tool",
+	# Selecting this quick-slot tool opens the toolbuild picker (build mode). It is not a
+	# weapon or a placeable itself; the toolbuild picker chooses which building to place.
+	"toolbuild": {
+		"id": "toolbuild",
 		"name": "Build",
 		"type": "tool",
 		"category": "tools",

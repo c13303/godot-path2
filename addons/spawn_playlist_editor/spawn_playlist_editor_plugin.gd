@@ -9,7 +9,7 @@ var _dock: Control
 func _enter_tree() -> void:
 	_dock = SpawnPlaylistEditorDock.new() as Control
 	_dock.name = "Rose Level Editor"
-	_dock.custom_minimum_size = Vector2(420.0, 320.0)
+	_dock.custom_minimum_size = Vector2(560.0, 420.0)
 	_dock.set("editor_plugin", self)
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
 

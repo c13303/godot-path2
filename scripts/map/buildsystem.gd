@@ -1,12 +1,17 @@
 extends Node
 
+signal build_preview_changed(is_active: bool)
+
 const REMOVE_HOLD_SECONDS: float = 0.2
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
 const PREVIEW_NORMAL_COLOR: Color = Color(0.30, 0.62, 1.0, 0.70)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const PREVIEW_Z_INDEX: int = 4095
+const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
+const BUILD_FX_Z_INDEX: int = -62
 const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
+const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 # Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
 const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
 const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
@@ -23,6 +28,7 @@ const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 @export var game_ui: CanvasLayer
 @export var notif: Node
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
+@export var build_fx_pool_size: int = 60
 
 var _atlas_source_id: int = -1
 # Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
@@ -52,6 +58,8 @@ var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
+var _build_fx_pool: Array[Node2D] = []
+var _build_fx_pool_cursor: int = 0
 # Green outline panel that frames the active drag rectangle (built lazily).
 var _drag_selection_rect: Panel = null
 
@@ -59,6 +67,7 @@ func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
 	_configure_preview_layer()
+	_preload_build_fx_pool()
 	set_process(true)
 	set_process_input(true)
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -130,8 +139,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var remove_event: InputEventMouseButton = event as InputEventMouseButton
 		if remove_event.button_index == MOUSE_BUTTON_RIGHT:
-			var removal_input_active: bool = _build_tool_selected() or _remove_drag_active or _remove_active
-			if remove_event.pressed and _build_tool_selected():
+			var removal_input_active: bool = _toolbuild_selected() or _remove_drag_active or _remove_active
+			if remove_event.pressed and _toolbuild_selected():
 				_start_remove_drag()
 			elif not remove_event.pressed and _remove_drag_active:
 				_finish_remove_drag()
@@ -167,13 +176,13 @@ func _input(event: InputEvent) -> void:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
-func _build_tool_selected() -> bool:
-	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
+func _toolbuild_selected() -> bool:
+	return game_ui and game_ui.has_method("is_toolbuild_selected") and bool(game_ui.call("is_toolbuild_selected"))
 
 func _start_remove_drag() -> void:
 	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
-	if _placement_disabled() or not _build_tool_selected():
+	if _placement_disabled() or not _toolbuild_selected():
 		return
 	# A new drag stacks onto any in-progress removal instead of cancelling it, so
 	# only clear leftover preview bars here (committed queue bars are preserved).
@@ -227,7 +236,7 @@ func _finish_remove_drag() -> void:
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
+	if GameState.is_night or _is_inventory_open() or not _toolbuild_selected():
 		_cancel_removal()
 		return
 	if _remove_queue.is_empty():
@@ -321,6 +330,14 @@ func pad_set_cursor_active(active: bool) -> void:
 	_pad_cursor_offset = _mouse_hovered_cell() - _player_cell()
 
 
+## Snaps the pad build cursor to exactly one tile to the right of the player and activates
+## it. Called when the toolbuild is (re-)equipped in pad mode so the cursor starts next to
+## the player instead of wherever the hidden mouse last sat.
+func pad_place_cursor_right_of_player() -> void:
+	_pad_cursor_offset = Vector2i(1, 0)
+	_pad_cursor_active = true
+
+
 func pad_move_cursor(direction: Vector2i) -> void:
 	if direction == Vector2i.ZERO:
 		return
@@ -374,10 +391,16 @@ func _removable_at_cell(cell: Vector2i) -> Dictionary:
 	for layer: TileMapLayer in layers:
 		if not layer or layer.get_cell_source_id(cell) < 0:
 			continue
-		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
-		if item_id != "":
+		var atlas_coords: Vector2i = layer.get_cell_atlas_coords(cell)
+		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), atlas_coords)
+		if item_id != "" and _can_unbuild_tile(layer, item_id, atlas_coords):
 			return {"item_id": item_id, "layer": layer, "cell": cell}
 	return {}
+
+func _can_unbuild_tile(layer: TileMapLayer, item_id: String, atlas_coords: Vector2i) -> bool:
+	if layer == wallz:
+		return item_id == "wall" and atlas_coords == PLAYER_BUILDABLE_WALL_ATLAS
+	return true
 
 func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:
 	var removals: Array[Dictionary] = []
@@ -542,7 +565,7 @@ func _start_drag_build(placeable_def: Dictionary) -> void:
 	var item_id: String = str(placeable_def.get("id", ""))
 	if _affordable_quantity(item_id) <= 0:
 		return
-	_drag_build_active = true
+	_set_drag_build_active(true)
 	_drag_build_item_id = item_id
 	_drag_build_start_cell = _hovered_cell()
 	_drag_build_end_cell = _drag_build_start_cell
@@ -647,7 +670,7 @@ func _finish_drag_build() -> void:
 		cells = _drag_build_rectangle_cells(_drag_build_start_cell, _drag_build_end_cell, target_layer, placeable_def, available)
 	_clear_hover()
 	_hide_drag_selection_rect()
-	_drag_build_active = false
+	_set_drag_build_active(false)
 	_drag_build_item_id = ""
 	if cells.is_empty():
 		return
@@ -661,6 +684,7 @@ func _finish_drag_build() -> void:
 		if _target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
 		_after_placeable_placed(cell, placeable_def, false)
+		_play_build_fx_at_cell(cell, target_layer)
 	target_layer.update_internals()
 	if target_layer == plantz:
 		_flush_plant_layer_visuals()
@@ -669,10 +693,16 @@ func _finish_drag_build() -> void:
 		Sfx.play_sound(sound)
 
 func _cancel_drag_build() -> void:
-	_drag_build_active = false
+	_set_drag_build_active(false)
 	_drag_build_item_id = ""
 	_hide_drag_selection_rect()
 	_clear_hover()
+
+func _set_drag_build_active(active: bool) -> void:
+	if _drag_build_active == active:
+		return
+	_drag_build_active = active
+	build_preview_changed.emit(_drag_build_active)
 
 # How many of item_id the player can currently afford. Replaces the old inventory
 # count: buildings are paid for directly from currency, so affordability is the cap.
@@ -716,6 +746,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _target_layer_affects_collision(target_layer):
 		_refresh_cell_collision(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
+	_play_build_fx_at_cell(_hover_cell, target_layer)
 	if game_ui and game_ui.has_method("try_purchase_build"):
 		game_ui.call("try_purchase_build", item_id, 1)
 
@@ -863,6 +894,61 @@ func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_pla
 		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
+
+func _preload_build_fx_pool() -> void:
+	var count: int = maxi(build_fx_pool_size, 0)
+	for index: int in range(count):
+		var build_fx: Node2D = BUILD_FX_SCENE.instantiate() as Node2D
+		if build_fx == null:
+			continue
+		build_fx.name = "BuildFX%02d" % index
+		build_fx.visible = false
+		build_fx.z_as_relative = false
+		build_fx.z_index = BUILD_FX_Z_INDEX
+		add_child(build_fx)
+		_build_fx_pool.append(build_fx)
+
+func _play_build_fx_at_cell(cell: Vector2i, target_layer: TileMapLayer) -> void:
+	if _build_fx_pool.is_empty() or target_layer == null:
+		return
+	var build_fx: Node2D = _next_available_build_fx()
+	build_fx.global_position = target_layer.to_global(target_layer.map_to_local(cell))
+	build_fx.visible = true
+	for particle: CPUParticles2D in _particles_for_build_fx(build_fx):
+		particle.emitting = false
+		particle.restart()
+		particle.emitting = true
+
+func _next_available_build_fx() -> Node2D:
+	var pool_count: int = _build_fx_pool.size()
+	for offset: int in range(pool_count):
+		var index: int = (_build_fx_pool_cursor + offset) % pool_count
+		var build_fx: Node2D = _build_fx_pool[index]
+		if not _is_build_fx_busy(build_fx):
+			_build_fx_pool_cursor = (index + 1) % pool_count
+			return build_fx
+
+	var fallback_index: int = _build_fx_pool_cursor
+	_build_fx_pool_cursor = (_build_fx_pool_cursor + 1) % pool_count
+	return _build_fx_pool[fallback_index]
+
+func _is_build_fx_busy(build_fx: Node2D) -> bool:
+	for particle: CPUParticles2D in _particles_for_build_fx(build_fx):
+		if particle.emitting:
+			return true
+	build_fx.visible = false
+	return false
+
+func _particles_for_build_fx(root: Node) -> Array[CPUParticles2D]:
+	var particles: Array[CPUParticles2D] = []
+	_collect_build_fx_particles(root, particles)
+	return particles
+
+func _collect_build_fx_particles(root: Node, particles: Array[CPUParticles2D]) -> void:
+	for child: Node in root.get_children():
+		if child is CPUParticles2D:
+			particles.append(child as CPUParticles2D)
+		_collect_build_fx_particles(child, particles)
 
 func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
 	var placeable_category: String = str(placeable_def.get("category", ""))

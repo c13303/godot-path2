@@ -12,7 +12,7 @@ const INPUT_MODE_KMOUSE: String = "kmouse"
 @onready var projectile_system: Node = $"../../CPP/ProjectileSystemNative"
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
-@onready var shop: Control = $"../../GameUI/Shop"
+@onready var toolbuild: Control = $"../../GameUI/Toolbuild"
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
@@ -40,6 +40,7 @@ const INPUT_MODE_KMOUSE: String = "kmouse"
 
 var global_config_node: Node = null
 var _paused: bool = false
+var _pause_hold_count: int = 0
 var _mouse_was_locked_before_pause: bool = false
 var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
@@ -51,6 +52,9 @@ var _dpad_up_pressed: bool = false
 var _dpad_down_pressed: bool = false
 var _pad_cursor_repeat_direction: Vector2i = Vector2i.ZERO
 var _pad_cursor_repeat_time: float = 0.0
+# Tracks whether the pad build cursor was active last frame, so equipping the toolbuild
+# (an inactive->active transition in pad mode) can snap the cursor next to the player.
+var _pad_build_controls_active_prev: bool = false
 var _right_stick_weapon_active: bool = false
 var _rush_active: bool = false
 var _rush_shift_was_pressed: bool = false
@@ -130,6 +134,7 @@ func _process(delta: float) -> void:
 	if _startup_loading_active():
 		return
 
+	_update_toolbuild_equip_cursor()
 	_update_pad_cursor(delta)
 	_update_pad_navigation_input()
 	_update_player_input(delta)
@@ -149,6 +154,16 @@ func _set_control_mode(mode: String) -> void:
 
 func get_control_mode() -> String:
 	return _control_mode
+
+## Snaps the pad build cursor to one tile right of the player the moment the toolbuild
+## becomes the active build tool in pad mode (an inactive->active transition), so re-equipping
+## it relocates the cursor next to the player instead of leaving it at the hidden mouse.
+func _update_toolbuild_equip_cursor() -> void:
+	var active: bool = _control_mode == INPUT_MODE_PAD and _build_controls_active()
+	if active and not _pad_build_controls_active_prev:
+		if build_system != null and build_system.has_method("pad_place_cursor_right_of_player"):
+			build_system.call("pad_place_cursor_right_of_player")
+	_pad_build_controls_active_prev = active
 
 func _update_pad_cursor(delta: float) -> void:
 	if _control_mode != INPUT_MODE_PAD or not _build_controls_active():
@@ -252,13 +267,13 @@ func _update_pad_navigation_input() -> void:
 	_dpad_down_pressed = down_pressed
 
 func _step_pad_shop_selection(direction: int) -> void:
-	if shop != null and shop.has_method("step_pad_selection"):
-		shop.call("step_pad_selection", direction)
+	if toolbuild != null and toolbuild.has_method("step_pad_selection"):
+		toolbuild.call("step_pad_selection", direction)
 
 func _handle_pad_accept() -> void:
 	if _paused or _is_inventory_open():
 		return
-	if shop != null and shop.has_method("activate_pad_selection") and bool(shop.call("activate_pad_selection")):
+	if toolbuild != null and toolbuild.has_method("activate_pad_selection") and bool(toolbuild.call("activate_pad_selection")):
 		return
 	if _in_build_mode() and build_system != null and build_system.has_method("pad_place_selected_at_cursor"):
 		build_system.call("pad_place_selected_at_cursor")
@@ -605,17 +620,17 @@ func _selected_item_id() -> String:
 		return ""
 	return String(game_ui.call("get_selected_quick_item_id"))
 
-## True while the shop has a building selected: the player is placing, not fighting.
+## True while the toolbuild picker has a building selected: the player is placing, not fighting.
 func _in_build_mode() -> bool:
 	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
-func _build_tool_selected() -> bool:
-	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
+func _toolbuild_selected() -> bool:
+	return game_ui and game_ui.has_method("is_toolbuild_selected") and bool(game_ui.call("is_toolbuild_selected"))
 
 func _build_controls_active() -> bool:
-	if not _build_tool_selected():
+	if not _toolbuild_selected():
 		return false
-	if shop != null and shop.has_method("is_merchant_shop_open") and bool(shop.call("is_merchant_shop_open")):
+	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
 		return false
 	return true
 
@@ -639,7 +654,14 @@ func _try_use_equipped_item() -> void:
 		get_viewport().set_input_as_handled()
 
 func _toggle_pause() -> void:
-	_paused = not _paused
+	set_paused(not _paused)
+
+func set_paused(paused: bool) -> void:
+	if not paused and _pause_hold_count > 0:
+		return
+	if _paused == paused:
+		return
+	_paused = paused
 	if steering and steering.has_method("set_paused"):
 		steering.call("set_paused", _paused)
 	if projectile_system and projectile_system.has_method("set_paused"):
@@ -662,6 +684,16 @@ func _toggle_pause() -> void:
 	_toggle_units_visible(not _paused)
 	if pause_overlay:
 		pause_overlay.set_paused(_paused)
+
+func is_paused() -> bool:
+	return _paused
+
+func push_pause_hold() -> void:
+	_pause_hold_count += 1
+	set_paused(true)
+
+func pop_pause_hold() -> void:
+	_pause_hold_count = maxi(_pause_hold_count - 1, 0)
 
 func _toggle_units_visible(isvisible: bool) -> void:
 	for node in get_tree().get_nodes_in_group("main_chars"):

@@ -14,6 +14,7 @@ extends Node
 const LEVEL_MENU_SCENE: String = "res://scenes/menus/level_loader.tscn"
 
 @onready var _progression: Node = get_node("../progression")
+@onready var _player_controller: PlayerController = get_node("../Player/PlayerController") as PlayerController
 @onready var _prompts: CanvasLayer = $Prompts
 @onready var _message_label: Label = $Prompts/Panel/VBox/Message
 @onready var _yes_button: Button = $Prompts/Panel/VBox/Buttons/YesButton
@@ -22,9 +23,14 @@ const LEVEL_MENU_SCENE: String = "res://scenes/menus/level_loader.tscn"
 
 # Action run when the player confirms the currently shown prompt with YES.
 var _on_confirm: Callable = Callable()
+var _prompt_paused_gameplay: bool = false
+var _prompt_previously_paused: bool = false
+var _prompt_previously_tree_paused: bool = false
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_prompts.process_mode = Node.PROCESS_MODE_ALWAYS
 	_prompts.visible = false
 	_yes_button.pressed.connect(_on_yes_pressed)
 	_level_selection_button.pressed.connect(_on_level_selection_pressed)
@@ -45,8 +51,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# While a prompt is open, ESC cancels it and every other key is swallowed.
 	if _prompts.visible:
+		get_viewport().set_input_as_handled()
 		if key_event.keycode == KEY_ESCAPE:
-			get_viewport().set_input_as_handled()
 			_close_prompt()
 		return
 
@@ -73,12 +79,14 @@ func _show_prompt(
 	_yes_button.text = yes_text
 	_level_selection_button.visible = show_level_selection
 	_prompts.visible = true
+	_pause_gameplay_for_prompt()
 	_no_button.grab_focus()
 
 
 func _close_prompt() -> void:
 	_prompts.visible = false
 	_on_confirm = Callable()
+	_unpause_gameplay_after_prompt()
 
 
 func _on_yes_pressed() -> void:
@@ -110,3 +118,28 @@ func _confirm_reset() -> void:
 ## YES on the quit prompt: quit without touching the rose-growth auto-save slot.
 func _confirm_quit() -> void:
 	get_tree().quit()
+
+
+func _pause_gameplay_for_prompt() -> void:
+	if _player_controller == null:
+		_prompt_paused_gameplay = false
+		return
+	_prompt_previously_paused = _player_controller.is_paused()
+	_prompt_previously_tree_paused = get_tree().paused
+	_player_controller.push_pause_hold()
+	get_tree().paused = true
+	_prompt_paused_gameplay = true
+
+
+func _unpause_gameplay_after_prompt() -> void:
+	if not _prompt_paused_gameplay:
+		return
+	_prompt_paused_gameplay = false
+	if _player_controller:
+		_player_controller.pop_pause_hold()
+	get_tree().paused = _prompt_previously_tree_paused
+	if _player_controller:
+		if not _prompt_previously_paused:
+			_player_controller.set_paused(false)
+	_prompt_previously_paused = false
+	_prompt_previously_tree_paused = false
