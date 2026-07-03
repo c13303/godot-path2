@@ -45,6 +45,7 @@ var _loaded_tool_shop_prices: Dictionary = {
 	&"turret1": 5,
 	&"wall": 100,
 }
+var _loaded_tool_shop_growth_price_factors: Dictionary = {}
 var _loaded_tool_shop_days: Dictionary = {}
 var _loaded_merchant_available_items: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_merchant_prices: Dictionary = {
@@ -153,6 +154,10 @@ func get_loaded_tool_shop_prices() -> Dictionary:
 	return _loaded_tool_shop_prices.duplicate()
 
 
+func get_loaded_tool_shop_growth_price_factors() -> Dictionary:
+	return _loaded_tool_shop_growth_price_factors.duplicate()
+
+
 func get_loaded_tool_shop_days() -> Dictionary:
 	return _loaded_tool_shop_days.duplicate()
 
@@ -214,6 +219,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		&"turret1": 5,
 		&"wall": 100,
 	}
+	_loaded_tool_shop_growth_price_factors = {}
 	_loaded_tool_shop_days = {}
 	_loaded_merchant_available_items = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 	_loaded_merchant_prices = {
@@ -239,6 +245,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
 		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
+		_loaded_tool_shop_growth_price_factors = _valid_shop_growth_price_factors(config.tool_shop_growth_price_factors, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_days = _valid_shop_days(config.tool_shop_days, TOOL_SHOP_ITEM_IDS)
 		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, MERCHANT_ITEM_IDS)
 		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, MERCHANT_ITEM_IDS)
@@ -313,6 +320,16 @@ func _valid_shop_days(raw_days: Dictionary, item_ids: Array[StringName]) -> Dict
 		if day > 1:
 			days[item_id] = day
 	return days
+
+
+func _valid_shop_growth_price_factors(raw_factors: Dictionary, item_ids: Array[StringName]) -> Dictionary:
+	var growth_price_factors: Dictionary = {}
+	for item_id: StringName in item_ids:
+		var raw_factor: Variant = raw_factors.get(item_id, raw_factors.get(String(item_id), 1.0))
+		var factor: float = maxf(1.0, float(raw_factor))
+		if factor > 1.0:
+			growth_price_factors[item_id] = factor
+	return growth_price_factors
 
 
 func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[StringName]:

@@ -464,6 +464,15 @@ func is_build_item_available(item_id: String) -> bool:
 
 
 func get_build_price(item_id: String) -> int:
+	var base_price: int = _base_build_price(item_id)
+	var factor: float = _build_growth_price_factor(item_id)
+	if factor <= 1.0:
+		return base_price
+	var placed_count: int = _placed_build_count(item_id)
+	return _growth_build_price(base_price, factor, placed_count)
+
+
+func _base_build_price(item_id: String) -> int:
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_tool_shop_prices"):
@@ -483,6 +492,45 @@ func get_build_price(item_id: String) -> int:
 			if prices.has(item_id):
 				return maxi(0, int(prices[item_id]))
 	return ItemCatalog.get_price(item_id)
+
+
+func _build_growth_price_factor(item_id: String) -> float:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_tool_shop_growth_price_factors"):
+		var raw_factors: Variant = loader.call("get_loaded_tool_shop_growth_price_factors")
+		if raw_factors is Dictionary:
+			var factors: Dictionary = raw_factors as Dictionary
+			if factors.has(StringName(item_id)):
+				return maxf(1.0, float(factors[StringName(item_id)]))
+			if factors.has(item_id):
+				return maxf(1.0, float(factors[item_id]))
+	return 1.0
+
+
+func _growth_build_price(base_price: int, factor: float, placed_count: int) -> int:
+	if base_price <= 0:
+		return 0
+	var grown_price: float = float(base_price) * pow(factor, float(maxi(0, placed_count)))
+	return maxi(0, int(ceil(grown_price)))
+
+
+func _build_price_for_placed_count(item_id: String, placed_count: int) -> int:
+	var base_price: int = _base_build_price(item_id)
+	var factor: float = _build_growth_price_factor(item_id)
+	if factor <= 1.0:
+		return base_price
+	return _growth_build_price(base_price, factor, placed_count)
+
+
+func _build_price_total_for_next(item_id: String, count: int) -> int:
+	if count <= 0:
+		return 0
+	var total: int = 0
+	var placed_count: int = _placed_build_count(item_id)
+	for offset: int in range(count):
+		total += _build_price_for_placed_count(item_id, placed_count + offset)
+	return total
 
 
 func is_merchant_item_available(item_id: String) -> bool:
@@ -552,17 +600,31 @@ func get_build_affordable_quantity(item_id: String) -> int:
 	if not is_build_item_available(item_id):
 		return 0
 	var limit_remaining: int = _build_limit_remaining(item_id)
-	var price: int = get_build_price(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
-	if price <= 0:
+	var next_price: int = get_build_price(item_id)
+	if next_price <= 0:
 		return max(0, limit_remaining) if limit_remaining >= 0 else 0
 	if key == &"" or _progression_node == null:
 		return 0
 	var owned: int = int(_progression_node.call("get_value", key))
-	@warning_ignore("integer_division")
-	var affordable: int = owned / price
-	if limit_remaining >= 0:
-		return mini(affordable, limit_remaining)
+	var factor: float = _build_growth_price_factor(item_id)
+	if factor <= 1.0:
+		@warning_ignore("integer_division")
+		var flat_affordable: int = owned / next_price
+		if limit_remaining >= 0:
+			return mini(flat_affordable, limit_remaining)
+		return flat_affordable
+	var affordable: int = 0
+	var total: int = 0
+	var placed_count: int = _placed_build_count(item_id)
+	while limit_remaining < 0 or affordable < limit_remaining:
+		var price: int = _build_price_for_placed_count(item_id, placed_count + affordable)
+		if price <= 0:
+			break
+		if total + price > owned:
+			break
+		total += price
+		affordable += 1
 	return affordable
 
 
@@ -593,13 +655,13 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 		return false
 	if not is_build_item_available(item_id):
 		return false
-	var price: int = get_build_price(item_id)
+	var price: int = _build_price_total_for_next(item_id, count)
 	var key: StringName = _build_currency_prog_key(item_id)
 	if price <= 0:
 		return true
 	if key == &"" or _progression_node == null:
 		return false
-	return bool(_progression_node.call("spend", key, price * count))
+	return bool(_progression_node.call("spend", key, price))
 
 
 func try_purchase_merchant_item(item_id: String, count: int = 1) -> bool:

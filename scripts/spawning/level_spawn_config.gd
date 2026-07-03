@@ -20,6 +20,7 @@ class_name LevelSpawnConfig
 	&"turret1": 5,
 	&"wall": 100,
 }
+@export var tool_shop_growth_price_factors: Dictionary = {}
 @export var tool_shop_days: Dictionary = {}
 @export_range(1, 99, 1) var rose_shop_counter_limit: int = 2
 

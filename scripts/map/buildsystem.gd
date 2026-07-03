@@ -734,6 +734,11 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	if not _can_afford(item_id):
 		_notify("can't afford")
 		return
+	if not game_ui or not game_ui.has_method("try_purchase_build"):
+		return
+	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
+		_notify("can't afford")
+		return
 
 	_clear_other_build_layer(target_layer, _hover_cell)
 	target_layer.set_cell(
@@ -747,8 +752,6 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		_refresh_cell_collision(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
 	_play_build_fx_at_cell(_hover_cell, target_layer)
-	if game_ui and game_ui.has_method("try_purchase_build"):
-		game_ui.call("try_purchase_build", item_id, 1)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":

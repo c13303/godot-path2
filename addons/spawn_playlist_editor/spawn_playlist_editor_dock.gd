@@ -58,6 +58,7 @@ var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _tool_shop_day_spins: Dictionary = {}  # StringName -> SpinBox
+var _tool_shop_growth_price_factor_spins: Dictionary = {}  # StringName -> SpinBox
 var _merchant_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _merchant_day_spins: Dictionary = {}  # StringName -> SpinBox
@@ -407,7 +408,7 @@ func _build_shop_controls() -> void:
 	heading.text = "Tool Shop"
 	heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(heading)
-	_build_shop_item_controls(TOOL_SHOP_ITEM_IDS, _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed)
+	_build_shop_item_controls(TOOL_SHOP_ITEM_IDS, _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
 
 	var counter_limit_row: HBoxContainer = HBoxContainer.new()
 	_shop_controls.add_child(counter_limit_row)
@@ -429,7 +430,7 @@ func _build_shop_controls() -> void:
 	merchant_heading.text = "Merchent"
 	merchant_heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(merchant_heading)
-	_build_shop_item_controls(MERCHANT_ITEM_IDS, _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed)
+	_build_shop_item_controls(MERCHANT_ITEM_IDS, _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed, {}, Callable())
 
 
 func _build_shop_item_controls(
@@ -439,7 +440,9 @@ func _build_shop_item_controls(
 	day_spins: Dictionary,
 	toggled_handler: Callable,
 	price_handler: Callable,
-	day_handler: Callable
+	day_handler: Callable,
+	growth_factor_spins: Dictionary,
+	growth_factor_handler: Callable
 ) -> void:
 	var header: HBoxContainer = HBoxContainer.new()
 	_shop_controls.add_child(header)
@@ -457,11 +460,18 @@ func _build_shop_item_controls(
 	header.add_child(day_header)
 	var currency_header: Label = Label.new()
 	currency_header.text = "Currency"
+	currency_header.custom_minimum_size = Vector2(86.0, 0.0)
 	header.add_child(currency_header)
+	if growth_factor_handler.is_valid():
+		var growth_factor_header: Label = Label.new()
+		growth_factor_header.text = "Growth price factor"
+		growth_factor_header.custom_minimum_size = Vector2(132.0, 0.0)
+		header.add_child(growth_factor_header)
 
 	available_checkboxes.clear()
 	price_spins.clear()
 	day_spins.clear()
+	growth_factor_spins.clear()
 	for item_id: StringName in item_ids:
 		var row: HBoxContainer = HBoxContainer.new()
 		_shop_controls.add_child(row)
@@ -494,7 +504,18 @@ func _build_shop_item_controls(
 
 		var currency_label: Label = Label.new()
 		currency_label.text = String(ItemCatalog.get_currency(String(item_id)))
+		currency_label.custom_minimum_size = Vector2(86.0, 0.0)
 		row.add_child(currency_label)
+
+		if growth_factor_handler.is_valid():
+			var growth_factor_spin: SpinBox = SpinBox.new()
+			growth_factor_spin.min_value = 1.0
+			growth_factor_spin.max_value = 100.0
+			growth_factor_spin.step = 0.1
+			growth_factor_spin.custom_minimum_size = Vector2(132.0, 0.0)
+			growth_factor_spin.value_changed.connect(growth_factor_handler.bind(item_id))
+			row.add_child(growth_factor_spin)
+			growth_factor_spins[item_id] = growth_factor_spin
 
 
 func _build_reward_controls() -> void:
@@ -775,6 +796,7 @@ func _refresh_shop_controls() -> void:
 	var tool_available_items: Array[StringName] = _default_tool_shop_available_items()
 	var tool_prices: Dictionary = _default_tool_shop_prices()
 	var tool_days: Dictionary = {}
+	var tool_growth_price_factors: Dictionary = _default_tool_shop_growth_price_factors()
 	var merchant_available_items: Array[StringName] = _default_merchant_available_items()
 	var merchant_prices: Dictionary = _default_merchant_prices()
 	var merchant_days: Dictionary = {}
@@ -783,6 +805,7 @@ func _refresh_shop_controls() -> void:
 		tool_available_items = _valid_tool_shop_available_items(config.tool_shop_available_items)
 		tool_prices = _valid_tool_shop_prices(config.tool_shop_prices)
 		tool_days = _valid_tool_shop_days(config.tool_shop_days)
+		tool_growth_price_factors = _valid_tool_shop_growth_price_factors(config.tool_shop_growth_price_factors)
 		merchant_available_items = _valid_merchant_available_items(config.merchant_available_items)
 		merchant_prices = _valid_merchant_prices(config.merchant_prices)
 		merchant_days = _valid_merchant_days(config.merchant_days)
@@ -799,8 +822,8 @@ func _refresh_shop_controls() -> void:
 			if merchant_prices == _default_merchant_prices():
 				merchant_prices = _valid_merchant_prices(legacy_prices)
 		counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
-	_refresh_shop_item_controls(_tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, tool_available_items, tool_prices, tool_days, has_level)
-	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, merchant_available_items, merchant_prices, merchant_days, has_level)
+	_refresh_shop_item_controls(_tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, tool_available_items, tool_prices, tool_days, has_level, _tool_shop_growth_price_factor_spins, tool_growth_price_factors)
+	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, merchant_available_items, merchant_prices, merchant_days, has_level, {}, {})
 	_rose_shop_counter_limit.value = float(counter_limit)
 
 
@@ -811,7 +834,9 @@ func _refresh_shop_item_controls(
 	available_items: Array[StringName],
 	prices: Dictionary,
 	days: Dictionary,
-	has_level: bool
+	has_level: bool,
+	growth_factor_spins: Dictionary,
+	growth_price_factors: Dictionary
 ) -> void:
 	for raw_item_id: Variant in available_checkboxes.keys():
 		var item_id: StringName = raw_item_id as StringName
@@ -831,6 +856,12 @@ func _refresh_shop_item_controls(
 		if day_spin != null:
 			day_spin.value = float(int(days.get(item_id, 1)))
 			day_spin.editable = has_level
+	for raw_item_id: Variant in growth_factor_spins.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var growth_factor_spin: SpinBox = growth_factor_spins[item_id] as SpinBox
+		if growth_factor_spin != null:
+			growth_factor_spin.value = float(growth_price_factors.get(item_id, 1.0))
+			growth_factor_spin.editable = has_level
 
 
 func _refresh_client_frequency_controls() -> void:
@@ -1286,6 +1317,22 @@ func _on_tool_shop_day_changed(value: float, item_id: StringName) -> void:
 	mark_dirty()
 
 
+func _on_tool_shop_growth_price_factor_changed(value: float, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var growth_price_factors: Dictionary = _valid_tool_shop_growth_price_factors(config.tool_shop_growth_price_factors)
+	var factor: float = maxf(1.0, value)
+	if factor > 1.0:
+		growth_price_factors[item_id] = factor
+	else:
+		growth_price_factors.erase(item_id)
+	config.tool_shop_growth_price_factors = growth_price_factors
+	mark_dirty()
+
+
 func _on_merchant_item_available_toggled(enabled: bool, item_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -1495,6 +1542,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("monster_drop_seed_chance_percent", clampi(int(_monster_drop_seed_chance.value), 0, 100))
 		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
 		root.set("tool_shop_prices", _selected_tool_shop_prices())
+		root.set("tool_shop_growth_price_factors", _selected_tool_shop_growth_price_factors())
 		root.set("tool_shop_days", _selected_tool_shop_days())
 		root.set("merchant_available_items", _selected_merchant_available_items())
 		root.set("merchant_prices", _selected_merchant_prices())
@@ -1524,6 +1572,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.monster_drop_seed_chance_percent = clampi(int(_monster_drop_seed_chance.value), 0, 100)
 	config.tool_shop_available_items = _selected_tool_shop_available_items()
 	config.tool_shop_prices = _selected_tool_shop_prices()
+	config.tool_shop_growth_price_factors = _selected_tool_shop_growth_price_factors()
 	config.tool_shop_days = _selected_tool_shop_days()
 	config.merchant_available_items = _selected_merchant_available_items()
 	config.merchant_prices = _selected_merchant_prices()
@@ -1671,6 +1720,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.monster_drop_seed_chance_percent = DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT
 		config.tool_shop_available_items = _default_tool_shop_available_items()
 		config.tool_shop_prices = _default_tool_shop_prices()
+		config.tool_shop_growth_price_factors = _default_tool_shop_growth_price_factors()
 		config.tool_shop_days = {}
 		config.merchant_available_items = _default_merchant_available_items()
 		config.merchant_prices = _default_merchant_prices()
@@ -1765,6 +1815,10 @@ func _selected_tool_shop_days() -> Dictionary:
 	return _selected_shop_days_from(_tool_shop_day_spins, TOOL_SHOP_ITEM_IDS)
 
 
+func _selected_tool_shop_growth_price_factors() -> Dictionary:
+	return _selected_shop_growth_price_factors_from(_tool_shop_growth_price_factor_spins, TOOL_SHOP_ITEM_IDS)
+
+
 func _selected_merchant_days() -> Dictionary:
 	return _selected_shop_days_from(_merchant_day_spins, MERCHANT_ITEM_IDS)
 
@@ -1798,6 +1852,18 @@ func _selected_shop_days_from(day_spins: Dictionary, item_ids: Array[StringName]
 		if day > 1:
 			days[item_id] = day
 	return days
+
+
+func _selected_shop_growth_price_factors_from(growth_factor_spins: Dictionary, item_ids: Array[StringName]) -> Dictionary:
+	var growth_price_factors: Dictionary = {}
+	for item_id: StringName in item_ids:
+		var growth_factor_spin: SpinBox = growth_factor_spins.get(item_id) as SpinBox
+		if growth_factor_spin == null:
+			continue
+		var factor: float = maxf(1.0, float(growth_factor_spin.value))
+		if factor > 1.0:
+			growth_price_factors[item_id] = factor
+	return growth_price_factors
 
 
 func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
@@ -1850,6 +1916,10 @@ func _valid_tool_shop_days(raw_days: Dictionary) -> Dictionary:
 	return _valid_shop_days(raw_days, TOOL_SHOP_ITEM_IDS)
 
 
+func _valid_tool_shop_growth_price_factors(raw_factors: Dictionary) -> Dictionary:
+	return _valid_shop_growth_price_factors(raw_factors, TOOL_SHOP_ITEM_IDS)
+
+
 func _valid_merchant_days(raw_days: Dictionary) -> Dictionary:
 	return _valid_shop_days(raw_days, MERCHANT_ITEM_IDS)
 
@@ -1870,6 +1940,16 @@ func _valid_shop_days(raw_days: Dictionary, item_ids: Array[StringName]) -> Dict
 		if day > 1:
 			days[item_id] = day
 	return days
+
+
+func _valid_shop_growth_price_factors(raw_factors: Dictionary, item_ids: Array[StringName]) -> Dictionary:
+	var growth_price_factors: Dictionary = {}
+	for item_id: StringName in item_ids:
+		var raw_factor: Variant = raw_factors.get(item_id, raw_factors.get(String(item_id), 1.0))
+		var factor: float = maxf(1.0, float(raw_factor))
+		if factor > 1.0:
+			growth_price_factors[item_id] = factor
+	return growth_price_factors
 
 
 func _default_tool_shop_available_items() -> Array[StringName]:
@@ -1893,6 +1973,10 @@ func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[
 
 func _default_tool_shop_prices() -> Dictionary:
 	return _default_shop_prices(TOOL_SHOP_ITEM_IDS)
+
+
+func _default_tool_shop_growth_price_factors() -> Dictionary:
+	return {}
 
 
 func _default_merchant_prices() -> Dictionary:
