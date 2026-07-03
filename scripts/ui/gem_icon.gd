@@ -9,13 +9,14 @@ const BASE_FLIGHT_DURATION: float = 0.72
 @export_range(0.0, 5.0, 0.05, "or_greater", "suffix:x") var curve_strength: float = 1.0
 
 
-func animate_gem_harvest(world_position: Vector2, sequence_index: int = 0) -> bool:
+func animate_gem_harvest(world_position: Vector2, sequence_index: int = 0, stagger_seconds: float = -1.0) -> bool:
 	if texture == null:
 		return false
 	var game_ui: CanvasLayer = get_parent().get_parent() as CanvasLayer
 	if game_ui == null:
 		return false
-	var start_delay: float = float(sequence_index) * delay_between_gems
+	var per_icon_delay: float = delay_between_gems if stagger_seconds < 0.0 else stagger_seconds
+	var start_delay: float = float(sequence_index) * per_icon_delay
 	if start_delay <= 0.0:
 		_start_gem_flight(world_position)
 		return true

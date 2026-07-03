@@ -860,8 +860,14 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 		icon = get_node_or_null("top right/moneyIcon")
 		animate_method = "animate_money_harvest"
 	if icon != null and icon.has_method(animate_method):
+		# Deconstruct refunds fly the whole building's worth of currency within ~1s
+		# regardless of the amount, by compressing the per-icon stagger delay.
+		var stagger: float = minf(0.06, 1.0 / float(maxi(units - 1, 1)))
 		for i: int in range(units):
-			icon.call(animate_method, world_position, i)
+			if animate_method == "animate_seed_harvest":
+				icon.call(animate_method, world_position, i, Callable(), true, stagger)
+			else:
+				icon.call(animate_method, world_position, i, stagger)
 		return
 	# Fallback: no HUD icon to animate, so credit immediately.
 	var key: StringName = _build_currency_prog_key(item_id)

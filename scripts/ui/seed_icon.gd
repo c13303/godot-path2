@@ -16,7 +16,8 @@ func animate_seed_harvest(
 	world_position: Vector2,
 	sequence_index: int = 0,
 	on_launch: Callable = Callable(),
-	credit_on_finish: bool = true
+	credit_on_finish: bool = true,
+	stagger_seconds: float = -1.0
 ) -> bool:
 	if texture == null:
 		return false
@@ -24,7 +25,8 @@ func animate_seed_harvest(
 	if game_ui == null:
 		return false
 	_active_harvest_animation_count += 1
-	var start_delay: float = float(sequence_index) * delay_between_seeds
+	var per_icon_delay: float = delay_between_seeds if stagger_seconds < 0.0 else stagger_seconds
+	var start_delay: float = float(sequence_index) * per_icon_delay
 	if start_delay <= 0.0:
 		_start_seed_flight(world_position, on_launch, credit_on_finish)
 		return true

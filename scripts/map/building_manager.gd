@@ -85,6 +85,10 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
+@export_group("Water Edge Recovery")
+@export_range(0.0, 1.0, 0.01) var water_edge_stuck_coverage_threshold: float = 0.15
+@export_range(0.0, 3.0, 0.01, "or_greater") var water_edge_stuck_seconds: float = 0.35
+@export_range(0.0, 64.0, 0.5, "or_greater") var water_edge_stuck_speed: float = 2.0
 @export_group("CPP > Gardens")
 @export var dont_shrink_gardens: bool = true
 @export_group("")
@@ -162,6 +166,7 @@ var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
 var _turret_eating_agents: Dictionary = {}
 var _drowning_agents: Dictionary = {}
+var _water_edge_stuck_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
@@ -3662,8 +3667,10 @@ func _process_turret_eating_agents(delta: float) -> void:
 
 func _process_drowning_agents(delta: float) -> void:
 	if watersources == null:
+		_water_edge_stuck_agents.clear()
 		return
 
+	var steering: Node = _get_steering_system()
 	for group_name: String in ["monsters", "clients", "merchants"]:
 		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
@@ -3674,11 +3681,22 @@ func _process_drowning_agents(delta: float) -> void:
 				continue
 			_update_monster_splash(agent, delta)
 			if _turret_eating_agents.has(nav_id):
+				_water_edge_stuck_agents.erase(nav_id)
 				continue
-			var in_water: bool = _agent_over_drowning_water(agent)
 			if _drowning_agents.has(nav_id):
+				_water_edge_stuck_agents.erase(nav_id)
 				continue
-			if in_water and _agent_can_drown(agent):
+			var water_coverage: float = _agent_water_coverage(agent)
+			var in_water: bool = _agent_over_drowning_water_with_coverage(agent, water_coverage)
+			if in_water:
+				_water_edge_stuck_agents.erase(nav_id)
+				if _agent_can_drown(agent):
+					_start_agent_drowning(nav_id, agent)
+				continue
+			if not _agent_can_drown(agent):
+				_water_edge_stuck_agents.erase(nav_id)
+				continue
+			if _agent_water_edge_stuck_should_drown(nav_id, water_coverage, delta, steering):
 				_start_agent_drowning(nav_id, agent)
 
 	var dead_agents: Array[Node2D] = []
@@ -3743,10 +3761,45 @@ func _agent_can_drown(agent: Node2D) -> bool:
 func _agent_over_drowning_water(agent: Node2D) -> bool:
 	if watersources == null:
 		return false
+	return _agent_over_drowning_water_with_coverage(agent, _agent_water_coverage(agent))
+
+func _agent_over_drowning_water_with_coverage(agent: Node2D, water_coverage: float) -> bool:
+	if watersources == null:
+		return false
 	var threshold: float = clampf(watersources.drowning_coverage_threshold, 0.0, 1.0)
 	if threshold <= 0.0:
 		return watersources.has_water_at_foot_position(agent.global_position)
-	return _agent_water_coverage(agent) >= threshold
+	return water_coverage >= threshold
+
+func _agent_water_edge_stuck_should_drown(nav_id: int, water_coverage: float, delta: float, steering: Node) -> bool:
+	if watersources == null:
+		_water_edge_stuck_agents.erase(nav_id)
+		return false
+
+	var normal_threshold: float = clampf(watersources.drowning_coverage_threshold, 0.0, 1.0)
+	var edge_threshold: float = clampf(water_edge_stuck_coverage_threshold, 0.0, 1.0)
+	if normal_threshold <= 0.0 or edge_threshold <= 0.0:
+		_water_edge_stuck_agents.erase(nav_id)
+		return false
+	if water_coverage < edge_threshold or water_coverage >= normal_threshold:
+		_water_edge_stuck_agents.erase(nav_id)
+		return false
+	if steering == null or not steering.has_method("get_agent_velocity"):
+		_water_edge_stuck_agents.erase(nav_id)
+		return false
+
+	var velocity: Vector2 = steering.call("get_agent_velocity", nav_id) as Vector2
+	if velocity.length() > water_edge_stuck_speed:
+		_water_edge_stuck_agents.erase(nav_id)
+		return false
+
+	var elapsed: float = float(_water_edge_stuck_agents.get(nav_id, 0.0)) + delta
+	if elapsed < water_edge_stuck_seconds:
+		_water_edge_stuck_agents[nav_id] = elapsed
+		return false
+
+	_water_edge_stuck_agents.erase(nav_id)
+	return true
 
 func _agent_water_coverage(agent: Node2D) -> float:
 	if watersources == null:
@@ -3765,6 +3818,7 @@ func _agent_world_radius() -> float:
 	return 12.0
 
 func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
+	_water_edge_stuck_agents.erase(nav_id)
 	var duration: float = maxf(float(agent.get("drowning")), 0.001)
 	var raw_update_freq: Variant = agent.get("drowning_update_freq")
 	var update_freq: float = maxf(float(raw_update_freq) if raw_update_freq != null else 0.1, 0.01)
@@ -3786,6 +3840,7 @@ func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
 func _stop_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	var data: Dictionary = _drowning_agents.get(nav_id, {}) as Dictionary
 	_drowning_agents.erase(nav_id)
+	_water_edge_stuck_agents.erase(nav_id)
 	if agent.has_method("stop_drowning"):
 		agent.call("stop_drowning")
 	var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
@@ -4221,6 +4276,7 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
 	_drowning_agents.erase(nav_id)
+	_water_edge_stuck_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_paying_agents.erase(nav_id)
