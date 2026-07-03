@@ -1,6 +1,6 @@
 extends SceneTree
 
-const MAIN_SCENE: String = "res://mainRun.tscn"
+const MAIN_SCENE: String = "res://scenes/main/mainRun.tscn"
 
 
 func _initialize() -> void:
