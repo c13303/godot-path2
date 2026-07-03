@@ -528,8 +528,8 @@ func _build_price_total_for_next(item_id: String, count: int) -> int:
 		return 0
 	var total: int = 0
 	var placed_count: int = _placed_build_count(item_id)
-	for offset: int in range(count):
-		total += _build_price_for_placed_count(item_id, placed_count + offset)
+	for i: int in range(count):
+		total += _build_price_for_placed_count(item_id, placed_count + i)
 	return total
 
 
