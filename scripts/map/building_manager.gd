@@ -697,6 +697,10 @@ func _run_night_preparation(token: int) -> void:
 			await get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 
+	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_MONSTER, token)
+	if not bool(prep_result):
+		return
+
 	# Exit fields also use the native worker during preparation.
 	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
 	if not bool(prep_result):
@@ -767,6 +771,11 @@ func _run_client_preparation(token: int) -> void:
 		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
 			await get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
+
+	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_CLIENT, token)
+	if not bool(prep_result):
+		_abort_client_preparation(token)
+		return
 
 	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
 	if not bool(prep_result):
@@ -842,6 +851,59 @@ func _night_flow_fields_are_ready() -> bool:
 			if not is_finite(exit_cost):
 				return false
 	return true
+
+func _prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
+	if not _flow_ready or not agent_manager or not flow:
+		return true
+	if not flow.has_method("are_async_flows_idle") or not flow.has_method("is_group_flow_request_ready"):
+		return false
+	var requested_groups: Dictionary = {}
+	var slice_started_us: int = Time.get_ticks_usec()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		if not _night_preparation_is_current(token):
+			return false
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
+			continue
+		for raw_garden_id: Variant in _gardens.keys():
+			if not _night_preparation_is_current(token):
+				return false
+			var garden_id: int = int(raw_garden_id)
+			var garden: Dictionary = _gardens[garden_id] as Dictionary
+			if not bool(garden.get("targetable", false)):
+				continue
+			if not _garden_has_target_for_kind(garden_id, agent_kind):
+				continue
+			var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+			var group_id: int = int(route.get("plant_group", -1))
+			if group_id > IDLE_GROUP:
+				requested_groups[group_id] = true
+			if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+				await get_tree().process_frame
+				slice_started_us = Time.get_ticks_usec()
+	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+		await get_tree().process_frame
+	if not _night_preparation_is_current(token):
+		return false
+	for raw_group_id: Variant in requested_groups.keys():
+		var group_id: int = int(raw_group_id)
+		if not bool(flow.call("is_group_flow_request_ready", group_id)):
+			return false
+	_mark_spawner_entry_routes_ready_for_groups(requested_groups)
+	return true
+
+func _mark_spawner_entry_routes_ready_for_groups(group_ids: Dictionary) -> void:
+	for raw_spawner_cell: Variant in _spawner_garden_routes.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+		for raw_garden_id: Variant in routes.keys():
+			var garden_id: int = int(raw_garden_id)
+			var route: Dictionary = routes[garden_id] as Dictionary
+			var group_id: int = int(route.get("plant_group", -1))
+			if group_ids.has(group_id) and _garden_route_is_current(route, garden_id):
+				route["ready"] = _spawner_garden_route_flow_ready(route, spawner_cell)
+				routes[garden_id] = route
+		_spawner_garden_routes[spawner_cell] = routes
 
 func _rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 	if not _flow_ready or not agent_manager or not flow:
@@ -1908,6 +1970,8 @@ func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 			continue
 		var entry_world: Vector2 = _cell_center(entry_cell)
 		route["entry_world"] = entry_world
+		route["ready"] = false
+		route["flow_requested"] = true
 		_request_group_flow_rebuild(plant_group, entry_world)
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
@@ -2232,6 +2296,27 @@ func has_grownup_roses_to_harvest() -> bool:
 	return _morning_harvest_active and _grownup_rose_count() > 0
 
 
+func restore_day_phase(phase: String) -> void:
+	if GameState.is_night:
+		return
+	_morning_harvest_active = false
+	_client_preparing = false
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	_client_counter_agents.clear()
+	_client_paying_agents.clear()
+	match phase:
+		"morning":
+			call_deferred("_begin_morning_phase")
+		"client":
+			call_deferred("_begin_client_sale_phase")
+		"seed_merchant":
+			call_deferred("_begin_seed_merchant_phase")
+		_:
+			GameState.set_building_phase(true)
+
+
 func _check_morning_harvest_finished() -> void:
 	if _grownup_rose_count() > 0:
 		return
@@ -2334,6 +2419,28 @@ func _clients_are_finished_for_day() -> bool:
 		and _client_paying_agents.is_empty()
 		and _client_counter_agents.is_empty()
 	)
+
+
+func has_clients_for_save_load() -> bool:
+	return _client_preparing or not _clients_are_finished_for_day()
+
+
+func save_load_client_block_reason() -> String:
+	if _client_preparing:
+		return "client preparation active"
+	if _client_sale_active:
+		return "client sale active"
+	if GameState.is_client_phase:
+		return "client phase active"
+	if not _client_sale_pending_spawners.is_empty():
+		return "incoming clients pending"
+	if _client_count() > 0:
+		return "clients on map"
+	if not _client_paying_agents.is_empty():
+		return "clients paying"
+	if not _client_counter_agents.is_empty():
+		return "clients walking to counters"
+	return ""
 
 
 func _all_planted_roses_are_wet() -> bool:
@@ -2556,15 +2663,20 @@ func _rose_shop_counter_cells() -> Array[Vector2i]:
 		for raw_cell: Variant in raw_cells:
 			cells.append(raw_cell as Vector2i)
 		return cells
-	if traversable_buildings == null:
-		return cells
 	var item_def: Dictionary = ItemCatalog.get_item_def(ROSE_SHOP_COUNTER_ID)
 	var atlas: Vector2i = item_def.get("atlas", Vector2i(-1, -1)) as Vector2i
-	for raw_cell: Variant in traversable_buildings.get_used_cells():
-		var cell: Vector2i = raw_cell as Vector2i
-		if traversable_buildings.get_cell_atlas_coords(cell) == atlas:
-			cells.append(cell)
+	for layer: TileMapLayer in [traversable_buildings, blocking_buildings]:
+		if layer == null:
+			continue
+		for raw_cell: Variant in layer.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
+			if layer.get_cell_atlas_coords(cell) == atlas and not cells.has(cell):
+				cells.append(cell)
 	return cells
+
+
+func rose_shop_counter_count() -> int:
+	return _rose_shop_counter_cells().size()
 
 
 func _total_counter_stock() -> int:
@@ -4842,6 +4954,9 @@ func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
 			continue
+		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+		if not bool(route.get("ready", false)):
+			continue
 		var delta: Vector2i = entry_cell - spawner_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
 		if manhattan < best_dist:
@@ -4868,6 +4983,9 @@ func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 			continue
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
+			continue
+		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+		if not bool(route.get("ready", false)):
 			continue
 		var delta: Vector2i = entry_cell - spawner_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
@@ -4906,6 +5024,9 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringNam
 				_garden_entry_resolve_misses += 1
 			if entry_cell == INVALID_CELL:
 				continue
+			var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+			if not bool(route.get("ready", false)):
+				continue
 			var delta: Vector2i = entry_cell - from_cell
 			var manhattan: int = abs(delta.x) + abs(delta.y)
 			if manhattan < best_dist:
@@ -4933,6 +5054,9 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
 			continue
+		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
+		if not bool(route.get("ready", false)):
+			continue
 		var delta: Vector2i = entry_cell - from_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
 		if manhattan < best_dist:
@@ -4941,7 +5065,8 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 	if best_spawner_cell == INVALID_CELL and fallback_spawner_cell != INVALID_CELL and _spawner_routes.has(fallback_spawner_cell):
 		if (_spawner_kind_by_cell.get(fallback_spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
 			return INVALID_CELL
-		if _nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL:
+		var fallback_route: Dictionary = _get_or_create_spawner_garden_route(fallback_spawner_cell, garden_id)
+		if _nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL and bool(fallback_route.get("ready", false)):
 			best_spawner_cell = fallback_spawner_cell
 	return best_spawner_cell
 
@@ -5183,12 +5308,26 @@ func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, g
 		agent.call("start_flow_in")
 	return true
 
+func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i) -> bool:
+	var plant_group: int = int(route.get("plant_group", -1))
+	if plant_group <= IDLE_GROUP:
+		return false
+	if flow == null or not flow.has_method("is_group_flow_request_ready") or not flow.has_method("group_route_cost_at_world"):
+		return false
+	if not bool(flow.call("is_group_flow_request_ready", plant_group)):
+		return false
+	var cost: float = float(flow.call("group_route_cost_at_world", plant_group, _cell_center(spawner_cell)))
+	return is_finite(cost)
+
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
 	if not _spawner_garden_routes.has(spawner_cell):
 		_spawner_garden_routes[spawner_cell] = {}
 	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
 	var existing_route: Dictionary = routes.get(garden_id, {}) as Dictionary
-	if bool(existing_route.get("ready", false)) and int(existing_route.get("plant_group", -1)) > IDLE_GROUP and _garden_route_is_current(existing_route, garden_id):
+	if int(existing_route.get("plant_group", -1)) > IDLE_GROUP and _garden_route_is_current(existing_route, garden_id):
+		existing_route["ready"] = _spawner_garden_route_flow_ready(existing_route, spawner_cell)
+		routes[garden_id] = existing_route
+		_spawner_garden_routes[spawner_cell] = routes
 		_route_cache_hits += 1
 		return existing_route
 	# Cache miss: recompute the route (nearest garden entry + sanity checks) below.
@@ -5222,7 +5361,8 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 		"entry_cell": entry_cell,
 		"entry_world": entry_world,
 		"plant_group": plant_group,
-		"ready": true,
+		"ready": _spawner_garden_route_flow_ready({"plant_group": plant_group}, spawner_cell),
+		"flow_requested": true,
 		"garden_version": int(garden.get("version", 0)),
 		"garden_epoch": int(garden.get("epoch", -1))
 	}

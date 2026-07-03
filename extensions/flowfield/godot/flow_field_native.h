@@ -50,7 +50,6 @@ namespace godot
             Vector2i goal_cell;
             double tile_size = 1.0;
             std::vector<Vector2i> walls;
-            std::vector<Vector2i> navigation_blockers;
             std::vector<Vector2i> walkables;
             bool debug_disable_bottlenecks = false;
             int bottleneck_zone_radius_tiles = 0;
@@ -93,8 +92,7 @@ namespace godot
         void build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
                         std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
         void add_navigation_coverage_blockers(const Array &floor_cells,
-                                              std::unordered_set<Vector2i, Vector2iHash> &navigation_blocked_set,
-                                              std::vector<Vector2i> *out_blockers = nullptr) const;
+                                              std::unordered_set<Vector2i, Vector2iHash> &navigation_blocked_set) const;
         bool cell_reaches_navigation_blocking_coverage(const Vector2i &cell,
                                                        double radius,
                                                        double threshold) const;
@@ -103,8 +101,7 @@ namespace godot
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
-                           std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                           const std::unordered_set<Vector2i, Vector2iHash> &navigation_penalty_set = {});
+                           std::unordered_map<Vector2i, double, Vector2iHash> &costs);
         void compute_directions(const Rect2i &used,
                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs,

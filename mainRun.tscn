@@ -5,6 +5,8 @@
 [node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
 
 [node name="CPP" parent="." index="4" unique_id=304113688]
+debug_enabled = true
+draw_flow_field = true
 show_gardens = true
 show_enters_exits = true
 

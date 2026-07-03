@@ -390,17 +390,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		load_progression()
 
 
-func save_progression(save_path: String = SAVE_PATH) -> void:
-	if _reject_during_night():
-		return
-	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
+func save_progression(save_path: String = SAVE_PATH, day_phase_override: String = "") -> bool:
 	var scene: Node = get_tree().current_scene
+	if _reject_while_clients_active(scene, "Save"):
+		return false
+	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
 	var layers: Dictionary = _get_layers(scene)
 	var player: Node2D = _get_player()
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene else null
 	if layers.size() != LAYER_NAMES.size() or player == null or game_ui == null:
 		_fail("Save failed: required game nodes are missing")
-		return
+		return false
 
 	var inventory: Array[Dictionary] = _get_inventory(game_ui)
 	var layer_data: Dictionary = {}
@@ -410,39 +410,51 @@ func save_progression(save_path: String = SAVE_PATH) -> void:
 		layer_data[layer_name] = serialized_cells
 		_log("Captured layer %s: %d cells" % [layer_name, serialized_cells.size()])
 
+	var day_phase: String = day_phase_override if day_phase_override != "" else _get_day_phase()
+	var plant_states: Array[Dictionary] = _get_plant_states(scene)
+	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"night_rewards": GameState.get_special_reward_claim_save_data(),
+		"day_phase": day_phase,
 		"layers": layer_data,
-		"counter_stock": _get_counter_stock(scene),
+		"plant_states": plant_states,
+		"counter_stock": counter_stock,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
 			"selected_quick_index": int(game_ui.get("selected_quick_index")),
 		},
 	}
+	_log("Save summary: %s" % _save_summary(data))
+	_log("Save live summary: %s" % _live_scene_summary(scene))
 
 	var json_text: String = JSON.stringify(data)
 	var file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
 	if file == null:
 		_fail("Save failed: cannot open save file")
-		return
+		return false
 	file.store_string(json_text)
 	file.close()
 	_log("Save complete: player=%s inventory_slots=%d bytes=%d" % [
 		str(player.global_position), inventory.size(), json_text.to_utf8_buffer().size()
 	])
 	_notify("Game saved")
+	return true
 
 
 func load_progression() -> void:
 	# F9 reload is allowed anytime, including during night.
+	var scene: Node = get_tree().current_scene
+	if _reject_while_clients_active(scene, "Load"):
+		return
 	_log("Load started: %s" % ProjectSettings.globalize_path(SAVE_PATH))
 	var data: Dictionary = _read_save_data()
 	if data.is_empty():
 		return
+	_log("Manual load summary: %s" % _save_summary(data))
 
 	_unregister_scene_agents()
 	GameState.request_startup_save_load(SAVE_PATH)
@@ -455,8 +467,13 @@ func load_progression() -> void:
 
 
 ## Write the auto-save slot (separate file from the F5/F9 manual slot).
-func auto_save() -> void:
-	save_progression(AUTOSAVE_PATH)
+func auto_save() -> bool:
+	return save_progression(AUTOSAVE_PATH)
+
+
+func auto_save_after_rose_growth() -> bool:
+	_log("Rose-growth auto-save requested")
+	return save_progression(AUTOSAVE_PATH, "morning")
 
 
 ## Startup auto-load: restore the auto-save slot into the freshly loaded scene.
@@ -476,6 +493,7 @@ func load_on_start() -> void:
 	if data.is_empty():
 		return
 	_log("Auto-loading save on start")
+	_log("Auto-load summary: %s" % _save_summary(data))
 	_apply_save_to_fresh_scene(data)
 
 
@@ -541,6 +559,7 @@ func _read_save_data(save_path: String = SAVE_PATH) -> Dictionary:
 	if validation_error != "":
 		_fail("Load failed: " + validation_error)
 		return {}
+	_log("Read save OK: %s summary=%s" % [ProjectSettings.globalize_path(save_path), _save_summary(data)])
 	return data
 
 
@@ -580,19 +599,35 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	player.set("velocity", Vector2.ZERO)
 	_restore_inventory(game_ui, player_data)
 	_reindex_loaded_layers(scene)
+	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
+	_restore_day_phase(scene, str(data.get("day_phase", "")))
 	_save_applied = true
+	_log("Post-load live summary: %s" % _live_scene_summary(scene))
 	_log("Load complete: player=%s inventory_slots=%d" % [
 		str(player.global_position), (player_data["inventory"] as Array).size()
 	])
 	_notify("Game loaded")
 
 
-func _reject_during_night() -> bool:
-	if not GameState.is_night:
+func _reject_while_clients_active(scene: Node, operation: String) -> bool:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager != null and building_manager.has_method("has_clients_for_save_load"):
+		if not bool(building_manager.call("has_clients_for_save_load")):
+			return false
+		var reason: String = ""
+		if building_manager.has_method("save_load_client_block_reason"):
+			reason = str(building_manager.call("save_load_client_block_reason"))
+		if reason == "":
+			reason = "clients active"
+		_log("%s rejected: %s" % [operation, reason])
+		_notify("%s unavailable while clients are active" % operation)
+		return true
+	var client_count: int = get_tree().get_nodes_in_group("clients").size()
+	if client_count <= 0:
 		return false
-	_log("Operation rejected because night is active")
-	_notify("Save/load unavailable during night")
+	_log("%s rejected: clients on map (%d)" % [operation, client_count])
+	_notify("%s unavailable while clients are active" % operation)
 	return true
 
 
@@ -649,6 +684,30 @@ func _get_counter_stock(scene: Node) -> Array[Dictionary]:
 			if raw_entry is Dictionary:
 				stock.append(raw_entry as Dictionary)
 	return stock
+
+
+func _get_day_phase() -> String:
+	if GameState.is_morning_phase:
+		return "morning"
+	if GameState.is_client_phase:
+		return "client"
+	if GameState.is_seed_merchant_phase:
+		return "seed_merchant"
+	return "building"
+
+
+func _get_plant_states(scene: Node) -> Array[Dictionary]:
+	var states: Array[Dictionary] = []
+	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
+	if plant_manager == null or not plant_manager.has_method("serialize_plant_states"):
+		return states
+	var raw_states: Variant = plant_manager.call("serialize_plant_states")
+	if raw_states is Array:
+		var state_data: Array = raw_states as Array
+		for raw_entry: Variant in state_data:
+			if raw_entry is Dictionary:
+				states.append(raw_entry as Dictionary)
+	return states
 
 
 func _serialize_layer(layer: TileMapLayer) -> Array[Dictionary]:
@@ -715,7 +774,43 @@ func _restore_counter_stock(scene: Node, raw_stock: Variant) -> void:
 	if raw_stock is Array:
 		stock = raw_stock as Array
 	building_manager.call("restore_counter_stock", stock)
-	_log("Counter stock restored: %d entries" % stock.size())
+	var requested_total: int = 0
+	for raw_entry: Variant in stock:
+		if raw_entry is Dictionary:
+			var entry: Dictionary = raw_entry as Dictionary
+			requested_total += int(entry.get("count", 0))
+	var restored_total: int = -1
+	if building_manager.has_method("total_counter_stock"):
+		restored_total = int(building_manager.call("total_counter_stock"))
+	var counter_buildings: int = -1
+	if building_manager.has_method("rose_shop_counter_count"):
+		counter_buildings = int(building_manager.call("rose_shop_counter_count"))
+	_log("Counter stock restored: entries=%d requested_roses=%d live_counter_buildings=%d live_counter_roses=%d" % [
+		stock.size(),
+		requested_total,
+		counter_buildings,
+		restored_total,
+	])
+
+
+func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
+	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
+	if plant_manager == null or not plant_manager.has_method("restore_plant_states"):
+		return
+	var states: Array = []
+	if raw_states is Array:
+		states = raw_states as Array
+	plant_manager.call("restore_plant_states", states)
+	_log("Plant states restored: %d entries" % states.size())
+
+
+func _restore_day_phase(scene: Node, phase: String) -> void:
+	if phase == "":
+		return
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager != null and building_manager.has_method("restore_day_phase"):
+		building_manager.call("restore_day_phase", phase)
+		_log("Day phase restored: %s" % phase)
 
 
 func _reindex_loaded_layers(scene: Node) -> void:
@@ -793,7 +888,110 @@ func _validate_save(data: Dictionary) -> String:
 					return "invalid counter stock entry"
 			if int(entry["count"]) < 0:
 				return "invalid counter stock count"
+	if data.has("plant_states"):
+		if not (data["plant_states"] is Array):
+			return "invalid plant states"
+		var plant_states: Array = data["plant_states"] as Array
+		for raw_entry: Variant in plant_states:
+			if not (raw_entry is Dictionary):
+				return "invalid plant state entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "watered_once", "grownup"]:
+				if not entry.has(field):
+					return "invalid plant state entry"
+			if not (entry["watered_once"] is bool) or not (entry["grownup"] is bool):
+				return "invalid plant state value"
+	if data.has("day_phase"):
+		var phase: String = str(data["day_phase"])
+		if not ["building", "morning", "client", "seed_merchant"].has(phase):
+			return "invalid day phase"
 	return ""
+
+
+func _save_summary(data: Dictionary) -> String:
+	var progression_data: Dictionary = data.get("progression", {}) as Dictionary
+	var layers: Dictionary = data.get("layers", {}) as Dictionary
+	var plant_layer_count: int = 0
+	var raw_plant_layer: Variant = layers.get("plantz", [])
+	if raw_plant_layer is Array:
+		var plant_layer_cells: Array = raw_plant_layer as Array
+		plant_layer_count = plant_layer_cells.size()
+	var plant_states: Array = []
+	var raw_plant_states: Variant = data.get("plant_states", [])
+	if raw_plant_states is Array:
+		plant_states = raw_plant_states as Array
+	var grown_count: int = 0
+	var watered_count: int = 0
+	for raw_entry: Variant in plant_states:
+		if not (raw_entry is Dictionary):
+			continue
+		var entry: Dictionary = raw_entry as Dictionary
+		if bool(entry.get("grownup", false)):
+			grown_count += 1
+		if bool(entry.get("watered_once", false)):
+			watered_count += 1
+	var counter_stock: Array = []
+	var raw_counter_stock: Variant = data.get("counter_stock", [])
+	if raw_counter_stock is Array:
+		counter_stock = raw_counter_stock as Array
+	var counter_total: int = 0
+	for raw_counter: Variant in counter_stock:
+		if raw_counter is Dictionary:
+			var counter_entry: Dictionary = raw_counter as Dictionary
+			counter_total += int(counter_entry.get("count", 0))
+	var player_data: Dictionary = data.get("player", {}) as Dictionary
+	var inventory_count: int = 0
+	var raw_inventory: Variant = player_data.get("inventory", [])
+	if raw_inventory is Array:
+		var inventory: Array = raw_inventory as Array
+		inventory_count = inventory.size()
+	return "phase=%s day=%d seeds=%d gems=%d money=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d" % [
+		str(data.get("day_phase", "<missing>")),
+		int(progression_data.get("nDays", 0)),
+		int(progression_data.get("seeds", 0)),
+		int(progression_data.get("gems", 0)),
+		int(progression_data.get("money", 0)),
+		plant_layer_count,
+		plant_states.size(),
+		watered_count,
+		grown_count,
+		counter_stock.size(),
+		counter_total,
+		inventory_count,
+	]
+
+
+func _live_scene_summary(scene: Node) -> String:
+	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
+	var rose_count_value: int = -1
+	var grown_count_value: int = -1
+	var unwatered_count_value: int = -1
+	if plant_manager != null:
+		if plant_manager.has_method("rose_count"):
+			rose_count_value = int(plant_manager.call("rose_count"))
+		if plant_manager.has_method("grownup_rose_count"):
+			grown_count_value = int(plant_manager.call("grownup_rose_count"))
+		if plant_manager.has_method("unwatered_rose_count"):
+			unwatered_count_value = int(plant_manager.call("unwatered_rose_count"))
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	var counter_total: int = -1
+	var counter_buildings: int = -1
+	if building_manager != null and building_manager.has_method("total_counter_stock"):
+		counter_total = int(building_manager.call("total_counter_stock"))
+	if building_manager != null and building_manager.has_method("rose_shop_counter_count"):
+		counter_buildings = int(building_manager.call("rose_shop_counter_count"))
+	return "phase=%s day=%d seeds=%d gems=%d money=%d roses=%d grown=%d unwatered=%d counter_buildings=%d counter_total=%d" % [
+		_get_day_phase(),
+		progression.get_value(&"nDays"),
+		progression.get_value(SEED_KEY),
+		progression.get_value(GEM_KEY),
+		progression.get_value(MONEY_KEY),
+		rose_count_value,
+		grown_count_value,
+		unwatered_count_value,
+		counter_buildings,
+		counter_total,
+	]
 
 
 func _notify(message: String) -> void:
@@ -811,5 +1009,5 @@ func _fail(message: String) -> void:
 	_notify(message)
 
 
-func _log(_message: String) -> void:
-	pass
+func _log(message: String) -> void:
+	print("[SAVE] Progression: " + message)

@@ -1339,7 +1339,7 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="spot" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1455932304]
-position = Vector2(903, -368)
+position = Vector2(978, 35)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 

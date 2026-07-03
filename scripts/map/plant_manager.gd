@@ -49,9 +49,24 @@ func _connect_day_started() -> void:
 func _on_day_started(_day_number: int) -> void:
 	var delay_seconds: float = float(NEW_DAY_DELAY) / 1000.0
 	await get_tree().create_timer(delay_seconds).timeout
-	grow_green_roses()
+	var grown_count: int = grow_green_roses()
+	var progression_node: Node = _get_progression_node()
+	if progression_node == null or not progression_node.has_method("auto_save_after_rose_growth"):
+		_log("Rose-growth auto-save blocked: progression node missing")
+		return
+	var saved: bool = bool(progression_node.call("auto_save_after_rose_growth"))
+	if not saved:
+		_log("Rose-growth auto-save failed; new day remains locked")
+		return
+	_log("Rose-growth auto-save succeeded; grown_roses=%d" % grown_count)
 	new_day_finished.emit()
 	day_seed_harvest_finished.emit()
+
+func _get_progression_node() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("progression")
 
 func initialize_from_layer() -> void:
 	_plants.clear()
@@ -280,6 +295,51 @@ func get_plant_cells() -> Array[Vector2i]:
 		cells.append(cell)
 	return cells
 
+func serialize_plant_states() -> Array[Dictionary]:
+	var states: Array[Dictionary] = []
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var plant_data: Dictionary = _plants[cell] as Dictionary
+		states.append({
+			"x": cell.x,
+			"y": cell.y,
+			"watered_once": bool(plant_data.get("watered_once", false)),
+			"grownup": bool(plant_data.get("grownup", false)),
+		})
+	return states
+
+func restore_plant_states(saved_states: Array) -> void:
+	var restored_count: int = 0
+	var ignored_count: int = 0
+	var grown_count: int = 0
+	var watered_count: int = 0
+	for raw_entry: Variant in saved_states:
+		if not (raw_entry is Dictionary):
+			ignored_count += 1
+			continue
+		var entry: Dictionary = raw_entry as Dictionary
+		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
+		if not _plants.has(cell):
+			ignored_count += 1
+			continue
+		var plant_data: Dictionary = _plants[cell] as Dictionary
+		plant_data["watered_once"] = bool(entry.get("watered_once", plant_data.get("watered_once", false)))
+		plant_data["grownup"] = bool(entry.get("grownup", plant_data.get("grownup", false)))
+		_plants[cell] = plant_data
+		restored_count += 1
+		if bool(plant_data.get("watered_once", false)):
+			watered_count += 1
+		if bool(plant_data.get("grownup", false)):
+			grown_count += 1
+	_log("Restore plant states: saved=%d restored=%d ignored=%d watered=%d grown=%d live_roses=%d" % [
+		saved_states.size(),
+		restored_count,
+		ignored_count,
+		watered_count,
+		grown_count,
+		rose_count(),
+	])
+
 func add_plant(cell: Vector2i) -> void:
 	if _plants.has(cell):
 		return
@@ -462,3 +522,6 @@ func _max_bucket_search_radius(origin_bucket: Vector2i) -> int:
 		var bucket: Vector2i = raw_bucket
 		max_radius = max(max_radius, max(abs(bucket.x - origin_bucket.x), abs(bucket.y - origin_bucket.y)))
 	return max_radius
+
+func _log(message: String) -> void:
+	print("[SAVE] PlantManager: " + message)

@@ -4,12 +4,16 @@ class_name PlayerController
 const CONTROL_MODE_MANUAL: int = 1
 const SMASH_CLASS_PLAYER: int = 1
 const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
+const INPUT_MODE_PAD: String = "pad"
+const INPUT_MODE_KMOUSE: String = "kmouse"
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
 @onready var projectile_system: Node = $"../../CPP/ProjectileSystemNative"
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
+@onready var shop: Control = $"../../GameUI/Shop"
+@onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
 
@@ -38,9 +42,12 @@ var _mouse_was_locked_before_pause: bool = false
 var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
 var _active_gamepad_device: int = -1
-var _left_trigger_pressed: bool = false
-var _right_trigger_pressed: bool = false
-var _emulated_mouse_button_mask: int = 0
+var _control_mode: String = INPUT_MODE_KMOUSE
+var _dpad_left_pressed: bool = false
+var _dpad_right_pressed: bool = false
+var _dpad_up_pressed: bool = false
+var _dpad_down_pressed: bool = false
+var _right_stick_weapon_active: bool = false
 var _rush_active: bool = false
 var _rush_shift_was_pressed: bool = false
 var _rush_time_left: float = 0.0
@@ -65,16 +72,22 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton:
 		var joy_button_event: InputEventJoypadButton = event
 		_active_gamepad_device = joy_button_event.device
+		if joy_button_event.pressed:
+			_set_control_mode(INPUT_MODE_PAD)
 		if joy_button_event.button_index == JOY_BUTTON_A:
-			_emulate_mouse_button(MOUSE_BUTTON_LEFT, joy_button_event.pressed)
+			if joy_button_event.pressed:
+				_handle_pad_accept()
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_B:
-			_emulate_mouse_button(MOUSE_BUTTON_RIGHT, joy_button_event.pressed)
+			if joy_button_event.pressed:
+				_handle_pad_cancel()
 			get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey:
 		var key_event: InputEventKey = event
+		if key_event.pressed and not key_event.echo:
+			_set_control_mode(INPUT_MODE_KMOUSE)
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_P:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
@@ -83,9 +96,17 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadMotion:
 		var joy_motion_event: InputEventJoypadMotion = event
 		_active_gamepad_device = joy_motion_event.device
+		if absf(joy_motion_event.axis_value) > gamepad_stick_deadzone:
+			_set_control_mode(INPUT_MODE_PAD)
+
+	if event is InputEventMouseMotion:
+		var mouse_motion: InputEventMouseMotion = event
+		if mouse_motion.relative.length_squared() > 0.0:
+			_set_control_mode(INPUT_MODE_KMOUSE)
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
+		_set_control_mode(INPUT_MODE_KMOUSE)
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
 			# In build mode the click belongs to the build system, not the weapon.
 			if _in_build_mode():
@@ -105,30 +126,28 @@ func _process(delta: float) -> void:
 	if _startup_loading_active():
 		return
 
-	_update_gamepad_cursor(delta)
-	_update_gamepad_slot_input()
+	_update_pad_cursor(delta)
+	_update_pad_navigation_input()
 	_update_player_input(delta)
 	_update_gun_fire(delta)
 	_update_lance_sprite()
 	camera_controller.process(delta, _paused)
 
-func _emulate_mouse_button(button_index: MouseButton, pressed: bool) -> void:
-	var button_mask: int = MOUSE_BUTTON_MASK_LEFT if button_index == MOUSE_BUTTON_LEFT else MOUSE_BUTTON_MASK_RIGHT
-	if pressed:
-		_emulated_mouse_button_mask |= button_mask
+func _set_control_mode(mode: String) -> void:
+	if _control_mode == mode:
+		return
+	_control_mode = mode
+	if _control_mode == INPUT_MODE_PAD:
+		Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN)
 	else:
-		_emulated_mouse_button_mask &= ~button_mask
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
-	var mouse_event: InputEventMouseButton = InputEventMouseButton.new()
-	var cursor_position: Vector2 = get_viewport().get_mouse_position()
-	mouse_event.button_index = button_index
-	mouse_event.pressed = pressed
-	mouse_event.button_mask = _emulated_mouse_button_mask
-	mouse_event.position = cursor_position
-	mouse_event.global_position = cursor_position
-	Input.parse_input_event(mouse_event)
+func get_control_mode() -> String:
+	return _control_mode
 
-func _update_gamepad_cursor(delta: float) -> void:
+func _update_pad_cursor(delta: float) -> void:
+	if _control_mode != INPUT_MODE_PAD or not _in_build_mode():
+		return
 	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	if stick == Vector2.ZERO:
 		return
@@ -144,20 +163,48 @@ func _update_gamepad_cursor(delta: float) -> void:
 	cursor_position = cursor_position.clamp(Vector2.ZERO, max_position)
 	Input.warp_mouse(cursor_position)
 
-func _update_gamepad_slot_input() -> void:
+func _update_pad_navigation_input() -> void:
 	if _active_gamepad_device < 0:
-		_left_trigger_pressed = false
-		_right_trigger_pressed = false
+		_dpad_left_pressed = false
+		_dpad_right_pressed = false
+		_dpad_up_pressed = false
+		_dpad_down_pressed = false
 		return
 
-	var left_pressed: bool = Input.get_joy_axis(_active_gamepad_device, JOY_AXIS_TRIGGER_LEFT) >= gamepad_trigger_threshold
-	var right_pressed: bool = Input.get_joy_axis(_active_gamepad_device, JOY_AXIS_TRIGGER_RIGHT) >= gamepad_trigger_threshold
-	if left_pressed and not _left_trigger_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
+	var left_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_LEFT)
+	var right_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_RIGHT)
+	var up_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_UP)
+	var down_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_DOWN)
+	if left_pressed and not _dpad_left_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
 		game_ui.call("step_selected_quick_slot", -1)
-	if right_pressed and not _right_trigger_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
+	if right_pressed and not _dpad_right_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
 		game_ui.call("step_selected_quick_slot", 1)
-	_left_trigger_pressed = left_pressed
-	_right_trigger_pressed = right_pressed
+	if up_pressed and not _dpad_up_pressed:
+		_step_pad_shop_selection(-1)
+	if down_pressed and not _dpad_down_pressed:
+		_step_pad_shop_selection(1)
+	_dpad_left_pressed = left_pressed
+	_dpad_right_pressed = right_pressed
+	_dpad_up_pressed = up_pressed
+	_dpad_down_pressed = down_pressed
+
+func _step_pad_shop_selection(direction: int) -> void:
+	if shop != null and shop.has_method("step_pad_selection"):
+		shop.call("step_pad_selection", direction)
+
+func _handle_pad_accept() -> void:
+	if _paused or _is_inventory_open():
+		return
+	if shop != null and shop.has_method("activate_pad_selection") and bool(shop.call("activate_pad_selection")):
+		return
+	if _in_build_mode() and build_system != null and build_system.has_method("pad_place_selected_at_cursor"):
+		build_system.call("pad_place_selected_at_cursor")
+
+func _handle_pad_cancel() -> void:
+	if _paused or _is_inventory_open():
+		return
+	if _in_build_mode() and build_system != null and build_system.has_method("pad_unbuild_at_cursor"):
+		build_system.call("pad_unbuild_at_cursor")
 
 func _gamepad_stick_vector(x_axis: JoyAxis, y_axis: JoyAxis) -> Vector2:
 	if _active_gamepad_device < 0:
@@ -183,16 +230,25 @@ func _update_gun_fire(delta: float) -> void:
 	if not player:
 		return
 	var origin: Vector2 = _weapon_origin(player)
-	var direction: Vector2 = get_global_mouse_position() - origin
+	var pad_aim: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
+	var direction: Vector2 = pad_aim if _control_mode == INPUT_MODE_PAD else get_global_mouse_position() - origin
 	var weapon_id: String = ""
 	var trigger_allowed: bool = not _paused and not _is_inventory_open()
-	trigger_allowed = trigger_allowed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	trigger_allowed = trigger_allowed and get_viewport().gui_get_hovered_control() == null
+	if _control_mode == INPUT_MODE_PAD:
+		trigger_allowed = trigger_allowed and pad_aim != Vector2.ZERO
+	else:
+		trigger_allowed = trigger_allowed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		trigger_allowed = trigger_allowed and get_viewport().gui_get_hovered_control() == null
 	trigger_allowed = trigger_allowed and not _in_build_mode()
 	if trigger_allowed:
 		var selected_id: String = _selected_item_id()
 		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
 			weapon_id = selected_id
+			if _control_mode == INPUT_MODE_PAD and not fight_system.is_held_weapon(weapon_id) and not _right_stick_weapon_active:
+				fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))
+			_right_stick_weapon_active = _control_mode == INPUT_MODE_PAD
+	else:
+		_right_stick_weapon_active = false
 	var player_velocity: Vector2 = _agent_velocity(player_nav_id)
 	fight_system.process_held_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player), delta, player_velocity)
 
@@ -309,7 +365,8 @@ func _update_lance_sprite() -> void:
 		return
 
 	var origin: Vector2 = _weapon_origin(player)
-	var direction: Vector2 = get_global_mouse_position() - origin
+	var pad_aim: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
+	var direction: Vector2 = pad_aim if _control_mode == INPUT_MODE_PAD and pad_aim != Vector2.ZERO else get_global_mouse_position() - origin
 	if direction.length_squared() <= 0.000001:
 		lance.visible = false
 		return

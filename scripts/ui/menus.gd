@@ -3,9 +3,9 @@ extends Node
 ##
 ## Owns the auto-save lifecycle and the in-scene confirmation prompts:
 ##   - On launch the latest auto-save is restored.
-##   - Each new day (the night -> day transition) auto-saves.
+##   - The plant manager auto-saves once after overnight rose growth completes.
 ##   - R asks to reset the game (wipe the save and start a fresh new game).
-##   - ESC asks to quit (auto-saving first).
+##   - ESC asks to quit without touching the auto-save slot.
 ##
 ## The prompt UI is premade and themed in mainRun.tscn under `Prompts`; this
 ## script only drives its message and YES/NO behaviour. The actual save / load /
@@ -26,20 +26,10 @@ func _ready() -> void:
 	_yes_button.pressed.connect(_on_yes_pressed)
 	_no_button.pressed.connect(_on_no_pressed)
 
-	# Auto-save whenever a new day begins (night -> day transition).
-	if _progression.has_signal("day_started"):
-		_progression.connect("day_started", _on_day_started)
-
 	# Restore the auto-save into the freshly loaded scene. Runs after the
 	# progression node's own _ready, so an F9 pending-load is not applied twice.
 	if _progression.has_method("load_on_start"):
 		_progression.call("load_on_start")
-
-
-## A new day began (night -> day): auto-save the run (separate slot from F5/F9).
-func _on_day_started(_day_number: int) -> void:
-	if _progression.has_method("auto_save"):
-		_progression.call("auto_save")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -95,8 +85,6 @@ func _confirm_reset() -> void:
 		_progression.call("reset_game")
 
 
-## YES on the quit prompt: auto-save (skipped automatically during night) and quit.
+## YES on the quit prompt: quit without touching the rose-growth auto-save slot.
 func _confirm_quit() -> void:
-	if _progression.has_method("auto_save"):
-		_progression.call("auto_save")
 	get_tree().quit()

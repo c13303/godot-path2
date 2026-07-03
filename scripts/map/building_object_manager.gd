@@ -16,7 +16,7 @@ signal building_removed(cell: Vector2i, item_id: String)
 const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
 const LIGHT_ENERGY: float = 0.75
-const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap"]
+const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter"]
 
 var _buildings_by_cell: Dictionary = {}
 var _runtime_nodes_by_cell: Dictionary = {}
@@ -34,6 +34,10 @@ func initialize_from_layer() -> void:
 	_clear_static_obstacles()
 	_initialize_from_one_layer(traversable_buildings)
 	_initialize_from_one_layer(blocking_buildings)
+	_log("Indexed buildings=%d rose_shop_counters=%d" % [
+		_buildings_by_cell.size(),
+		count_buildings_by_item_id("rose_shop_counter"),
+	])
 
 func _initialize_from_one_layer(layer: TileMapLayer) -> void:
 	if not layer:
@@ -285,6 +289,9 @@ func _set_runtime_node_light_enabled(runtime_node: Node, enabled: bool) -> void:
 		if child is PointLight2D:
 			var light: PointLight2D = child as PointLight2D
 			light.enabled = enabled
+
+func _log(message: String) -> void:
+	print("[SAVE] BuildingObjectManager: " + message)
 
 func _remove_runtime_node(cell: Vector2i) -> void:
 	if not _runtime_nodes_by_cell.has(cell):
