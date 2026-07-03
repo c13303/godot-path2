@@ -28,6 +28,7 @@ const TURRET_ID: String = "turret1"
 # reach while remaining wall-aware.
 const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
+const LEGACY_SPAWN_INTERVAL_SECONDS: float = 3.0
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
@@ -85,10 +86,6 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
-@export_group("Water Edge Recovery")
-@export_range(0.0, 1.0, 0.01) var water_edge_stuck_coverage_threshold: float = 0.15
-@export_range(0.0, 3.0, 0.01, "or_greater") var water_edge_stuck_seconds: float = 0.35
-@export_range(0.0, 64.0, 0.5, "or_greater") var water_edge_stuck_speed: float = 2.0
 @export_group("CPP > Gardens")
 @export var dont_shrink_gardens: bool = true
 @export_group("")
@@ -166,7 +163,6 @@ var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
 var _turret_eating_agents: Dictionary = {}
 var _drowning_agents: Dictionary = {}
-var _water_edge_stuck_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
@@ -298,6 +294,9 @@ var _playlist_spawning_enabled: bool = false
 var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
+var _legacy_spawn_timers: Dictionary = {}  # Vector2i -> float
+var _legacy_spawn_limit_this_night: int = 0
+var _legacy_spawned_this_night: int = 0
 var _client_sale_active: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
@@ -556,6 +555,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_night_preparation_token += 1
 		_night_preparing = false
 		_night_preparation_ready = false
+		_clear_legacy_spawn_fallback()
 		_clear_waterpool_directional_field()
 		return
 	# Night visuals/build lock become active immediately, but spawning remains gated
@@ -566,7 +566,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_current_playlist_night_index = _get_playlist_night_index_from_progression()
 	if _playlist_spawning_enabled:
 		if not _spawn_playlist_controller.begin_night(_current_playlist_night_index):
-			push_error("BuildingManager: playlist night index %d is invalid; spawning disabled for this night." % (_current_playlist_night_index + 1))
+			push_error("BuildingManager: playlist night index %d is invalid; using legacy fallback spawning this night." % (_current_playlist_night_index + 1))
 			_playlist_spawning_enabled = false
 			_playlist_spawning_invalid = true
 		else:
@@ -576,10 +576,14 @@ func _on_game_mode_changed(is_night: bool) -> void:
 			])
 			for line: String in _spawn_playlist_controller.get_current_night_debug_lines():
 				print("BuildingManager: playlist " + line)
+	if _playlist_spawning_enabled:
+		_clear_legacy_spawn_fallback()
+	else:
+		_begin_legacy_spawn_fallback_night()
 	if _playlist_spawning_invalid:
-		push_error("BuildingManager: assigned spawn playlist is invalid; spawning remains disabled this night.")
+		push_error("BuildingManager: assigned spawn playlist is invalid; using legacy fallback spawning this night.")
 	elif not _playlist_spawning_enabled:
-		push_error("BuildingManager: no valid spawn playlist is enabled; spawning remains disabled this night.")
+		push_error("BuildingManager: no valid spawn playlist is enabled; using legacy fallback spawning this night.")
 	_ready_spawner_queue.clear()
 	_ready_spawner_queue_set.clear()
 	_night_preparation_token += 1
@@ -670,6 +674,36 @@ func _night_preparation_is_current(token: int) -> bool:
 func _night_preparation_budget_us() -> int:
 	return maxi(500, int(night_preparation_budget_ms * 1000.0))
 
+func _flow_uses_async_requests() -> bool:
+	return (
+		flow != null
+		and flow.has_method("request_flow_to_group")
+		and flow.has_method("are_async_flows_idle")
+		and flow.has_method("is_group_flow_request_ready")
+	)
+
+func _flow_supports_sync_assign() -> bool:
+	return flow != null and flow.has_method("assign_flow_to_group")
+
+func _group_flow_id_is_ready(group_id: int) -> bool:
+	if group_id <= IDLE_GROUP:
+		return false
+	if flow == null:
+		return false
+	if flow.has_method("is_group_flow_request_ready"):
+		return bool(flow.call("is_group_flow_request_ready", group_id))
+	return flow.has_method("group_route_cost_at_world")
+
+func _group_flow_is_ready_at_world(group_id: int, world_pos: Vector2) -> bool:
+	if group_id <= IDLE_GROUP:
+		return false
+	if flow == null or not flow.has_method("group_route_cost_at_world"):
+		return false
+	if not _group_flow_id_is_ready(group_id):
+		return false
+	var cost: float = float(flow.call("group_route_cost_at_world", group_id, world_pos))
+	return is_finite(cost)
+
 func _run_night_preparation(token: int) -> void:
 	# Start on a clean frame; the mode-change input frame performs no navigation.
 	await get_tree().process_frame
@@ -717,13 +751,15 @@ func _run_night_preparation(token: int) -> void:
 	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
 		fight_system.call("prepare_night_static_colliders")
 
-	# Do not open the spawn gate until the worker has finished and the native
-	# node's process callback has applied every completed field to its group.
-	if not flow or not flow.has_method("are_async_flows_idle"):
-		push_error("BuildingManager: rebuilt FlowFieldNative is required for safe night preparation")
+	# Do not open the spawn gate until async work has finished. Older exported
+	# native DLLs may not expose async status methods; in that case requests are
+	# assigned synchronously by _request_group_flow_rebuild().
+	if not _flow_uses_async_requests() and not _flow_supports_sync_assign():
+		push_error("BuildingManager: FlowFieldNative cannot assign group routes; night preparation cannot spawn monsters.")
 		return
-	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-		await get_tree().process_frame
+	if _flow_uses_async_requests():
+		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+			await get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return
 	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_MONSTER], true):
@@ -781,12 +817,13 @@ func _run_client_preparation(token: int) -> void:
 	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
 		fight_system.call("prepare_night_static_colliders")
 
-	if not flow or not flow.has_method("are_async_flows_idle"):
-		push_error("BuildingManager: rebuilt FlowFieldNative is required for safe client preparation")
+	if not _flow_uses_async_requests() and not _flow_supports_sync_assign():
+		push_error("BuildingManager: FlowFieldNative cannot assign group routes; client preparation cannot spawn clients.")
 		_abort_client_preparation(token)
 		return
-	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-		await get_tree().process_frame
+	if _flow_uses_async_requests():
+		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+			await get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return
 	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT], false):
@@ -828,7 +865,7 @@ func _initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token:
 	return true
 
 func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check_exit_wall_escapes: bool) -> bool:
-	if not flow or not flow.has_method("group_route_cost_at_world") or not flow.has_method("is_group_flow_request_ready"):
+	if not flow or not flow.has_method("group_route_cost_at_world"):
 		return false
 	for raw_spawner_cell: Variant in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
@@ -841,10 +878,7 @@ func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], chec
 			return false
 		var group_id: int = int(route.get("escape_group", -1))
 		var goal_world: Vector2 = route.get("escape_world", Vector2.ZERO) as Vector2
-		if group_id <= IDLE_GROUP or not bool(flow.call("is_group_flow_request_ready", group_id)):
-			return false
-		var cost: float = float(flow.call("group_route_cost_at_world", group_id, goal_world))
-		if not is_finite(cost):
+		if not _group_flow_is_ready_at_world(group_id, goal_world):
 			return false
 	if not check_exit_wall_escapes:
 		return true
@@ -852,18 +886,14 @@ func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], chec
 		var escape: Dictionary = raw_escape as Dictionary
 		var exit_group_id: int = int(escape.get("escape_group", -1))
 		var exit_goal_world: Vector2 = escape.get("escape_world", Vector2.ZERO) as Vector2
-		if exit_group_id > IDLE_GROUP:
-			if not bool(flow.call("is_group_flow_request_ready", exit_group_id)):
-				return false
-			var exit_cost: float = float(flow.call("group_route_cost_at_world", exit_group_id, exit_goal_world))
-			if not is_finite(exit_cost):
-				return false
+		if exit_group_id > IDLE_GROUP and not _group_flow_is_ready_at_world(exit_group_id, exit_goal_world):
+			return false
 	return true
 
 func _prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
 	if not _flow_ready or not agent_manager or not flow:
 		return true
-	if not flow.has_method("are_async_flows_idle") or not flow.has_method("is_group_flow_request_ready"):
+	if not flow.has_method("group_route_cost_at_world"):
 		return false
 	var requested_groups: Dictionary = {}
 	var slice_started_us: int = Time.get_ticks_usec()
@@ -889,13 +919,14 @@ func _prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -
 			if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
 				await get_tree().process_frame
 				slice_started_us = Time.get_ticks_usec()
-	while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-		await get_tree().process_frame
+	if _flow_uses_async_requests():
+		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
+			await get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return false
 	for raw_group_id: Variant in requested_groups.keys():
 		var group_id: int = int(raw_group_id)
-		if not bool(flow.call("is_group_flow_request_ready", group_id)):
+		if not _group_flow_id_is_ready(group_id):
 			return false
 	_mark_spawner_entry_routes_ready_for_groups(requested_groups)
 	return true
@@ -2058,7 +2089,7 @@ func _rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
 		# Night preparation submits these to the native worker and holds spawning
 		# until every result is applied. Runtime fallback keeps the prior synchronous
 		# behavior for callers that explicitly need an immediately queryable field.
-		if use_async_requests:
+		if use_async_requests and _flow_uses_async_requests():
 			_request_group_flow_rebuild(escape_group, escape_world)
 		elif flow.has_method("assign_flow_to_group"):
 			flow.call("assign_flow_to_group", escape_group, escape_world)
@@ -2105,9 +2136,9 @@ func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
 	if not _is_finite_world(goal_world):
 		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
 		return
-	if flow and flow.has_method("request_flow_to_group"):
+	if _flow_uses_async_requests():
 		flow.call("request_flow_to_group", group_id, goal_world)
-	elif flow and flow.has_method("assign_flow_to_group"):
+	elif _flow_supports_sync_assign():
 		flow.call("assign_flow_to_group", group_id, goal_world)
 
 func _is_finite_world(p: Vector2) -> bool:
@@ -2161,15 +2192,10 @@ func _process_spawners(delta: float) -> void:
 	var mc: int = _monster_count()
 	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
 	_spawn_pass_stats["active_monsters"] = mc
-	if _playlist_spawning_invalid:
-		if mc == 0:
-			_empty_night_elapsed += delta
-			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
-				GameState.start_day()
-		return
 	if _playlist_spawning_enabled:
 		_process_playlist_spawners(delta, mc)
 		return
+	_process_legacy_spawners(delta, mc)
 	return
 
 
@@ -2196,6 +2222,113 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 	_empty_night_elapsed = 0.0
 	_enqueue_playlist_spawn_requests(delta)
 	_drain_ready_spawner_queue_budgeted()
+
+
+func _begin_legacy_spawn_fallback_night() -> void:
+	_legacy_spawn_timers.clear()
+	_legacy_spawned_this_night = 0
+	_legacy_spawn_limit_this_night = _compute_legacy_spawn_limit()
+	for raw_spawner_cell: Variant in _spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
+			continue
+		_legacy_spawn_timers[spawner_cell] = 0.0
+	print("BuildingManager: legacy spawn fallback started: limit=%d spawners=%d" % [
+		_legacy_spawn_limit_this_night,
+		_legacy_spawn_timers.size(),
+	])
+
+
+func _clear_legacy_spawn_fallback() -> void:
+	_legacy_spawn_timers.clear()
+	_legacy_spawn_limit_this_night = 0
+	_legacy_spawned_this_night = 0
+
+
+func _compute_legacy_spawn_limit() -> int:
+	var prog: Node = _get_progression()
+	if prog == null:
+		return 1
+	var day_number: int = int(prog.call("get_value", &"nDays"))
+	var monsters_per_day: int = int(prog.call("get_value", &"monster_per_day"))
+	var monsters_per_rose: int = int(prog.call("get_value", &"monster_per_rose"))
+	var rose_count: int = 0
+	if plant_manager != null and plant_manager.has_method("rose_count"):
+		rose_count = int(plant_manager.call("rose_count"))
+	return maxi(1, day_number * monsters_per_day + rose_count * monsters_per_rose)
+
+
+func _process_legacy_spawners(delta: float, active_monsters: int) -> void:
+	if _legacy_spawn_timers.is_empty():
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				GameState.start_day()
+		return
+	if _legacy_spawned_this_night >= _legacy_spawn_limit_this_night:
+		if active_monsters == 0:
+			GameState.start_day()
+		return
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = _no_plants_remaining()
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				_log("Legacy fallback night stalled because no plants remain.")
+				GameState.start_day()
+				return
+		else:
+			_empty_night_elapsed = 0.0
+		return
+	_empty_night_elapsed = 0.0
+	_drain_legacy_spawners_budgeted(delta)
+
+
+func _drain_legacy_spawners_budgeted(delta: float) -> void:
+	var start_us: int = Time.get_ticks_usec()
+	var budget_us: int = int(spawner_budget_ms * 1000.0)
+	var processed: int = 0
+	var spawner_cells: Array = _legacy_spawn_timers.keys()
+	for raw_spawner_cell: Variant in spawner_cells:
+		if _legacy_spawned_this_night >= _legacy_spawn_limit_this_night:
+			break
+		if processed >= spawner_budget_per_frame:
+			break
+		if processed > 0 and budget_us > 0:
+			if Time.get_ticks_usec() - start_us >= budget_us:
+				break
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if not _spawners.has(spawner_cell):
+			_legacy_spawn_timers.erase(spawner_cell)
+			continue
+		var time_left: float = maxf(0.0, float(_legacy_spawn_timers.get(spawner_cell, 0.0)) - delta)
+		_legacy_spawn_timers[spawner_cell] = time_left
+		if time_left > 0.0:
+			continue
+		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
+		processed += 1
+		var spawner_us: int = Time.get_ticks_usec()
+		var spawned: bool = _spawn_monster_from(spawner_cell, &"basic")
+		if spawned:
+			_legacy_spawned_this_night += 1
+			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
+			_legacy_spawn_timers[spawner_cell] = LEGACY_SPAWN_INTERVAL_SECONDS
+		else:
+			_spawn_pass_stats["skipped_count"] = int(_spawn_pass_stats["skipped_count"]) + 1
+			_legacy_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
+		if _over_garden_threshold_us(spawner_elapsed_us):
+			_warn_garden_task_lag_us("_process_spawners.legacy_spawner_total", spawner_elapsed_us,
+				"spawner_cell=%s spawned=%s fallback=%d/%d" % [
+					str(spawner_cell),
+					str(spawned),
+					_legacy_spawned_this_night,
+					_legacy_spawn_limit_this_night,
+				])
+	_spawn_pass_stats["ready_queue_remaining"] = 0
+	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
 
 
 func _on_new_day_finished() -> void:
@@ -3667,10 +3800,8 @@ func _process_turret_eating_agents(delta: float) -> void:
 
 func _process_drowning_agents(delta: float) -> void:
 	if watersources == null:
-		_water_edge_stuck_agents.clear()
 		return
 
-	var steering: Node = _get_steering_system()
 	for group_name: String in ["monsters", "clients", "merchants"]:
 		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
@@ -3681,22 +3812,12 @@ func _process_drowning_agents(delta: float) -> void:
 				continue
 			_update_monster_splash(agent, delta)
 			if _turret_eating_agents.has(nav_id):
-				_water_edge_stuck_agents.erase(nav_id)
 				continue
 			if _drowning_agents.has(nav_id):
-				_water_edge_stuck_agents.erase(nav_id)
 				continue
 			var water_coverage: float = _agent_water_coverage(agent)
 			var in_water: bool = _agent_over_drowning_water_with_coverage(agent, water_coverage)
-			if in_water:
-				_water_edge_stuck_agents.erase(nav_id)
-				if _agent_can_drown(agent):
-					_start_agent_drowning(nav_id, agent)
-				continue
-			if not _agent_can_drown(agent):
-				_water_edge_stuck_agents.erase(nav_id)
-				continue
-			if _agent_water_edge_stuck_should_drown(nav_id, water_coverage, delta, steering):
+			if in_water and _agent_can_drown(agent):
 				_start_agent_drowning(nav_id, agent)
 
 	var dead_agents: Array[Node2D] = []
@@ -3771,36 +3892,6 @@ func _agent_over_drowning_water_with_coverage(agent: Node2D, water_coverage: flo
 		return watersources.has_water_at_foot_position(agent.global_position)
 	return water_coverage >= threshold
 
-func _agent_water_edge_stuck_should_drown(nav_id: int, water_coverage: float, delta: float, steering: Node) -> bool:
-	if watersources == null:
-		_water_edge_stuck_agents.erase(nav_id)
-		return false
-
-	var normal_threshold: float = clampf(watersources.drowning_coverage_threshold, 0.0, 1.0)
-	var edge_threshold: float = clampf(water_edge_stuck_coverage_threshold, 0.0, 1.0)
-	if normal_threshold <= 0.0 or edge_threshold <= 0.0:
-		_water_edge_stuck_agents.erase(nav_id)
-		return false
-	if water_coverage < edge_threshold or water_coverage >= normal_threshold:
-		_water_edge_stuck_agents.erase(nav_id)
-		return false
-	if steering == null or not steering.has_method("get_agent_velocity"):
-		_water_edge_stuck_agents.erase(nav_id)
-		return false
-
-	var velocity: Vector2 = steering.call("get_agent_velocity", nav_id) as Vector2
-	if velocity.length() > water_edge_stuck_speed:
-		_water_edge_stuck_agents.erase(nav_id)
-		return false
-
-	var elapsed: float = float(_water_edge_stuck_agents.get(nav_id, 0.0)) + delta
-	if elapsed < water_edge_stuck_seconds:
-		_water_edge_stuck_agents[nav_id] = elapsed
-		return false
-
-	_water_edge_stuck_agents.erase(nav_id)
-	return true
-
 func _agent_water_coverage(agent: Node2D) -> float:
 	if watersources == null:
 		return 0.0
@@ -3818,7 +3909,6 @@ func _agent_world_radius() -> float:
 	return 12.0
 
 func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
-	_water_edge_stuck_agents.erase(nav_id)
 	var duration: float = maxf(float(agent.get("drowning")), 0.001)
 	var raw_update_freq: Variant = agent.get("drowning_update_freq")
 	var update_freq: float = maxf(float(raw_update_freq) if raw_update_freq != null else 0.1, 0.01)
@@ -3840,7 +3930,6 @@ func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
 func _stop_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	var data: Dictionary = _drowning_agents.get(nav_id, {}) as Dictionary
 	_drowning_agents.erase(nav_id)
-	_water_edge_stuck_agents.erase(nav_id)
 	if agent.has_method("stop_drowning"):
 		agent.call("stop_drowning")
 	var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
@@ -4276,7 +4365,6 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
 	_drowning_agents.erase(nav_id)
-	_water_edge_stuck_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_paying_agents.erase(nav_id)
@@ -5371,12 +5459,7 @@ func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i)
 	var plant_group: int = int(route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
 		return false
-	if flow == null or not flow.has_method("is_group_flow_request_ready") or not flow.has_method("group_route_cost_at_world"):
-		return false
-	if not bool(flow.call("is_group_flow_request_ready", plant_group)):
-		return false
-	var cost: float = float(flow.call("group_route_cost_at_world", plant_group, _cell_center(spawner_cell)))
-	return is_finite(cost)
+	return _group_flow_is_ready_at_world(plant_group, _cell_center(spawner_cell))
 
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
 	if not _spawner_garden_routes.has(spawner_cell):

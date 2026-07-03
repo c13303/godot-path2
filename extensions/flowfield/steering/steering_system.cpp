@@ -2050,10 +2050,17 @@ void SteeringSystem::update_all(double delta)
 
         if (a.lost_timer > 0.0)
         {
-            a.lost_timer = std::max(0.0, a.lost_timer - delta);
-            a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
-            a.update_motion_state(delta, cfg);
-            continue;
+            if (a.is_propelled)
+            {
+                a.lost_timer = 0.0;
+            }
+            else
+            {
+                a.lost_timer = std::max(0.0, a.lost_timer - delta);
+                a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
+                a.update_motion_state(delta, cfg);
+                continue;
+            }
         }
 
         Vec2 goal_pos = ff->goal_center_world();
@@ -2122,10 +2129,14 @@ void SteeringSystem::update_all(double delta)
         const double lost_goal_margin = std::max(ff->tile_size() * 0.5, target_radius);
         if (flow_dir.is_zero() && dist_to_target > lost_goal_margin)
         {
-            a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
-            a.velocity = Vec2(0, 0);
-            a.update_motion_state(delta, cfg, true);
-            continue;
+            if (!a.is_propelled)
+            {
+                a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
+                a.velocity = Vec2(0, 0);
+                a.update_motion_state(delta, cfg, true);
+                continue;
+            }
+            a.lost_timer = 0.0;
         }
         Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
         if (!flow_dir.is_zero())

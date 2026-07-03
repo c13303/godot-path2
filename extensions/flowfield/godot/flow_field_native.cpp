@@ -71,9 +71,10 @@ static double layer_double_property(Object *object, const char *name, double fal
 static double navigation_blocking_coverage_threshold(Object *object)
 {
     double threshold = layer_double_property(object, "navigation_blocking_coverage_threshold", -1.0);
+    double drowning_threshold = layer_double_property(object, "drowning_coverage_threshold", 0.0);
     if (threshold < 0.0)
-        threshold = layer_double_property(object, "drowning_coverage_threshold", 0.0);
-    return clamp01(threshold);
+        threshold = drowning_threshold;
+    return clamp01(std::max(threshold, drowning_threshold));
 }
 
 void FlowFieldNative::_bind_methods()
