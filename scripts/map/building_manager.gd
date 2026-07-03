@@ -3,7 +3,6 @@ class_name BuildingManager
 
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
-signal level_completed
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
@@ -2158,6 +2157,12 @@ func _begin_morning_phase() -> void:
 		_begin_client_sale_phase()
 		return
 	_morning_harvest_active = true
+	# Grown roses can only be harvested onto shop counters. If none are placed the
+	# player must build them first ("placez les comptoirs du magasin"): auto-equip the
+	# build tool so the shop opens with the counter pre-selected (see shop._open_shop),
+	# leaving the player ready to build straight away.
+	if _rose_shop_counter_cells().is_empty():
+		_auto_select_shop_tool()
 
 
 func _process_morning_harvest_walkover() -> void:

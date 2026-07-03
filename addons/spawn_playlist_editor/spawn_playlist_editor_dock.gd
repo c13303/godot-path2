@@ -940,7 +940,7 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 
 	var labels: HBoxContainer = HBoxContainer.new()
 	outer.add_child(labels)
-	for raw_label_text in ["", "#", "Type", "Count", "Interval", "Wait Event", "Emit Event", ""]:
+	for raw_label_text in ["", "#", "Type", "Count", "Interval", "Wait Event", "Emit Event", "Emit Delay", ""]:
 		var label_text: String = str(raw_label_text)
 		var label: Label = Label.new()
 		label.text = label_text
@@ -968,7 +968,7 @@ func _header_width(label_text: String) -> Vector2:
 			return Vector2(90.0, 0.0)
 		"Count":
 			return Vector2(74.0, 0.0)
-		"Interval":
+		"Interval", "Emit Delay":
 			return Vector2(86.0, 0.0)
 		"Wait Event", "Emit Event":
 			return Vector2(110.0, 0.0)

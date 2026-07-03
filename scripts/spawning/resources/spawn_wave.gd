@@ -14,8 +14,10 @@ class_name SpawnWave
 @export_group("Playlist Events")
 ## Optional playlist event that must already be emitted during this night.
 @export var wait_for_event: StringName = &""
-## Optional playlist event emitted immediately after this wave's final successful spawn.
+## Optional playlist event emitted after this wave's final successful spawn.
 @export var emit_event: StringName = &""
+## Seconds to wait after this wave finishes before emit_event is actually emitted.
+@export_range(0.0, 3600.0, 0.1, "or_greater") var emit_delay_seconds: float = 6.0
 
 
 func is_valid_config() -> bool:

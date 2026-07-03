@@ -9,22 +9,22 @@ show_gardens = true
 show_enters_exits = true
 
 [node name="seedIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="0" unique_id=1153248331]
-offset_left = -79.0
-offset_top = 68.0
-offset_right = -39.0
-offset_bottom = 108.0
+offset_left = -123.0
+offset_top = 734.0
+offset_right = -83.0
+offset_bottom = 774.0
 
 [node name="gemIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="1" unique_id=855508628]
-offset_left = -80.0
-offset_top = 117.0
-offset_right = -40.0
-offset_bottom = 157.0
+offset_left = -124.0
+offset_top = 783.0
+offset_right = -84.0
+offset_bottom = 823.0
 
 [node name="moneyIcon" parent="GameUI/top right" parent_id_path=PackedInt32Array(401142736) index="2" unique_id=8700093]
-offset_left = -82.0
-offset_top = 16.0
-offset_right = -42.0
-offset_bottom = 56.0
+offset_left = -126.0
+offset_top = 682.0
+offset_right = -86.0
+offset_bottom = 722.0
 
 [node name="ToolbarPanel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="0" unique_id=2101533894]
 layout_mode = 1

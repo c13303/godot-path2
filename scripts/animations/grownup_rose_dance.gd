@@ -188,10 +188,10 @@ func _is_logical_grownup(cell: Vector2i) -> bool:
 	return bool(_plant_manager.call("is_rose_grownup", cell))
 
 
-func _set_source_visual_hidden(cell: Vector2i, hidden: bool) -> void:
+func _set_source_visual_hidden(cell: Vector2i, is_hidden: bool) -> void:
 	if _plant_manager == null or not _plant_manager.has_method("set_rose_visual_hidden"):
 		return
-	_plant_manager.call("set_rose_visual_hidden", cell, hidden)
+	_plant_manager.call("set_rose_visual_hidden", cell, is_hidden)
 
 
 func _cell_center_local(cell: Vector2i) -> Vector2:

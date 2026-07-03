@@ -483,6 +483,13 @@ func _open_shop() -> void:
 	_apply_phase_layout()
 	_set_shop_open(true)
 	_refresh_slots()
+	# No counters placed yet: the shop can't do anything until the player builds them
+	# (roses are harvested onto counters, clients buy from them). Pre-select the counter
+	# so the "place the shop counters" prompt is immediately actionable, ahead of the
+	# usual last-picked / first-available resume below.
+	if _should_prefer_counter():
+		_select_item(COUNTER_ID)
+		return
 	# Resume the last buildable. If it ran out while the player was away from the
 	# build tool, move to another currently usable buildable; otherwise leave the
 	# empty one selected so its price/remaining label stays visible.
@@ -625,6 +632,25 @@ func _merchant_affordable_quantity(item_id: String) -> int:
 
 func _is_item_locked(_item_id: String) -> bool:
 	return false
+
+
+## True while the shop should force the counter to the front of the selection: the
+## counter is buildable and affordable, and none have been placed yet. This is exactly
+## the state that drives the tutorial's "place the shop counters" prompt.
+func _should_prefer_counter() -> bool:
+	if not _should_show_item(COUNTER_ID) or _is_item_locked(COUNTER_ID):
+		return false
+	if _affordable_quantity(COUNTER_ID) <= 0:
+		return false
+	return _placed_counter_count() == 0
+
+
+func _placed_counter_count() -> int:
+	var scene: Node = get_tree().current_scene
+	var manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene != null else null
+	if manager != null and manager.has_method("count_buildings_by_item_id"):
+		return int(manager.call("count_buildings_by_item_id", COUNTER_ID))
+	return 0
 
 
 func _is_item_available(item_id: String) -> bool:
@@ -826,10 +852,10 @@ func _refresh_merchant_slots() -> void:
 		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
 		if cells.is_empty():
 			continue
-		var show: bool = _should_show_merchant_item(item_id)
+		var should_show: bool = _should_show_merchant_item(item_id)
 		for cell: Control in cells:
-			cell.visible = show
-		if not show:
+			cell.visible = should_show
+		if not should_show:
 			continue
 		var button: Button = _merchant_slot_buttons[item_id] as Button
 		var affordable: int = _merchant_affordable_quantity(item_id)

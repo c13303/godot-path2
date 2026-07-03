@@ -10,6 +10,7 @@ var _current_night_index: int = -1
 var _current_night: NightSpawnPlaylist
 var _tracks: Array[Dictionary] = []
 var _events_emitted: Dictionary = {}
+var _pending_emits: Array[Dictionary] = []
 var _valid_monster_types: Dictionary = {}
 var _configured: bool = false
 var _last_errors: Array[String] = []
@@ -73,6 +74,7 @@ func begin_night(night_index: int) -> bool:
 	_current_night = null
 	_tracks.clear()
 	_events_emitted.clear()
+	_pending_emits.clear()
 	if not _configured:
 		return false
 	if _playlist == null or night_index < 0 or night_index >= _playlist.nights.size():
@@ -97,6 +99,9 @@ func advance(delta: float) -> Array[Dictionary]:
 	var requests: Array[Dictionary] = []
 	if _current_night == null:
 		return requests
+	# Fire any delayed wave events whose timer has elapsed before advancing tracks,
+	# so a wave waiting on the event can react on the same tick it becomes ready.
+	_advance_pending_emits(delta)
 	for track_state: Dictionary in _tracks:
 		_advance_track_past_completed_zero_waves(track_state)
 		if bool(track_state.get("complete", false)) or bool(track_state.get("pending", false)):
@@ -196,8 +201,30 @@ func _advance_track_past_completed_zero_waves(track_state: Dictionary) -> void:
 
 
 func _emit_wave_event(wave: SpawnWave) -> void:
-	if wave.emit_event != &"":
+	if wave.emit_event == &"":
+		return
+	# A zero delay keeps the old immediate behaviour; otherwise the emit is queued and
+	# fired later from _advance_pending_emits once its timer runs out.
+	if wave.emit_delay_seconds > 0.0:
+		_pending_emits.append({"event": wave.emit_event, "time_left": wave.emit_delay_seconds})
+	else:
 		_events_emitted[wave.emit_event] = true
+
+
+# Counts down queued delayed emits, marking each event emitted once its timer elapses.
+# Any wait_for_event depending on it will see it on the tick it fires.
+func _advance_pending_emits(delta: float) -> void:
+	if _pending_emits.is_empty():
+		return
+	var still_pending: Array[Dictionary] = []
+	for pending: Dictionary in _pending_emits:
+		var time_left: float = float(pending.get("time_left", 0.0)) - delta
+		if time_left <= 0.0:
+			_events_emitted[StringName(str(pending.get("event", "")))] = true
+		else:
+			pending["time_left"] = time_left
+			still_pending.append(pending)
+	_pending_emits = still_pending
 
 
 func _get_current_wave(track_state: Dictionary) -> SpawnWave:

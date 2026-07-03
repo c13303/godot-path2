@@ -118,7 +118,7 @@ func _is_on_screen(screen_position: Vector2, viewport_size: Vector2) -> bool:
 	)
 
 
-func _edge_position(direction: Vector2, viewport_size: Vector2) -> Vector2:
+func _edge_position(direction: Vector2, _viewport_size: Vector2) -> Vector2:
 	var edge_half_size: Vector2 = Vector2(
 		max(0.0, _half_viewport_size.x - distance_from_edge),
 		max(0.0, _half_viewport_size.y - distance_from_edge)
@@ -129,8 +129,8 @@ func _edge_position(direction: Vector2, viewport_size: Vector2) -> Vector2:
 	var scale_y: float = INF
 	if direction.y != 0.0:
 		scale_y = edge_half_size.y / absf(direction.y)
-	var scale: float = minf(scale_x, scale_y)
-	return _half_viewport_size + direction * scale
+	var edge_scale: float = minf(scale_x, scale_y)
+	return _half_viewport_size + direction * edge_scale
 
 
 func _hide_from(first_index: int) -> void:

@@ -279,7 +279,7 @@ func _blend_mark(draw_center: Vector2i) -> bool:
 	var stamp_index: int = randi_range(0, _stamp_images.size() - 1)
 	var stamp_image: Image = _stamp_images[stamp_index]
 	var stamp_size: Vector2i = stamp_image.get_size()
-	var half_diagonal: int = int(stamp_size.x / 2)
+	var half_diagonal: int = int(stamp_size.x / 2.0)
 	var bounds_position: Vector2i = draw_center - Vector2i(half_diagonal, half_diagonal)
 	var bounds_size: Vector2i = stamp_size
 	var clipped_rect: Rect2i = canvas_rect.intersection(Rect2i(bounds_position, bounds_size))

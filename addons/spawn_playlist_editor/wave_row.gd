@@ -12,6 +12,7 @@ var _count: SpinBox
 var _interval: SpinBox
 var _wait_event: LineEdit
 var _emit_event: LineEdit
+var _emit_delay: SpinBox
 
 
 func setup(p_dock: Control, p_spawner_id: StringName, p_wave_index: int, p_wave_count: int, p_wave: SpawnWave, monster_types: Array[StringName], event_names: Array[StringName]) -> void:
@@ -96,6 +97,17 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_emit_event.text_changed.connect(_on_emit_event_changed)
 	add_child(_emit_event)
 
+	_emit_delay = SpinBox.new()
+	_emit_delay.min_value = 0.0
+	_emit_delay.max_value = 3600.0
+	_emit_delay.step = 0.1
+	_emit_delay.value = wave.emit_delay_seconds
+	_emit_delay.suffix = "s"
+	_emit_delay.custom_minimum_size = Vector2(86.0, 0.0)
+	_emit_delay.tooltip_text = "Seconds to wait after the wave finishes before emitting its Emit Event."
+	_emit_delay.value_changed.connect(_on_emit_delay_changed)
+	add_child(_emit_delay)
+
 	var delete_button: Button = Button.new()
 	delete_button.text = "Delete"
 	delete_button.pressed.connect(_on_delete_pressed)
@@ -143,6 +155,13 @@ func _on_emit_event_changed(value: String) -> void:
 	if wave == null:
 		return
 	wave.emit_event = StringName(value.strip_edges())
+	_mark_dirty()
+
+
+func _on_emit_delay_changed(value: float) -> void:
+	if wave == null:
+		return
+	wave.emit_delay_seconds = value
 	_mark_dirty()
 
 
