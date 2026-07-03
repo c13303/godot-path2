@@ -1,36 +1,65 @@
 extends RefCounted
 class_name MonsterCatalog
 
-## Central registry of spawnable monster definitions (the "monster bible"). Mirrors
-## the weapon .tres pattern: each monster is a MonsterData resource under
-## scripts/entities/monsters/. Both the runtime (building_manager) and the spawn
-## playlist editor enumerate types from here, so adding a monster is a one-line
-## change plus a new .tres.
-const _MONSTERS: Array[MonsterData] = [
-	preload("res://scripts/entities/monsters/basic.tres"),
-	preload("res://scripts/entities/monsters/bigmonster.tres"),
-]
+## Runtime-safe registry of spawnable monster definitions. The exported console
+## build can load .tres monster resources as plain Resource objects when their
+## script attachment is unavailable, so the current built-in entries are created
+## directly here instead of reading exported fields from those resources.
+
+const BASIC_ID: StringName = &"basic"
+const BIG_MONSTER_ID: StringName = &"bigmonster"
+const BASIC_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
+const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 
 
 static func get_all() -> Array[MonsterData]:
-	return _MONSTERS
+	return [_make_basic(), _make_bigmonster()]
 
 
 ## Ordered list of catalog IDs, suitable for editor dropdowns and validation.
 static func get_ids() -> Array[StringName]:
-	var ids: Array[StringName] = []
-	for monster: MonsterData in _MONSTERS:
-		if monster != null and monster.id != &"":
-			ids.append(monster.id)
-	return ids
+	return [BASIC_ID, BIG_MONSTER_ID]
 
 
 static func get_monster(id: StringName) -> MonsterData:
-	for monster: MonsterData in _MONSTERS:
-		if monster != null and monster.id == id:
-			return monster
-	return null
+	match id:
+		BASIC_ID:
+			return _make_basic()
+		BIG_MONSTER_ID:
+			return _make_bigmonster()
+		_:
+			return null
 
 
 static func has_monster(id: StringName) -> bool:
-	return get_monster(id) != null
+	return id == BASIC_ID or id == BIG_MONSTER_ID
+
+
+static func _make_basic() -> MonsterData:
+	var data: MonsterData = MonsterData.new()
+	data.id = BASIC_ID
+	data.display_name = "Monster"
+	data.texture = BASIC_TEXTURE
+	data.sprite_hframes = 4
+	data.sprite_scale = Vector2(0.75, 0.75)
+	data.sprite_offset = Vector2(0.0, -16.0)
+	data.max_health = 100
+	data.speed_scale = 1.0
+	data.crowd_resist_scale = 1.0
+	data.smash_resist_scale = 1.0
+	return data
+
+
+static func _make_bigmonster() -> MonsterData:
+	var data: MonsterData = MonsterData.new()
+	data.id = BIG_MONSTER_ID
+	data.display_name = "Big Monster"
+	data.texture = BIG_MONSTER_TEXTURE
+	data.sprite_hframes = 4
+	data.sprite_scale = Vector2(0.75, 0.75)
+	data.sprite_offset = Vector2(0.0, -28.0)
+	data.max_health = 200
+	data.speed_scale = 0.5
+	data.crowd_resist_scale = 2.0
+	data.smash_resist_scale = 2.0
+	return data

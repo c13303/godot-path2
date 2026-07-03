@@ -14,6 +14,11 @@ extends Node
 
 @export var level_selection: bool = false
 
+## Set just before reload_current_scene() by the ² dev key so the freshly
+## reloaded scene comes up with debug_enabled forced ON, regardless of what the
+## scene file / editor had. Static so it survives the scene reload.
+static var _force_debug_on_restart: bool = false
+
 @export var draw_world_hitboxes: bool = false:
 	set(value):
 		draw_world_hitboxes = value
@@ -161,6 +166,8 @@ extends Node
 
 @onready var tile_hover_info: TileHoverInfo = get_node_or_null("TileHoverInfo") as TileHoverInfo
 var _building_manager: Node
+## Cached PlayerController, used to allow click-log-agent while the game is paused.
+var _player_controller: Node
 ## The top-left FPS/agent-count debug label, gated by debug_enabled.
 var _fps_label: Label
 ## Unmultiplied agent_max_speed, captured once before the multiplier is applied.
@@ -168,6 +175,9 @@ var _base_agent_max_speed: float = -1.0
 
 
 func _ready() -> void:
+	if _force_debug_on_restart:
+		_force_debug_on_restart = false
+		debug_enabled = true
 	_apply_debug_settings()
 	_setup_tile_hover_info()
 
@@ -196,7 +206,12 @@ func _process(_delta: float) -> void:
 		tile_hover_info.process()
 
 func _input(event: InputEvent) -> void:
-	if not debug_enabled or not click_log_agents:
+	# The click-log normally requires Debug Enabled, but it is also allowed while
+	# the game is paused so an agent can be inspected on a frozen frame even with
+	# debug off. When debug is off and the game is running, clicks are left alone.
+	if not click_log_agents:
+		return
+	if not debug_enabled and not _is_game_paused():
 		return
 	if not (event is InputEventMouseButton):
 		return
@@ -208,8 +223,21 @@ func _input(event: InputEvent) -> void:
 	_log_clicked_agent_debug_snapshot()
 
 
+## True while the game is paused, resolved via the PlayerController. Used so the
+## click-log-agent event stays available on a paused frame even when debug is off.
+func _is_game_paused() -> bool:
+	if _player_controller == null or not is_instance_valid(_player_controller):
+		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
+		if scene:
+			_player_controller = scene.get_node_or_null("Player/PlayerController")
+	if _player_controller and _player_controller.has_method("is_paused"):
+		return bool(_player_controller.call("is_paused"))
+	return false
+
+
 ## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds, gems, and money.
 ## F1 advances the current day, but only while daytime is active.
+## ² (top-left key) restarts the level with debug forced ON.
 func _unhandled_input(event: InputEvent) -> void:
 	if not dev_keys or not (event is InputEventKey):
 		return
@@ -222,6 +250,24 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif key_event.keycode == KEY_F1 and not GameState.is_night:
 		get_viewport().set_input_as_handled()
 		_advance_dev_day()
+	elif _is_restart_debug_key(key_event):
+		get_viewport().set_input_as_handled()
+		_restart_level_with_debug()
+
+
+## True for the ² key. Matched by physical position (grave/tilde key on US
+## layouts, ² on French AZERTY) so it works regardless of keyboard layout, with
+## the ² unicode (178) as a fallback.
+func _is_restart_debug_key(key_event: InputEventKey) -> bool:
+	return key_event.physical_keycode == KEY_QUOTELEFT \
+		or key_event.keycode == KEY_QUOTELEFT \
+		or key_event.unicode == 0xB2
+
+
+## Reloads the current scene with debug_enabled forced ON in the reloaded scene.
+func _restart_level_with_debug() -> void:
+	_force_debug_on_restart = true
+	get_tree().reload_current_scene()
 
 
 func _grant_dev_currency() -> void:

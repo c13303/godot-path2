@@ -493,6 +493,8 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
         return "flow not ready";
     if (a->lost_timer > 0.0)
         return "lost";
+    if (a->lost_slide_accum > 0.0)
+        return "lost (sliding)";
     if (a->debug_bottleneck_wait)
         return "bottleneck wait";
     if (a->debug_in_bottleneck_state)

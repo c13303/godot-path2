@@ -2131,12 +2131,56 @@ void SteeringSystem::update_all(double delta)
         {
             if (!a.is_propelled)
             {
-                a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
-                a.velocity = Vec2(0, 0);
+                // The agent is on a cell with no flow arrow (non-navigable but
+                // physics-passable, e.g. a water edge tile it was shoved onto).
+                // It can neither be routed nor repelled off. Phase 1: freeze for one
+                // lost_retry window so a mid-rebuild flow field / a crowd shove can
+                // resolve it. Phase 2 (still lost after the delay): slide toward the
+                // nearest navigable cell at min speed until flow is recovered. This
+                // is guarded to !is_propelled (knockback keeps priority) and only
+                // runs far from the goal, so arrival/wall-repel behavior is untouched.
+                if (a.lost_slide_accum <= 0.0)
+                {
+                    a.lost_slide_accum = std::max(cfg.lost_retry_seconds, 1e-4);
+                    a.lost_timer = std::max(0.0, cfg.lost_retry_seconds);
+                    a.velocity = Vec2(0, 0);
+                    a.update_motion_state(delta, cfg, true);
+                    continue;
+                }
+
+                Vec2i target_cell = ff->find_nearest_navigable(rel_cell);
+                Vec2 escape = safe_normalize(ff->cell_to_world(target_cell) - sample_pos);
+                if (escape.is_zero())
+                {
+                    a.velocity = a.velocity.lerp(Vec2(0, 0), cfg.lerp_general);
+                    a.update_motion_state(delta, cfg, true);
+                    continue;
+                }
+
+                Vec2 target_velocity = escape * a.max_speed * cfg.min_speed_fraction;
+                a.velocity = a.velocity.lerp(target_velocity, cfg.lerp_general);
+                a.debug_nav_dir = escape;
+                a.debug_wall_repel = wall_repel;
+                a.debug_separation = agent_separation;
+                a.debug_desired_dir = escape;
+                a.debug_target_velocity = target_velocity;
+                Vec2 old_pos = a.position;
+                Vec2 step = a.velocity * delta;
+                a.position = apply_walk_with_walls(a, step, nav);
+                if (nav)
+                    ultimate_wall_correction(a, nav, delta);
+                resolve_static_obstacle_overlap(a);
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
                 a.update_motion_state(delta, cfg, true);
                 continue;
             }
             a.lost_timer = 0.0;
+            a.lost_slide_accum = 0.0;
+        }
+        else
+        {
+            // Flow recovered (or the agent is within goal margin): end the lost episode.
+            a.lost_slide_accum = 0.0;
         }
         Vec2 nav_dir = flow_dir.is_zero() ? safe_normalize(to_goal) : flow_dir;
         if (!flow_dir.is_zero())

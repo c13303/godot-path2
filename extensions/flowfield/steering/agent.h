@@ -109,6 +109,13 @@ namespace ffcore
         double target_radius_timer = 0.0;
         double lost_timer = 0.0;
         double stuck_in_wall_accum = 0.0;
+        // Generic "lost outside the flow field" recovery. When an agent sits on a
+        // cell with no flow arrow (non-navigable but physics-passable, e.g. a water
+        // edge tile it was shoved onto), it can neither be routed nor repelled off.
+        // Once it has stayed lost past the confirm-delay (lost_timer window) this is
+        // > 0, which switches the agent from "freeze and wait" to "slide toward the
+        // nearest navigable cell". Reset to 0 the moment flow is recovered.
+        double lost_slide_accum = 0.0;
         bool never_rest = false;
         // Hard freeze pushed from game-side (e.g. the seed merchant halting while the
         // player browses its shop). While set, the agent's velocity is zeroed every
