@@ -34,6 +34,7 @@ const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 @export var previewbuild: TileMapLayer
 @export var plant_manager: Node
 @export var building_object_manager: Node
+@export var reservoir_system: Node
 @export var game_ui: CanvasLayer
 @export var notif: Node
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
@@ -153,6 +154,21 @@ func _input(event: InputEvent) -> void:
 			if rotate_selected_build_direction():
 				get_viewport().set_input_as_handled()
 				return
+
+	# Mouse wheel rotates the buildable during placement (keyboard+mouse controls).
+	# Only consumes the event when a rotatable buildable is selected, so the wheel is
+	# free otherwise. Wheel up / down rotate in opposite directions.
+	if event is InputEventMouseButton:
+		var wheel_event: InputEventMouseButton = event as InputEventMouseButton
+		if wheel_event.pressed and not wheel_event.ctrl_pressed:
+			if wheel_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				if rotate_selected_build_direction(false):
+					get_viewport().set_input_as_handled()
+					return
+			elif wheel_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				if rotate_selected_build_direction(true):
+					get_viewport().set_input_as_handled()
+					return
 
 	if event is InputEventMouseButton:
 		var remove_event: InputEventMouseButton = event as InputEventMouseButton
@@ -389,11 +405,11 @@ func pad_rotate_selected_at_cursor() -> bool:
 	return rotate_selected_build_direction()
 
 
-func rotate_selected_build_direction() -> bool:
+func rotate_selected_build_direction(reverse: bool = false) -> bool:
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if placeable_def.is_empty() or not _is_directional_placeable(placeable_def):
 		return false
-	_build_direction = _next_build_direction(_build_direction)
+	_build_direction = _prev_build_direction(_build_direction) if reverse else _next_build_direction(_build_direction)
 	_clear_hover()
 	return true
 
@@ -994,6 +1010,8 @@ func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_pla
 		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
+	if placeable_id == "reservoir" and reservoir_system != null and reservoir_system.has_method("request_irrigation_from_cell"):
+		reservoir_system.call("request_irrigation_from_cell", cell)
 
 func _preload_build_fx_pool() -> void:
 	var count: int = maxi(build_fx_pool_size, 0)
@@ -1055,7 +1073,7 @@ func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
 	var light_source: float = float(placeable_def.get("light_source", 0.0))
 	if light_source > 0.0:
 		return true
-	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter"
+	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation"
 
 func _is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
 	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz
@@ -1212,6 +1230,15 @@ func _next_build_direction(direction: Vector2i) -> Vector2i:
 		return DIRECTION_LEFT
 	if direction == DIRECTION_LEFT:
 		return DIRECTION_UP
+	return DIRECTION_RIGHT
+
+func _prev_build_direction(direction: Vector2i) -> Vector2i:
+	if direction == DIRECTION_RIGHT:
+		return DIRECTION_UP
+	if direction == DIRECTION_UP:
+		return DIRECTION_LEFT
+	if direction == DIRECTION_LEFT:
+		return DIRECTION_DOWN
 	return DIRECTION_RIGHT
 
 func _alternative_from_placeable(placeable_def: Dictionary) -> int:

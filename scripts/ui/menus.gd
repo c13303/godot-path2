@@ -41,6 +41,13 @@ func _ready() -> void:
 	if _progression.has_method("load_on_start"):
 		_progression.call("load_on_start")
 
+	# With save-loading now resolved, place the player on the level's authored
+	# "player" spawn marker for a fresh start. A restored save keeps its own
+	# player position, so this is a no-op after a load. Still _ready-time, so the
+	# player is positioned before the first frame is drawn.
+	if _progression.has_method("apply_fresh_start_player_spawn"):
+		_progression.call("apply_fresh_start_player_spawn")
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):

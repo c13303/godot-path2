@@ -497,6 +497,45 @@ func load_on_start() -> void:
 	_apply_save_to_fresh_scene(data)
 
 
+## Places the player on the level's authored "player" spawn marker. Only applies
+## on a fresh start: when a save was restored the player keeps its saved position,
+## so this is a no-op. Called during startup _ready (after save-loading is
+## resolved and before the first frame is drawn), so the player is never shown at
+## its scene-authored placeholder position.
+func apply_fresh_start_player_spawn() -> void:
+	if _save_applied:
+		return
+	var player: Node2D = _get_player()
+	if player == null:
+		return
+	var marker: Node2D = _find_player_spawn_marker()
+	if marker == null:
+		push_warning("progression: level has no 'player' spawn marker; keeping the player's authored position")
+		return
+	player.global_position = marker.global_position
+	player.set("velocity", Vector2.ZERO)
+	_log("Fresh start: player placed on 'player' spawn marker at %s" % str(player.global_position))
+
+
+## Locates the authored "player" marker node inside the loaded level's spawner
+## container (reparented under the MonTilemap host by LevelLoader).
+func _find_player_spawn_marker() -> Node2D:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	var host: Node = scene.get_node_or_null("Map/MonTilemap")
+	if host == null:
+		return null
+	for container_name in ["spawner", "spawners"]:
+		var container: Node = host.get_node_or_null(container_name)
+		if container == null:
+			continue
+		var marker: Node2D = container.get_node_or_null("player") as Node2D
+		if marker != null:
+			return marker
+	return null
+
+
 ## Wipe the auto-save slot and restart a brand-new game (Day 1, defaults). The
 ## fresh scene reload recreates progression at its defaults; skipping the next
 ## startup auto-load keeps the post-reload load_on_start from restoring the lost

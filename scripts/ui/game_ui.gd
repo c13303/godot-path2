@@ -102,17 +102,8 @@ func _update_day_toggle_icon(is_night: bool) -> void:
 	day_toggle.texture = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var mouse_event: InputEventMouseButton = event
-		if not inventory_modal.visible and mouse_event.pressed and not mouse_event.ctrl_pressed:
-			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				if _step_open_toolbuild_selection(-1):
-					get_viewport().set_input_as_handled()
-			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-				if _step_open_toolbuild_selection(1):
-					get_viewport().set_input_as_handled()
-		return
-
+	# The mouse wheel is reserved for rotating the buildable during placement
+	# (see buildsystem.gd); it no longer steps the toolbuild vertical menu.
 	if not (event is InputEventKey):
 		return
 
@@ -136,14 +127,6 @@ func _input(event: InputEvent) -> void:
 	if slot_index >= 0:
 		select_quick_slot(slot_index)
 		get_viewport().set_input_as_handled()
-
-func _step_open_toolbuild_selection(direction: int) -> bool:
-	if direction == 0 or toolbuild == null or not toolbuild.visible:
-		return false
-	if not toolbuild.has_method("step_pad_selection"):
-		return false
-	toolbuild.call("step_pad_selection", direction)
-	return true
 
 func move_inventory_item(from_slot: int, to_slot: int) -> void:
 	if from_slot < 0 or from_slot >= inventory_slots.size():
@@ -460,7 +443,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "ronce"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "ronce" or item_id == "reservoir"
 
 
 func get_build_price(item_id: String) -> int:

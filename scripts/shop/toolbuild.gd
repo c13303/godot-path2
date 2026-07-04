@@ -35,10 +35,10 @@ const BAR_CONTENT_INSET: float = 10.0
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
-const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID]
+const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", "reservoir", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", "reservoir", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)

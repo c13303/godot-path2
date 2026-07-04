@@ -46,6 +46,7 @@
 [ext_resource type="Script" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
 [ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
 [ext_resource type="Script" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
+[ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -772,7 +773,13 @@ blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 runtime_parent = NodePath("../BuildingObjects")
 steering_system = NodePath("../../CPP/SteeringSystemNative")
 
-[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "game_ui", "notif")]
+[node name="ReservoirSystem" type="Node" parent="Map" node_paths=PackedStringArray("floorz", "watersources", "building_object_manager")]
+script = ExtResource("44_reservoir")
+floorz = NodePath("../MonTilemap/floor")
+watersources = NodePath("../MonTilemap/watersources")
+building_object_manager = NodePath("../BuildingObjectManager")
+
+[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "reservoir_system", "game_ui", "notif")]
 script = ExtResource("17_k5rlw")
 plantz = NodePath("../MonTilemap/plantz")
 traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
@@ -780,6 +787,7 @@ blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 previewbuild = NodePath("../MonTilemap/previewbuild")
 plant_manager = NodePath("../PlantManager")
 building_object_manager = NodePath("../BuildingObjectManager")
+reservoir_system = NodePath("../ReservoirSystem")
 game_ui = NodePath("../../GameUI")
 notif = NodePath("../../GameUI/notif")
 

@@ -27,9 +27,10 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -39,13 +40,14 @@ var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"turret_epine": 5,
 	&"wall": 100,
 	&"ronce": 1,
+	&"reservoir": 100,
 }
 var _loaded_tool_shop_growth_price_factors: Dictionary = {
 	&"ronce": 2.0,
@@ -93,6 +95,7 @@ func _load_level() -> void:
 		_clear_owner_recursive(layer)
 		host.add_child(layer)
 	_reparent_spawner_container(level_root, host)
+	_reparent_reservoir_nodes(level_root, host)
 
 	level_root.free()
 	_loaded_level_scene_path = scene_to_load.resource_path
@@ -217,13 +220,14 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
 	_loaded_monster_drop_seed_chance_percent = 0
-	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
 	_loaded_tool_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"turret_epine": 5,
 		&"wall": 100,
 		&"ronce": 1,
+		&"reservoir": 100,
 	}
 	_loaded_tool_shop_growth_price_factors = {
 		&"ronce": 2.0,
@@ -424,6 +428,28 @@ func _reparent_spawner_container(level_root: Node, host: Node) -> void:
 	level_root.remove_child(spawner_container)
 	_clear_owner_recursive(spawner_container)
 	host.add_child(spawner_container)
+
+func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
+	var reservoir_nodes: Array[Node2D] = []
+	for child: Node in level_root.get_children():
+		var reservoir: Node2D = child as Node2D
+		if reservoir == null or String(child.name).to_lower() != "reservoir":
+			continue
+		reservoir_nodes.append(reservoir)
+	if reservoir_nodes.is_empty():
+		return
+	var container: Node2D = host.get_node_or_null(NodePath(RESERVOIR_CONTAINER_NAME)) as Node2D
+	if container == null:
+		container = Node2D.new()
+		container.name = RESERVOIR_CONTAINER_NAME
+		host.add_child(container)
+	for reservoir: Node2D in reservoir_nodes:
+		var global_pos: Vector2 = reservoir.global_position
+		level_root.remove_child(reservoir)
+		_clear_owner_recursive(reservoir)
+		container.add_child(reservoir)
+		reservoir.global_position = global_pos
+		reservoir.add_to_group("reservoirs")
 
 
 func _find_spawner_container(level_root: Node) -> Node:

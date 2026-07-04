@@ -16,7 +16,9 @@ signal building_removed(cell: Vector2i, item_id: String)
 const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
 const LIGHT_ENERGY: float = 0.75
-const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter"]
+const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir.png")
+const RESERVOIR_Z_INDEX: int = -46
+const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
 const TILE_TRANSFORM_TRANSPOSE: int = 16384
@@ -72,6 +74,8 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	if item_def.has("light_source"):
 		building_data["light_source"] = light_source
 	_buildings_by_cell[cell] = building_data
+	if runtime_id == "reservoir":
+		_register_reservoir_runtime(cell, runtime_id)
 	if light_source > 0.0:
 		_register_light_runtime(cell, runtime_id, light_source)
 	_register_blocking_obstacle(cell, item_def)
@@ -217,6 +221,24 @@ func _register_light_runtime(cell: Vector2i, runtime_id: String, light_source: f
 	light.range_z_max = 4096
 	light.enabled = _is_game_state_night()
 	runtime_node.add_child(light)
+
+	parent.add_child(runtime_node)
+	_runtime_nodes_by_cell[cell] = runtime_node
+
+func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
+	var parent: Node2D = _runtime_parent()
+	if not parent:
+		return
+	var runtime_node: Node2D = Node2D.new()
+	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.global_position = _cell_center(cell)
+
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "Sprite2D"
+	sprite.texture = RESERVOIR_TEXTURE
+	sprite.z_as_relative = false
+	sprite.z_index = RESERVOIR_Z_INDEX
+	runtime_node.add_child(sprite)
 
 	parent.add_child(runtime_node)
 	_runtime_nodes_by_cell[cell] = runtime_node
