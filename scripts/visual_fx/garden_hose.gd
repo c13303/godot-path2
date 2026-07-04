@@ -274,6 +274,48 @@ func _render_points() -> void:
 	_right_border.points = right_points
 	_highlight.points = highlight_points
 
+func get_hose_world_points() -> PackedVector2Array:
+	var world_points: PackedVector2Array = PackedVector2Array()
+	var center_points: Array[Vector2] = _smoothed_render_points()
+	for point: Vector2 in center_points:
+		world_points.append(point)
+	return world_points
+
+func sample_world_position(progress: float) -> Vector2:
+	var points: PackedVector2Array = get_hose_world_points()
+	if points.is_empty():
+		return global_position
+	if points.size() == 1:
+		return points[0]
+
+	var clamped_progress: float = clampf(progress, 0.0, 1.0)
+	var total_length: float = _polyline_length(points)
+	if total_length <= 0.0001:
+		return points[points.size() - 1]
+
+	var target_distance: float = total_length * clamped_progress
+	var traversed: float = 0.0
+	for index: int in range(points.size() - 1):
+		var a: Vector2 = points[index]
+		var b: Vector2 = points[index + 1]
+		var segment_distance: float = a.distance_to(b)
+		if segment_distance <= 0.0001:
+			continue
+		if traversed + segment_distance >= target_distance:
+			var segment_t: float = (target_distance - traversed) / segment_distance
+			return a.lerp(b, segment_t)
+		traversed += segment_distance
+	return points[points.size() - 1]
+
+func get_hose_length() -> float:
+	return _polyline_length(get_hose_world_points())
+
+func _polyline_length(points: PackedVector2Array) -> float:
+	var total: float = 0.0
+	for index: int in range(points.size() - 1):
+		total += points[index].distance_to(points[index + 1])
+	return total
+
 func _clear_simulation() -> void:
 	_points.clear()
 	_previous_points.clear()

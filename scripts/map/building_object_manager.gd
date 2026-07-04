@@ -17,7 +17,9 @@ const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
 const LIGHT_ENERGY: float = 0.75
 const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir.png")
-const RESERVOIR_Z_INDEX: int = 506
+const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
+const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
+const RESERVOIR_Z_INDEX: int = 510
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
@@ -239,10 +241,20 @@ func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 	sprite.texture = RESERVOIR_TEXTURE
 	sprite.z_as_relative = false
 	sprite.z_index = RESERVOIR_Z_INDEX
+	_add_reservoir_water_fill(sprite)
 	runtime_node.add_child(sprite)
 
 	parent.add_child(runtime_node)
 	_runtime_nodes_by_cell[cell] = runtime_node
+
+func _add_reservoir_water_fill(reservoir_sprite: Sprite2D) -> void:
+	var water: Sprite2D = Sprite2D.new()
+	water.name = "WaterFill"
+	water.texture = RESERVOIR_WATER_TEXTURE
+	water.z_as_relative = true
+	water.z_index = -1
+	water.script = RESERVOIR_WATER_FILL_SCRIPT
+	reservoir_sprite.add_child(water)
 
 func _runtime_parent() -> Node2D:
 	if runtime_parent:

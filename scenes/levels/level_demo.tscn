@@ -1239,11 +1239,12 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
-starting_weapons = Array[StringName]([&"spray", &"epine"])
+starting_weapons = Array[StringName]([&"epine", &"spray"])
+tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce"])
 tool_shop_prices = {
-&"reservoir": 100,
 &"ronce": 1,
 &"rose": 1,
+&"turret1": 5,
 &"turret_epine": 5,
 &"wall": 10
 }
@@ -1252,16 +1253,16 @@ tool_shop_growth_price_factors = {
 &"turret_epine": 2.0
 }
 merchant_available_items = Array[StringName]([&"spray", &"beam"])
-shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"reservoir", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,
-&"reservoir": 100,
 &"ronce": 1,
 &"rose": 1,
 &"seed": 2,
 &"spray": 100,
 &"sword": 100,
+&"turret1": 5,
 &"turret_epine": 5,
 &"wall": 10
 }
@@ -1277,6 +1278,7 @@ tile_set = SubResource("TileSet_egp0g")
 collision_enabled = false
 navigation_enabled = false
 metadata/water = false
+metadata/_edit_lock_ = true
 
 [node name="watersources" type="TileMapLayer" parent="." unique_id=1380434763]
 z_index = -100
@@ -1316,23 +1318,23 @@ texture = ExtResource("6_5dxts")
 metadata/id = ""
 
 [node name="monster2" type="Sprite2D" parent="spawners" unique_id=1155345194]
-position = Vector2(1912, 2991)
-scale = Vector2(1, -0.015625)
+position = Vector2(1813, 56)
+scale = Vector2(0.70312417, 0.6796846)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster2" unique_id=1311384222]
-position = Vector2(22, 174912)
+position = Vector2(749.51196, 4869.9063)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="monster1" type="Sprite2D" parent="spawners" unique_id=1274841071]
-position = Vector2(1478, 51)
+position = Vector2(2059, 70)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster1" unique_id=389270062]
-position = Vector2(-773, 902)
+position = Vector2(-35, 3303)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
@@ -1348,37 +1350,37 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="seedmerchent" type="Sprite2D" parent="spawners" unique_id=655819204]
-position = Vector2(666, 1499)
+position = Vector2(850, 2322)
 texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1151164943]
-position = Vector2(2052, 58)
+position = Vector2(2640, 26)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="spot" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1455932304]
-position = Vector2(1380, 1302)
+position = Vector2(1196, 508)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="monster3" type="Sprite2D" parent="spawners" unique_id=2123954901]
-position = Vector2(585, 1669)
+position = Vector2(1534, 52)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster3" unique_id=452574762]
-position = Vector2(2183, -112)
+position = Vector2(191, 3314)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="monster4" type="Sprite2D" parent="spawners" unique_id=501834689]
-position = Vector2(2728, 1672)
+position = Vector2(2551, 69)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster4" unique_id=1545341588]
-position = Vector2(-2396, -82)
+position = Vector2(-355, 3309)
 texture = ExtResource("5_drkbx")
 metadata/id = ""

@@ -27,11 +27,13 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
-const RESERVOIR_Z_INDEX: int = 506
+const RESERVOIR_Z_INDEX: int = 510
+const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
+const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -41,14 +43,13 @@ var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"turret_epine": 5,
 	&"wall": 100,
 	&"ronce": 1,
-	&"reservoir": 100,
 }
 var _loaded_tool_shop_growth_price_factors: Dictionary = {
 	&"ronce": 2.0,
@@ -221,14 +222,13 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
 	_loaded_monster_drop_seed_chance_percent = 0
-	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir"]
+	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 	_loaded_tool_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"turret_epine": 5,
 		&"wall": 100,
 		&"ronce": 1,
-		&"reservoir": 100,
 	}
 	_loaded_tool_shop_growth_price_factors = {
 		&"ronce": 2.0,
@@ -452,7 +452,19 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		reservoir.global_position = global_pos
 		reservoir.z_as_relative = false
 		reservoir.z_index = RESERVOIR_Z_INDEX
+		_add_reservoir_water_fill(reservoir)
 		reservoir.add_to_group("reservoirs")
+
+func _add_reservoir_water_fill(reservoir: Node2D) -> void:
+	if reservoir.has_node(NodePath("WaterFill")):
+		return
+	var water: Sprite2D = Sprite2D.new()
+	water.name = "WaterFill"
+	water.texture = RESERVOIR_WATER_TEXTURE
+	water.z_as_relative = true
+	water.z_index = -1
+	water.script = RESERVOIR_WATER_FILL_SCRIPT
+	reservoir.add_child(water)
 
 
 func _find_spawner_container(level_root: Node) -> Node:
