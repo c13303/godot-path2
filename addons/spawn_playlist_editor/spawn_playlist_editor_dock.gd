@@ -55,6 +55,8 @@ var _monster_drop_seed_chance: SpinBox
 var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
+var _starting_items_box: GridContainer
+var _starting_item_spins: Dictionary = {}  # StringName -> SpinBox
 var _tool_shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _tool_shop_day_spins: Dictionary = {}  # StringName -> SpinBox
@@ -382,6 +384,31 @@ func _build_starting_controls() -> void:
 		checkbox.toggled.connect(_on_starting_weapon_toggled.bind(weapon_id))
 		_weapon_checks_box.add_child(checkbox)
 		_weapon_checkboxes[weapon_id] = checkbox
+
+	var items_label: Label = Label.new()
+	items_label.text = "Starting items (any non-weapon item; 0 = none)"
+	_starting_controls.add_child(items_label)
+
+	# Two item/quantity pairs per row (label + spin, twice).
+	_starting_items_box = GridContainer.new()
+	_starting_items_box.columns = 4
+	_starting_controls.add_child(_starting_items_box)
+	_starting_item_spins.clear()
+	for item_id: StringName in _giveable_starting_item_ids():
+		var item_label: Label = Label.new()
+		item_label.text = _item_display_name(item_id)
+		item_label.tooltip_text = String(item_id)
+		item_label.custom_minimum_size = Vector2(128.0, 0.0)
+		_starting_items_box.add_child(item_label)
+
+		var quantity_spin: SpinBox = SpinBox.new()
+		quantity_spin.min_value = 0.0
+		quantity_spin.max_value = 9999.0
+		quantity_spin.step = 1.0
+		quantity_spin.custom_minimum_size = Vector2(74.0, 0.0)
+		quantity_spin.value_changed.connect(_on_starting_item_changed.bind(item_id))
+		_starting_items_box.add_child(quantity_spin)
+		_starting_item_spins[item_id] = quantity_spin
 
 
 func _build_monster_drop_controls() -> void:
@@ -779,6 +806,13 @@ func _refresh_starting_controls() -> void:
 		if checkbox != null:
 			checkbox.button_pressed = weapons.has(weapon_id)
 			checkbox.disabled = not has_level
+	var starting_items: Dictionary = config.starting_items if config != null else {}
+	for raw_item_id: Variant in _starting_item_spins.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var quantity_spin: SpinBox = _starting_item_spins[item_id] as SpinBox
+		if quantity_spin != null:
+			quantity_spin.value = float(_starting_item_quantity(starting_items, item_id))
+			quantity_spin.editable = has_level
 
 
 func _refresh_monster_drop_controls() -> void:
@@ -1403,6 +1437,24 @@ func _on_starting_weapon_toggled(enabled: bool, weapon_id: StringName) -> void:
 	mark_dirty()
 
 
+func _on_starting_item_changed(value: float, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var items: Dictionary = config.starting_items.duplicate()
+	# Drop any legacy String-keyed duplicate so the StringName key is authoritative.
+	items.erase(String(item_id))
+	var quantity: int = maxi(0, int(value))
+	if quantity > 0:
+		items[item_id] = quantity
+	else:
+		items.erase(item_id)
+	config.starting_items = items
+	mark_dirty()
+
+
 func _on_client_frequency_changed(value: float, spawner_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -1543,6 +1595,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_money", int(_starting_money.value))
 		root.set("starting_weapons", _selected_starting_weapons())
+		root.set("starting_items", _selected_starting_items())
 		root.set("monster_drop_seed_chance_percent", clampi(int(_monster_drop_seed_chance.value), 0, 100))
 		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
 		root.set("tool_shop_prices", _selected_tool_shop_prices())
@@ -1573,6 +1626,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_money = int(_starting_money.value)
 	config.starting_weapons = _selected_starting_weapons()
+	config.starting_items = _selected_starting_items()
 	config.monster_drop_seed_chance_percent = clampi(int(_monster_drop_seed_chance.value), 0, 100)
 	config.tool_shop_available_items = _selected_tool_shop_available_items()
 	config.tool_shop_prices = _selected_tool_shop_prices()
@@ -1721,6 +1775,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_gems = DEFAULT_STARTING_GEMS
 		config.starting_money = DEFAULT_STARTING_MONEY
 		config.starting_weapons = _default_starting_weapons()
+		config.starting_items = {}
 		config.monster_drop_seed_chance_percent = DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT
 		config.tool_shop_available_items = _default_tool_shop_available_items()
 		config.tool_shop_prices = _default_tool_shop_prices()
@@ -1779,6 +1834,41 @@ func _selected_starting_weapons() -> Array[StringName]:
 		if checkbox != null and checkbox.button_pressed:
 			weapons.append(weapon_id)
 	return weapons
+
+
+func _selected_starting_items() -> Dictionary:
+	var items: Dictionary = {}
+	for raw_item_id: Variant in _starting_item_spins.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var quantity_spin: SpinBox = _starting_item_spins[item_id] as SpinBox
+		if quantity_spin == null:
+			continue
+		var quantity: int = maxi(0, int(quantity_spin.value))
+		if quantity > 0:
+			items[item_id] = quantity
+	return items
+
+
+## Every non-weapon item that can be granted at start: placeables and resources
+## (weapons have their own checkbox row; pure tools like the build tool are excluded).
+func _giveable_starting_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for raw_id: Variant in ItemCatalog.ITEM_DEFS.keys():
+		var item_def: Dictionary = ItemCatalog.get_item_def(str(raw_id))
+		var item_type: String = str(item_def.get("type", ""))
+		if item_type == "placeable" or item_type == "resource":
+			ids.append(StringName(str(raw_id)))
+	return ids
+
+
+## Reads the quantity for an item from an authored starting-items dict, tolerating either
+## a StringName or a String key (as tscn / hand edits may produce).
+func _starting_item_quantity(items: Dictionary, item_id: StringName) -> int:
+	if items.has(item_id):
+		return maxi(0, int(items[item_id]))
+	if items.has(String(item_id)):
+		return maxi(0, int(items[String(item_id)]))
+	return 0
 
 
 func _selected_tool_shop_available_items() -> Array[StringName]:

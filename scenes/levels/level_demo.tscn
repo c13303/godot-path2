@@ -1239,6 +1239,9 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
+starting_items = {
+&"small_reservoir": 10
+}
 tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce"])
 tool_shop_prices = {
 &"ronce": 1,
@@ -1247,11 +1250,8 @@ tool_shop_prices = {
 &"turret_epine": 5,
 &"wall": 10
 }
-tool_shop_growth_price_factors = {
-&"ronce": 2.0,
-&"turret_epine": 2.0
-}
-merchant_available_items = Array[StringName]([&"spray", &"beam"])
+tool_shop_growth_price_factors = {}
+merchant_available_items = Array[StringName]([&"spray", &"beam", &"small_reservoir"])
 shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,

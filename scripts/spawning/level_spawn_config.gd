@@ -9,6 +9,10 @@ class_name LevelSpawnConfig
 @export var starting_gems: int = 1000
 @export var starting_money: int = 0
 @export var starting_weapons: Array[StringName] = [&"spray"]
+# Any non-weapon item granted to the player at the start of a fresh run, as
+# item_id (StringName) -> quantity (int > 0). Placed into the inventory alongside the
+# starting weapons; e.g. { &"small_reservoir": 10 }. Weapons use starting_weapons above.
+@export var starting_items: Dictionary = {}
 
 @export_group("Monster Drop")
 @export_range(0, 100, 1, "suffix:%") var monster_drop_seed_chance_percent: int = 0

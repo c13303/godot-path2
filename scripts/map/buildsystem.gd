@@ -1010,7 +1010,7 @@ func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_pla
 		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
-	if placeable_id == "reservoir" and reservoir_system != null and reservoir_system.has_method("request_irrigation_from_cell"):
+	if (placeable_id == "reservoir" or placeable_id == "small_reservoir") and reservoir_system != null and reservoir_system.has_method("request_irrigation_from_cell"):
 		reservoir_system.call("request_irrigation_from_cell", cell)
 
 func _preload_build_fx_pool() -> void:

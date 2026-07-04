@@ -35,10 +35,13 @@ const BAR_CONTENT_INSET: float = 10.0
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
-const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID]
+const SMALL_RESERVOIR_ID: String = "small_reservoir"
+const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID, SMALL_RESERVOIR_ID]
 const SEED_ITEM_ID: String = "seed"
-const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+# The seed-merchant column also carries inventory-backed buildables (small_reservoir),
+# which are bought here and later placed from the toolbuild column above.
+const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam", SMALL_RESERVOIR_ID]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID, SMALL_RESERVOIR_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
@@ -604,6 +607,8 @@ func _on_merchant_item_pressed(item_id: String) -> void:
 	var start_position: Vector2 = button.get_global_rect().get_center() if button != null else Vector2.ZERO
 	if item_id == SEED_ITEM_ID and game_ui != null and game_ui.has_method("try_purchase_seed_merchant_item"):
 		purchased = bool(game_ui.call("try_purchase_seed_merchant_item", item_id, 1))
+	elif ItemCatalog.is_inventory_backed(item_id) and game_ui != null and game_ui.has_method("try_purchase_placeable_merchant_item"):
+		purchased = bool(game_ui.call("try_purchase_placeable_merchant_item", item_id, 1))
 	elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
 		purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
 	if purchased:
@@ -789,7 +794,7 @@ func _refresh_slots() -> void:
 		# The counter's badge is a remaining-stock count, not a price, so it carries no
 		# currency icon; every other buildable shows the icon for the currency it costs.
 		var slot_currency: TextureRect = _slot_currencies[item_id] as TextureRect
-		var slot_currency_texture: AtlasTexture = null if item_id == COUNTER_ID else _currency_texture(item_id)
+		var slot_currency_texture: AtlasTexture = null if (item_id == COUNTER_ID or ItemCatalog.is_inventory_backed(item_id)) else _currency_texture(item_id)
 		slot_currency.texture = slot_currency_texture
 		slot_currency.visible = slot_currency_texture != null
 		# The merchant column signals unaffordability through the per-row label colour, so its
@@ -865,6 +870,10 @@ func _slot_badge_text(item_id: String) -> String:
 	if item_id == COUNTER_ID:
 		var remaining: int = _limit_remaining(item_id)
 		return str(maxi(remaining, 0))
+	# Inventory-backed buildables show how many the player currently owns (already paid
+	# for at the merchant), not a placement price.
+	if ItemCatalog.is_inventory_backed(item_id):
+		return str(maxi(_affordable_quantity(item_id), 0))
 	return str(_build_price(item_id))
 
 
@@ -944,7 +953,7 @@ func _should_show_merchant_item(item_id: String) -> bool:
 
 
 func _is_merchant_item(item_id: String) -> bool:
-	return item_id == SEED_ITEM_ID or ItemCatalog.is_weapon(item_id)
+	return item_id == SEED_ITEM_ID or ItemCatalog.is_weapon(item_id) or ItemCatalog.is_inventory_backed(item_id)
 
 
 func _player_near_seed_merchant() -> bool:

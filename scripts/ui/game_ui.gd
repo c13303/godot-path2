@@ -427,6 +427,10 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 func is_build_item_available(item_id: String) -> bool:
 	if item_id == "rose_shop_counter":
 		return true
+	# Inventory-backed buildables are always offered in the toolbuild picker; their
+	# affordability is the owned count, so an empty stack simply greys the slot.
+	if ItemCatalog.is_inventory_backed(item_id):
+		return true
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
@@ -582,6 +586,9 @@ func get_merchant_price(item_id: String) -> int:
 func get_build_affordable_quantity(item_id: String) -> int:
 	if not is_build_item_available(item_id):
 		return 0
+	# Inventory-backed buildables are gated by how many the player owns, not currency.
+	if ItemCatalog.is_inventory_backed(item_id):
+		return get_inventory_item_quantity(item_id)
 	var limit_remaining: int = _build_limit_remaining(item_id)
 	var key: StringName = _build_currency_prog_key(item_id)
 	var next_price: int = get_build_price(item_id)
@@ -638,6 +645,10 @@ func try_purchase_build(item_id: String, count: int) -> bool:
 		return false
 	if not is_build_item_available(item_id):
 		return false
+	# Inventory-backed buildables were already paid for at the merchant; placing one
+	# just consumes it from the inventory.
+	if ItemCatalog.is_inventory_backed(item_id):
+		return consume_inventory_item(item_id, count)
 	var price: int = _build_price_total_for_next(item_id, count)
 	var key: StringName = _build_currency_prog_key(item_id)
 	if price <= 0:
@@ -661,6 +672,21 @@ func try_purchase_merchant_item(item_id: String, count: int = 1) -> bool:
 
 func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
 	if count != 1 or not ItemCatalog.is_weapon(item_id) or _has_possessed_weapon(item_id):
+		return false
+	if not can_add_inventory(item_id, count):
+		return false
+	if not try_purchase_merchant_item(item_id, count):
+		return false
+	return add_inventory(item_id, count)
+
+
+## Buy an inventory-backed placeable (e.g. small_reservoir) at the seed merchant: spend
+## its money price and stock the unit(s) in the inventory, all-or-nothing. The building
+## is later placed from the toolbuild picker, which consumes it from the inventory.
+func try_purchase_placeable_merchant_item(item_id: String, count: int = 1) -> bool:
+	if count <= 0 or not ItemCatalog.is_inventory_backed(item_id):
+		return false
+	if not is_merchant_item_available(item_id):
 		return false
 	if not can_add_inventory(item_id, count):
 		return false
@@ -864,6 +890,11 @@ func _build_tile_layer_for_item_def(item_def: Dictionary) -> TileMapLayer:
 func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
 		return
+	# Inventory-backed buildables are returned to the inventory rather than refunded as
+	# currency (their stored contents, e.g. a tank's water, are discarded).
+	if ItemCatalog.is_inventory_backed(item_id):
+		add_inventory(item_id, count)
+		return
 	var price: int = get_build_price(item_id)
 	var units: int = price * count
 	if units <= 0:
@@ -902,6 +933,13 @@ func _setup_starting_inventory() -> void:
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
 	add_inventory(TOOLBUILD_ID, 1)
+	# Any non-weapon items the level grants at start (e.g. small_reservoir x10).
+	var starting_items: Dictionary = _get_level_starting_items()
+	for raw_item_id: Variant in starting_items:
+		var item_id: String = str(raw_item_id)
+		var quantity: int = int(starting_items[raw_item_id])
+		if item_id != "" and quantity > 0:
+			add_inventory(item_id, quantity)
 
 
 func _get_level_starting_weapons() -> Array[StringName]:
@@ -917,6 +955,16 @@ func _get_level_starting_weapons() -> Array[StringName]:
 					weapons.append(weapon_id)
 			return weapons
 	return [&"spray"]
+
+
+func _get_level_starting_items() -> Dictionary:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_starting_items"):
+		var raw_items: Variant = loader.call("get_loaded_starting_items")
+		if raw_items is Dictionary:
+			return raw_items as Dictionary
+	return {}
 
 
 # Generic inventory add, reusable for purchases, pickups, and rewards.

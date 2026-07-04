@@ -28,7 +28,7 @@ const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
-const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"small_reservoir"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 const RESERVOIR_Z_INDEX: int = 510
@@ -42,6 +42,7 @@ var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
+var _loaded_starting_items: Dictionary = {}
 var _loaded_monster_drop_seed_chance_percent: int = 0
 var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 var _loaded_tool_shop_prices: Dictionary = {
@@ -145,6 +146,10 @@ func get_loaded_starting_weapons() -> Array[StringName]:
 	return weapons
 
 
+func get_loaded_starting_items() -> Dictionary:
+	return _loaded_starting_items.duplicate()
+
+
 func get_loaded_monster_drop_seed_chance_percent() -> int:
 	return _loaded_monster_drop_seed_chance_percent
 
@@ -221,6 +226,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
+	_loaded_starting_items = {}
 	_loaded_monster_drop_seed_chance_percent = 0
 	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 	_loaded_tool_shop_prices = {
@@ -255,6 +261,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_money = config.starting_money
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
+		_loaded_starting_items = _valid_starting_items(config.starting_items)
 		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
 		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
@@ -303,6 +310,22 @@ func _valid_starting_weapons(raw_weapons: Array[StringName]) -> Array[StringName
 		seen[weapon_id] = true
 		weapons.append(weapon_id)
 	return weapons
+
+
+## Sanitize the authored starting-items map to { StringName item_id -> int quantity>0 },
+## dropping unknown item ids and non-positive quantities. Keys may be authored as either
+## String or StringName.
+func _valid_starting_items(raw_items: Dictionary) -> Dictionary:
+	var items: Dictionary = {}
+	for raw_key: Variant in raw_items.keys():
+		var item_id: StringName = StringName(str(raw_key))
+		if item_id == &"" or not ItemCatalog.get_item_def(String(item_id)):
+			continue
+		var quantity: int = int(raw_items[raw_key])
+		if quantity <= 0:
+			continue
+		items[item_id] = quantity
+	return items
 
 
 func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids: Array[StringName]) -> Array[StringName]:

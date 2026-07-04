@@ -174,6 +174,32 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"max_stack": 999,
 	},
+	# A player-buildable, self-contained water tank. Unlike the level-authored main
+	# reservoir it is NOT connected to the hose/lance and each instance keeps its own
+	# reserve (see BuildingObjectManager). It is bought at the seed merchant into the
+	# inventory (inventory_backed) and then placed from the toolbuild picker, which
+	# consumes one from the inventory instead of spending currency on placement.
+	"small_reservoir": {
+		"id": "small_reservoir",
+		"name": "Small Reservoir",
+		"currency": &"money",
+		"type": "placeable",
+		"category": "irrigation",
+		"frame": 16,
+		"price": 20,
+		"target_layer": "traversable_buildings",
+		"atlas": Vector2i(3, 1),
+		"occupies_cell": true,
+		"blocks_movement": false,
+		"blocks_projectiles": false,
+		"requires_walkable_floor": true,
+		"runtime_id": "small_reservoir",
+		"drag_buildable": false,
+		# Paid for at the seed merchant into the inventory; placing consumes one unit
+		# from the inventory rather than charging currency again.
+		"inventory_backed": true,
+		"max_stack": 999,
+	},
 	"turret1": {
 		"id": "turret1",
 		"name": "Spitter",
@@ -262,6 +288,12 @@ static func get_place_tile(item_id: String) -> Dictionary:
 
 static func is_placeable(item_id: String) -> bool:
 	return str(get_item_def(item_id).get("type", "")) == "placeable"
+
+## True for placeables that are stocked in the inventory (bought at the merchant) and
+## consumed from it when placed, instead of being paid for directly from currency on
+## placement. See small_reservoir.
+static func is_inventory_backed(item_id: String) -> bool:
+	return bool(get_item_def(item_id).get("inventory_backed", false))
 
 ## Catalog types that count as combat weapons (fired by the fight system) rather
 ## than tools/placeables. Quick-bar disabling and night auto-arming key off this.

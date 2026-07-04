@@ -3,6 +3,9 @@ extends Node
 const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
 const RESERVOIR_GROUP: StringName = &"reservoirs"
 const RESERVOIR_ITEM_ID: String = "reservoir"
+# Player-built small reservoirs also paint grass around themselves, but they are tracked
+# as buildings (not in the "reservoirs" group) so the hose ignores them.
+const SMALL_RESERVOIR_ITEM_ID: String = "small_reservoir"
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
@@ -41,10 +44,11 @@ func irrigate_all_reservoirs() -> void:
 	_resolve_level_nodes()
 	var center_cells: Dictionary = {}
 	if building_object_manager != null and building_object_manager.has_method("get_building_cells_by_item_id"):
-		var raw_cells: Array = building_object_manager.call("get_building_cells_by_item_id", RESERVOIR_ITEM_ID) as Array
-		for raw_cell: Variant in raw_cells:
-			var cell: Vector2i = raw_cell as Vector2i
-			center_cells[cell] = true
+		for item_id: String in [RESERVOIR_ITEM_ID, SMALL_RESERVOIR_ITEM_ID]:
+			var raw_cells: Array = building_object_manager.call("get_building_cells_by_item_id", item_id) as Array
+			for raw_cell: Variant in raw_cells:
+				var cell: Vector2i = raw_cell as Vector2i
+				center_cells[cell] = true
 	for reservoir_node: Node in get_tree().get_nodes_in_group(RESERVOIR_GROUP):
 		var reservoir_2d: Node2D = reservoir_node as Node2D
 		if reservoir_2d == null or floorz == null:

@@ -9,6 +9,8 @@ const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
 const ALERT_REFILL_WATER_KEY: String = "alert.refill_water"
 const RESERVE_ALERT_COOLDOWN_SECONDS: float = 3.0
+# How fast a small reservoir fills while a watering spray is landing on it (units/sec).
+const SMALL_RESERVOIR_REFILL_PER_SEC: float = 40.0
 const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
 const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
 
@@ -32,6 +34,8 @@ var _steering: Node
 var _projectiles: Node
 var _agent_manager: Node
 var _building_manager: Node
+var _building_object_manager: Node
+var _traversable_buildings_layer: TileMapLayer
 var _plant_manager: Node
 var _plant_layer: TileMapLayer
 var _wall_layer: TileMapLayer
@@ -72,6 +76,8 @@ func _ready() -> void:
 	_projectiles = get_node_or_null("../CPP/ProjectileSystemNative")
 	_agent_manager = get_node_or_null("../CPP/AgentManagerNative")
 	_building_manager = get_node_or_null("../Map/BuildingManager")
+	_building_object_manager = get_node_or_null("../Map/BuildingObjectManager")
+	_traversable_buildings_layer = get_node_or_null("../Map/MonTilemap/traversable_buildings") as TileMapLayer
 	_plant_manager = get_node_or_null("../Map/PlantManager")
 	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
 	_wall_layer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
@@ -121,6 +127,7 @@ func _process(_delta: float) -> void:
 	_drain_projectile_impacts()
 	_drain_damage_events()
 	_water_roses_under_spray_projectiles()
+	_refill_small_reservoirs_under_spray_projectiles(_delta)
 
 func set_paused(paused: bool) -> void:
 	_paused = paused
@@ -178,6 +185,35 @@ func _water_roses_under_spray_projectiles() -> void:
 					checked_cells[cell] = true
 					if bool(_plant_manager.call("is_rose_cell", cell)):
 						_plant_manager.call("wet_rose", cell)
+
+# Small reservoirs refill when a watering spray lands on (or next to) them, mirroring
+# how roses get wet. Each landed cell is credited once per frame so overlapping droplets
+# do not multiply the fill rate. Reserves are stored per-cell in the BuildingObjectManager.
+func _refill_small_reservoirs_under_spray_projectiles(delta: float) -> void:
+	if delta <= 0.0 or not _projectiles or _spray_type_ids.is_empty():
+		return
+	if _building_object_manager == null or _traversable_buildings_layer == null:
+		return
+	if not _building_object_manager.has_method("is_small_reservoir_cell") or not _building_object_manager.has_method("add_small_reservoir_water"):
+		return
+	var amount: float = SMALL_RESERVOIR_REFILL_PER_SEC * delta
+	var checked_cells: Dictionary = {}
+	for weapon_id_variant: Variant in _spray_type_ids.keys():
+		var weapon: WeaponData = _weapons_by_id.get(str(weapon_id_variant)) as WeaponData
+		if weapon == null or not weapon.spray_waters_reactive_plants:
+			continue
+		var type_id: int = int(_spray_type_ids[weapon_id_variant])
+		var positions: PackedVector2Array = _projectiles.call("get_active_positions", type_id) as PackedVector2Array
+		for droplet_pos: Vector2 in positions:
+			var center_cell: Vector2i = _traversable_buildings_layer.local_to_map(_traversable_buildings_layer.to_local(droplet_pos))
+			for y: int in range(center_cell.y - 1, center_cell.y + 2):
+				for x: int in range(center_cell.x - 1, center_cell.x + 2):
+					var cell: Vector2i = Vector2i(x, y)
+					if checked_cells.has(cell):
+						continue
+					checked_cells[cell] = true
+					if bool(_building_object_manager.call("is_small_reservoir_cell", cell)):
+						_building_object_manager.call("add_small_reservoir_water", cell, amount)
 
 func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
 	if _building_manager and _building_manager.has_method("remove_dead_monster"):
