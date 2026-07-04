@@ -12,6 +12,7 @@ const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn
 const BUILD_FX_Z_INDEX: int = -62
 const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
+const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 # Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
 const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
 const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
@@ -67,6 +68,7 @@ func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
 	_configure_preview_layer()
+	_sync_terrain_speed_cells()
 	_preload_build_fx_pool()
 	set_process(true)
 	set_process_input(true)
@@ -381,10 +383,12 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 			layer.erase_cell(cell)
 			layer.update_internals()
 		_refresh_cell_collision(cell)
+		_refresh_cell_terrain_speed(cell)
 		return
 	layer.erase_cell(cell)
 	layer.update_internals()
 	_refresh_cell_collision(cell)
+	_refresh_cell_terrain_speed(cell)
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
 	var layers: Array[TileMapLayer] = [blocking_buildings, traversable_buildings, plantz, wallz]
@@ -525,6 +529,31 @@ func _refresh_cell_collision(cell: Vector2i) -> void:
 	elif blocking_buildings and blocking_buildings.get_cell_source_id(cell) >= 0:
 		blocked = true
 	ff.call("set_cell_blocked", cell, blocked)
+
+func _sync_terrain_speed_cells() -> void:
+	var ff: Object = _resolve_flow_field()
+	if ff == null:
+		return
+	if ff.has_method("clear_cell_speed_multipliers"):
+		ff.call("clear_cell_speed_multipliers")
+	if traversable_buildings == null or not ff.has_method("set_cell_speed_multiplier"):
+		return
+	for raw_cell: Variant in traversable_buildings.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		_refresh_cell_terrain_speed(cell)
+
+func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
+	var ff: Object = _resolve_flow_field()
+	if ff == null or not ff.has_method("set_cell_speed_multiplier"):
+		return
+	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	if traversable_buildings != null and traversable_buildings.get_cell_source_id(cell) >= 0:
+		var atlas_coords: Vector2i = traversable_buildings.get_cell_atlas_coords(cell)
+		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(traversable_buildings.name), atlas_coords)
+		if item_id != "":
+			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+			speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+	ff.call("set_cell_speed_multiplier", cell, speed_multiplier)
 
 func _resolve_flow_field() -> Object:
 	if _flow_field and is_instance_valid(_flow_field):
@@ -683,6 +712,7 @@ func _finish_drag_build() -> void:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
 		if _target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
+		_refresh_cell_terrain_speed(cell)
 		_after_placeable_placed(cell, placeable_def, false)
 		_play_build_fx_at_cell(cell, target_layer)
 	target_layer.update_internals()
@@ -750,6 +780,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	target_layer.update_internals()
 	if _target_layer_affects_collision(target_layer):
 		_refresh_cell_collision(_hover_cell)
+	_refresh_cell_terrain_speed(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
 	_play_build_fx_at_cell(_hover_cell, target_layer)
 
@@ -782,6 +813,7 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 		traversable_buildings.update_internals()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
+		_refresh_cell_terrain_speed(cell)
 	if target_layer != blocking_buildings and blocking_buildings:
 		blocking_buildings.erase_cell(cell)
 		blocking_buildings.update_internals()

@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="GunData" format=3 uid="uid://cflgsj1o7qjms"]
+
+[ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="1_items"]
+[ext_resource type="Script" uid="uid://cojaivo3a6d7g" path="res://scripts/combat/weapons/gun_data.gd" id="2_gun_data"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_epine"]
+atlas = ExtResource("1_items")
+region = Rect2(480, 0, 32, 32)
+
+[resource]
+script = ExtResource("2_gun_data")
+id = "epine"
+reserve_id = &"water"
+reserve_cost = 1
+fire_delay_ms = 1000.0
+projectile_visual_size = 32.0
+projectile_sprite = SubResource("AtlasTexture_epine")
+throw_offset = 16.0
+projectile_shadow_size = Vector2(10, 4)
+smash_force = 1600.0
+smash_detach_flow = true
+smash_control_suppression = 1.0
+smash_control_suppression_duration = 0.2

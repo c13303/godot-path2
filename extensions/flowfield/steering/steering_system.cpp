@@ -77,6 +77,19 @@ static inline Vec2 agent_foot_point(const AgentData &a)
     return a.position + Vec2(0, a.profile.foot_offset_y);
 }
 
+static inline double terrain_speed_multiplier_for_agent(const AgentData &a, FlowField *nav)
+{
+    if (!nav)
+        return 1.0;
+    Vec2i cell = nav->world_to_cell(agent_foot_point(a));
+    return nav->cell_speed_multiplier(cell);
+}
+
+static inline Vec2 terrain_scaled_step(const AgentData &a, FlowField *nav, const Vec2 &velocity, double delta)
+{
+    return velocity * delta * terrain_speed_multiplier_for_agent(a, nav);
+}
+
 static inline double agent_fight_query_padding(const AgentData &a)
 {
     return std::abs(a.profile.foot_offset_y - a.profile.fight_offset_y) + std::sqrt(a.profile.fight_half_w * a.profile.fight_half_w + a.profile.fight_half_h * a.profile.fight_half_h);
@@ -1805,7 +1818,7 @@ void SteeringSystem::update_all(double delta)
             if (safe_len(target_velocity) < DROWNING_STOP_SPEED && safe_len(a.velocity) < DROWNING_STOP_SPEED)
                 a.velocity = Vec2(0, 0);
             Vec2 old_pos = a.position;
-            Vec2 step = a.velocity * delta;
+            Vec2 step = terrain_scaled_step(a, nav, a.velocity, delta);
             a.position = apply_walk_with_walls(a, step, nav);
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
@@ -1876,7 +1889,7 @@ void SteeringSystem::update_all(double delta)
                 }
                 a.debug_separation = agent_separation;
                 Vec2 old_pos = a.position;
-                Vec2 step = a.velocity * delta;
+                Vec2 step = terrain_scaled_step(a, nav, a.velocity, delta);
                 a.position = apply_walk_with_walls(a, step, nav);
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
@@ -1925,7 +1938,7 @@ void SteeringSystem::update_all(double delta)
 
             Vec2 old_pos = a.position;
             Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
-            Vec2 step = move_velocity * delta;
+            Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
             a.position = apply_walk_with_walls(a, step, nav);
             if (nav)
                 ultimate_wall_correction(a, nav, delta);
@@ -1959,7 +1972,7 @@ void SteeringSystem::update_all(double delta)
 
                 Vec2 old_pos = a.position;
                 Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
-                Vec2 step = move_velocity * delta;
+                Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
                 Vec2 new_pos = apply_walk_with_walls(a, step, nav);
                 a.position = new_pos;
 
@@ -1992,7 +2005,7 @@ void SteeringSystem::update_all(double delta)
             // si propulsé, on conserve la velocity existante (déjà amortie)
 
             Vec2 old_pos = a.position;
-            Vec2 step = a.velocity * delta;
+            Vec2 step = terrain_scaled_step(a, nav, a.velocity, delta);
             a.position = apply_walk_with_walls(a, step, nav);
 
             if (nav)
@@ -2026,7 +2039,7 @@ void SteeringSystem::update_all(double delta)
 
             Vec2 old_pos = a.position;
             Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
-            Vec2 step = move_velocity * delta;
+            Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
             Vec2 new_pos = apply_walk_with_walls(a, step, nav);
             a.position = new_pos;
 
@@ -2165,7 +2178,7 @@ void SteeringSystem::update_all(double delta)
                 a.debug_desired_dir = escape;
                 a.debug_target_velocity = target_velocity;
                 Vec2 old_pos = a.position;
-                Vec2 step = a.velocity * delta;
+                Vec2 step = terrain_scaled_step(a, nav, a.velocity, delta);
                 a.position = apply_walk_with_walls(a, step, nav);
                 if (nav)
                     ultimate_wall_correction(a, nav, delta);
@@ -2357,7 +2370,7 @@ void SteeringSystem::update_all(double delta)
 
         Vec2 old_pos = a.position;
         Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
-        Vec2 step = move_velocity * delta;
+        Vec2 step = terrain_scaled_step(a, ff, move_velocity, delta);
         a.position = apply_walk_with_walls(a, step, ff);
 
         ultimate_wall_correction(a, ff, delta);

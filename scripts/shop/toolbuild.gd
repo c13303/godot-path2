@@ -6,10 +6,10 @@ extends Control
 ## takes over while the player is near the merchant without the toolbuild selected.
 ## It renders as a vertical column
 ## rising up out of the toolbuild quick slot, like a dropdown that opens upward:
-## one icon per buildable, stacked with no per-row text. A single floating label sits
-## just to the right of the currently selected icon only, showing that buildable's name
-## plus either its price (with the matching currency icon) or, for limited buildables,
-## "remaining : n". The floating label has a transparent background and ignores all mouse
+## one icon per buildable, with the build price overlaid where the quantity badge would
+## be. The rose shop counter uses that same badge for its remaining fixed stock. A single
+## floating label sits just to the right of the currently selected icon only, showing that
+## buildable's name. The floating label has a transparent background and ignores all mouse
 ## events. Unaffordable / unavailable buildables are greyed out like disabled quick slots,
 ## and the floating label turns red when the selected buildable cannot be placed.
 ## Clicking a slot selects it so the build system places it when affordable; buildables are
@@ -35,10 +35,10 @@ const BAR_CONTENT_INSET: float = 10.0
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
-const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID]
+const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "ronce", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "ronce", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
@@ -83,8 +83,6 @@ var _row_currencies: Dictionary = {}
 # The single floating label shown to the right of the selected slot only.
 var _selected_label: HBoxContainer
 var _selected_name: Label
-var _selected_price: Label
-var _selected_currency: TextureRect
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
@@ -315,8 +313,8 @@ func _make_icon_count_label(text: String) -> Label:
 	return count
 
 
-## Builds the single floating label (name + price + currency icon) that sits to the
-## right of the selected slot. It has no background and ignores all mouse events.
+## Builds the single floating label (name only) that sits to the right of the selected
+## slot. It has no background and ignores all mouse events.
 func _build_selected_label() -> void:
 	var group: HBoxContainer = HBoxContainer.new()
 	_selected_label = group
@@ -329,21 +327,6 @@ func _build_selected_label() -> void:
 	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
 	group.add_child(name_label)
 	_selected_name = name_label
-
-	var price_label: Label = _make_row_label(18)
-	price_label.add_theme_color_override("font_color", Color.WHITE)
-	group.add_child(price_label)
-	_selected_price = price_label
-
-	var currency: TextureRect = TextureRect.new()
-	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	currency.custom_minimum_size = Vector2(20.0, 20.0)
-	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	group.add_child(currency)
-	_selected_currency = currency
 
 	group.visible = false
 
@@ -783,7 +766,7 @@ func _refresh_slots() -> void:
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
 		var selected: bool = item_id == _selected_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
-		count_label.text = str(affordable)
+		count_label.text = _slot_badge_text(item_id)
 		# The merchant column signals unaffordability through the per-row label colour, so its
 		# slots stay at full colour; the build column greys unaffordable/locked slots.
 		var visual_disabled: bool = disabled
@@ -832,7 +815,7 @@ func _next_available_buildable(from_id: String) -> String:
 
 
 ## Fills in and positions the floating label for the selected slot only. It shows the
-## buildable's name, price and currency icon, turning red when it cannot be placed.
+## buildable's name, turning red when it cannot be placed.
 ## During the merchant phase (no build pick) the label stays hidden — icons only.
 func _update_selected_label() -> void:
 	if _selected_label == null:
@@ -849,19 +832,15 @@ func _update_selected_label() -> void:
 	var can_place: bool = _can_afford(item_id) and not _is_item_locked(item_id)
 	var color: Color = SELECTED_LABEL_COLOR if can_place else SELECTED_DISABLED_LABEL_COLOR
 	_selected_name.add_theme_color_override("font_color", color)
-	_selected_price.add_theme_color_override("font_color", color)
-	_selected_currency.modulate = color
 	_selected_name.text = _display_name(item_id)
-	var remaining: int = _limit_remaining(item_id)
-	if remaining >= 0:
-		_selected_price.text = "%s : %d" % [Translations.t("ui.remaining"), remaining]
-		_selected_currency.visible = false
-	else:
-		_selected_price.text = str(_build_price(item_id))
-		var currency_texture: AtlasTexture = _currency_texture(item_id)
-		_selected_currency.texture = currency_texture
-		_selected_currency.visible = currency_texture != null
 	_position_selected_label(button)
+
+
+func _slot_badge_text(item_id: String) -> String:
+	if item_id == COUNTER_ID:
+		var remaining: int = _limit_remaining(item_id)
+		return str(maxi(remaining, 0))
+	return str(_build_price(item_id))
 
 
 ## Maps an item's catalog currency to its HUD icon texture, or null if it has none.

@@ -43,6 +43,13 @@ namespace godot
         TileMapLayer *navigation_blocking_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
         std::unordered_set<Vector2i, Vector2iHash> extra_blocking_cells;
+        std::unordered_map<Vector2i, double, Vector2iHash> cell_speed_multipliers;
+
+        struct CellSpeedModifier
+        {
+            Vector2i cell;
+            double multiplier = 1.0;
+        };
 
         struct AsyncFlowSnapshot
         {
@@ -54,6 +61,7 @@ namespace godot
             bool debug_disable_bottlenecks = false;
             int bottleneck_zone_radius_tiles = 0;
             double flow_field_wall_clearance = 0.0;
+            std::vector<CellSpeedModifier> speed_modifiers;
         };
 
         struct AsyncFlowRequest
@@ -99,6 +107,10 @@ namespace godot
         void apply_physics_passability(ffcore::FlowField &target_field,
                                        const Rect2i &used,
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
+        void apply_cell_speed_multipliers(ffcore::FlowField &target_field, const Rect2i &used) const;
+        void apply_cell_speed_modifiers(ffcore::FlowField &target_field,
+                                        const Rect2i &used,
+                                        const std::vector<CellSpeedModifier> &modifiers) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
                            std::unordered_map<Vector2i, double, Vector2iHash> &costs);
@@ -152,6 +164,8 @@ namespace godot
         Object *get_blocking_layer() const;
         void set_extra_blocking_cells(const PackedVector2Array &cells);
         void clear_extra_blocking_cells();
+        void set_cell_speed_multiplier(Vector2i map_cell, double multiplier);
+        void clear_cell_speed_multipliers();
 
         bool rebuild_async(Vector2 goal);
         void request_flow_to_group(int group_id, Vector2 goal);

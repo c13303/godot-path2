@@ -457,7 +457,7 @@ func _update_lance_sprite() -> void:
 		return
 
 	var facing: Vector2 = direction.normalized()
-	var throw_offset: float = float(fight_system.call("get_spray_weapon_throw_offset", weapon_id))
+	var throw_offset: float = float(fight_system.call("get_held_weapon_throw_offset", weapon_id))
 	var local_origin: Vector2 = _weapon_origin_offset(player)
 	lance.position = local_origin + facing * throw_offset
 	lance.rotation = facing.angle() + PI * 0.5
@@ -466,11 +466,10 @@ func _update_lance_sprite() -> void:
 func _is_lance_weapon(weapon_id: String) -> bool:
 	if weapon_id == "" or not fight_system:
 		return false
-	if fight_system.is_gun(weapon_id):
-		return false
+	# The lance shows for any held weapon: spray weapons and guns (water, epine).
 	if not fight_system.is_held_weapon(weapon_id):
 		return false
-	return fight_system.has_method("get_spray_weapon_throw_offset")
+	return fight_system.has_method("get_held_weapon_throw_offset")
 
 func _agent_velocity(agent_id: int) -> Vector2:
 	if steering and agent_id >= 0 and steering.has_method("get_agent_velocity"):

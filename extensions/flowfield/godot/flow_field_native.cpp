@@ -94,6 +94,8 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_blocking_layer", "node"), &FlowFieldNative::set_blocking_layer);
     ClassDB::bind_method(D_METHOD("set_extra_blocking_cells", "cells"), &FlowFieldNative::set_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("clear_extra_blocking_cells"), &FlowFieldNative::clear_extra_blocking_cells);
+    ClassDB::bind_method(D_METHOD("set_cell_speed_multiplier", "map_cell", "multiplier"), &FlowFieldNative::set_cell_speed_multiplier);
+    ClassDB::bind_method(D_METHOD("clear_cell_speed_multipliers"), &FlowFieldNative::clear_cell_speed_multipliers);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("get_navigation_blocking_layer"), &FlowFieldNative::get_navigation_blocking_layer);
@@ -121,6 +123,26 @@ void FlowFieldNative::set_extra_blocking_cells(const PackedVector2Array &cells)
     }
 }
 void FlowFieldNative::clear_extra_blocking_cells() { extra_blocking_cells.clear(); }
+void FlowFieldNative::set_cell_speed_multiplier(Vector2i map_cell, double multiplier)
+{
+    if (!std::isfinite(multiplier) || multiplier >= 0.999)
+        cell_speed_multipliers.erase(map_cell);
+    else
+        cell_speed_multipliers[map_cell] = std::clamp(multiplier, 0.01, 1.0);
+
+    ffcore::Vec2i rel(map_cell.x - field.get_cell_origin().x, map_cell.y - field.get_cell_origin().y);
+    if (field.width() > 0 && field.height() > 0)
+        field.set_cell_speed_multiplier(rel, multiplier);
+}
+void FlowFieldNative::clear_cell_speed_multipliers()
+{
+    cell_speed_multipliers.clear();
+    if (field.width() <= 0 || field.height() <= 0)
+        return;
+    for (int y = 0; y < field.height(); ++y)
+        for (int x = 0; x < field.width(); ++x)
+            field.set_cell_speed_multiplier(ffcore::Vec2i(x, y), 1.0);
+}
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 Object *FlowFieldNative::get_navigation_blocking_layer() const { return navigation_blocking_layer; }
@@ -159,6 +181,7 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
     field.first_is_arrived = false;
     field.arrived_count = 0;
+    apply_cell_speed_multipliers(field, used);
 
     Vector2 goal_local = floor_layer->to_local(goal_world);
     goal_cell = floor_layer->local_to_map(goal_local);
@@ -166,6 +189,27 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     goal_world = goal_center_world;
 
     return true;
+}
+
+void FlowFieldNative::apply_cell_speed_multipliers(ffcore::FlowField &target_field, const Rect2i &used) const
+{
+    for (const auto &entry : cell_speed_multipliers)
+    {
+        const Vector2i &cell = entry.first;
+        ffcore::Vec2i rel(cell.x - used.position.x, cell.y - used.position.y);
+        target_field.set_cell_speed_multiplier(rel, entry.second);
+    }
+}
+
+void FlowFieldNative::apply_cell_speed_modifiers(ffcore::FlowField &target_field,
+                                                 const Rect2i &used,
+                                                 const std::vector<CellSpeedModifier> &modifiers) const
+{
+    for (const CellSpeedModifier &modifier : modifiers)
+    {
+        ffcore::Vec2i rel(modifier.cell.x - used.position.x, modifier.cell.y - used.position.y);
+        target_field.set_cell_speed_multiplier(rel, modifier.multiplier);
+    }
 }
 
 void FlowFieldNative::build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
@@ -873,6 +917,7 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
         blockers = blocking_layer->get_used_cells();
     Array floors = floor_layer->get_used_cells();
     snapshot.walls.reserve(walls.size() + blockers.size() + extra_blocking_cells.size());
+    snapshot.speed_modifiers.reserve(cell_speed_multipliers.size());
     for (int i = 0; i < walls.size(); i++)
     {
         Vector2i cell = walls[i];
@@ -911,6 +956,8 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
         return false;
 
     const auto &cfg = ffcore::globalconfig();
+    for (const auto &entry : cell_speed_multipliers)
+        snapshot.speed_modifiers.push_back({entry.first, entry.second});
     snapshot.used = used;
     snapshot.goal_cell = goal_cell;
     snapshot.tile_size = tile_size;
@@ -986,6 +1033,7 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     computed.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
     computed.first_is_arrived = false;
     computed.arrived_count = 0;
+    apply_cell_speed_modifiers(computed, used, snapshot.speed_modifiers);
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     wall_set.reserve(snapshot.walls.size());

@@ -11,7 +11,11 @@ class_name GunData
 
 @export var projectile_speed: float = 600.0
 @export var projectile_lifetime: float = 0.6
+# Collision size (px): the projectile's hitbox radius is projectile_size * 0.5.
 @export var projectile_size: float = 16.0
+# Visual sprite draw size (px). 0 = draw at projectile_size (visual == hitbox).
+# Set larger than projectile_size to render a bigger sprite over a smaller hitbox.
+@export var projectile_visual_size: float = 0.0
 @export var projectile_sprite: Texture2D
 
 # Spawn the projectile this many pixels from the origin along the aim direction

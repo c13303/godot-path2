@@ -460,7 +460,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "ronce"
 
 
 func get_build_price(item_id: String) -> int:

@@ -14,13 +14,16 @@ class_name LevelSpawnConfig
 @export_range(0, 100, 1, "suffix:%") var monster_drop_seed_chance_percent: int = 0
 
 @export_group("Tool Shop")
-@export var tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall"]
+@export var tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"ronce"]
 @export var tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+	&"ronce": 1,
 }
-@export var tool_shop_growth_price_factors: Dictionary = {}
+@export var tool_shop_growth_price_factors: Dictionary = {
+	&"ronce": 2.0,
+}
 @export var tool_shop_days: Dictionary = {}
 @export_range(1, 99, 1) var rose_shop_counter_limit: int = 2
 
@@ -36,11 +39,12 @@ class_name LevelSpawnConfig
 @export var merchant_days: Dictionary = {}
 
 @export_group("Legacy Shop")
-@export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+@export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 @export var shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"wall": 100,
+	&"ronce": 1,
 	&"seed": 2,
 	&"spray": 100,
 	&"beam": 100,

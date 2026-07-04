@@ -23,6 +23,7 @@ const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaba
 ]
 @export var guns: Array[GunData] = [
 	preload("res://scripts/combat/weapons/water.tres"),
+	preload("res://scripts/combat/weapons/epine.tres"),
 ]
 
 var _steering: Node
@@ -36,6 +37,7 @@ var _floor_layer: TileMapLayer
 var _water_sources: WaterSources
 var _player: Node2D
 var _progression: Node
+var _splash_controller: Node
 var _drawer
 var _projectile_drawer
 var _damage_number_drawer: DamageNumberDrawer
@@ -72,6 +74,7 @@ func _ready() -> void:
 	_water_sources = get_node_or_null("../Map/MonTilemap/watersources") as WaterSources
 	_player = get_node_or_null("../Player") as Node2D
 	_progression = get_node_or_null("../progression")
+	_splash_controller = get_node_or_null("../visualFX/splashController")
 	if _steering and not _steering.has_method("take_damage_events"):
 		push_error("FightSystem: native damage API is unavailable. Rebuild the GDExtension and restart Godot.")
 	_drawer = WeaponAOEDrawer.new()
@@ -137,6 +140,8 @@ func _drain_damage_events() -> void:
 			continue
 		var number_position: Vector2 = event.get("position", enemy.global_position) as Vector2
 		_damage_number_drawer.show_damage(number_position, damage)
+		if _splash_controller:
+			_splash_controller.call("play_at", enemy.global_position)
 		var died: bool = bool(enemy.call("take_damage", damage))
 		Sfx.play_random_scream()
 		if died:
@@ -492,6 +497,14 @@ func get_spray_weapon_throw_offset(item_id: String) -> float:
 	if weapon == null or not weapon.spray_projectiles_enabled:
 		return 0.0
 	return weapon.throw_offset
+
+## Throw offset for any held weapon (spray weapon or gun), used to position the
+## aim lance sprite along the aim direction.
+func get_held_weapon_throw_offset(item_id: String) -> float:
+	var gun: GunData = _guns_by_id.get(item_id) as GunData
+	if gun != null:
+		return gun.throw_offset
+	return get_spray_weapon_throw_offset(item_id)
 
 func _register_guns() -> void:
 	_guns_by_id.clear()
@@ -1161,7 +1174,10 @@ class ProjectileDrawer:
 			if not gun:
 				continue
 			var tid: int = int(_gun_type_ids[gun_id])
-			var half: float = gun.projectile_size * 0.5
+			# Visual sprite half-size is independent of the collision size: a gun may
+			# draw a larger sprite over a smaller hitbox (projectile_visual_size).
+			var visual_size: float = gun.projectile_visual_size if gun.projectile_visual_size > 0.0 else gun.projectile_size
+			var half: float = visual_size * 0.5
 			var shadow_half: Vector2 = gun.projectile_shadow_size * 0.5
 			var shadow_tex: Texture2D = gun.projectile_shadow_texture
 			var shadow_tex_offset: Vector2 = Vector2.ZERO

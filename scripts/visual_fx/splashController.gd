@@ -5,7 +5,7 @@ const FLOOR_SPLASH_Z_INDEX: int = -99
 const PLAYER_PATH: NodePath = ^"../../Player"
 const WATERSOURCES_PATH: NodePath = ^"../../Map/MonTilemap/watersources"
 
-@export var splash_pool_size: int = 12
+@export var splash_pool_size: int = 50
 @export var splash_freq: float = 0.1
 
 var _player: Node2D
@@ -38,6 +38,12 @@ func _process(delta: float) -> void:
 		_repeat_time_left = maxf(splash_freq, 0.0)
 
 	_was_in_water = true
+
+
+# Public one-shot: fire a pooled splash at an arbitrary world position (e.g. an
+# enemy hit), independent of the player water-walking logic in _process.
+func play_at(world_position: Vector2) -> void:
+	_play_splash(world_position)
 
 
 func _preload_pool() -> void:
