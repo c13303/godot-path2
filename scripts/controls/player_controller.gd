@@ -6,6 +6,7 @@ const SMASH_CLASS_PLAYER: int = 1
 const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 const INPUT_MODE_PAD: String = "pad"
 const INPUT_MODE_KMOUSE: String = "kmouse"
+const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
@@ -63,6 +64,7 @@ var _rush_direction: Vector2 = Vector2.ZERO
 var _rush_sample_position: Vector2 = Vector2.ZERO
 var _trail_last_emit_pos: Vector2 = Vector2.ZERO
 var _last_move_direction: Vector2 = Vector2.ZERO
+var _last_lance_facing: Vector2 = Vector2.RIGHT
 var _player_in_water: bool = false
 
 func _ready() -> void:
@@ -450,30 +452,30 @@ func _weapon_origin_offset(player: Node2D) -> Vector2:
 
 func _update_lance_sprite() -> void:
 	var player: Node2D = _get_player_node()
-	if not player or not fight_system:
+	if not player:
 		return
 	var lance: Sprite2D = player.get_node_or_null("lance") as Sprite2D
 	if not lance:
 		return
 
 	var weapon_id: String = _selected_item_id()
-	if not _is_lance_weapon(weapon_id):
-		lance.visible = false
-		return
-
 	var origin: Vector2 = _weapon_origin(player)
 	var pad_aim: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	var direction: Vector2 = pad_aim if _control_mode == INPUT_MODE_PAD and pad_aim != Vector2.ZERO else get_global_mouse_position() - origin
-	if direction.length_squared() <= 0.000001:
-		lance.visible = false
-		return
-
-	var facing: Vector2 = direction.normalized()
-	var throw_offset: float = float(fight_system.call("get_held_weapon_throw_offset", weapon_id))
+	var facing: Vector2 = _last_lance_facing
+	if direction.length_squared() > 0.000001:
+		facing = direction.normalized()
+		_last_lance_facing = facing
+	var throw_offset: float = _lance_throw_offset(weapon_id)
 	var local_origin: Vector2 = _weapon_origin_offset(player)
 	lance.position = local_origin + facing * throw_offset
 	lance.rotation = facing.angle() + PI * 0.5
 	lance.visible = true
+
+func _lance_throw_offset(weapon_id: String) -> float:
+	if _is_lance_weapon(weapon_id):
+		return float(fight_system.call("get_held_weapon_throw_offset", weapon_id))
+	return DEFAULT_LANCE_THROW_OFFSET
 
 func _is_lance_weapon(weapon_id: String) -> bool:
 	if weapon_id == "" or not fight_system:

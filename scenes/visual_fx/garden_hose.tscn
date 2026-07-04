@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3 uid="uid://de6aqnminose"]
+
+[ext_resource type="Script" path="res://scripts/visual_fx/garden_hose.gd" id="1_hose"]
+
+[node name="GardenHose" type="Node2D"]
+z_index = 505
+script = ExtResource("1_hose")
+
+[node name="LeftBorder" type="Line2D" parent="."]
+z_index = 0
+
+[node name="RightBorder" type="Line2D" parent="."]
+z_index = 1
+
+[node name="Highlight" type="Line2D" parent="."]
+z_index = 2

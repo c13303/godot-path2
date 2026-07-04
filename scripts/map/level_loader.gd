@@ -31,6 +31,7 @@ const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epi
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"reservoir", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
+const RESERVOIR_Z_INDEX: int = 506
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -449,6 +450,8 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		_clear_owner_recursive(reservoir)
 		container.add_child(reservoir)
 		reservoir.global_position = global_pos
+		reservoir.z_as_relative = false
+		reservoir.z_index = RESERVOIR_Z_INDEX
 		reservoir.add_to_group("reservoirs")
 
 

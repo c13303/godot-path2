@@ -17,7 +17,7 @@ const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
 const LIGHT_ENERGY: float = 0.75
 const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir.png")
-const RESERVOIR_Z_INDEX: int = -46
+const RESERVOIR_Z_INDEX: int = 506
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
@@ -232,6 +232,7 @@ func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 	var runtime_node: Node2D = Node2D.new()
 	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
 	runtime_node.global_position = _cell_center(cell)
+	runtime_node.add_to_group("reservoirs")
 
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.name = "Sprite2D"

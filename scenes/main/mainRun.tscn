@@ -47,6 +47,7 @@
 [ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
 [ext_resource type="Script" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
+[ext_resource type="PackedScene" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -666,6 +667,7 @@ target_sprite_path = NodePath("../rosa")
 
 [node name="lance" type="Sprite2D" parent="Player" unique_id=1598475842]
 visible = false
+z_index = 2
 texture = ExtResource("6_y7386")
 script = ExtResource("7_pqqvp")
 
@@ -726,6 +728,11 @@ transition_duration = 1.0
 
 [node name="splashController" type="Node" parent="visualFX" unique_id=180811705]
 script = ExtResource("12_t6n3k")
+
+[node name="GardenHose" parent="visualFX" node_paths=PackedStringArray("lance_path", "player_path", "building_object_manager_path") instance=ExtResource("45_garden_hose")]
+lance_path = NodePath("../../Player/lance")
+player_path = NodePath("../../Player")
+building_object_manager_path = NodePath("../../Map/BuildingObjectManager")
 
 [node name="Map" type="Node" parent="." unique_id=214584774]
 
