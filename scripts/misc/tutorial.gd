@@ -30,6 +30,11 @@ const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 
+const ALERT_DURATION: float = 3.0
+const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)
+const ALERT_DARK_RED: Color = Color(0.55, 0.0, 0.0)
+const ALERT_FLASH_SPEED: float = 8.0
+
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
 const CHANGE_DELAY: float = 0.5
@@ -46,6 +51,8 @@ var _pending_remaining: float = 0.0
 var _glow_tween: Tween
 var _glow_active: bool = false
 var _waiting_for_seed_harvest: bool = false
+var _alert_key: String = ""
+var _alert_remaining: float = 0.0
 # True during the sunrise transition: night has just ended but the first day phase
 # (the morning harvest) has not begun yet. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -114,13 +121,38 @@ func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
 
 func _on_locale_changed(_locale: String) -> void:
 	# Same message, new language: re-translate in place without re-blanking.
+	if _alert_key != "":
+		text = Translations.t(_alert_key)
+		return
 	if _displayed_key != "":
 		text = Translations.t(_displayed_key)
+
+
+func show_alert(key: String) -> void:
+	if key == "":
+		return
+	_alert_key = key
+	_alert_remaining = ALERT_DURATION
+	visible = true
+	text = Translations.t(_alert_key)
+	_set_glow(false)
 
 
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
+	if _alert_key != "":
+		_alert_remaining -= delta
+		if _alert_remaining > 0.0:
+			visible = true
+			text = Translations.t(_alert_key)
+			var pulse: float = (sin((ALERT_DURATION - _alert_remaining) * ALERT_FLASH_SPEED) + 1.0) * 0.5
+			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, pulse)
+			_set_glow(false)
+			return
+		_alert_key = ""
+		_alert_remaining = 0.0
+		modulate = Color.WHITE
 	if _should_start_night_automatically():
 		_start_night_automatically()
 		return
@@ -136,13 +168,16 @@ func _refresh(delta: float = 0.0) -> void:
 		_displayed_key = ""
 		text = ""
 		visible = false
+		modulate = Color.WHITE
 		_set_glow(false)
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
+		modulate = Color.WHITE
 		_set_glow(false)
 		return
 	visible = true
+	modulate = Color.WHITE
 
 	if key == _displayed_key:
 		# Already showing the right message; cancel any stale pending switch.

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="TurretData" format=3 uid="uid://b3rvh7n7lqt4s"]
+
+[ext_resource type="Script" path="res://scripts/combat/turrets/turret_data.gd" id="1_turret_data"]
+[ext_resource type="Resource" uid="uid://cflgsj1o7qjms" path="res://scripts/combat/weapons/epine.tres" id="2_weapon"]
+
+[resource]
+script = ExtResource("1_turret_data")
+id = "turret_epine"
+weapon = ExtResource("2_weapon")
+directional = true
+straight_line_detection = true
+build_in_range = true

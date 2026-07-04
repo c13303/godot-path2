@@ -90,6 +90,10 @@ func _input(event: InputEvent) -> void:
 			if joy_button_event.pressed:
 				_handle_pad_cancel()
 			get_viewport().set_input_as_handled()
+		elif joy_button_event.button_index == JOY_BUTTON_Y:
+			if joy_button_event.pressed:
+				_handle_pad_rotate_build()
+			get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey:
@@ -287,6 +291,14 @@ func _handle_pad_cancel() -> void:
 		return
 	if build_system.has_method("pad_unbuild_at_cursor"):
 		build_system.call("pad_unbuild_at_cursor")
+
+func _handle_pad_rotate_build() -> void:
+	if _paused or _is_inventory_open():
+		return
+	if not _build_controls_active() or build_system == null:
+		return
+	if build_system.has_method("pad_rotate_selected_at_cursor"):
+		build_system.call("pad_rotate_selected_at_cursor")
 
 func _pad_build_preview_active() -> bool:
 	return build_system != null and build_system.has_method("pad_is_build_preview_active") and bool(build_system.call("pad_is_build_preview_active"))

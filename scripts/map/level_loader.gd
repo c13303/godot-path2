@@ -27,9 +27,9 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"ronce"]
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -39,10 +39,11 @@ var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"wall", &"ronce"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
+	&"turret_epine": 5,
 	&"wall": 100,
 	&"ronce": 1,
 }
@@ -216,10 +217,11 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
 	_loaded_monster_drop_seed_chance_percent = 0
-	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"wall", &"ronce"]
+	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 	_loaded_tool_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
+		&"turret_epine": 5,
 		&"wall": 100,
 		&"ronce": 1,
 	}

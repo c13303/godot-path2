@@ -2,6 +2,7 @@ extends RefCounted
 class_name ItemCatalog
 
 const TURRET1_DATA: TurretData = preload("res://scripts/combat/turrets/turret1.tres")
+const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
 
 const ITEM_DEFS: Dictionary = {
 	"sword": {
@@ -176,6 +177,28 @@ const ITEM_DEFS: Dictionary = {
 		"pad_skip_preview": true,
 		"runtime_id": "turret1",
 		"turret_data": TURRET1_DATA,
+		"max_stack": 999,
+	},
+	"turret_epine": {
+		"id": "turret_epine",
+		"name": "Epine Turret",
+		"currency": &"gem",
+		"type": "placeable",
+		"category": "turret",
+		"frame": 6,
+		"price": 5,
+		"target_layer": "blocking_buildings",
+		"atlas": Vector2i(2, 0),
+		"occupies_cell": true,
+		"isWall": false,
+		"blocks_movement": false,
+		"blocks_projectiles": false,
+		"requires_walkable_floor": true,
+		"requires_grass_green_floor": true,
+		"pad_skip_preview": true,
+		"directional": true,
+		"runtime_id": "turret_epine",
+		"turret_data": TURRET_EPINE_DATA,
 		"max_stack": 999,
 	},
 	"rose_shop_counter": {

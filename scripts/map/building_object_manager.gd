@@ -17,6 +17,9 @@ const LIGHT_TEXTURE_FALLBACK_TILE_SIZE: int = 16
 const LIGHT_COLOR: Color = Color(1.0, 0.72, 0.32, 1.0)
 const LIGHT_ENERGY: float = 0.75
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter"]
+const TILE_TRANSFORM_FLIP_H: int = 4096
+const TILE_TRANSFORM_FLIP_V: int = 8192
+const TILE_TRANSFORM_TRANSPOSE: int = 16384
 
 var _buildings_by_cell: Dictionary = {}
 var _runtime_nodes_by_cell: Dictionary = {}
@@ -64,6 +67,8 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 		"category": placeable_category,
 		"runtime_id": runtime_id,
 	}
+	if item_def.has("direction"):
+		building_data["direction"] = item_def.get("direction", Vector2i(1, 0))
 	if item_def.has("light_source"):
 		building_data["light_source"] = light_source
 	_buildings_by_cell[cell] = building_data
@@ -329,7 +334,10 @@ func _default_building_def_for_existing_tile(layer: TileMapLayer, _cell: Vector2
 			continue
 		var item_atlas: Vector2i = _atlas_coords_from_item_def(item_def)
 		if item_atlas == atlas:
-			return item_def
+			var resolved_def: Dictionary = item_def.duplicate(true)
+			if bool(resolved_def.get("directional", false)):
+				resolved_def["direction"] = _direction_from_alternative(layer.get_cell_alternative_tile(_cell))
+			return resolved_def
 	return {}
 
 func _atlas_coords_from_item_def(item_def: Dictionary) -> Vector2i:
@@ -341,3 +349,13 @@ func _atlas_coords_from_item_def(item_def: Dictionary) -> Vector2i:
 	if raw is Array and raw.size() == 2:
 		return Vector2i(int(raw[0]), int(raw[1]))
 	return Vector2i(-1, -1)
+
+func _direction_from_alternative(alternative_tile: int) -> Vector2i:
+	var transform: int = alternative_tile & (TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V | TILE_TRANSFORM_TRANSPOSE)
+	if transform == (TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V):
+		return Vector2i(-1, 0)
+	if transform == (TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H):
+		return Vector2i(0, 1)
+	if transform == (TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V):
+		return Vector2i(0, -1)
+	return Vector2i(1, 0)

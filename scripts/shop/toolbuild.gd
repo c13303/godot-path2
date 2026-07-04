@@ -35,10 +35,10 @@ const BAR_CONTENT_INSET: float = 10.0
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
-const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "ronce", COUNTER_ID]
+const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID]
 const SEED_ITEM_ID: String = "seed"
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "wall", "ronce", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", COUNTER_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
@@ -73,6 +73,8 @@ var _slot_rows: Dictionary = {}
 var _slot_buttons: Dictionary = {}
 var _slot_icons: Dictionary = {}
 var _slot_counts: Dictionary = {}
+# item id -> the small currency icon shown right after the price in each slot's badge.
+var _slot_currencies: Dictionary = {}
 # item id -> its persistent per-row label group (name + price + currency icon) and its
 # parts. Only shown during the seed/weapon merchant column; hidden in build phase, which
 # uses the single floating label below instead.
@@ -445,6 +447,18 @@ func _build_slot(item_id: String) -> Button:
 	icon.offset_bottom = -8.0
 	button.add_child(icon)
 
+	# Price badge pinned to the slot's bottom-right, laid out as "<price> <currency icon>"
+	# so the icon sits right after the number and both grow up-left from the corner.
+	var badge: HBoxContainer = HBoxContainer.new()
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_theme_constant_override("separation", 1)
+	badge.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	badge.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	badge.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	badge.offset_right = -4.0
+	badge.offset_bottom = -2.0
+	button.add_child(badge)
+
 	var count: Label = Label.new()
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -454,16 +468,21 @@ func _build_slot(item_id: String) -> Button:
 	count.add_theme_color_override("font_shadow_color", Color.BLACK)
 	count.add_theme_constant_override("shadow_offset_x", 1)
 	count.add_theme_constant_override("shadow_offset_y", 1)
-	count.set_anchors_preset(Control.PRESET_FULL_RECT)
-	count.offset_left = 2.0
-	count.offset_top = 2.0
-	count.offset_right = -4.0
-	count.offset_bottom = -2.0
-	button.add_child(count)
+	badge.add_child(count)
+
+	var currency: TextureRect = TextureRect.new()
+	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	currency.custom_minimum_size = Vector2(14.0, 14.0)
+	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	currency.size_flags_vertical = Control.SIZE_SHRINK_END
+	badge.add_child(currency)
 
 	_slot_buttons[item_id] = button
 	_slot_icons[item_id] = icon
 	_slot_counts[item_id] = count
+	_slot_currencies[item_id] = currency
 	return button
 
 
@@ -767,6 +786,12 @@ func _refresh_slots() -> void:
 		var selected: bool = item_id == _selected_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = _slot_badge_text(item_id)
+		# The counter's badge is a remaining-stock count, not a price, so it carries no
+		# currency icon; every other buildable shows the icon for the currency it costs.
+		var slot_currency: TextureRect = _slot_currencies[item_id] as TextureRect
+		var slot_currency_texture: AtlasTexture = null if item_id == COUNTER_ID else _currency_texture(item_id)
+		slot_currency.texture = slot_currency_texture
+		slot_currency.visible = slot_currency_texture != null
 		# The merchant column signals unaffordability through the per-row label colour, so its
 		# slots stay at full colour; the build column greys unaffordable/locked slots.
 		var visual_disabled: bool = disabled

@@ -16,6 +16,14 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 # Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
 const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
 const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
+const TILE_TRANSFORM_FLIP_H: int = 4096
+const TILE_TRANSFORM_FLIP_V: int = 8192
+const TILE_TRANSFORM_TRANSPOSE: int = 16384
+const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
+const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
+const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
+const DIRECTION_UP: Vector2i = Vector2i(0, -1)
+const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
@@ -59,6 +67,7 @@ var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
+var _build_direction: Vector2i = DIRECTION_RIGHT
 var _build_fx_pool: Array[Node2D] = []
 var _build_fx_pool_cursor: int = 0
 # Green outline panel that frames the active drag rectangle (built lazily).
@@ -138,6 +147,13 @@ func _process(delta: float) -> void:
 	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var key_event: InputEventKey = event as InputEventKey
+		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_R:
+			if rotate_selected_build_direction():
+				get_viewport().set_input_as_handled()
+				return
+
 	if event is InputEventMouseButton:
 		var remove_event: InputEventMouseButton = event as InputEventMouseButton
 		if remove_event.button_index == MOUSE_BUTTON_RIGHT:
@@ -368,6 +384,19 @@ func pad_unbuild_at_cursor() -> void:
 		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
 	_clear_hover()
 
+
+func pad_rotate_selected_at_cursor() -> bool:
+	return rotate_selected_build_direction()
+
+
+func rotate_selected_build_direction() -> bool:
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if placeable_def.is_empty() or not _is_directional_placeable(placeable_def):
+		return false
+	_build_direction = _next_build_direction(_build_direction)
+	_clear_hover()
+	return true
+
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	if layer == plantz:
 		if plant_manager and plant_manager.has_method("remove_plant"):
@@ -397,6 +426,9 @@ func _removable_at_cell(cell: Vector2i) -> Dictionary:
 			continue
 		var atlas_coords: Vector2i = layer.get_cell_atlas_coords(cell)
 		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), atlas_coords)
+		if building_object_manager and building_object_manager.has_method("get_building") and (layer == blocking_buildings or layer == traversable_buildings):
+			var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
+			item_id = str(building.get("item_id", item_id))
 		if item_id != "" and _can_unbuild_tile(layer, item_id, atlas_coords):
 			return {"item_id": item_id, "layer": layer, "cell": cell}
 	return {}
@@ -571,7 +603,7 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 		cell,
 		_atlas_source_id,
 		atlas_coords,
-		0
+		_alternative_from_placeable(placeable_def)
 	)
 	_preview_cells.append(cell)
 	_hover_item_id = item_id
@@ -617,7 +649,7 @@ func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void
 		available
 	)
 	for cell: Vector2i in valid_cells:
-		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
 	_preview_cells = valid_cells
 	_hover_active = not _preview_cells.is_empty()
@@ -702,6 +734,8 @@ func _finish_drag_build() -> void:
 	_set_drag_build_active(false)
 	_drag_build_item_id = ""
 	if cells.is_empty():
+		if _placement_attempt_needs_grass_alert(_drag_build_start_cell, _drag_build_end_cell, placeable_def):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
 		return
 	# Pay for exactly the cells we are about to place; bail if the spend fails.
 	if not game_ui or not game_ui.has_method("try_purchase_build"):
@@ -709,7 +743,7 @@ func _finish_drag_build() -> void:
 	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
 		return
 	for cell: Vector2i in cells:
-		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, 0)
+		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
 		if _target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
 		_refresh_cell_terrain_speed(cell)
@@ -757,6 +791,9 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 
 	_hover_cell = _hovered_cell()
 	if not _is_valid_placeable_cell(_hover_cell, target_layer, placeable_def):
+		if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(_hover_cell):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+			return
 		_notify("invalid construction")
 		return
 
@@ -775,7 +812,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		_hover_cell,
 		_atlas_source_id,
 		atlas_coords,
-		0
+		_alternative_from_placeable(placeable_def)
 	)
 	target_layer.update_internals()
 	if _target_layer_affects_collision(target_layer):
@@ -862,6 +899,34 @@ func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null or floorz.get_cell_source_id(cell) < 0:
 		return false
 	return floorz.get_cell_atlas_coords(cell) == GRASS_GREEN_FLOOR_ATLAS
+
+func _placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
+	if not _requires_grass_green_floor(placeable_def):
+		return false
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if not _is_grass_green_floor_cell(cell):
+				return true
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return false
+
+func _show_tutorial_alert(key: String) -> void:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	if tutorial != null and tutorial.has_method("show_alert"):
+		tutorial.call("show_alert", key)
 
 func _is_water_source_cell(cell: Vector2i) -> bool:
 	return watersources != null and watersources.get_cell_source_id(cell) >= 0
@@ -1087,6 +1152,9 @@ func get_preview_item_id() -> String:
 func get_preview_cell() -> Vector2i:
 	return _hover_cell
 
+func get_preview_direction() -> Vector2i:
+	return _build_direction
+
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
 		return
@@ -1109,7 +1177,12 @@ func _selected_placeable_def() -> Dictionary:
 		return {}
 	if _placement_disabled():
 		return {}
-	return ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_build_item_id")))
+	var placeable_def: Dictionary = ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_build_item_id")))
+	if _is_directional_placeable(placeable_def):
+		var directed_def: Dictionary = placeable_def.duplicate(true)
+		directed_def["direction"] = _build_direction
+		return directed_def
+	return placeable_def
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
@@ -1128,3 +1201,30 @@ func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 	if raw is Array and raw.size() == 2:
 		return Vector2i(int(raw[0]), int(raw[1]))
 	return Vector2i(-1, -1)
+
+func _is_directional_placeable(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("directional", false))
+
+func _next_build_direction(direction: Vector2i) -> Vector2i:
+	if direction == DIRECTION_RIGHT:
+		return DIRECTION_DOWN
+	if direction == DIRECTION_DOWN:
+		return DIRECTION_LEFT
+	if direction == DIRECTION_LEFT:
+		return DIRECTION_UP
+	return DIRECTION_RIGHT
+
+func _alternative_from_placeable(placeable_def: Dictionary) -> int:
+	if not _is_directional_placeable(placeable_def):
+		return 0
+	var direction: Vector2i = placeable_def.get("direction", DIRECTION_RIGHT) as Vector2i
+	return _alternative_from_direction(direction)
+
+func _alternative_from_direction(direction: Vector2i) -> int:
+	if direction == DIRECTION_LEFT:
+		return TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V
+	if direction == DIRECTION_DOWN:
+		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H
+	if direction == DIRECTION_UP:
+		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V
+	return 0

@@ -22,6 +22,8 @@ var _los_generation: int = 0
 var _has_hovered_turret: bool = false
 var _hovered_turret_cell: Vector2i = Vector2i.ZERO
 var _has_preview_turret: bool = false
+var _preview_turret_cell: Vector2i = Vector2i.ZERO
+var _preview_turret_direction: Vector2i = Vector2i(1, 0)
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
@@ -65,21 +67,25 @@ func _process(delta: float) -> void:
 		if elapsed < shoot_frequency:
 			state["elapsed"] = elapsed
 			continue
-		var target: Node2D = _nearest_enemy_in_range(cell, origin, activation_range)
+		var target: Node2D = _target_for_turret(cell, state, origin, activation_range)
 		if target == null:
 			# Ready to fire but nothing in range; stay primed and retry next frame.
 			state["elapsed"] = shoot_frequency
 			continue
-		var direction: Vector2 = target.global_position - origin
-		state["spraying"] = true
-		state["spray_time_left"] = float(state.get("shoot_duration", 1.0))
+		var direction: Vector2 = _fire_direction_for_target(state, origin, target)
 		state["last_direction"] = direction
 		state["elapsed"] = elapsed - shoot_frequency
-		_fight_system.update_turret_spray(cell, str(state.get("weapon", "spray")), origin, direction, delta)
+		var weapon_id: String = str(state.get("weapon", "spray"))
+		if _fight_system.is_gun(weapon_id):
+			_fight_system.fire_gun_once(weapon_id, origin, direction, -1)
+			continue
+		state["spraying"] = true
+		state["spray_time_left"] = float(state.get("shoot_duration", 1.0))
+		_fight_system.update_turret_spray(cell, weapon_id, origin, direction, delta)
 
 func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float, delta: float) -> void:
-	var target: Node2D = _nearest_enemy_in_range(cell, origin, activation_range)
-	var direction: Vector2 = (target.global_position - origin) if target != null else (state.get("last_direction", Vector2.RIGHT) as Vector2)
+	var target: Node2D = _target_for_turret(cell, state, origin, activation_range)
+	var direction: Vector2 = _fire_direction_for_target(state, origin, target) if target != null else (state.get("last_direction", Vector2.RIGHT) as Vector2)
 	state["last_direction"] = direction
 	_fight_system.update_turret_spray(cell, str(state.get("weapon", "spray")), origin, direction, delta)
 	state["elapsed"] = float(state.get("elapsed", 0.0)) + delta
@@ -104,6 +110,7 @@ func _draw() -> void:
 		return
 	if _has_preview_turret:
 		_draw_forbidden_zone(layer)
+		_draw_preview_turret_coverage(layer)
 	elif _has_hovered_turret:
 		_draw_visible_by_turret(layer)
 
@@ -133,7 +140,21 @@ func _draw_visible_by_turret(layer: TileMapLayer) -> void:
 			_fill_cells(layer, (raw_visible_cells as Dictionary).keys(), visible_by_turret_color)
 		return
 	var cells: Dictionary = {}
-	_collect_range_cells(layer, _hovered_turret_cell, float(state.get("shooting_range", 0.0)), cells)
+	if bool(state.get("straight_line_detection", false)):
+		_collect_line_cells(layer, _hovered_turret_cell, state.get("direction", Vector2i(1, 0)) as Vector2i, float(state.get("shooting_range", 0.0)), cells)
+	else:
+		_collect_range_cells(layer, _hovered_turret_cell, float(state.get("shooting_range", 0.0)), cells)
+	_fill_cells(layer, cells.keys(), visible_by_turret_color)
+
+func _draw_preview_turret_coverage(layer: TileMapLayer) -> void:
+	var turret_data: TurretData = _preview_turret_data()
+	if turret_data == null:
+		return
+	var cells: Dictionary = {}
+	if turret_data.straight_line_detection:
+		_collect_line_cells(layer, _preview_turret_cell, _preview_turret_direction, turret_data.shooting_range, cells)
+	else:
+		_collect_range_cells(layer, _preview_turret_cell, turret_data.shooting_range, cells)
 	_fill_cells(layer, cells.keys(), visible_by_turret_color)
 
 func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range: float, out_cells: Dictionary) -> void:
@@ -149,6 +170,17 @@ func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range:
 			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
 			if origin.distance_squared_to(target_world) <= range_squared:
 				out_cells[target_cell] = true
+
+func _collect_line_cells(layer: TileMapLayer, cell: Vector2i, direction: Vector2i, activation_range: float, out_cells: Dictionary) -> void:
+	if activation_range <= 0.0 or direction == Vector2i.ZERO:
+		return
+	var tile_size: float = _tile_size_pixels(layer)
+	var range_cells: int = ceili(activation_range / maxf(1.0, tile_size))
+	for offset: int in range(1, range_cells + 1):
+		var target_cell: Vector2i = cell + direction * offset
+		if _is_los_blocker_cell(target_cell):
+			return
+		out_cells[target_cell] = true
 
 func _fill_cells(layer: TileMapLayer, cells: Array, color: Color) -> void:
 	var half_size: Vector2 = Vector2.ONE * (_tile_size_pixels(layer) * 0.5)
@@ -176,8 +208,10 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 	if turret_data == null:
 		push_warning("TurretSystem: missing TurretData for %s." % item_id)
 		return
-	var weapon_id: String = turret_data.weapon.id if turret_data.weapon != null else ""
+	var weapon_id: String = _weapon_id_from_resource(turret_data.weapon)
 	var shoot_frequency: float = maxf(0.001, turret_data.shoot_frequency)
+	var building: Dictionary = _building_objects.get_building(cell)
+	var direction: Vector2i = building.get("direction", Vector2i(1, 0)) as Vector2i
 	_turrets[cell] = {
 		"item_id": item_id,
 		"data": turret_data,
@@ -187,15 +221,18 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"weapon": weapon_id,
 		"shooting_range": turret_data.shooting_range,
 		"build_range": turret_data.build_range,
+		"direction": direction,
+		"directional": turret_data.directional,
+		"straight_line_detection": turret_data.straight_line_detection,
 		"spraying": false,
 		"spray_time_left": 0.0,
-		"last_direction": Vector2.RIGHT,
+		"last_direction": Vector2(float(direction.x), float(direction.y)),
 		"los_status": LOS_PENDING,
 		"visible_cells": {},
 		"los_generation": _next_los_generation(),
 	}
-	# Initialize this turret's independent spray timers.
-	_fight_system.create_turret_spray(cell)
+	if not _fight_system.is_gun(weapon_id):
+		_fight_system.create_turret_spray(cell)
 	call_deferred("_compute_turret_los_async", cell, int((_turrets[cell] as Dictionary).get("los_generation", 0)))
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
@@ -225,11 +262,23 @@ func _update_preview_turret() -> void:
 	if not TURRET_SHOW_RADIUS:
 		return
 	var has_preview_turret: bool = false
+	var preview_cell: Vector2i = _preview_turret_cell
+	var preview_direction: Vector2i = _preview_turret_direction
 	if _build_system != null and _build_system.has_method("has_single_tile_preview") and bool(_build_system.call("has_single_tile_preview")):
 		has_preview_turret = _is_turret_item(str(_build_system.call("get_preview_item_id")))
-	if has_preview_turret == _has_preview_turret:
+		if has_preview_turret and _build_system.has_method("get_preview_cell"):
+			preview_cell = _build_system.call("get_preview_cell") as Vector2i
+		if has_preview_turret and _build_system.has_method("get_preview_direction"):
+			preview_direction = _build_system.call("get_preview_direction") as Vector2i
+	if (
+		has_preview_turret == _has_preview_turret
+		and preview_cell == _preview_turret_cell
+		and preview_direction == _preview_turret_direction
+	):
 		return
 	_has_preview_turret = has_preview_turret
+	_preview_turret_cell = preview_cell
+	_preview_turret_direction = preview_direction
 	queue_redraw()
 
 func _preview_turret_data() -> TurretData:
@@ -237,6 +286,61 @@ func _preview_turret_data() -> TurretData:
 		return null
 	var item_id: String = str(_build_system.call("get_preview_item_id"))
 	return ItemCatalog.get_turret_data(item_id)
+
+func _weapon_id_from_resource(weapon: Resource) -> String:
+	if weapon == null:
+		return ""
+	return str(weapon.get("id"))
+
+func _target_for_turret(turret_cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float) -> Node2D:
+	if bool(state.get("straight_line_detection", false)):
+		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
+		return _nearest_enemy_in_line(turret_cell, origin, activation_range, direction)
+	return _nearest_enemy_in_range(turret_cell, origin, activation_range)
+
+func _fire_direction_for_target(state: Dictionary, origin: Vector2, target: Node2D) -> Vector2:
+	if bool(state.get("directional", false)):
+		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
+		return Vector2(float(direction.x), float(direction.y))
+	return target.global_position - origin
+
+func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_range: float, direction: Vector2i) -> Node2D:
+	if direction == Vector2i.ZERO:
+		return null
+	var layer: TileMapLayer = _building_objects.blocking_buildings
+	if layer == null:
+		return null
+	var nearest: Node2D = null
+	var nearest_step: int = 2147483647
+	var tile_size: float = _tile_size_pixels(layer)
+	var max_steps: int = ceili(activation_range / maxf(1.0, tile_size))
+	for raw_enemy: Node in get_tree().get_nodes_in_group(&"monsters"):
+		var enemy: Node2D = raw_enemy as Node2D
+		if enemy == null or not is_instance_valid(enemy):
+			continue
+		var enemy_cell: Vector2i = layer.local_to_map(layer.to_local(enemy.global_position))
+		var offset: Vector2i = enemy_cell - turret_cell
+		var step: int = _line_step_for_offset(offset, direction)
+		if step <= 0 or step > max_steps or step >= nearest_step:
+			continue
+		if origin.distance_squared_to(enemy.global_position) > activation_range * activation_range:
+			continue
+		if not _turret_can_see_world_position(turret_cell, enemy.global_position):
+			continue
+		nearest = enemy
+		nearest_step = step
+	return nearest
+
+func _line_step_for_offset(offset: Vector2i, direction: Vector2i) -> int:
+	if direction.x != 0:
+		if offset.y != 0 or offset.x * direction.x <= 0:
+			return -1
+		return absi(offset.x)
+	if direction.y != 0:
+		if offset.x != 0 or offset.y * direction.y <= 0:
+			return -1
+		return absi(offset.y)
+	return -1
 
 func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_range: float) -> Node2D:
 	var nearest: Node2D = null
@@ -290,6 +394,12 @@ func _compute_turret_los_async(cell: Vector2i, generation: int) -> void:
 	var range_squared: float = activation_range * activation_range
 	var budget_us: int = maxi(500, int(LOS_PRECOMPUTE_BUDGET_MS * 1000.0))
 	var slice_started_us: int = Time.get_ticks_usec()
+
+	if bool(state.get("straight_line_detection", false)):
+		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
+		_collect_line_cells(layer, cell, direction, activation_range, visible_cells)
+		_finish_turret_los(cell, generation, visible_cells)
+		return
 
 	for y_offset: int in range(-radius_cells, radius_cells + 1):
 		for x_offset: int in range(-radius_cells, radius_cells + 1):
