@@ -815,9 +815,47 @@ func _build_limit_for_item(item_id: String) -> int:
 func _placed_build_count(item_id: String) -> int:
 	var scene: Node = get_tree().current_scene
 	var manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene != null else null
+	var managed_count: int = 0
 	if manager != null and manager.has_method("count_buildings_by_item_id"):
-		return int(manager.call("count_buildings_by_item_id", item_id))
-	return 0
+		managed_count = int(manager.call("count_buildings_by_item_id", item_id))
+	var tile_count: int = _placed_build_tile_count(item_id)
+	return maxi(managed_count, tile_count)
+
+
+func _placed_build_tile_count(item_id: String) -> int:
+	var item_def: Dictionary = ItemCatalog.get_placeable_def(item_id)
+	if item_def.is_empty():
+		return 0
+	var layer: TileMapLayer = _build_tile_layer_for_item_def(item_def)
+	if layer == null:
+		return 0
+	var count: int = 0
+	for raw_cell: Variant in layer.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		var placed_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+		if placed_item_id == item_id:
+			count += 1
+	return count
+
+
+func _build_tile_layer_for_item_def(item_def: Dictionary) -> TileMapLayer:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	var target_layer: String = str(item_def.get("target_layer", "wallz"))
+	if target_layer == "buildings":
+		target_layer = "traversable_buildings"
+	var map_root: Node = scene.get_node_or_null("Map")
+	match target_layer:
+		"plantz", "traversable_buildings", "blocking_buildings":
+			return scene.get_node_or_null("Map/MonTilemap/%s" % target_layer) as TileMapLayer
+		"wallz":
+			if map_root != null:
+				var level_wallz: TileMapLayer = map_root.get_node_or_null("wallz") as TileMapLayer
+				if level_wallz != null:
+					return level_wallz
+			return scene.get_node_or_null("Map/MonTilemap/wallz") as TileMapLayer
+	return null
 
 ## Refund the full price of `count` removed units back to the matching currency,
 ## flying one currency icon per unit from `world_position` to the HUD and crediting

@@ -73,6 +73,9 @@ func end_refill_flow() -> void:
 func is_ready_for_shooting() -> bool:
 	return _mode == MODE_FULL_TO_LANCE
 
+func has_shooting_fluid_at_lance() -> bool:
+	return _mode == MODE_FULL_TO_LANCE or (_mode == MODE_DRAIN_FROM_RESERVOIR and _fluid_end >= 0.999)
+
 func is_ready_for_refill() -> bool:
 	return _mode == MODE_FULL_TO_RESERVOIR
 

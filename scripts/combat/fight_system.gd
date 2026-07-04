@@ -587,8 +587,16 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	if type_id < 0:
 		_stop_held_spray()
 		return
-	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_ready_for_shooting():
-		return
+	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
+		var can_feed_hose: bool = _reserve_has_amount(weapon.spray_reserve_id, weapon.spray_reserve_cost)
+		if can_feed_hose:
+			_begin_hose_shooting_flow()
+		else:
+			_end_hose_shooting_flow()
+		if not _hose_has_shooting_fluid_at_lance():
+			if not can_feed_hose:
+				_stop_held_spray()
+			return
 	if _held_spray_weapon_id != "" and _held_spray_weapon_id != weapon.id:
 		_stop_held_spray()
 
@@ -605,7 +613,12 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
 	if _held_spray_weapon_id == "":
 		if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
-			return
+			if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
+				_end_hose_shooting_flow()
+				if not _hose_has_shooting_fluid_at_lance():
+					return
+			else:
+				return
 		_held_spray_weapon_id = weapon.id
 		_held_spray_cost_time_left = weapon.spray_reserve_cost_interval
 		_held_spray_fire_time_left = 0.0
@@ -613,6 +626,11 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 		_held_spray_cost_time_left -= delta
 		while _held_spray_cost_time_left <= 0.0:
 			if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
+				if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
+					_end_hose_shooting_flow()
+					if _hose_has_shooting_fluid_at_lance():
+						_held_spray_cost_time_left += maxf(weapon.spray_reserve_cost_interval, 0.001)
+						break
 				_stop_held_spray()
 				return
 			_held_spray_cost_time_left += maxf(weapon.spray_reserve_cost_interval, 0.001)
@@ -639,7 +657,7 @@ func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector
 	var jitter: float = deg_to_rad(weapon.spray_projectile_spread_jitter_degrees)
 	var angle: float = base_angle + randf_range(-half_angle, half_angle) + randf_range(-jitter, jitter)
 	var projectile_direction: Vector2 = Vector2.from_angle(angle)
-	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_ready_for_shooting():
+	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_has_shooting_fluid_at_lance():
 		return
 	fire_spray_projectile_direct(type_id, origin, projectile_direction, inherited_velocity, source_agent_id)
 
@@ -760,6 +778,13 @@ func _spend_reserve(reserve_id: StringName, amount: int, alert_on_failure: bool 
 		_show_reserve_alert()
 	return spent
 
+func _reserve_has_amount(reserve_id: StringName, amount: int) -> bool:
+	if reserve_id == &"" or amount <= 0:
+		return true
+	if reserve_id != WATER_RESERVE_ID or not _progression or not _progression.has_method("get_value"):
+		return false
+	return int(_progression.call("get_value", WATER_RESERVE_KEY)) >= amount
+
 func _show_reserve_alert() -> void:
 	if _reserve_alert_cooldown > 0.0:
 		return
@@ -778,12 +803,16 @@ func _refill_water_reserve(delta: float) -> void:
 		_water_refill_elapsed = 0.0
 		_end_hose_refill_flow()
 		return
+	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
+	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
+	if current >= maximum:
+		_water_refill_elapsed = 0.0
+		_end_hose_refill_flow()
+		return
 	_begin_hose_refill_flow()
 	if not _hose_ready_for_refill():
 		_water_refill_elapsed = 0.0
 		return
-	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
-	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
 	if _water_sources == null:
 		return
 	var interval_seconds: float = maxf(_water_sources.refill_interval_seconds, 0.001)
@@ -791,14 +820,14 @@ func _refill_water_reserve(delta: float) -> void:
 	if refill_amount <= 0:
 		return
 	_water_refill_elapsed += delta
-	if current >= maximum:
-		_water_refill_elapsed = 0.0
-		return
 	while _water_refill_elapsed >= interval_seconds and current < maximum:
 		_water_refill_elapsed -= interval_seconds
 		var added: int = mini(refill_amount, maximum - current)
 		_update_water_reserve(added)
 		current += added
+	if current >= maximum:
+		_water_refill_elapsed = 0.0
+		_end_hose_refill_flow()
 
 func _player_is_above_water_source() -> bool:
 	if _water_sources == null:
@@ -829,8 +858,11 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 		var type_id: int = int(_gun_type_ids.get(gun_id, -1))
 		if type_id >= 0:
 			if source_agent_id >= 0:
-				_begin_hose_shooting_flow()
-				if not _hose_ready_for_shooting():
+				if _reserve_has_amount(gun.reserve_id, gun.reserve_cost):
+					_begin_hose_shooting_flow()
+				else:
+					_end_hose_shooting_flow()
+				if not _hose_has_shooting_fluid_at_lance():
 					_gun_fire_timers[gun_id] = 0.0
 					return
 			if _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
@@ -844,6 +876,14 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 				_projectiles.call("fire", type_id, spawn_pos, facing, source_agent_id, gun.affected_smash_classes)
 				if gun.id == "water":
 					Sfx.play_sound(&"bubble1")
+			elif source_agent_id >= 0 and gun.reserve_id == WATER_RESERVE_ID:
+				_end_hose_shooting_flow()
+				if _hose_has_shooting_fluid_at_lance():
+					var drain_facing: Vector2 = get_current_lance_direction(direction)
+					var drain_spawn_pos: Vector2 = get_current_lance_position(origin)
+					_projectiles.call("fire", type_id, drain_spawn_pos, drain_facing, source_agent_id, gun.affected_smash_classes)
+					if gun.id == "water":
+						Sfx.play_sound(&"bubble1")
 			t = max(0.0, gun.fire_delay_ms * 0.001)
 	_gun_fire_timers[gun_id] = t
 
@@ -906,6 +946,15 @@ func _hose_ready_for_shooting() -> bool:
 	if not _garden_hose_fluid.has_method("is_ready_for_shooting"):
 		return true
 	return bool(_garden_hose_fluid.call("is_ready_for_shooting"))
+
+func _hose_has_shooting_fluid_at_lance() -> bool:
+	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
+		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
+	if _garden_hose_fluid == null:
+		return false
+	if not _garden_hose_fluid.has_method("has_shooting_fluid_at_lance"):
+		return _hose_ready_for_shooting()
+	return bool(_garden_hose_fluid.call("has_shooting_fluid_at_lance"))
 
 func _begin_hose_refill_flow() -> void:
 	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):

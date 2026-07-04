@@ -1239,7 +1239,6 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
-starting_weapons = Array[StringName]([&"epine", &"spray"])
 tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce"])
 tool_shop_prices = {
 &"ronce": 1,
