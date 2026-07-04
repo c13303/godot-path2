@@ -63,3 +63,10 @@ offset_left = 3.0
 offset_top = -46.0
 offset_right = -13.0
 offset_bottom = -58.0
+
+[node name="waterReserve" parent="GameUI/bottom left anchor" parent_id_path=PackedInt32Array(1873448854) index="0" unique_id=1896415017]
+offset_left = -1557.0
+offset_top = -12.0
+offset_right = -1557.0
+offset_bottom = -12.0
+rotation = -1.5647762

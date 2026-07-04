@@ -1,83 +1,98 @@
 extends Node2D
 class_name GardenHoseFluid
 
-const WATER_PACKET_COLOR: Color = Color(0.25, 0.65, 1.0, 0.9)
+const MODE_EMPTY: int = 0
+const MODE_FILL_TO_LANCE: int = 1
+const MODE_FULL_TO_LANCE: int = 2
+const MODE_DRAIN_FROM_RESERVOIR: int = 3
+const MODE_FILL_TO_RESERVOIR: int = 4
+const MODE_FULL_TO_RESERVOIR: int = 5
+const MODE_DRAIN_FROM_LANCE: int = 6
 
 @export var hose_path: NodePath
-@export var packet_pool_size: int = 160
-@export var packet_radius: float = 4.0
-@export var packet_speed_pixels_per_second: float = 260.0
-@export var min_travel_seconds: float = 0.35
-@export var max_travel_seconds: float = 1.6
-@export var visual_packets_per_shot: int = 5
-@export var visual_packet_spacing_seconds: float = 0.055
+@export var fluid_width: float = 7.0
+@export var fill_speed_progress_per_second: float = 3.2
+@export var drain_speed_progress_per_second: float = 2.4
+@export var fluid_color: Color = Color(0.2, 0.58, 1.0, 0.72)
+@export var highlight_color: Color = Color(1.0, 1.0, 1.0, 0.2)
+@export var highlight_width: float = 2.0
 
 var _hose: GardenHose
-var _packet_nodes: Array[FluidPacketNode] = []
-var _active_packets: Array[Dictionary] = []
+var _mode: int = MODE_EMPTY
+var _fluid_start: float = 0.0
+var _fluid_end: float = 0.0
+var _shooting_requested: bool = false
+var _refill_requested: bool = false
 
 func _ready() -> void:
 	_resolve_hose()
-	_create_packet_pool()
 	set_process(true)
 
 func _process(delta: float) -> void:
 	if _hose == null or not is_instance_valid(_hose):
 		_resolve_hose()
-	_update_packets(delta)
+	_update_state(delta)
+	queue_redraw()
+
+func begin_shooting_flow() -> void:
+	_shooting_requested = true
+	_refill_requested = false
+	if _mode == MODE_FULL_TO_LANCE or _mode == MODE_FILL_TO_LANCE:
+		return
+	_mode = MODE_FILL_TO_LANCE
+	_fluid_start = 0.0
+	_fluid_end = clampf(_fluid_end, 0.0, 1.0)
+
+func end_shooting_flow() -> void:
+	_shooting_requested = false
+	if _mode == MODE_FILL_TO_LANCE or _mode == MODE_FULL_TO_LANCE:
+		_mode = MODE_DRAIN_FROM_RESERVOIR
+		_fluid_start = 0.0
+		_fluid_end = maxf(_fluid_end, 0.0)
+
+func begin_refill_flow() -> void:
+	_refill_requested = true
+	_shooting_requested = false
+	if _mode == MODE_FULL_TO_RESERVOIR or _mode == MODE_FILL_TO_RESERVOIR:
+		return
+	var was_empty: bool = _mode == MODE_EMPTY or _fluid_end <= _fluid_start
+	_mode = MODE_FILL_TO_RESERVOIR
+	_fluid_end = 1.0
+	if was_empty:
+		_fluid_start = 1.0
+	else:
+		_fluid_start = clampf(_fluid_start, 0.0, 1.0)
+
+func end_refill_flow() -> void:
+	_refill_requested = false
+	if _mode == MODE_FILL_TO_RESERVOIR or _mode == MODE_FULL_TO_RESERVOIR:
+		_mode = MODE_DRAIN_FROM_LANCE
+		_fluid_start = minf(_fluid_start, 1.0)
+		_fluid_end = 1.0
+
+func is_ready_for_shooting() -> bool:
+	return _mode == MODE_FULL_TO_LANCE
+
+func is_ready_for_refill() -> bool:
+	return _mode == MODE_FULL_TO_RESERVOIR
+
+func request_gun_shot(_gun_id: String, _direction: Vector2, _source_agent_id: int, _fight_system: Node) -> bool:
+	begin_shooting_flow()
+	return is_ready_for_shooting()
 
 func request_water_shot(_origin: Vector2, direction: Vector2, source_agent_id: int, fight_system: Node) -> bool:
-	if fight_system == null or direction.length_squared() <= 0.000001:
-		return false
-	var packet_node: FluidPacketNode = _next_available_packet_node()
-	if packet_node == null:
-		return false
+	return request_gun_shot("water", direction, source_agent_id, fight_system)
 
-	var travel_seconds: float = _travel_seconds()
-	_queue_forward_visual_packets(packet_node, travel_seconds, {
-		"shot_direction": direction.normalized(),
-		"source_agent_id": source_agent_id,
-		"fight_system": fight_system,
-	})
-	return true
+func request_spray_projectile(_type_id: int, _direction: Vector2, _inherited_velocity: Vector2, _source_agent_id: int, _fight_system: Node) -> bool:
+	begin_shooting_flow()
+	return is_ready_for_shooting()
 
-func request_spray_projectile(type_id: int, direction: Vector2, inherited_velocity: Vector2, source_agent_id: int, fight_system: Node) -> bool:
-	if fight_system == null or type_id < 0 or direction.length_squared() <= 0.000001:
-		return false
-	var packet_node: FluidPacketNode = _next_available_packet_node()
-	if packet_node == null:
-		return false
-
-	var travel_seconds: float = _travel_seconds()
-	_queue_forward_visual_packets(packet_node, travel_seconds, {
-		"spray_type_id": type_id,
-		"shot_direction": direction.normalized(),
-		"inherited_velocity": inherited_velocity,
-		"source_agent_id": source_agent_id,
-		"fight_system": fight_system,
-	})
-	return true
-
-func request_refill(amount: int, fight_system: Node) -> bool:
-	if fight_system == null or amount <= 0:
-		return false
-	var packet_node: FluidPacketNode = _next_available_packet_node()
-	if packet_node == null:
-		return false
-
-	var travel_seconds: float = _travel_seconds()
-	_queue_refill_visual_packets(packet_node, travel_seconds, {
-		"refill_amount": amount,
-		"fight_system": fight_system,
-	})
-	return true
+func request_refill(_amount: int, _fight_system: Node) -> bool:
+	begin_refill_flow()
+	return is_ready_for_refill()
 
 func request_refill_visual() -> bool:
-	var packet_node: FluidPacketNode = _next_available_packet_node()
-	if packet_node == null:
-		return false
-
-	_queue_refill_visual_packets(packet_node, _travel_seconds(), {})
+	begin_refill_flow()
 	return true
 
 func _resolve_hose() -> void:
@@ -88,131 +103,87 @@ func _resolve_hose() -> void:
 		if parent != null:
 			_hose = parent.get_node_or_null("GardenHose") as GardenHose
 
-func _create_packet_pool() -> void:
-	var count: int = maxi(0, packet_pool_size)
-	for index: int in range(count):
-		var packet_node: FluidPacketNode = FluidPacketNode.new()
-		packet_node.name = "FluidPacket%02d" % index
-		packet_node.radius = packet_radius
-		packet_node.color = WATER_PACKET_COLOR
-		packet_node.visible = false
-		add_child(packet_node)
-		_packet_nodes.append(packet_node)
+func _update_state(delta: float) -> void:
+	var fill_step: float = maxf(0.0, fill_speed_progress_per_second) * delta
+	var drain_step: float = maxf(0.0, drain_speed_progress_per_second) * delta
+	match _mode:
+		MODE_EMPTY:
+			_fluid_start = 0.0
+			_fluid_end = 0.0
+		MODE_FILL_TO_LANCE:
+			_fluid_start = 0.0
+			_fluid_end = minf(1.0, _fluid_end + fill_step)
+			if _fluid_end >= 1.0:
+				_mode = MODE_FULL_TO_LANCE if _shooting_requested else MODE_DRAIN_FROM_RESERVOIR
+		MODE_FULL_TO_LANCE:
+			_fluid_start = 0.0
+			_fluid_end = 1.0
+			if not _shooting_requested:
+				_mode = MODE_DRAIN_FROM_RESERVOIR
+		MODE_DRAIN_FROM_RESERVOIR:
+			_fluid_start = minf(1.0, _fluid_start + drain_step)
+			if _fluid_start >= _fluid_end:
+				_mode = MODE_EMPTY
+		MODE_FILL_TO_RESERVOIR:
+			_fluid_end = 1.0
+			_fluid_start = maxf(0.0, _fluid_start - fill_step)
+			if _fluid_start <= 0.0:
+				_mode = MODE_FULL_TO_RESERVOIR if _refill_requested else MODE_DRAIN_FROM_LANCE
+		MODE_FULL_TO_RESERVOIR:
+			_fluid_start = 0.0
+			_fluid_end = 1.0
+			if not _refill_requested:
+				_mode = MODE_DRAIN_FROM_LANCE
+		MODE_DRAIN_FROM_LANCE:
+			_fluid_end = maxf(0.0, _fluid_end - drain_step)
+			if _fluid_end <= _fluid_start:
+				_mode = MODE_EMPTY
 
-func _queue_forward_visual_packets(first_packet_node: FluidPacketNode, travel_seconds: float, data: Dictionary) -> void:
-	var count: int = maxi(1, visual_packets_per_shot)
-	var speed: float = 1.0 / maxf(travel_seconds, 0.001)
-	for index: int in range(count):
-		var packet_node: FluidPacketNode = first_packet_node if index == 0 else _next_available_packet_node()
-		if packet_node == null:
-			return
-		var packet: Dictionary = data.duplicate()
-		packet["node"] = packet_node
-		packet["progress"] = -speed * visual_packet_spacing_seconds * float(index)
-		packet["direction"] = 1.0
-		packet["speed"] = speed
-		packet["triggers_payload"] = index == count - 1
-		packet_node.visible = true
-		_active_packets.append(packet)
-
-func _queue_refill_visual_packets(first_packet_node: FluidPacketNode, travel_seconds: float, data: Dictionary) -> void:
-	var count: int = maxi(1, visual_packets_per_shot)
-	var speed: float = 1.0 / maxf(travel_seconds, 0.001)
-	for index: int in range(count):
-		var packet_node: FluidPacketNode = first_packet_node if index == 0 else _next_available_packet_node()
-		if packet_node == null:
-			return
-		var packet: Dictionary = data.duplicate()
-		packet["node"] = packet_node
-		packet["progress"] = 1.0 + speed * visual_packet_spacing_seconds * float(index)
-		packet["direction"] = -1.0
-		packet["speed"] = speed
-		packet["triggers_payload"] = data.has("refill_amount") and index == count - 1
-		packet_node.visible = true
-		_active_packets.append(packet)
-
-func _update_packets(delta: float) -> void:
-	for index: int in range(_active_packets.size() - 1, -1, -1):
-		var packet: Dictionary = _active_packets[index]
-		var progress: float = float(packet.get("progress", 0.0))
-		var direction: float = float(packet.get("direction", 1.0))
-		var speed: float = float(packet.get("speed", 1.0))
-		progress += direction * speed * delta
-		packet["progress"] = progress
-
-		var packet_node: FluidPacketNode = packet.get("node") as FluidPacketNode
-		if packet_node != null and is_instance_valid(packet_node):
-			packet_node.global_position = _sample_packet_position(clampf(progress, 0.0, 1.0))
-
-		if progress >= 1.0:
-			if bool(packet.get("triggers_payload", true)):
-				_finish_forward_packet(packet)
-			_deactivate_packet(index)
-		elif progress <= 0.0 and direction < 0.0:
-			if bool(packet.get("triggers_payload", true)):
-				_finish_refill_packet(packet)
-			_deactivate_packet(index)
-		else:
-			_active_packets[index] = packet
-
-func _sample_packet_position(progress: float) -> Vector2:
-	if _hose != null and is_instance_valid(_hose):
-		return _hose.sample_world_position(progress)
-	return global_position
-
-func _travel_seconds() -> float:
-	var hose_length: float = 0.0
-	if _hose != null and is_instance_valid(_hose):
-		hose_length = _hose.get_hose_length()
-	var seconds: float = hose_length / maxf(1.0, packet_speed_pixels_per_second)
-	return clampf(seconds, min_travel_seconds, max_travel_seconds)
-
-func _finish_forward_packet(packet: Dictionary) -> void:
-	var fight_system: Node = packet.get("fight_system") as Node
-	if fight_system == null or not is_instance_valid(fight_system):
+func _draw() -> void:
+	if _mode == MODE_EMPTY or _hose == null or not is_instance_valid(_hose):
 		return
-	var spawn_position: Vector2 = _sample_packet_position(1.0)
-	var direction: Vector2 = packet.get("shot_direction", Vector2.RIGHT) as Vector2
-	var source_agent_id: int = int(packet.get("source_agent_id", -1))
-	if packet.has("spray_type_id"):
-		if not fight_system.has_method("fire_spray_projectile_direct"):
-			return
-		var type_id: int = int(packet.get("spray_type_id", -1))
-		var inherited_velocity: Vector2 = packet.get("inherited_velocity", Vector2.ZERO) as Vector2
-		fight_system.call("fire_spray_projectile_direct", type_id, spawn_position, direction, inherited_velocity, source_agent_id)
+	var points: PackedVector2Array = _fluid_polyline(_fluid_start, _fluid_end)
+	if points.size() < 2:
 		return
-	if not fight_system.has_method("fire_gun_projectile_direct"):
-		return
-	fight_system.call("fire_gun_projectile_direct", "water", spawn_position, direction, source_agent_id)
+	draw_polyline(points, fluid_color, fluid_width, true)
+	if highlight_width > 0.0:
+		draw_polyline(points, highlight_color, highlight_width, true)
 
-func _finish_refill_packet(packet: Dictionary) -> void:
-	var fight_system: Node = packet.get("fight_system") as Node
-	if fight_system == null or not is_instance_valid(fight_system):
-		return
-	if not fight_system.has_method("apply_hose_refill"):
-		return
-	var amount: int = int(packet.get("refill_amount", 0))
-	fight_system.call("apply_hose_refill", amount)
+func _fluid_polyline(start_progress: float, end_progress: float) -> PackedVector2Array:
+	var result: PackedVector2Array = PackedVector2Array()
+	var source: PackedVector2Array = _hose.get_hose_world_points()
+	if source.size() < 2:
+		return result
+	var total_length: float = _polyline_length(source)
+	var start_distance: float = total_length * clampf(start_progress, 0.0, 1.0)
+	var end_distance: float = total_length * clampf(end_progress, 0.0, 1.0)
+	if end_distance <= start_distance:
+		return result
 
-func _deactivate_packet(index: int) -> void:
-	var packet: Dictionary = _active_packets[index]
-	var packet_node: FluidPacketNode = packet.get("node") as FluidPacketNode
-	if packet_node != null and is_instance_valid(packet_node):
-		packet_node.visible = false
-	_active_packets.remove_at(index)
+	var traversed: float = 0.0
+	for index: int in range(source.size() - 1):
+		var a: Vector2 = source[index]
+		var b: Vector2 = source[index + 1]
+		var segment_length: float = a.distance_to(b)
+		if segment_length <= 0.0001:
+			continue
+		var segment_start: float = traversed
+		var segment_end: float = traversed + segment_length
+		if segment_end >= start_distance and segment_start <= end_distance:
+			var from_t: float = clampf((start_distance - segment_start) / segment_length, 0.0, 1.0)
+			var to_t: float = clampf((end_distance - segment_start) / segment_length, 0.0, 1.0)
+			var from_point: Vector2 = to_local(a.lerp(b, from_t))
+			var to_point: Vector2 = to_local(a.lerp(b, to_t))
+			if result.is_empty() or result[result.size() - 1].distance_squared_to(from_point) > 0.0001:
+				result.append(from_point)
+			result.append(to_point)
+		traversed = segment_end
+		if traversed > end_distance:
+			break
+	return result
 
-func _next_available_packet_node() -> FluidPacketNode:
-	for packet_node: FluidPacketNode in _packet_nodes:
-		if not packet_node.visible:
-			return packet_node
-	return null
-
-class FluidPacketNode:
-	extends Node2D
-
-	var radius: float = 4.0
-	var color: Color = Color(0.25, 0.65, 1.0, 0.9)
-
-	func _draw() -> void:
-		draw_circle(Vector2.ZERO, radius, color)
-		draw_circle(Vector2(-radius * 0.25, -radius * 0.25), radius * 0.45, Color(1.0, 1.0, 1.0, 0.35))
+func _polyline_length(points: PackedVector2Array) -> float:
+	var total: float = 0.0
+	for index: int in range(points.size() - 1):
+		total += points[index].distance_to(points[index + 1])
+	return total

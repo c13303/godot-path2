@@ -39,6 +39,7 @@ var _floor_layer: TileMapLayer
 var _water_sources: WaterSources
 var _garden_hose_fluid: Node
 var _player: Node2D
+var _lance: Node2D
 var _progression: Node
 var _splash_controller: Node
 var _drawer
@@ -52,7 +53,6 @@ var _spray_type_ids: Dictionary = {}
 var _spray_weapon_by_type_id: Dictionary = {}
 var _gun_fire_timers: Dictionary = {}
 var _water_refill_elapsed: float = 0.0
-var _pending_hose_refill: int = 0
 var _held_spray_weapon_id: String = ""
 var _held_spray_facing: Vector2 = Vector2.RIGHT
 var _held_spray_cost_time_left: float = 0.0
@@ -79,6 +79,8 @@ func _ready() -> void:
 	_water_sources = get_node_or_null("../Map/MonTilemap/watersources") as WaterSources
 	_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
 	_player = get_node_or_null("../Player") as Node2D
+	if _player != null:
+		_lance = _player.get_node_or_null("lance") as Node2D
 	_progression = get_node_or_null("../progression")
 	_splash_controller = get_node_or_null("../visualFX/splashController")
 	if _steering and not _steering.has_method("take_damage_events"):
@@ -556,21 +558,24 @@ func _register_guns() -> void:
 	if _projectile_drawer:
 		_projectile_drawer.rebuild_visual_cache()
 
-## Called once per player frame. Water-source refill advances every frame, and
-## a non-empty weapon id means the trigger is held for that weapon.
+## Called once per player frame. A non-empty weapon id means the trigger is held;
+## otherwise the water-source refill path can advance.
 func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float, source_velocity: Vector2 = Vector2.ZERO) -> void:
-	_refill_water_reserve(delta)
 	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
 	if gun != null:
+		_end_hose_refill_flow()
 		_stop_held_spray()
 		fire_gun_held(weapon_id, origin, direction, source_agent_id, delta)
 		return
 
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
 	if weapon != null and weapon.spray_projectiles_enabled:
+		_end_hose_refill_flow()
 		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta, source_velocity)
 		return
 
+	_end_hose_shooting_flow()
+	_refill_water_reserve(delta)
 	_stop_held_spray()
 
 func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float, source_velocity: Vector2) -> void:
@@ -581,6 +586,8 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	var type_id: int = int(_spray_type_ids.get(weapon.id, -1))
 	if type_id < 0:
 		_stop_held_spray()
+		return
+	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_ready_for_shooting():
 		return
 	if _held_spray_weapon_id != "" and _held_spray_weapon_id != weapon.id:
 		_stop_held_spray()
@@ -632,7 +639,7 @@ func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector
 	var jitter: float = deg_to_rad(weapon.spray_projectile_spread_jitter_degrees)
 	var angle: float = base_angle + randf_range(-half_angle, half_angle) + randf_range(-jitter, jitter)
 	var projectile_direction: Vector2 = Vector2.from_angle(angle)
-	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and _queue_hose_spray_projectile(type_id, projectile_direction, inherited_velocity, source_agent_id):
+	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_ready_for_shooting():
 		return
 	fire_spray_projectile_direct(type_id, origin, projectile_direction, inherited_velocity, source_agent_id)
 
@@ -769,15 +776,14 @@ func _refill_water_reserve(delta: float) -> void:
 		return
 	if not _player_is_above_water_source():
 		_water_refill_elapsed = 0.0
-		_set_hose_full_idle(false)
+		_end_hose_refill_flow()
 		return
-	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY)) + _pending_hose_refill
-	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
-	if current >= maximum:
+	_begin_hose_refill_flow()
+	if not _hose_ready_for_refill():
 		_water_refill_elapsed = 0.0
-		_set_hose_full_idle(true)
 		return
-	_set_hose_full_idle(false)
+	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
+	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
 	if _water_sources == null:
 		return
 	var interval_seconds: float = maxf(_water_sources.refill_interval_seconds, 0.001)
@@ -785,13 +791,13 @@ func _refill_water_reserve(delta: float) -> void:
 	if refill_amount <= 0:
 		return
 	_water_refill_elapsed += delta
+	if current >= maximum:
+		_water_refill_elapsed = 0.0
+		return
 	while _water_refill_elapsed >= interval_seconds and current < maximum:
 		_water_refill_elapsed -= interval_seconds
 		var added: int = mini(refill_amount, maximum - current)
-		if _queue_hose_refill(added):
-			_pending_hose_refill += added
-		else:
-			_update_water_reserve(added)
+		_update_water_reserve(added)
 		current += added
 
 func _player_is_above_water_source() -> bool:
@@ -811,7 +817,6 @@ func _update_water_reserve(delta_value: int) -> void:
 
 func apply_hose_refill(amount: int) -> void:
 	var refill_amount: int = maxi(0, amount)
-	_pending_hose_refill = maxi(0, _pending_hose_refill - refill_amount)
 	_update_water_reserve(refill_amount)
 
 func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, delta: float) -> void:
@@ -822,14 +827,21 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 	t -= delta
 	if t <= 0.0:
 		var type_id: int = int(_gun_type_ids.get(gun_id, -1))
-		if type_id >= 0 and _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
-			var spawn_pos: Vector2 = origin
-			if gun.throw_offset != 0.0 and direction.length_squared() > 0.000001:
-				spawn_pos += direction.normalized() * gun.throw_offset
-			if gun.id == "water" and _queue_hose_water_shot(origin, direction, source_agent_id):
-				pass
-			else:
-				_projectiles.call("fire", type_id, spawn_pos, direction, source_agent_id, gun.affected_smash_classes)
+		if type_id >= 0:
+			if source_agent_id >= 0:
+				_begin_hose_shooting_flow()
+				if not _hose_ready_for_shooting():
+					_gun_fire_timers[gun_id] = 0.0
+					return
+			if _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
+				var facing: Vector2 = direction.normalized()
+				var spawn_pos: Vector2 = origin
+				if source_agent_id >= 0:
+					facing = get_current_lance_direction(direction)
+					spawn_pos = get_current_lance_position(origin)
+				elif gun.throw_offset != 0.0 and direction.length_squared() > 0.000001:
+					spawn_pos += facing * gun.throw_offset
+				_projectiles.call("fire", type_id, spawn_pos, facing, source_agent_id, gun.affected_smash_classes)
 				if gun.id == "water":
 					Sfx.play_sound(&"bubble1")
 			t = max(0.0, gun.fire_delay_ms * 0.001)
@@ -848,39 +860,73 @@ func fire_gun_projectile_direct(gun_id: String, spawn_position: Vector2, directi
 		Sfx.play_sound(&"bubble1")
 	return fired
 
-func _queue_hose_water_shot(origin: Vector2, direction: Vector2, source_agent_id: int) -> bool:
-	if direction.length_squared() <= 0.000001:
-		return false
-	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
-		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
-	if _garden_hose_fluid == null or not _garden_hose_fluid.has_method("request_water_shot"):
-		return false
-	return bool(_garden_hose_fluid.call("request_water_shot", origin, direction, source_agent_id, self))
+func get_current_lance_direction(fallback_direction: Vector2 = Vector2.RIGHT) -> Vector2:
+	if _lance == null or not is_instance_valid(_lance):
+		if not is_instance_valid(_player):
+			_player = get_node_or_null("../Player") as Node2D
+		if _player != null:
+			_lance = _player.get_node_or_null("lance") as Node2D
+	if _lance != null and is_instance_valid(_lance):
+		var lance_direction: Vector2 = Vector2.from_angle(_lance.global_rotation - PI * 0.5)
+		if lance_direction.length_squared() > 0.000001:
+			return lance_direction.normalized()
+	if fallback_direction.length_squared() > 0.000001:
+		return fallback_direction.normalized()
+	return Vector2.RIGHT
 
-func _queue_hose_spray_projectile(type_id: int, direction: Vector2, inherited_velocity: Vector2, source_agent_id: int) -> bool:
-	if type_id < 0 or direction.length_squared() <= 0.000001:
-		return false
-	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
-		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
-	if _garden_hose_fluid == null or not _garden_hose_fluid.has_method("request_spray_projectile"):
-		return false
-	return bool(_garden_hose_fluid.call("request_spray_projectile", type_id, direction, inherited_velocity, source_agent_id, self))
+func get_current_lance_position(fallback_position: Vector2) -> Vector2:
+	if _lance == null or not is_instance_valid(_lance):
+		if not is_instance_valid(_player):
+			_player = get_node_or_null("../Player") as Node2D
+		if _player != null:
+			_lance = _player.get_node_or_null("lance") as Node2D
+	if _lance != null and is_instance_valid(_lance):
+		return _lance.global_position
+	return fallback_position
 
-func _queue_hose_refill(amount: int) -> bool:
-	if amount <= 0:
-		return false
+func _begin_hose_shooting_flow() -> void:
 	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
 		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
-	if _garden_hose_fluid == null or not _garden_hose_fluid.has_method("request_refill"):
-		return false
-	return bool(_garden_hose_fluid.call("request_refill", amount, self))
+	if _garden_hose_fluid != null and _garden_hose_fluid.has_method("begin_shooting_flow"):
+		_garden_hose_fluid.call("begin_shooting_flow")
 
-func _set_hose_full_idle(enabled: bool) -> void:
+func _end_hose_shooting_flow() -> void:
 	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
 		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
-	if _garden_hose_fluid == null or not _garden_hose_fluid.has_method("set_full_idle_enabled"):
-		return
-	_garden_hose_fluid.call("set_full_idle_enabled", enabled)
+	if _garden_hose_fluid != null and _garden_hose_fluid.has_method("end_shooting_flow"):
+		_garden_hose_fluid.call("end_shooting_flow")
+
+func _hose_ready_for_shooting() -> bool:
+	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
+		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
+	if _garden_hose_fluid == null:
+		return false
+	if _garden_hose_fluid.has_method("begin_shooting_flow"):
+		_garden_hose_fluid.call("begin_shooting_flow")
+	if not _garden_hose_fluid.has_method("is_ready_for_shooting"):
+		return true
+	return bool(_garden_hose_fluid.call("is_ready_for_shooting"))
+
+func _begin_hose_refill_flow() -> void:
+	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
+		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
+	if _garden_hose_fluid != null and _garden_hose_fluid.has_method("begin_refill_flow"):
+		_garden_hose_fluid.call("begin_refill_flow")
+
+func _end_hose_refill_flow() -> void:
+	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
+		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
+	if _garden_hose_fluid != null and _garden_hose_fluid.has_method("end_refill_flow"):
+		_garden_hose_fluid.call("end_refill_flow")
+
+func _hose_ready_for_refill() -> bool:
+	if _garden_hose_fluid == null or not is_instance_valid(_garden_hose_fluid):
+		_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
+	if _garden_hose_fluid == null:
+		return false
+	if not _garden_hose_fluid.has_method("is_ready_for_refill"):
+		return true
+	return bool(_garden_hose_fluid.call("is_ready_for_refill"))
 
 func fire_gun_once(gun_id: String, origin: Vector2, direction: Vector2, source_agent_id: int = -1) -> bool:
 	var gun: GunData = _guns_by_id.get(gun_id) as GunData
