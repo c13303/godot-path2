@@ -629,15 +629,19 @@ func _refresh_levels() -> void:
 	_find_level_scenes(LEVELS_DIR)
 	_level_paths.sort()
 	_level_option.clear()
+	_level_option.add_item("Select a level...")
+	_level_option.set_item_metadata(0, "")
 	for path: String in _level_paths:
 		_level_option.add_item(path.get_file().get_basename())
 		_level_option.set_item_metadata(_level_option.get_item_count() - 1, path)
-	var selected_index: int = _level_paths.find(previous_path)
-	if selected_index < 0 and not _level_paths.is_empty():
-		selected_index = 0
-	if selected_index >= 0:
+	var selected_index: int = 0
+	if previous_path != "":
+		var previous_level_index: int = _level_paths.find(previous_path)
+		if previous_level_index >= 0:
+			selected_index = previous_level_index + 1
+	if selected_index >= 0 and selected_index < _level_option.get_item_count():
 		_level_option.select(selected_index)
-		_load_level(_level_paths[selected_index])
+		_load_level(str(_level_option.get_item_metadata(selected_index)))
 	else:
 		_load_level("")
 

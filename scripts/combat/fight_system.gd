@@ -972,6 +972,7 @@ class SprayProjectileDrawer:
 	func _process(_delta: float) -> void:
 		if not _projectile_system or _material == null:
 			return
+		var had_points: bool = _has_points
 		var point_count: int = 0
 		var min_pos: Vector2 = Vector2.ZERO
 		var max_pos: Vector2 = Vector2.ZERO
@@ -1005,7 +1006,15 @@ class SprayProjectileDrawer:
 					max_pos.y = maxf(max_pos.y, droplet_pos.y)
 				point_count += 1
 
-		_has_points = point_count > 0
+		if point_count == 0:
+			if not had_points:
+				return
+			_has_points = false
+			_material.set_shader_parameter("droplet_count", 0)
+			queue_redraw()
+			return
+
+		_has_points = true
 		var shader: Shader = _fallback_shader
 		if active_weapon != null and active_weapon.spray_visual_shader != null:
 			shader = active_weapon.spray_visual_shader
@@ -1017,11 +1026,10 @@ class SprayProjectileDrawer:
 			_material.set_shader_parameter("radius_px", active_weapon.spray_visual_radius)
 			_material.set_shader_parameter("threshold", active_weapon.spray_visual_threshold)
 			_material.set_shader_parameter("softness", active_weapon.spray_visual_softness)
-		if _has_points:
-			var padding: float = 52.0
-			if active_weapon != null:
-				padding = active_weapon.spray_visual_radius * 4.0
-			_draw_bounds = Rect2(min_pos - Vector2(padding, padding), (max_pos - min_pos) + Vector2(padding * 2.0, padding * 2.0))
+		var padding: float = 52.0
+		if active_weapon != null:
+			padding = active_weapon.spray_visual_radius * 4.0
+		_draw_bounds = Rect2(min_pos - Vector2(padding, padding), (max_pos - min_pos) + Vector2(padding * 2.0, padding * 2.0))
 		queue_redraw()
 
 	func _set_shader(shader: Shader) -> void:
