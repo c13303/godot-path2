@@ -5,7 +5,7 @@ signal build_preview_changed(is_active: bool)
 const REMOVE_HOLD_SECONDS: float = 0.2
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
-const PREVIEW_NORMAL_COLOR: Color = Color(0.30, 0.62, 1.0, 0.70)
+const PREVIEW_NORMAL_COLOR: Color = Color(0.78, 0.90, 0.98, 0.80)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const PREVIEW_Z_INDEX: int = 4095
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
@@ -92,6 +92,8 @@ var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
+# True while we have hidden the OS cursor because a build preview tile is showing.
+var _cursor_hidden_for_preview: bool = false
 var _build_direction: Vector2i = DIRECTION_RIGHT
 var _build_fx_pool: Array[Node2D] = []
 var _build_fx_pool_cursor: int = 0
@@ -713,16 +715,21 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 	if _atlas_source_id < 0:
 		return
 
-	previewbuild.set_cell(
-		cell,
-		_atlas_source_id,
-		atlas_coords,
-		_alternative_from_placeable(placeable_def)
-	)
-	_preview_cells.append(cell)
+	if item_id == FENCE_ITEM_ID:
+		var fence_cells: Array[Vector2i] = [cell]
+		_preview_cells = _draw_fence_preview_cells(fence_cells)
+	else:
+		previewbuild.set_cell(
+			cell,
+			_atlas_source_id,
+			atlas_coords,
+			_alternative_from_placeable(placeable_def)
+		)
+		_preview_cells.append(cell)
 	_hover_item_id = item_id
 	_refresh_preview_visual_state(placeable_def)
 	previewbuild.update_internals()
+	_set_preview_cursor_hidden(true)
 
 # Placeables build as a click-drag rectangle chunk by default, placed up to the
 # affordable/limited count while skipping occupied or invalid cells. Specific
@@ -762,15 +769,55 @@ func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void
 		placeable_def,
 		available
 	)
-	for cell: Vector2i in valid_cells:
-		previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
+	if str(placeable_def.get("id", "")) == FENCE_ITEM_ID:
+		_preview_cells = _draw_fence_preview_cells(valid_cells)
+	else:
+		for cell: Vector2i in valid_cells:
+			previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
+		_preview_cells = valid_cells
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
-	_preview_cells = valid_cells
 	_hover_active = not _preview_cells.is_empty()
 	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
 	_hover_atlas_coords = atlas_coords
 	_show_drag_selection_rect(_drag_build_start_cell, _drag_build_end_cell)
 	previewbuild.update_internals()
+	_set_preview_cursor_hidden(_hover_active)
+
+func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector2i]:
+	var candidate_set: Dictionary = {}
+	for cell: Vector2i in candidate_cells:
+		candidate_set[cell] = true
+	var touched: Dictionary = {}
+	for cell: Vector2i in candidate_cells:
+		for refresh_cell: Vector2i in _fence_refresh_cells(cell):
+			if candidate_set.has(refresh_cell) or _has_fence_cell(refresh_cell):
+				touched[refresh_cell] = true
+	var preview_cells: Array[Vector2i] = []
+	for raw_cell: Variant in touched.keys():
+		var preview_cell: Vector2i = raw_cell as Vector2i
+		var atlas_coords: Vector2i = _fence_preview_atlas(preview_cell, candidate_set)
+		previewbuild.set_cell(preview_cell, _atlas_source_id, atlas_coords)
+		preview_cells.append(preview_cell)
+	return preview_cells
+
+func _fence_preview_atlas(cell: Vector2i, candidate_set: Dictionary) -> Vector2i:
+	var mask: int = _fence_preview_neighbor_mask(cell, candidate_set)
+	return FENCE_ATLAS_BY_MASK.get(mask, Vector2i(5, 7)) as Vector2i
+
+func _fence_preview_neighbor_mask(cell: Vector2i, candidate_set: Dictionary) -> int:
+	var mask: int = 0
+	if _has_preview_fence_cell(cell + DIRECTION_UP, candidate_set):
+		mask |= FENCE_NEIGHBOR_NORTH
+	if _has_preview_fence_cell(cell + DIRECTION_RIGHT, candidate_set):
+		mask |= FENCE_NEIGHBOR_EAST
+	if _has_preview_fence_cell(cell + DIRECTION_DOWN, candidate_set):
+		mask |= FENCE_NEIGHBOR_SOUTH
+	if _has_preview_fence_cell(cell + DIRECTION_LEFT, candidate_set):
+		mask |= FENCE_NEIGHBOR_WEST
+	return mask
+
+func _has_preview_fence_cell(cell: Vector2i, candidate_set: Dictionary) -> bool:
+	return candidate_set.has(cell) or _has_fence_cell(cell)
 
 func _drag_build_rectangle_cells(
 	start_cell: Vector2i,
@@ -1214,6 +1261,7 @@ func _notify(message: String) -> void:
 		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
+	_set_preview_cursor_hidden(false)
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
 	if not _hover_active and _preview_cells.is_empty():
 		_hover_item_id = ""
@@ -1225,6 +1273,16 @@ func _clear_hover() -> void:
 	_hover_active = false
 	_hover_item_id = ""
 	_hover_atlas_coords = Vector2i(-1, -1)
+
+# Hides the OS cursor while a build preview tile is on screen (the tile itself acts as
+# the cursor). Skipped in pad mode, where the player controller already hides the mouse.
+func _set_preview_cursor_hidden(hidden: bool) -> void:
+	if _pad_cursor_active:
+		return
+	if hidden == _cursor_hidden_for_preview:
+		return
+	_cursor_hidden_for_preview = hidden
+	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN if hidden else Input.MOUSE_MODE_VISIBLE)
 
 func _hovered_cell() -> Vector2i:
 	if _pad_cursor_active:
