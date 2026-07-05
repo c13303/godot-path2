@@ -266,7 +266,13 @@ func is_item_disabled_for_placement(item_id: String) -> bool:
 ## only wield weapons; during the day nothing is locked. Generalizes to any new
 ## weapon (selectable at night) or non-weapon (locked at night) item.
 func is_quick_item_disabled(item_id: String) -> bool:
-	return item_id != "" and GameState.is_night and not ItemCatalog.is_weapon(item_id)
+	if item_id == "":
+		return false
+	# Build-only items (inventory-backed placeables) are never wielded from the quick bar;
+	# they are used through the toolbuild picker instead, so keep them disabled here.
+	if _is_build_only_item(item_id):
+		return true
+	return GameState.is_night and not ItemCatalog.is_weapon(item_id)
 
 ## Selects the first quick-slot weapon, used to auto-arm the player when night
 ## falls. No-op if the quick bar holds no weapon.
@@ -991,8 +997,15 @@ func add_inventory(item_id: String, quantity: int = 1) -> bool:
 		if remaining == 0:
 			break
 
+	# Build-only items are kept out of the quick bar (slots 0..QUICK_SLOT_COUNT-1) so they
+	# can't be wielded; only fall back to a quick slot if the backpack is completely full.
+	var new_stack_start: int = QUICK_SLOT_COUNT if _is_build_only_item(item_id) else 0
 	while remaining > 0:
-		var free_index: int = _first_free_slot()
+		var free_index: int = _first_free_slot(new_stack_start)
+		if free_index < 0:
+			free_index = _first_free_slot(0)
+		if free_index < 0:
+			break
 		var new_stack_quantity: int = mini(remaining, max_stack)
 		inventory_slots[free_index] = _make_slot(item_id, new_stack_quantity)
 		remaining -= new_stack_quantity
@@ -1018,11 +1031,17 @@ func can_add_inventory(item_id: String, quantity: int = 1) -> bool:
 			return true
 	return false
 
-func _first_free_slot() -> int:
-	for i in range(inventory_slots.size()):
+func _first_free_slot(start_index: int = 0) -> int:
+	for i in range(maxi(0, start_index), inventory_slots.size()):
 		if _slot_item_id(inventory_slots[i]) == "":
 			return i
 	return -1
+
+## Build-only items (inventory-backed placeables like small_reservoir) live in the
+## inventory purely so the toolbuild picker can count and consume them; they are never
+## wielded, so they are kept out of the quick bar and cannot be selected there.
+func _is_build_only_item(item_id: String) -> bool:
+	return ItemCatalog.is_inventory_backed(item_id)
 
 func _make_slot(item_id: String, quantity: int) -> Dictionary:
 	if item_id == "" or quantity <= 0:
