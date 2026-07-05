@@ -1242,6 +1242,7 @@ starting_gems = 10
 starting_items = {
 &"pasteque": 1
 }
+starting_item_toolbuild_hidden = Array[StringName]([&"turret1"])
 tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence"])
 tool_shop_prices = {
 &"fence": 1,
