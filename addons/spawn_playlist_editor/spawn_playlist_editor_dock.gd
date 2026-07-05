@@ -23,6 +23,7 @@ const WAVE_COUNT_WIDTH: float = 84.0
 const WAVE_TIME_WIDTH: float = 96.0
 const WAVE_EVENT_WIDTH: float = 124.0
 const WAVE_DELETE_WIDTH: float = 74.0
+const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const WATER_POND_ATLAS_ORIGIN: Vector2i = Vector2i(4, 3)
 const WATER_OCEAN_HOLE_ATLAS_CENTER: Vector2i = Vector2i(8, 4)
 const WATER_DIAGONAL_GROUND_TOP_LEFT_ATLAS: Vector2i = Vector2i(10, 3)
@@ -1345,18 +1346,21 @@ func _on_water_edges_pressed() -> void:
 		_show_save_error("Level has no watersources TileMapLayer", ERR_DOES_NOT_EXIST)
 		return
 	var changed_count: int = _beautify_water_edges(watersources)
-	var floor: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
-	var cleared_count: int = _clear_floor_under_water(floor, watersources) if floor != null else 0
+	var floor_layer: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
+	var floor_result: Dictionary = _reconcile_floor_with_water(floor_layer, watersources) if floor_layer != null else {}
 	if not _save_level_scene(level_root):
 		return
 	if level_root != _level_root:
 		_reload_cached_level_root()
 	_validation_label.clear()
 	_validation_label.append_text("[color=light_green]Water edges updated: %d tile%s.[/color]" % [changed_count, "" if changed_count == 1 else "s"])
-	if floor == null:
+	if floor_layer == null:
 		_validation_label.append_text("\n[color=yellow]No floor TileMapLayer found; skipped floor cleanup.[/color]")
 	else:
+		var cleared_count: int = int(floor_result.get("cleared", 0))
+		var filled_count: int = int(floor_result.get("filled", 0))
 		_validation_label.append_text("\n[color=light_green]Floor tiles removed under water: %d tile%s.[/color]" % [cleared_count, "" if cleared_count == 1 else "s"])
+		_validation_label.append_text("\n[color=light_green]Floor tiles restored off water: %d tile%s.[/color]" % [filled_count, "" if filled_count == 1 else "s"])
 
 
 func _current_editable_level_root() -> Node:
@@ -1406,18 +1410,76 @@ func _beautify_water_edges(watersources: TileMapLayer) -> int:
 	return replacement_atlas_coords.size()
 
 
-# Erases every floor cell that sits under a watersources tile so painted water is
-# never layered on top of leftover ground. Returns the number of floor cells cleared.
-func _clear_floor_under_water(floor: TileMapLayer, watersources: TileMapLayer) -> int:
-	var cleared_count: int = 0
+# Enforces the floor/water invariant across the combined floor+water region: every
+# cell with a watersources tile has its floor cleared (water is never layered on top
+# of ground), and every cell without water gets a dry-ground floor tile if it has
+# none (restoring floor where water was deleted). Returns {"cleared": int, "filled": int}.
+func _reconcile_floor_with_water(floor_layer: TileMapLayer, watersources: TileMapLayer) -> Dictionary:
+	var water_cells: Dictionary = {}
 	for cell: Vector2i in watersources.get_used_cells():
 		if watersources.get_cell_source_id(cell) < 0:
 			continue
-		if floor.get_cell_source_id(cell) < 0:
-			continue
-		floor.erase_cell(cell)
-		cleared_count += 1
-	return cleared_count
+		water_cells[cell] = true
+
+	# Region to reconcile = bounding rect of every floor and water tile. Cells where
+	# water was deleted are now empty on both layers, so they only fall inside this
+	# rect (not in either used-cell list); walking the rect is what recovers them.
+	var region: Rect2i = _combined_used_rect(floor_layer, watersources)
+	if region.size == Vector2i.ZERO:
+		return {"cleared": 0, "filled": 0}
+
+	# Floor source/alternative to paint with: sampled from an existing floor tile so we
+	# match whatever tileset the level uses. Without one we cannot author floor tiles.
+	var floor_source_id: int = -1
+	var floor_alternative_tile: int = 0
+	var floor_used: Array[Vector2i] = floor_layer.get_used_cells()
+	if not floor_used.is_empty():
+		var sample_cell: Vector2i = floor_used[0]
+		floor_source_id = floor_layer.get_cell_source_id(sample_cell)
+		floor_alternative_tile = floor_layer.get_cell_alternative_tile(sample_cell)
+
+	var dry_ground_atlas: Vector2i = FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS
+	var cleared_count: int = 0
+	var filled_count: int = 0
+	for y: int in range(region.position.y, region.position.y + region.size.y):
+		for x: int in range(region.position.x, region.position.x + region.size.x):
+			var cell: Vector2i = Vector2i(x, y)
+			if water_cells.has(cell):
+				if floor_layer.get_cell_source_id(cell) >= 0:
+					floor_layer.erase_cell(cell)
+					cleared_count += 1
+				continue
+			if floor_layer.get_cell_source_id(cell) >= 0:
+				continue
+			if floor_source_id < 0:
+				continue
+			floor_layer.set_cell(cell, floor_source_id, dry_ground_atlas, floor_alternative_tile)
+			filled_count += 1
+	return {"cleared": cleared_count, "filled": filled_count}
+
+
+# Bounding rectangle (inclusive of the far edge) enclosing every used cell across the
+# floor and watersources layers. Zero-size when both layers are empty.
+func _combined_used_rect(floor_layer: TileMapLayer, watersources: TileMapLayer) -> Rect2i:
+	var has_any: bool = false
+	var min_cell: Vector2i = Vector2i.ZERO
+	var max_cell: Vector2i = Vector2i.ZERO
+	for layer: TileMapLayer in [floor_layer, watersources]:
+		for cell: Vector2i in layer.get_used_cells():
+			if layer.get_cell_source_id(cell) < 0:
+				continue
+			if not has_any:
+				min_cell = cell
+				max_cell = cell
+				has_any = true
+				continue
+			min_cell.x = mini(min_cell.x, cell.x)
+			min_cell.y = mini(min_cell.y, cell.y)
+			max_cell.x = maxi(max_cell.x, cell.x)
+			max_cell.y = maxi(max_cell.y, cell.y)
+	if not has_any:
+		return Rect2i()
+	return Rect2i(min_cell, max_cell - min_cell + Vector2i.ONE)
 
 
 func _water_edge_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
