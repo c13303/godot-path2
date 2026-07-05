@@ -26,11 +26,11 @@ const _MASK_TO_ATLAS: Dictionary = {
 	# water autotile block at +6 in Y.
 	0: Vector2i(11, 11),
 	1: Vector2i(13, 11),
-	2: Vector2i(12, 11),
-	4: Vector2i(13, 10),
-	5: Vector2i(13, 9),
-	8: Vector2i(12, 10),
-	10: Vector2i(12, 9),
+	2: Vector2i(10, 9),
+	4: Vector2i(13, 9),
+	5: Vector2i(13, 10),
+	8: Vector2i(12, 9),
+	10: Vector2i(11, 9),
 	19: Vector2i(4, 11),
 	27: Vector2i(5, 11),
 	38: Vector2i(4, 9),
@@ -51,13 +51,13 @@ const _MASK_TO_ATLAS: Dictionary = {
 	207: Vector2i(1, 10),  # TR+BR
 	63: Vector2i(2, 10),   # TL+BL
 	159: Vector2i(3, 10),  # BL+BR
-	95: Vector2i(14, 10),  # TL+BR (opposite)
-	175: Vector2i(14, 11), # TR+BL (opposite)
+	95: Vector2i(11, 10),  # TL+BR (opposite)
+	175: Vector2i(12, 10), # TR+BL (opposite)
 	79: Vector2i(0, 11),   # TL+TR+BR
 	31: Vector2i(1, 11),   # TL+BL+BR
 	47: Vector2i(2, 11),   # TL+TR+BL
 	143: Vector2i(3, 11),  # TR+BL+BR
-	15: Vector2i(14, 9),   # TL+TR+BL+BR
+	15: Vector2i(10, 10),  # TL+TR+BL+BR
 }
 
 const _NEIGHBOUR_OFFSETS: Array[Vector2i] = [
