@@ -898,11 +898,14 @@ func _finish_drag_build() -> void:
 	if cells.is_empty():
 		if _placement_attempt_needs_grass_alert(_drag_build_start_cell, _drag_build_end_cell, placeable_def):
 			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+		_clear_build_selection()
 		return
 	# Pay for exactly the cells we are about to place; bail if the spend fails.
 	if not game_ui or not game_ui.has_method("try_purchase_build"):
+		_clear_build_selection()
 		return
 	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
+		_clear_build_selection()
 		return
 	for cell: Vector2i in cells:
 		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
@@ -919,12 +922,14 @@ func _finish_drag_build() -> void:
 	var sound: StringName = _drag_build_sound(item_id)
 	if sound != &"":
 		Sfx.play_sound(sound)
+	_clear_build_selection()
 
 func _cancel_drag_build() -> void:
 	_set_drag_build_active(false)
 	_drag_build_item_id = ""
 	_hide_drag_selection_rect()
 	_clear_hover()
+	_clear_build_selection()
 
 func _set_drag_build_active(active: bool) -> void:
 	if _drag_build_active == active:
@@ -941,6 +946,10 @@ func _affordable_quantity(item_id: String) -> int:
 
 func _can_afford(item_id: String) -> bool:
 	return game_ui and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
+
+func _clear_build_selection() -> void:
+	if game_ui != null and game_ui.has_method("clear_build_selection"):
+		game_ui.call("clear_build_selection")
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
@@ -986,6 +995,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(_hover_cell)
 	_play_build_fx_at_cell(_hover_cell, target_layer)
+	_clear_build_selection()
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":

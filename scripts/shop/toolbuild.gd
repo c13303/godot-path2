@@ -14,8 +14,7 @@ extends Control
 ## buildable's name. The floating label has a transparent background and ignores all mouse
 ## events. Unaffordable / unavailable buildables are greyed out like disabled quick slots,
 ## and the floating label turns red when the selected buildable cannot be placed.
-## Clicking a slot selects it so the build system places it when affordable; buildables are
-## paid for directly from currency and never enter the inventory.
+## Clicking a slot selects it for placement and closes the quickbar into build preview mode.
 
 const COUNTER_ID: String = "rose_shop_counter"
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
@@ -27,16 +26,13 @@ const MONEY_ICON_REGION: Rect2 = Rect2(416.0, 0.0, 32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The merchant column is laid out as an aligned grid: icon | name | price.
 const MERCHANT_COLUMNS: int = 3
-# The column's bottom sits this many pixels above the screen bottom, clearing the quick
-# bar and its "Construction (…)" info label; rows stack upward from there.
-const BAR_BOTTOM_OFFSET: float = -134.0
+const DROPUP_GAP: float = 0.0
 # Left inset from the panel edge to the first slot (panel border + margin_left), so the
 # column's slots can be centred on the toolbuild icon.
 const BAR_CONTENT_INSET: float = 10.0
 # Y offset (from the top) of the seed-merchant column's top, placing it just below the
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
-const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
 const PASTEQUE_ID: String = "pasteque"
 # The build picker is opened by one of two quick-bar tools, each offering its own buildables:
 # the gardening tool grows plants/turrets, the hammer builds structures. The active tool
@@ -60,7 +56,7 @@ const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
 var progression_node: Node
 var game_ui: Node
-# The building currently picked for placement (drives build mode).
+# The buildable currently highlighted in the open picker.
 var _selected_item_id: String = ""
 # Per build tool (gardening/hammer): the last building the player picked with it, restored
 # when that tool's picker reopens if the building still exists.
@@ -359,8 +355,9 @@ func _apply_weapon_layout() -> void:
 	_weapon_column.anchor_bottom = 1.0
 	_weapon_column.grow_horizontal = Control.GROW_DIRECTION_END
 	_weapon_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_weapon_column.offset_top = BAR_BOTTOM_OFFSET
-	_weapon_column.offset_bottom = BAR_BOTTOM_OFFSET
+	var bottom_offset: float = _dropup_bottom_offset()
+	_weapon_column.offset_top = bottom_offset
+	_weapon_column.offset_bottom = bottom_offset
 	_weapon_column.alignment = BoxContainer.ALIGNMENT_END
 	_update_weapon_column_anchor()
 
@@ -700,8 +697,8 @@ func _open_build_picker() -> void:
 	# At level start the gardening tool must come up with rose equipped, ahead of every
 	# other resume rule. Consumed on the first gardening open so later opens fall through
 	# to the usual last-picked logic.
-	# Opening only highlights a default buildable; equipping (setting the build preview and
-	# closing the quickbar) happens when the player actually clicks a slot (see _commit_item).
+	# Opening only highlights a default buildable. Clicking a slot commits that item for
+	# placement and closes the quickbar.
 	if _level_start_default_pending and tool_id == GARDENING_TOOL_ID:
 		_level_start_default_pending = false
 		if _should_show_item("rose") and not _is_item_locked("rose"):
@@ -738,10 +735,7 @@ func _close_all() -> void:
 	_close_merchant_shop()
 
 
-## Hides the build column. The equipped build preview (game_ui.selected_build_item_id) is left
-## intact so that committing a buildable, which closes the quickbar, keeps it equipped for
-## play-mode placement. Callers that must drop the preview (nightfall, building-phase end) clear
-## it explicitly.
+## Hides the build column. The caller decides whether build preview remains active.
 func _close_toolbuild() -> void:
 	_set_toolbuild_open(false)
 	_shown_build_tool_id = ""
@@ -802,7 +796,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _on_building_phase_changed(is_building_phase: bool) -> void:
 	if not is_building_phase:
 		_close_toolbuild()
-		# Leaving the building phase drops any equipped build preview.
+		# Leaving the building phase drops any pending build menu selection.
 		if game_ui != null and game_ui.has_method("clear_build_selection"):
 			game_ui.call("clear_build_selection")
 
@@ -820,8 +814,7 @@ func _on_item_pressed(item_id: String) -> void:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
-	# Clicking a buildable commits it: it becomes the equipped build preview and the quickbar
-	# closes back to play mode for placement.
+	# Clicking a buildable commits it for placement and closes the quickbar.
 	_commit_item(item_id)
 
 
@@ -949,8 +942,7 @@ func _highlight_item(item_id: String) -> void:
 	_refresh_slots()
 
 
-## Commits a buildable: it becomes the equipped build preview, is remembered as this tool's
-## last pick, and the quickbar closes back to play mode for placement.
+## Commits a buildable: it becomes the active build preview and closes the quickbar for placement.
 func _commit_item(item_id: String) -> void:
 	_selected_item_id = item_id
 	var tool_id: String = _selected_build_tool_id()
@@ -965,7 +957,7 @@ func _commit_item(item_id: String) -> void:
 	_refresh_slots()
 
 
-## Clears the menu highlight without touching the equipped build preview.
+## Clears the menu highlight.
 func _clear_highlight() -> void:
 	_selected_item_id = ""
 	_refresh_slots()
@@ -1482,10 +1474,20 @@ func _apply_phase_layout() -> void:
 	_toolbuild_column.anchor_bottom = 1.0
 	_toolbuild_column.grow_horizontal = Control.GROW_DIRECTION_END
 	_toolbuild_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_toolbuild_column.offset_top = BAR_BOTTOM_OFFSET
-	_toolbuild_column.offset_bottom = BAR_BOTTOM_OFFSET
+	var bottom_offset: float = _dropup_bottom_offset()
+	_toolbuild_column.offset_top = bottom_offset
+	_toolbuild_column.offset_bottom = bottom_offset
 	_toolbuild_column.alignment = BoxContainer.ALIGNMENT_END
 	_update_build_column_anchor()
+
+
+func _dropup_bottom_offset() -> float:
+	if game_ui != null and game_ui.has_method("get_quick_bar_top_y"):
+		var toolbar_top_y: float = float(game_ui.call("get_quick_bar_top_y"))
+		if toolbar_top_y >= 0.0:
+			var parent_bottom_y: float = global_position.y + size.y
+			return toolbar_top_y - parent_bottom_y - DROPUP_GAP
+	return -84.0
 
 
 func _apply_merchant_layout() -> void:
@@ -1503,15 +1505,11 @@ func _apply_merchant_layout() -> void:
 	_update_merchant_column_anchor()
 
 
-## Aligns the merchant column's slots to the X of the 7th quick slot.
+## Aligns the merchant column's slots to the quickbar's left edge.
 func _update_merchant_column_anchor() -> void:
-	if _merchant_column == null or game_ui == null:
+	if _merchant_column == null or game_ui == null or not game_ui.has_method("get_quick_bar_left_x"):
 		return
-	var left_x: float = -1.0
-	if game_ui.has_method("get_quick_slot_left_x"):
-		left_x = float(game_ui.call("get_quick_slot_left_x", SEED_MERCHANT_QUICK_SLOT_INDEX))
-	elif game_ui.has_method("get_quick_bar_left_x"):
-		left_x = float(game_ui.call("get_quick_bar_left_x"))
+	var left_x: float = float(game_ui.call("get_quick_bar_left_x"))
 	if left_x < 0.0:
 		return
 	var left: float = left_x - BAR_CONTENT_INSET

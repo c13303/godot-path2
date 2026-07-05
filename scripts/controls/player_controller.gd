@@ -7,6 +7,7 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 const INPUT_MODE_PAD: String = "pad"
 const INPUT_MODE_KMOUSE: String = "kmouse"
 const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
+const FENCE_SPEED_MULTIPLIER: float = 0.5
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
@@ -17,6 +18,7 @@ const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
+@onready var fences: TileMapLayer = $"../../Map/MonTilemap/fences"
 
 @onready var camera_controller: CameraController = $"../../Camera2D"
 @onready var smoke_trail: SmokeTrail = $"../../SmokeTrail"
@@ -66,6 +68,7 @@ var _trail_last_emit_pos: Vector2 = Vector2.ZERO
 var _last_move_direction: Vector2 = Vector2.ZERO
 var _last_lance_facing: Vector2 = Vector2.RIGHT
 var _player_in_water: bool = false
+var _player_on_fence: bool = false
 
 func _ready() -> void:
 	var scene: Node = get_tree().get_current_scene()
@@ -122,15 +125,19 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		_set_control_mode(INPUT_MODE_KMOUSE)
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
-			# While the quickbar is active, a click in the world dismisses it back to play mode
-			# (no fire/placement). Clicks over a menu slot/item hit a hovered control and fall
-			# through to the GUI, which handles the pick.
+			# While build quickbar menus are active, a click in the world dismisses the menu
+			# without placing. The weapon menu returns to play mode and lets this same click fire.
 			if _is_quickbar_active():
-				if get_viewport().gui_get_hovered_control() == null:
-					_deactivate_quickbar()
+				if get_viewport().gui_get_hovered_control() != null:
+					return
+				var active_menu_kind: String = _active_quickbar_menu_kind()
+				if active_menu_kind == "weapon":
+					_clear_build_selection()
+				_deactivate_quickbar()
+				if active_menu_kind != "weapon":
 					get_viewport().set_input_as_handled()
-				return
-			# In build mode the click belongs to the build system, not the weapon.
+					return
+			# In build preview mode, the click belongs to the build system, not the weapon.
 			if _in_build_mode():
 				return
 			var weapon_id: String = _selected_item_id()
@@ -404,6 +411,7 @@ func _setup_player() -> void:
 		var base_speed: float = player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
 		if base_speed > 0.0:
 			_player_in_water = _is_player_in_water(player)
+			_player_on_fence = _is_player_on_fence(player)
 			profile["max_speed"] = _player_profile_speed(player, false)
 		steering.call("set_agent_profile", player_nav_id, profile)
 
@@ -556,7 +564,7 @@ func _update_player_input(delta: float) -> void:
 		if dir.length_squared() > 0.0:
 			_last_move_direction = dir.normalized()
 
-	_update_water_speed_state()
+	_update_terrain_speed_state()
 	steering.call("set_agent_input", player_nav_id, dir)
 
 func _start_rush(direction: Vector2) -> void:
@@ -600,18 +608,29 @@ func _set_rush_speed(enabled: bool) -> void:
 	var profile: Dictionary = {"max_speed": speed}
 	steering.call("set_agent_profile", player_nav_id, profile)
 
-func _update_water_speed_state() -> void:
+func _update_terrain_speed_state() -> void:
 	var player: Node2D = _get_player_node()
 	if not player:
 		return
 	var in_water: bool = _is_player_in_water(player)
-	if in_water == _player_in_water:
+	var on_fence: bool = _is_player_on_fence(player)
+	if in_water == _player_in_water and on_fence == _player_on_fence:
 		return
 	_player_in_water = in_water
+	_player_on_fence = on_fence
 	_set_rush_speed(_rush_active)
 
 func _is_player_in_water(player: Node2D) -> bool:
 	return watersources != null and watersources.has_water_at_foot_position(player.global_position)
+
+func _is_player_on_fence(player: Node2D) -> bool:
+	if fences == null:
+		return false
+	var player_world_radius: float = _agent_world_radius()
+	var foot_world_position: Vector2 = player.global_position + Vector2(0.0, -player_world_radius)
+	var local_position: Vector2 = fences.to_local(foot_world_position)
+	var cell: Vector2i = fences.local_to_map(local_position)
+	return fences.get_cell_source_id(cell) >= 0
 
 func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 	var player_max_speed: float = float(player.get("max_speed"))
@@ -620,7 +639,9 @@ func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 		return 0.0
 	var rush_multiplier: float = maxf(rush_speed_mult, 0.0) if rush_enabled else 1.0
 	var water_multiplier: float = _water_speed_multiplier() if _is_player_in_water(player) else 1.0
-	return base_speed * _speed_multiplier() * rush_multiplier * water_multiplier
+	var fence_multiplier: float = FENCE_SPEED_MULTIPLIER if _is_player_on_fence(player) else 1.0
+	var terrain_multiplier: float = minf(water_multiplier, fence_multiplier)
+	return base_speed * _speed_multiplier() * rush_multiplier * terrain_multiplier
 
 func _water_speed_multiplier() -> float:
 	if watersources == null:
@@ -644,15 +665,24 @@ func _selected_item_id() -> String:
 func _is_quickbar_active() -> bool:
 	return game_ui and game_ui.has_method("is_quickbar_active") and bool(game_ui.call("is_quickbar_active"))
 
+func _active_quickbar_menu_kind() -> String:
+	if not game_ui or not game_ui.has_method("get_active_menu_kind"):
+		return ""
+	return String(game_ui.call("get_active_menu_kind"))
+
 func _deactivate_quickbar() -> void:
 	if game_ui and game_ui.has_method("deactivate_quickbar"):
 		game_ui.call("deactivate_quickbar")
 
-## True while the toolbuild picker has a building selected: the player is placing, not fighting.
+func _clear_build_selection() -> void:
+	if game_ui and game_ui.has_method("clear_build_selection"):
+		game_ui.call("clear_build_selection")
+
+## True while a build preview owns the click instead of the weapon.
 func _in_build_mode() -> bool:
 	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
-# True while any build tool (gardening or hammer) is equipped; both drive build placement.
+# True while a build-tool menu or build preview is active.
 func _build_tool_selected() -> bool:
 	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
 

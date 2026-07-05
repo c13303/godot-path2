@@ -1598,26 +1598,39 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
         return;
     }
 
-    // Synchronous fallback path (only used when async requests are unavailable). It reuses
-    // the default field via rebuild_async(), whose wall mask deliberately excludes fences
-    // to keep them out of player collision, so per-group fence blocking is not applied
-    // here. The async request_flow_to_group() path is the one that honors block_fences.
-    (void)block_fences;
-
-    current_group_id = group_id;
+    uint64_t serial = 0;
     {
         std::lock_guard<std::mutex> lock(async_mutex);
-        latest_request_serial_by_group[group_id] = next_request_serial++;
+        serial = next_request_serial++;
+        latest_request_serial_by_group[group_id] = serial;
     }
-    if (!rebuild_async(goal))
-        return;
+
+    ffcore::FlowField computed_field;
+    if (block_fences)
+    {
+        AsyncFlowRequest request;
+        request.group_id = group_id;
+        request.serial = serial;
+        if (!build_async_snapshot(goal, request.snapshot, true))
+            return;
+        AsyncFlowResult result = compute_async_request(request);
+        if (!result.ok)
+            return;
+        computed_field.copy_from(result.field);
+    }
+    else
+    {
+        if (!rebuild_async(goal))
+            return;
+        computed_field.copy_from(field);
+    }
 
     ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
     if (!mgr)
         return;
 
     auto *fm = ffcore::flowfields();
-    ffcore::FlowFieldID fid = fm->register_copy(field);
+    ffcore::FlowFieldID fid = fm->register_copy(computed_field);
     ffcore::FlowField *new_flow = fm->get(fid);
     if (fid == ffcore::INVALID_FLOWFIELD || !new_flow)
     {
@@ -1638,6 +1651,15 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
         "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size()); */
     new_flow->set_ff_target_radius(world_radius);
     mgr->set_group_flow(group_id, new_flow);
+
+    {
+        std::lock_guard<std::mutex> lock(async_mutex);
+        latest_applied_serial_by_group[group_id] = serial;
+    }
+
+    field.copy_from(computed_field);
+    current_group_id = group_id;
+    queue_redraw();
 }
 
 double FlowFieldNative::group_route_cost_at_world(int group_id, Vector2 world_pos) const

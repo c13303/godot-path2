@@ -27,6 +27,9 @@ const ITEM_NAME_KEY_PREFIX: String = "item."
 # mapped 1:1 to inventory slots.
 const WEAPON_SLOT_KIND: String = "weapon"
 const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID]
+const QUICK_SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
+const QUICK_SLOT_GAP: float = 6.0
+const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
 # Buildables offered by the gardening menu (mirrors toolbuild.GARDENING_ITEM_IDS); used to tell
 # whether a gardening buildable is currently equipped, which drives the tutorial's plant step.
 const GARDENING_BUILDABLE_IDS: Array[String] = ["rose", "ronce", "pasteque", "turret1", "turret_epine"]
@@ -57,10 +60,7 @@ var active_slot_index: int = -1
 # The persistently equipped weapon, wielded in play mode. Independent of the quickbar slots now
 # that every weapon shares the single weapon menu; empty falls back to the first possessed weapon.
 var equipped_weapon_id: String = ""
-# The building the toolbuild picker has selected for placement (rose/wall/turret), or "" when
-# nothing is selected. While non-empty the player is in build mode: the build
-# system places this item and the player's weapon is suppressed. Buildings are
-# paid for directly from currency on placement and never enter the inventory.
+# The active build preview, or "" when the inactive quickbar should use weapon mode.
 var selected_build_item_id: String = ""
 var _progression_node: Node
 var _toolbar_slot_nodes: Array[ItemSlot] = []
@@ -254,9 +254,10 @@ func _is_quickbar_slot_disabled(kind: String) -> bool:
 		return _first_possessed_weapon_id() == ""
 	return GameState.is_night
 
-## The active item id: the equipped buildable preview during build mode, otherwise the equipped
-## weapon. Used by the player to decide what a play-mode left-click does.
+## The active quick item: explicit build preview first, otherwise the equipped weapon.
 func get_selected_quick_item_id() -> String:
+	if quickbar_active and get_active_menu_kind() == WEAPON_SLOT_KIND:
+		return get_equipped_weapon_id()
 	if selected_build_item_id != "":
 		return selected_build_item_id
 	return get_equipped_weapon_id()
@@ -289,9 +290,11 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 func is_item_disabled_for_placement(item_id: String) -> bool:
 	return GameState.is_night and ItemCatalog.is_placeable(item_id)
 
-# --- Build mode (toolbuild-driven placement, paid directly from currency) ---------
+# --- Build menu state --------------------------------------------------------
 
 func get_selected_build_item_id() -> String:
+	if quickbar_active and not is_build_menu_open():
+		return ""
 	return selected_build_item_id
 
 func set_selected_build_item(item_id: String) -> void:
@@ -301,10 +304,9 @@ func clear_build_selection() -> void:
 	selected_build_item_id = ""
 
 func is_build_mode_active() -> bool:
-	return selected_build_item_id != ""
+	return get_selected_build_item_id() != ""
 
-## True while a build tool is in play: either a build-tool menu is open, or a buildable is
-## equipped as the placement preview. Drives right-click removal and gamepad build controls.
+## True while a build-tool menu is open or an explicit build preview is active.
 func is_build_tool_selected() -> bool:
 	return is_build_menu_open() or is_build_mode_active()
 
@@ -319,12 +321,12 @@ func get_selected_build_tool_id() -> String:
 	var kind: String = get_active_menu_kind()
 	return kind if (kind == GARDENING_ID or kind == HAMMER_ID) else ""
 
-## True while the gardening menu is open OR a gardening buildable is equipped (used by the
-## tutorial's "plant roses" flow, since roses are placed from gardening, not the hammer).
+## True while the gardening menu is open or a gardening buildable is active for placement.
 func is_gardening_selected() -> bool:
 	if get_active_menu_kind() == GARDENING_ID:
 		return true
-	return selected_build_item_id != "" and selected_build_item_id in GARDENING_BUILDABLE_IDS
+	var build_item_id: String = get_selected_build_item_id()
+	return build_item_id != "" and build_item_id in GARDENING_BUILDABLE_IDS
 
 func is_unbuild_tool_selected() -> bool:
 	return false
@@ -1259,29 +1261,21 @@ func _fit_toolbar_panel_to_slots() -> void:
 	if toolbar_panel == null:
 		return
 	var slot_count: int = _toolbar_slot_nodes.size()
-	var content_width: float = 0.0
-	var content_height: float = 0.0
-	for slot: ItemSlot in _toolbar_slot_nodes:
-		var slot_size: Vector2 = slot.get_combined_minimum_size()
-		content_width += slot_size.x
-		content_height = maxf(content_height, slot_size.y)
-	var separation: float = float(toolbar_slots.get_theme_constant("separation"))
-	if slot_count > 1:
-		content_width += separation * float(slot_count - 1)
-	var panel_style: StyleBox = toolbar_panel.get_theme_stylebox("panel")
-	var margin_left: float = panel_style.get_content_margin(SIDE_LEFT) if panel_style != null else 0.0
-	var margin_right: float = panel_style.get_content_margin(SIDE_RIGHT) if panel_style != null else 0.0
-	var margin_top: float = panel_style.get_content_margin(SIDE_TOP) if panel_style != null else 0.0
-	var margin_bottom: float = panel_style.get_content_margin(SIDE_BOTTOM) if panel_style != null else 0.0
+	var gaps: int = maxi(slot_count - 1, 0)
 	var panel_size: Vector2 = Vector2(
-		content_width + margin_left + margin_right,
-		content_height + margin_top + margin_bottom
+		QUICK_SLOT_SIZE.x * float(slot_count) + QUICK_SLOT_GAP * float(gaps) + TOOLBAR_PADDING.x * 2.0,
+		QUICK_SLOT_SIZE.y + TOOLBAR_PADDING.y * 2.0
 	)
 	toolbar_panel.custom_minimum_size = panel_size
 	toolbar_panel.offset_left = -panel_size.x * 0.5
 	toolbar_panel.offset_right = panel_size.x * 0.5
 	toolbar_panel.offset_top = -panel_size.y
 	toolbar_panel.offset_bottom = 0.0
+
+func get_quick_bar_top_y() -> float:
+	if toolbar_panel == null:
+		return -1.0
+	return toolbar_panel.get_global_rect().position.y
 
 func _build_inventory() -> void:
 	_clear_container(inventory_content)
