@@ -431,14 +431,19 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 	return &""
 
 func is_build_item_available(item_id: String) -> bool:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	# The level author can uncheck a buildable's "Available" box in the Rose Level editor;
+	# that hides it from the toolbuild picker entirely, ahead of every always-shown rule
+	# below (rose_shop_counter, inventory-backed buildables like small_reservoir).
+	if loader != null and loader.has_method("is_starting_item_toolbuild_hidden") and bool(loader.call("is_starting_item_toolbuild_hidden", item_id)):
+		return false
 	if item_id == "rose_shop_counter":
 		return true
 	# Inventory-backed buildables are always offered in the toolbuild picker; their
 	# affordability is the owned count, so an empty stack simply greys the slot.
 	if ItemCatalog.is_inventory_backed(item_id):
 		return true
-	var scene: Node = get_tree().current_scene
-	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
 		var raw_tool_item_ids: Variant = loader.call("get_loaded_tool_shop_available_items")
 		if raw_tool_item_ids is Array:

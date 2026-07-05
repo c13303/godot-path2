@@ -43,6 +43,7 @@ var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_starting_items: Dictionary = {}
+var _loaded_starting_item_toolbuild_hidden: Array[StringName] = []
 var _loaded_monster_drop_seed_chance_percent: int = 0
 var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 var _loaded_tool_shop_prices: Dictionary = {
@@ -150,6 +151,12 @@ func get_loaded_starting_items() -> Dictionary:
 	return _loaded_starting_items.duplicate()
 
 
+## True when the level author unchecked this item's "Available" box in the Rose Level
+## editor, meaning it must not appear in the toolbuild vertical build menu at all.
+func is_starting_item_toolbuild_hidden(item_id: String) -> bool:
+	return _loaded_starting_item_toolbuild_hidden.has(StringName(item_id))
+
+
 func get_loaded_monster_drop_seed_chance_percent() -> int:
 	return _loaded_monster_drop_seed_chance_percent
 
@@ -227,6 +234,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_money = 0
 	_loaded_starting_weapons = [&"spray"]
 	_loaded_starting_items = {}
+	_loaded_starting_item_toolbuild_hidden = []
 	_loaded_monster_drop_seed_chance_percent = 0
 	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
 	_loaded_tool_shop_prices = {
@@ -262,6 +270,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_money = config.starting_money
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
 		_loaded_starting_items = _valid_starting_items(config.starting_items)
+		_loaded_starting_item_toolbuild_hidden = _valid_toolbuild_hidden_items(config.starting_item_toolbuild_hidden)
 		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
 		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
 		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
@@ -326,6 +335,20 @@ func _valid_starting_items(raw_items: Dictionary) -> Dictionary:
 			continue
 		items[item_id] = quantity
 	return items
+
+
+## Sanitize the authored hidden-item list to known item ids, dropping empties, unknown ids
+## and duplicates. Keys may be authored as either String or StringName.
+func _valid_toolbuild_hidden_items(raw_item_ids: Array) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	var seen: Dictionary = {}
+	for raw_item_id: Variant in raw_item_ids:
+		var item_id: StringName = StringName(str(raw_item_id))
+		if item_id == &"" or seen.has(item_id) or ItemCatalog.get_item_def(String(item_id)).is_empty():
+			continue
+		seen[item_id] = true
+		item_ids.append(item_id)
+	return item_ids
 
 
 func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids: Array[StringName]) -> Array[StringName]:

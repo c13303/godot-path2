@@ -13,6 +13,11 @@ class_name LevelSpawnConfig
 # item_id (StringName) -> quantity (int > 0). Placed into the inventory alongside the
 # starting weapons; e.g. { &"small_reservoir": 10 }. Weapons use starting_weapons above.
 @export var starting_items: Dictionary = {}
+# Item ids whose "Available" box is unchecked in the Rose Level editor's Items tab: they
+# are hidden entirely from the in-game toolbuild vertical build menu, even always-shown
+# inventory-backed buildables like small_reservoir. Empty = every buildable stays
+# available as before.
+@export var starting_item_toolbuild_hidden: Array[StringName] = []
 
 @export_group("Monster Drop")
 @export_range(0, 100, 1, "suffix:%") var monster_drop_seed_chance_percent: int = 0

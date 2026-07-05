@@ -1,6 +1,7 @@
 [gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://cql7ltbqg2veo"]
 
 [ext_resource type="Script" uid="uid://7fy1vw4t2nil" path="res://scripts/combat/weapons/weapon_data.gd" id="1_weapon_data"]
+[ext_resource type="Shader" uid="uid://j2vgdcjugb6p" path="res://scripts/combat/spray_metaball.gdshader" id="2_1py7c"]
 
 [resource]
 script = ExtResource("1_weapon_data")

@@ -599,15 +599,23 @@ func _register_guns() -> void:
 func process_held_weapon(weapon_id: String, origin: Vector2, direction: Vector2, source_agent_id: int, _follow_offset: Vector2, delta: float, source_velocity: Vector2 = Vector2.ZERO) -> void:
 	var gun: GunData = _guns_by_id.get(weapon_id) as GunData
 	if gun != null:
-		_end_hose_refill_flow()
+		var shooting_during_refill: bool = _player_water_reserve_cost_is_ignored(source_agent_id, gun.reserve_id)
+		if not shooting_during_refill:
+			_end_hose_refill_flow()
 		_stop_held_spray()
 		fire_gun_held(weapon_id, origin, direction, source_agent_id, delta)
+		if shooting_during_refill:
+			_refill_water_reserve(delta)
 		return
 
 	var weapon: WeaponData = _weapon_by_id(weapon_id)
 	if weapon != null and weapon.spray_projectiles_enabled:
-		_end_hose_refill_flow()
+		var spraying_during_refill: bool = _player_water_reserve_cost_is_ignored(source_agent_id, weapon.spray_reserve_id)
+		if not spraying_during_refill:
+			_end_hose_refill_flow()
 		_update_spray_projectile_weapon(weapon, origin, direction, source_agent_id, delta, source_velocity)
+		if spraying_during_refill:
+			_refill_water_reserve(delta)
 		return
 
 	_end_hose_shooting_flow()
@@ -623,7 +631,8 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	if type_id < 0:
 		_stop_held_spray()
 		return
-	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
+	var ignore_water_cost: bool = _player_water_reserve_cost_is_ignored(source_agent_id, weapon.spray_reserve_id)
+	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not ignore_water_cost:
 		var can_feed_hose: bool = _reserve_has_amount(weapon.spray_reserve_id, weapon.spray_reserve_cost)
 		if can_feed_hose:
 			_begin_hose_shooting_flow()
@@ -648,7 +657,7 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
 	if _held_spray_weapon_id == "":
-		if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
+		if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
 			if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
 				_end_hose_shooting_flow()
 				if not _hose_has_shooting_fluid_at_lance():
@@ -661,7 +670,7 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	else:
 		_held_spray_cost_time_left -= delta
 		while _held_spray_cost_time_left <= 0.0:
-			if not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
+			if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
 				if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
 					_end_hose_shooting_flow()
 					if _hose_has_shooting_fluid_at_lance():
@@ -693,7 +702,10 @@ func _fire_one_spray_projectile(weapon: WeaponData, type_id: int, origin: Vector
 	var jitter: float = deg_to_rad(weapon.spray_projectile_spread_jitter_degrees)
 	var angle: float = base_angle + randf_range(-half_angle, half_angle) + randf_range(-jitter, jitter)
 	var projectile_direction: Vector2 = Vector2.from_angle(angle)
-	if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID and not _hose_has_shooting_fluid_at_lance():
+	var ignore_water_cost: bool = _player_water_reserve_cost_is_ignored(source_agent_id, weapon.spray_reserve_id)
+	var player_water_spray: bool = source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID
+	var hose_blocks_spray: bool = player_water_spray and not ignore_water_cost and not _hose_has_shooting_fluid_at_lance()
+	if hose_blocks_spray:
 		return
 	fire_spray_projectile_direct(type_id, origin, projectile_direction, inherited_velocity, source_agent_id)
 
@@ -821,6 +833,17 @@ func _reserve_has_amount(reserve_id: StringName, amount: int) -> bool:
 		return false
 	return int(_progression.call("get_value", WATER_RESERVE_KEY)) >= amount
 
+func _player_water_reserve_cost_is_ignored(source_agent_id: int, reserve_id: StringName) -> bool:
+	if source_agent_id < 0 or reserve_id != WATER_RESERVE_ID:
+		return false
+	if not _progression or not _progression.has_method("get_value"):
+		return false
+	if not _player_is_above_water_source():
+		return false
+	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
+	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
+	return current < maximum
+
 func _show_reserve_alert() -> void:
 	if _reserve_alert_cooldown > 0.0:
 		return
@@ -893,7 +916,8 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 	if t <= 0.0:
 		var type_id: int = int(_gun_type_ids.get(gun_id, -1))
 		if type_id >= 0:
-			if source_agent_id >= 0:
+			var ignore_water_cost: bool = _player_water_reserve_cost_is_ignored(source_agent_id, gun.reserve_id)
+			if source_agent_id >= 0 and not ignore_water_cost:
 				if _reserve_has_amount(gun.reserve_id, gun.reserve_cost):
 					_begin_hose_shooting_flow()
 				else:
@@ -901,7 +925,7 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 				if not _hose_has_shooting_fluid_at_lance():
 					_gun_fire_timers[gun_id] = 0.0
 					return
-			if _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
+			if ignore_water_cost or _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
 				var facing: Vector2 = direction.normalized()
 				var spawn_pos: Vector2 = origin
 				if source_agent_id >= 0:

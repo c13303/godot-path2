@@ -80,6 +80,7 @@ var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _starting_items_box: GridContainer
 var _starting_item_spins: Dictionary = {}  # StringName -> SpinBox
+var _starting_item_available_checks: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _tool_shop_day_spins: Dictionary = {}  # StringName -> SpinBox
@@ -224,7 +225,8 @@ func _build_ui() -> void:
 	tabs.size_flags_horizontal = SIZE_EXPAND_FILL
 	add_child(tabs)
 
-	_build_level_tab(tabs)
+	_build_configuration_tab(tabs)
+	_build_items_tab(tabs)
 	_build_nights_tab(tabs)
 
 	# Validation and the missing-id rename tool sit under the tabs so save errors
@@ -265,10 +267,34 @@ func _build_ui() -> void:
 	_refresh_status()
 
 
-# Rose Level tab: level-wide configuration, grouped into collapsible sections.
-func _build_level_tab(tabs: TabContainer) -> void:
+# Configuration tab: level-wide setup that is not about items — the client spawners and
+# the tilemap beautifier tools.
+func _build_configuration_tab(tabs: TabContainer) -> void:
 	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.name = "Rose Level"
+	scroll.name = "Configuration"
+	scroll.size_flags_vertical = SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
+	tabs.add_child(scroll)
+
+	var body: VBoxContainer = VBoxContainer.new()
+	body.size_flags_horizontal = SIZE_EXPAND_FILL
+	scroll.add_child(body)
+
+	_client_frequency_box = VBoxContainer.new()
+	_client_frequency_section = _make_section("Client Spawners", _client_frequency_box)
+	body.add_child(_client_frequency_section)
+
+	var beautifier_controls: VBoxContainer = VBoxContainer.new()
+	_build_beautifier_controls(beautifier_controls)
+	_beautifier_section = _make_section("tilemap beautifier", beautifier_controls)
+	body.add_child(_beautifier_section)
+
+
+# Items tab: the starting inventory (currencies, weapons, per-item quantities and
+# toolbuild availability), the shop and the monster drop settings.
+func _build_items_tab(tabs: TabContainer) -> void:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.name = "Items"
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = SIZE_EXPAND_FILL
 	tabs.add_child(scroll)
@@ -282,24 +308,15 @@ func _build_level_tab(tabs: TabContainer) -> void:
 	_starting_section = _make_section("Starting Level", _starting_controls)
 	body.add_child(_starting_section)
 
-	_monster_drop_controls = VBoxContainer.new()
-	_build_monster_drop_controls()
-	_monster_drop_section = _make_section("Monster Drop", _monster_drop_controls)
-	body.add_child(_monster_drop_section)
-
 	_shop_controls = VBoxContainer.new()
 	_build_shop_controls()
 	_shop_section = _make_section("Shop", _shop_controls)
 	body.add_child(_shop_section)
 
-	_client_frequency_box = VBoxContainer.new()
-	_client_frequency_section = _make_section("Client Spawners", _client_frequency_box)
-	body.add_child(_client_frequency_section)
-
-	var beautifier_controls: VBoxContainer = VBoxContainer.new()
-	_build_beautifier_controls(beautifier_controls)
-	_beautifier_section = _make_section("tilemap beautifier", beautifier_controls)
-	body.add_child(_beautifier_section)
+	_monster_drop_controls = VBoxContainer.new()
+	_build_monster_drop_controls()
+	_monster_drop_section = _make_section("Monster Drop", _monster_drop_controls)
+	body.add_child(_monster_drop_section)
 
 
 # Nights tab: per-night options, special reward and the wave tracks.
@@ -416,19 +433,42 @@ func _build_starting_controls() -> void:
 		_weapon_checkboxes[weapon_id] = checkbox
 
 	var items_label: Label = Label.new()
-	items_label.text = "Starting items (any non-weapon item; 0 = none)"
+	items_label.text = "Starting items (any non-weapon item; 0 = none). Uncheck Available to hide a buildable from the toolbuild vertical menu."
+	items_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_starting_controls.add_child(items_label)
 
-	# Two item/quantity pairs per row (label + spin, twice).
+	# One item per row: Available checkbox | item name | starting quantity.
 	_starting_items_box = GridContainer.new()
-	_starting_items_box.columns = 4
+	_starting_items_box.columns = 3
 	_starting_controls.add_child(_starting_items_box)
+
+	var available_header: Label = Label.new()
+	available_header.text = "Available"
+	available_header.custom_minimum_size = Vector2(80.0, 0.0)
+	_starting_items_box.add_child(available_header)
+	var item_header: Label = Label.new()
+	item_header.text = "Item"
+	item_header.custom_minimum_size = Vector2(140.0, 0.0)
+	_starting_items_box.add_child(item_header)
+	var quantity_header: Label = Label.new()
+	quantity_header.text = "Qty"
+	quantity_header.custom_minimum_size = Vector2(74.0, 0.0)
+	_starting_items_box.add_child(quantity_header)
+
 	_starting_item_spins.clear()
+	_starting_item_available_checks.clear()
 	for item_id: StringName in _giveable_starting_item_ids():
+		var available_check: CheckBox = CheckBox.new()
+		available_check.tooltip_text = "Show %s in the toolbuild vertical menu" % String(item_id)
+		available_check.custom_minimum_size = Vector2(80.0, 0.0)
+		available_check.toggled.connect(_on_starting_item_available_toggled.bind(item_id))
+		_starting_items_box.add_child(available_check)
+		_starting_item_available_checks[item_id] = available_check
+
 		var item_label: Label = Label.new()
 		item_label.text = _item_display_name(item_id)
 		item_label.tooltip_text = String(item_id)
-		item_label.custom_minimum_size = Vector2(128.0, 0.0)
+		item_label.custom_minimum_size = Vector2(140.0, 0.0)
 		_starting_items_box.add_child(item_label)
 
 		var quantity_spin: SpinBox = SpinBox.new()
@@ -862,6 +902,13 @@ func _refresh_starting_controls() -> void:
 		if quantity_spin != null:
 			quantity_spin.value = float(_starting_item_quantity(starting_items, item_id))
 			quantity_spin.editable = has_level
+	var hidden_items: Array = config.starting_item_toolbuild_hidden if config != null else []
+	for raw_item_id: Variant in _starting_item_available_checks.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var available_check: CheckBox = _starting_item_available_checks[item_id] as CheckBox
+		if available_check != null:
+			available_check.button_pressed = not _toolbuild_hidden_has(hidden_items, item_id)
+			available_check.disabled = not has_level
 
 
 func _refresh_monster_drop_controls() -> void:
@@ -1684,6 +1731,16 @@ func _on_starting_item_changed(value: float, item_id: StringName) -> void:
 	mark_dirty()
 
 
+func _on_starting_item_available_toggled(_enabled: bool, _item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.starting_item_toolbuild_hidden = _selected_starting_item_hidden()
+	mark_dirty()
+
+
 func _on_client_frequency_changed(value: float, spawner_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -1825,6 +1882,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_money", int(_starting_money.value))
 		root.set("starting_weapons", _selected_starting_weapons())
 		root.set("starting_items", _selected_starting_items())
+		root.set("starting_item_toolbuild_hidden", _selected_starting_item_hidden())
 		root.set("monster_drop_seed_chance_percent", clampi(int(_monster_drop_seed_chance.value), 0, 100))
 		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
 		root.set("tool_shop_prices", _selected_tool_shop_prices())
@@ -1856,6 +1914,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_money = int(_starting_money.value)
 	config.starting_weapons = _selected_starting_weapons()
 	config.starting_items = _selected_starting_items()
+	config.starting_item_toolbuild_hidden = _selected_starting_item_hidden()
 	config.monster_drop_seed_chance_percent = clampi(int(_monster_drop_seed_chance.value), 0, 100)
 	config.tool_shop_available_items = _selected_tool_shop_available_items()
 	config.tool_shop_prices = _selected_tool_shop_prices()
@@ -2005,6 +2064,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_money = DEFAULT_STARTING_MONEY
 		config.starting_weapons = _default_starting_weapons()
 		config.starting_items = {}
+		config.starting_item_toolbuild_hidden = []
 		config.monster_drop_seed_chance_percent = DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT
 		config.tool_shop_available_items = _default_tool_shop_available_items()
 		config.tool_shop_prices = _default_tool_shop_prices()
@@ -2076,6 +2136,24 @@ func _selected_starting_items() -> Dictionary:
 		if quantity > 0:
 			items[item_id] = quantity
 	return items
+
+
+## Item ids whose "Available" box is unchecked: they are hidden from the toolbuild vertical
+## menu. Empty means every buildable stays available.
+func _selected_starting_item_hidden() -> Array[StringName]:
+	var hidden: Array[StringName] = []
+	for raw_item_id: Variant in _starting_item_available_checks.keys():
+		var item_id: StringName = raw_item_id as StringName
+		var available_check: CheckBox = _starting_item_available_checks[item_id] as CheckBox
+		if available_check != null and not available_check.button_pressed:
+			hidden.append(item_id)
+	return hidden
+
+
+## Membership test for an authored hidden-items list, tolerating either a StringName or a
+## String entry (as tscn / hand edits may produce).
+func _toolbuild_hidden_has(hidden_items: Array, item_id: StringName) -> bool:
+	return hidden_items.has(item_id) or hidden_items.has(String(item_id))
 
 
 ## Every non-weapon item that can be granted at start: placeables and resources

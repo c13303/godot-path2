@@ -2,6 +2,8 @@ extends TileMapLayer
 class_name WaterSources
 
 const SPLASH_SCENE: PackedScene = preload("res://scenes/particles/splash.tscn")
+const WATER_SHADER: Shader = preload("res://scripts/map/shaders/pixel_water.gdshader")
+const WATER_TEXTURE: Texture2D = preload("res://assets/sprites/animations/water.png")
 const FLOOR_SPLASH_Z_INDEX: int = -99
 
 @export var refill_amount: int = 10
@@ -25,9 +27,27 @@ const FLOOR_SPLASH_Z_INDEX: int = -99
 var _splash_pool: Array[Node2D] = []
 var _splash_cursor: int = 0
 
+static var _shared_water_material: ShaderMaterial
+
 
 func _ready() -> void:
+	_apply_water_material()
 	_preload_splash_pool()
+
+func _apply_water_material() -> void:
+	material = _water_material()
+
+func _water_material() -> ShaderMaterial:
+	if _shared_water_material == null:
+		var water_material: ShaderMaterial = ShaderMaterial.new()
+		water_material.shader = WATER_SHADER
+		water_material.set_shader_parameter("water_texture", WATER_TEXTURE)
+		water_material.set_shader_parameter("water_blue", Color("#0dbfff"))
+		water_material.set_shader_parameter("frame_count", 14)
+		water_material.set_shader_parameter("frame_size_px", Vector2(13.0, 13.0))
+		water_material.set_shader_parameter("animation_fps", 8.0)
+		_shared_water_material = water_material
+	return _shared_water_material
 
 
 func has_water_at_foot_position(world_position: Vector2) -> bool:
