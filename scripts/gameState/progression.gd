@@ -102,6 +102,7 @@ var progression: Progression = Progression.new()
 var _seed_label_tween: Tween
 var _gem_label_tween: Tween
 var _money_label_tween: Tween
+var _water_reserve_tween: Tween
 # True once a save has been applied to this scene instance (pending-load during
 # _ready or startup auto-load). Prevents the auto-save from being applied twice.
 var _save_applied: bool = false
@@ -326,7 +327,11 @@ func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label:
 		var water_maximum: int = maxi(1, progression.get_value(&"water_reserve_max"))
 		var water_current: int = clampi(progression.get_value(WATER_RESERVE_KEY), 0, water_maximum)
 		water_reserve_bar.max_value = float(water_maximum)
-		water_reserve_bar.value = float(water_current)
+		if _water_reserve_tween != null and _water_reserve_tween.is_valid():
+			_water_reserve_tween.kill()
+		_water_reserve_tween = create_tween()
+		_water_reserve_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		_water_reserve_tween.tween_property(water_reserve_bar, "value", float(water_current), 0.2)
 
 	var label: RichTextLabel = _get_progression_ui()
 	if label == null:

@@ -1297,6 +1297,12 @@ tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/water = true
 
+[node name="fences" type="TileMapLayer" parent="." unique_id=329676032]
+z_index = -50
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
+metadata/water = true
+
 [node name="spawners" type="Node" parent="." unique_id=608668911]
 
 [node name="player" type="Sprite2D" parent="spawners" unique_id=1860060299]
