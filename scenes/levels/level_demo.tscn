@@ -740,6 +740,7 @@ texture_region_size = Vector2i(32, 32)
 12:24/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_kset8")
 13:24/0 = 0
 13:24/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_kset8")
+14:9/0 = 0
 
 [sub_resource type="TileSet" id="TileSet_egp0g"]
 tile_size = Vector2i(32, 32)

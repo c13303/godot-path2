@@ -1,6 +1,6 @@
-[gd_resource type="Resource" script_class="MonsterData" format=3 uid="uid://cmb0nsterbig000"]
+[gd_resource type="Resource" script_class="MonsterData" format=3 uid="uid://3g4jnnxv3ujn"]
 
-[ext_resource type="Script" path="res://scripts/entities/monster_data.gd" id="1_monster_data"]
+[ext_resource type="Script" uid="uid://c0uc541pw3xoq" path="res://scripts/entities/monster_data.gd" id="1_monster_data"]
 [ext_resource type="Texture2D" uid="uid://dk7gefgnmu4il" path="res://assets/sprites/legval/bigmonster.png" id="2_texture"]
 
 [resource]
@@ -8,10 +8,8 @@ script = ExtResource("1_monster_data")
 id = &"bigmonster"
 display_name = "Big Monster"
 texture = ExtResource("2_texture")
-sprite_hframes = 4
-sprite_scale = Vector2(0.75, 0.75)
 sprite_offset = Vector2(0, -28)
-max_health = 200
+max_health = 300
 speed_scale = 0.5
-crowd_resist_scale = 2.0
-smash_resist_scale = 2.0
+crowd_resist_scale = 3.0
+smash_resist_scale = 3.0

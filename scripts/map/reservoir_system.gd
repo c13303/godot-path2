@@ -25,15 +25,18 @@ func _process(_delta: float) -> void:
 		set_process(false)
 		return
 	var processed: int = 0
-	var changed: bool = false
 	var budget: int = maxi(1, max_cells_per_frame)
+	var newly_grassed: Array[Vector2i] = []
 	while processed < budget and not _irrigation_queue.is_empty():
 		var cell: Vector2i = _irrigation_queue.pop_front()
 		_queued_cells.erase(cell)
 		if _irrigate_floor_cell(cell):
-			changed = true
+			newly_grassed.append(cell)
 		processed += 1
-	if changed and floorz != null:
+	# Beautify this batch (plus their neighbours). Cells whose neighbours only get
+	# grassed on a later frame are re-tiled then, via that frame's neighbour expansion.
+	if not newly_grassed.is_empty() and floorz != null:
+		GrassAutotile.beautify(floorz, newly_grassed)
 		floorz.update_internals()
 		floorz.queue_redraw()
 	if _irrigation_queue.is_empty():
@@ -87,7 +90,7 @@ func clear_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
 	var radius: int = _pasteque_irrigation_radius_tiles()
 	var radius_squared: int = radius * radius
 	var restore_atlas: Vector2i = _pasteque_restore_floor_atlas()
-	var changed: bool = false
+	var removed_cells: Array[Vector2i] = []
 	for y_offset: int in range(-radius, radius + 1):
 		for x_offset: int in range(-radius, radius + 1):
 			var distance_squared: int = x_offset * x_offset + y_offset * y_offset
@@ -97,8 +100,10 @@ func clear_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
 			if _cell_has_other_irrigation_source(cell, center_cell):
 				continue
 			if _restore_floor_cell(cell, restore_atlas):
-				changed = true
-	if changed:
+				removed_cells.append(cell)
+	if not removed_cells.is_empty():
+		# Grass that remains around the removed patch needs its edges re-tiled.
+		GrassAutotile.beautify(floorz, removed_cells)
 		floorz.update_internals()
 		floorz.queue_redraw()
 
@@ -131,17 +136,19 @@ func _irrigate_floor_cell(cell: Vector2i) -> bool:
 		return false
 	if watersources != null and watersources.get_cell_source_id(cell) >= 0:
 		return false
-	if floorz.get_cell_atlas_coords(cell) == FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS:
+	if GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell)):
 		return false
 	var alternative_tile: int = floorz.get_cell_alternative_tile(cell)
-	floorz.set_cell(cell, source_id, FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS, alternative_tile)
+	# Paint the interior grass tile as a placeholder; GrassAutotile.beautify() then
+	# picks the correct edge/corner tile for this cell and its neighbours.
+	floorz.set_cell(cell, source_id, GrassAutotile.GRASS_FULL_ATLAS, alternative_tile)
 	return true
 
 func _restore_floor_cell(cell: Vector2i, restore_atlas: Vector2i) -> bool:
 	var source_id: int = floorz.get_cell_source_id(cell)
 	if source_id < 0:
 		return false
-	if floorz.get_cell_atlas_coords(cell) != FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS:
+	if not GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell)):
 		return false
 	var alternative_tile: int = floorz.get_cell_alternative_tile(cell)
 	floorz.set_cell(cell, source_id, restore_atlas, alternative_tile)

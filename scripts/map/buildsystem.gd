@@ -9,7 +9,6 @@ const PREVIEW_NORMAL_COLOR: Color = Color(0.78, 0.90, 0.98, 0.80)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const PREVIEW_Z_INDEX: int = 4095
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
-const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const BUILD_FX_Z_INDEX: int = -62
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
@@ -1076,7 +1075,8 @@ func _requires_grass_green_floor(placeable_def: Dictionary) -> bool:
 func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null or floorz.get_cell_source_id(cell) < 0:
 		return false
-	return floorz.get_cell_atlas_coords(cell) == FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS
+	# Green grass is drawn with the beautified autotile block, not a single tile.
+	return GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell))
 
 func _placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
 	if not _requires_grass_green_floor(placeable_def):
