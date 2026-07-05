@@ -31,6 +31,7 @@ const LEGACY_SPAWN_INTERVAL_SECONDS: float = 3.0
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
 const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
@@ -1532,6 +1533,7 @@ func _sync_runtime_state() -> void:
 	_scan_buildings()
 	_validate_playlist_after_spawner_scan()
 	_apply_navigation_topology_rebuild()
+	_sync_player_blocking_cells()
 	var spawner_cells: Array = _spawners.keys()
 	var total_count: int = spawner_cells.size()
 	if total_count == 0:
@@ -1693,7 +1695,10 @@ func _setup_counter_stock_manager() -> void:
 	)
 
 
-func _on_building_added(_cell: Vector2i, item_id: String) -> void:
+func _on_building_added(cell: Vector2i, item_id: String) -> void:
+	if _building_item_blocks_player(item_id):
+		_set_player_cell_blocked(cell, true)
+	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
 		_navigation_topology_dirty = true
 	if item_id != ROSE_SHOP_COUNTER_ID:
@@ -1701,6 +1706,9 @@ func _on_building_added(_cell: Vector2i, item_id: String) -> void:
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
+	if _building_item_blocks_player(item_id):
+		_set_player_cell_blocked(cell, false)
+	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
 		_navigation_topology_dirty = true
 	if item_id != ROSE_SHOP_COUNTER_ID:
@@ -1728,6 +1736,47 @@ func _building_item_blocks_flow(item_id: String) -> bool:
 	if str(item_def.get("target_layer", "")) != "blocking_buildings":
 		return false
 	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+
+func _building_item_blocks_player(item_id: String) -> bool:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if item_def.is_empty():
+		return false
+	if str(item_def.get("target_layer", "")) != "blocking_buildings":
+		return false
+	if item_def.has("blocks_player_movement"):
+		return bool(item_def.get("blocks_player_movement", false))
+	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+
+func _sync_player_blocking_cells() -> void:
+	if flow == null or not flow.has_method("set_cell_blocked") or blocking_buildings == null:
+		return
+	for raw_cell: Variant in blocking_buildings.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		var item_id: String = _blocking_building_item_id_at_cell(cell)
+		if item_id == "" or _building_item_blocks_player(item_id):
+			_set_player_cell_blocked(cell, true)
+
+func _set_player_cell_blocked(cell: Vector2i, blocked: bool) -> void:
+	if flow == null or not flow.has_method("set_cell_blocked"):
+		return
+	flow.call("set_cell_blocked", cell, blocked)
+
+func _blocking_building_item_id_at_cell(cell: Vector2i) -> String:
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return ""
+	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
+	return ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), atlas)
+
+func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
+	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
+		return
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if item_def.is_empty() or not item_def.has("speed_multiplier"):
+		return
+	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	if blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0:
+		speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+	flow.call("set_cell_speed_multiplier", cell, speed_multiplier)
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not GameState.is_night:
@@ -2976,6 +3025,10 @@ func _rose_pile_parent() -> Node:
 func _auto_select_hammer() -> void:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui != null and game_ui.has_method("select_build_item_for_tool"):
+		var equipped: bool = bool(game_ui.call("select_build_item_for_tool", "hammer", ROSE_SHOP_COUNTER_ID))
+		if equipped:
+			return
 	if game_ui != null and game_ui.has_method("select_build_tool"):
 		game_ui.call("select_build_tool", "hammer")
 

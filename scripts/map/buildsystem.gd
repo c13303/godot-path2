@@ -89,6 +89,8 @@ var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _remove_drag_active: bool = false
 var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
+var _keyboard_unbuild_held: bool = false
+var _keyboard_unbuild_cell: Vector2i = Vector2i.ZERO
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
 # True while we have hidden the OS cursor because a build preview tile is showing.
@@ -137,6 +139,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_cancel_drag_build()
 
 func _process(delta: float) -> void:
+	_update_keyboard_unbuild()
 	_process_removal(delta)
 	if _remove_drag_active:
 		_clear_hover()
@@ -177,6 +180,17 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event: InputEventKey = event as InputEventKey
+		if key_event.physical_keycode == KEY_X:
+			if key_event.pressed and not key_event.echo:
+				_keyboard_unbuild_held = true
+				_start_keyboard_unbuild_at_hover()
+				get_viewport().set_input_as_handled()
+				return
+			if not key_event.pressed:
+				_keyboard_unbuild_held = false
+				_cancel_removal()
+				get_viewport().set_input_as_handled()
+				return
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_R:
 			if rotate_selected_build_direction():
 				get_viewport().set_input_as_handled()
@@ -196,18 +210,6 @@ func _input(event: InputEvent) -> void:
 				if rotate_selected_build_direction(true):
 					get_viewport().set_input_as_handled()
 					return
-
-	if event is InputEventMouseButton:
-		var remove_event: InputEventMouseButton = event as InputEventMouseButton
-		if remove_event.button_index == MOUSE_BUTTON_RIGHT:
-			var removal_input_active: bool = _build_tool_selected() or _remove_drag_active or _remove_active
-			if remove_event.pressed and _build_tool_selected():
-				_start_remove_drag()
-			elif not remove_event.pressed and _remove_drag_active:
-				_finish_remove_drag()
-			if removal_input_active:
-				get_viewport().set_input_as_handled()
-				return
 
 	if event is InputEventMouseMotion and _remove_drag_active:
 		var current_cell: Vector2i = _hovered_cell()
@@ -299,7 +301,7 @@ func _finish_remove_drag() -> void:
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
+	if GameState.is_night or _is_inventory_open() or not _keyboard_unbuild_held:
 		_cancel_removal()
 		return
 	if _remove_queue.is_empty():
@@ -345,6 +347,41 @@ func _finish_removal() -> void:
 	_remove_elapsed = 0.0
 	if _remove_queue.is_empty():
 		_cancel_removal()
+
+func _update_keyboard_unbuild() -> void:
+	if not _keyboard_unbuild_held:
+		return
+	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+		_cancel_removal()
+		return
+	var cell: Vector2i = _hovered_cell()
+	if _remove_active and cell == _keyboard_unbuild_cell:
+		return
+	if _remove_active:
+		_cancel_removal()
+	_keyboard_unbuild_cell = cell
+	_start_keyboard_unbuild_at_hover()
+
+
+func _start_keyboard_unbuild_at_hover() -> void:
+	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
+		return
+	if _placement_disabled():
+		return
+	_cancel_drag_build_preserving_selection()
+	_clear_preview_remove_progress_bars()
+	var cell: Vector2i = _hovered_cell()
+	var removal: Dictionary = _removable_at_cell(cell)
+	if removal.is_empty():
+		_cancel_removal()
+		return
+	_keyboard_unbuild_cell = cell
+	_remove_queue.clear()
+	_remove_queue.append(removal)
+	_remove_elapsed = 0.0
+	_remove_active = true
+	_create_remove_progress(cell, 0.0)
+	_clear_hover()
 
 
 func pad_place_selected_at_cursor() -> void:
@@ -620,9 +657,20 @@ func _refresh_cell_collision(cell: Vector2i) -> void:
 	var blocked: bool = false
 	if wallz and wallz.get_cell_source_id(cell) >= 0:
 		blocked = true
-	elif blocking_buildings and blocking_buildings.get_cell_source_id(cell) >= 0:
+	elif _blocking_building_blocks_player(cell):
 		blocked = true
 	ff.call("set_cell_blocked", cell, blocked)
+
+func _blocking_building_blocks_player(cell: Vector2i) -> bool:
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return false
+	var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_buildings.get_cell_atlas_coords(cell))
+	if item_id == "":
+		return true
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if item_def.has("blocks_player_movement"):
+		return bool(item_def.get("blocks_player_movement", false))
+	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 func _sync_terrain_speed_cells() -> void:
 	var ff: Object = _resolve_flow_field()
@@ -632,7 +680,7 @@ func _sync_terrain_speed_cells() -> void:
 		ff.call("clear_cell_speed_multipliers")
 	if not ff.has_method("set_cell_speed_multiplier"):
 		return
-	for layer: TileMapLayer in [traversable_buildings, fences]:
+	for layer: TileMapLayer in [traversable_buildings, blocking_buildings, fences]:
 		if layer == null:
 			continue
 		for raw_cell: Variant in layer.get_used_cells():
@@ -650,6 +698,13 @@ func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 		if item_id != "":
 			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 			speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+	if blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0:
+		var blocking_atlas_coords: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
+		var blocking_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_atlas_coords)
+		if blocking_item_id != "":
+			var blocking_item_def: Dictionary = ItemCatalog.get_item_def(blocking_item_id)
+			var blocking_speed_multiplier: float = clampf(float(blocking_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, blocking_speed_multiplier)
 	if fences != null and fences.get_cell_source_id(cell) >= 0:
 		var fence_atlas_coords: Vector2i = fences.get_cell_atlas_coords(cell)
 		var fence_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(fences.name), fence_atlas_coords)
@@ -930,6 +985,12 @@ func _cancel_drag_build() -> void:
 	_hide_drag_selection_rect()
 	_clear_hover()
 	_clear_build_selection()
+
+func _cancel_drag_build_preserving_selection() -> void:
+	_set_drag_build_active(false)
+	_drag_build_item_id = ""
+	_hide_drag_selection_rect()
+	_clear_hover()
 
 func _set_drag_build_active(active: bool) -> void:
 	if _drag_build_active == active:

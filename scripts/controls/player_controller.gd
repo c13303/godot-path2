@@ -7,7 +7,6 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 const INPUT_MODE_PAD: String = "pad"
 const INPUT_MODE_KMOUSE: String = "kmouse"
 const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
-const FENCE_SPEED_MULTIPLIER: float = 0.5
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
@@ -18,7 +17,6 @@ const FENCE_SPEED_MULTIPLIER: float = 0.5
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
-@onready var fences: TileMapLayer = $"../../Map/MonTilemap/fences"
 
 @onready var camera_controller: CameraController = $"../../Camera2D"
 @onready var smoke_trail: SmokeTrail = $"../../SmokeTrail"
@@ -68,7 +66,6 @@ var _trail_last_emit_pos: Vector2 = Vector2.ZERO
 var _last_move_direction: Vector2 = Vector2.ZERO
 var _last_lance_facing: Vector2 = Vector2.RIGHT
 var _player_in_water: bool = false
-var _player_on_fence: bool = false
 
 func _ready() -> void:
 	var scene: Node = get_tree().get_current_scene()
@@ -124,6 +121,12 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		_set_control_mode(INPUT_MODE_KMOUSE)
+		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and not _paused and not _is_inventory_open():
+			if _is_quickbar_active() or _in_build_mode():
+				_clear_build_selection()
+				_deactivate_quickbar()
+				get_viewport().set_input_as_handled()
+				return
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
 			# While build quickbar menus are active, a click in the world dismisses the menu
 			# without placing. The weapon menu returns to play mode and lets this same click fire.
@@ -411,7 +414,6 @@ func _setup_player() -> void:
 		var base_speed: float = player_max_speed if player_max_speed > 0.0 else _base_agent_max_speed()
 		if base_speed > 0.0:
 			_player_in_water = _is_player_in_water(player)
-			_player_on_fence = _is_player_on_fence(player)
 			profile["max_speed"] = _player_profile_speed(player, false)
 		steering.call("set_agent_profile", player_nav_id, profile)
 
@@ -613,24 +615,13 @@ func _update_terrain_speed_state() -> void:
 	if not player:
 		return
 	var in_water: bool = _is_player_in_water(player)
-	var on_fence: bool = _is_player_on_fence(player)
-	if in_water == _player_in_water and on_fence == _player_on_fence:
+	if in_water == _player_in_water:
 		return
 	_player_in_water = in_water
-	_player_on_fence = on_fence
 	_set_rush_speed(_rush_active)
 
 func _is_player_in_water(player: Node2D) -> bool:
 	return watersources != null and watersources.has_water_at_foot_position(player.global_position)
-
-func _is_player_on_fence(player: Node2D) -> bool:
-	if fences == null:
-		return false
-	var player_world_radius: float = _agent_world_radius()
-	var foot_world_position: Vector2 = player.global_position + Vector2(0.0, -player_world_radius)
-	var local_position: Vector2 = fences.to_local(foot_world_position)
-	var cell: Vector2i = fences.local_to_map(local_position)
-	return fences.get_cell_source_id(cell) >= 0
 
 func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 	var player_max_speed: float = float(player.get("max_speed"))
@@ -639,9 +630,7 @@ func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 		return 0.0
 	var rush_multiplier: float = maxf(rush_speed_mult, 0.0) if rush_enabled else 1.0
 	var water_multiplier: float = _water_speed_multiplier() if _is_player_in_water(player) else 1.0
-	var fence_multiplier: float = FENCE_SPEED_MULTIPLIER if _is_player_on_fence(player) else 1.0
-	var terrain_multiplier: float = minf(water_multiplier, fence_multiplier)
-	return base_speed * _speed_multiplier() * rush_multiplier * terrain_multiplier
+	return base_speed * _speed_multiplier() * rush_multiplier * water_multiplier
 
 func _water_speed_multiplier() -> float:
 	if watersources == null:

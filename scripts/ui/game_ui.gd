@@ -33,6 +33,7 @@ const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
 # Buildables offered by the gardening menu (mirrors toolbuild.GARDENING_ITEM_IDS); used to tell
 # whether a gardening buildable is currently equipped, which drives the tutorial's plant step.
 const GARDENING_BUILDABLE_IDS: Array[String] = ["rose", "ronce", "pasteque", "turret1", "turret_epine"]
+const HAMMER_BUILDABLE_IDS: Array[String] = ["rose_shop_counter", "wall", "fence"]
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/ToolbarPanel/toolbar"
 @onready var toolbar_panel: PanelContainer = $"bottom anchor/ToolbarPanel"
@@ -337,6 +338,29 @@ func select_build_tool(tool_id: String) -> void:
 	var index: int = QUICK_SLOT_KINDS.find(tool_id)
 	if index >= 0:
 		activate_quickbar_slot(index)
+
+## Scripted helper for tutorial/objective nudges: equips a concrete buildable directly, bypassing
+## the picker highlight step while preserving the same availability/affordability gates.
+func select_build_item_for_tool(tool_id: String, item_id: String) -> bool:
+	var index: int = QUICK_SLOT_KINDS.find(tool_id)
+	if index < 0 or _is_quickbar_slot_disabled(tool_id):
+		return false
+	if not _tool_offers_build_item(tool_id, item_id):
+		return false
+	if not is_build_item_available(item_id) or not can_afford_build(item_id, 1):
+		return false
+	selected_build_item_id = item_id
+	quickbar_active = false
+	active_slot_index = -1
+	_refresh_all_slots()
+	return true
+
+func _tool_offers_build_item(tool_id: String, item_id: String) -> bool:
+	if tool_id == GARDENING_ID:
+		return item_id in GARDENING_BUILDABLE_IDS
+	if tool_id == HAMMER_ID:
+		return item_id in HAMMER_BUILDABLE_IDS
+	return false
 
 ## Global-space center X of a quick slot's icon, or -1 if that slot has not been built yet.
 func get_quick_slot_center_x(index: int) -> float:

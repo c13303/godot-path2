@@ -264,7 +264,9 @@ const ITEM_DEFS: Dictionary = {
 		# then continue their previous route.
 		"isWall": false,
 		"blocks_movement": false,
+		"blocks_player_movement": false,
 		"blocks_projectiles": false,
+		"speed_multiplier": 0.5,
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"pad_skip_preview": true,
@@ -285,7 +287,9 @@ const ITEM_DEFS: Dictionary = {
 		"occupies_cell": true,
 		"isWall": false,
 		"blocks_movement": false,
+		"blocks_player_movement": false,
 		"blocks_projectiles": false,
+		"speed_multiplier": 0.5,
 		"requires_walkable_floor": true,
 		"requires_grass_green_floor": true,
 		"pad_skip_preview": true,
