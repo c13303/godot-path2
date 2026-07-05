@@ -15,8 +15,12 @@ const REWARD_ANIM_CAP: int = 15
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
-# Quick-slot tool that drives build/unbuild mode rather than acting as a weapon.
-const TOOLBUILD_ID: String = "toolbuild"
+# Quick-slot tools that drive build mode rather than acting as weapons. The build picker is
+# split into two tools: gardening (rose/ronce/pasteque/turrets) and hammer (counter/wall/fence).
+# Both open the same picker; the selected tool decides which buildables it offers.
+const GARDENING_ID: String = "gardening"
+const HAMMER_ID: String = "hammer"
+const BUILD_TOOL_IDS: Array[String] = [GARDENING_ID, HAMMER_ID]
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
 const ITEM_NAME_KEY_PREFIX: String = "item."
 
@@ -68,11 +72,11 @@ func _ready() -> void:
 	_refresh_all_slots()
 	_set_inventory_open(false)
 	call_deferred("_connect_startup_loading_signals")
-	# Day 1 starts in build mode (the toolbuild picker is open). Later days re-select the
-	# toolbuild when the day's seed-harvest finishes (driven from the picker). A loaded save
-	# overrides this afterwards via its restored selected_quick_index.
+	# Day 1 starts in build mode with the gardening tool (its picker opens on rose). Later
+	# days re-select a build tool when the day's seed-harvest finishes (driven from the
+	# picker). A loaded save overrides this afterwards via its restored selected_quick_index.
 	if not GameState.is_night:
-		call_deferred("select_toolbuild")
+		call_deferred("select_build_tool", GARDENING_ID)
 
 func _setup_day_toggle() -> void:
 	_sun_icon = AtlasTexture.new()
@@ -296,26 +300,42 @@ func clear_build_selection() -> void:
 func is_build_mode_active() -> bool:
 	return selected_build_item_id != ""
 
-func is_toolbuild_selected() -> bool:
-	return get_selected_quick_item_id() == TOOLBUILD_ID
+## True while any build tool (gardening or hammer) is the selected quick slot: the build
+## picker is open and the player is in build mode.
+func is_build_tool_selected() -> bool:
+	return get_selected_quick_item_id() in BUILD_TOOL_IDS
+
+## The selected build tool's id (gardening/hammer), or "" when no build tool is selected.
+## The picker uses this to decide which buildables to offer and which slot to anchor to.
+func get_selected_build_tool_id() -> String:
+	var selected: String = get_selected_quick_item_id()
+	return selected if selected in BUILD_TOOL_IDS else ""
+
+## True only while the gardening tool is selected (used by the tutorial's "plant roses" flow,
+## since roses are placed from gardening, not the hammer).
+func is_gardening_selected() -> bool:
+	return get_selected_quick_item_id() == GARDENING_ID
 
 func is_unbuild_tool_selected() -> bool:
 	return get_selected_quick_item_id() == UNBUILD_TOOL_ID
 
-## Select the quick slot holding the toolbuild (opens the toolbuild picker). No-op if
-## the toolbuild is not in the quick bar.
-func select_toolbuild() -> void:
+## Select the quick slot holding the given build tool (opens the picker in that tool's mode).
+## No-op if the tool is not in the quick bar.
+func select_build_tool(tool_id: String) -> void:
 	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == TOOLBUILD_ID:
+		if _slot_item_id(inventory_slots[i]) == tool_id:
 			select_quick_slot(i)
 			return
 
-## Global-space center X of the quick slot holding the toolbuild, or -1 if the
-## toolbuild is not currently in the quick bar. The Toolbuild picker uses this to anchor
-## its column directly above the toolbuild icon.
-func get_toolbuild_slot_center_x() -> float:
+## Global-space center X of the quick slot holding the currently selected build tool, or -1
+## if no build tool is selected / it is not in the quick bar. The picker uses this to anchor
+## its column directly above the active tool's icon.
+func get_build_tool_slot_center_x() -> float:
+	var tool_id: String = get_selected_build_tool_id()
+	if tool_id == "":
+		return -1.0
 	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == TOOLBUILD_ID:
+		if _slot_item_id(inventory_slots[i]) == tool_id:
 			if i < _toolbar_slot_nodes.size():
 				var rect: Rect2 = _toolbar_slot_nodes[i].get_global_rect()
 				return rect.position.x + rect.size.x * 0.5
@@ -943,7 +963,8 @@ func _setup_starting_inventory() -> void:
 		inventory_slots[i] = _empty_slot()
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
-	add_inventory(TOOLBUILD_ID, 1)
+	add_inventory(GARDENING_ID, 1)
+	add_inventory(HAMMER_ID, 1)
 	# Any non-weapon items the level grants at start (e.g. pasteque x10).
 	var starting_items: Dictionary = _get_level_starting_items()
 	for raw_item_id: Variant in starting_items:

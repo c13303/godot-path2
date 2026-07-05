@@ -239,7 +239,7 @@ func _current_message_key() -> String:
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
 	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
-		if _toolbuild_equipped():
+		if _gardening_equipped():
 			return KEY_PLANT_ROSES
 		return KEY_BUY_ROSES
 	# Some planted roses are still dry.
@@ -289,12 +289,13 @@ func _player_near_seed_merchant() -> bool:
 	)
 
 
-## True while the quick-bar toolbuild is the selected slot (the toolbuild picker is open).
-func _toolbuild_equipped() -> bool:
+## True while the gardening tool is the selected slot. The "plant roses" prompt is gated on
+## gardening specifically (not the hammer), since roses are placed from the gardening picker.
+func _gardening_equipped() -> bool:
 	return (
 		_game_ui != null
-		and _game_ui.has_method("is_toolbuild_selected")
-		and bool(_game_ui.call("is_toolbuild_selected"))
+		and _game_ui.has_method("is_gardening_selected")
+		and bool(_game_ui.call("is_gardening_selected"))
 	)
 
 

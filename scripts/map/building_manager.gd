@@ -2399,10 +2399,10 @@ func _begin_morning_phase() -> void:
 	_morning_harvest_active = true
 	# Grown roses can only be harvested onto shop counters. If none are placed the
 	# player must build them first ("placez les comptoirs du magasin"): auto-equip the
-	# toolbuild so the toolbuild picker opens with the counter pre-selected (see
-	# toolbuild._open_toolbuild), leaving the player ready to build straight away.
+	# hammer so its picker opens with the counter pre-selected (see
+	# toolbuild._open_build_picker), leaving the player ready to build straight away.
 	if _rose_shop_counter_cells().is_empty():
-		_auto_select_toolbuild()
+		_auto_select_hammer()
 
 
 func _process_morning_harvest_walkover() -> void:
@@ -2973,11 +2973,11 @@ func _rose_pile_parent() -> Node:
 	return scene if scene != null else self
 
 
-func _auto_select_toolbuild() -> void:
+func _auto_select_hammer() -> void:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui != null and game_ui.has_method("select_toolbuild"):
-		game_ui.call("select_toolbuild")
+	if game_ui != null and game_ui.has_method("select_build_tool"):
+		game_ui.call("select_build_tool", "hammer")
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:

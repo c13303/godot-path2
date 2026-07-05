@@ -7,6 +7,7 @@
 script = ExtResource("1_turret_data")
 id = "turret_epine"
 weapon = ExtResource("2_weapon")
+shooting_range = 400.0
 directional = true
 straight_line_detection = true
 build_in_range = true

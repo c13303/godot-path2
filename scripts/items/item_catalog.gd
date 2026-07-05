@@ -64,14 +64,24 @@ const ITEM_DEFS: Dictionary = {
 		"category": "resources",
 		"price": 2,
 	},
-	# Selecting this quick-slot tool opens the toolbuild picker (build mode). It is not a
-	# weapon or a placeable itself; the toolbuild picker chooses which building to place.
-	"toolbuild": {
-		"id": "toolbuild",
-		"name": "Build",
+	# Selecting this quick-slot tool opens the build picker in gardening mode (rose, ronce,
+	# pasteque, turrets). It is not a weapon or a placeable itself; the picker chooses which
+	# building to place.
+	"gardening": {
+		"id": "gardening",
+		"name": "Gardening",
 		"type": "tool",
 		"category": "tools",
 		"frame": 9,
+	},
+	# Selecting this quick-slot tool opens the build picker in hammer mode (shop counter,
+	# wall, fence). Like gardening it drives build mode but offers the structural buildables.
+	"hammer": {
+		"id": "hammer",
+		"name": "Hammer",
+		"type": "tool",
+		"category": "tools",
+		"frame": 19,
 	},
 	# Holding left-click with this quick-slot tool removes the hovered building.
 	"unbuild_tool": {

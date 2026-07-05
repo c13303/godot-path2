@@ -1,11 +1,13 @@
 extends Control
 
-## The toolbuild picker is the building picker for build mode. It is open exactly while
-## the quick-bar toolbuild is selected (see game_ui.is_toolbuild_selected) and during
-## the day; selecting any other quick slot closes it. The seed merchant column still
-## takes over while the player is near the merchant without the toolbuild selected.
+## The build picker is the building picker for build mode. It is open exactly while a build
+## tool (gardening or hammer) is the selected quick slot (see game_ui.get_selected_build_tool_id)
+## and during the day; selecting any other quick slot closes it. The active tool decides which
+## buildables it lists: gardening offers rose/ronce/pasteque/turrets, hammer offers
+## counter/wall/fence. The seed merchant column still takes over while the player is near the
+## merchant without a build tool selected.
 ## It renders as a vertical column
-## rising up out of the toolbuild quick slot, like a dropdown that opens upward:
+## rising up out of the active tool's quick slot, like a dropdown that opens upward:
 ## one icon per buildable, with the build price overlaid where the quantity badge would
 ## be. The rose shop counter uses that same badge for its remaining fixed stock. A single
 ## floating label sits just to the right of the currently selected icon only, showing that
@@ -36,12 +38,18 @@ const BAR_CONTENT_INSET: float = 10.0
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const SEED_MERCHANT_QUICK_SLOT_INDEX: int = 6
 const PASTEQUE_ID: String = "pasteque"
-const BUILD_ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", "fence", COUNTER_ID, PASTEQUE_ID]
+# The build picker is opened by one of two quick-bar tools, each offering its own buildables:
+# the gardening tool grows plants/turrets, the hammer builds structures. The active tool
+# (game_ui.get_selected_build_tool_id) decides which set is shown and anchored to.
+const GARDENING_TOOL_ID: String = "gardening"
+const HAMMER_TOOL_ID: String = "hammer"
+const GARDENING_ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine"]
+const HAMMER_ITEM_IDS: Array[String] = [COUNTER_ID, "wall", "fence"]
 const SEED_ITEM_ID: String = "seed"
 # The seed-merchant column also carries inventory-backed buildables (pasteque),
-# which are bought here and later placed from the toolbuild column above.
+# which are bought here and later placed from the gardening column above.
 const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam", PASTEQUE_ID]
-const ITEM_IDS: Array[String] = ["rose", "turret1", "turret_epine", "wall", "ronce", "fence", COUNTER_ID, PASTEQUE_ID, SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
+const ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine", COUNTER_ID, "wall", "fence", SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
@@ -51,8 +59,12 @@ var progression_node: Node
 var game_ui: Node
 # The building currently picked for placement (drives build mode).
 var _selected_item_id: String = ""
-# The last building the player picked; restored when the toolbuild picker reopens if it still exists.
-var _last_picked_item_id: String = ""
+# Per build tool (gardening/hammer): the last building the player picked with it, restored
+# when that tool's picker reopens if the building still exists.
+var _last_picked_by_tool: Dictionary = {}
+# The build tool whose column is currently shown, so a tool switch (gardening<->hammer) while
+# the picker stays open re-runs the open/default-selection logic for the new tool.
+var _shown_build_tool_id: String = ""
 var _selected_merchant_item_id: String = ""
 # The level must open with the toolbuild showing rose. Consumed on the first toolbuild picker
 # open so the counter-preference / last-picked logic resumes on every later open.
@@ -135,16 +147,18 @@ func _ready() -> void:
 ## Build tool is the selected quick slot and it is daytime.
 func _process(_delta: float) -> void:
 	var merchant_should_show: bool = _is_seed_merchant_shop_active()
+	var build_tool_id: String = _selected_build_tool_id()
 	var build_should_show: bool = (
-		game_ui != null
-		and game_ui.has_method("is_toolbuild_selected")
-		and bool(game_ui.call("is_toolbuild_selected"))
+		build_tool_id != ""
 		and not GameState.is_night
 		and not merchant_should_show
 	)
 	visible = build_should_show or merchant_should_show
-	if build_should_show and _toolbuild_column != null and not _toolbuild_column.visible:
-		_open_toolbuild()
+	# Open on first show, and re-open when the active tool changes while already open so the
+	# column re-anchors and picks a valid default for the newly selected tool.
+	if build_should_show and _toolbuild_column != null and (not _toolbuild_column.visible or build_tool_id != _shown_build_tool_id):
+		_shown_build_tool_id = build_tool_id
+		_open_build_picker()
 	elif not build_should_show and _toolbuild_column != null and _toolbuild_column.visible:
 		_close_toolbuild()
 	if merchant_should_show:
@@ -491,37 +505,39 @@ func _build_slot(item_id: String) -> Button:
 
 # --- Open / close ------------------------------------------------------------
 
-func _open_toolbuild() -> void:
+func _open_build_picker() -> void:
 	_apply_phase_layout()
 	_set_toolbuild_open(true)
 	_refresh_slots()
-	# At level start the Build tool must come up with rose equipped, ahead of every
-	# other resume rule. Consumed on this first open so later opens fall through to the
-	# usual counter-preference / last-picked logic.
-	if _level_start_default_pending:
+	var tool_id: String = _selected_build_tool_id()
+	# At level start the gardening tool must come up with rose equipped, ahead of every
+	# other resume rule. Consumed on the first gardening open so later opens fall through
+	# to the usual last-picked logic.
+	if _level_start_default_pending and tool_id == GARDENING_TOOL_ID:
 		_level_start_default_pending = false
 		if _should_show_item("rose") and not _is_item_locked("rose"):
 			_select_item("rose")
 			return
-	# No counters placed yet: the shop can't do anything until the player builds them
-	# (roses are harvested onto counters, clients buy from them). Pre-select the counter
-	# so the "place the shop counters" prompt is immediately actionable, ahead of the
-	# usual last-picked / first-available resume below.
-	if _should_prefer_counter():
+	# Hammer with no counters placed yet: the shop can't do anything until the player builds
+	# them (roses are harvested onto counters, clients buy from them). Pre-select the counter
+	# so the "place the shop counters" prompt is immediately actionable, ahead of the usual
+	# last-picked / first-available resume below.
+	if tool_id == HAMMER_TOOL_ID and _should_prefer_counter():
 		_select_item(COUNTER_ID)
 		return
-	# Resume the last buildable. If it ran out while the player was away from the
-	# build tool, move to another currently usable buildable; otherwise leave the
-	# empty one selected so its price/remaining label stays visible.
-	if _last_picked_item_id != "" and _should_show_item(_last_picked_item_id) and not _is_item_locked(_last_picked_item_id):
-		if _affordable_quantity(_last_picked_item_id) <= 0:
-			var next_id: String = _next_available_buildable(_last_picked_item_id)
+	# Resume this tool's last buildable. If it ran out while the player was away from the
+	# tool, move to another currently usable buildable; otherwise leave the empty one
+	# selected so its price/remaining label stays visible.
+	var last_picked: String = str(_last_picked_by_tool.get(tool_id, ""))
+	if last_picked != "" and _should_show_item(last_picked) and not _is_item_locked(last_picked):
+		if _affordable_quantity(last_picked) <= 0:
+			var next_id: String = _next_available_buildable(last_picked)
 			if next_id != "":
 				_select_item(next_id)
 				return
-		_select_item(_last_picked_item_id)
+		_select_item(last_picked)
 		return
-	for item_id: String in ITEM_IDS:
+	for item_id: String in _active_build_item_ids():
 		if item_id != COUNTER_ID and _is_item_available(item_id) and not _is_item_locked(item_id):
 			_select_item(item_id)
 			return
@@ -535,6 +551,7 @@ func _close_all() -> void:
 
 func _close_toolbuild() -> void:
 	_set_toolbuild_open(false)
+	_shown_build_tool_id = ""
 	_deselect_active()
 
 
@@ -589,10 +606,12 @@ func _on_item_pressed(item_id: String) -> void:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
-	# Clicking the already-selected item toggles it back off and forgets it.
+	# Clicking the already-selected item toggles it back off and forgets it for this tool.
 	if _selected_item_id == item_id:
 		_deselect_active()
-		_last_picked_item_id = ""
+		var tool_id: String = _selected_build_tool_id()
+		if tool_id != "":
+			_last_picked_by_tool.erase(tool_id)
 		return
 	_select_item(item_id)
 
@@ -664,7 +683,7 @@ func _step_build_pad_selection(direction: int) -> void:
 
 func _visible_build_item_ids() -> Array[String]:
 	var ids: Array[String] = []
-	for item_id: String in BUILD_ITEM_IDS:
+	for item_id: String in _active_build_item_ids():
 		if _should_show_item(item_id) and not _is_item_locked(item_id):
 			ids.append(item_id)
 	return ids
@@ -709,7 +728,9 @@ func _visible_merchant_pad_item_ids() -> Array[String]:
 
 func _select_item(item_id: String) -> void:
 	_selected_item_id = item_id
-	_last_picked_item_id = item_id
+	var tool_id: String = _selected_build_tool_id()
+	if tool_id != "":
+		_last_picked_by_tool[tool_id] = item_id
 	# Seed the run-dry tracker with the new pick's current count, so the recursive
 	# refresh below (and a deliberately-empty pick) never mis-fires an auto-switch.
 	_selected_affordable_prev = _affordable_quantity(item_id)
@@ -829,14 +850,17 @@ func _maybe_auto_switch_from_empty() -> void:
 	_selected_affordable_prev = current
 
 
-## The next buildable after `from_id` in the vertical bar (wrapping) that is shown, unlocked
-## and affordable, or "" if none.
+## The next buildable after `from_id` in the active tool's bar (wrapping) that is shown,
+## unlocked and affordable, or "" if none.
 func _next_available_buildable(from_id: String) -> String:
-	var n: int = BUILD_ITEM_IDS.size()
-	var start: int = BUILD_ITEM_IDS.find(from_id)
+	var ids: Array[String] = _active_build_item_ids()
+	var n: int = ids.size()
+	if n == 0:
+		return ""
+	var start: int = ids.find(from_id)
 	for offset: int in range(1, n + 1):
 		var idx: int = ((start if start >= 0 else -1) + offset) % n
-		var candidate: String = BUILD_ITEM_IDS[idx]
+		var candidate: String = ids[idx]
 		if candidate == from_id:
 			continue
 		if _should_show_item(candidate) and not _is_item_locked(candidate) and _affordable_quantity(candidate) > 0:
@@ -944,8 +968,26 @@ func _merchant_price(item_id: String) -> int:
 	return ItemCatalog.get_price(item_id)
 
 
+## The build tool currently selected in the quick bar (gardening/hammer), or "" if none.
+func _selected_build_tool_id() -> String:
+	if game_ui != null and game_ui.has_method("get_selected_build_tool_id"):
+		return str(game_ui.call("get_selected_build_tool_id"))
+	return ""
+
+
+## The buildables offered by the currently selected build tool, in column order. Empty when
+## no build tool is selected.
+func _active_build_item_ids() -> Array[String]:
+	match _selected_build_tool_id():
+		GARDENING_TOOL_ID:
+			return GARDENING_ITEM_IDS
+		HAMMER_TOOL_ID:
+			return HAMMER_ITEM_IDS
+	return []
+
+
 func _should_show_item(item_id: String) -> bool:
-	return item_id in BUILD_ITEM_IDS and _is_item_available(item_id)
+	return item_id in _active_build_item_ids() and _is_item_available(item_id)
 
 
 func _should_show_merchant_item(item_id: String) -> bool:
@@ -1223,11 +1265,11 @@ func _update_merchant_column_anchor() -> void:
 	_merchant_column.offset_right = left
 
 
-## Aligns the build-phase column's slots horizontally over the toolbuild quick slot.
+## Aligns the build-phase column's slots horizontally over the active build tool's quick slot.
 func _update_build_column_anchor() -> void:
-	if _toolbuild_column == null or game_ui == null or not game_ui.has_method("get_toolbuild_slot_center_x"):
+	if _toolbuild_column == null or game_ui == null or not game_ui.has_method("get_build_tool_slot_center_x"):
 		return
-	var center_x: float = float(game_ui.call("get_toolbuild_slot_center_x"))
+	var center_x: float = float(game_ui.call("get_build_tool_slot_center_x"))
 	if center_x < 0.0:
 		return
 	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET

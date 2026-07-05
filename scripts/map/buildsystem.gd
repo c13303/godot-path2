@@ -201,8 +201,8 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var remove_event: InputEventMouseButton = event as InputEventMouseButton
 		if remove_event.button_index == MOUSE_BUTTON_RIGHT:
-			var removal_input_active: bool = _toolbuild_selected() or _remove_drag_active or _remove_active
-			if remove_event.pressed and _toolbuild_selected():
+			var removal_input_active: bool = _build_tool_selected() or _remove_drag_active or _remove_active
+			if remove_event.pressed and _build_tool_selected():
 				_start_remove_drag()
 			elif not remove_event.pressed and _remove_drag_active:
 				_finish_remove_drag()
@@ -238,13 +238,15 @@ func _input(event: InputEvent) -> void:
 				_apply_placeable(placeable_def)
 			get_viewport().set_input_as_handled()
 
-func _toolbuild_selected() -> bool:
-	return game_ui and game_ui.has_method("is_toolbuild_selected") and bool(game_ui.call("is_toolbuild_selected"))
+# True while any build tool (gardening or hammer) is equipped: right-click removal works for
+# either, so the player can deconstruct regardless of which build tool is in hand.
+func _build_tool_selected() -> bool:
+	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
 
 func _start_remove_drag() -> void:
 	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		return
-	if _placement_disabled() or not _toolbuild_selected():
+	if _placement_disabled() or not _build_tool_selected():
 		return
 	# A new drag stacks onto any in-progress removal instead of cancelling it, so
 	# only clear leftover preview bars here (committed queue bars are preserved).
@@ -298,7 +300,7 @@ func _finish_remove_drag() -> void:
 func _process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _toolbuild_selected():
+	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
 		_cancel_removal()
 		return
 	if _remove_queue.is_empty():

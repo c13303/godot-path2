@@ -637,11 +637,12 @@ func _selected_item_id() -> String:
 func _in_build_mode() -> bool:
 	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
-func _toolbuild_selected() -> bool:
-	return game_ui and game_ui.has_method("is_toolbuild_selected") and bool(game_ui.call("is_toolbuild_selected"))
+# True while any build tool (gardening or hammer) is equipped; both drive build placement.
+func _build_tool_selected() -> bool:
+	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
 
 func _build_controls_active() -> bool:
-	if not _toolbuild_selected():
+	if not _build_tool_selected():
 		return false
 	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
 		return false
