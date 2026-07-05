@@ -32,13 +32,11 @@ const _MASK_TO_ATLAS: Dictionary = {
 	8: Vector2i(12, 9),
 	10: Vector2i(11, 9),
 	19: Vector2i(4, 11),
-	27: Vector2i(5, 11),
 	38: Vector2i(4, 9),
 	55: Vector2i(4, 10),
 	76: Vector2i(6, 9),
 	110: Vector2i(5, 9),
 	137: Vector2i(6, 11),
-	139: Vector2i(5, 11),
 	155: Vector2i(5, 11),
 	205: Vector2i(6, 10),
 	255: Vector2i(5, 10),
@@ -58,6 +56,19 @@ const _MASK_TO_ATLAS: Dictionary = {
 	47: Vector2i(2, 11),   # TL+TR+BL
 	143: Vector2i(3, 11),  # TR+BL+BR
 	15: Vector2i(10, 10),  # TL+TR+BL+BR
+	# Edge grass with dry-ground corner(s) on the grass side.
+	78: Vector2i(0, 12),   # top dry + BR
+	46: Vector2i(1, 12),   # top dry + BL
+	14: Vector2i(2, 12),   # top dry + BL+BR
+	139: Vector2i(3, 12),  # bottom dry + TR
+	27: Vector2i(4, 12),   # bottom dry + TL
+	11: Vector2i(5, 12),   # bottom dry + TL+TR
+	7: Vector2i(14, 9),    # left dry + TR+BR
+	23: Vector2i(14, 10),  # left dry + BR
+	39: Vector2i(14, 11),  # left dry + TR
+	13: Vector2i(15, 9),   # right dry + TL+BL
+	141: Vector2i(15, 10), # right dry + BL
+	77: Vector2i(15, 11),  # right dry + TL
 }
 
 const _NEIGHBOUR_OFFSETS: Array[Vector2i] = [
