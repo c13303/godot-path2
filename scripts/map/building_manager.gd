@@ -7,7 +7,6 @@ signal startup_loading_finished
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
-const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const EATING_COOLDOWN: float = 5.0
@@ -36,19 +35,10 @@ const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
 const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
-const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const SEED_MERCHANT_INTERACT_RADIUS_TILES: int = 2
-const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
 # Chebyshev tile radius around the player from which grown roses can be harvested
 # during the morning walkover. 1 = the player's cell plus the surrounding 3x3 ring.
 const PLAYER_HARVEST_RADIUS_TILES: int = 1
-# Counter rose pile: roses stack in a single vertical column, each one overlapping
-# COUNTER_PILE_OVERLAP of the rose below it (0.66 => 66% covered, 34% visible).
-const COUNTER_PILE_ROSE_SCALE: float = 0.56
-const COUNTER_PILE_ROSE_FRAME_HEIGHT: float = 64.0  # rose.png is 128x64 with hframes=2
-const COUNTER_PILE_OVERLAP: float = 0.66
-const COUNTER_PILE_BASE_Y: float = -8.0
-
 # Garden access-cell scoring penalties. Distance / escape cost stays the main
 # driver; these only nudge selection away from obviously bad local geometry (a
 # wall-pocket exit that forces an immediate reversal, a dead-ended outside tile).
@@ -320,8 +310,7 @@ var _seed_merchant_leave_at_night_pending: bool = false
 # Mirrors the native per-agent pause; cleared when the player walks away so the
 # merchant resumes whatever it was doing (walking in, or walking back out).
 var _seed_merchant_paused: bool = false
-var _counter_stock_by_cell: Dictionary = {}  # Vector2i -> int
-var _counter_pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
+var _counter_stock_manager: CounterStockManager
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
 # These are fed into the garden clustering as ordinary "plant cells" so a stocked
 # counter becomes a kind of garden: monsters path to one of these tiles and eat a
@@ -475,6 +464,7 @@ func _ready() -> void:
 	_migrate_special_tiles_from_wallz()
 	_setup_plant_manager()
 	_setup_building_object_manager()
+	_setup_counter_stock_manager()
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -1681,6 +1671,19 @@ func _setup_building_object_manager() -> void:
 		building_objects.connect("building_removed", Callable(self, "_on_building_removed"))
 
 
+func _setup_counter_stock_manager() -> void:
+	if _counter_stock_manager == null:
+		_counter_stock_manager = CounterStockManager.new()
+		_counter_stock_manager.name = "CounterStockManager"
+		add_child(_counter_stock_manager)
+	_counter_stock_manager.configure(
+		_rose_pile_parent(),
+		Callable(self, "_cell_center"),
+		Callable(self, "_is_walkable"),
+		Callable(self, "_has_plant_cell")
+	)
+
+
 func _on_building_added(_cell: Vector2i, item_id: String) -> void:
 	if _building_item_blocks_flow(item_id):
 		_navigation_topology_dirty = true
@@ -1693,8 +1696,7 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 		_navigation_topology_dirty = true
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
-	_counter_stock_by_cell.erase(cell)
-	_clear_counter_pile(cell)
+	_counter_stock_manager.clear_counter(cell)
 	for raw_nav_id: Variant in _client_counter_agents.keys():
 		var nav_id: int = int(raw_nav_id)
 		var data: Dictionary = _client_counter_agents[nav_id] as Dictionary
@@ -2863,10 +2865,7 @@ func rose_shop_counter_count() -> int:
 
 
 func _total_counter_stock() -> int:
-	var total: int = 0
-	for raw_count: Variant in _counter_stock_by_cell.values():
-		total += int(raw_count)
-	return total
+	return _counter_stock_manager.total_stock()
 
 
 ## Public accessor: total number of harvested roses waiting on shop counters.
@@ -2875,56 +2874,33 @@ func total_counter_stock() -> int:
 
 
 func serialize_counter_stock() -> Array[Dictionary]:
-	var data: Array[Dictionary] = []
-	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
-	for raw_cell: Variant in _counter_stock_by_cell.keys():
-		var cell: Vector2i = raw_cell as Vector2i
-		var count: int = _counter_stock(cell)
-		if count <= 0 or not counter_cells.has(cell):
-			continue
-		data.append({
-			"x": cell.x,
-			"y": cell.y,
-			"count": count,
-		})
-	return data
+	return _counter_stock_manager.serialize(_rose_shop_counter_cells())
 
 
 func restore_counter_stock(saved_stock: Array) -> void:
-	_clear_all_counter_piles()
-	_counter_stock_by_cell.clear()
-	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
-	for raw_entry: Variant in saved_stock:
-		if not (raw_entry is Dictionary):
-			continue
-		var entry: Dictionary = raw_entry as Dictionary
-		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
-		var count: int = maxi(0, int(entry.get("count", 0)))
-		if count <= 0 or not counter_cells.has(cell):
-			continue
-		_counter_stock_by_cell[cell] = count
-		_rebuild_counter_pile(cell)
+	_counter_stock_manager.restore(saved_stock, _rose_shop_counter_cells())
 	_counter_access_cells.clear()
 	_plant_zone_built = false
 	_navigation_topology_dirty = true
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:
-	return int(_counter_stock_by_cell.get(counter_cell, 0))
+	return _counter_stock_manager.stock(counter_cell)
 
 
 func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
-	_set_counter_stock(counter_cell, _counter_stock(counter_cell) + amount)
+	var change: Dictionary = _counter_stock_manager.add_stock(counter_cell, amount)
+	_after_counter_stock_changed(int(change.get("previous", 0)), int(change.get("value", 0)))
 
 
 func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
-	var previous: int = _counter_stock(counter_cell)
-	var value: int = maxi(0, amount)
-	if value <= 0:
-		_counter_stock_by_cell.erase(counter_cell)
-	else:
-		_counter_stock_by_cell[counter_cell] = value
-	_rebuild_counter_pile(counter_cell)
+	var change: Dictionary = _counter_stock_manager.set_stock(counter_cell, amount)
+	var previous: int = int(change.get("previous", 0))
+	var value: int = int(change.get("value", 0))
+	_after_counter_stock_changed(previous, value)
+
+
+func _after_counter_stock_changed(previous: int, value: int) -> void:
 	# A counter gaining its first rose turns it into an edible garden, which requires
 	# folding its access tiles into the garden topology (a full rebuild). Depletion
 	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
@@ -2940,25 +2916,7 @@ func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 # 8-adjacent to the counter that does not already hold a plant (the flower keeps its
 # own cell). Called from _build_gardens_from_plants, which clears the map first.
 func _collect_counter_access_cells() -> Array[Vector2i]:
-	var access_cells: Array[Vector2i] = []
-	for raw_counter: Variant in _counter_stock_by_cell.keys():
-		var counter_cell: Vector2i = raw_counter as Vector2i
-		if _counter_stock(counter_cell) <= 0:
-			continue
-		for dy: int in range(-1, 2):
-			for dx: int in range(-1, 2):
-				if dx == 0 and dy == 0:
-					continue
-				var cell: Vector2i = counter_cell + Vector2i(dx, dy)
-				if _counter_access_cells.has(cell):
-					continue
-				if not _is_walkable(cell):
-					continue
-				if plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell)):
-					continue
-				_counter_access_cells[cell] = counter_cell
-				access_cells.append(cell)
-	return access_cells
+	return _counter_stock_manager.collect_access_cells(_counter_access_cells)
 
 
 # A cell a monster can eat from: a real plant, or an access tile of a still-stocked
@@ -2982,119 +2940,15 @@ func _consume_counter_rose(eater: Node2D, _spawner_cell: Vector2i, access_cell: 
 
 
 func _select_stocked_counter_target(from_cell: Vector2i) -> Dictionary:
-	var best: Dictionary = {}
-	var best_dist: int = 2147483647
-	for raw_cell: Variant in _counter_stock_by_cell.keys():
-		var counter_cell: Vector2i = raw_cell as Vector2i
-		if _counter_stock(counter_cell) <= 0:
-			continue
-		var target_cell: Vector2i = _nearest_counter_access_cell(counter_cell, from_cell)
-		if target_cell == INVALID_CELL:
-			continue
-		var delta: Vector2i = target_cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best = {
-				"counter_cell": counter_cell,
-				"target_cell": target_cell,
-			}
-	return best
+	return _counter_stock_manager.select_stocked_counter_target(from_cell)
 
 
 func _nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) -> Vector2i:
-	var best_cell: Vector2i = INVALID_CELL
-	var best_dist: int = 2147483647
-	for y: int in range(counter_cell.y - CLIENT_COUNTER_RADIUS_TILES, counter_cell.y + CLIENT_COUNTER_RADIUS_TILES + 1):
-		for x: int in range(counter_cell.x - CLIENT_COUNTER_RADIUS_TILES, counter_cell.x + CLIENT_COUNTER_RADIUS_TILES + 1):
-			var cell: Vector2i = Vector2i(x, y)
-			var to_counter: Vector2i = cell - counter_cell
-			if abs(to_counter.x) + abs(to_counter.y) > CLIENT_COUNTER_RADIUS_TILES:
-				continue
-			if not _is_walkable(cell):
-				continue
-			var from_delta: Vector2i = cell - from_cell
-			var manhattan: int = abs(from_delta.x) + abs(from_delta.y)
-			if manhattan < best_dist:
-				best_dist = manhattan
-				best_cell = cell
-	return best_cell
+	return _counter_stock_manager.nearest_counter_access_cell(counter_cell, from_cell)
 
 
 func _animate_harvested_rose_to_counter(start_world: Vector2, counter_cell: Vector2i) -> void:
-	var sprite: Sprite2D = Sprite2D.new()
-	sprite.texture = ROSE_TEXTURE
-	sprite.hframes = 2
-	sprite.frame = 0
-	sprite.centered = true
-	sprite.scale = Vector2(0.75, 0.75)
-	sprite.global_position = start_world
-	sprite.z_index = int(start_world.y) + 10
-	_rose_pile_parent().add_child(sprite)
-	var end_world: Vector2 = _cell_center(counter_cell) + _counter_pile_offset(counter_cell, maxi(0, _counter_stock(counter_cell) - 1))
-	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -64.0)
-	var tween: Tween = create_tween()
-	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_method(
-		Callable(self, "_update_harvest_rose_flight").bind(sprite, start_world, mid_world, end_world),
-		0.0,
-		1.0,
-		HARVEST_ROSE_FLIGHT_SECONDS
-	)
-	tween.parallel().tween_property(sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
-	tween.tween_callback(Callable(sprite, "queue_free"))
-
-
-func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:
-	if not is_instance_valid(sprite):
-		return
-	var inverse_progress: float = 1.0 - progress
-	var pos: Vector2 = (
-		inverse_progress * inverse_progress * start_world
-		+ 2.0 * inverse_progress * progress * mid_world
-		+ progress * progress * end_world
-	)
-	sprite.global_position = pos
-	sprite.z_index = int(pos.y) + 10
-
-
-func _rebuild_counter_pile(counter_cell: Vector2i) -> void:
-	_clear_counter_pile(counter_cell)
-	var count: int = _counter_stock(counter_cell)
-	if count <= 0:
-		return
-	var nodes: Array[Node2D] = []
-	for index: int in range(count):
-		var sprite: Sprite2D = Sprite2D.new()
-		sprite.texture = ROSE_TEXTURE
-		sprite.hframes = 2
-		sprite.frame = 0
-		sprite.centered = true
-		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
-		sprite.global_position = _cell_center(counter_cell) + _counter_pile_offset(counter_cell, index)
-		# Base the whole column at the counter's depth, then stack front-to-back by
-		# index so each higher rose draws in front of the one it overlaps.
-		sprite.z_index = int(_cell_center(counter_cell).y) + index
-		_rose_pile_parent().add_child(sprite)
-		nodes.append(sprite)
-	_counter_pile_nodes_by_cell[counter_cell] = nodes
-
-
-func _clear_counter_pile(counter_cell: Vector2i) -> void:
-	var nodes: Array = _counter_pile_nodes_by_cell.get(counter_cell, []) as Array
-	for raw_node: Variant in nodes:
-		var node: Node = raw_node as Node
-		if node != null and is_instance_valid(node):
-			node.queue_free()
-	_counter_pile_nodes_by_cell.erase(counter_cell)
-
-
-func _clear_all_counter_piles() -> void:
-	var cells: Array = _counter_pile_nodes_by_cell.keys()
-	for raw_cell: Variant in cells:
-		var cell: Vector2i = raw_cell as Vector2i
-		_clear_counter_pile(cell)
-	_counter_pile_nodes_by_cell.clear()
+	_counter_stock_manager.animate_harvested_rose(start_world, counter_cell)
 
 
 func _rose_pile_parent() -> Node:
@@ -3102,11 +2956,6 @@ func _rose_pile_parent() -> Node:
 		return parent_for_agents
 	var scene: Node = get_tree().current_scene
 	return scene if scene != null else self
-
-
-func _counter_pile_offset(_counter_cell: Vector2i, index: int) -> Vector2:
-	var step: float = COUNTER_PILE_ROSE_FRAME_HEIGHT * COUNTER_PILE_ROSE_SCALE * (1.0 - COUNTER_PILE_OVERLAP)
-	return Vector2(0.0, COUNTER_PILE_BASE_Y - float(index) * step)
 
 
 func _auto_select_toolbuild() -> void:
@@ -4584,6 +4433,9 @@ func _find_walkable_cell_near(start_cell: Vector2i, max_radius: int = 8) -> Vect
 
 func _is_walkable(cell: Vector2i) -> bool:
 	return _has_floor(cell) and not _has_wall(cell) and not _has_water(cell)
+
+func _has_plant_cell(cell: Vector2i) -> bool:
+	return plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell))
 
 func _rebuild_walkable_map_cache() -> void:
 	_walkable_map_tiles.clear()
