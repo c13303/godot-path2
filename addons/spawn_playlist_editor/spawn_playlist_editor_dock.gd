@@ -1345,12 +1345,18 @@ func _on_water_edges_pressed() -> void:
 		_show_save_error("Level has no watersources TileMapLayer", ERR_DOES_NOT_EXIST)
 		return
 	var changed_count: int = _beautify_water_edges(watersources)
+	var floor: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
+	var cleared_count: int = _clear_floor_under_water(floor, watersources) if floor != null else 0
 	if not _save_level_scene(level_root):
 		return
 	if level_root != _level_root:
 		_reload_cached_level_root()
 	_validation_label.clear()
 	_validation_label.append_text("[color=light_green]Water edges updated: %d tile%s.[/color]" % [changed_count, "" if changed_count == 1 else "s"])
+	if floor == null:
+		_validation_label.append_text("\n[color=yellow]No floor TileMapLayer found; skipped floor cleanup.[/color]")
+	else:
+		_validation_label.append_text("\n[color=light_green]Floor tiles removed under water: %d tile%s.[/color]" % [cleared_count, "" if cleared_count == 1 else "s"])
 
 
 func _current_editable_level_root() -> Node:
@@ -1398,6 +1404,20 @@ func _beautify_water_edges(watersources: TileMapLayer) -> int:
 		var alternative_tile: int = watersources.get_cell_alternative_tile(cell)
 		watersources.set_cell(cell, source_id, atlas_coords, alternative_tile)
 	return replacement_atlas_coords.size()
+
+
+# Erases every floor cell that sits under a watersources tile so painted water is
+# never layered on top of leftover ground. Returns the number of floor cells cleared.
+func _clear_floor_under_water(floor: TileMapLayer, watersources: TileMapLayer) -> int:
+	var cleared_count: int = 0
+	for cell: Vector2i in watersources.get_used_cells():
+		if watersources.get_cell_source_id(cell) < 0:
+			continue
+		if floor.get_cell_source_id(cell) < 0:
+			continue
+		floor.erase_cell(cell)
+		cleared_count += 1
+	return cleared_count
 
 
 func _water_edge_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:

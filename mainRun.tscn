@@ -47,6 +47,16 @@
 [ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
+[ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
+[ext_resource type="Shader" uid="uid://bwuv8i5i0l0r4" path="res://scripts/map/shaders/animated_water_bg.gdshader" id="48_watershader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_wateranim"]
+shader = ExtResource("48_watershader")
+shader_parameter/anim_tex = ExtResource("47_wateranim")
+shader_parameter/region_px = Vector2(4128, 3552)
+shader_parameter/tile_px = 32.0
+shader_parameter/frame_count = 4
+shader_parameter/fps = 6.0
 
 [sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
 vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
@@ -611,6 +621,17 @@ corner_radius_bottom_left = 6
 
 [node name="game" type="Node2D" unique_id=1481310298]
 
+[node name="WaterBackground" type="Sprite2D" parent="." unique_id=1481310299]
+z_index = -4096
+z_as_relative = false
+texture_repeat = 2
+material = SubResource("ShaderMaterial_wateranim")
+texture = ExtResource("47_wateranim")
+centered = false
+offset = Vector2(-128, -96)
+region_enabled = true
+region_rect = Rect2(0, 0, 4128, 3552)
+
 [node name="LevelLoader" type="Node" parent="." unique_id=981086677]
 script = ExtResource("36_lvload")
 level_scene = ExtResource("37_lvdemo")
@@ -963,6 +984,7 @@ metadata/_edit_lock_ = true
 
 [node name="ToolbarPanel" type="PanelContainer" parent="GameUI/bottom anchor" unique_id=2101533894]
 layout_mode = 1
+anchors_preset = 7
 anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
@@ -970,7 +992,6 @@ anchor_bottom = 1.0
 offset_left = -98.0
 offset_top = -68.0
 offset_right = 98.0
-offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
 theme_override_styles/panel = SubResource("StyleBoxFlat_toolbar_bg")

@@ -434,6 +434,7 @@ void FlowFieldNative::compute_distance_field_global()
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(tile_size);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
+    apply_cell_speed_multipliers(field, used);
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;

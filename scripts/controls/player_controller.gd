@@ -17,6 +17,7 @@ const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
+@onready var fences: TileMapLayer = $"../../Map/MonTilemap/fences"
 
 @onready var camera_controller: CameraController = $"../../Camera2D"
 @onready var smoke_trail: SmokeTrail = $"../../SmokeTrail"

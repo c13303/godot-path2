@@ -1773,10 +1773,25 @@ func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if item_def.is_empty() or not item_def.has("speed_multiplier"):
 		return
+	# The buildsystem's terrain-speed refresh and this signal-driven sync both write
+	# the same flow-field cell. A fence carries a speed_multiplier but lives on the
+	# `fences` layer, so if we only inspected blocking_buildings we'd reset the cell to
+	# 1.0 and clobber the fence slow the buildsystem just applied. Recompute the
+	# effective multiplier across every speed-carrying layer instead.
+	flow.call("set_cell_speed_multiplier", cell, _effective_cell_speed_multiplier(cell))
+
+func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	if blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0:
-		speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-	flow.call("set_cell_speed_multiplier", cell, speed_multiplier)
+	for layer: TileMapLayer in [traversable_buildings, blocking_buildings, fences]:
+		if layer == null or layer.get_cell_source_id(cell) < 0:
+			continue
+		var layer_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+		if layer_item_id == "":
+			continue
+		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
+		var layer_multiplier: float = clampf(float(layer_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+		speed_multiplier = minf(speed_multiplier, layer_multiplier)
+	return speed_multiplier
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not GameState.is_night:
