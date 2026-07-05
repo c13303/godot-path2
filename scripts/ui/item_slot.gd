@@ -151,7 +151,8 @@ func _atlas_for_frame(frame: int) -> AtlasTexture:
 	return atlas
 
 func _get_drag_data(_at_position: Vector2) -> Variant:
-	if item_data.is_empty() or disabled:
+	# Quickbar slots are fixed menu buttons, not inventory contents, so they never drag.
+	if slot_type == "quick" or item_data.is_empty() or disabled:
 		return null
 
 	var preview := TextureRect.new()
@@ -168,7 +169,8 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	}
 
 func _can_drop_data(_at_position: Vector2, data: Variant) -> bool:
-	if slot_index < 0 or not (data is Dictionary):
+	# Only backpack slots accept dropped items; the quickbar menu slots do not.
+	if slot_type == "quick" or slot_index < 0 or not (data is Dictionary):
 		return false
 	var drop_data: Dictionary = data
 	return drop_data.has("from_slot")
@@ -189,6 +191,7 @@ func _gui_input(event: InputEvent) -> void:
 			if disabled:
 				accept_event()
 				return
-			if slot_index >= 0 and slot_index < 8 and game_ui and game_ui.has_method("select_quick_slot"):
-				game_ui.call("select_quick_slot", slot_index)
+			# Clicking a quickbar slot activates the quickbar and opens that slot's drop-up menu.
+			if slot_index >= 0 and game_ui and game_ui.has_method("activate_quickbar_slot"):
+				game_ui.call("activate_quickbar_slot", slot_index)
 				accept_event()

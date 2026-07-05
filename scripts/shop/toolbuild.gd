@@ -43,6 +43,9 @@ const PASTEQUE_ID: String = "pasteque"
 # (game_ui.get_selected_build_tool_id) decides which set is shown and anchored to.
 const GARDENING_TOOL_ID: String = "gardening"
 const HAMMER_TOOL_ID: String = "hammer"
+# Slot 0 of the quickbar is the weapons menu; this kind string matches game_ui.WEAPON_SLOT_KIND.
+const WEAPON_MENU_KIND: String = "weapon"
+const WEAPON_MENU_SLOT_INDEX: int = 0
 const GARDENING_ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine"]
 const HAMMER_ITEM_IDS: Array[String] = [COUNTER_ID, "wall", "fence"]
 const SEED_ITEM_ID: String = "seed"
@@ -75,6 +78,15 @@ var _level_start_default_pending: bool = true
 var _selected_affordable_prev: int = -1
 
 var _toolbuild_column: VBoxContainer
+# The weapons drop-up (slot 0): a vertical menu of possessed weapons, rebuilt when the owned
+# set or equipped weapon changes. Selecting one equips it and closes the quickbar.
+var _weapon_column: VBoxContainer
+var _weapon_items_list: VBoxContainer
+var _weapon_rows: Dictionary = {}
+var _weapon_buttons: Dictionary = {}
+var _weapon_icons: Dictionary = {}
+var _weapon_names: Dictionary = {}
+var _weapon_signature: String = ""
 var _merchant_column: VBoxContainer
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
 # vertical stack for the toolbuild picker, horizontal bar for the seed-merchant sale.
@@ -147,13 +159,20 @@ func _ready() -> void:
 ## Build tool is the selected quick slot and it is daytime.
 func _process(_delta: float) -> void:
 	var merchant_should_show: bool = _is_seed_merchant_shop_active()
+	var menu_kind: String = _active_menu_kind()
 	var build_tool_id: String = _selected_build_tool_id()
 	var build_should_show: bool = (
 		build_tool_id != ""
 		and not GameState.is_night
 		and not merchant_should_show
 	)
-	visible = build_should_show or merchant_should_show
+	# The weapons menu is available day and night (weapons are wielded at night); it only yields
+	# to the seed-merchant column.
+	var weapon_should_show: bool = (
+		menu_kind == WEAPON_MENU_KIND
+		and not merchant_should_show
+	)
+	visible = build_should_show or merchant_should_show or weapon_should_show
 	# Open on first show, and re-open when the active tool changes while already open so the
 	# column re-anchors and picks a valid default for the newly selected tool.
 	if build_should_show and _toolbuild_column != null and (not _toolbuild_column.visible or build_tool_id != _shown_build_tool_id):
@@ -161,6 +180,10 @@ func _process(_delta: float) -> void:
 		_open_build_picker()
 	elif not build_should_show and _toolbuild_column != null and _toolbuild_column.visible:
 		_close_toolbuild()
+	if weapon_should_show and _weapon_column != null and not _weapon_column.visible:
+		_weapon_column.visible = true
+	elif not weapon_should_show and _weapon_column != null and _weapon_column.visible:
+		_weapon_column.visible = false
 	if merchant_should_show:
 		_open_merchant_shop()
 	elif _merchant_column != null and _merchant_column.visible:
@@ -169,9 +192,20 @@ func _process(_delta: float) -> void:
 		_apply_phase_layout()
 		_refresh_slots()
 		_update_build_column_anchor()
+	if _weapon_column != null and _weapon_column.visible:
+		_apply_weapon_layout()
+		_refresh_weapon_menu()
+		_update_weapon_column_anchor()
 	if _merchant_column != null and _merchant_column.visible:
 		_apply_merchant_layout()
 		_refresh_merchant_slots()
+
+
+## The kind of quickbar menu game_ui currently has open ("weapon"/gardening/hammer), or "".
+func _active_menu_kind() -> String:
+	if game_ui != null and game_ui.has_method("get_active_menu_kind"):
+		return str(game_ui.call("get_active_menu_kind"))
+	return ""
 
 
 # --- UI construction ---------------------------------------------------------
@@ -187,8 +221,163 @@ func _build_ui() -> void:
 
 	column.add_child(_build_bar())
 	_build_selected_label()
+	_build_weapon_ui()
 	_build_merchant_ui()
 	_apply_phase_layout()
+
+
+# --- Weapons menu (slot 0) ---------------------------------------------------
+
+func _build_weapon_ui() -> void:
+	var column: VBoxContainer = VBoxContainer.new()
+	_weapon_column = column
+	column.name = "WeaponColumn"
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_theme_constant_override("separation", 6)
+	column.alignment = BoxContainer.ALIGNMENT_END
+	add_child(column)
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.name = "WeaponBarPanel"
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	panel.add_theme_stylebox_override("panel", _bar_background_style())
+	column.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	panel.add_child(margin)
+
+	var list: VBoxContainer = VBoxContainer.new()
+	_weapon_items_list = list
+	list.name = "WeaponItemsList"
+	list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	list.add_theme_constant_override("separation", 6)
+	margin.add_child(list)
+	column.visible = false
+
+
+## Rebuilds the weapon rows when the owned set changes, then highlights the equipped weapon.
+func _refresh_weapon_menu() -> void:
+	var ids: Array[String] = _possessed_weapon_ids()
+	var equipped: String = _equipped_weapon_id()
+	var signature: String = "|".join(PackedStringArray(ids)) + "#" + equipped
+	if signature != _weapon_signature:
+		_weapon_signature = signature
+		_rebuild_weapon_rows(ids)
+	for id: String in ids:
+		var button: Button = _weapon_buttons.get(id) as Button
+		if button == null:
+			continue
+		_apply_slot_style(button, id == equipped, false)
+
+
+func _rebuild_weapon_rows(ids: Array[String]) -> void:
+	for child: Node in _weapon_items_list.get_children():
+		_weapon_items_list.remove_child(child)
+		child.queue_free()
+	_weapon_rows.clear()
+	_weapon_buttons.clear()
+	_weapon_icons.clear()
+	_weapon_names.clear()
+	for id: String in ids:
+		var row: HBoxContainer = HBoxContainer.new()
+		row.name = id + "WeaponRow"
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.alignment = BoxContainer.ALIGNMENT_BEGIN
+		row.add_theme_constant_override("separation", 8)
+		row.add_child(_build_weapon_slot(id))
+		var name_label: Label = _make_row_label(18)
+		name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+		name_label.text = _display_name(id)
+		row.add_child(name_label)
+		_weapon_items_list.add_child(row)
+		_weapon_rows[id] = row
+		_weapon_names[id] = name_label
+
+
+func _build_weapon_slot(item_id: String) -> Button:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var button: Button = Button.new()
+	button.name = item_id
+	button.custom_minimum_size = SLOT_SIZE
+	button.tooltip_text = _display_name(item_id)
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(_on_weapon_pressed.bind(item_id))
+
+	var icon: TextureRect = TextureRect.new()
+	icon.texture = _item_frame_texture(item_def)
+	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 8.0
+	icon.offset_top = 8.0
+	icon.offset_right = -8.0
+	icon.offset_bottom = -8.0
+	button.add_child(icon)
+	_apply_slot_style(button, false, false)
+
+	_weapon_buttons[item_id] = button
+	_weapon_icons[item_id] = icon
+	return button
+
+
+func _on_weapon_pressed(item_id: String) -> void:
+	if _weapon_column == null or not _weapon_column.visible:
+		return
+	if game_ui != null and game_ui.has_method("equip_weapon"):
+		game_ui.call("equip_weapon", item_id)
+		Sfx.play_sound(&"buy")
+
+
+func _possessed_weapon_ids() -> Array[String]:
+	var ids: Array[String] = []
+	if game_ui != null and game_ui.has_method("get_possessed_weapon_ids"):
+		var raw: Variant = game_ui.call("get_possessed_weapon_ids")
+		if raw is Array:
+			for value: Variant in raw:
+				ids.append(str(value))
+	return ids
+
+
+func _equipped_weapon_id() -> String:
+	if game_ui != null and game_ui.has_method("get_equipped_weapon_id"):
+		return str(game_ui.call("get_equipped_weapon_id"))
+	return ""
+
+
+func _apply_weapon_layout() -> void:
+	if _weapon_column == null:
+		return
+	# Drop-up column pinned to the bottom, rising out of the weapon quick slot (slot 0).
+	_weapon_column.anchor_left = 0.0
+	_weapon_column.anchor_right = 0.0
+	_weapon_column.anchor_top = 1.0
+	_weapon_column.anchor_bottom = 1.0
+	_weapon_column.grow_horizontal = Control.GROW_DIRECTION_END
+	_weapon_column.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_weapon_column.offset_top = BAR_BOTTOM_OFFSET
+	_weapon_column.offset_bottom = BAR_BOTTOM_OFFSET
+	_weapon_column.alignment = BoxContainer.ALIGNMENT_END
+	_update_weapon_column_anchor()
+
+
+## Aligns the weapon column's slots over the weapon quick slot's icon.
+func _update_weapon_column_anchor() -> void:
+	if _weapon_column == null or game_ui == null or not game_ui.has_method("get_quick_slot_center_x"):
+		return
+	var center_x: float = float(game_ui.call("get_quick_slot_center_x", WEAPON_MENU_SLOT_INDEX))
+	if center_x < 0.0:
+		return
+	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
+	_weapon_column.offset_left = left
+	_weapon_column.offset_right = left
 
 
 func _build_merchant_ui() -> void:
@@ -513,35 +702,37 @@ func _open_build_picker() -> void:
 	# At level start the gardening tool must come up with rose equipped, ahead of every
 	# other resume rule. Consumed on the first gardening open so later opens fall through
 	# to the usual last-picked logic.
+	# Opening only highlights a default buildable; equipping (setting the build preview and
+	# closing the quickbar) happens when the player actually clicks a slot (see _commit_item).
 	if _level_start_default_pending and tool_id == GARDENING_TOOL_ID:
 		_level_start_default_pending = false
 		if _should_show_item("rose") and not _is_item_locked("rose"):
-			_select_item("rose")
+			_highlight_item("rose")
 			return
 	# Hammer with no counters placed yet: the shop can't do anything until the player builds
-	# them (roses are harvested onto counters, clients buy from them). Pre-select the counter
+	# them (roses are harvested onto counters, clients buy from them). Pre-highlight the counter
 	# so the "place the shop counters" prompt is immediately actionable, ahead of the usual
 	# last-picked / first-available resume below.
 	if tool_id == HAMMER_TOOL_ID and _should_prefer_counter():
-		_select_item(COUNTER_ID)
+		_highlight_item(COUNTER_ID)
 		return
 	# Resume this tool's last buildable. If it ran out while the player was away from the
 	# tool, move to another currently usable buildable; otherwise leave the empty one
-	# selected so its price/remaining label stays visible.
+	# highlighted so its price/remaining label stays visible.
 	var last_picked: String = str(_last_picked_by_tool.get(tool_id, ""))
 	if last_picked != "" and _should_show_item(last_picked) and not _is_item_locked(last_picked):
 		if _affordable_quantity(last_picked) <= 0:
 			var next_id: String = _next_available_buildable(last_picked)
 			if next_id != "":
-				_select_item(next_id)
+				_highlight_item(next_id)
 				return
-		_select_item(last_picked)
+		_highlight_item(last_picked)
 		return
 	for item_id: String in _active_build_item_ids():
 		if item_id != COUNTER_ID and _is_item_available(item_id) and not _is_item_locked(item_id):
-			_select_item(item_id)
+			_highlight_item(item_id)
 			return
-	_deselect_active()
+	_clear_highlight()
 
 
 func _close_all() -> void:
@@ -549,16 +740,29 @@ func _close_all() -> void:
 	_close_merchant_shop()
 
 
+## Hides the build column. The equipped build preview (game_ui.selected_build_item_id) is left
+## intact so that committing a buildable, which closes the quickbar, keeps it equipped for
+## play-mode placement. Callers that must drop the preview (nightfall, building-phase end) clear
+## it explicitly.
 func _close_toolbuild() -> void:
 	_set_toolbuild_open(false)
 	_shown_build_tool_id = ""
-	_deselect_active()
 
 
 func _set_toolbuild_open(is_open: bool) -> void:
 	if _toolbuild_column != null:
 		_toolbuild_column.visible = is_open
-	visible = is_open or (_merchant_column != null and _merchant_column.visible)
+	visible = is_open or _other_columns_visible()
+
+
+## True when the merchant or weapon columns are showing, so the root stays visible while only the
+## build column closes (e.g. switching from a build menu to the weapon menu).
+func _other_columns_visible() -> bool:
+	if _merchant_column != null and _merchant_column.visible:
+		return true
+	if _weapon_column != null and _weapon_column.visible:
+		return true
+	return false
 
 
 func _open_merchant_shop() -> void:
@@ -577,7 +781,7 @@ func _close_merchant_shop() -> void:
 	if _merchant_column != null:
 		_merchant_column.visible = false
 	_selected_merchant_item_id = ""
-	visible = _toolbuild_column != null and _toolbuild_column.visible
+	visible = (_toolbuild_column != null and _toolbuild_column.visible) or (_weapon_column != null and _weapon_column.visible)
 
 
 # --- Phase handling ----------------------------------------------------------
@@ -591,6 +795,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _on_building_phase_changed(is_building_phase: bool) -> void:
 	if not is_building_phase:
 		_close_toolbuild()
+		# Leaving the building phase drops any equipped build preview.
+		if game_ui != null and game_ui.has_method("clear_build_selection"):
+			game_ui.call("clear_build_selection")
 
 
 func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
@@ -606,14 +813,9 @@ func _on_item_pressed(item_id: String) -> void:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
-	# Clicking the already-selected item toggles it back off and forgets it for this tool.
-	if _selected_item_id == item_id:
-		_deselect_active()
-		var tool_id: String = _selected_build_tool_id()
-		if tool_id != "":
-			_last_picked_by_tool.erase(tool_id)
-		return
-	_select_item(item_id)
+	# Clicking a buildable commits it: it becomes the equipped build preview and the quickbar
+	# closes back to play mode for placement.
+	_commit_item(item_id)
 
 
 func _on_merchant_item_pressed(item_id: String) -> void:
@@ -659,6 +861,10 @@ func activate_pad_selection() -> bool:
 		if _selected_merchant_item_id != "":
 			_on_merchant_item_pressed(_selected_merchant_item_id)
 			return true
+	# Gamepad: confirming while the build menu is open commits the highlighted buildable.
+	if _toolbuild_column != null and _toolbuild_column.visible and _selected_item_id != "":
+		_commit_item(_selected_item_id)
+		return true
 	return false
 
 
@@ -669,7 +875,7 @@ func is_merchant_shop_open() -> bool:
 func _step_build_pad_selection(direction: int) -> void:
 	var ids: Array[String] = _visible_build_item_ids()
 	if ids.is_empty():
-		_deselect_active()
+		_clear_highlight()
 		return
 	var index: int = ids.find(_selected_item_id)
 	if index < 0:
@@ -678,7 +884,7 @@ func _step_build_pad_selection(direction: int) -> void:
 		index = (index + direction) % ids.size()
 		if index < 0:
 			index += ids.size()
-	_select_item(ids[index])
+	_highlight_item(ids[index])
 
 
 func _visible_build_item_ids() -> Array[String]:
@@ -726,26 +932,35 @@ func _visible_merchant_pad_item_ids() -> Array[String]:
 	return ids
 
 
-func _select_item(item_id: String) -> void:
+## Highlights a buildable in the open menu without equipping it (no build preview, quickbar
+## stays open). Used for the menu's default/browse selection.
+func _highlight_item(item_id: String) -> void:
+	_selected_item_id = item_id
+	# Seed the run-dry tracker with the highlight's current count so the refresh below (and a
+	# deliberately-empty highlight) never mis-fires an auto-switch.
+	_selected_affordable_prev = _affordable_quantity(item_id)
+	_refresh_slots()
+
+
+## Commits a buildable: it becomes the equipped build preview, is remembered as this tool's
+## last pick, and the quickbar closes back to play mode for placement.
+func _commit_item(item_id: String) -> void:
 	_selected_item_id = item_id
 	var tool_id: String = _selected_build_tool_id()
 	if tool_id != "":
 		_last_picked_by_tool[tool_id] = item_id
-	# Seed the run-dry tracker with the new pick's current count, so the recursive
-	# refresh below (and a deliberately-empty pick) never mis-fires an auto-switch.
 	_selected_affordable_prev = _affordable_quantity(item_id)
 	if game_ui != null and game_ui.has_method("set_selected_build_item"):
 		game_ui.call("set_selected_build_item", item_id)
 	Sfx.play_sound(&"buy")
+	if game_ui != null and game_ui.has_method("deactivate_quickbar"):
+		game_ui.call("deactivate_quickbar")
 	_refresh_slots()
 
 
-## Clears the active build pick (build mode) but remembers it for the next time the
-## toolbuild picker opens.
-func _deselect_active() -> void:
+## Clears the menu highlight without touching the equipped build preview.
+func _clear_highlight() -> void:
 	_selected_item_id = ""
-	if game_ui != null and game_ui.has_method("clear_build_selection"):
-		game_ui.call("clear_build_selection")
 	_refresh_slots()
 
 
@@ -845,7 +1060,7 @@ func _maybe_auto_switch_from_empty() -> void:
 	if _selected_affordable_prev > 0 and current <= 0 and not _is_item_locked(_selected_item_id):
 		var next_id: String = _next_available_buildable(_selected_item_id)
 		if next_id != "":
-			_select_item(next_id)
+			_highlight_item(next_id)
 			return
 	_selected_affordable_prev = current
 

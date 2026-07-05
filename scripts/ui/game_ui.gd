@@ -1,7 +1,6 @@
 extends CanvasLayer
 
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
-const QUICK_SLOT_COUNT: int = 8
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
@@ -23,6 +22,14 @@ const HAMMER_ID: String = "hammer"
 const BUILD_TOOL_IDS: Array[String] = [GARDENING_ID, HAMMER_ID]
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
 const ITEM_NAME_KEY_PREFIX: String = "item."
+# Slot 0 of the quickbar is the weapons menu (a drop-up over all possessed weapons); the other
+# slots are the build-tool menus. The quickbar is a fixed set of drop-up slots and is no longer
+# mapped 1:1 to inventory slots.
+const WEAPON_SLOT_KIND: String = "weapon"
+const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID]
+# Buildables offered by the gardening menu (mirrors toolbuild.GARDENING_ITEM_IDS); used to tell
+# whether a gardening buildable is currently equipped, which drives the tutorial's plant step.
+const GARDENING_BUILDABLE_IDS: Array[String] = ["rose", "ronce", "pasteque", "turret1", "turret_epine"]
 
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
 @onready var toolbar_info: RichTextLabel = get_node_or_null("bottom anchor/toolbarInfo") as RichTextLabel
@@ -41,7 +48,14 @@ var _sun_icon: AtlasTexture
 var _moon_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
-var selected_quick_index: int = 0
+# Quickbar activity. false = play mode: menus closed, no labels, the equipped weapon (or
+# equipped buildable preview) is active. true = a slot's drop-up menu is open for selection;
+# active_slot_index is that open slot (index into QUICK_SLOT_KINDS), or -1 when inactive.
+var quickbar_active: bool = false
+var active_slot_index: int = -1
+# The persistently equipped weapon, wielded in play mode. Independent of the quickbar slots now
+# that every weapon shares the single weapon menu; empty falls back to the first possessed weapon.
+var equipped_weapon_id: String = ""
 # The building the toolbuild picker has selected for placement (rose/wall/turret), or "" when
 # nothing is selected. While non-empty the player is in build mode: the build
 # system places this item and the player's weapon is suppressed. Buildings are
@@ -72,11 +86,9 @@ func _ready() -> void:
 	_refresh_all_slots()
 	_set_inventory_open(false)
 	call_deferred("_connect_startup_loading_signals")
-	# Day 1 starts in build mode with the gardening tool (its picker opens on rose). Later
-	# days re-select a build tool when the day's seed-harvest finishes (driven from the
-	# picker). A loaded save overrides this afterwards via its restored selected_quick_index.
-	if not GameState.is_night:
-		call_deferred("select_build_tool", GARDENING_ID)
+	# The quickbar starts inactive (play mode) with the equipped weapon active; the player
+	# activates a slot to build. equipped_weapon_id self-heals to the first possessed weapon.
+	equipped_weapon_id = _first_possessed_weapon_id()
 
 func _setup_day_toggle() -> void:
 	_sun_icon = AtlasTexture.new()
@@ -91,11 +103,13 @@ func _setup_day_toggle() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
-	# Night: non-weapon quick items (build/unbuild tools, placeables) are disabled
-	# and the player is auto-armed with their first weapon. Day re-enables them without
-	# changing the player's selected quick slot.
+	# Night: the build-tool menus are disabled and any equipped buildable is cleared so the
+	# player wields their weapon. The quickbar closes either way. Day re-enables the build slots.
 	if is_night:
-		select_first_weapon()
+		deactivate_quickbar()
+		clear_build_selection()
+		if equipped_weapon_id == "":
+			equipped_weapon_id = _first_possessed_weapon_id()
 	_refresh_all_slots()
 
 func _on_locale_changed(_locale: String) -> void:
@@ -120,6 +134,12 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# ESC while the quickbar is active closes it back to play mode.
+	if key_event.keycode == KEY_ESCAPE and quickbar_active:
+		deactivate_quickbar()
+		get_viewport().set_input_as_handled()
+		return
+
 	if key_event.keycode == KEY_I:
 		_set_inventory_open(not inventory_modal.visible)
 		if inventory_modal.visible:
@@ -127,9 +147,11 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# A number key activates the quickbar and opens that slot's drop-up menu. Pressing another
+	# number while active simply switches to that slot's menu.
 	var slot_index: int = _quick_slot_index_from_event(key_event)
-	if slot_index >= 0:
-		select_quick_slot(slot_index)
+	if slot_index >= 0 and slot_index < QUICK_SLOT_KINDS.size():
+		activate_quickbar_slot(slot_index)
 		get_viewport().set_input_as_handled()
 
 func move_inventory_item(from_slot: int, to_slot: int) -> void:
@@ -159,52 +181,84 @@ func move_inventory_item(from_slot: int, to_slot: int) -> void:
 		inventory_slots[to_slot] = from_item
 	_refresh_all_slots()
 
-func select_quick_slot(index: int) -> void:
-	if index < 0 or index >= QUICK_SLOT_COUNT:
+# --- Quickbar activation & equip -------------------------------------------------
+
+## Activates the quickbar and opens the given slot's drop-up menu. Pressing another slot while
+## active just switches menus. Build-tool slots stay locked out at night (weapon slot only).
+func activate_quickbar_slot(index: int) -> void:
+	if index < 0 or index >= QUICK_SLOT_KINDS.size():
 		return
-	# If the chosen quick slot can't be selected (empty, or a non-weapon disabled
-	# during the night), fall back to the nearest selectable slot. If none qualify
-	# (shouldn't happen, "spray" is non-removable), leave the requested slot.
-	if not _is_quick_slot_selectable(index):
-		var fallback: int = _nearest_valid_quick_slot(index)
-		if fallback >= 0:
-			index = fallback
-	selected_quick_index = index
+	if _is_quickbar_slot_disabled(QUICK_SLOT_KINDS[index]):
+		return
+	quickbar_active = true
+	active_slot_index = index
 	_refresh_all_slots()
 
-# Re-selects the nearest selectable quick slot when the current selection is no
-# longer valid (emptied by consuming its last item, or disabled at nightfall).
-# Leaves the selection untouched if no quick slot is selectable.
-func _ensure_valid_quick_selection() -> void:
-	if _is_quick_slot_selectable(selected_quick_index):
+## Closes the quickbar back to play mode (menus closed, no labels).
+func deactivate_quickbar() -> void:
+	if not quickbar_active and active_slot_index < 0:
 		return
-	var fallback: int = _nearest_valid_quick_slot(selected_quick_index)
-	if fallback >= 0:
-		selected_quick_index = fallback
+	quickbar_active = false
+	active_slot_index = -1
+	_refresh_all_slots()
 
-# A quick slot can be selected when it holds an item that isn't currently disabled
-# (non-weapon tools/placeables are disabled during the night).
-func _is_quick_slot_selectable(index: int) -> bool:
-	if index < 0 or index >= inventory_slots.size():
-		return false
-	var item_id: String = _slot_item_id(inventory_slots[index])
-	return item_id != "" and not is_quick_item_disabled(item_id)
+func is_quickbar_active() -> bool:
+	return quickbar_active
 
-func _nearest_valid_quick_slot(index: int) -> int:
-	var limit: int = mini(QUICK_SLOT_COUNT, inventory_slots.size())
-	for distance: int in range(1, limit):
-		var left: int = index - distance
-		if left >= 0 and _is_quick_slot_selectable(left):
-			return left
-		var right: int = index + distance
-		if right < limit and _is_quick_slot_selectable(right):
-			return right
-	return -1
-
-func get_selected_quick_item_id() -> String:
-	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
+## The kind of the currently open menu (WEAPON_SLOT_KIND / gardening / hammer), or "" when inactive.
+func get_active_menu_kind() -> String:
+	if not quickbar_active or active_slot_index < 0 or active_slot_index >= QUICK_SLOT_KINDS.size():
 		return ""
-	return _slot_item_id(inventory_slots[selected_quick_index])
+	return QUICK_SLOT_KINDS[active_slot_index]
+
+func get_active_slot_index() -> int:
+	return active_slot_index if quickbar_active else -1
+
+## Equips a possessed weapon from the weapon menu: it becomes the wielded weapon, any build
+## preview is cleared, and the quickbar closes to play mode.
+func equip_weapon(item_id: String) -> void:
+	if not ItemCatalog.is_weapon(item_id) or not _has_inventory_weapon(item_id):
+		return
+	equipped_weapon_id = item_id
+	clear_build_selection()
+	deactivate_quickbar()
+
+## The weapon wielded in play mode. Falls back to the first possessed weapon when the stored
+## pick is empty or no longer owned, so it is always a currently-owned weapon (or "").
+func get_equipped_weapon_id() -> String:
+	if equipped_weapon_id != "" and _has_inventory_weapon(equipped_weapon_id):
+		return equipped_weapon_id
+	return _first_possessed_weapon_id()
+
+## The weapons the player currently owns, in inventory order (drives the weapon menu).
+func get_possessed_weapon_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for slot_data: Dictionary in inventory_slots:
+		var item_id: String = _slot_item_id(slot_data)
+		if item_id != "" and ItemCatalog.is_weapon(item_id) and not ids.has(item_id):
+			ids.append(item_id)
+	return ids
+
+func _first_possessed_weapon_id() -> String:
+	for slot_data: Dictionary in inventory_slots:
+		var item_id: String = _slot_item_id(slot_data)
+		if item_id != "" and ItemCatalog.is_weapon(item_id):
+			return item_id
+	return ""
+
+## A quickbar slot kind is disabled when its menu cannot be opened: build-tool menus are locked
+## out at night; the weapon menu is only unusable when the player owns no weapon at all.
+func _is_quickbar_slot_disabled(kind: String) -> bool:
+	if kind == WEAPON_SLOT_KIND:
+		return _first_possessed_weapon_id() == ""
+	return GameState.is_night
+
+## The active item id: the equipped buildable preview during build mode, otherwise the equipped
+## weapon. Used by the player to decide what a play-mode left-click does.
+func get_selected_quick_item_id() -> String:
+	if selected_build_item_id != "":
+		return selected_build_item_id
+	return get_equipped_weapon_id()
 
 func get_inventory_item_quantity(item_id: String) -> int:
 	var total: int = 0
@@ -217,15 +271,7 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 	if item_id == "" or quantity <= 0 or get_inventory_item_quantity(item_id) < quantity:
 		return false
 	var remaining: int = quantity
-	# Empty the selected stack first so bulk placement behaves consistently with
-	# normal single-item placement, then continue through any other stacks.
-	var slot_order: Array[int] = []
-	if selected_quick_index >= 0 and selected_quick_index < inventory_slots.size():
-		slot_order.append(selected_quick_index)
-	for i: int in range(inventory_slots.size()):
-		if i != selected_quick_index:
-			slot_order.append(i)
-	for slot_index: int in slot_order:
+	for slot_index: int in range(inventory_slots.size()):
 		var slot_data: Dictionary = inventory_slots[slot_index]
 		if _slot_item_id(slot_data) != item_id:
 			continue
@@ -236,55 +282,11 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 		remaining -= consumed_quantity
 		if remaining == 0:
 			break
-	_ensure_valid_quick_selection()
 	_refresh_all_slots()
 	return true
-
-func consume_selected_quick_item(expected_item_id: String) -> bool:
-	if selected_quick_index < 0 or selected_quick_index >= inventory_slots.size():
-		return false
-	var slot_data: Dictionary = inventory_slots[selected_quick_index]
-	if _slot_item_id(slot_data) != expected_item_id:
-		return false
-	var quantity: int = _slot_quantity(slot_data)
-	if quantity <= 0:
-		return false
-	quantity -= 1
-	inventory_slots[selected_quick_index] = _make_slot(expected_item_id, quantity) if quantity > 0 else _empty_slot()
-	_ensure_valid_quick_selection()
-	_refresh_all_slots()
-	return true
-
-func get_selected_quick_item_def() -> Dictionary:
-	return ItemCatalog.get_item_def(get_selected_quick_item_id())
-
-func selected_quick_item_places_tile() -> bool:
-	var item_id: String = get_selected_quick_item_id()
-	return ItemCatalog.is_placeable(item_id) and not is_item_disabled_for_placement(item_id)
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
 	return GameState.is_night and ItemCatalog.is_placeable(item_id)
-
-## Whether a quick-bar item is disabled for selection/use. At night every
-## non-weapon (build/unbuild tools, placeables) is locked out so the player can
-## only wield weapons; during the day nothing is locked. Generalizes to any new
-## weapon (selectable at night) or non-weapon (locked at night) item.
-func is_quick_item_disabled(item_id: String) -> bool:
-	if item_id == "":
-		return false
-	# Build-only items (inventory-backed placeables) are never wielded from the quick bar;
-	# they are used through the toolbuild picker instead, so keep them disabled here.
-	if _is_build_only_item(item_id):
-		return true
-	return GameState.is_night and not ItemCatalog.is_weapon(item_id)
-
-## Selects the first quick-slot weapon, used to auto-arm the player when night
-## falls. No-op if the quick bar holds no weapon.
-func select_first_weapon() -> void:
-	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if ItemCatalog.is_weapon(_slot_item_id(inventory_slots[i])):
-			select_quick_slot(i)
-			return
 
 # --- Build mode (toolbuild-driven placement, paid directly from currency) ---------
 
@@ -300,47 +302,53 @@ func clear_build_selection() -> void:
 func is_build_mode_active() -> bool:
 	return selected_build_item_id != ""
 
-## True while any build tool (gardening or hammer) is the selected quick slot: the build
-## picker is open and the player is in build mode.
+## True while a build tool is in play: either a build-tool menu is open, or a buildable is
+## equipped as the placement preview. Drives right-click removal and gamepad build controls.
 func is_build_tool_selected() -> bool:
-	return get_selected_quick_item_id() in BUILD_TOOL_IDS
+	return is_build_menu_open() or is_build_mode_active()
 
-## The selected build tool's id (gardening/hammer), or "" when no build tool is selected.
-## The picker uses this to decide which buildables to offer and which slot to anchor to.
+## True while one of the build-tool drop-up menus (gardening/hammer) is open.
+func is_build_menu_open() -> bool:
+	var kind: String = get_active_menu_kind()
+	return kind == GARDENING_ID or kind == HAMMER_ID
+
+## The open build-tool menu's id (gardening/hammer), or "" when no build menu is open. The
+## picker uses this to decide which buildables to offer and which quick slot to anchor to.
 func get_selected_build_tool_id() -> String:
-	var selected: String = get_selected_quick_item_id()
-	return selected if selected in BUILD_TOOL_IDS else ""
+	var kind: String = get_active_menu_kind()
+	return kind if (kind == GARDENING_ID or kind == HAMMER_ID) else ""
 
-## True only while the gardening tool is selected (used by the tutorial's "plant roses" flow,
-## since roses are placed from gardening, not the hammer).
+## True while the gardening menu is open OR a gardening buildable is equipped (used by the
+## tutorial's "plant roses" flow, since roses are placed from gardening, not the hammer).
 func is_gardening_selected() -> bool:
-	return get_selected_quick_item_id() == GARDENING_ID
+	if get_active_menu_kind() == GARDENING_ID:
+		return true
+	return selected_build_item_id != "" and selected_build_item_id in GARDENING_BUILDABLE_IDS
 
 func is_unbuild_tool_selected() -> bool:
-	return get_selected_quick_item_id() == UNBUILD_TOOL_ID
+	return false
 
-## Select the quick slot holding the given build tool (opens the picker in that tool's mode).
-## No-op if the tool is not in the quick bar.
+## Opens the given build tool's drop-up menu (activating the quickbar). No-op if the tool id is
+## not a quickbar slot kind. Kept for callers like the morning harvest's auto-open-hammer prompt.
 func select_build_tool(tool_id: String) -> void:
-	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == tool_id:
-			select_quick_slot(i)
-			return
+	var index: int = QUICK_SLOT_KINDS.find(tool_id)
+	if index >= 0:
+		activate_quickbar_slot(index)
 
-## Global-space center X of the quick slot holding the currently selected build tool, or -1
-## if no build tool is selected / it is not in the quick bar. The picker uses this to anchor
-## its column directly above the active tool's icon.
+## Global-space center X of a quick slot's icon, or -1 if that slot has not been built yet.
+func get_quick_slot_center_x(index: int) -> float:
+	if index < 0 or index >= _toolbar_slot_nodes.size():
+		return -1.0
+	var rect: Rect2 = _toolbar_slot_nodes[index].get_global_rect()
+	return rect.position.x + rect.size.x * 0.5
+
+## Global-space center X of the quick slot for the currently open build-tool menu, or -1 when
+## no build menu is open. The picker uses this to anchor its column above the active tool's icon.
 func get_build_tool_slot_center_x() -> float:
 	var tool_id: String = get_selected_build_tool_id()
 	if tool_id == "":
 		return -1.0
-	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == tool_id:
-			if i < _toolbar_slot_nodes.size():
-				var rect: Rect2 = _toolbar_slot_nodes[i].get_global_rect()
-				return rect.position.x + rect.size.x * 0.5
-			return -1.0
-	return -1.0
+	return get_quick_slot_center_x(QUICK_SLOT_KINDS.find(tool_id))
 
 ## Global-space left X of the leftmost quick slot, or -1 if the quick bar has no
 ## slots yet. The seed/weapon merchant column left-aligns its rows to this.
@@ -397,9 +405,10 @@ func animate_inventory_item_to_slot(item_id: String, start_global_position: Vect
 
 
 func _find_inventory_item_slot(item_id: String) -> Control:
-	for i: int in range(mini(QUICK_SLOT_COUNT, inventory_slots.size())):
-		if _slot_item_id(inventory_slots[i]) == item_id and i < _toolbar_slot_nodes.size():
-			return _toolbar_slot_nodes[i]
+	# Weapons are represented by the single weapon quick slot; everything else flies to its
+	# backpack slot.
+	if ItemCatalog.is_weapon(item_id) and not _toolbar_slot_nodes.is_empty():
+		return _toolbar_slot_nodes[0]
 	for i: int in range(inventory_slots.size()):
 		if _slot_item_id(inventory_slots[i]) == item_id and i < _inventory_slot_nodes.size():
 			return _inventory_slot_nodes[i]
@@ -963,8 +972,8 @@ func _setup_starting_inventory() -> void:
 		inventory_slots[i] = _empty_slot()
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
-	add_inventory(GARDENING_ID, 1)
-	add_inventory(HAMMER_ID, 1)
+	# The gardening/hammer tools are no longer inventory items; they are fixed quickbar menu
+	# slots shown unconditionally (see QUICK_SLOT_KINDS / _build_toolbar).
 	# Any non-weapon items the level grants at start (e.g. pasteque x10).
 	var starting_items: Dictionary = _get_level_starting_items()
 	for raw_item_id: Variant in starting_items:
@@ -1023,13 +1032,10 @@ func add_inventory(item_id: String, quantity: int = 1) -> bool:
 		if remaining == 0:
 			break
 
-	# Build-only items are kept out of the quick bar (slots 0..QUICK_SLOT_COUNT-1) so they
-	# can't be wielded; only fall back to a quick slot if the backpack is completely full.
-	var new_stack_start: int = QUICK_SLOT_COUNT if _is_build_only_item(item_id) else 0
+	# The quickbar is a fixed set of menu slots now, so the backpack is a plain flat store:
+	# new stacks simply take the first free slot.
 	while remaining > 0:
-		var free_index: int = _first_free_slot(new_stack_start)
-		if free_index < 0:
-			free_index = _first_free_slot(0)
+		var free_index: int = _first_free_slot(0)
 		if free_index < 0:
 			break
 		var new_stack_quantity: int = mini(remaining, max_stack)
@@ -1062,12 +1068,6 @@ func _first_free_slot(start_index: int = 0) -> int:
 		if _slot_item_id(inventory_slots[i]) == "":
 			return i
 	return -1
-
-## Build-only items (inventory-backed placeables like pasteque) live in the
-## inventory purely so the toolbuild picker can count and consume them; they are never
-## wielded, so they are kept out of the quick bar and cannot be selected there.
-func _is_build_only_item(item_id: String) -> bool:
-	return ItemCatalog.is_inventory_backed(item_id)
 
 func _make_slot(item_id: String, quantity: int) -> Dictionary:
 	if item_id == "" or quantity <= 0:
@@ -1247,7 +1247,7 @@ func _build_toolbar() -> void:
 	_clear_container(toolbar_slots)
 	_toolbar_slot_nodes.clear()
 
-	for i in range(QUICK_SLOT_COUNT):
+	for i in range(QUICK_SLOT_KINDS.size()):
 		var slot: ItemSlot = ItemSlotScript.new()
 		toolbar_slots.add_child(slot)
 		slot.setup(self, "quick", i)
@@ -1280,27 +1280,28 @@ func _build_inventory() -> void:
 
 func _refresh_all_slots() -> void:
 	_normalize_unique_weapons()
-	_remove_unbuild_tool_from_inventory()
+	_strip_non_backpack_items_from_inventory()
+	# Keep the equipped weapon pointing at a weapon the player still owns.
+	if equipped_weapon_id != "" and not _has_inventory_weapon(equipped_weapon_id):
+		equipped_weapon_id = _first_possessed_weapon_id()
 	for i in range(_toolbar_slot_nodes.size()):
-		_apply_slot_item(_toolbar_slot_nodes[i], i)
+		_apply_toolbar_slot(_toolbar_slot_nodes[i], i)
 
 	for i in range(_inventory_slot_nodes.size()):
-		_apply_slot_item(_inventory_slot_nodes[i], i)
+		_apply_inventory_slot(_inventory_slot_nodes[i], i)
 
 	_refresh_toolbar_info()
 
-func _remove_unbuild_tool_from_inventory() -> void:
-	var changed: bool = false
+## Strips items that are not real backpack contents (the build tools and the ephemeral unbuild
+## tool) from the inventory — e.g. when loading an older save that stored them as inventory items.
+func _strip_non_backpack_items_from_inventory() -> void:
 	for i: int in range(inventory_slots.size()):
-		if _slot_item_id(inventory_slots[i]) == UNBUILD_TOOL_ID:
+		var item_id: String = _slot_item_id(inventory_slots[i])
+		if item_id == GARDENING_ID or item_id == HAMMER_ID or item_id == UNBUILD_TOOL_ID:
 			inventory_slots[i] = _empty_slot()
-			changed = true
-	if changed:
-		_ensure_valid_quick_selection()
 
 func _normalize_unique_weapons() -> void:
 	var seen: Dictionary = {}
-	var changed: bool = false
 	for i: int in range(inventory_slots.size()):
 		var slot_data: Dictionary = inventory_slots[i]
 		var item_id: String = _slot_item_id(slot_data)
@@ -1309,64 +1310,52 @@ func _normalize_unique_weapons() -> void:
 		_possessed_weapon_ids[item_id] = true
 		if seen.has(item_id):
 			inventory_slots[i] = _empty_slot()
-			changed = true
 			continue
 		seen[item_id] = true
 		if _slot_quantity(slot_data) != 1:
 			inventory_slots[i] = _make_slot(item_id, 1)
-			changed = true
-	if changed:
-		_ensure_valid_quick_selection()
 
 func _refresh_toolbar_info() -> void:
 	if toolbar_info == null:
 		return
-	var item_id: String = get_selected_quick_item_id()
-	if item_id == "":
-		toolbar_info.text = ""
-		return
-	toolbar_info.text = _get_item_display_name(item_id)
+	# Play mode shows no labels; while a menu is open it renders its own item labels, so the
+	# toolbar info line stays empty in both states.
+	toolbar_info.text = ""
 
-func _get_item_display_name(item_id: String) -> String:
-	var key: String = ITEM_NAME_KEY_PREFIX + item_id
-	var translated: String = Translations.t(key)
-	if translated != key:
-		return translated
+## Renders a fixed quickbar slot: the weapon slot shows the equipped weapon, the others show
+## their build tool. Selected only while its menu is the open one; disabled when its menu is locked.
+func _apply_toolbar_slot(slot: ItemSlot, index: int) -> void:
+	var kind: String = QUICK_SLOT_KINDS[index]
+	var item_id: String = get_equipped_weapon_id() if kind == WEAPON_SLOT_KIND else kind
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	return str(item_def.get("name", item_id))
+	slot.set_item(item_def if not item_def.is_empty() else {}, 0)
+	slot.set_disabled(_is_quickbar_slot_disabled(kind))
+	slot.set_selected(quickbar_active and index == active_slot_index)
 
-func _apply_slot_item(slot: ItemSlot, slot_index: int) -> void:
+## Renders a backpack slot straight from its inventory contents (never selected/disabled).
+func _apply_inventory_slot(slot: ItemSlot, slot_index: int) -> void:
 	var slot_data: Dictionary = inventory_slots[slot_index]
-	var item_id: String = _slot_item_id(slot_data)
-	var quantity: int = _slot_quantity(slot_data)
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if not item_def.is_empty():
-		slot.set_item(item_def, quantity)
-	else:
-		slot.set_item({}, 0)
-	slot.set_disabled(is_quick_item_disabled(item_id))
-	slot.set_selected(slot_index == selected_quick_index)
+	var item_def: Dictionary = ItemCatalog.get_item_def(_slot_item_id(slot_data))
+	slot.set_item(item_def if not item_def.is_empty() else {}, _slot_quantity(slot_data))
+	slot.set_disabled(false)
+	slot.set_selected(false)
 
 func _clear_container(container: Container) -> void:
 	for child in container.get_children():
 		container.remove_child(child)
 		child.queue_free()
 
+## Gamepad: steps the open menu to the next non-disabled quickbar slot (wrapping). Only meaningful
+## while the quickbar is active; no-op otherwise.
 func step_selected_quick_slot(direction: int) -> void:
-	if direction == 0:
+	if direction == 0 or not quickbar_active:
 		return
-	# Walk in the scroll direction to the next selectable slot, skipping empty and
-	# disabled (non-weapon at night) ones and wrapping around. Keeps the current
-	# selection if no other slot can be selected.
-	var next_index: int = selected_quick_index
-	for _step: int in range(QUICK_SLOT_COUNT):
-		next_index += direction
-		if next_index < 0:
-			next_index = QUICK_SLOT_COUNT - 1
-		elif next_index >= QUICK_SLOT_COUNT:
-			next_index = 0
-		if _is_quick_slot_selectable(next_index):
-			select_quick_slot(next_index)
+	var count: int = QUICK_SLOT_KINDS.size()
+	var next_index: int = active_slot_index
+	for _step: int in range(count):
+		next_index = wrapi(next_index + direction, 0, count)
+		if not _is_quickbar_slot_disabled(QUICK_SLOT_KINDS[next_index]):
+			activate_quickbar_slot(next_index)
 			return
 
 func _quick_slot_index_from_event(event: InputEventKey) -> int:

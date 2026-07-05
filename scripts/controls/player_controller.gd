@@ -122,6 +122,14 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		_set_control_mode(INPUT_MODE_KMOUSE)
 		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not _paused and not _is_inventory_open():
+			# While the quickbar is active, a click in the world dismisses it back to play mode
+			# (no fire/placement). Clicks over a menu slot/item hit a hovered control and fall
+			# through to the GUI, which handles the pick.
+			if _is_quickbar_active():
+				if get_viewport().gui_get_hovered_control() == null:
+					_deactivate_quickbar()
+					get_viewport().set_input_as_handled()
+				return
 			# In build mode the click belongs to the build system, not the weapon.
 			if _in_build_mode():
 				return
@@ -632,6 +640,13 @@ func _selected_item_id() -> String:
 	if not game_ui or not game_ui.has_method("get_selected_quick_item_id"):
 		return ""
 	return String(game_ui.call("get_selected_quick_item_id"))
+
+func _is_quickbar_active() -> bool:
+	return game_ui and game_ui.has_method("is_quickbar_active") and bool(game_ui.call("is_quickbar_active"))
+
+func _deactivate_quickbar() -> void:
+	if game_ui and game_ui.has_method("deactivate_quickbar"):
+		game_ui.call("deactivate_quickbar")
 
 ## True while the toolbuild picker has a building selected: the player is placing, not fighting.
 func _in_build_mode() -> bool:

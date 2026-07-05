@@ -431,7 +431,8 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
-			"selected_quick_index": int(game_ui.get("selected_quick_index")),
+			"equipped_weapon_id": _game_ui_equipped_weapon_id(game_ui),
+			"selected_build_item_id": String(game_ui.get("selected_build_item_id")),
 		},
 	}
 	_log("Save summary: %s" % _save_summary(data))
@@ -449,6 +450,14 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	])
 	_notify("Game saved")
 	return true
+
+
+## The player's currently equipped weapon id, resolved through game_ui so an empty stored value
+## is saved as the actual first-possessed weapon.
+func _game_ui_equipped_weapon_id(game_ui: Node) -> String:
+	if game_ui != null and game_ui.has_method("get_equipped_weapon_id"):
+		return String(game_ui.call("get_equipped_weapon_id"))
+	return ""
 
 
 func load_progression() -> void:
@@ -804,13 +813,18 @@ func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 				"quantity": 1 if legacy_item_id != "" else 0,
 			})
 	game_ui.set("inventory_slots", inventory)
-	game_ui.set("selected_quick_index", int(player_data.get("selected_quick_index", 0)))
+	# The quickbar is restored to play mode (inactive): the equipped weapon and any equipped
+	# build preview are restored, but no menu is reopened.
+	game_ui.set("equipped_weapon_id", String(player_data.get("equipped_weapon_id", "")))
+	game_ui.set("selected_build_item_id", String(player_data.get("selected_build_item_id", "")))
+	game_ui.set("quickbar_active", false)
+	game_ui.set("active_slot_index", -1)
 	if game_ui.has_method("reset_possessed_weapons_from_inventory"):
 		game_ui.call("reset_possessed_weapons_from_inventory")
 	if game_ui.has_method("_refresh_all_slots"):
 		game_ui.call("_refresh_all_slots")
-	_log("Inventory restored: %d slots, selected=%d" % [
-		inventory.size(), int(player_data.get("selected_quick_index", 0))
+	_log("Inventory restored: %d slots, weapon=%s" % [
+		inventory.size(), String(player_data.get("equipped_weapon_id", ""))
 	])
 
 
