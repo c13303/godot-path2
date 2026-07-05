@@ -922,7 +922,7 @@ func _finish_drag_build() -> void:
 	var sound: StringName = _drag_build_sound(item_id)
 	if sound != &"":
 		Sfx.play_sound(sound)
-	_clear_build_selection()
+	_clear_build_selection_if_unaffordable(item_id)
 
 func _cancel_drag_build() -> void:
 	_set_drag_build_active(false)
@@ -950,6 +950,10 @@ func _can_afford(item_id: String) -> bool:
 func _clear_build_selection() -> void:
 	if game_ui != null and game_ui.has_method("clear_build_selection"):
 		game_ui.call("clear_build_selection")
+
+func _clear_build_selection_if_unaffordable(item_id: String) -> void:
+	if item_id == "" or not _can_afford(item_id):
+		_clear_build_selection()
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
 	if _atlas_source_id < 0:
@@ -995,7 +999,7 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(_hover_cell)
 	_play_build_fx_at_cell(_hover_cell, target_layer)
-	_clear_build_selection()
+	_clear_build_selection_if_unaffordable(item_id)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":
