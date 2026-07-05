@@ -413,7 +413,6 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	var day_phase: String = day_phase_override if day_phase_override != "" else _get_day_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
-	var small_reservoir_states: Array[Dictionary] = _get_small_reservoir_states(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
@@ -423,7 +422,6 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
-		"small_reservoir_states": small_reservoir_states,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
@@ -642,7 +640,6 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_reindex_loaded_layers(scene)
 	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
-	_restore_small_reservoir_states(scene, data.get("small_reservoir_states", []))
 	_restore_day_phase(scene, str(data.get("day_phase", "")))
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
@@ -726,19 +723,6 @@ func _get_counter_stock(scene: Node) -> Array[Dictionary]:
 			if raw_entry is Dictionary:
 				stock.append(raw_entry as Dictionary)
 	return stock
-
-
-func _get_small_reservoir_states(scene: Node) -> Array[Dictionary]:
-	var states: Array[Dictionary] = []
-	var building_object_manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene else null
-	if building_object_manager == null or not building_object_manager.has_method("serialize_small_reservoir_states"):
-		return states
-	var raw_states: Variant = building_object_manager.call("serialize_small_reservoir_states")
-	if raw_states is Array:
-		for raw_entry: Variant in raw_states as Array:
-			if raw_entry is Dictionary:
-				states.append(raw_entry as Dictionary)
-	return states
 
 
 func _get_day_phase() -> String:
@@ -846,17 +830,6 @@ func _restore_counter_stock(scene: Node, raw_stock: Variant) -> void:
 		counter_buildings,
 		restored_total,
 	])
-
-
-func _restore_small_reservoir_states(scene: Node, raw_states: Variant) -> void:
-	var building_object_manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene else null
-	if building_object_manager == null or not building_object_manager.has_method("restore_small_reservoir_states"):
-		return
-	var states: Array = []
-	if raw_states is Array:
-		states = raw_states as Array
-	building_object_manager.call("restore_small_reservoir_states", states)
-	_log("Small reservoir states restored: %d entries" % states.size())
 
 
 func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
@@ -967,19 +940,6 @@ func _validate_save(data: Dictionary) -> String:
 					return "invalid plant state entry"
 			if not (entry["watered_once"] is bool) or not (entry["grownup"] is bool):
 				return "invalid plant state value"
-	if data.has("small_reservoir_states"):
-		if not (data["small_reservoir_states"] is Array):
-			return "invalid small reservoir states"
-		var small_reservoir_states: Array = data["small_reservoir_states"] as Array
-		for raw_entry: Variant in small_reservoir_states:
-			if not (raw_entry is Dictionary):
-				return "invalid small reservoir state entry"
-			var entry: Dictionary = raw_entry as Dictionary
-			for field: String in ["x", "y", "reserve"]:
-				if not entry.has(field):
-					return "invalid small reservoir state entry"
-			if int(entry["reserve"]) < 0:
-				return "invalid small reservoir reserve"
 	if data.has("day_phase"):
 		var phase: String = str(data["day_phase"])
 		if not ["building", "morning", "client", "seed_merchant"].has(phase):

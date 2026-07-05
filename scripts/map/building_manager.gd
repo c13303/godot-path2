@@ -63,6 +63,7 @@ const ACCESS_NARROW_CONTINUATION_PENALTY: float = 20.0
 const ACCESS_REVERSAL_PENALTY: float = 100.0
 const ACCESS_TURN_PENALTY: float = 5.0
 const ACCESS_BLOCKED_CARDINAL_PENALTY: float = 2.0
+const PASTEQUE_ITEM_ID: String = "pasteque"
 # Enter mode uses softer continuation penalties (the agent is heading inward, so
 # outside continuation matters less than for exits).
 const ACCESS_ENTER_DEAD_CONTINUATION_PENALTY: float = 30.0
@@ -1315,6 +1316,7 @@ func _process(delta: float) -> void:
 	_process_eating_agents(delta)
 	_process_client_paying_agents(delta)
 	_process_creature_rose_trampling()
+	_process_pasteque_trampling()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
@@ -2409,6 +2411,30 @@ func _process_creature_rose_trampling() -> void:
 			var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 			if bool(plant_manager.call("is_rose_cell", cell)):
 				plant_manager.call("consume_plant", cell)
+
+
+func _process_pasteque_trampling() -> void:
+	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
+	if not bool(pasteque_def.get("destroyed_by_creatures", false)):
+		return
+	if traversable_buildings == null:
+		return
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects == null or not building_objects.has_method("get_building"):
+		return
+	var checked_cells: Dictionary = {}
+	for group_name: StringName in [&"monsters", &"clients"]:
+		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_agent as Node2D
+			if not is_instance_valid(agent):
+				continue
+			var cell: Vector2i = traversable_buildings.local_to_map(traversable_buildings.to_local(agent.global_position))
+			if checked_cells.has(cell):
+				continue
+			checked_cells[cell] = true
+			var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
+			if str(building_data.get("item_id", "")) == PASTEQUE_ITEM_ID:
+				_destroy_pasteque_cell(cell)
 
 
 func _player_grownup_rose_cell() -> Vector2i:
@@ -4071,6 +4097,35 @@ func _leave_turret_debris(turret_cell: Vector2i) -> void:
 		return
 	var alternative_tile: int = blocking_buildings.get_cell_alternative_tile(turret_cell)
 	plantz.set_cell(turret_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
+	_flush_plant_layer_visuals()
+
+func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
+	if traversable_buildings == null:
+		return
+	var source_id: int = traversable_buildings.get_cell_source_id(pasteque_cell)
+	var alternative_tile: int = traversable_buildings.get_cell_alternative_tile(pasteque_cell)
+	_clear_pasteque_irrigation(pasteque_cell)
+	_leave_pasteque_debris(pasteque_cell, source_id, alternative_tile)
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects != null and building_objects.has_method("remove_building"):
+		building_objects.call("remove_building", pasteque_cell, true)
+	elif traversable_buildings.get_cell_source_id(pasteque_cell) >= 0:
+		traversable_buildings.erase_cell(pasteque_cell)
+		traversable_buildings.update_internals()
+	Sfx.play_sound(&"crunsh")
+
+func _clear_pasteque_irrigation(pasteque_cell: Vector2i) -> void:
+	var reservoir_system: Node = get_node_or_null("../ReservoirSystem")
+	if reservoir_system == null or not reservoir_system.has_method("clear_pasteque_irrigation_from_cell"):
+		return
+	reservoir_system.call("clear_pasteque_irrigation_from_cell", pasteque_cell)
+
+func _leave_pasteque_debris(pasteque_cell: Vector2i, source_id: int, alternative_tile: int) -> void:
+	if plantz == null or source_id < 0:
+		return
+	if plantz.get_cell_source_id(pasteque_cell) >= 0:
+		return
+	plantz.set_cell(pasteque_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 	_flush_plant_layer_visuals()
 
 func _remove_turret_cell(turret_cell: Vector2i) -> void:

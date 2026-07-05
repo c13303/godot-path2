@@ -1,16 +1,15 @@
 extends Node
 
-const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
+const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const RESERVOIR_GROUP: StringName = &"reservoirs"
 const RESERVOIR_ITEM_ID: String = "reservoir"
-# Player-built small reservoirs also paint grass around themselves, but they are tracked
-# as buildings (not in the "reservoirs" group) so the hose ignores them.
-const SMALL_RESERVOIR_ITEM_ID: String = "small_reservoir"
+const PASTEQUE_ITEM_ID: String = "pasteque"
+const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 6
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
 @export var building_object_manager: Node
-@export var irrigation_radius_tiles: int = 8
+@export var reservoir_irrigation_radius_tiles: int = 8
 @export var max_cells_per_frame: int = 24
 
 var _irrigation_queue: Array[Vector2i] = []
@@ -44,11 +43,14 @@ func irrigate_all_reservoirs() -> void:
 	_resolve_level_nodes()
 	var center_cells: Dictionary = {}
 	if building_object_manager != null and building_object_manager.has_method("get_building_cells_by_item_id"):
-		for item_id: String in [RESERVOIR_ITEM_ID, SMALL_RESERVOIR_ITEM_ID]:
-			var raw_cells: Array = building_object_manager.call("get_building_cells_by_item_id", item_id) as Array
-			for raw_cell: Variant in raw_cells:
-				var cell: Vector2i = raw_cell as Vector2i
-				center_cells[cell] = true
+		var pasteque_cells: Array = building_object_manager.call("get_building_cells_by_item_id", PASTEQUE_ITEM_ID) as Array
+		for raw_pasteque_cell: Variant in pasteque_cells:
+			var pasteque_cell: Vector2i = raw_pasteque_cell as Vector2i
+			request_pasteque_irrigation_from_cell(pasteque_cell)
+		var reservoir_cells: Array = building_object_manager.call("get_building_cells_by_item_id", RESERVOIR_ITEM_ID) as Array
+		for raw_reservoir_cell: Variant in reservoir_cells:
+			var reservoir_cell: Vector2i = raw_reservoir_cell as Vector2i
+			center_cells[reservoir_cell] = true
 	for reservoir_node: Node in get_tree().get_nodes_in_group(RESERVOIR_GROUP):
 		var reservoir_2d: Node2D = reservoir_node as Node2D
 		if reservoir_2d == null or floorz == null:
@@ -56,10 +58,18 @@ func irrigate_all_reservoirs() -> void:
 		var cell: Vector2i = floorz.local_to_map(floorz.to_local(reservoir_2d.global_position))
 		center_cells[cell] = true
 	for raw_cell: Variant in center_cells.keys():
-		request_irrigation_from_cell(raw_cell as Vector2i)
+		request_reservoir_irrigation_from_cell(raw_cell as Vector2i)
 
 func request_irrigation_from_cell(center_cell: Vector2i) -> void:
-	_queue_radius(center_cell, maxi(0, irrigation_radius_tiles))
+	request_reservoir_irrigation_from_cell(center_cell)
+
+func request_reservoir_irrigation_from_cell(center_cell: Vector2i) -> void:
+	_queue_radius(center_cell, maxi(0, reservoir_irrigation_radius_tiles))
+	if not _irrigation_queue.is_empty():
+		set_process(true)
+
+func request_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
+	_queue_radius(center_cell, _pasteque_irrigation_radius_tiles())
 	if not _irrigation_queue.is_empty():
 		set_process(true)
 
@@ -68,7 +78,29 @@ func request_irrigation_from_world_position(world_position: Vector2) -> void:
 	if floorz == null:
 		return
 	var center_cell: Vector2i = floorz.local_to_map(floorz.to_local(world_position))
-	request_irrigation_from_cell(center_cell)
+	request_reservoir_irrigation_from_cell(center_cell)
+
+func clear_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
+	_resolve_level_nodes()
+	if floorz == null:
+		return
+	var radius: int = _pasteque_irrigation_radius_tiles()
+	var radius_squared: int = radius * radius
+	var restore_atlas: Vector2i = _pasteque_restore_floor_atlas()
+	var changed: bool = false
+	for y_offset: int in range(-radius, radius + 1):
+		for x_offset: int in range(-radius, radius + 1):
+			var distance_squared: int = x_offset * x_offset + y_offset * y_offset
+			if distance_squared > radius_squared:
+				continue
+			var cell: Vector2i = center_cell + Vector2i(x_offset, y_offset)
+			if _cell_has_other_irrigation_source(cell, center_cell):
+				continue
+			if _restore_floor_cell(cell, restore_atlas):
+				changed = true
+	if changed:
+		floorz.update_internals()
+		floorz.queue_redraw()
 
 func _resolve_level_nodes() -> void:
 	if floorz == null:
@@ -99,8 +131,76 @@ func _irrigate_floor_cell(cell: Vector2i) -> bool:
 		return false
 	if watersources != null and watersources.get_cell_source_id(cell) >= 0:
 		return false
-	if floorz.get_cell_atlas_coords(cell) == GRASS_GREEN_FLOOR_ATLAS:
+	if floorz.get_cell_atlas_coords(cell) == FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS:
 		return false
 	var alternative_tile: int = floorz.get_cell_alternative_tile(cell)
-	floorz.set_cell(cell, source_id, GRASS_GREEN_FLOOR_ATLAS, alternative_tile)
+	floorz.set_cell(cell, source_id, FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS, alternative_tile)
 	return true
+
+func _restore_floor_cell(cell: Vector2i, restore_atlas: Vector2i) -> bool:
+	var source_id: int = floorz.get_cell_source_id(cell)
+	if source_id < 0:
+		return false
+	if floorz.get_cell_atlas_coords(cell) != FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS:
+		return false
+	var alternative_tile: int = floorz.get_cell_alternative_tile(cell)
+	floorz.set_cell(cell, source_id, restore_atlas, alternative_tile)
+	return true
+
+func _cell_has_other_irrigation_source(cell: Vector2i, ignored_center_cell: Vector2i) -> bool:
+	var reservoir_radius: int = maxi(0, reservoir_irrigation_radius_tiles)
+	var reservoir_radius_squared: int = reservoir_radius * reservoir_radius
+	for reservoir_node: Node in get_tree().get_nodes_in_group(RESERVOIR_GROUP):
+		var reservoir_2d: Node2D = reservoir_node as Node2D
+		if reservoir_2d == null or floorz == null:
+			continue
+		var reservoir_cell: Vector2i = floorz.local_to_map(floorz.to_local(reservoir_2d.global_position))
+		if reservoir_cell == ignored_center_cell:
+			continue
+		var reservoir_delta: Vector2i = cell - reservoir_cell
+		if reservoir_delta.x * reservoir_delta.x + reservoir_delta.y * reservoir_delta.y <= reservoir_radius_squared:
+			return true
+	if building_object_manager == null or not building_object_manager.has_method("get_building_cells_by_item_id"):
+		return false
+	var building_reservoir_cells: Array = building_object_manager.call("get_building_cells_by_item_id", RESERVOIR_ITEM_ID) as Array
+	for raw_building_reservoir_cell: Variant in building_reservoir_cells:
+		var building_reservoir_cell: Vector2i = raw_building_reservoir_cell as Vector2i
+		if building_reservoir_cell == ignored_center_cell:
+			continue
+		var building_reservoir_delta: Vector2i = cell - building_reservoir_cell
+		if building_reservoir_delta.x * building_reservoir_delta.x + building_reservoir_delta.y * building_reservoir_delta.y <= reservoir_radius_squared:
+			return true
+	var pasteque_radius: int = _pasteque_irrigation_radius_tiles()
+	var pasteque_radius_squared: int = pasteque_radius * pasteque_radius
+	var pasteque_cells: Array = building_object_manager.call("get_building_cells_by_item_id", PASTEQUE_ITEM_ID) as Array
+	for raw_pasteque_cell: Variant in pasteque_cells:
+		var pasteque_cell: Vector2i = raw_pasteque_cell as Vector2i
+		if pasteque_cell == ignored_center_cell:
+			continue
+		var pasteque_delta: Vector2i = cell - pasteque_cell
+		if pasteque_delta.x * pasteque_delta.x + pasteque_delta.y * pasteque_delta.y <= pasteque_radius_squared:
+			return true
+	return false
+
+func _pasteque_irrigation_radius_tiles() -> int:
+	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
+	return maxi(0, int(pasteque_def.get("irrigation_radius_tiles", PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES)))
+
+func _pasteque_restore_floor_atlas() -> Vector2i:
+	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
+	return _atlas_coords_from_variant(
+		pasteque_def.get("restore_floor_atlas", FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS),
+		FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS
+	)
+
+func _atlas_coords_from_variant(raw_atlas: Variant, fallback: Vector2i) -> Vector2i:
+	if raw_atlas is Vector2i:
+		return raw_atlas as Vector2i
+	if raw_atlas is Vector2:
+		var vector_atlas: Vector2 = raw_atlas as Vector2
+		return Vector2i(int(vector_atlas.x), int(vector_atlas.y))
+	if raw_atlas is Array:
+		var atlas_array: Array = raw_atlas as Array
+		if atlas_array.size() >= 2:
+			return Vector2i(int(atlas_array[0]), int(atlas_array[1]))
+	return fallback

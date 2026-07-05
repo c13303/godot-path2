@@ -3,6 +3,7 @@ class_name ItemCatalog
 
 const TURRET1_DATA: TurretData = preload("res://scripts/combat/turrets/turret1.tres")
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
+const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 
 const ITEM_DEFS: Dictionary = {
 	"sword": {
@@ -174,14 +175,13 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"max_stack": 999,
 	},
-	# A player-buildable, self-contained water tank. Unlike the level-authored main
-	# reservoir it is NOT connected to the hose/lance and each instance keeps its own
-	# reserve (see BuildingObjectManager). It is bought at the seed merchant into the
-	# inventory (inventory_backed) and then placed from the toolbuild picker, which
-	# consumes one from the inventory instead of spending currency on placement.
-	"small_reservoir": {
-		"id": "small_reservoir",
-		"name": "Small Reservoir",
+	# A player-buildable watermelon/pasteque that paints grass around itself when placed. It is
+	# bought at the seed merchant into the inventory (inventory_backed) and then placed
+	# from the toolbuild picker, which consumes one from the inventory instead of
+	# spending currency on placement.
+	"pasteque": {
+		"id": "pasteque",
+		"name": "Watermelon",
 		"currency": &"money",
 		"type": "placeable",
 		"category": "irrigation",
@@ -193,8 +193,11 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_projectiles": false,
 		"requires_walkable_floor": true,
-		"runtime_id": "small_reservoir",
+		"runtime_id": "pasteque",
 		"drag_buildable": false,
+		"irrigation_radius_tiles": 6,
+		"destroyed_by_creatures": true,
+		"restore_floor_atlas": FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS,
 		# Paid for at the seed merchant into the inventory; placing consumes one unit
 		# from the inventory rather than charging currency again.
 		"inventory_backed": true,
@@ -291,7 +294,7 @@ static func is_placeable(item_id: String) -> bool:
 
 ## True for placeables that are stocked in the inventory (bought at the merchant) and
 ## consumed from it when placed, instead of being paid for directly from currency on
-## placement. See small_reservoir.
+## placement. See pasteque.
 static func is_inventory_backed(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("inventory_backed", false))
 

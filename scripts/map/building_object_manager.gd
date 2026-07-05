@@ -19,10 +19,7 @@ const LIGHT_ENERGY: float = 0.75
 const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir.png")
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
-const SMALL_RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/small_reservoir_water_fill.gd")
 const RESERVOIR_Z_INDEX: int = 510
-const SMALL_RESERVOIR_RUNTIME_ID: String = "small_reservoir"
-const SMALL_RESERVOIR_DEFAULT_MAX: float = 100.0
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
@@ -78,16 +75,9 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 		building_data["direction"] = item_def.get("direction", Vector2i(1, 0))
 	if item_def.has("light_source"):
 		building_data["light_source"] = light_source
-	# Each small reservoir carries its own water reserve (empty on placement). A loaded
-	# save re-seeds it afterwards via restore_small_reservoir_states.
-	if runtime_id == SMALL_RESERVOIR_RUNTIME_ID:
-		building_data["water_reserve"] = maxf(0.0, float(item_def.get("water_reserve", 0.0)))
-		building_data["water_reserve_max"] = maxf(1.0, float(item_def.get("water_reserve_max", SMALL_RESERVOIR_DEFAULT_MAX)))
 	_buildings_by_cell[cell] = building_data
 	if runtime_id == "reservoir":
 		_register_reservoir_runtime(cell, runtime_id)
-	if runtime_id == SMALL_RESERVOIR_RUNTIME_ID:
-		_register_small_reservoir_runtime(cell, runtime_id)
 	if light_source > 0.0:
 		_register_light_runtime(cell, runtime_id, light_source)
 	_register_blocking_obstacle(cell, item_def)
@@ -265,97 +255,6 @@ func _add_reservoir_water_fill(reservoir_sprite: Sprite2D) -> void:
 	water.z_index = -1
 	water.script = RESERVOIR_WATER_FILL_SCRIPT
 	reservoir_sprite.add_child(water)
-
-# A small reservoir looks exactly like the main reservoir (same sprite + water fill),
-# but it is deliberately NOT added to the "reservoirs" group so the garden hose never
-# tries to connect to it, and its water fill reads this instance's own reserve rather
-# than the global progression reserve.
-func _register_small_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
-	var parent: Node2D = _runtime_parent()
-	if not parent:
-		return
-	var runtime_node: Node2D = Node2D.new()
-	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
-	runtime_node.global_position = _cell_center(cell)
-
-	var sprite: Sprite2D = Sprite2D.new()
-	sprite.name = "Sprite2D"
-	sprite.texture = RESERVOIR_TEXTURE
-	sprite.z_as_relative = false
-	sprite.z_index = RESERVOIR_Z_INDEX
-	_add_small_reservoir_water_fill(sprite, cell)
-	runtime_node.add_child(sprite)
-
-	parent.add_child(runtime_node)
-	_runtime_nodes_by_cell[cell] = runtime_node
-
-func _add_small_reservoir_water_fill(reservoir_sprite: Sprite2D, cell: Vector2i) -> void:
-	var water: Sprite2D = Sprite2D.new()
-	water.name = "WaterFill"
-	water.texture = RESERVOIR_WATER_TEXTURE
-	water.z_as_relative = true
-	water.z_index = -1
-	water.script = SMALL_RESERVOIR_WATER_FILL_SCRIPT
-	reservoir_sprite.add_child(water)
-	# Point the fill at this manager + cell so it renders this tank's own reserve.
-	water.set("manager", self)
-	water.set("cell", cell)
-
-# --- Small reservoir per-instance reserves -------------------------------------
-
-func is_small_reservoir_cell(cell: Vector2i) -> bool:
-	if not _buildings_by_cell.has(cell):
-		return false
-	return str((_buildings_by_cell[cell] as Dictionary).get("runtime_id", "")) == SMALL_RESERVOIR_RUNTIME_ID
-
-func get_small_reservoir_reserve(cell: Vector2i) -> float:
-	if not _buildings_by_cell.has(cell):
-		return 0.0
-	return maxf(0.0, float((_buildings_by_cell[cell] as Dictionary).get("water_reserve", 0.0)))
-
-func get_small_reservoir_max(cell: Vector2i) -> float:
-	if not _buildings_by_cell.has(cell):
-		return SMALL_RESERVOIR_DEFAULT_MAX
-	return maxf(1.0, float((_buildings_by_cell[cell] as Dictionary).get("water_reserve_max", SMALL_RESERVOIR_DEFAULT_MAX)))
-
-## Add (or, with a negative amount, remove) water to one small reservoir, clamped to
-## [0, max]. Silently ignores cells that are not small reservoirs.
-func add_small_reservoir_water(cell: Vector2i, amount: float) -> void:
-	if not is_small_reservoir_cell(cell):
-		return
-	var data: Dictionary = _buildings_by_cell[cell] as Dictionary
-	var maximum: float = maxf(1.0, float(data.get("water_reserve_max", SMALL_RESERVOIR_DEFAULT_MAX)))
-	data["water_reserve"] = clampf(float(data.get("water_reserve", 0.0)) + amount, 0.0, maximum)
-	_buildings_by_cell[cell] = data
-
-## Serialize every small reservoir's rounded reserve for the save file.
-func serialize_small_reservoir_states() -> Array[Dictionary]:
-	var states: Array[Dictionary] = []
-	for raw_cell: Variant in _buildings_by_cell.keys():
-		var cell: Vector2i = raw_cell as Vector2i
-		var data: Dictionary = _buildings_by_cell[cell] as Dictionary
-		if str(data.get("runtime_id", "")) != SMALL_RESERVOIR_RUNTIME_ID:
-			continue
-		states.append({
-			"x": cell.x,
-			"y": cell.y,
-			"reserve": int(round(float(data.get("water_reserve", 0.0)))),
-		})
-	return states
-
-## Restore saved reserves onto small reservoirs re-indexed from the loaded layer.
-func restore_small_reservoir_states(states: Array) -> void:
-	for raw_entry: Variant in states:
-		if not (raw_entry is Dictionary):
-			continue
-		var entry: Dictionary = raw_entry as Dictionary
-		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
-		if not is_small_reservoir_cell(cell):
-			continue
-		var data: Dictionary = _buildings_by_cell[cell] as Dictionary
-		var maximum: float = maxf(1.0, float(data.get("water_reserve_max", SMALL_RESERVOIR_DEFAULT_MAX)))
-		data["water_reserve"] = clampf(float(entry.get("reserve", 0)), 0.0, maximum)
-		_buildings_by_cell[cell] = data
 
 func _runtime_parent() -> Node2D:
 	if runtime_parent:

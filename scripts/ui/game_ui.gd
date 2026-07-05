@@ -435,7 +435,7 @@ func is_build_item_available(item_id: String) -> bool:
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	# The level author can uncheck a buildable's "Available" box in the Rose Level editor;
 	# that hides it from the toolbuild picker entirely, ahead of every always-shown rule
-	# below (rose_shop_counter, inventory-backed buildables like small_reservoir).
+	# below (rose_shop_counter, inventory-backed buildables like pasteque).
 	if loader != null and loader.has_method("is_starting_item_toolbuild_hidden") and bool(loader.call("is_starting_item_toolbuild_hidden", item_id)):
 		return false
 	if item_id == "rose_shop_counter":
@@ -691,7 +691,7 @@ func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:
 	return add_inventory(item_id, count)
 
 
-## Buy an inventory-backed placeable (e.g. small_reservoir) at the seed merchant: spend
+## Buy an inventory-backed placeable (e.g. pasteque) at the seed merchant: spend
 ## its money price and stock the unit(s) in the inventory, all-or-nothing. The building
 ## is later placed from the toolbuild picker, which consumes it from the inventory.
 func try_purchase_placeable_merchant_item(item_id: String, count: int = 1) -> bool:
@@ -944,7 +944,7 @@ func _setup_starting_inventory() -> void:
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
 	add_inventory(TOOLBUILD_ID, 1)
-	# Any non-weapon items the level grants at start (e.g. small_reservoir x10).
+	# Any non-weapon items the level grants at start (e.g. pasteque x10).
 	var starting_items: Dictionary = _get_level_starting_items()
 	for raw_item_id: Variant in starting_items:
 		var item_id: String = str(raw_item_id)
@@ -1042,7 +1042,7 @@ func _first_free_slot(start_index: int = 0) -> int:
 			return i
 	return -1
 
-## Build-only items (inventory-backed placeables like small_reservoir) live in the
+## Build-only items (inventory-backed placeables like pasteque) live in the
 ## inventory purely so the toolbuild picker can count and consume them; they are never
 ## wielded, so they are kept out of the quick bar and cannot be selected there.
 func _is_build_only_item(item_id: String) -> bool:

@@ -9,8 +9,8 @@ const PREVIEW_NORMAL_COLOR: Color = Color(0.30, 0.62, 1.0, 0.70)
 const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const PREVIEW_Z_INDEX: int = 4095
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
+const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const BUILD_FX_Z_INDEX: int = -62
-const GRASS_GREEN_FLOOR_ATLAS: Vector2i = Vector2i(11, 6)
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 # Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
@@ -422,6 +422,7 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 			_flush_plant_layer_visuals()
 		return
 	if layer == traversable_buildings or layer == blocking_buildings:
+		_clear_pasteque_irrigation_before_unbuild(layer, cell)
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, true)
 		if layer.get_cell_source_id(cell) >= 0:
@@ -434,6 +435,20 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	layer.update_internals()
 	_refresh_cell_collision(cell)
 	_refresh_cell_terrain_speed(cell)
+
+func _clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2i) -> void:
+	if layer != traversable_buildings:
+		return
+	var item_id: String = ""
+	if building_object_manager and building_object_manager.has_method("get_building"):
+		var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
+		item_id = str(building.get("item_id", ""))
+	if item_id == "" and layer.get_cell_source_id(cell) >= 0:
+		item_id = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+	if item_id != "pasteque":
+		return
+	if reservoir_system != null and reservoir_system.has_method("clear_pasteque_irrigation_from_cell"):
+		reservoir_system.call("clear_pasteque_irrigation_from_cell", cell)
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
 	var layers: Array[TileMapLayer] = [blocking_buildings, traversable_buildings, plantz, wallz]
@@ -914,7 +929,7 @@ func _requires_grass_green_floor(placeable_def: Dictionary) -> bool:
 func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null or floorz.get_cell_source_id(cell) < 0:
 		return false
-	return floorz.get_cell_atlas_coords(cell) == GRASS_GREEN_FLOOR_ATLAS
+	return floorz.get_cell_atlas_coords(cell) == FLOOR_TILE_CATALOG.GRASS_GREEN_FLOOR_ATLAS
 
 func _placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
 	if not _requires_grass_green_floor(placeable_def):
@@ -1010,8 +1025,10 @@ func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_pla
 		Sfx.play_sound(&"plant")
 	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
 		building_object_manager.call("add_building", cell, placeable_def)
-	if (placeable_id == "reservoir" or placeable_id == "small_reservoir") and reservoir_system != null and reservoir_system.has_method("request_irrigation_from_cell"):
-		reservoir_system.call("request_irrigation_from_cell", cell)
+	if placeable_id == "reservoir" and reservoir_system != null and reservoir_system.has_method("request_reservoir_irrigation_from_cell"):
+		reservoir_system.call("request_reservoir_irrigation_from_cell", cell)
+	if placeable_id == "pasteque" and reservoir_system != null and reservoir_system.has_method("request_pasteque_irrigation_from_cell"):
+		reservoir_system.call("request_pasteque_irrigation_from_cell", cell)
 
 func _preload_build_fx_pool() -> void:
 	var count: int = maxi(build_fx_pool_size, 0)

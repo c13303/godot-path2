@@ -11,11 +11,11 @@ class_name LevelSpawnConfig
 @export var starting_weapons: Array[StringName] = [&"spray"]
 # Any non-weapon item granted to the player at the start of a fresh run, as
 # item_id (StringName) -> quantity (int > 0). Placed into the inventory alongside the
-# starting weapons; e.g. { &"small_reservoir": 10 }. Weapons use starting_weapons above.
+# starting weapons; e.g. { &"pasteque": 10 }. Weapons use starting_weapons above.
 @export var starting_items: Dictionary = {}
 # Item ids whose "Available" box is unchecked in the Rose Level editor's Items tab: they
 # are hidden entirely from the in-game toolbuild vertical build menu, even always-shown
-# inventory-backed buildables like small_reservoir. Empty = every buildable stays
+# inventory-backed buildables like pasteque. Empty = every buildable stays
 # available as before.
 @export var starting_item_toolbuild_hidden: Array[StringName] = []
 
