@@ -458,7 +458,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "ronce"
+	return item_id == "rose" or item_id == "turret1" or item_id == "wall" or item_id == "ronce" or item_id == "fence"
 
 
 func get_build_price(item_id: String) -> int:
@@ -884,7 +884,7 @@ func _build_tile_layer_for_item_def(item_def: Dictionary) -> TileMapLayer:
 		target_layer = "traversable_buildings"
 	var map_root: Node = scene.get_node_or_null("Map")
 	match target_layer:
-		"plantz", "traversable_buildings", "blocking_buildings":
+		"plantz", "traversable_buildings", "blocking_buildings", "fences":
 			return scene.get_node_or_null("Map/MonTilemap/%s" % target_layer) as TileMapLayer
 		"wallz":
 			if map_root != null:

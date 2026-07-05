@@ -1239,6 +1239,7 @@ spawn_playlist = ExtResource("2_6dc0g")
 starting_gems = 10
 starting_weapons = Array[StringName]([&"spray", &"epine"])
 tool_shop_prices = {
+&"fence": 1,
 &"ronce": 1,
 &"rose": 1,
 &"turret_epine": 5,
@@ -1249,10 +1250,11 @@ tool_shop_growth_price_factors = {
 &"turret_epine": 2.0
 }
 merchant_available_items = Array[StringName]([&"spray", &"beam"])
-shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,
+&"fence": 1,
 &"ronce": 1,
 &"rose": 1,
 &"seed": 2,
@@ -1288,6 +1290,11 @@ tile_map_data = PackedByteArray("AAAyAEcAAAAKAAEAAAAyAEgAAAAKAAEAAAAyAEkAAAAKAAE
 tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/water = true
+
+[node name="fences" type="TileMapLayer" parent="."]
+z_index = -49
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
 
 [node name="spawners" type="Node" parent="." unique_id=608668911]
 

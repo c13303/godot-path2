@@ -6,6 +6,7 @@ signal building_removed(cell: Vector2i, item_id: String)
 
 @export var traversable_buildings: TileMapLayer
 @export var blocking_buildings: TileMapLayer
+@export var fences: TileMapLayer
 @export var runtime_parent: Node2D
 # Generic static-obstacle steering system (CPP/SteeringSystemNative). Blocking buildings
 # register a circular static obstacle here so agents are locally pushed around them.
@@ -20,7 +21,7 @@ const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reserv
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
 const RESERVOIR_Z_INDEX: int = 510
-const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation"]
+const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation", "fence"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
 const TILE_TRANSFORM_TRANSPOSE: int = 16384
@@ -33,7 +34,12 @@ var _static_obstacle_ids_by_cell: Dictionary = {}
 
 func _ready() -> void:
 	_connect_game_state()
+	_resolve_level_layers()
 	initialize_from_layer()
+
+func _resolve_level_layers() -> void:
+	if fences == null:
+		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 func initialize_from_layer() -> void:
 	_buildings_by_cell.clear()
@@ -41,6 +47,7 @@ func initialize_from_layer() -> void:
 	_clear_static_obstacles()
 	_initialize_from_one_layer(traversable_buildings)
 	_initialize_from_one_layer(blocking_buildings)
+	_initialize_from_one_layer(fences)
 	_log("Indexed buildings=%d rose_shop_counters=%d" % [
 		_buildings_by_cell.size(),
 		count_buildings_by_item_id("rose_shop_counter"),
@@ -92,7 +99,7 @@ func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
 	_remove_runtime_node(cell)
 	_unregister_blocking_obstacle(cell)
 	if erase_tile:
-		for layer in [traversable_buildings, blocking_buildings]:
+		for layer in [traversable_buildings, blocking_buildings, fences]:
 			if layer and layer.get_cell_source_id(cell) >= 0:
 				layer.erase_cell(cell)
 				layer.update_internals()
@@ -266,6 +273,8 @@ func _runtime_parent() -> Node2D:
 func _reference_layer() -> TileMapLayer:
 	if traversable_buildings:
 		return traversable_buildings
+	if fences:
+		return fences
 	return blocking_buildings
 
 func _cell_center(cell: Vector2i) -> Vector2:

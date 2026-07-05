@@ -1242,8 +1242,9 @@ starting_gems = 10
 starting_items = {
 &"pasteque": 1
 }
-tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce"])
+tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence"])
 tool_shop_prices = {
+&"fence": 1,
 &"ronce": 1,
 &"rose": 1,
 &"turret1": 5,
@@ -1252,10 +1253,11 @@ tool_shop_prices = {
 }
 tool_shop_growth_price_factors = {}
 merchant_available_items = Array[StringName]([&"spray", &"beam"])
-shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,
+&"fence": 1,
 &"ronce": 1,
 &"rose": 1,
 &"seed": 2,

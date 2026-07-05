@@ -21,15 +21,15 @@ extends Node
 @export var level_scene: PackedScene
 
 ## The authored layers a level provides, in the order they should be hosted.
-const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz"]
+const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz", "fences"]
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
 const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"pasteque"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 const RESERVOIR_Z_INDEX: int = 510
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
@@ -45,13 +45,14 @@ var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_starting_items: Dictionary = {}
 var _loaded_starting_item_toolbuild_hidden: Array[StringName] = []
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret1": 5,
 	&"turret_epine": 5,
 	&"wall": 100,
 	&"ronce": 1,
+	&"fence": 1,
 }
 var _loaded_tool_shop_growth_price_factors: Dictionary = {
 	&"ronce": 2.0,
@@ -89,6 +90,8 @@ func _load_level() -> void:
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
 		if layer == null:
+			if layer_name == "fences":
+				continue
 			push_warning("LevelLoader: level '%s' is missing layer '%s'." % [scene_to_load.resource_path, layer_name])
 			continue
 		if host.has_node(NodePath(layer_name)):
@@ -98,6 +101,7 @@ func _load_level() -> void:
 		layer.name = layer_name
 		_clear_owner_recursive(layer)
 		host.add_child(layer)
+	_ensure_optional_fences_layer(host)
 	_reparent_spawner_container(level_root, host)
 	_reparent_reservoir_nodes(level_root, host)
 
@@ -111,6 +115,19 @@ func _clear_owner_recursive(node: Node) -> void:
 	node.owner = null
 	for child in node.get_children():
 		_clear_owner_recursive(child)
+
+
+func _ensure_optional_fences_layer(host: Node) -> void:
+	if host == null or host.has_node(^"fences"):
+		return
+	var wall_layer: TileMapLayer = host.get_node_or_null(^"wallz") as TileMapLayer
+	var fence_layer: TileMapLayer = TileMapLayer.new()
+	fence_layer.name = "fences"
+	fence_layer.z_index = -49
+	fence_layer.navigation_enabled = false
+	if wall_layer != null:
+		fence_layer.tile_set = wall_layer.tile_set
+	host.add_child(fence_layer)
 
 
 func get_loaded_level_scene_path() -> String:
@@ -236,13 +253,14 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_items = {}
 	_loaded_starting_item_toolbuild_hidden = []
 	_loaded_monster_drop_seed_chance_percent = 0
-	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce"]
+	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
 	_loaded_tool_shop_prices = {
 		&"rose": 1,
 		&"turret1": 5,
 		&"turret_epine": 5,
 		&"wall": 100,
 		&"ronce": 1,
+		&"fence": 1,
 	}
 	_loaded_tool_shop_growth_price_factors = {
 		&"ronce": 2.0,

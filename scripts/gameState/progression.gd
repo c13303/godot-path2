@@ -19,6 +19,7 @@ const LAYER_NAMES: Array[String] = [
 	"wallz",
 	"traversable_buildings",
 	"blocking_buildings",
+	"fences",
 ]
 
 ## Per-prop starting values, exposed for inspector tuning. These seed the matching
@@ -629,7 +630,10 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	var saved_layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:
 		var layer: TileMapLayer = layers[layer_name] as TileMapLayer
-		var cells: Array = saved_layers[layer_name] as Array
+		var cells: Array = []
+		var raw_cells: Variant = saved_layers.get(layer_name, [])
+		if raw_cells is Array:
+			cells = raw_cells as Array
 		_restore_layer(layer, cells)
 		_log("Restored layer %s: %d cells" % [layer_name, cells.size()])
 
@@ -883,6 +887,8 @@ func _validate_save(data: Dictionary) -> String:
 
 	var layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:
+		if layer_name == "fences" and not layers.has(layer_name):
+			continue
 		if not (layers.get(layer_name) is Array):
 			return "invalid layer " + layer_name
 		var cells: Array = layers[layer_name] as Array

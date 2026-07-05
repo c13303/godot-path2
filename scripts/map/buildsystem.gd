@@ -24,6 +24,29 @@ const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
 const DIRECTION_UP: Vector2i = Vector2i(0, -1)
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
+const FENCE_ITEM_ID: String = "fence"
+const FENCE_NEIGHBOR_NORTH: int = 1
+const FENCE_NEIGHBOR_EAST: int = 2
+const FENCE_NEIGHBOR_SOUTH: int = 4
+const FENCE_NEIGHBOR_WEST: int = 8
+const FENCE_ATLAS_BY_MASK: Dictionary = {
+	0: Vector2i(5, 7),
+	1: Vector2i(4, 7),
+	2: Vector2i(5, 6),
+	3: Vector2i(4, 8),
+	4: Vector2i(4, 7),
+	5: Vector2i(4, 7),
+	6: Vector2i(4, 6),
+	7: Vector2i(8, 7),
+	8: Vector2i(5, 6),
+	9: Vector2i(6, 8),
+	10: Vector2i(5, 6),
+	11: Vector2i(7, 7),
+	12: Vector2i(6, 6),
+	13: Vector2i(8, 6),
+	14: Vector2i(7, 6),
+	15: Vector2i(7, 8),
+}
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
@@ -31,6 +54,7 @@ const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 @export var plantz: TileMapLayer
 @export var traversable_buildings: TileMapLayer
 @export var blocking_buildings: TileMapLayer
+@export var fences: TileMapLayer
 @export var previewbuild: TileMapLayer
 @export var plant_manager: Node
 @export var building_object_manager: Node
@@ -94,6 +118,8 @@ func _resolve_level_layers() -> void:
 		watersources = get_node_or_null("../MonTilemap/watersources") as TileMapLayer
 	if wallz == null:
 		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
+	if fences == null:
+		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 func _configure_preview_layer() -> void:
 	if previewbuild == null:
@@ -421,7 +447,7 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 			plantz.erase_cell(cell)
 			_flush_plant_layer_visuals()
 		return
-	if layer == traversable_buildings or layer == blocking_buildings:
+	if layer == traversable_buildings or layer == blocking_buildings or layer == fences:
 		_clear_pasteque_irrigation_before_unbuild(layer, cell)
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, true)
@@ -430,6 +456,8 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 			layer.update_internals()
 		_refresh_cell_collision(cell)
 		_refresh_cell_terrain_speed(cell)
+		if layer == fences:
+			_refresh_fence_autotiles_around(cell)
 		return
 	layer.erase_cell(cell)
 	layer.update_internals()
@@ -451,13 +479,13 @@ func _clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector
 		reservoir_system.call("clear_pasteque_irrigation_from_cell", cell)
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
-	var layers: Array[TileMapLayer] = [blocking_buildings, traversable_buildings, plantz, wallz]
+	var layers: Array[TileMapLayer] = [blocking_buildings, fences, traversable_buildings, plantz, wallz]
 	for layer: TileMapLayer in layers:
 		if not layer or layer.get_cell_source_id(cell) < 0:
 			continue
 		var atlas_coords: Vector2i = layer.get_cell_atlas_coords(cell)
 		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), atlas_coords)
-		if building_object_manager and building_object_manager.has_method("get_building") and (layer == blocking_buildings or layer == traversable_buildings):
+		if building_object_manager and building_object_manager.has_method("get_building") and (layer == blocking_buildings or layer == traversable_buildings or layer == fences):
 			var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
 			item_id = str(building.get("item_id", item_id))
 		if item_id != "" and _can_unbuild_tile(layer, item_id, atlas_coords):
@@ -599,11 +627,14 @@ func _sync_terrain_speed_cells() -> void:
 		return
 	if ff.has_method("clear_cell_speed_multipliers"):
 		ff.call("clear_cell_speed_multipliers")
-	if traversable_buildings == null or not ff.has_method("set_cell_speed_multiplier"):
+	if not ff.has_method("set_cell_speed_multiplier"):
 		return
-	for raw_cell: Variant in traversable_buildings.get_used_cells():
-		var cell: Vector2i = raw_cell as Vector2i
-		_refresh_cell_terrain_speed(cell)
+	for layer: TileMapLayer in [traversable_buildings, fences]:
+		if layer == null:
+			continue
+		for raw_cell: Variant in layer.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
+			_refresh_cell_terrain_speed(cell)
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	var ff: Object = _resolve_flow_field()
@@ -616,7 +647,59 @@ func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 		if item_id != "":
 			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 			speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+	if fences != null and fences.get_cell_source_id(cell) >= 0:
+		var fence_atlas_coords: Vector2i = fences.get_cell_atlas_coords(cell)
+		var fence_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(fences.name), fence_atlas_coords)
+		if fence_item_id != "":
+			var fence_item_def: Dictionary = ItemCatalog.get_item_def(fence_item_id)
+			var fence_speed_multiplier: float = clampf(float(fence_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, fence_speed_multiplier)
 	ff.call("set_cell_speed_multiplier", cell, speed_multiplier)
+
+func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
+	var touched: Dictionary = {}
+	for cell: Vector2i in cells:
+		for refresh_cell: Vector2i in _fence_refresh_cells(cell):
+			touched[refresh_cell] = true
+	for raw_cell: Variant in touched.keys():
+		_refresh_fence_autotile(raw_cell as Vector2i)
+	if fences != null:
+		fences.update_internals()
+
+func _refresh_fence_autotiles_around(cell: Vector2i) -> void:
+	var cells: Array[Vector2i] = [cell]
+	_refresh_fence_autotiles_for_cells(cells)
+
+func _fence_refresh_cells(cell: Vector2i) -> Array[Vector2i]:
+	return [
+		cell,
+		cell + DIRECTION_UP,
+		cell + DIRECTION_RIGHT,
+		cell + DIRECTION_DOWN,
+		cell + DIRECTION_LEFT,
+	]
+
+func _refresh_fence_autotile(cell: Vector2i) -> void:
+	if fences == null or fences.get_cell_source_id(cell) < 0:
+		return
+	var mask: int = _fence_neighbor_mask(cell)
+	var atlas_coords: Vector2i = FENCE_ATLAS_BY_MASK.get(mask, Vector2i(5, 7)) as Vector2i
+	fences.set_cell(cell, _atlas_source_id, atlas_coords)
+
+func _fence_neighbor_mask(cell: Vector2i) -> int:
+	var mask: int = 0
+	if _has_fence_cell(cell + DIRECTION_UP):
+		mask |= FENCE_NEIGHBOR_NORTH
+	if _has_fence_cell(cell + DIRECTION_RIGHT):
+		mask |= FENCE_NEIGHBOR_EAST
+	if _has_fence_cell(cell + DIRECTION_DOWN):
+		mask |= FENCE_NEIGHBOR_SOUTH
+	if _has_fence_cell(cell + DIRECTION_LEFT):
+		mask |= FENCE_NEIGHBOR_WEST
+	return mask
+
+func _has_fence_cell(cell: Vector2i) -> bool:
+	return fences != null and fences.get_cell_source_id(cell) >= 0
 
 func _resolve_flow_field() -> Object:
 	if _flow_field and is_instance_valid(_flow_field):
@@ -781,6 +864,8 @@ func _finish_drag_build() -> void:
 		_after_placeable_placed(cell, placeable_def, false)
 		_play_build_fx_at_cell(cell, target_layer)
 	target_layer.update_internals()
+	if item_id == FENCE_ITEM_ID:
+		_refresh_fence_autotiles_for_cells(cells)
 	if target_layer == plantz:
 		_flush_plant_layer_visuals()
 	var sound: StringName = _drag_build_sound(item_id)
@@ -850,6 +935,8 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		_refresh_cell_collision(_hover_cell)
 	_refresh_cell_terrain_speed(_hover_cell)
 	_after_placeable_placed(_hover_cell, placeable_def)
+	if item_id == FENCE_ITEM_ID:
+		_refresh_fence_autotiles_around(_hover_cell)
 	_play_build_fx_at_cell(_hover_cell, target_layer)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
@@ -859,6 +946,8 @@ func _target_tile_layer(layer_name: String) -> TileMapLayer:
 		return traversable_buildings
 	if layer_name == "blocking_buildings":
 		return blocking_buildings
+	if layer_name == "fences":
+		return fences
 	# Backward compatibility: old "buildings" target maps to traversable_buildings.
 	if layer_name == "buildings":
 		return traversable_buildings
@@ -887,6 +976,13 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 		blocking_buildings.update_internals()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
+	if target_layer != fences and fences:
+		fences.erase_cell(cell)
+		fences.update_internals()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
+		_refresh_cell_terrain_speed(cell)
+		_refresh_fence_autotiles_around(cell)
 
 # True only when `cell` is a real floor tile with no blocking wall on it. Used by
 # placeables (e.g. turret1) that may only be built on free walkable ground. This is
@@ -908,6 +1004,8 @@ func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeabl
 	if traversable_buildings and traversable_buildings != target_layer and traversable_buildings.get_cell_source_id(cell) >= 0:
 		return true
 	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
+		return true
+	if fences and fences != target_layer and fences.get_cell_source_id(cell) >= 0:
 		return true
 	return _is_occupied_by_group_node(cell, placeable_def)
 
@@ -1090,7 +1188,7 @@ func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
 	var light_source: float = float(placeable_def.get("light_source", 0.0))
 	if light_source > 0.0:
 		return true
-	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation"
+	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation" or placeable_category == "fence"
 
 func _is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
 	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz

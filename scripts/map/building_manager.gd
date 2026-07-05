@@ -80,6 +80,9 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 # blockers like walls. Their flow-field topology is applied once when night starts,
 # never while the player is building during the day.
 @export var blocking_buildings: TileMapLayer
+# Player-walkable, agent-blocking fences. These block monster/client routing, but not
+# player collision or projectiles.
+@export var fences: TileMapLayer
 @export var plant_manager: Node
 @export var flow: Node
 @export var agent_manager: Node
@@ -209,6 +212,7 @@ var _scan_timer: float = 0.0
 var _last_wall_signature: int = 0
 var _last_water_signature: int = 0
 var _last_blocking_signature: int = 0
+var _last_fence_signature: int = 0
 var _navigation_topology_dirty: bool = true
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
@@ -522,6 +526,8 @@ func _resolve_level_layers() -> void:
 		watersources = get_node_or_null("../MonTilemap/watersources") as WaterSources
 	if wallz == null:
 		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
+	if fences == null:
+		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 
 func _resolve_desire() -> void:
@@ -1448,20 +1454,24 @@ func _scan_buildings() -> void:
 	var wall_signature: int = _tile_layer_signature(wallz)
 	var water_signature: int = _tile_layer_signature(watersources)
 	var blocking_signature: int = _tile_layer_signature(blocking_buildings)
+	var fence_signature: int = _tile_layer_signature(fences)
 	_warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
-		"wall_cells=%d water_cells=%d" % [
+		"wall_cells=%d water_cells=%d fence_cells=%d" % [
 			wallz.get_used_cells().size() if wallz else 0,
 			watersources.get_used_cells().size() if watersources else 0,
+			fences.get_used_cells().size() if fences else 0,
 		])
 	var walls_changed: bool = (
 		wall_signature != _last_wall_signature
 		or water_signature != _last_water_signature
 		or blocking_signature != _last_blocking_signature
+		or fence_signature != _last_fence_signature
 		or migrated
 	)
 	_last_wall_signature = wall_signature
 	_last_water_signature = water_signature
 	_last_blocking_signature = blocking_signature
+	_last_fence_signature = fence_signature
 
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
@@ -1513,6 +1523,10 @@ func _sync_flow_extra_blocking_cells() -> void:
 			if not _building_cell_blocks_movement(cell):
 				continue
 			cells.append(Vector2(float(cell.x), float(cell.y)))
+	if fences != null:
+		for raw_cell: Variant in fences.get_used_cells():
+			var fence_cell: Vector2i = raw_cell as Vector2i
+			cells.append(Vector2(float(fence_cell.x), float(fence_cell.y)))
 	flow.call("set_extra_blocking_cells", cells)
 
 func _sync_runtime_state() -> void:
@@ -1698,6 +1712,8 @@ func _building_item_blocks_flow(item_id: String) -> bool:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if item_def.is_empty():
 		return false
+	if bool(item_def.get("blocks_agents", false)):
+		return true
 	if str(item_def.get("target_layer", "")) != "blocking_buildings":
 		return false
 	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
@@ -4583,6 +4599,8 @@ func _has_floor(cell: Vector2i) -> bool:
 
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
+		return true
+	if fences != null and fences.get_cell_tile_data(cell) != null:
 		return true
 	return _building_cell_blocks_movement(cell)
 
