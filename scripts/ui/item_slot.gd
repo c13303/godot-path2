@@ -121,23 +121,14 @@ func _refresh() -> void:
 	else:
 		_key_label.text = ""
 
-	var style := StyleBoxFlat.new()
+	var style: StyleBoxFlat = StyleBoxFlat.new()
 	style.bg_color = Color(0.10, 0.11, 0.12, 0.92)
-	style.border_width_left = 2
-	style.border_width_top = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
 	style.border_color = Color(0.30, 0.33, 0.35)
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(4)
 	if selected:
 		style.bg_color = Color(0.16, 0.18, 0.18, 0.96)
-		style.border_width_left = 4
-		style.border_width_top = 4
-		style.border_width_right = 4
-		style.border_width_bottom = 4
+		style.set_border_width_all(4)
 		style.border_color = Color(0.92, 0.78, 0.34)
 	if disabled:
 		style.bg_color = Color(0.055, 0.06, 0.065, 0.88)

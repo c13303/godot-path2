@@ -19,7 +19,7 @@ unchanged. This doc is the replacement reference.
  1. The native nodes involved
 ------------------------------------------------------------------------------
 
-Under the "CPP" node in scenes/main/mainRun.tscn:
+Under the "CPP" node in mainRun.tscn:
 
   AgentManagerNative   - registers agents, owns group ids, tracks orders
   FlowFieldNative      - computes/holds flow fields (one per goal/group)

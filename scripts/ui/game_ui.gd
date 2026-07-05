@@ -31,7 +31,8 @@ const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_
 # whether a gardening buildable is currently equipped, which drives the tutorial's plant step.
 const GARDENING_BUILDABLE_IDS: Array[String] = ["rose", "ronce", "pasteque", "turret1", "turret_epine"]
 
-@onready var toolbar_slots: HBoxContainer = $"bottom anchor/toolbar"
+@onready var toolbar_slots: HBoxContainer = $"bottom anchor/ToolbarPanel/toolbar"
+@onready var toolbar_panel: PanelContainer = $"bottom anchor/ToolbarPanel"
 @onready var toolbar_info: RichTextLabel = get_node_or_null("bottom anchor/toolbarInfo") as RichTextLabel
 @onready var toolbar_anchor: Control = $"bottom anchor"
 @onready var modals_root: Control = $Modals
@@ -1252,6 +1253,35 @@ func _build_toolbar() -> void:
 		toolbar_slots.add_child(slot)
 		slot.setup(self, "quick", i)
 		_toolbar_slot_nodes.append(slot)
+	call_deferred("_fit_toolbar_panel_to_slots")
+
+func _fit_toolbar_panel_to_slots() -> void:
+	if toolbar_panel == null:
+		return
+	var slot_count: int = _toolbar_slot_nodes.size()
+	var content_width: float = 0.0
+	var content_height: float = 0.0
+	for slot: ItemSlot in _toolbar_slot_nodes:
+		var slot_size: Vector2 = slot.get_combined_minimum_size()
+		content_width += slot_size.x
+		content_height = maxf(content_height, slot_size.y)
+	var separation: float = float(toolbar_slots.get_theme_constant("separation"))
+	if slot_count > 1:
+		content_width += separation * float(slot_count - 1)
+	var panel_style: StyleBox = toolbar_panel.get_theme_stylebox("panel")
+	var margin_left: float = panel_style.get_content_margin(SIDE_LEFT) if panel_style != null else 0.0
+	var margin_right: float = panel_style.get_content_margin(SIDE_RIGHT) if panel_style != null else 0.0
+	var margin_top: float = panel_style.get_content_margin(SIDE_TOP) if panel_style != null else 0.0
+	var margin_bottom: float = panel_style.get_content_margin(SIDE_BOTTOM) if panel_style != null else 0.0
+	var panel_size: Vector2 = Vector2(
+		content_width + margin_left + margin_right,
+		content_height + margin_top + margin_bottom
+	)
+	toolbar_panel.custom_minimum_size = panel_size
+	toolbar_panel.offset_left = -panel_size.x * 0.5
+	toolbar_panel.offset_right = panel_size.x * 0.5
+	toolbar_panel.offset_top = -panel_size.y
+	toolbar_panel.offset_bottom = 0.0
 
 func _build_inventory() -> void:
 	_clear_container(inventory_content)

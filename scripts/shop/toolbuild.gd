@@ -109,9 +109,11 @@ var _row_labels: Dictionary = {}
 var _row_names: Dictionary = {}
 var _row_prices: Dictionary = {}
 var _row_currencies: Dictionary = {}
-# The single floating label shown to the right of the selected slot only.
+# The single floating item-name label shown to the right of the slot the mouse is hovering.
+# Empty _hovered_item_id hides it.
 var _selected_label: HBoxContainer
 var _selected_name: Label
+var _hovered_item_id: String = ""
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
@@ -184,6 +186,7 @@ func _process(_delta: float) -> void:
 		_weapon_column.visible = true
 	elif not weapon_should_show and _weapon_column != null and _weapon_column.visible:
 		_weapon_column.visible = false
+		_reset_hover_label()
 	if merchant_should_show:
 		_open_merchant_shop()
 	elif _merchant_column != null and _merchant_column.visible:
@@ -196,9 +199,11 @@ func _process(_delta: float) -> void:
 		_apply_weapon_layout()
 		_refresh_weapon_menu()
 		_update_weapon_column_anchor()
+		_update_hover_label()
 	if _merchant_column != null and _merchant_column.visible:
 		_apply_merchant_layout()
 		_refresh_merchant_slots()
+		_update_hover_label()
 
 
 ## The kind of quickbar menu game_ui currently has open ("weapon"/gardening/hammer), or "".
@@ -223,6 +228,7 @@ func _build_ui() -> void:
 	_build_selected_label()
 	_build_weapon_ui()
 	_build_merchant_ui()
+	move_child(_selected_label, get_child_count() - 1)
 	_apply_phase_layout()
 
 
@@ -261,7 +267,7 @@ func _build_weapon_ui() -> void:
 	column.visible = false
 
 
-## Rebuilds the weapon rows when the owned set changes, then highlights the equipped weapon.
+## Rebuilds the weapon rows when the owned set changes, then highlights the hovered weapon.
 func _refresh_weapon_menu() -> void:
 	var ids: Array[String] = _possessed_weapon_ids()
 	var equipped: String = _equipped_weapon_id()
@@ -273,7 +279,7 @@ func _refresh_weapon_menu() -> void:
 		var button: Button = _weapon_buttons.get(id) as Button
 		if button == null:
 			continue
-		_apply_slot_style(button, id == equipped, false)
+		_apply_slot_style(button, id == _hovered_item_id, false)
 
 
 func _rebuild_weapon_rows(ids: Array[String]) -> void:
@@ -284,20 +290,11 @@ func _rebuild_weapon_rows(ids: Array[String]) -> void:
 	_weapon_buttons.clear()
 	_weapon_icons.clear()
 	_weapon_names.clear()
+	# Icons only; the hovered weapon's name is shown by the shared floating label.
 	for id: String in ids:
-		var row: HBoxContainer = HBoxContainer.new()
-		row.name = id + "WeaponRow"
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.alignment = BoxContainer.ALIGNMENT_BEGIN
-		row.add_theme_constant_override("separation", 8)
-		row.add_child(_build_weapon_slot(id))
-		var name_label: Label = _make_row_label(18)
-		name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-		name_label.text = _display_name(id)
-		row.add_child(name_label)
-		_weapon_items_list.add_child(row)
-		_weapon_rows[id] = row
-		_weapon_names[id] = name_label
+		var button: Button = _build_weapon_slot(id)
+		_weapon_items_list.add_child(button)
+		_weapon_rows[id] = button
 
 
 func _build_weapon_slot(item_id: String) -> Button:
@@ -305,9 +302,9 @@ func _build_weapon_slot(item_id: String) -> Button:
 	var button: Button = Button.new()
 	button.name = item_id
 	button.custom_minimum_size = SLOT_SIZE
-	button.tooltip_text = _display_name(item_id)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(_on_weapon_pressed.bind(item_id))
+	_connect_hover_label(button, item_id)
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
@@ -479,9 +476,9 @@ func _build_merchant_slot(item_id: String) -> Button:
 	var button: Button = Button.new()
 	button.name = item_id
 	button.custom_minimum_size = SLOT_SIZE
-	button.tooltip_text = _display_name(item_id)
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(_on_merchant_item_pressed.bind(item_id))
+	_connect_hover_label(button, item_id)
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
@@ -528,6 +525,7 @@ func _build_selected_label() -> void:
 	_selected_label = group
 	group.name = "SelectedItemLabel"
 	group.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	group.z_index = 100
 	group.add_theme_constant_override("separation", 8)
 	add_child(group)
 
@@ -635,10 +633,10 @@ func _build_slot(item_id: String) -> Button:
 	var button: Button = Button.new()
 	button.name = item_id
 	button.custom_minimum_size = SLOT_SIZE
-	button.tooltip_text = _display_name(item_id)
 	# Mouse-only: keyboard/gamepad focus would let the GUI layer swallow game input.
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(_on_item_pressed.bind(item_id))
+	_connect_hover_label(button, item_id)
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
@@ -747,6 +745,14 @@ func _close_all() -> void:
 func _close_toolbuild() -> void:
 	_set_toolbuild_open(false)
 	_shown_build_tool_id = ""
+	_reset_hover_label()
+
+
+## Clears the hover state and hides the floating item-name label (on menu close).
+func _reset_hover_label() -> void:
+	_hovered_item_id = ""
+	if _selected_label != null:
+		_selected_label.visible = false
 
 
 func _set_toolbuild_open(is_open: bool) -> void:
@@ -781,6 +787,7 @@ func _close_merchant_shop() -> void:
 	if _merchant_column != null:
 		_merchant_column.visible = false
 	_selected_merchant_item_id = ""
+	_reset_hover_label()
 	visible = (_toolbuild_column != null and _toolbuild_column.visible) or (_weapon_column != null and _weapon_column.visible)
 
 
@@ -1024,7 +1031,7 @@ func _refresh_slots() -> void:
 		var button: Button = _slot_buttons[item_id] as Button
 		var affordable: int = _affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
-		var selected: bool = item_id == _selected_item_id
+		var highlighted: bool = item_id == _hovered_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = _slot_badge_text(item_id)
 		# The counter's badge is a remaining-stock count, not a price, so it carries no
@@ -1036,14 +1043,14 @@ func _refresh_slots() -> void:
 		# The merchant column signals unaffordability through the per-row label colour, so its
 		# slots stay at full colour; the build column greys unaffordable/locked slots.
 		var visual_disabled: bool = disabled
-		var state: Array[bool] = [selected, visual_disabled]
+		var state: Array[bool] = [highlighted, visual_disabled]
 		if _slot_state.get(item_id) != state:
 			_slot_state[item_id] = state
-			_apply_slot_style(button, selected, visual_disabled)
+			_apply_slot_style(button, highlighted, visual_disabled)
 			(_slot_icons[item_id] as TextureRect).modulate = (
 				Color(0.45, 0.45, 0.45, 0.55) if visual_disabled else Color.WHITE
 			)
-	_update_selected_label()
+	_update_hover_label()
 	_update_row_labels()
 	_maybe_auto_switch_from_empty()
 
@@ -1083,25 +1090,56 @@ func _next_available_buildable(from_id: String) -> String:
 	return ""
 
 
-## Fills in and positions the floating label for the selected slot only. It shows the
-## buildable's name, turning red when it cannot be placed.
-## During the merchant phase (no build pick) the label stays hidden — icons only.
-func _update_selected_label() -> void:
+## Connects a menu slot button so hovering it shows the shared floating item-name label.
+func _connect_hover_label(button: Button, item_id: String) -> void:
+	button.mouse_entered.connect(_on_slot_hover.bind(item_id, true))
+	button.mouse_exited.connect(_on_slot_hover.bind(item_id, false))
+
+
+func _on_slot_hover(item_id: String, entered: bool) -> void:
+	if entered:
+		_hovered_item_id = item_id
+	elif _hovered_item_id == item_id:
+		_hovered_item_id = ""
+	_update_hover_label()
+
+
+func _button_for_item(item_id: String) -> Button:
+	if _slot_buttons.has(item_id):
+		return _slot_buttons[item_id] as Button
+	if _weapon_buttons.has(item_id):
+		return _weapon_buttons[item_id] as Button
+	if _merchant_slot_buttons.has(item_id):
+		return _merchant_slot_buttons[item_id] as Button
+	if item_id.begins_with(SPECIAL_REWARD_PAD_PREFIX):
+		for cell: Control in _reward_cells:
+			var button: Button = cell as Button
+			if button != null and str(button.get_meta(&"reward_pad_id", "")) == item_id:
+				return button
+	return null
+
+
+## Fills in and positions the floating label next to the slot the mouse is hovering. Build and
+## merchant items that cannot be used turn the label red. Hidden when nothing is hovered.
+func _update_hover_label() -> void:
 	if _selected_label == null:
 		return
-	var item_id: String = _selected_item_id
-	if item_id == "" or not _slot_buttons.has(item_id):
-		_selected_label.visible = false
-		return
-	var button: Button = _slot_buttons[item_id] as Button
-	if not button.visible:
+	var item_id: String = _hovered_item_id
+	var button: Button = _button_for_item(item_id) if item_id != "" else null
+	if button == null or not button.visible:
 		_selected_label.visible = false
 		return
 	_selected_label.visible = true
-	var can_place: bool = _can_afford(item_id) and not _is_item_locked(item_id)
-	var color: Color = SELECTED_LABEL_COLOR if can_place else SELECTED_DISABLED_LABEL_COLOR
+	var color: Color = SELECTED_LABEL_COLOR
+	# Build slots redden when the buildable cannot be placed; weapon slots are always plain.
+	if _slot_buttons.has(item_id):
+		var can_place: bool = _can_afford(item_id) and not _is_item_locked(item_id)
+		color = SELECTED_LABEL_COLOR if can_place else SELECTED_DISABLED_LABEL_COLOR
+	elif _merchant_slot_buttons.has(item_id):
+		var can_buy: bool = _can_afford(item_id) and not _is_item_locked(item_id)
+		color = SELECTED_LABEL_COLOR if can_buy else SELECTED_DISABLED_LABEL_COLOR
 	_selected_name.add_theme_color_override("font_color", color)
-	_selected_name.text = _display_name(item_id)
+	_selected_name.text = _special_reward_label() if item_id.begins_with(SPECIAL_REWARD_PAD_PREFIX) else _display_name(item_id)
 	_position_selected_label(button)
 
 
@@ -1238,11 +1276,11 @@ func _refresh_merchant_slots() -> void:
 		var button: Button = _merchant_slot_buttons[item_id] as Button
 		var affordable: int = _merchant_affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0
-		var selected: bool = _selected_merchant_item_id == item_id
-		var state: Array[bool] = [selected, false]
+		var highlighted: bool = _hovered_item_id == item_id
+		var state: Array[bool] = [highlighted, false]
 		if _merchant_slot_state.get(item_id) != state:
 			_merchant_slot_state[item_id] = state
-			_apply_slot_style(button, selected, false)
+			_apply_slot_style(button, highlighted, false)
 			(_merchant_slot_icons[item_id] as TextureRect).modulate = Color.WHITE
 		var color: Color = SELECTED_DISABLED_LABEL_COLOR if disabled else SELECTED_LABEL_COLOR
 		var name_label: Label = _merchant_row_names[item_id] as Label
@@ -1304,8 +1342,8 @@ func _refresh_special_reward_selection_style() -> void:
 		var button: Button = _reward_cells[index] as Button
 		if button != null:
 			var pad_id: String = str(button.get_meta(&"reward_pad_id", ""))
-			var selected: bool = _selected_merchant_item_id == pad_id
-			_apply_slot_style(button, selected, false)
+			var highlighted: bool = _hovered_item_id == pad_id
+			_apply_slot_style(button, highlighted, false)
 		index += MERCHANT_COLUMNS
 
 
@@ -1351,10 +1389,11 @@ func _refresh_special_reward_row() -> void:
 func _build_reward_row_cells(currency: String, amount: int, reward_key: String) -> Array[Control]:
 	var button: Button = Button.new()
 	button.custom_minimum_size = SLOT_SIZE
-	button.tooltip_text = _special_reward_label()
 	button.focus_mode = Control.FOCUS_NONE
-	button.set_meta(&"reward_pad_id", _special_reward_pad_id(reward_key))
+	var reward_pad_id: String = _special_reward_pad_id(reward_key)
+	button.set_meta(&"reward_pad_id", reward_pad_id)
 	button.pressed.connect(_on_special_reward_pressed.bind(button, reward_key))
+	_connect_hover_label(button, reward_pad_id)
 	_apply_slot_style(button, false, false)
 
 	var icon: TextureRect = TextureRect.new()
@@ -1509,7 +1548,7 @@ func _apply_slot_style(button: Button, selected: bool, disabled: bool) -> void:
 		style.border_color = Color(0.15, 0.16, 0.17, 0.9)
 		if selected:
 			style.set_border_width_all(4)
-			style.border_color = SELECTED_DISABLED_LABEL_COLOR
+			style.border_color = Color(0.92, 0.78, 0.34)
 	for state_name: String in ["normal", "hover", "pressed", "focus", "disabled"]:
 		button.add_theme_stylebox_override(state_name, style)
 

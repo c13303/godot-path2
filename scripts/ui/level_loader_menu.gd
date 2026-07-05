@@ -2,7 +2,6 @@ extends Control
 
 const LEVELS_DIR: String = "res://scenes/levels"
 const MAIN_RUN_SCENE: String = "res://mainRun.tscn"
-const MAIN_RUN_BASE_SCENE: String = "res://scenes/main/mainRun.tscn"
 const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 const MANUAL_SAVE_PATH: String = "user://progression_save.json"
 const PAD_AXIS_DEADZONE: float = 0.45
@@ -174,8 +173,6 @@ func _reset_pad_hold_navigation() -> void:
 
 func _is_level_selection_enabled() -> bool:
 	var override_value: int = _read_level_selection_from_scene(MAIN_RUN_SCENE)
-	if override_value == LEVEL_SELECTION_UNSET:
-		override_value = _read_level_selection_from_scene(MAIN_RUN_BASE_SCENE)
 	return override_value == LEVEL_SELECTION_ENABLED
 
 

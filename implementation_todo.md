@@ -191,7 +191,7 @@ Use the project’s existing level-loading architecture. Inspect:
 res://scripts/map/level_loader.gd
 res://scenes/levels/level_demo.tscn
 res://scenes/levels/level_river.tscn
-res://scenes/main/mainRun.tscn
+res://mainRun.tscn
 res://scripts/map/building_manager.gd
 ```
 
@@ -558,7 +558,7 @@ Modify only the necessary existing files, likely including:
 ```text
 scripts/map/building_manager.gd
 scripts/map/level_loader.gd or the actual level integration point
-scenes/main/mainRun.tscn
+mainRun.tscn
 scenes/levels/level_demo.tscn
 ```
 

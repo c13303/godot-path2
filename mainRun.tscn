@@ -1,72 +1,1312 @@
 [gd_scene format=3 uid="uid://hwix5spp7crc"]
 
-[ext_resource type="PackedScene" uid="uid://ct78mat36fwuc" path="res://scenes/main/mainRun.tscn" id="1_main_run"]
+[ext_resource type="Script" uid="uid://cupb1x17lyekd" path="res://scripts/misc/lagMonitor.gd" id="1_1iu6q"]
+[ext_resource type="Script" uid="uid://dcjngyugck8d1" path="res://scripts/entities/player.gd" id="1_6cm2i"]
+[ext_resource type="Texture2D" uid="uid://cffsdc7sgt2fs" path="res://assets/sprites/legval/farmer.png" id="2_gtwxa"]
+[ext_resource type="Script" uid="uid://bu6qx56psr3lj" path="res://scripts/controls/player_controller.gd" id="3_mdsmv"]
+[ext_resource type="Script" uid="uid://cyemr34mbedp8" path="res://scripts/controls/camera_controller.gd" id="4_jptjp"]
+[ext_resource type="Texture2D" uid="uid://nbn16r37mwdo" path="res://assets/sprites/legval/lance.png" id="6_y7386"]
+[ext_resource type="Script" uid="uid://uxunvnd1ke7a" path="res://scripts/animations/lance.gd" id="7_pqqvp"]
+[ext_resource type="Script" uid="uid://bdr80wy54wx5w" path="res://scripts/controls/tile_hover_info.gd" id="8_5nq50"]
+[ext_resource type="Script" uid="uid://bp0pqt56ma3wj" path="res://scripts/global/agent_listener.gd" id="9_v7qf8"]
+[ext_resource type="Script" uid="uid://dilcxy6n0p208" path="res://scripts/pathfinder/FlowFieldCode.gd" id="10_8g1qu"]
+[ext_resource type="Script" uid="uid://rgvwggljlw8n" path="res://scripts/misc/label.gd" id="11_62xsw"]
+[ext_resource type="Script" uid="uid://6k6ogr8mpss" path="res://scripts/visual_fx/splashController.gd" id="12_t6n3k"]
+[ext_resource type="Script" uid="uid://bye6q0k7j4v32" path="res://scripts/controls/pause_overlay.gd" id="12_vj62y"]
+[ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
+[ext_resource type="Script" uid="uid://itkewskbri68" path="res://scripts/map/buildsystem.gd" id="17_k5rlw"]
+[ext_resource type="Script" uid="uid://cv7jp6vpx4hh8" path="res://scripts/map/building_manager.gd" id="18_vt3yt"]
+[ext_resource type="Script" uid="uid://d3edhdcktbvkw" path="res://scripts/combat/fight_system.gd" id="19_gvmlv"]
+[ext_resource type="Script" uid="uid://b1e22fwbyfhns" path="res://scripts/combat/turret_system.gd" id="19_turret"]
+[ext_resource type="Script" uid="uid://y5eghj2cqur0" path="res://scripts/misc/tutorial.gd" id="20_7xko8"]
+[ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
+[ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
+[ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
+[ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
+[ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
+[ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
+[ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/day_night_colors.gd" id="25_day_night_colors"]
+[ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
+[ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
+[ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
+[ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
+[ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
+[ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
+[ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
+[ext_resource type="Script" uid="uid://b4mvldtd7kft4" path="res://scripts/map/desire.gd" id="31_desire"]
+[ext_resource type="Script" uid="uid://bmoneyicon13q" path="res://scripts/ui/money_icon.gd" id="31_money_icon"]
+[ext_resource type="Script" uid="uid://ddklovsi2tle0" path="res://scripts/animations/characterAnimation.gd" id="32_anim"]
+[ext_resource type="Script" uid="uid://sfwpyffffhdb" path="res://scripts/ui/menus.gd" id="35_ikr28"]
+[ext_resource type="Script" uid="uid://bmti7g3rbm2dg" path="res://scripts/map/level_loader.gd" id="36_lvload"]
+[ext_resource type="PackedScene" uid="uid://bdi57o0hf3tu5" path="res://scenes/levels/level_demo.tscn" id="37_lvdemo"]
+[ext_resource type="Script" uid="uid://bkpo3r2bsqrcn" path="res://scripts/ui/game_over_modal.gd" id="38_game_over"]
+[ext_resource type="Script" uid="uid://ccmupt03fhiga" path="res://scripts/visual_fx/smoke_trail.gd" id="39_smktrl"]
+[ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
+[ext_resource type="Script" uid="uid://q776h0tybxkw" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
+[ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
+[ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
+[ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
+[ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 
-[node name="mainRun" unique_id=442079609 instance=ExtResource("1_main_run")]
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_8wl7c"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
 
-[node name="CPP" parent="." index="4" unique_id=304113688]
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_as8yg"]
+vertices = PackedVector2Array(16, -0.71875, -16, -0.71875, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, -0.719432, -16, -0.719432)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_38wuo"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_afxt4"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_b2iol"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_eda4p"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_15w6l"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_3pjmw"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_cjy31"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_48hws"]
+vertices = PackedVector2Array(16, 16, -16, 16, -16, -16, 16, -16)
+polygons = Array[PackedInt32Array]([PackedInt32Array(0, 1, 2, 3)])
+outlines = Array[PackedVector2Array]([PackedVector2Array(-16, -16, 16, -16, 16, 16, -16, 16)])
+agent_radius = 0.0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_egp0g"]
+texture = ExtResource("13_1kyii")
+texture_region_size = Vector2i(32, 32)
+0:0/0 = 0
+1:0/0 = 0
+2:0/0 = 0
+3:0/0 = 0
+4:0/0 = 0
+5:0/0 = 0
+6:0/0 = 0
+7:0/0 = 0
+8:0/0 = 0
+9:0/0 = 0
+10:0/0 = 0
+10:0/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:0/0 = 0
+11:0/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:0/0 = 0
+12:0/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:0/0 = 0
+14:0/0 = 0
+15:0/0 = 0
+0:1/0 = 0
+1:1/0 = 0
+2:1/0 = 0
+3:1/0 = 0
+4:1/0 = 0
+5:1/0 = 0
+6:1/0 = 0
+7:1/0 = 0
+8:1/0 = 0
+9:1/0 = 0
+10:1/0 = 0
+10:1/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:1/0 = 0
+11:1/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:1/0 = 0
+12:1/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:1/0 = 0
+0:2/0 = 0
+1:2/0 = 0
+2:2/0 = 0
+3:2/0 = 0
+4:2/0 = 0
+5:2/0 = 0
+6:2/0 = 0
+7:2/0 = 0
+8:2/0 = 0
+9:2/0 = 0
+10:2/0 = 0
+10:2/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:2/0 = 0
+11:2/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:2/0 = 0
+12:2/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:2/0 = 0
+0:3/0 = 0
+1:3/0 = 0
+2:3/0 = 0
+3:3/0 = 0
+4:3/0 = 0
+5:3/0 = 0
+6:3/0 = 0
+7:3/0 = 0
+8:3/0 = 0
+9:3/0 = 0
+10:3/0 = 0
+10:3/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+11:3/0 = 0
+11:3/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+12:3/0 = 0
+12:3/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+13:3/0 = 0
+0:4/0 = 0
+1:4/0 = 0
+2:4/0 = 0
+3:4/0 = 0
+4:4/0 = 0
+5:4/0 = 0
+6:4/0 = 0
+7:4/0 = 0
+8:4/0 = 0
+9:4/0 = 0
+10:4/0 = 0
+11:4/0 = 0
+12:4/0 = 0
+13:4/0 = 0
+0:5/0 = 0
+1:5/0 = 0
+2:5/0 = 0
+3:5/0 = 0
+4:5/0 = 0
+5:5/0 = 0
+6:5/0 = 0
+7:5/0 = 0
+8:5/0 = 0
+9:5/0 = 0
+10:5/0 = 0
+10:5/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:5/0 = 0
+11:5/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_b2iol")
+12:5/0 = 0
+12:5/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_3pjmw")
+13:5/0 = 0
+14:5/0 = 0
+15:5/0 = 0
+0:6/0 = 0
+1:6/0 = 0
+2:6/0 = 0
+3:6/0 = 0
+4:6/0 = 0
+5:6/0 = 0
+6:6/0 = 0
+7:6/0 = 0
+8:6/0 = 0
+9:6/0 = 0
+10:6/0 = 0
+10:6/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_38wuo")
+11:6/0 = 0
+11:6/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_eda4p")
+12:6/0 = 0
+12:6/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_cjy31")
+13:6/0 = 0
+0:7/0 = 0
+1:7/0 = 0
+2:7/0 = 0
+3:7/0 = 0
+4:7/0 = 0
+5:7/0 = 0
+6:7/0 = 0
+7:7/0 = 0
+8:7/0 = 0
+9:7/0 = 0
+10:7/0 = 0
+10:7/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_afxt4")
+11:7/0 = 0
+11:7/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_15w6l")
+12:7/0 = 0
+12:7/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_48hws")
+13:7/0 = 0
+0:8/0 = 0
+1:8/0 = 0
+2:8/0 = 0
+3:8/0 = 0
+4:8/0 = 0
+5:8/0 = 0
+6:8/0 = 0
+7:8/0 = 0
+8:8/0 = 0
+9:8/0 = 0
+10:8/0 = 0
+10:8/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+11:8/0 = 0
+11:8/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+12:8/0 = 0
+12:8/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+13:8/0 = 0
+0:9/0 = 0
+1:9/0 = 0
+2:9/0 = 0
+3:9/0 = 0
+4:9/0 = 0
+5:9/0 = 0
+6:9/0 = 0
+7:9/0 = 0
+8:9/0 = 0
+9:9/0 = 0
+10:9/0 = 0
+11:9/0 = 0
+12:9/0 = 0
+13:9/0 = 0
+0:10/0 = 0
+1:10/0 = 0
+2:10/0 = 0
+3:10/0 = 0
+4:10/0 = 0
+5:10/0 = 0
+6:10/0 = 0
+7:10/0 = 0
+8:10/0 = 0
+9:10/0 = 0
+10:10/0 = 0
+10:10/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:10/0 = 0
+11:10/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:10/0 = 0
+12:10/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:10/0 = 0
+14:10/0 = 0
+15:10/0 = 0
+0:11/0 = 0
+1:11/0 = 0
+2:11/0 = 0
+3:11/0 = 0
+4:11/0 = 0
+5:11/0 = 0
+6:11/0 = 0
+7:11/0 = 0
+8:11/0 = 0
+9:11/0 = 0
+10:11/0 = 0
+10:11/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:11/0 = 0
+11:11/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:11/0 = 0
+12:11/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:11/0 = 0
+0:12/0 = 0
+1:12/0 = 0
+2:12/0 = 0
+3:12/0 = 0
+4:12/0 = 0
+5:12/0 = 0
+6:12/0 = 0
+7:12/0 = 0
+8:12/0 = 0
+9:12/0 = 0
+10:12/0 = 0
+10:12/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:12/0 = 0
+11:12/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:12/0 = 0
+12:12/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:12/0 = 0
+0:13/0 = 0
+1:13/0 = 0
+2:13/0 = 0
+3:13/0 = 0
+4:13/0 = 0
+5:13/0 = 0
+6:13/0 = 0
+7:13/0 = 0
+8:13/0 = 0
+9:13/0 = 0
+10:13/0 = 0
+10:13/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+11:13/0 = 0
+11:13/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+12:13/0 = 0
+12:13/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+13:13/0 = 0
+0:14/0 = 0
+1:14/0 = 0
+2:14/0 = 0
+3:14/0 = 0
+4:14/0 = 0
+5:14/0 = 0
+6:14/0 = 0
+7:14/0 = 0
+8:14/0 = 0
+9:14/0 = 0
+10:14/0 = 0
+11:14/0 = 0
+12:14/0 = 0
+13:14/0 = 0
+0:15/0 = 0
+1:15/0 = 0
+2:15/0 = 0
+3:15/0 = 0
+4:15/0 = 0
+5:15/0 = 0
+6:15/0 = 0
+7:15/0 = 0
+8:15/0 = 0
+9:15/0 = 0
+10:15/0 = 0
+10:15/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:15/0 = 0
+11:15/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:15/0 = 0
+12:15/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:15/0 = 0
+14:15/0 = 0
+15:15/0 = 0
+0:16/0 = 0
+1:16/0 = 0
+2:16/0 = 0
+3:16/0 = 0
+4:16/0 = 0
+5:16/0 = 0
+6:16/0 = 0
+7:16/0 = 0
+8:16/0 = 0
+9:16/0 = 0
+10:16/0 = 0
+10:16/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:16/0 = 0
+11:16/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:16/0 = 0
+12:16/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:16/0 = 0
+0:17/0 = 0
+1:17/0 = 0
+2:17/0 = 0
+3:17/0 = 0
+4:17/0 = 0
+5:17/0 = 0
+6:17/0 = 0
+7:17/0 = 0
+8:17/0 = 0
+9:17/0 = 0
+10:17/0 = 0
+10:17/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:17/0 = 0
+11:17/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:17/0 = 0
+12:17/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:17/0 = 0
+0:18/0 = 0
+1:18/0 = 0
+2:18/0 = 0
+3:18/0 = 0
+4:18/0 = 0
+5:18/0 = 0
+6:18/0 = 0
+7:18/0 = 0
+8:18/0 = 0
+9:18/0 = 0
+10:18/0 = 0
+10:18/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+11:18/0 = 0
+11:18/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+12:18/0 = 0
+12:18/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+13:18/0 = 0
+0:19/0 = 0
+1:19/0 = 0
+2:19/0 = 0
+3:19/0 = 0
+4:19/0 = 0
+5:19/0 = 0
+6:19/0 = 0
+7:19/0 = 0
+8:19/0 = 0
+9:19/0 = 0
+10:19/0 = 0
+11:19/0 = 0
+12:19/0 = 0
+13:19/0 = 0
+0:20/0 = 0
+1:20/0 = 0
+2:20/0 = 0
+3:20/0 = 0
+4:20/0 = 0
+5:20/0 = 0
+6:20/0 = 0
+7:20/0 = 0
+8:20/0 = 0
+9:20/0 = 0
+10:20/0 = 0
+10:20/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:20/0 = 0
+11:20/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:20/0 = 0
+12:20/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:20/0 = 0
+14:20/0 = 0
+15:20/0 = 0
+0:21/0 = 0
+1:21/0 = 0
+2:21/0 = 0
+3:21/0 = 0
+4:21/0 = 0
+5:21/0 = 0
+6:21/0 = 0
+7:21/0 = 0
+8:21/0 = 0
+9:21/0 = 0
+10:21/0 = 0
+10:21/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:21/0 = 0
+11:21/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:21/0 = 0
+12:21/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:21/0 = 0
+0:22/0 = 0
+1:22/0 = 0
+2:22/0 = 0
+3:22/0 = 0
+4:22/0 = 0
+5:22/0 = 0
+6:22/0 = 0
+7:22/0 = 0
+8:22/0 = 0
+9:22/0 = 0
+10:22/0 = 0
+10:22/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+11:22/0 = 0
+11:22/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+12:22/0 = 0
+12:22/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_8wl7c")
+13:22/0 = 0
+0:23/0 = 0
+1:23/0 = 0
+2:23/0 = 0
+3:23/0 = 0
+4:23/0 = 0
+5:23/0 = 0
+6:23/0 = 0
+7:23/0 = 0
+8:23/0 = 0
+9:23/0 = 0
+10:23/0 = 0
+10:23/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+11:23/0 = 0
+11:23/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+12:23/0 = 0
+12:23/0/navigation_layer_0/polygon = SubResource("NavigationPolygon_as8yg")
+13:23/0 = 0
+0:24/0 = 0
+1:24/0 = 0
+2:24/0 = 0
+3:24/0 = 0
+4:24/0 = 0
+5:24/0 = 0
+6:24/0 = 0
+7:24/0 = 0
+8:24/0 = 0
+9:24/0 = 0
+10:24/0 = 0
+11:24/0 = 0
+12:24/0 = 0
+13:24/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_8wl7c"]
+tile_size = Vector2i(32, 32)
+navigation_layer_0/layers = 1
+sources/0 = SubResource("TileSetAtlasSource_egp0g")
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
+atlas = ExtResource("24_moonsun")
+region = Rect2(0, 0, 64, 64)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_seed_icon"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(226, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_gem_icon"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(256, 0, 32, 32)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_money_icon"]
+atlas = ExtResource("27_shop_items")
+region = Rect2(416, 0, 32, 32)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_toolbar_bg"]
+content_margin_left = 8.0
+content_margin_top = 6.0
+content_margin_right = 8.0
+content_margin_bottom = 6.0
+bg_color = Color(0.055, 0.058, 0.06, 0.86)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.22, 0.24, 0.25, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_water_reserve_background"]
+bg_color = Color(0, 0, 0, 0.9)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_water_reserve_fill"]
+bg_color = Color(0.3, 0.75, 1, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_modal"]
+bg_color = Color(0.075, 0.078, 0.08, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.28, 0.3, 0.31, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_game_ui_toolbar"]
+bg_color = Color(0.055, 0.058, 0.06, 0.86)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.22, 0.24, 0.25, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="Theme" id="Theme_siwji"]
+
+[node name="game" type="Node2D" unique_id=1481310298]
+
+[node name="LevelLoader" type="Node" parent="." unique_id=981086677]
+script = ExtResource("36_lvload")
+level_scene = ExtResource("37_lvdemo")
+
+[node name="lagMonitor" type="Node" parent="." unique_id=160659281]
+script = ExtResource("1_1iu6q")
+
+[node name="SmokeTrail" type="Node2D" parent="." unique_id=1145732856]
+script = ExtResource("39_smktrl")
+smoke_scene = ExtResource("40_smkscn")
+
+[node name="Player" type="CharacterBody2D" parent="." unique_id=1977329300 groups=["player"]]
+z_index = 504
+position = Vector2(1646, 1518)
+script = ExtResource("1_6cm2i")
+acceleration = 100000.0
+deceleration = 100000.0
+max_speed = 300.0
+sprite_node_path = NodePath("rosa")
+sprite_offset = Vector2(0, -36)
+weapon_origin = Vector2(0, -12)
+
+[node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
+position = Vector2(0, -20)
+texture = ExtResource("2_gtwxa")
+hframes = 2
+metadata/_edit_lock_ = true
+
+[node name="PlayerController" type="Node2D" parent="Player" unique_id=1943697114]
+script = ExtResource("3_mdsmv")
+rush_duration = 0.2
+rush_speed_mult = 2.0
+
+[node name="characterAnimation" type="Node" parent="Player" unique_id=1539367599]
+script = ExtResource("32_anim")
+preset = 1
+target_sprite_path = NodePath("../rosa")
+
+[node name="lance" type="Sprite2D" parent="Player" unique_id=1598475842]
+visible = false
+z_index = 2
+texture = ExtResource("6_y7386")
+script = ExtResource("7_pqqvp")
+
+[node name="CPP" type="Node" parent="." unique_id=304113688]
+script = ExtResource("23_cpp_debug")
+dev_keys = true
+draw_combat_hitboxes = true
+draw_bottleneck_zones = false
+refresh_interval = 0.0
 draw_flow_field = true
-show_gardens = true
+verbose = true
 show_enters_exits = true
+monster_eating_time = 1.0
+debug_gardens_lag_ms = 35.0
 
-[node name="top right" parent="GameUI" parent_id_path=PackedInt32Array(1892661931) index="2" unique_id=401142736]
-anchors_preset = 2
-anchor_left = 0.0
-anchor_top = 1.0
-anchor_right = 0.0
-anchor_bottom = 1.0
-offset_left = 0.0
-offset_top = -40.0
+[node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
+script = ExtResource("8_5nq50")
+
+[node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
+flow_weight = 5.0
+center_pull = 5.0
+
+[node name="AgentManagerNative" type="AgentManagerNative" parent="CPP" unique_id=1027504485]
+
+[node name="Listener" type="Node" parent="CPP/AgentManagerNative" unique_id=1204077203]
+script = ExtResource("9_v7qf8")
+
+[node name="SpatialGridNative" type="SpatialGridNative" parent="CPP" unique_id=100932911]
+
+[node name="FlowFieldNative" type="FlowFieldNative" parent="CPP" unique_id=1111037510]
+z_index = 1
+
+[node name="FlowFieldCode" type="Node2D" parent="CPP/FlowFieldNative" unique_id=299614452]
+script = ExtResource("10_8g1qu")
+
+[node name="SteeringSystemNative" type="SteeringSystemNative" parent="CPP" unique_id=1185593092]
+
+[node name="ProjectileSystemNative" type="ProjectileSystemNative" parent="CPP" unique_id=1185593093]
+
+[node name="PathfinderNative" type="PathfinderNative" parent="CPP" unique_id=1185593094]
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1494994299]
+position = Vector2(1628, 1507)
+script = ExtResource("4_jptjp")
+
+[node name="arros" type="CanvasLayer" parent="." unique_id=1256371816]
+script = ExtResource("42_arros")
+
+[node name="dayNightColors" type="Node" parent="." unique_id=683992596]
+script = ExtResource("25_day_night_colors")
+night_color = Color(0.70980394, 0.49019608, 0.7607843, 1)
+transition_duration = 1.0
+
+[node name="CanvasModulate" type="CanvasModulate" parent="dayNightColors" unique_id=1889007787]
+
+[node name="visualFX" type="Node" parent="." unique_id=930054664]
+
+[node name="splashController" type="Node" parent="visualFX" unique_id=180811705]
+script = ExtResource("12_t6n3k")
+
+[node name="GardenHose" parent="visualFX" unique_id=813304596 instance=ExtResource("45_garden_hose")]
+
+[node name="Map" type="Node" parent="." unique_id=214584774]
+
+[node name="MonTilemap" type="Node" parent="Map" unique_id=62371074]
+
+[node name="Desire" type="Sprite2D" parent="Map/MonTilemap" unique_id=1391463247]
+z_index = -99
+script = ExtResource("31_desire")
+
+[node name="plantz" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1102024521]
+z_index = -60
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
+
+[node name="GrownupRoseDance" type="Node2D" parent="Map/MonTilemap/plantz" unique_id=1602234807]
+script = ExtResource("41_rosedance")
+plant_manager_path = NodePath("../../../PlantManager")
+plantz_path = NodePath("..")
+
+[node name="traversable_buildings" type="TileMapLayer" parent="Map/MonTilemap" unique_id=784302091]
+z_index = -48
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
+
+[node name="blocking_buildings" type="TileMapLayer" parent="Map/MonTilemap" unique_id=784302092]
+z_index = -47
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
+
+[node name="previewbuild" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1848235087]
+z_index = 4095
+tile_set = SubResource("TileSet_8wl7c")
+navigation_enabled = false
+
+[node name="PlantManager" type="Node" parent="Map" unique_id=424212055 node_paths=PackedStringArray("plantz")]
+script = ExtResource("22_plant")
+plantz = NodePath("../MonTilemap/plantz")
+
+[node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
+
+[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("traversable_buildings", "blocking_buildings", "runtime_parent", "steering_system")]
+script = ExtResource("26_building_objects")
+traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
+blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
+runtime_parent = NodePath("../BuildingObjects")
+steering_system = NodePath("../../CPP/SteeringSystemNative")
+
+[node name="ReservoirSystem" type="Node" parent="Map" unique_id=730695030 node_paths=PackedStringArray("building_object_manager")]
+script = ExtResource("44_reservoir")
+building_object_manager = NodePath("../BuildingObjectManager")
+
+[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "reservoir_system", "game_ui", "notif")]
+script = ExtResource("17_k5rlw")
+plantz = NodePath("../MonTilemap/plantz")
+traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
+blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
+previewbuild = NodePath("../MonTilemap/previewbuild")
+plant_manager = NodePath("../PlantManager")
+building_object_manager = NodePath("../BuildingObjectManager")
+reservoir_system = NodePath("../ReservoirSystem")
+game_ui = NodePath("../../GameUI")
+notif = NodePath("../../GameUI/notif")
+
+[node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "plant_manager", "flow", "agent_manager", "pathfinder", "parent_for_agents", "global_config")]
+script = ExtResource("18_vt3yt")
+plantz = NodePath("../MonTilemap/plantz")
+traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
+blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
+plant_manager = NodePath("../PlantManager")
+flow = NodePath("../../CPP/FlowFieldNative")
+agent_manager = NodePath("../../CPP/AgentManagerNative")
+pathfinder = NodePath("../../CPP/PathfinderNative")
+parent_for_agents = NodePath("../..")
+global_config = NodePath("../../CPP/GlobalConfigNative")
+
+[node name="fightSystem" type="Node" parent="." unique_id=1631584488]
+script = ExtResource("19_gvmlv")
+
+[node name="turretSystem" type="Node2D" parent="fightSystem" unique_id=936456910]
+script = ExtResource("19_turret")
+
+[node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
+layer = 50
+script = ExtResource("20_hamdt")
+
+[node name="top left anchor" type="Control" parent="GameUI" unique_id=1417670402]
+layout_mode = 3
+anchors_preset = 0
 offset_right = 40.0
-offset_bottom = 0.0
-grow_horizontal = 1
+offset_bottom = 40.0
+mouse_filter = 2
+
+[node name="progressionUI" type="RichTextLabel" parent="GameUI/top left anchor" unique_id=1027128920]
+visible = false
+layout_mode = 0
+offset_left = 15.0
+offset_top = 15.0
+offset_right = 875.0
+offset_bottom = 557.0
+mouse_filter = 2
+theme_override_font_sizes/normal_font_size = 8
+
+[node name="top anchor" type="Control" parent="GameUI" unique_id=857551045]
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -32.0
+offset_top = 16.0
+offset_right = 32.0
+offset_bottom = 80.0
+grow_horizontal = 2
 grow_vertical = 0
 
-[node name="seedIcon" parent="GameUI/top right" index="0" unique_id=1153248331]
-offset_left = 115.0
-offset_top = -136.0
-offset_right = 155.0
-offset_bottom = -96.0
-
-[node name="gemIcon" parent="GameUI/top right" index="1" unique_id=855508628]
-offset_left = 114.0
-offset_top = -87.0
-offset_right = 154.0
-offset_bottom = -47.0
-
-[node name="moneyIcon" parent="GameUI/top right" index="2" unique_id=8700093]
-offset_left = 112.0
-offset_top = -188.0
-offset_right = 152.0
-offset_bottom = -148.0
-
-[node name="ToolbarPanel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="0" unique_id=2101533894]
+[node name="dayToggle" type="TextureRect" parent="GameUI/top anchor" unique_id=2071789185]
 layout_mode = 1
 anchors_preset = 15
-offset_left = -5.0
-offset_top = -52.0
-offset_right = -5.0
-offset_bottom = -52.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("AtlasTexture_sun")
+expand_mode = 1
+stretch_mode = 5
 
-[node name="toolbarInfo" type="RichTextLabel" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="1" unique_id=1926956478]
+[node name="dayLabel" type="RichTextLabel" parent="GameUI/top anchor" unique_id=2071789186]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -64.0
+offset_top = 4.0
+offset_right = 64.0
+offset_bottom = 40.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+
+[node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
 layout_mode = 0
-offset_left = -1.0
-offset_top = 27.0
-offset_right = 514.0
-offset_bottom = 67.0
-text = "toolbarinfo"
+offset_left = -225.0
+offset_top = 95.0
+offset_right = 304.0
+offset_bottom = 223.0
+text = "Achetez des roses avec l'outil MAGASIN"
+horizontal_alignment = 1
+script = ExtResource("20_7xko8")
 
-[node name="toolbar" parent="GameUI/bottom anchor" parent_id_path=PackedInt32Array(904977731) index="2" unique_id=1961685898]
+[node name="top right" type="Control" parent="GameUI" unique_id=401142736]
+layout_mode = 3
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -40.0
+offset_right = 40.0
+grow_vertical = 0
+
+[node name="seedIcon" type="TextureRect" parent="GameUI/top right" unique_id=1153248331]
+layout_mode = 0
+offset_left = 168.0
+offset_top = -113.0
+offset_right = 208.0
+offset_bottom = -73.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_seed_icon")
+script = ExtResource("29_seed_icon")
+delay_between_seeds = 0.2
+animation_speed = 0.5
+curve_strength = 2.0
+
+[node name="seedQT" type="RichTextLabel" parent="GameUI/top right/seedIcon" unique_id=618629205]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
+text = "x 999"
+fit_content = true
+
+[node name="gemIcon" type="TextureRect" parent="GameUI/top right" unique_id=855508628]
+layout_mode = 0
+offset_left = 167.0
+offset_top = -64.0
+offset_right = 207.0
+offset_bottom = -24.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_gem_icon")
+script = ExtResource("30_gem_icon")
+delay_between_gems = 0.2
+animation_speed = 0.5
+curve_strength = 2.0
+
+[node name="gemQT" type="RichTextLabel" parent="GameUI/top right/gemIcon" unique_id=1609902140]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
+text = "x 0"
+fit_content = true
+
+[node name="moneyIcon" type="TextureRect" parent="GameUI/top right" unique_id=8700093]
+layout_mode = 0
+offset_left = 165.0
+offset_top = -165.0
+offset_right = 205.0
+offset_bottom = -125.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_money_icon")
+script = ExtResource("31_money_icon")
+delay_between_money = 0.2
+animation_speed = 0.5
+curve_strength = 2.0
+
+[node name="moneyQT" type="RichTextLabel" parent="GameUI/top right/moneyIcon" unique_id=1319827880]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 39.0
+mouse_filter = 2
+text = "x 0"
+fit_content = true
+
+[node name="bottom anchor" type="Control" parent="GameUI" unique_id=904977731]
+layout_mode = 3
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -263.0
+offset_top = -84.0
+offset_right = 263.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+metadata/_edit_lock_ = true
+
+[node name="ToolbarPanel" type="PanelContainer" parent="GameUI/bottom anchor" unique_id=2101533894]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_toolbar_bg")
+
+[node name="toolbar" type="HBoxContainer" parent="GameUI/bottom anchor/ToolbarPanel" unique_id=1961685898]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="bottom left anchor" type="Control" parent="GameUI" unique_id=1873448854]
+layout_mode = 3
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -52.0
+offset_right = 224.0
+offset_bottom = -24.0
+grow_horizontal = 0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="waterReserve" type="ProgressBar" parent="GameUI/bottom left anchor" unique_id=1896415017]
 layout_mode = 1
 anchors_preset = 15
-offset_left = 3.0
-offset_top = -46.0
-offset_right = -13.0
-offset_bottom = -58.0
-
-[node name="waterReserve" parent="GameUI/bottom left anchor" parent_id_path=PackedInt32Array(1873448854) index="0" unique_id=1896415017]
-offset_left = -1557.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -1509.0
 offset_top = -12.0
-offset_right = -1557.0
+offset_right = -1509.0
 offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
 rotation = -1.5647762
+mouse_filter = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_water_reserve_background")
+theme_override_styles/fill = SubResource("StyleBoxFlat_water_reserve_fill")
+value = 100.0
+show_percentage = false
+
+[node name="Modals" type="Control" parent="GameUI" unique_id=966875778]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+metadata/_edit_lock_ = true
+
+[node name="inventoryModal" type="Panel" parent="GameUI/Modals" unique_id=828585163]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -330.0
+offset_top = -245.0
+offset_right = 330.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_modal")
+
+[node name="CloseButton" type="Button" parent="GameUI/Modals/inventoryModal" unique_id=358385963]
+z_index = 20
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -42.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 42.0
+text = "X"
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/Modals/inventoryModal" unique_id=541002244]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = 56.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Content" type="VBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer" unique_id=1601479495]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1225103106]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.88, 0.78, 1)
+theme_override_font_sizes/font_size = 22
+text = "Inventory"
+
+[node name="QuickbarRow" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1241883366]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="Slot1" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1832585777]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot2" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=640989024]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot3" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=781953931]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot4" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1832413037]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot5" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=770397693]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot6" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1615472159]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot7" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=2001303819]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="Slot8" type="PanelContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content/QuickbarRow" unique_id=1071131455]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_toolbar")
+
+[node name="ExtraRow1" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1495809560]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="ExtraRow2" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1037910916]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="ExtraRow3" type="HBoxContainer" parent="GameUI/Modals/inventoryModal/MarginContainer/Content" unique_id=1428965787]
+layout_mode = 2
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="gameOverModal" type="Panel" parent="GameUI/Modals" unique_id=700000009]
+visible = false
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -190.0
+offset_top = -150.0
+offset_right = 190.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_modal")
+script = ExtResource("38_game_over")
+
+[node name="MarginContainer" type="MarginContainer" parent="GameUI/Modals/gameOverModal" unique_id=700000010]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 28
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 28
+
+[node name="Buttons" type="VBoxContainer" parent="GameUI/Modals/gameOverModal/MarginContainer" unique_id=700000011]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000012]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Recommencer"
+
+[node name="MainMenuButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000013]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Menu"
+
+[node name="QuitButton" type="Button" parent="GameUI/Modals/gameOverModal/MarginContainer/Buttons" unique_id=700000014]
+custom_minimum_size = Vector2(240, 58)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "Quitter"
+
+[node name="notif" type="RichTextLabel" parent="GameUI" unique_id=835359556]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -140.0
+offset_right = 140.0
+offset_bottom = 40.0
+grow_horizontal = 2
+theme = SubResource("Theme_siwji")
+theme_override_colors/default_color = Color(0.7529412, 0, 0, 1)
+bbcode_enabled = true
+text = "invalid tile"
+fit_content = true
+scroll_active = false
+horizontal_alignment = 1
+script = ExtResource("21_v8oxv")
+metadata/_edit_lock_ = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="GameUI" unique_id=607979633]
+
+[node name="CPP_Debug_Label" type="Label" parent="GameUI/CanvasLayer" unique_id=1158384981]
+offset_right = 40.0
+offset_bottom = 23.0
+script = ExtResource("11_62xsw")
+
+[node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
+script = ExtResource("12_vj62y")
+
+[node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("28_shop")
+
+[node name="BuildFrame" type="Control" parent="GameUI" unique_id=632591766]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("43_build_frame")
+
+[node name="progression" type="Node" parent="." unique_id=1463723645]
+script = ExtResource("22_m1b8m")
+starting_gems = 1000
+
+[node name="difficulty" type="Node" parent="." unique_id=922878044]
+script = ExtResource("28_g12xc")
+
+[node name="sfx" type="Node" parent="." unique_id=1937632267]
+script = ExtResource("27_vhv61")
+
+[node name="menus" type="Node" parent="." unique_id=586165781]
+script = ExtResource("35_ikr28")
+
+[node name="Prompts" type="CanvasLayer" parent="menus" unique_id=700000001]
+layer = 128
+visible = false
+
+[node name="Dim" type="ColorRect" parent="menus/Prompts" unique_id=700000002]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.6)
+
+[node name="Panel" type="Panel" parent="menus/Prompts" unique_id=700000003]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -310.0
+offset_top = -110.0
+offset_right = 310.0
+offset_bottom = 110.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_game_ui_modal")
+
+[node name="VBox" type="VBoxContainer" parent="menus/Prompts/Panel" unique_id=700000004]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 24
+alignment = 1
+
+[node name="Message" type="Label" parent="menus/Prompts/Panel/VBox" unique_id=700000005]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.88, 0.78, 1)
+theme_override_font_sizes/font_size = 24
+text = "Are you sure?"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="Buttons" type="HBoxContainer" parent="menus/Prompts/Panel/VBox" unique_id=700000006]
+layout_mode = 2
+theme_override_constants/separation = 24
+alignment = 1
+
+[node name="NoButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000008]
+custom_minimum_size = Vector2(120, 44)
+layout_mode = 2
+text = "NO"
+
+[node name="LevelSelectionButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=1116621020]
+visible = false
+custom_minimum_size = Vector2(180, 44)
+layout_mode = 2
+text = "Level Selection"
+
+[node name="YesButton" type="Button" parent="menus/Prompts/Panel/VBox/Buttons" unique_id=700000007]
+custom_minimum_size = Vector2(120, 44)
+layout_mode = 2
+text = "YES"
