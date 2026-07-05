@@ -348,10 +348,10 @@ func _catmull_rom_render_point(segment_index: int, t: float) -> Vector2:
 	var t_cubed: float = t_squared * t
 	return (p1 * 2.0 + (p2 - p0) * t + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * t_squared + (-p0 + p1 * 3.0 - p2 * 3.0 + p3) * t_cubed) * 0.5
 
-func _set_lines_visible(is_visible: bool) -> void:
-	_left_border.visible = is_visible
-	_right_border.visible = is_visible
-	_highlight.visible = is_visible
+func _set_lines_visible(lines_visible: bool) -> void:
+	_left_border.visible = lines_visible
+	_right_border.visible = lines_visible
+	_highlight.visible = lines_visible
 
 func _render_normal(points: Array[Vector2], index: int) -> Vector2:
 	if points.size() < 2:

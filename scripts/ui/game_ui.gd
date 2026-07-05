@@ -858,13 +858,13 @@ func _placed_build_tile_count(item_id: String) -> int:
 	var item_def: Dictionary = ItemCatalog.get_placeable_def(item_id)
 	if item_def.is_empty():
 		return 0
-	var layer: TileMapLayer = _build_tile_layer_for_item_def(item_def)
-	if layer == null:
+	var tile_layer: TileMapLayer = _build_tile_layer_for_item_def(item_def)
+	if tile_layer == null:
 		return 0
 	var count: int = 0
-	for raw_cell: Variant in layer.get_used_cells():
+	for raw_cell: Variant in tile_layer.get_used_cells():
 		var cell: Vector2i = raw_cell as Vector2i
-		var placed_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+		var placed_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(tile_layer.name), tile_layer.get_cell_atlas_coords(cell))
 		if placed_item_id == item_id:
 			count += 1
 	return count
