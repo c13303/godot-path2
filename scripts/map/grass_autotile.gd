@@ -89,16 +89,16 @@ static func is_grass_atlas(coords: Vector2i) -> bool:
 	return _grass_atlas_set.has(coords)
 
 
-static func is_grass_cell(floor: TileMapLayer, cell: Vector2i) -> bool:
-	if floor == null or floor.get_cell_source_id(cell) < 0:
+static func is_grass_cell(layer: TileMapLayer, cell: Vector2i) -> bool:
+	if layer == null or layer.get_cell_source_id(cell) < 0:
 		return false
-	return is_grass_atlas(floor.get_cell_atlas_coords(cell))
+	return is_grass_atlas(layer.get_cell_atlas_coords(cell))
 
 
 ## Re-tiles every grass cell touched by `cells` and their neighbours, so edges/corners
 ## stay consistent after grass was added or removed. Returns true if any tile changed.
-static func beautify(floor: TileMapLayer, cells) -> bool:
-	if floor == null:
+static func beautify(layer: TileMapLayer, cells) -> bool:
+	if layer == null:
 		return false
 	var dirty: Dictionary = {}
 	for cell: Vector2i in cells:
@@ -107,24 +107,24 @@ static func beautify(floor: TileMapLayer, cells) -> bool:
 			dirty[cell + offset] = true
 	var changed: bool = false
 	for cell: Vector2i in dirty:
-		if not is_grass_cell(floor, cell):
+		if not is_grass_cell(layer, cell):
 			continue
-		var atlas: Vector2i = _atlas_for_mask(_compute_mask(floor, cell))
-		if floor.get_cell_atlas_coords(cell) != atlas:
-			floor.set_cell(cell, floor.get_cell_source_id(cell), atlas, floor.get_cell_alternative_tile(cell))
+		var atlas: Vector2i = _atlas_for_mask(_compute_mask(layer, cell))
+		if layer.get_cell_atlas_coords(cell) != atlas:
+			layer.set_cell(cell, layer.get_cell_source_id(cell), atlas, layer.get_cell_alternative_tile(cell))
 			changed = true
 	return changed
 
 
-static func _compute_mask(floor: TileMapLayer, cell: Vector2i) -> int:
-	var n: bool = is_grass_cell(floor, cell + Vector2i(0, -1))
-	var e: bool = is_grass_cell(floor, cell + Vector2i(1, 0))
-	var s: bool = is_grass_cell(floor, cell + Vector2i(0, 1))
-	var w: bool = is_grass_cell(floor, cell + Vector2i(-1, 0))
-	var ne: bool = is_grass_cell(floor, cell + Vector2i(1, -1))
-	var se: bool = is_grass_cell(floor, cell + Vector2i(1, 1))
-	var sw: bool = is_grass_cell(floor, cell + Vector2i(-1, 1))
-	var nw: bool = is_grass_cell(floor, cell + Vector2i(-1, -1))
+static func _compute_mask(layer: TileMapLayer, cell: Vector2i) -> int:
+	var n: bool = is_grass_cell(layer, cell + Vector2i(0, -1))
+	var e: bool = is_grass_cell(layer, cell + Vector2i(1, 0))
+	var s: bool = is_grass_cell(layer, cell + Vector2i(0, 1))
+	var w: bool = is_grass_cell(layer, cell + Vector2i(-1, 0))
+	var ne: bool = is_grass_cell(layer, cell + Vector2i(1, -1))
+	var se: bool = is_grass_cell(layer, cell + Vector2i(1, 1))
+	var sw: bool = is_grass_cell(layer, cell + Vector2i(-1, 1))
+	var nw: bool = is_grass_cell(layer, cell + Vector2i(-1, -1))
 	var mask: int = 0
 	if n: mask |= 1
 	if e: mask |= 2
