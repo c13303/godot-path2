@@ -32,6 +32,13 @@ const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"swor
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 const RESERVOIR_Z_INDEX: int = 510
+## Wall tile stamped on wallz under the reservoir base so its cell is non-walkable
+## and non-buildable. The game only checks that a wallz cell has a source (>= 0), so
+## we use a fully transparent atlas tile (15,0 in tileset32x32) that blocks
+## nav/building but renders nothing — the reservoir sprite's own z-order is untouched.
+## Must not collide with special atlases: exit wall (13,0), spawner (14,0),
+## plantsToTarget (13,1).
+const RESERVOIR_BASE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
 
@@ -508,6 +515,7 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		container = Node2D.new()
 		container.name = RESERVOIR_CONTAINER_NAME
 		host.add_child(container)
+	var wallz: TileMapLayer = host.get_node_or_null(^"wallz") as TileMapLayer
 	for reservoir: Node2D in reservoir_nodes:
 		var global_pos: Vector2 = reservoir.global_position
 		level_root.remove_child(reservoir)
@@ -516,8 +524,60 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		reservoir.global_position = global_pos
 		reservoir.z_as_relative = false
 		reservoir.z_index = RESERVOIR_Z_INDEX
+		_snap_reservoir_base_to_wall_tile(reservoir, wallz)
 		_add_reservoir_water_fill(reservoir)
 		reservoir.add_to_group("reservoirs")
+
+## Snaps the reservoir so the middle of its sprite's bottom edge sits on the center
+## of the nearest wallz cell, marks that cell as a wall (non-walkable /
+## non-buildable, invisible tile), and Y-sorts the sprite against the agents: its
+## z_index is set to the base Y, so an agent above the base (smaller Y) draws behind
+## it and an agent below (larger Y) draws in front — agents use z_index = int(Y).
+## Called once at level load per authored reservoir.
+func _snap_reservoir_base_to_wall_tile(reservoir: Node2D, wallz: TileMapLayer) -> void:
+	if wallz == null:
+		push_warning("LevelLoader: no wallz layer; cannot anchor reservoir base to a wall tile.")
+		return
+	var sprite: Sprite2D = reservoir as Sprite2D
+	if sprite == null or sprite.texture == null:
+		push_warning("LevelLoader: reservoir has no sprite texture; cannot compute its base.")
+		return
+	# Middle of the bottom edge in the sprite's local space (centered sprites put the
+	# origin at the middle; otherwise the top-left corner is the origin).
+	var tex_size: Vector2 = sprite.texture.get_size()
+	var base_local: Vector2 = sprite.offset
+	if sprite.centered:
+		base_local += Vector2(0.0, tex_size.y * 0.5)
+	else:
+		base_local += Vector2(tex_size.x * 0.5, tex_size.y)
+	var base_world: Vector2 = sprite.to_global(base_local)
+	# For a square grid the cell containing the point is the one whose center is
+	# nearest, so local_to_map already gives the nearest tile.
+	var cell: Vector2i = wallz.local_to_map(wallz.to_local(base_world))
+	var cell_center_world: Vector2 = wallz.to_global(wallz.map_to_local(cell))
+	# Shift the whole sprite (translation only) so the base lands on the cell center.
+	reservoir.global_position += cell_center_world - base_world
+	# Y-sort against agents: z = base Y (the cell center the base now sits on). The
+	# reservoir is static, so this one-shot value stays correct. Overrides the fixed
+	# RESERVOIR_Z_INDEX set by the caller.
+	reservoir.z_as_relative = false
+	reservoir.z_index = int(cell_center_world.y)
+	var source_id: int = _wallz_atlas_source_id(wallz)
+	if source_id < 0:
+		push_warning("LevelLoader: wallz tile_set has no atlas source; cannot stamp reservoir wall tile.")
+		return
+	wallz.set_cell(cell, source_id, RESERVOIR_BASE_WALL_ATLAS)
+	wallz.update_internals()
+
+func _wallz_atlas_source_id(wallz: TileMapLayer) -> int:
+	if wallz == null or wallz.tile_set == null:
+		return -1
+	var ts: TileSet = wallz.tile_set
+	for i in range(ts.get_source_count()):
+		var sid: int = ts.get_source_id(i)
+		if ts.get_source(sid) is TileSetAtlasSource:
+			return sid
+	return -1
 
 func _add_reservoir_water_fill(reservoir: Node2D) -> void:
 	if reservoir.has_node(NodePath("WaterFill")):
