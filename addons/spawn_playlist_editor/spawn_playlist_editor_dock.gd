@@ -23,6 +23,29 @@ const WAVE_COUNT_WIDTH: float = 84.0
 const WAVE_TIME_WIDTH: float = 96.0
 const WAVE_EVENT_WIDTH: float = 124.0
 const WAVE_DELETE_WIDTH: float = 74.0
+const WATER_POND_ATLAS_ORIGIN: Vector2i = Vector2i(4, 3)
+const WATER_OCEAN_HOLE_ATLAS_CENTER: Vector2i = Vector2i(8, 4)
+const WATER_DIAGONAL_GROUND_TOP_LEFT_ATLAS: Vector2i = Vector2i(10, 3)
+const WATER_DIAGONAL_GROUND_TOP_RIGHT_ATLAS: Vector2i = Vector2i(11, 3)
+const WATER_DIAGONAL_GROUND_BOTTOM_LEFT_ATLAS: Vector2i = Vector2i(10, 4)
+const WATER_DIAGONAL_GROUND_BOTTOM_RIGHT_ATLAS: Vector2i = Vector2i(11, 4)
+const WATER_ISOLATED_ATLAS: Vector2i = Vector2i(10, 6)
+const WATER_HORIZONTAL_RIVER_ATLAS: Vector2i = Vector2i(12, 3)
+const WATER_HORIZONTAL_RIVER_LEFT_EDGE_ATLAS: Vector2i = Vector2i(12, 4)
+const WATER_HORIZONTAL_RIVER_RIGHT_EDGE_ATLAS: Vector2i = Vector2i(12, 5)
+const WATER_VERTICAL_RIVER_ATLAS: Vector2i = Vector2i(13, 3)
+const WATER_VERTICAL_RIVER_TOP_EDGE_ATLAS: Vector2i = Vector2i(13, 4)
+const WATER_VERTICAL_RIVER_BOTTOM_EDGE_ATLAS: Vector2i = Vector2i(13, 5)
+const WATER_NEIGHBOR_OFFSETS: Array[Vector2i] = [
+	Vector2i(0, -1),
+	Vector2i(-1, 0),
+	Vector2i(1, 0),
+	Vector2i(0, 1),
+	Vector2i(-1, -1),
+	Vector2i(1, -1),
+	Vector2i(-1, 1),
+	Vector2i(1, 1),
+]
 
 var editor_plugin: EditorPlugin
 
@@ -78,6 +101,8 @@ var _monster_drop_section: FoldableContainer
 var _shop_section: FoldableContainer
 var _client_frequency_section: FoldableContainer
 var _reward_section: FoldableContainer
+var _beautifier_section: FoldableContainer
+var _water_edges_button: Button
 
 
 func _ready() -> void:
@@ -270,6 +295,11 @@ func _build_level_tab(tabs: TabContainer) -> void:
 	_client_frequency_box = VBoxContainer.new()
 	_client_frequency_section = _make_section("Client Spawners", _client_frequency_box)
 	body.add_child(_client_frequency_section)
+
+	var beautifier_controls: VBoxContainer = VBoxContainer.new()
+	_build_beautifier_controls(beautifier_controls)
+	_beautifier_section = _make_section("tilemap beautifier", beautifier_controls)
+	body.add_child(_beautifier_section)
 
 
 # Nights tab: per-night options, special reward and the wave tracks.
@@ -580,6 +610,18 @@ func _build_reward_controls() -> void:
 		_reward_amount_spins[currency] = amount_spin
 
 
+func _build_beautifier_controls(parent: VBoxContainer) -> void:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	parent.add_child(row)
+
+	_water_edges_button = Button.new()
+	_water_edges_button.text = "water edges"
+	_water_edges_button.tooltip_text = "Rewrite watersources tiles using the pond and ocean-hole water edge atlas tiles."
+	_water_edges_button.pressed.connect(_on_water_edges_pressed)
+	row.add_child(_water_edges_button)
+
+
 func _rebuild_reward_controls() -> void:
 	var night: NightSpawnPlaylist = _get_selected_night()
 	var has_night: bool = night != null
@@ -754,6 +796,7 @@ func _refresh_all() -> void:
 	_refresh_monster_drop_controls()
 	_refresh_shop_controls()
 	_refresh_client_frequency_controls()
+	_refresh_beautifier_controls()
 	_refresh_nights()
 	_rebuild_reward_controls()
 	_rebuild_tracks()
@@ -773,6 +816,12 @@ func _refresh_status() -> void:
 	_create_button.disabled = _current_level_path == ""
 	if not _dirty:
 		_hide_saved_status_after_delay(_status_hide_token)
+
+
+func _refresh_beautifier_controls() -> void:
+	var has_level: bool = _current_level_path != "" and _level_root != null
+	_beautifier_section.visible = has_level
+	_water_edges_button.disabled = not has_level
 
 
 func _hide_saved_status_after_delay(token: int) -> void:
@@ -1238,6 +1287,186 @@ func _on_open_level_pressed() -> void:
 	if _current_level_path == "" or editor_plugin == null:
 		return
 	editor_plugin.get_editor_interface().open_scene_from_path(_current_level_path)
+
+
+func _on_water_edges_pressed() -> void:
+	if _current_level_path == "" or _level_root == null:
+		return
+	var level_root: Node = _current_editable_level_root()
+	var watersources: TileMapLayer = level_root.get_node_or_null("watersources") as TileMapLayer
+	if watersources == null:
+		_show_save_error("Level has no watersources TileMapLayer", ERR_DOES_NOT_EXIST)
+		return
+	var changed_count: int = _beautify_water_edges(watersources)
+	if not _save_level_scene(level_root):
+		return
+	if level_root != _level_root:
+		_reload_cached_level_root()
+	_validation_label.clear()
+	_validation_label.append_text("[color=light_green]Water edges updated: %d tile%s.[/color]" % [changed_count, "" if changed_count == 1 else "s"])
+
+
+func _current_editable_level_root() -> Node:
+	if editor_plugin != null:
+		var edited_root: Node = editor_plugin.get_editor_interface().get_edited_scene_root()
+		if edited_root != null and edited_root.scene_file_path == _current_level_path:
+			return edited_root
+	return _level_root
+
+
+func _reload_cached_level_root() -> void:
+	if _level_root != null:
+		_level_root.free()
+		_level_root = null
+	var packed: PackedScene = load(_current_level_path) as PackedScene
+	if packed == null:
+		return
+	_spawner_ids.clear()
+	_client_spawner_ids.clear()
+	_spawner_nodes.clear()
+	_duplicate_spawner_ids.clear()
+	_level_root = packed.instantiate()
+	_capture_spawners()
+
+
+func _beautify_water_edges(watersources: TileMapLayer) -> int:
+	var water_cells: Dictionary = {}
+	var used_cells: Array[Vector2i] = []
+	for cell: Vector2i in watersources.get_used_cells():
+		if watersources.get_cell_source_id(cell) < 0:
+			continue
+		used_cells.append(cell)
+		water_cells[cell] = true
+
+	var replacement_atlas_coords: Dictionary = {}
+	for cell: Vector2i in used_cells:
+		var atlas_coords: Vector2i = _water_edge_atlas_for_cell(cell, water_cells)
+		if watersources.get_cell_atlas_coords(cell) != atlas_coords:
+			replacement_atlas_coords[cell] = atlas_coords
+
+	for raw_cell: Variant in replacement_atlas_coords.keys():
+		var cell: Vector2i = Vector2i(raw_cell)
+		var atlas_coords: Vector2i = Vector2i(replacement_atlas_coords[cell])
+		var source_id: int = watersources.get_cell_source_id(cell)
+		var alternative_tile: int = watersources.get_cell_alternative_tile(cell)
+		watersources.set_cell(cell, source_id, atlas_coords, alternative_tile)
+	return replacement_atlas_coords.size()
+
+
+func _water_edge_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
+	if _is_water_surrounded_by_ground(cell, water_cells):
+		return WATER_ISOLATED_ATLAS
+	var river_atlas_coords: Vector2i = _river_atlas_for_cell(cell, water_cells)
+	if river_atlas_coords != Vector2i(-1, -1):
+		return river_atlas_coords
+	var ocean_hole_atlas_coords: Vector2i = _ocean_hole_atlas_for_cell(cell, water_cells)
+	if ocean_hole_atlas_coords != Vector2i(-1, -1):
+		return ocean_hole_atlas_coords
+	var pond_atlas_coords: Vector2i = _pond_atlas_for_cell(cell, water_cells)
+	if pond_atlas_coords != WATER_POND_ATLAS_ORIGIN + Vector2i(1, 1):
+		return pond_atlas_coords
+	var diagonal_ground_atlas_coords: Vector2i = _diagonal_ground_atlas_for_cell(cell, water_cells)
+	if diagonal_ground_atlas_coords != Vector2i(-1, -1):
+		return diagonal_ground_atlas_coords
+	return pond_atlas_coords
+
+
+func _is_water_surrounded_by_ground(cell: Vector2i, water_cells: Dictionary) -> bool:
+	for offset: Vector2i in WATER_NEIGHBOR_OFFSETS:
+		if water_cells.has(cell + offset):
+			return false
+	return true
+
+
+func _river_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
+	var has_north: bool = water_cells.has(cell + Vector2i(0, -1))
+	var has_west: bool = water_cells.has(cell + Vector2i(-1, 0))
+	var has_east: bool = water_cells.has(cell + Vector2i(1, 0))
+	var has_south: bool = water_cells.has(cell + Vector2i(0, 1))
+	if has_north or has_south:
+		if not has_west and not has_east:
+			if not has_north and has_south:
+				return WATER_VERTICAL_RIVER_TOP_EDGE_ATLAS
+			if has_north and not has_south:
+				return WATER_VERTICAL_RIVER_BOTTOM_EDGE_ATLAS
+			if has_north and has_south:
+				return WATER_VERTICAL_RIVER_ATLAS
+	else:
+		if not has_west and has_east:
+			return WATER_HORIZONTAL_RIVER_LEFT_EDGE_ATLAS
+		if has_west and not has_east:
+			return WATER_HORIZONTAL_RIVER_RIGHT_EDGE_ATLAS
+		if has_west and has_east:
+			return WATER_HORIZONTAL_RIVER_ATLAS
+	return Vector2i(-1, -1)
+
+
+func _ocean_hole_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
+	for offset: Vector2i in WATER_NEIGHBOR_OFFSETS:
+		var ground_cell: Vector2i = cell - offset
+		if _is_single_tile_ground_hole(ground_cell, water_cells):
+			return WATER_OCEAN_HOLE_ATLAS_CENTER + offset
+	return Vector2i(-1, -1)
+
+
+func _is_single_tile_ground_hole(ground_cell: Vector2i, water_cells: Dictionary) -> bool:
+	if water_cells.has(ground_cell):
+		return false
+	for offset: Vector2i in WATER_NEIGHBOR_OFFSETS:
+		if not water_cells.has(ground_cell + offset):
+			return false
+	return true
+
+
+func _diagonal_ground_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
+	if not water_cells.has(cell + Vector2i(0, -1)):
+		return Vector2i(-1, -1)
+	if not water_cells.has(cell + Vector2i(-1, 0)):
+		return Vector2i(-1, -1)
+	if not water_cells.has(cell + Vector2i(1, 0)):
+		return Vector2i(-1, -1)
+	if not water_cells.has(cell + Vector2i(0, 1)):
+		return Vector2i(-1, -1)
+	if not water_cells.has(cell + Vector2i(-1, -1)):
+		return WATER_DIAGONAL_GROUND_TOP_LEFT_ATLAS
+	if not water_cells.has(cell + Vector2i(1, -1)):
+		return WATER_DIAGONAL_GROUND_TOP_RIGHT_ATLAS
+	if not water_cells.has(cell + Vector2i(-1, 1)):
+		return WATER_DIAGONAL_GROUND_BOTTOM_LEFT_ATLAS
+	if not water_cells.has(cell + Vector2i(1, 1)):
+		return WATER_DIAGONAL_GROUND_BOTTOM_RIGHT_ATLAS
+	return Vector2i(-1, -1)
+
+
+func _pond_atlas_for_cell(cell: Vector2i, water_cells: Dictionary) -> Vector2i:
+	var has_north: bool = water_cells.has(cell + Vector2i(0, -1))
+	var has_west: bool = water_cells.has(cell + Vector2i(-1, 0))
+	var has_east: bool = water_cells.has(cell + Vector2i(1, 0))
+	var has_south: bool = water_cells.has(cell + Vector2i(0, 1))
+	var atlas_column: int = 1
+	var atlas_row: int = 1
+	if not has_west:
+		atlas_column = 0
+	elif not has_east:
+		atlas_column = 2
+	if not has_north:
+		atlas_row = 0
+	elif not has_south:
+		atlas_row = 2
+	return WATER_POND_ATLAS_ORIGIN + Vector2i(atlas_column, atlas_row)
+
+
+func _save_level_scene(level_root: Node) -> bool:
+	var new_scene: PackedScene = PackedScene.new()
+	var pack_error: Error = new_scene.pack(level_root)
+	if pack_error != OK:
+		_show_save_error("Could not pack level scene", pack_error)
+		return false
+	var save_error: Error = ResourceSaver.save(new_scene, _current_level_path)
+	if save_error != OK:
+		_show_save_error("Could not save level scene", save_error)
+		return false
+	return true
 
 
 func _on_rename_missing_id_pressed() -> void:
