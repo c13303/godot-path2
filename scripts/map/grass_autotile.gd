@@ -15,14 +15,15 @@ class_name GrassAutotile
 ## multi-notch interiors) fall back to the "all corners filled" variant, mirroring
 ## how the editor best-matches those cases.
 
-## Inclusive atlas bounds of the beautified grass block (floor layer).
-const GRASS_ATLAS_MIN: Vector2i = Vector2i(4, 9)
-const GRASS_ATLAS_MAX: Vector2i = Vector2i(13, 11)
 ## Fully-surrounded interior grass tile (used as the paint placeholder before re-tiling).
 const GRASS_FULL_ATLAS: Vector2i = Vector2i(5, 10)
 
 ## Neighbour bit layout: N=1, E=2, S=4, W=8, NE=16, SE=32, SW=64, NW=128.
+## A missing corner bit on a fully-surrounded cell = that diagonal is dry ground,
+## so the tile shows a dry-ground corner (dry corners: TL=NW, TR=NE, BL=SW, BR=SE).
 const _MASK_TO_ATLAS: Dictionary = {
+	# Perimeter tiles (no neighbours / edges / convex corners), mirroring the
+	# water autotile block at +6 in Y.
 	0: Vector2i(11, 11),
 	1: Vector2i(13, 11),
 	2: Vector2i(12, 11),
@@ -36,15 +37,27 @@ const _MASK_TO_ATLAS: Dictionary = {
 	55: Vector2i(4, 10),
 	76: Vector2i(6, 9),
 	110: Vector2i(5, 9),
-	127: Vector2i(10, 9),
 	137: Vector2i(6, 11),
 	139: Vector2i(5, 11),
 	155: Vector2i(5, 11),
-	191: Vector2i(10, 10),
 	205: Vector2i(6, 10),
-	223: Vector2i(11, 10),
-	239: Vector2i(11, 9),
 	255: Vector2i(5, 10),
+	# Interior grass with one or more dry-ground corners.
+	127: Vector2i(0, 9),   # TL
+	239: Vector2i(1, 9),   # TR
+	191: Vector2i(2, 9),   # BL
+	223: Vector2i(3, 9),   # BR
+	111: Vector2i(0, 10),  # TL+TR
+	207: Vector2i(1, 10),  # TR+BR
+	63: Vector2i(2, 10),   # TL+BL
+	159: Vector2i(3, 10),  # BL+BR
+	95: Vector2i(14, 10),  # TL+BR (opposite)
+	175: Vector2i(14, 11), # TR+BL (opposite)
+	79: Vector2i(0, 11),   # TL+TR+BR
+	31: Vector2i(1, 11),   # TL+BL+BR
+	47: Vector2i(2, 11),   # TL+TR+BL
+	143: Vector2i(3, 11),  # TR+BL+BR
+	15: Vector2i(14, 9),   # TL+TR+BL+BR
 }
 
 const _NEIGHBOUR_OFFSETS: Array[Vector2i] = [
@@ -53,9 +66,16 @@ const _NEIGHBOUR_OFFSETS: Array[Vector2i] = [
 ]
 
 
+static var _grass_atlas_set: Dictionary = {}
+
 static func is_grass_atlas(coords: Vector2i) -> bool:
-	return coords.x >= GRASS_ATLAS_MIN.x and coords.x <= GRASS_ATLAS_MAX.x \
-		and coords.y >= GRASS_ATLAS_MIN.y and coords.y <= GRASS_ATLAS_MAX.y
+	# Exact membership: only tiles the beautifier can paint count as grass, so no
+	# unrelated floor tile is ever mistaken for grass (the grass tiles are spread
+	# across a few atlas blocks, not one contiguous rectangle).
+	if _grass_atlas_set.is_empty():
+		for atlas: Vector2i in _MASK_TO_ATLAS.values():
+			_grass_atlas_set[atlas] = true
+	return _grass_atlas_set.has(coords)
 
 
 static func is_grass_cell(floor: TileMapLayer, cell: Vector2i) -> bool:
