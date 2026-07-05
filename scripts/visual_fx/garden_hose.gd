@@ -7,6 +7,7 @@ const RESERVOIR_GROUP: StringName = &"reservoirs"
 @export var player_path: NodePath
 @export var building_object_manager_path: NodePath
 @export var reservoir_socket_offset: Vector2 = Vector2(0.0, -8.0)
+@export var reservoir_render_hide_radius: float = 18.0
 @export var hose_radius: float = 5.0
 @export var border_width: float = 1.25
 @export var highlight_width: float = 1.0
@@ -35,6 +36,8 @@ var _spool_elapsed: float = 0.0
 var _reservoirs_dirty: bool = true
 var _building_signals_connected: bool = false
 var _cached_reservoirs: Array[Node2D] = []
+var _render_hide_anchor: Vector2 = Vector2.ZERO
+var _has_render_hide_anchor: bool = false
 
 func _ready() -> void:
 	z_as_relative = false
@@ -61,6 +64,8 @@ func _process(delta: float) -> void:
 
 	var reservoir_anchor: Vector2 = reservoir.global_position + reservoir_socket_offset
 	var lance_anchor: Vector2 = start
+	_render_hide_anchor = reservoir_anchor
+	_has_render_hide_anchor = true
 	_update_verlet_hose(reservoir, reservoir_anchor, lance_anchor, delta)
 	_set_lines_visible(true)
 
@@ -163,10 +168,11 @@ func _update_verlet_hose(reservoir: Node2D, reservoir_anchor: Vector2, lance_anc
 
 func _target_segment_count(reservoir_anchor: Vector2, lance_anchor: Vector2) -> int:
 	var safe_segment_length: float = maxf(1.0, segment_length)
-	var safe_min_segments: int = maxi(2, min_segments)
-	var safe_max_segments: int = maxi(safe_min_segments, max_segments)
+	var configured_min_segments: int = maxi(2, min_segments)
 	var desired_length: float = reservoir_anchor.distance_to(lance_anchor) + maxf(0.0, slack_length)
-	var desired_segments: int = ceili(desired_length / safe_segment_length)
+	var desired_segments: int = maxi(2, ceili(desired_length / safe_segment_length))
+	var safe_min_segments: int = mini(configured_min_segments, desired_segments)
+	var safe_max_segments: int = maxi(safe_min_segments, max_segments)
 	return clampi(desired_segments, safe_min_segments, safe_max_segments)
 
 func _initialize_hose(reservoir: Node2D, reservoir_anchor: Vector2, lance_anchor: Vector2, segment_count: int) -> void:
@@ -202,7 +208,7 @@ func _adjust_spooled_length(target_segments: int, reservoir_anchor: Vector2, lan
 	for _step: int in range(steps):
 		if segment_difference > 0:
 			_spool_out_segment(reservoir_anchor, lance_anchor)
-		elif _points.size() > maxi(3, min_segments + 1):
+		elif _points.size() > maxi(3, target_segments + 1):
 			_rewind_segment()
 
 func _spool_out_segment(reservoir_anchor: Vector2, lance_anchor: Vector2) -> void:
@@ -321,13 +327,14 @@ func _clear_simulation() -> void:
 	_previous_points.clear()
 	_active_reservoir = null
 	_spool_elapsed = 0.0
+	_has_render_hide_anchor = false
 
 func _smoothed_render_points() -> Array[Vector2]:
 	var rendered: Array[Vector2] = []
 	if _points.size() <= 2:
 		for point: Vector2 in _points:
 			rendered.append(point)
-		return rendered
+		return _clip_render_points_near_reservoir(rendered)
 
 	var subdivisions: int = maxi(1, render_subdivisions)
 	for segment_index: int in range(_points.size() - 1):
@@ -337,7 +344,53 @@ func _smoothed_render_points() -> Array[Vector2]:
 			var t: float = float(step) / float(subdivisions)
 			rendered.append(_catmull_rom_render_point(segment_index, t))
 	rendered.append(_points[_points.size() - 1])
-	return rendered
+	return _clip_render_points_near_reservoir(rendered)
+
+func _clip_render_points_near_reservoir(points: Array[Vector2]) -> Array[Vector2]:
+	var clipped: Array[Vector2] = []
+	if points.size() < 2 or not _has_render_hide_anchor:
+		return points
+
+	var hide_radius: float = maxf(0.0, reservoir_render_hide_radius)
+	if hide_radius <= 0.0:
+		return points
+
+	var hide_radius_squared: float = hide_radius * hide_radius
+	var previous: Vector2 = points[0]
+	var previous_inside: bool = previous.distance_squared_to(_render_hide_anchor) < hide_radius_squared
+	if not previous_inside:
+		return points
+
+	for index: int in range(1, points.size()):
+		var current: Vector2 = points[index]
+		var current_inside: bool = current.distance_squared_to(_render_hide_anchor) < hide_radius_squared
+		if current_inside:
+			previous = current
+			continue
+
+		var boundary: Vector2 = _segment_circle_exit_point(previous, current, _render_hide_anchor, hide_radius)
+		clipped.append(boundary)
+		for append_index: int in range(index, points.size()):
+			clipped.append(points[append_index])
+		return clipped
+
+	return clipped
+
+func _segment_circle_exit_point(from_point: Vector2, to_point: Vector2, center: Vector2, radius: float) -> Vector2:
+	var segment: Vector2 = to_point - from_point
+	var segment_length_squared: float = segment.length_squared()
+	if segment_length_squared <= 0.000001:
+		return to_point
+
+	var from_center: Vector2 = from_point - center
+	var b: float = 2.0 * from_center.dot(segment)
+	var c: float = from_center.length_squared() - radius * radius
+	var discriminant: float = b * b - 4.0 * segment_length_squared * c
+	if discriminant < 0.0:
+		return to_point
+
+	var exit_t: float = (-b + sqrt(discriminant)) / (2.0 * segment_length_squared)
+	return from_point.lerp(to_point, clampf(exit_t, 0.0, 1.0))
 
 func _catmull_rom_render_point(segment_index: int, t: float) -> Vector2:
 	var p0: Vector2 = _points[maxi(segment_index - 1, 0)]
@@ -356,9 +409,18 @@ func _set_lines_visible(lines_visible: bool) -> void:
 func _render_normal(points: Array[Vector2], index: int) -> Vector2:
 	if points.size() < 2:
 		return Vector2.UP
-	var previous_index: int = maxi(index - 1, 0)
-	var next_index: int = mini(index + 1, points.size() - 1)
-	var tangent: Vector2 = points[next_index] - points[previous_index]
+	var tangent: Vector2 = Vector2.ZERO
+	if index > 0:
+		tangent += points[index] - points[index - 1]
+	if index < points.size() - 1:
+		tangent += points[index + 1] - points[index]
+	if tangent.length_squared() <= 0.000001:
+		for look_ahead: int in range(1, points.size()):
+			var previous_index: int = maxi(index - look_ahead, 0)
+			var next_index: int = mini(index + look_ahead, points.size() - 1)
+			tangent = points[next_index] - points[previous_index]
+			if tangent.length_squared() > 0.000001:
+				break
 	if tangent.length_squared() <= 0.000001:
 		return Vector2.UP
 	return tangent.orthogonal().normalized()
