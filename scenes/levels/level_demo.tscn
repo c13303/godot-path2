@@ -1325,13 +1325,13 @@ texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="client1" type="Sprite2D" parent="spawners" unique_id=830005137]
-position = Vector2(848, 2361)
+position = Vector2(851, 2521)
 texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/client1" unique_id=912409132]
-position = Vector2(2641, 74)
+position = Vector2(2607, 6)
 texture = ExtResource("6_5dxts")
 metadata/id = ""
 
@@ -1357,7 +1357,7 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="client2" type="Sprite2D" parent="spawners" unique_id=1169622304]
-position = Vector2(3480, 2409)
+position = Vector2(3474, 2081)
 texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
@@ -1379,7 +1379,7 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="spot" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1455932304]
-position = Vector2(1647, 396)
+position = Vector2(1639, -311)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 

@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://hwix5spp7crc"]
+[gd_scene format=4 uid="uid://hwix5spp7crc"]
 
 [ext_resource type="Script" uid="uid://cupb1x17lyekd" path="res://scripts/misc/lagMonitor.gd" id="1_1iu6q"]
 [ext_resource type="Script" uid="uid://dcjngyugck8d1" path="res://scripts/entities/player.gd" id="1_6cm2i"]
@@ -54,7 +54,6 @@ texture = ExtResource("47_wateranim")
 texture_region_size = Vector2i(64, 64)
 0:0/animation_columns = 6
 0:0/animation_speed = 6.0
-0:0/animation_frames_count = 6
 0:0/animation_frame_0/duration = 1.0
 0:0/animation_frame_1/duration = 1.0
 0:0/animation_frame_2/duration = 1.0
@@ -684,13 +683,12 @@ script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+debug_enabled = true
 dev_keys = true
 draw_combat_hitboxes = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
-draw_flow_field = true
-verbose = true
-show_enters_exits = true
+show_gardens = false
 monster_eating_time = 1.0
 debug_gardens_lag_ms = 35.0
 
