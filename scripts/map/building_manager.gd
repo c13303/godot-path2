@@ -70,8 +70,10 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 # blockers like walls. Their flow-field topology is applied once when night starts,
 # never while the player is building during the day.
 @export var blocking_buildings: TileMapLayer
-# Player-walkable, agent-blocking fences. These block monster/client routing, but not
-# player collision or projectiles.
+# Player-walkable fences. Clients treat them as non-walkable (routing walls); monsters
+# ignore them entirely and are only slowed by their 0.5 speed multiplier. Never block
+# player collision or projectiles. Fence-vs-agent handling: _fences_block_navigation /
+# _has_wall (A*/gardens) and the block_fences flag in _request_group_flow_rebuild (flow).
 @export var fences: TileMapLayer
 @export var plant_manager: Node
 @export var flow: Node
@@ -1513,11 +1515,18 @@ func _sync_flow_extra_blocking_cells() -> void:
 			if not _building_cell_blocks_movement(cell):
 				continue
 			cells.append(Vector2(float(cell.x), float(cell.y)))
-	if fences != null:
-		for raw_cell: Variant in fences.get_used_cells():
-			var fence_cell: Vector2i = raw_cell as Vector2i
-			cells.append(Vector2(float(fence_cell.x), float(fence_cell.y)))
 	flow.call("set_extra_blocking_cells", cells)
+	# Fences are kept out of extra_blocking_cells (which feeds player collision and every
+	# group flow). They are pushed as a separate set that only client/merchant flows bake
+	# as walls (block_fences); monster flows ignore fences and are slowed by the fence
+	# cells' 0.5 speed multiplier instead. See _request_group_flow_rebuild / _has_wall.
+	if flow.has_method("set_fence_blocking_cells"):
+		var fence_cells: PackedVector2Array = PackedVector2Array()
+		if fences != null:
+			for raw_cell: Variant in fences.get_used_cells():
+				var fence_cell: Vector2i = raw_cell as Vector2i
+				fence_cells.append(Vector2(float(fence_cell.x), float(fence_cell.y)))
+		flow.call("set_fence_blocking_cells", fence_cells)
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
@@ -2112,7 +2121,7 @@ func _rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
 		if use_async_requests and _flow_uses_async_requests():
 			_request_group_flow_rebuild(escape_group, escape_world)
 		elif flow.has_method("assign_flow_to_group"):
-			flow.call("assign_flow_to_group", escape_group, escape_world)
+			flow.call("assign_flow_to_group", escape_group, escape_world, _fences_block_navigation())
 		else:
 			_request_group_flow_rebuild(escape_group, escape_world)
 		escape["escape_group"] = escape_group
@@ -2156,10 +2165,16 @@ func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
 	if not _is_finite_world(goal_world):
 		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
 		return
+	# Monster and client agents never coexist: monster flows are (re)built during night,
+	# client/merchant flows during the client-sale (day) phase. Fences are walls only for
+	# the client side, so the per-request block flag keys straight off the phase. Monster
+	# flows ignore fences entirely (slowed by the fence speed multiplier), client flows
+	# treat them as impassable.
+	var block_fences: bool = _fences_block_navigation()
 	if _flow_uses_async_requests():
-		flow.call("request_flow_to_group", group_id, goal_world)
+		flow.call("request_flow_to_group", group_id, goal_world, block_fences)
 	elif _flow_supports_sync_assign():
-		flow.call("assign_flow_to_group", group_id, goal_world)
+		flow.call("assign_flow_to_group", group_id, goal_world, block_fences)
 
 func _is_finite_world(p: Vector2) -> bool:
 	if not (is_finite(p.x) and is_finite(p.y)):
@@ -4449,10 +4464,17 @@ func _rebuild_walkable_map_cache() -> void:
 func _has_floor(cell: Vector2i) -> bool:
 	return floorz != null and floorz.get_cell_tile_data(cell) != null
 
+# Fences are non-walkable for clients but not for monsters. Monster and client agents are
+# phase-separated (monsters at night, clients during the day sale), and the walkable-map /
+# garden geometry / A* are rebuilt from _is_walkable each phase, so a single phase check is
+# the source of truth for both the flow field (see _request_group_flow_rebuild) and A*.
+func _fences_block_navigation() -> bool:
+	return not GameState.is_night
+
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
 		return true
-	if fences != null and fences.get_cell_tile_data(cell) != null:
+	if _fences_block_navigation() and fences != null and fences.get_cell_tile_data(cell) != null:
 		return true
 	return _building_cell_blocks_movement(cell)
 

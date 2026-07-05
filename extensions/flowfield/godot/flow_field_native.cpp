@@ -80,10 +80,10 @@ static double navigation_blocking_coverage_threshold(Object *object)
 void FlowFieldNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
-    ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal"), &FlowFieldNative::request_flow_to_group);
+    ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::request_flow_to_group, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("are_async_flows_idle"), &FlowFieldNative::are_async_flows_idle);
     ClassDB::bind_method(D_METHOD("is_group_flow_request_ready", "group_id"), &FlowFieldNative::is_group_flow_request_ready);
-    ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal"), &FlowFieldNative::assign_flow_to_group);
+    ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::assign_flow_to_group, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("group_route_cost_at_world", "group_id", "world_pos"), &FlowFieldNative::group_route_cost_at_world);
     ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
     ClassDB::bind_method(D_METHOD("get_debug_draw"), &FlowFieldNative::get_debug_draw);
@@ -94,6 +94,8 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_blocking_layer", "node"), &FlowFieldNative::set_blocking_layer);
     ClassDB::bind_method(D_METHOD("set_extra_blocking_cells", "cells"), &FlowFieldNative::set_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("clear_extra_blocking_cells"), &FlowFieldNative::clear_extra_blocking_cells);
+    ClassDB::bind_method(D_METHOD("set_fence_blocking_cells", "cells"), &FlowFieldNative::set_fence_blocking_cells);
+    ClassDB::bind_method(D_METHOD("clear_fence_blocking_cells"), &FlowFieldNative::clear_fence_blocking_cells);
     ClassDB::bind_method(D_METHOD("set_cell_speed_multiplier", "map_cell", "multiplier"), &FlowFieldNative::set_cell_speed_multiplier);
     ClassDB::bind_method(D_METHOD("clear_cell_speed_multipliers"), &FlowFieldNative::clear_cell_speed_multipliers);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
@@ -123,6 +125,17 @@ void FlowFieldNative::set_extra_blocking_cells(const PackedVector2Array &cells)
     }
 }
 void FlowFieldNative::clear_extra_blocking_cells() { extra_blocking_cells.clear(); }
+void FlowFieldNative::set_fence_blocking_cells(const PackedVector2Array &cells)
+{
+    fence_blocking_cells.clear();
+    fence_blocking_cells.reserve(cells.size());
+    for (int i = 0; i < cells.size(); i++)
+    {
+        Vector2 cell = cells[i];
+        fence_blocking_cells.insert(Vector2i((int)cell.x, (int)cell.y));
+    }
+}
+void FlowFieldNative::clear_fence_blocking_cells() { fence_blocking_cells.clear(); }
 void FlowFieldNative::set_cell_speed_multiplier(Vector2i map_cell, double multiplier)
 {
     if (!std::isfinite(multiplier) || multiplier >= 0.999)
@@ -894,8 +907,9 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     return true;
 }
 
-bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot)
+bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences)
 {
+    snapshot.block_fences = block_fences;
     if (!floor_layer || !wall_layer)
         return false;
 
@@ -916,7 +930,8 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     if (blocking_layer)
         blockers = blocking_layer->get_used_cells();
     Array floors = floor_layer->get_used_cells();
-    snapshot.walls.reserve(walls.size() + blockers.size() + extra_blocking_cells.size());
+    snapshot.walls.reserve(walls.size() + blockers.size() + extra_blocking_cells.size() +
+                           (block_fences ? fence_blocking_cells.size() : 0));
     snapshot.speed_modifiers.reserve(cell_speed_multipliers.size());
     for (int i = 0; i < walls.size(); i++)
     {
@@ -937,6 +952,17 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
         navigation_blocked_set.insert(cell);
         if (wall_set.insert(cell).second)
             snapshot.walls.push_back(cell);
+    }
+    // Fences block only client/merchant flows (block_fences). Monster flows omit them so
+    // monsters route straight through, merely slowed by the fence cells' speed multiplier.
+    if (block_fences)
+    {
+        for (const Vector2i &cell : fence_blocking_cells)
+        {
+            navigation_blocked_set.insert(cell);
+            if (wall_set.insert(cell).second)
+                snapshot.walls.push_back(cell);
+        }
     }
     add_navigation_coverage_blockers(floors, navigation_blocked_set);
 
@@ -1366,7 +1392,7 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     return result;
 }
 
-void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal)
+void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool block_fences)
 {
     if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
     {
@@ -1385,7 +1411,7 @@ void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal)
 
     // Stamp the request before snapshot construction. If the snapshot is invalid,
     // readiness remains false instead of accidentally accepting an older field.
-    if (!build_async_snapshot(goal, request.snapshot))
+    if (!build_async_snapshot(goal, request.snapshot, block_fences))
         return;
 
     {
@@ -1564,13 +1590,19 @@ void FlowFieldNative::_draw()
 
 }
 
-void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal)
+void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool block_fences)
 {
     if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
     {
         UtilityFunctions::printerr("FlowFieldNative.assign_flow_to_group: invalid group_id ", group_id);
         return;
     }
+
+    // Synchronous fallback path (only used when async requests are unavailable). It reuses
+    // the default field via rebuild_async(), whose wall mask deliberately excludes fences
+    // to keep them out of player collision, so per-group fence blocking is not applied
+    // here. The async request_flow_to_group() path is the one that honors block_fences.
+    (void)block_fences;
 
     current_group_id = group_id;
     {

@@ -43,6 +43,12 @@ namespace godot
         TileMapLayer *navigation_blocking_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
         std::unordered_set<Vector2i, Vector2iHash> extra_blocking_cells;
+        // Fence cells are kept separate from extra_blocking_cells so they never enter
+        // the default field's physical wall mask (player collision) nor monster flow
+        // builds. They are baked as walls only into flow builds requested with
+        // block_fences = true (client/merchant groups). Monsters ignore fences entirely
+        // and are merely slowed by their per-cell speed multiplier.
+        std::unordered_set<Vector2i, Vector2iHash> fence_blocking_cells;
         std::unordered_map<Vector2i, double, Vector2iHash> cell_speed_multipliers;
 
         struct CellSpeedModifier
@@ -61,6 +67,7 @@ namespace godot
             bool debug_disable_bottlenecks = false;
             int bottleneck_zone_radius_tiles = 0;
             double flow_field_wall_clearance = 0.0;
+            bool block_fences = false;
             std::vector<CellSpeedModifier> speed_modifiers;
         };
 
@@ -128,7 +135,7 @@ namespace godot
 
         std::vector<float> distance_field;
         int group_size_for_draw() const;
-        bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot);
+        bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences);
         void start_worker();
         void stop_worker();
         void worker_loop();
@@ -164,11 +171,15 @@ namespace godot
         Object *get_blocking_layer() const;
         void set_extra_blocking_cells(const PackedVector2Array &cells);
         void clear_extra_blocking_cells();
+        // Fence cells act as walls only for flow builds requested with block_fences = true
+        // (clients/merchants). They never affect the default field or monster flow builds.
+        void set_fence_blocking_cells(const PackedVector2Array &cells);
+        void clear_fence_blocking_cells();
         void set_cell_speed_multiplier(Vector2i map_cell, double multiplier);
         void clear_cell_speed_multipliers();
 
         bool rebuild_async(Vector2 goal);
-        void request_flow_to_group(int group_id, Vector2 goal);
+        void request_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
         bool are_async_flows_idle() const;
         bool is_group_flow_request_ready(int group_id) const;
         void _draw() override;
@@ -179,7 +190,7 @@ namespace godot
         ffcore::FlowField *get_field() { return &field; }
         Vector2 get_goal_world() const { return goal_world; }
 
-        void assign_flow_to_group(int group_id, Vector2 goal);
+        void assign_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
 
         // Walkable cost-to-goal for a group's flow field at a world position.
         // Returns +INF if the group has no flow or the cell is unreachable.
