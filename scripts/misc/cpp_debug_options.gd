@@ -235,7 +235,9 @@ func _is_game_paused() -> bool:
 	return false
 
 
-## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds, gems, and money.
+## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds/gems/money,
+## fully refills the water reserve, and (if it is currently night) removes every
+## monster and ends the night.
 ## F1 advances the current day, but only while daytime is active.
 ## ² (top-left key) restarts the level with debug forced ON.
 func _unhandled_input(event: InputEvent) -> void:
@@ -247,6 +249,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key_event.keycode == KEY_KP_ADD:
 		get_viewport().set_input_as_handled()
 		_grant_dev_currency()
+		_refill_dev_water_reserve()
+		_end_dev_night()
 	elif key_event.keycode == KEY_F1 and not GameState.is_night:
 		get_viewport().set_input_as_handled()
 		_advance_dev_day()
@@ -289,6 +293,45 @@ func _advance_dev_day() -> void:
 		return
 	if progression.has_method("advance_day"):
 		progression.call("advance_day")
+
+
+## Tops the player's water reserve back up to its current maximum.
+func _refill_dev_water_reserve() -> void:
+	var scene: Node = get_tree().current_scene if is_inside_tree() else null
+	var progression: Node = scene.get_node_or_null("progression") if scene else null
+	if progression == null:
+		push_warning("dev_keys: progression node not found")
+		return
+	if not progression.has_method("get_value") or not progression.has_method("update_value"):
+		return
+	var current: int = int(progression.call("get_value", &"water_reserve"))
+	var maximum: int = int(progression.call("get_value", &"water_reserve_max"))
+	if current < maximum:
+		progression.call("update_value", &"water_reserve", maximum - current, 0, maximum)
+
+
+## When night is active, removes every monster (no corpse/drop) and flips back to
+## day. No-op during daytime. Uses the same authoritative despawn path as combat
+## deaths so native agents are unregistered cleanly.
+func _end_dev_night() -> void:
+	if not GameState.is_night:
+		return
+	var manager: Node = _building_manager
+	if manager == null or not is_instance_valid(manager):
+		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
+		if scene:
+			manager = scene.get_node_or_null("Map/BuildingManager")
+			_building_manager = manager
+	for node: Node in get_tree().get_nodes_in_group(&"monsters"):
+		var agent: Node2D = node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		if manager and manager.has_method("remove_dead_monster"):
+			manager.call("remove_dead_monster", agent, false)
+		else:
+			agent.queue_free()
+	GameState.start_day()
+
 
 func _log_clicked_agent_debug_snapshot() -> void:
 	var steering: Node = get_node_or_null("SteeringSystemNative")

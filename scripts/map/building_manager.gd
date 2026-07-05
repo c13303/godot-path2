@@ -548,9 +548,10 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(false)
 		_morning_harvest_active = false
-		# Roses left on the counters are NOT cleared at nightfall: they persist as
-		# edible targets monsters can eat during the night (see the monster-counter
-		# logic), and any survivors carry over as sellable stock into the next morning.
+		# Nightfall clears the counters: stock drops to zero immediately (so the night
+		# preparation below clusters no counter gardens and monsters never target roses),
+		# while the pile sprites animate away top-to-bottom over a few seconds.
+		_counter_stock_manager.dissolve_all_piles_at_nightfall()
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false

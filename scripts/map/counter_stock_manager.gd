@@ -9,6 +9,9 @@ const COUNTER_PILE_OVERLAP: float = 0.66
 const COUNTER_PILE_BASE_Y: float = -8.0
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+# Total duration of the nightfall "counters emptying" animation. The per-rose tick is
+# derived from this so the whole sequence always finishes in exactly this many seconds.
+const NIGHTFALL_DISSOLVE_SECONDS: float = 3.0
 
 var _stock_by_cell: Dictionary = {}  # Vector2i -> int
 var _pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
@@ -218,6 +221,45 @@ func clear_all_piles() -> void:
 		var cell: Vector2i = raw_cell as Vector2i
 		clear_pile(cell)
 	_pile_nodes_by_cell.clear()
+
+
+# Nightfall: every counter is emptied. The logical stock drops to zero immediately so
+# monster garden clustering/targeting never sees counter roses (the monster-eat mechanic
+# is gone), while the already-built pile sprites are detached and popped top-to-bottom
+# for a visual "counters emptying" effect. All counters pop in sync — one rose per tick,
+# tick = total_seconds / tallest pile — so the whole sequence always finishes in exactly
+# total_seconds regardless of how tall each pile is (a 4-high pile just runs out early).
+func dissolve_all_piles_at_nightfall(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> void:
+	var piles: Array = []  # Array[Array[Node2D]] — each pile in bottom..top order (top == last)
+	var max_count: int = 0
+	for raw_cell: Variant in _pile_nodes_by_cell.keys():
+		var nodes: Array = _pile_nodes_by_cell[raw_cell] as Array
+		if nodes.is_empty():
+			continue
+		piles.append(nodes)
+		max_count = maxi(max_count, nodes.size())
+	# Hand the sprites over to the animation: detaching them from the manager (without
+	# freeing) means set_stock/clear_pile won't touch them mid-dissolve, and zeroing the
+	# stock makes the counters logically empty right now.
+	_pile_nodes_by_cell.clear()
+	_stock_by_cell.clear()
+	if max_count <= 0:
+		return
+	var interval: float = maxf(0.01, total_seconds / float(max_count))
+	var tween: Tween = create_tween()
+	for _step: int in range(max_count):
+		tween.tween_interval(interval)
+		tween.tween_callback(Callable(self, "_pop_pile_tops").bind(piles))
+
+
+func _pop_pile_tops(piles: Array) -> void:
+	for raw_nodes: Variant in piles:
+		var nodes: Array = raw_nodes as Array
+		if nodes.is_empty():
+			continue
+		var node: Node = nodes.pop_back() as Node
+		if node != null and is_instance_valid(node):
+			node.queue_free()
 
 
 func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:
