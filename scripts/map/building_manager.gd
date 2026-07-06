@@ -468,39 +468,11 @@ func _ready() -> void:
 
 
 func _load_level_spawn_config() -> void:
-	_level_spawn_playlist = null
-	_level_spawner_bindings.clear()
-	_loaded_level_scene_path = ""
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return
-	var loader: Node = scene.get_node_or_null("LevelLoader")
-	if loader == null:
-		return
-	if loader.has_method("get_loaded_level_scene_path"):
-		_loaded_level_scene_path = str(loader.call("get_loaded_level_scene_path"))
-	if loader.has_method("get_loaded_spawn_playlist"):
-		_level_spawn_playlist = loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
-	if loader.has_method("get_loaded_monster_drop_seed_chance_percent"):
-		_monster_drop_seed_chance_percent = clampi(int(loader.call("get_loaded_monster_drop_seed_chance_percent")), 0, 100)
-	if _level_spawn_playlist == null:
-		_level_spawn_playlist = _load_default_spawn_playlist(_loaded_level_scene_path)
-	if loader.has_method("get_loaded_spawner_bindings"):
-		var raw_bindings: Array = loader.call("get_loaded_spawner_bindings") as Array
-		for raw_binding: Variant in raw_bindings:
-			var binding: SpawnerBinding = raw_binding as SpawnerBinding
-			if binding != null:
-				_level_spawner_bindings.append(binding)
-
-
-func _load_default_spawn_playlist(level_scene_path: String) -> LevelSpawnPlaylist:
-	if level_scene_path == "":
-		return null
-	var playlist_path: String = "res://scenes/levels/playlists/%s_spawn_playlist.tres" % level_scene_path.get_file().get_basename()
-	if not ResourceLoader.exists(playlist_path):
-		return null
-	var resource: Resource = load(playlist_path)
-	return resource as LevelSpawnPlaylist
+	var config: LevelSpawnConfigLoader = LevelSpawnConfigLoader.load_from_scene(get_tree().current_scene)
+	_level_spawn_playlist = config.playlist
+	_level_spawner_bindings = config.spawner_bindings
+	_loaded_level_scene_path = config.level_scene_path
+	_monster_drop_seed_chance_percent = config.monster_drop_seed_chance_percent
 
 # floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
 # injected into MonTilemap before any _ready runs, so they are resolved by path

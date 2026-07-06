@@ -1,22 +1,113 @@
-do no run godot tests nor compilation
-user do the tests
+# AGENTS.md
 
-Godot/GDScript strict typing is enabled. When editing GDScript, avoid relying on := inference for numeric expressions, Dictionary values, signal/call returns, or mixed int/float math. Prefer explicit local types such as `var count: int = ...`, `var pos: Vector2i = ...`, and cast `call()` results before use.
+## Test / build policy
 
-No source file may exceed 800 lines without asking first.
-No class may own more than one gameplay responsibility.
-No new feature may be implemented by only expanding an existing manager if it introduces a new domain concept.
-If a task would add more than 150 lines to one file, stop and propose a split.
+Do not run Godot, tests, compilation, export, or build commands.
 
-Before coding, identify:
-- which module owns the new behavior
-- which existing file will call it
-- what state it owns
-- what public API it exposes
-- what files will change
-Do not implement until this is clear.
+The user runs tests manually.
 
+Only run Godot if the user explicitly authorizes it in the current conversation.
 
+Godot executable, only if authorized:
 
-ONLY IF AUTHORISATION IS GIVEN BY USER : 
-godot exe for tests : C:\GAMETOOLS\godot
+```txt
+C:\GAMETOOLS\godot
+```
+
+## GDScript typing
+
+Godot/GDScript strict typing is enabled.
+
+When editing GDScript, avoid `:=` inference for:
+
+* numeric expressions
+* Dictionary / Array values
+* signal or `call()` returns
+* mixed `int` / `float` math
+* nullable or dynamic values
+
+Prefer explicit local types:
+
+```gdscript
+var count: int = 0
+var pos: Vector2i = Vector2i.ZERO
+var speed: float = 0.0
+var data: Dictionary = {}
+```
+
+Cast dynamic values before use:
+
+```gdscript
+var result: Variant = call(...)
+var value: int = int(result)
+```
+
+## File size and architecture
+
+Avoid creating huge source files.
+
+Before editing a large or central source file, check its line count and consider whether the change belongs there.
+
+A file over ~800 lines is not automatically wrong, but it requires caution.
+
+Do not split files only to satisfy a line count.
+
+Split only when there is a real architectural reason, such as:
+
+* a separate gameplay responsibility
+* a reusable subsystem
+* isolated state
+* a clear public API
+* logic that can be tested or reasoned about independently
+* a manager accumulating unrelated domain behavior
+
+If a planned change would add more than ~150 lines to one existing file, pause before coding and explain whether:
+
+* the file is still the correct owner
+* the new logic should become a separate class/module/resource/node
+* the existing file should only delegate to the new module
+
+If a change would push a file far beyond ~800 lines, do not automatically split it. First justify whether keeping it together is cleaner than extracting a new responsibility.
+
+## Responsibility rules
+
+No class should own multiple unrelated gameplay responsibilities.
+
+Do not implement a new domain concept by only expanding an existing manager.
+
+A new domain concept should usually become one of:
+
+* a new class
+* a new node/component
+* a new Resource
+* a helper module with a narrow API
+
+Managers may coordinate systems, but should not accumulate domain logic.
+
+Prefer coherent files over artificially tiny files.
+
+## Before coding
+
+Before writing code, identify:
+
+```txt
+Owner:
+Caller:
+State owned:
+Public API:
+Files changed:
+Estimated line additions per file:
+Should anything be split? Why / why not:
+```
+
+If ownership is unclear, propose the smallest safe architecture first.
+
+## Patch discipline
+
+Keep patches small and scoped.
+
+Preserve existing behavior unless a behavior change was requested.
+
+Avoid unrelated rewrites, renames, formatting changes, or cleanup.
+
+Do not mix refactor, new feature, cleanup, and unrelated fixes in one patch unless explicitly requested.
