@@ -1,257 +1,228 @@
-Task: reduce `scripts/map/building_manager.gd` by extracting build/place/remove command orchestration into a dedicated RefCounted controller.
+Task: reduce scripts/map/building_manager.gd by extracting level spawn playlist setup/validation into a dedicated RefCounted service.
 
 Context:
-`BuildingManager` is still too large. Previous extraction passes have been tested, including path service, agent definition service, spawn controller, garden access resolver, and invalidation controller.
+BuildingManager is still too large. Previous extraction passes have been tested. The next extraction should move level spawn playlist loading and validation out of BuildingManager while preserving behavior exactly.
 
-The next extraction should move build/place/remove command orchestration out of `BuildingManager`, while preserving behavior exactly.
+Create:
 
-Create a new file:
-
-`scripts/map/build_command_controller.gd`
+scripts/map/spawn_playlist_config_service.gd
 
 with:
 
-```gdscript
 extends RefCounted
-class_name BuildCommandController
-```
+class_name SpawnPlaylistConfigService
 
 Goal:
-Move the high-level “apply a build/remove command” orchestration out of `BuildingManager`.
+Move spawn playlist configuration, spawner-binding validation, playlist enable/invalid state, and valid-monster-type lookup out of BuildingManager.
 
-This controller should not invent new build rules.
+Extract these responsibilities from BuildingManager:
 
-It should preserve current placement/removal behavior and delegate to existing systems exactly as before.
+- loading the level spawn config from the current scene
+- storing the loaded playlist
+- storing level spawner bindings
+- storing loaded level scene path
+- storing monster drop seed chance percent
+- validating spawner bindings after spawner scan
+- configuring SpawnPlaylistController
+- maintaining playlist enabled/invalid/validation-attempted flags
+- maintaining spawner_bindings_by_id
+- valid monster type dictionary construction
+- resolving current playlist night index from progression, if it is only used for playlist setup
 
-Extract logic related to:
+Likely methods to extract:
 
-* placing a selected placeable
-* removing/unbuilding a placeable
-* successful placement side effects
-* successful removal side effects
-* cost/inventory application
-* refund behavior, if currently handled directly in `BuildingManager`
-* object manager placement/removal calls
-* tilemap/building-layer mutation calls
-* calling invalidation after successful mutation
-* debug logging around placement/removal
+- _load_level_spawn_config
+- _validate_playlist_after_spawner_scan
+- _valid_monster_types
+- _get_playlist_night_index_from_progression
 
-Likely methods/code blocks to search for:
+Also move these state vars if they are only used by this playlist setup/validation responsibility:
 
-* `_place_selected`
-* `_place_building`
-* `_try_place`
-* `_try_place_at`
-* `_remove_building`
-* `_try_remove`
-* `_unbuild`
-* `_unbuild_at`
-* `_can_place`
-* `_can_remove`
-* `_commit_place`
-* `_commit_remove`
-* `_apply_build_cost`
-* `_refund_build_cost`
-* calls into `BuildingObjectManager`
-* calls into inventory/cost services
-* placement/removal success paths
-* calls into the new invalidation controller
+- _level_spawn_playlist
+- _level_spawner_bindings
+- _loaded_level_scene_path
+- _monster_drop_seed_chance_percent
+- _spawner_bindings_by_id
+- _playlist_spawning_enabled
+- _playlist_spawning_invalid
+- _playlist_validation_attempted
+- _current_playlist_night_index
 
-Exact method names may differ. Search the codebase and extract the coherent command orchestration, not unrelated preview/input/drag logic.
+If some of these vars are still read directly by unrelated code, either:
+1. move the state and expose accessors on SpawnPlaylistConfigService, or
+2. keep the state in BuildingManager and let the service operate through manager accessors.
+
+Prefer moving the state if it keeps ownership clean without broad call-site churn.
+
+Do not extract SpawnPlaylistController itself.
+Do not change LevelSpawnPlaylist.
+Do not change LevelSpawnConfigLoader.
+Do not change spawn orchestration.
+Do not change spawn tick processing.
+Do not change spawner scanning.
+Do not change monster spawning.
+Do not change progression logic beyond delegating the current existing lookup.
 
 Architecture:
-Follow the existing RefCounted controller pattern.
+Follow the existing RefCounted service/controller pattern.
 
-The controller should keep a manager reference:
+The new service should keep a manager reference:
 
-```gdscript
 var _manager: Node
 
 func setup(manager: Node) -> void:
 	_manager = manager
-```
 
 Suggested public API:
 
-```gdscript
 func setup(manager: Node) -> void
+func load_level_spawn_config() -> void
+func validate_after_spawner_scan() -> void
+func get_playlist_night_index_from_progression() -> int
 
-func try_place_at(cell: Vector2i, placeable_def: Dictionary, source: StringName = &"") -> bool
-func try_remove_at(cell: Vector2i, source: StringName = &"") -> bool
-func can_place_at(cell: Vector2i, placeable_def: Dictionary) -> bool
-func can_remove_at(cell: Vector2i) -> bool
-```
+func playlist_spawning_enabled() -> bool
+func playlist_spawning_invalid() -> bool
+func playlist_validation_attempted() -> bool
+func current_playlist_night_index() -> int
+func set_current_playlist_night_index(value: int) -> void
+func monster_drop_seed_chance_percent() -> int
+func spawner_bindings_by_id() -> Dictionary
+func loaded_level_scene_path() -> String
 
-Adjust names/signatures to match the current codebase if necessary.
+Adjust names/signatures only if the existing code makes another shape cleaner. Preserve behavior over preferred API shape.
 
-Preserve compatibility:
-Keep thin wrappers in `BuildingManager` for old methods that other controllers, signals, or dynamic `call()` usage may still depend on.
+Integration:
+Add to BuildingManager:
 
-Example:
+var _spawn_playlist_config: SpawnPlaylistConfigService = SpawnPlaylistConfigService.new()
 
-```gdscript
-func _try_place_at(cell: Vector2i, placeable_def: Dictionary) -> bool:
-	return _build_command_controller.try_place_at(cell, placeable_def)
+In _ready(), before any call that needs loaded playlist config:
 
-func _try_remove_at(cell: Vector2i) -> bool:
-	return _build_command_controller.try_remove_at(cell)
-```
+_spawn_playlist_config.setup(self)
+_spawn_playlist_config.load_level_spawn_config()
 
-Add to `BuildingManager`:
+Replace the extracted methods in BuildingManager with thin compatibility wrappers:
 
-```gdscript
-var _build_command_controller: BuildCommandController = BuildCommandController.new()
-```
+func _load_level_spawn_config() -> void:
+	_spawn_playlist_config.load_level_spawn_config()
 
-In `_ready()`:
+func _validate_playlist_after_spawner_scan() -> void:
+	_spawn_playlist_config.validate_after_spawner_scan()
 
-```gdscript
-_build_command_controller.setup(self)
-```
+func _valid_monster_types() -> Dictionary:
+	return _spawn_playlist_config.valid_monster_types()
 
-Important ownership boundary:
-`BuildCommandController` owns command orchestration.
+func _get_playlist_night_index_from_progression() -> int:
+	return _spawn_playlist_config.get_playlist_night_index_from_progression()
 
-It should not own:
+Keep wrappers because other code may still call these methods.
 
-* preview logic
-* cursor hover logic
-* drag input
-* UI selection state
-* placeable definitions
-* direction rotation state
-* raw object storage
-* garden topology implementation
-* pathfinding implementation
-* flow-field implementation
-* spawning
-* agent retargeting
+Then update BuildingManager call sites to use either the wrappers or the service accessors consistently.
 
-Those should remain in their existing owners.
+Important:
+If _playlist_spawning_enabled, _playlist_spawning_invalid, _playlist_validation_attempted, or _current_playlist_night_index are moved into the service, update all BuildingManager reads/writes to use service accessors.
 
-The command controller may call existing services/controllers through `_manager`, for example:
+For example:
 
-```gdscript
-_manager.call("_can_place_at", cell, placeable_def)
-_manager.call("_clear_hover")
-_manager.call("_cell_center", cell)
-_manager.call("_is_walkable", cell)
-_manager.call("_apply_build_cost", placeable_def)
-_manager.call("_refund_build_cost", removed_def)
-_manager.call("_set_building_cell", cell, placeable_def)
-_manager.call("_remove_building_cell", cell)
-```
+if _spawn_playlist_config.playlist_spawning_enabled():
+	...
 
-Use the actual existing method names from the codebase.
+_spawn_playlist_config.set_current_playlist_night_index(
+	_spawn_playlist_config.get_playlist_night_index_from_progression()
+)
 
-For extracted controllers, direct property access is acceptable if consistent with existing code:
+Do not keep duplicate playlist state in both BuildingManager and SpawnPlaylistConfigService.
 
-```gdscript
-var invalidation: Object = _manager.get("_building_invalidation_controller")
-```
+Dependencies:
+The service may access manager-owned dependencies through _manager.
 
-Do not invent a new dependency-injection architecture.
+Likely dependencies:
+
+var spawn_playlist_controller: SpawnPlaylistController = _manager.get("_spawn_playlist_controller") as SpawnPlaylistController
+var spawners: Dictionary = _manager.get("_spawners") as Dictionary
+
+For progression lookup, keep the same behavior as the existing code:
+
+- use manager._get_progression(), or
+- move only the playlist-night-index method and call _manager.call("_get_progression")
+
+Do not change the day-number modulo behavior.
+
+Constants:
+Use the existing spawner kind constants exactly.
+
+If needed, define local copies only if they are exclusively playlist-config-related:
+
+const SPAWNER_KIND_MONSTER: StringName = &"monster"
+
+Do not move unrelated spawner constants unless they are part of this service’s ownership.
 
 Behavior preservation requirements:
-
-1. Do not change placement rules.
-2. Do not change removal rules.
-3. Do not change inventory/cost behavior.
-4. Do not change refund behavior.
-5. Do not change object-manager behavior.
-6. Do not change tilemap mutation behavior.
-7. Do not change blocked/walkable behavior.
-8. Do not change light-source behavior.
-9. Do not change turret/furniture/wall/plant/trap behavior.
-10. Do not change build direction behavior.
-11. Do not change UI selection behavior.
-12. Do not change preview behavior.
-13. Do not change drag behavior.
-14. Do not change debug logs.
-15. Do not change telemetry names.
-16. Do not change return values.
-17. Do not change side-effect order.
-
-Side-effect order is critical.
-
-Preserve the exact current order of:
-
-* validation
-* cost check
-* inventory mutation
-* object/tile mutation
-* light registration
-* turret/blocker registration
-* plant/garden dirty marks
-* route/cache invalidation
-* preview/hover refresh
-* debug logging
-* signal emission
-
-If the current code has rollback behavior on failed placement/removal, preserve it exactly.
-
-If the current code consumes cost before mutation, keep that order.
-
-If the current code mutates before invalidation, keep that order.
-
-If the current code clears hover/preview after mutation, keep that order.
+- Do not change when playlist validation is attempted.
+- Do not change validation failure behavior.
+- Do not change validation error messages.
+- Do not change duplicate binding detection.
+- Do not change empty binding detection.
+- Do not change null binding detection.
+- Do not change empty spawner_id detection.
+- Do not change duplicate spawner_id behavior.
+- Do not change duplicate cell behavior.
+- Do not change filtering to monster bindings only.
+- Do not change valid monster type detection.
+- Do not change calls to SpawnPlaylistController.configure.
+- Do not change playlist enabled/invalid flags.
+- Do not change fallback spawning behavior.
+- Do not change debug log text.
+- Do not change current night index calculation.
+- Do not change monster_drop_seed_chance_percent behavior.
 
 Search all references before editing:
 
-* place
-* placement
-* remove
-* unbuild
-* refund
-* cost
-* inventory
-* building_object_manager
-* light
-* turret
-* trap
-* furniture
-* wall
-* plant
-* `_building_invalidation_controller`
-* `_clear_hover`
-* `_refresh_preview`
-* `_placement_disabled`
+- _load_level_spawn_config(
+- _validate_playlist_after_spawner_scan(
+- _valid_monster_types(
+- _get_playlist_night_index_from_progression(
+- _level_spawn_playlist
+- _level_spawner_bindings
+- _loaded_level_scene_path
+- _monster_drop_seed_chance_percent
+- _spawner_bindings_by_id
+- _playlist_spawning_enabled
+- _playlist_spawning_invalid
+- _playlist_validation_attempted
+- _current_playlist_night_index
 
 Expected result:
-
-* `building_manager.gd` loses a large coherent block of build/remove command orchestration.
-* `BuildCommandController` owns command execution.
-* `BuildingManager` keeps selection/input/preview coordination and compatibility wrappers only.
-* Existing callers continue to work.
-* No `.tscn` changes required.
-* No gameplay behavior changes.
+- building_manager.gd loses the spawn playlist loading/validation block.
+- SpawnPlaylistConfigService owns playlist config state and validation.
+- BuildingManager keeps only wrappers and high-level night/client orchestration.
+- SpawnPlaylistController remains unchanged.
+- SpawnTickController remains unchanged.
+- Existing spawning behavior remains unchanged.
+- No .tscn changes required.
+- No gameplay behavior changes.
 
 Regression risks to avoid:
-
-1. Do not move input handling into this controller.
-2. Do not move preview handling into this controller except existing post-command refresh calls if they already occur in the command path.
-3. Do not change build validation rules while extracting.
-4. Do not accidentally charge inventory on failed placement.
-5. Do not accidentally refund twice on removal.
-6. Do not skip invalidation after successful mutation.
-7. Do not invalidate before mutation if the old code invalidated after mutation.
-8. Do not change how directional placeables are resolved.
-9. Do not change light/turret/blocker registration order.
-10. Do not duplicate placement state between `BuildingManager` and the new controller.
-11. Do not rewrite `BuildingObjectManager`.
-12. Do not modify garden/path/spawn/agent services unless strictly required for call-site wiring.
-13. Do not rename concepts.
-14. Do not compile or run tests; I will do it.
+1. Do not accidentally validate before _scan_buildings has populated _spawners.
+2. Do not accidentally reset validation-attempted every scan.
+3. Do not accidentally enable playlist spawning after validation errors.
+4. Do not accidentally include client or merchant bindings in monster playlist validation.
+5. Do not change current night modulo behavior.
+6. Do not duplicate _spawner_bindings_by_id state.
+7. Do not silently swallow validation errors.
+8. Do not change debug/error strings unless absolutely necessary.
+9. Do not modify agent spawning.
+10. Do not modify spawner scan service.
+11. Do not modify spawn tick processing.
+12. Do not compile or run tests; I will do it.
 
 Non-goals:
-Do not refactor preview rendering.
-Do not refactor input handling.
-Do not refactor drag placement.
-Do not refactor placeable definitions.
-Do not refactor direction rules.
-Do not refactor garden topology.
-Do not refactor pathfinding.
-Do not refactor spawning.
-Do not change build costs.
-Do not optimize placement.
+Do not refactor LevelSpawnPlaylist.
+Do not refactor LevelSpawnConfigLoader.
+Do not refactor SpawnPlaylistController.
+Do not refactor SpawnTickController.
+Do not refactor spawner scanning.
+Do not refactor night preparation.
+Do not refactor spawn route creation.
+Do not optimize behavior.
 Do not perform unrelated cleanup.

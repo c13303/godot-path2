@@ -117,7 +117,8 @@ func scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void
 
 func scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 	var debug_telemetry: BuildingDebugTelemetry = _debug_telemetry()
-	var level_spawner_bindings: Array = _manager.get("_level_spawner_bindings") as Array
+	var playlist_config: SpawnPlaylistConfigService = _manager.get("_spawn_playlist_config") as SpawnPlaylistConfigService
+	var level_spawner_bindings: Array = playlist_config.level_spawner_bindings()
 	for raw_binding: Variant in level_spawner_bindings:
 		var binding: SpawnerBinding = raw_binding as SpawnerBinding
 		if binding == null:

@@ -143,17 +143,12 @@ var eat_exit_direct_ff_failed: int = 0
 # live in GardenAccessResolver (see _garden_access_resolver below).
 
 var _progression: Node = null
-var _level_spawn_playlist: LevelSpawnPlaylist
-var _level_spawner_bindings: Array[SpawnerBinding] = []
-var _loaded_level_scene_path: String = ""
-var _monster_drop_seed_chance_percent: int = 0
-var _spawner_bindings_by_id: Dictionary = {}  # StringName -> Vector2i
 var _spawn_playlist_controller: SpawnPlaylistController = SpawnPlaylistController.new()
 var _spawn_tick_controller: SpawnTickController = SpawnTickController.new()
-var _playlist_spawning_enabled: bool = false
-var _playlist_spawning_invalid: bool = false
-var _playlist_validation_attempted: bool = false
-var _current_playlist_night_index: int = -1
+# Owns level spawn-playlist config + spawner-binding validation state (playlist,
+# bindings, scene path, seed-drop chance, enabled/invalid/validated flags, current
+# playlist night index). See SpawnPlaylistConfigService.
+var _spawn_playlist_config: SpawnPlaylistConfigService = SpawnPlaylistConfigService.new()
 var _client_counter_agents: Dictionary = _agent_navigation_phases.client_counter_agents()  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
@@ -223,6 +218,7 @@ func _ready() -> void:
 	_building_invalidation_controller.setup(self)
 	_building_navigation_sync.setup(self)
 	_spawner_garden_selection_service.setup(self)
+	_spawn_playlist_config.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -241,11 +237,7 @@ func _ready() -> void:
 
 
 func _load_level_spawn_config() -> void:
-	var config: LevelSpawnConfigLoader = LevelSpawnConfigLoader.load_from_scene(get_tree().current_scene)
-	_level_spawn_playlist = config.playlist
-	_level_spawner_bindings = config.spawner_bindings
-	_loaded_level_scene_path = config.level_scene_path
-	_monster_drop_seed_chance_percent = config.monster_drop_seed_chance_percent
+	_spawn_playlist_config.load_level_spawn_config()
 
 # floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
 # injected into MonTilemap before any _ready runs, so they are resolved by path
@@ -300,29 +292,32 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		return
 	# Night visuals/build lock become active immediately, but spawning remains gated
 	# while all daytime topology is consumed by the capped preparation coroutine.
-	if not _playlist_validation_attempted:
+	if not _spawn_playlist_config.playlist_validation_attempted():
 		_scan_buildings()
 		_validate_playlist_after_spawner_scan()
-	_current_playlist_night_index = _get_playlist_night_index_from_progression()
-	if _playlist_spawning_enabled:
-		if not _spawn_playlist_controller.begin_night(_current_playlist_night_index):
-			push_error("BuildingManager: playlist night index %d is invalid; using legacy fallback spawning this night." % (_current_playlist_night_index + 1))
-			_playlist_spawning_enabled = false
-			_playlist_spawning_invalid = true
+	_spawn_playlist_config.set_current_playlist_night_index(
+		_spawn_playlist_config.get_playlist_night_index_from_progression()
+	)
+	var night_index: int = _spawn_playlist_config.current_playlist_night_index()
+	if _spawn_playlist_config.playlist_spawning_enabled():
+		if not _spawn_playlist_controller.begin_night(night_index):
+			push_error("BuildingManager: playlist night index %d is invalid; using legacy fallback spawning this night." % (night_index + 1))
+			_spawn_playlist_config.set_playlist_spawning_enabled(false)
+			_spawn_playlist_config.set_playlist_spawning_invalid(true)
 		else:
 			CppDebugOptions.dlog("BuildingManager: playlist night started: playable_night=%d total=%d" % [
-				_current_playlist_night_index + 1,
+				night_index + 1,
 				_spawn_playlist_controller.get_total_night_count(),
 			])
 			for line: String in _spawn_playlist_controller.get_current_night_debug_lines():
 				CppDebugOptions.dlog("BuildingManager: playlist " + line)
-	if _playlist_spawning_enabled:
+	if _spawn_playlist_config.playlist_spawning_enabled():
 		_spawn_tick_controller.clear_legacy_fallback()
 	else:
 		_spawn_tick_controller.begin_legacy_fallback_night()
-	if _playlist_spawning_invalid:
+	if _spawn_playlist_config.playlist_spawning_invalid():
 		push_error("BuildingManager: assigned spawn playlist is invalid; using legacy fallback spawning this night.")
-	elif not _playlist_spawning_enabled:
+	elif not _spawn_playlist_config.playlist_spawning_enabled():
 		push_error("BuildingManager: no valid spawn playlist is enabled; using legacy fallback spawning this night.")
 	_spawn_tick_controller.clear_ready_queue()
 	_night_preparation_token += 1
@@ -332,15 +327,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 
 
 func _get_playlist_night_index_from_progression() -> int:
-	var total_nights: int = _spawn_playlist_controller.get_total_night_count()
-	if total_nights <= 0:
-		return 0
-	var prog: Node = _get_progression()
-	if prog == null:
-		return 0
-	var day_number: int = int(prog.call("get_value", &"nDays"))
-	var day_index: int = maxi(0, day_number - 1)
-	return day_index % total_nights
+	return _spawn_playlist_config.get_playlist_night_index_from_progression()
 
 func _get_progression() -> Node:
 	if _progression != null and is_instance_valid(_progression):
@@ -722,7 +709,7 @@ func _process(delta: float) -> void:
 			])
 
 	t = Time.get_ticks_usec()
-	_spawn_tick_controller.process(delta, _playlist_spawning_enabled)
+	_spawn_tick_controller.process(delta, _spawn_playlist_config.playlist_spawning_enabled())
 	_client_sale.process(delta)
 	_seed_merchant.process_phase()
 	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
@@ -798,78 +785,11 @@ func _sync_runtime_state() -> void:
 
 
 func _validate_playlist_after_spawner_scan() -> void:
-	if _playlist_validation_attempted:
-		return
-	_playlist_validation_attempted = true
-	_playlist_spawning_enabled = false
-	_playlist_spawning_invalid = false
-	_spawner_bindings_by_id.clear()
-	if _level_spawn_playlist == null:
-		_playlist_spawning_invalid = true
-		push_error("BuildingManager: no spawn playlist found for '%s'; spawning disabled." % _loaded_level_scene_path)
-		return
-	if _level_spawner_bindings.is_empty():
-		_playlist_spawning_invalid = true
-		push_error("BuildingManager: spawn playlist exists for '%s' but the level has no spawner node bindings; spawning disabled." % _loaded_level_scene_path)
-		return
-	var binding_cells: Dictionary = {}
-	var bindings_valid: bool = true
-	for binding: SpawnerBinding in _level_spawner_bindings:
-		if binding == null:
-			push_error("BuildingManager: null spawner binding in level spawn config.")
-			bindings_valid = false
-			continue
-		if binding.kind != SPAWNER_KIND_MONSTER:
-			continue
-		if binding.spawner_id == &"":
-			push_error("BuildingManager: spawner binding has empty spawner_id for cell %s." % str(binding.cell))
-			bindings_valid = false
-			continue
-		if _spawner_bindings_by_id.has(binding.spawner_id):
-			push_error("BuildingManager: duplicate spawner binding ID '%s'." % String(binding.spawner_id))
-			bindings_valid = false
-			continue
-		if binding_cells.has(binding.cell):
-			push_error("BuildingManager: duplicate spawner binding cell %s." % str(binding.cell))
-			bindings_valid = false
-			continue
-		_spawner_bindings_by_id[binding.spawner_id] = binding.cell
-		binding_cells[binding.cell] = true
-	if not bindings_valid:
-		_playlist_spawning_invalid = true
-		push_error("BuildingManager: invalid spawner bindings; playlist spawning disabled for safety.")
-		return
-	var valid_monster_types: Dictionary = _valid_monster_types()
-	var valid: bool = _spawn_playlist_controller.configure(
-		_level_spawn_playlist,
-		_spawner_bindings_by_id,
-		_spawners,
-		valid_monster_types
-	)
-	if not valid:
-		for raw_error: Variant in _spawn_playlist_controller.get_last_errors():
-			push_error("BuildingManager: " + str(raw_error))
-		_playlist_spawning_invalid = true
-		push_error("BuildingManager: invalid level spawn playlist; playlist spawning disabled for safety.")
-		return
-	_playlist_spawning_enabled = true
-	CppDebugOptions.dlog("BuildingManager: spawn playlist enabled for '%s' with %d night(s) and %d spawner binding(s)." % [
-		_loaded_level_scene_path,
-		_spawn_playlist_controller.get_total_night_count(),
-		_spawner_bindings_by_id.size(),
-	])
-	if debug_logs:
-		_debug_telemetry.log("Configured spawn playlist nights=%d bindings=%d" % [
-			_spawn_playlist_controller.get_total_night_count(),
-			_spawner_bindings_by_id.size(),
-		])
+	_spawn_playlist_config.validate_after_spawner_scan()
 
 
 func _valid_monster_types() -> Dictionary:
-	var types: Dictionary = {}
-	for monster_id: StringName in MonsterCatalog.get_ids():
-		types[monster_id] = true
-	return types
+	return _spawn_playlist_config.valid_monster_types()
 
 
 # Compatibility wrappers: agent definition resolution and visual/stat setup now live
@@ -2059,7 +1979,7 @@ func skip_current_night_for_dev() -> bool:
 	_spawn_tick_controller.reset_empty_night()
 	_spawn_tick_controller.clear_ready_queue()
 	_spawn_tick_controller.clear_legacy_fallback()
-	_current_playlist_night_index = -1
+	_spawn_playlist_config.set_current_playlist_night_index(-1)
 	if _spawn_playlist_controller != null:
 		_spawn_playlist_controller.abort_current_night()
 	for node: Node in get_tree().get_nodes_in_group(&"monsters"):
@@ -2099,7 +2019,7 @@ func _on_removed_merchant_agent(agent: Node2D) -> void:
 
 
 func _monster_death_drop_seed_chance_percent() -> int:
-	return _monster_drop_seed_chance_percent
+	return _spawn_playlist_config.monster_drop_seed_chance_percent()
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL

@@ -134,10 +134,11 @@ func client_count() -> int:
 
 
 func current_night_client_count() -> int:
-	var playlist: LevelSpawnPlaylist = _manager.get("_level_spawn_playlist") as LevelSpawnPlaylist
+	var playlist_config: SpawnPlaylistConfigService = _manager.get("_spawn_playlist_config") as SpawnPlaylistConfigService
+	var playlist: LevelSpawnPlaylist = playlist_config.level_spawn_playlist()
 	if playlist == null or playlist.nights.is_empty():
 		return 20
-	var night_index: int = int(_manager.get("_current_playlist_night_index"))
+	var night_index: int = playlist_config.current_playlist_night_index()
 	if night_index < 0 or night_index >= playlist.nights.size():
 		night_index = int(_manager.call("_get_playlist_night_index_from_progression"))
 	night_index = clampi(night_index, 0, playlist.nights.size() - 1)
