@@ -43,9 +43,6 @@ const CLIENT_TANTRUM_ATTACK_DAMAGE: int = 1
 const CLIENT_TANTRUM_ATTACK_LUNGE_SECONDS: float = 0.09
 const CLIENT_TANTRUM_ATTACK_RETURN_SECONDS: float = 0.12
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
-# Chebyshev tile radius around the player from which grown roses can be harvested
-# during the morning walkover. 1 = the player's cell plus the surrounding 3x3 ring.
-const PLAYER_HARVEST_RADIUS_TILES: int = 1
 # Garden access-cell scoring penalties. Distance / escape cost stays the main
 # driver; these only nudge selection away from obviously bad local geometry (a
 # wall-pocket exit that forces an immediate reversal, a dead-ended outside tile).
@@ -311,6 +308,7 @@ var _client_tantrum_group: int = -1
 var _hostile_clients: Dictionary = {}  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
+var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
 var _counter_stock_manager: CounterStockManager
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
 # These are fed into the garden clustering as ordinary "plant cells" so a stocked
@@ -318,8 +316,6 @@ var _counter_stock_manager: CounterStockManager
 # rose from the counter (decrementing its stock) instead of a plant. Rebuilt every
 # time the gardens are (re)built (see _collect_counter_access_cells).
 var _counter_access_cells: Dictionary = {}  # access_cell (Vector2i) -> counter_cell (Vector2i)
-var _morning_harvest_active: bool = false
-
 # Plant zone compatibility caches. Tiles use the floorz tilemap cell space.
 var _plant_zone_tiles: Dictionary = {}  # Vector2i -> true
 var _plant_zone_margin_tiles: Dictionary = {}  # Vector2i -> true (entry/exit candidates)
@@ -458,6 +454,7 @@ func set_paused(value: bool) -> void:
 
 func _ready() -> void:
 	_seed_merchant.setup(self)
+	_morning_harvest.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -549,7 +546,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_counter_agents.clear()
 		_seed_merchant.on_night_started()
 		GameState.set_building_phase(false)
-		_morning_harvest_active = false
+		_morning_harvest.clear_active()
 		# Counters normally empty the moment the last client of the sale leaves (see
 		# _dissolve_counter_piles_after_clients). This is only a fallback for days where no
 		# client sale ever runs (no client spawners / stock but no buyers): it's idempotent
@@ -1293,8 +1290,8 @@ func _process(delta: float) -> void:
 	if _night_preparing or _client_preparing:
 		_sync_plant_zone_debug_visibility()
 		return
-	if _morning_harvest_active:
-		_process_morning_harvest_walkover()
+	if _morning_harvest.is_active():
+		_morning_harvest.process_walkover()
 	var frame_start_us: int = Time.get_ticks_usec()
 	var t: int = 0
 	_scan_timer -= delta
@@ -2444,60 +2441,11 @@ func _on_new_day_finished() -> void:
 
 
 func _begin_morning_phase() -> void:
-	_client_preparing = false
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
-	_client_counter_agents.clear()
-	var has_grownup_roses: bool = _grownup_rose_count() > 0
-	_morning_harvest_active = false
-	if not has_grownup_roses:
-		_begin_client_sale_phase()
-		return
-	GameState.set_morning_phase(true)
-	# Green (watered) roses open into full-bloom "rose-rose" one by one at the
-	# start of the harvest phase, so wait until the visual bloom sequence is done
-	# before the player can collect them.
-	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
-		await plant_manager.call("bloom_grownup_roses")
-	if GameState.is_night:
-		return
-	if _grownup_rose_count() <= 0:
-		GameState.set_morning_phase(false)
-		_begin_client_sale_phase()
-		return
-	_morning_harvest_active = true
-	if not has_counter_room_for_harvest() and not _can_install_new_counter():
-		_morning_harvest_active = false
-		GameState.set_morning_phase(false)
-		_begin_client_sale_phase()
-		return
-	# Grown roses can only be harvested onto shop counters. If none are placed the
-	# player must build them first ("placez les comptoirs du magasin"): auto-equip the
-	# hammer so its picker opens with the counter pre-selected (see
-	# toolbuild._open_build_picker), leaving the player ready to build straight away.
-	if not has_counter_room_for_harvest():
-		_auto_select_hammer()
+	await _morning_harvest.begin_phase()
 
 
 func _process_morning_harvest_walkover() -> void:
-	if not _morning_harvest_active:
-		return
-	if plant_manager == null or not plant_manager.has_method("harvest_grownup_rose"):
-		return
-	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells_with_room()
-	if counter_cells.is_empty():
-		return
-	var rose_cell: Vector2i = _player_grownup_rose_cell()
-	if rose_cell == INVALID_CELL:
-		return
-	var target_counter: Vector2i = counter_cells[randi_range(0, counter_cells.size() - 1)]
-	var rose_world: Vector2 = _cell_center(rose_cell)
-	if not bool(plant_manager.call("harvest_grownup_rose", rose_cell)):
-		return
-	_add_counter_stock(target_counter, 1)
-	_animate_harvested_rose_to_counter(rose_world, target_counter)
-	_check_morning_harvest_finished()
+	_morning_harvest.process_walkover()
 
 
 # Clients and merchants crush any rose they walk over, leaving debris behind.
@@ -2545,36 +2493,14 @@ func _process_pasteque_trampling() -> void:
 				_destroy_pasteque_cell(cell)
 
 
-func _player_grownup_rose_cell() -> Vector2i:
-	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
-	if player == null or floorz == null:
-		return INVALID_CELL
-	if plant_manager == null or not plant_manager.has_method("is_rose_grownup"):
-		return INVALID_CELL
-	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
-	# Reach extends PLAYER_HARVEST_RADIUS_TILES tiles around the player: prefer the
-	# cell the player stands on, then scan the surrounding ring so grown roses can be
-	# picked up without standing exactly on them.
-	if bool(plant_manager.call("is_rose_grownup", player_cell)):
-		return player_cell
-	for dy in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
-		for dx in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
-			if dx == 0 and dy == 0:
-				continue
-			var cell: Vector2i = player_cell + Vector2i(dx, dy)
-			if bool(plant_manager.call("is_rose_grownup", cell)):
-				return cell
-	return INVALID_CELL
-
-
 func has_grownup_roses_to_harvest() -> bool:
-	return _morning_harvest_active and _grownup_rose_count() > 0
+	return _morning_harvest.has_grownup_roses_to_harvest()
 
 
 func restore_day_phase(phase: String) -> void:
 	if GameState.is_night:
 		return
-	_morning_harvest_active = false
+	_morning_harvest.clear_active()
 	_client_preparing = false
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
@@ -2592,14 +2518,18 @@ func restore_day_phase(phase: String) -> void:
 
 
 func _check_morning_harvest_finished() -> void:
-	if _grownup_rose_count() > 0:
-		if not has_counter_room_for_harvest() and not _can_install_new_counter():
-			_morning_harvest_active = false
-			GameState.set_morning_phase(false)
-			_begin_client_sale_phase()
-		return
-	_morning_harvest_active = false
-	GameState.set_morning_phase(false)
+	_morning_harvest.check_finished()
+
+
+func reset_client_state_for_morning() -> void:
+	_client_preparing = false
+	_client_sale_active = false
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	_client_counter_agents.clear()
+
+
+func begin_client_sale_phase() -> void:
 	_begin_client_sale_phase()
 
 
@@ -2866,10 +2796,14 @@ func assign_agent_to_escape(agent: Node2D) -> bool:
 	return _assign_agent_to_escape(agent)
 
 
-func _grownup_rose_count() -> int:
+func grownup_rose_count() -> int:
 	if plant_manager != null and plant_manager.has_method("grownup_rose_count"):
 		return int(plant_manager.call("grownup_rose_count"))
 	return 0
+
+
+func _grownup_rose_count() -> int:
+	return grownup_rose_count()
 
 
 func _rose_shop_counter_cells() -> Array[Vector2i]:
@@ -2908,6 +2842,10 @@ func has_counter_room_for_harvest() -> bool:
 	return not _rose_shop_counter_cells_with_room().is_empty()
 
 
+func rose_shop_counter_cells_with_room() -> Array[Vector2i]:
+	return _rose_shop_counter_cells_with_room()
+
+
 func counter_room_for_harvest() -> int:
 	var total: int = 0
 	for counter_cell: Vector2i in _rose_shop_counter_cells():
@@ -2942,6 +2880,10 @@ func _counter_stock(counter_cell: Vector2i) -> int:
 func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 	var change: Dictionary = _counter_stock_manager.add_stock(counter_cell, amount)
 	_after_counter_stock_changed(int(change.get("previous", 0)), int(change.get("value", 0)))
+
+
+func add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	_add_counter_stock(counter_cell, amount)
 
 
 func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
@@ -3002,6 +2944,10 @@ func _animate_harvested_rose_to_counter(start_world: Vector2, counter_cell: Vect
 	_counter_stock_manager.animate_harvested_rose(start_world, counter_cell)
 
 
+func animate_harvested_rose_to_counter(start_world: Vector2, counter_cell: Vector2i) -> void:
+	_animate_harvested_rose_to_counter(start_world, counter_cell)
+
+
 func _animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, client: Node2D) -> void:
 	_counter_stock_manager.animate_counter_rose_to_client(
 		counter_cell, pile_index, client, Callable(self, "_on_client_rose_arrived").bind(client))
@@ -3030,6 +2976,10 @@ func _auto_select_hammer() -> void:
 		game_ui.call("select_build_tool", "hammer")
 
 
+func auto_select_hammer() -> void:
+	_auto_select_hammer()
+
+
 func _can_install_new_counter() -> bool:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
@@ -3042,6 +2992,10 @@ func _can_install_new_counter() -> bool:
 	if game_ui.has_method("can_afford_merchant_item"):
 		return bool(game_ui.call("can_afford_merchant_item", ROSE_SHOP_COUNTER_ID, 1))
 	return false
+
+
+func can_install_new_counter() -> bool:
+	return _can_install_new_counter()
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:
