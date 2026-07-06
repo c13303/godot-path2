@@ -2289,9 +2289,7 @@ func restore_day_phase(phase: String) -> void:
 	if GameState.is_night:
 		return
 	_morning_harvest.clear_active()
-	_client_preparing = false
-	_client_sale.reset()
-	_client_counter_agents.clear()
+	_reset_client_sale_state()
 	match phase:
 		"morning":
 			call_deferred("_begin_morning_phase")
@@ -2308,6 +2306,14 @@ func _check_morning_harvest_finished() -> void:
 
 
 func reset_client_state_for_morning() -> void:
+	_reset_client_sale_state()
+
+
+# Single reset path for the manager-owned client-sale state: the deferred-preparation
+# flag (_client_preparing) plus the counter-agent registry (_client_counter_agents),
+# alongside the controller's own sale-local reset. Kept here (not in the controller)
+# because both pieces are owned by the manager per the client-sale boundary rules.
+func _reset_client_sale_state() -> void:
 	_client_preparing = false
 	_client_sale.reset()
 	_client_counter_agents.clear()
