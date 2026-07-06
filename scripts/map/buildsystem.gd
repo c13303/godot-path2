@@ -486,6 +486,7 @@ func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 		if plantz.get_cell_source_id(cell) >= 0:
 			plantz.erase_cell(cell)
 			_flush_plant_layer_visuals()
+		_refresh_cell_terrain_speed(cell)
 		return
 	if layer == traversable_buildings or layer == blocking_buildings or layer == fences:
 		_clear_pasteque_irrigation_before_unbuild(layer, cell)
@@ -680,7 +681,7 @@ func _sync_terrain_speed_cells() -> void:
 		ff.call("clear_cell_speed_multipliers")
 	if not ff.has_method("set_cell_speed_multiplier"):
 		return
-	for layer: TileMapLayer in [traversable_buildings, blocking_buildings, fences]:
+	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null:
 			continue
 		for raw_cell: Variant in layer.get_used_cells():
@@ -692,12 +693,20 @@ func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	if ff == null or not ff.has_method("set_cell_speed_multiplier"):
 		return
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	if plantz != null and plantz.get_cell_source_id(cell) >= 0:
+		var plant_atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+		var plant_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(plantz.name), plant_atlas_coords)
+		if plant_item_id != "":
+			var plant_item_def: Dictionary = ItemCatalog.get_item_def(plant_item_id)
+			var plant_speed_multiplier: float = clampf(float(plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, plant_speed_multiplier)
 	if traversable_buildings != null and traversable_buildings.get_cell_source_id(cell) >= 0:
 		var atlas_coords: Vector2i = traversable_buildings.get_cell_atlas_coords(cell)
 		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(traversable_buildings.name), atlas_coords)
 		if item_id != "":
 			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-			speed_multiplier = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			var traversable_speed_multiplier: float = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, traversable_speed_multiplier)
 	if blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0:
 		var blocking_atlas_coords: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
 		var blocking_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_atlas_coords)
@@ -1085,10 +1094,11 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 		wallz.erase_cell(cell)
 		wallz.update_internals()
 	if target_layer != plantz and plantz:
-		plantz.erase_cell(cell)
-		_flush_plant_layer_visuals()
-		if plant_manager and plant_manager.has_method("remove_plant"):
-			plant_manager.call("remove_plant", cell, false)
+		if not _is_debris_cell(cell):
+			plantz.erase_cell(cell)
+			_flush_plant_layer_visuals()
+			if plant_manager and plant_manager.has_method("remove_plant"):
+				plant_manager.call("remove_plant", cell, false)
 	if target_layer != traversable_buildings and traversable_buildings:
 		traversable_buildings.erase_cell(cell)
 		traversable_buildings.update_internals()
@@ -1118,12 +1128,18 @@ func _is_free_walkable_cell(cell: Vector2i) -> bool:
 		return false
 	return true
 
+func _is_debris_cell(cell: Vector2i) -> bool:
+	if plantz == null or plantz.get_cell_source_id(cell) < 0:
+		return false
+	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	return ItemCatalog.get_placeable_id_for_tile(str(plantz.name), atlas_coords) == "debris"
+
 func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
-	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0:
+	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and _is_debris_cell(cell)):
 		return true
 	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
 		return true
-	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0:
+	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0 and not _is_debris_cell(cell):
 		return true
 	if traversable_buildings and traversable_buildings != target_layer and traversable_buildings.get_cell_source_id(cell) >= 0:
 		return true

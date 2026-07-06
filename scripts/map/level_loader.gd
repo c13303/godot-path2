@@ -56,8 +56,8 @@ var _loaded_monster_drop_seed_chance_percent: int = 0
 var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
-	&"turret1": 5,
-	&"turret_epine": 5,
+	&"turret1": 10,
+	&"turret_epine": 10,
 	&"wall": 100,
 	&"ronce": 1,
 	&"fence": 1,

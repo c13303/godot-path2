@@ -80,7 +80,7 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 # never while the player is building during the day.
 @export var blocking_buildings: TileMapLayer
 # Player-walkable fences. Clients treat them as non-walkable (routing walls); monsters
-# ignore them entirely and are only slowed by their 0.5 speed multiplier. Never block
+# ignore them entirely and are only slowed by their 0.3 speed multiplier. Never block
 # player collision or projectiles. Fence-vs-agent handling: _fences_block_navigation /
 # _has_wall (A*/gardens) and the block_fences flag in _request_group_flow_rebuild (flow).
 @export var fences: TileMapLayer
@@ -1539,7 +1539,7 @@ func _sync_flow_extra_blocking_cells() -> void:
 	# Fences are kept out of extra_blocking_cells (which feeds player collision and every
 	# group flow). They are pushed as a separate set that only client/merchant flows bake
 	# as walls (block_fences); monster flows ignore fences and are slowed by the fence
-	# cells' 0.5 speed multiplier instead. See _request_group_flow_rebuild / _has_wall.
+	# cells' 0.3 speed multiplier instead. See _request_group_flow_rebuild / _has_wall.
 	if flow.has_method("set_fence_blocking_cells"):
 		var fence_cells: PackedVector2Array = PackedVector2Array()
 		if fences != null:
@@ -1801,7 +1801,7 @@ func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 
 func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	for layer: TileMapLayer in [traversable_buildings, blocking_buildings, fences]:
+	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
 		var layer_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
@@ -1834,6 +1834,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
+	_sync_building_cell_speed(cell, "debris")
 	if not _runtime_agents_active():
 		_plant_zone_built = false
 		_navigation_topology_dirty = true
@@ -4396,6 +4397,7 @@ func _leave_turret_debris(turret_cell: Vector2i) -> void:
 	var alternative_tile: int = blocking_buildings.get_cell_alternative_tile(turret_cell)
 	plantz.set_cell(turret_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 	_flush_plant_layer_visuals()
+	_sync_building_cell_speed(turret_cell, "debris")
 
 func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
 	if traversable_buildings == null:
@@ -4425,6 +4427,7 @@ func _leave_pasteque_debris(pasteque_cell: Vector2i, source_id: int, alternative
 		return
 	plantz.set_cell(pasteque_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 	_flush_plant_layer_visuals()
+	_sync_building_cell_speed(pasteque_cell, "debris")
 
 func _remove_turret_cell(turret_cell: Vector2i) -> void:
 	var building_objects: BuildingObjectManager = _get_building_object_manager()

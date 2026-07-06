@@ -1242,7 +1242,7 @@ tool_shop_prices = {
 &"fence": 1,
 &"ronce": 1,
 &"rose": 1,
-&"turret_epine": 5,
+&"turret_epine": 10,
 &"wall": 10
 }
 tool_shop_growth_price_factors = {
@@ -1260,7 +1260,7 @@ shop_prices = {
 &"seed": 2,
 &"spray": 100,
 &"sword": 100,
-&"turret_epine": 5,
+&"turret_epine": 10,
 &"wall": 10
 }
 
