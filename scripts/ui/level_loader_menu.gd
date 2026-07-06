@@ -200,21 +200,21 @@ func _read_level_selection_from_scene(scene_path: String) -> int:
 func _auto_load_default_level() -> void:
 	GameState.clear_selected_level_scene_path()
 	GameState.skip_startup_autosave_once()
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	_load_main_run()
 
 
 func _on_level_pressed(level_path: String) -> void:
 	GameState.set_selected_level_scene_path(level_path)
 	GameState.skip_startup_autosave_once()
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	_load_main_run()
 
 
 func _on_save_pressed(save_path: String) -> void:
 	_apply_saved_level_path(save_path)
 	GameState.request_startup_save_load(save_path)
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	_load_main_run()
 
 

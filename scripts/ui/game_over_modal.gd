@@ -106,14 +106,14 @@ func _on_restart_pressed() -> void:
 		_progression.call("reset_game")
 		return
 	GameState.skip_startup_autosave_once()
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	var reload_error: Error = get_tree().reload_current_scene()
 	if reload_error != OK:
 		push_error("Game over: failed to restart current level (error %d)" % int(reload_error))
 
 
 func _on_main_menu_pressed() -> void:
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	var change_error: Error = get_tree().change_scene_to_file(LEVEL_MENU_SCENE)
 	if change_error != OK:
 		push_error("Game over: failed to load %s (error %d)" % [LEVEL_MENU_SCENE, int(change_error)])

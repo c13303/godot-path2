@@ -110,7 +110,7 @@ func _on_no_pressed() -> void:
 func _on_level_selection_pressed() -> void:
 	_close_prompt()
 	GameState.force_level_selection_once()
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	var change_error: Error = get_tree().change_scene_to_file(LEVEL_MENU_SCENE)
 	if change_error != OK:
 		push_error("Menus: failed to load %s (error %d)" % [LEVEL_MENU_SCENE, int(change_error)])

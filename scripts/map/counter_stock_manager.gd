@@ -185,6 +185,39 @@ func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> voi
 	tween.tween_callback(Callable(sprite, "queue_free"))
 
 
+# Symmetric counterpart to animate_harvested_rose: a rose leaves the top of a counter
+# pile and flies to a client that just bought it. `pile_index` is the index the rose
+# occupied in the pile BEFORE it was removed (i.e. stock - 1 at purchase time), so the
+# sprite launches from exactly where the popped pile rose sat. The client is walking
+# away, so the flight endpoint tracks its live position every tick; `on_arrival` fires
+# once the rose catches up (the caller uses this to flip the carry-rose frame on).
+func animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, target: Node2D, on_arrival: Callable) -> void:
+	if target == null or not is_instance_valid(target):
+		if not on_arrival.is_null():
+			on_arrival.call()
+		return
+	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _pile_offset(maxi(0, pile_index))
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.texture = ROSE_TEXTURE
+	sprite.hframes = 2
+	sprite.frame = 0
+	sprite.centered = true
+	sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
+	sprite.global_position = start_world
+	sprite.z_index = int(start_world.y) + 20
+	_resolve_pile_parent().add_child(sprite)
+	var tween: Tween = create_tween()
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	tween.tween_method(
+		Callable(self, "_update_counter_rose_to_client_flight").bind(sprite, start_world, target),
+		0.0,
+		1.0,
+		HARVEST_ROSE_FLIGHT_SECONDS
+	)
+	tween.parallel().tween_property(sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
+	tween.tween_callback(Callable(self, "_on_counter_rose_reached_client").bind(sprite, on_arrival))
+
+
 func rebuild_pile(counter_cell: Vector2i) -> void:
 	clear_pile(counter_cell)
 	var count: int = stock(counter_cell)
@@ -273,6 +306,31 @@ func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world:
 	)
 	sprite.global_position = pos
 	sprite.z_index = int(pos.y) + 10
+
+
+func _update_counter_rose_to_client_flight(progress: float, sprite: Sprite2D, start_world: Vector2, target: Node2D) -> void:
+	if not is_instance_valid(sprite):
+		return
+	# Endpoint re-read every tick so the rose homes onto the walking-away client.
+	var end_world: Vector2 = start_world
+	if target != null and is_instance_valid(target):
+		end_world = target.global_position
+	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -48.0)
+	var inverse_progress: float = 1.0 - progress
+	var pos: Vector2 = (
+		inverse_progress * inverse_progress * start_world
+		+ 2.0 * inverse_progress * progress * mid_world
+		+ progress * progress * end_world
+	)
+	sprite.global_position = pos
+	sprite.z_index = int(pos.y) + 20
+
+
+func _on_counter_rose_reached_client(sprite: Sprite2D, on_arrival: Callable) -> void:
+	if is_instance_valid(sprite):
+		sprite.queue_free()
+	if not on_arrival.is_null():
+		on_arrival.call()
 
 
 func _resolve_pile_parent() -> Node:

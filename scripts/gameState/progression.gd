@@ -398,6 +398,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func save_progression(save_path: String = SAVE_PATH, day_phase_override: String = "") -> bool:
 	var scene: Node = get_tree().current_scene
+	if _reject_while_night_active("Save"):
+		return false
 	if _reject_while_clients_active(scene, "Save"):
 		return false
 	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
@@ -474,6 +476,7 @@ func load_progression() -> void:
 	_unregister_scene_agents()
 	GameState.request_startup_save_load(SAVE_PATH)
 	GameState.set_meta(PENDING_LOAD_META, true)
+	GameState.reset_transient_run_state()
 	_log("Save validated; reloading current scene")
 	var reload_error: Error = get_tree().reload_current_scene()
 	if reload_error != OK:
@@ -566,7 +569,7 @@ func reset_game() -> void:
 	# A leftover pending-load flag must never carry into the fresh game.
 	if GameState.has_meta(PENDING_LOAD_META):
 		GameState.remove_meta(PENDING_LOAD_META)
-	GameState.set_night(false)
+	GameState.reset_transient_run_state()
 	_unregister_scene_agents()
 	var reload_error: Error = get_tree().reload_current_scene()
 	if reload_error != OK:
@@ -665,6 +668,14 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 		str(player.global_position), (player_data["inventory"] as Array).size()
 	])
 	_notify("Game loaded")
+
+
+func _reject_while_night_active(operation: String) -> bool:
+	if not GameState.is_night:
+		return false
+	_log("%s rejected: night active" % operation)
+	_notify("%s unavailable at night" % operation)
+	return true
 
 
 func _reject_while_clients_active(scene: Node, operation: String) -> bool:
@@ -869,6 +880,7 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 func _restore_day_phase(scene: Node, phase: String) -> void:
 	if phase == "":
 		return
+	GameState.restore_day_phase_flags(phase)
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if building_manager != null and building_manager.has_method("restore_day_phase"):
 		building_manager.call("restore_day_phase", phase)

@@ -34,6 +34,43 @@ const SKIP_STARTUP_AUTOSAVE_META: StringName = &"skip_startup_autosave"
 const FORCE_LEVEL_SELECTION_META: StringName = &"force_level_selection"
 
 
+## Reset autoload-only gameplay flags before a fresh main scene is loaded.
+## This is intentionally silent: callers use it while replacing/reloading scenes, so
+## emitting mode_changed would let the outgoing scene advance a day or start phases.
+func reset_transient_run_state() -> void:
+	is_night = false
+	is_building_phase = true
+	is_morning_phase = false
+	is_client_phase = false
+	is_seed_merchant_phase = false
+	is_reservoir_destroyed = false
+	seed_merchant_purchase_made = false
+
+
+## Restore phase flags for an already loaded day scene without emitting mode_changed.
+## Save files only persist daytime phases; nights are reconstructed by normal play.
+func restore_day_phase_flags(phase: String) -> void:
+	is_night = false
+	is_building_phase = false
+	is_morning_phase = false
+	is_client_phase = false
+	is_seed_merchant_phase = false
+	seed_merchant_purchase_made = false
+	match phase:
+		"morning":
+			is_morning_phase = true
+		"client":
+			is_client_phase = true
+		"seed_merchant":
+			is_seed_merchant_phase = true
+		_:
+			is_building_phase = true
+	building_phase_changed.emit(is_building_phase)
+	morning_phase_changed.emit(is_morning_phase)
+	client_phase_changed.emit(is_client_phase)
+	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
+
+
 ## Switch to night: monsters are allowed to spawn.
 func start_night() -> void:
 	set_morning_phase(false)
@@ -148,6 +185,7 @@ func skip_startup_autosave_once() -> void:
 	# Every fresh start (reset, level select, game-over restart) routes through here,
 	# so this is the single place that clears carried-over night-reward claims.
 	reset_special_reward_claims()
+	reset_transient_run_state()
 
 
 func force_level_selection_once() -> void:

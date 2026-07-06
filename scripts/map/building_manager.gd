@@ -3082,6 +3082,18 @@ func _animate_harvested_rose_to_counter(start_world: Vector2, counter_cell: Vect
 	_counter_stock_manager.animate_harvested_rose(start_world, counter_cell)
 
 
+func _animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, client: Node2D) -> void:
+	_counter_stock_manager.animate_counter_rose_to_client(
+		counter_cell, pile_index, client, Callable(self, "_on_client_rose_arrived").bind(client))
+
+
+# Called when the rose that left the counter pile reaches the buying client: only now
+# does the client show the carry-rose frame (character.gd gates flow_out on this meta).
+func _on_client_rose_arrived(client: Node2D) -> void:
+	if client != null and is_instance_valid(client):
+		client.set_meta("client_rose_visible", true)
+
+
 func _rose_pile_parent() -> Node:
 	if parent_for_agents != null:
 		return parent_for_agents
@@ -3659,6 +3671,8 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 	agent.set_meta("client_has_rose", true)
+	# Garden plant purchase has no counter-pile flight, so the carry frame shows at once.
+	agent.set_meta("client_rose_visible", true)
 	_spawn_client_payment_money(agent.global_position)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
@@ -3701,8 +3715,15 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 		_retarget_agent_or_escape(agent, spawner_cell)
 		return
+	# Index of the pile rose about to be popped (top == stock - 1); the flying rose
+	# launches from exactly that pile position before the stock decrement rebuilds it.
+	var pile_index: int = _counter_stock(counter_cell) - 1
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+	# Logical purchase is complete immediately (night-start gating, tantrum eligibility),
+	# but the visible "carrying a rose" frame is withheld until the flown rose reaches the
+	# client — _on_client_rose_arrived flips client_rose_visible on arrival.
 	agent.set_meta("client_has_rose", true)
+	_animate_counter_rose_to_client(counter_cell, pile_index, agent)
 	_spawn_client_payment_money(agent.global_position)
 	_finish_client_purchase(agent)
 

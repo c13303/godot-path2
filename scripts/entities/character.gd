@@ -135,7 +135,9 @@ func _update_monster_frame() -> void:
 		frame = CLIENT_FRAME_ANGRY
 	elif status == "eating":
 		frame = MONSTER_FRAME_EATING
-	elif status == "flow_out" and _is_client_agent():
+	elif status == "flow_out" and _is_client_agent() and bool(get_meta("client_rose_visible", false)):
+		# The carry-rose frame waits until the rose flown from the counter pile has
+		# actually reached the client (building_manager sets client_rose_visible on arrival).
 		frame = MONSTER_FRAME_EATING
 	elif status == "drowning":
 		frame = MONSTER_FRAME_DROWNING
