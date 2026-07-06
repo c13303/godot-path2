@@ -6,15 +6,14 @@ class_name BuildModeStateController
 # build direction). BuildSystem keeps subsystem orchestration and exposes thin wrappers
 # for UI/input/turret callers; the actual selected item id and tool state live in game_ui,
 # and remove/unbuild state lives in BuildDragController.
-
-const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
-const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
-const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
-const DIRECTION_UP: Vector2i = Vector2i(0, -1)
+#
+# Pure direction/orientation rules (directional detection, forward/backward cycle,
+# facing constants) live in BuildDirectionRules; this controller only owns the mutable
+# current _build_direction and the composed selected-placeable query.
 
 var _manager: Node
 
-var _build_direction: Vector2i = DIRECTION_RIGHT
+var _build_direction: Vector2i = BuildDirectionRules.DIRECTION_RIGHT
 
 
 func setup(manager: Node) -> void:
@@ -30,9 +29,9 @@ func get_build_direction() -> Vector2i:
 # input event through instead of consuming it.
 func rotate_selected_build_direction(reverse: bool = false) -> bool:
 	var placeable_def: Dictionary = selected_placeable_def()
-	if placeable_def.is_empty() or not _is_directional_placeable(placeable_def):
+	if placeable_def.is_empty() or not BuildDirectionRules.is_directional_placeable(placeable_def):
 		return false
-	_build_direction = _prev_build_direction(_build_direction) if reverse else _next_build_direction(_build_direction)
+	_build_direction = BuildDirectionRules.previous_direction(_build_direction) if reverse else BuildDirectionRules.next_direction(_build_direction)
 	_clear_hover()
 	return true
 
@@ -46,35 +45,11 @@ func selected_placeable_def() -> Dictionary:
 	if _placement_disabled():
 		return {}
 	var placeable_def: Dictionary = ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_build_item_id")))
-	if _is_directional_placeable(placeable_def):
+	if BuildDirectionRules.is_directional_placeable(placeable_def):
 		var directed_def: Dictionary = placeable_def.duplicate(true)
 		directed_def["direction"] = _build_direction
 		return directed_def
 	return placeable_def
-
-
-func _is_directional_placeable(placeable_def: Dictionary) -> bool:
-	return bool(placeable_def.get("directional", false))
-
-
-func _next_build_direction(direction: Vector2i) -> Vector2i:
-	if direction == DIRECTION_RIGHT:
-		return DIRECTION_DOWN
-	if direction == DIRECTION_DOWN:
-		return DIRECTION_LEFT
-	if direction == DIRECTION_LEFT:
-		return DIRECTION_UP
-	return DIRECTION_RIGHT
-
-
-func _prev_build_direction(direction: Vector2i) -> Vector2i:
-	if direction == DIRECTION_RIGHT:
-		return DIRECTION_UP
-	if direction == DIRECTION_UP:
-		return DIRECTION_LEFT
-	if direction == DIRECTION_LEFT:
-		return DIRECTION_DOWN
-	return DIRECTION_RIGHT
 
 
 # --- BuildSystem wrappers -----------------------------------------------------

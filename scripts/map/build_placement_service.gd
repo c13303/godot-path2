@@ -5,13 +5,6 @@ class_name BuildPlacementService
 # preview, selection state, drag state, removal, and save/load coordination.
 
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
-const TILE_TRANSFORM_FLIP_H: int = 4096
-const TILE_TRANSFORM_FLIP_V: int = 8192
-const TILE_TRANSFORM_TRANSPOSE: int = 16384
-const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
-const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
-const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
-const DIRECTION_UP: Vector2i = Vector2i(0, -1)
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 const FENCE_ITEM_ID: String = "fence"
 
@@ -389,10 +382,10 @@ func atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 
 
 func alternative_from_placeable(placeable_def: Dictionary) -> int:
-	if not _is_directional_placeable(placeable_def):
+	if not BuildDirectionRules.is_directional_placeable(placeable_def):
 		return 0
-	var direction: Vector2i = placeable_def.get("direction", DIRECTION_RIGHT) as Vector2i
-	return _alternative_from_direction(direction)
+	var direction: Vector2i = placeable_def.get("direction", BuildDirectionRules.DIRECTION_RIGHT) as Vector2i
+	return BuildDirectionRules.alternative_from_direction(direction)
 
 
 func clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
@@ -450,20 +443,6 @@ func after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_plac
 		reservoir_system.call("request_reservoir_irrigation_from_cell", cell)
 	if placeable_id == "pasteque" and reservoir_system != null and reservoir_system.has_method("request_pasteque_irrigation_from_cell"):
 		reservoir_system.call("request_pasteque_irrigation_from_cell", cell)
-
-
-func _is_directional_placeable(placeable_def: Dictionary) -> bool:
-	return bool(placeable_def.get("directional", false))
-
-
-func _alternative_from_direction(direction: Vector2i) -> int:
-	if direction == DIRECTION_LEFT:
-		return TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V
-	if direction == DIRECTION_DOWN:
-		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H
-	if direction == DIRECTION_UP:
-		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V
-	return 0
 
 
 func _clear_build_selection() -> void:

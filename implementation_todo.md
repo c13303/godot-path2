@@ -1,278 +1,283 @@
-Review `scripts/map/buildsystem.gd` after the recent extractions:
+Review the current build-system code after the recent `BuildModeStateController` extraction.
 
-* `BuildPreviewController`
-* `BuildPlacementService`
-* `BuildRemovalService`
-* `BuildDragController`
-* `BuildInputController`
+Recent state:
 
-Goal: perform one focused extraction: move build-mode state and tool/item selection state into a dedicated controller.
+```txt id="ssob76"
+BuildModeStateController now owns _build_direction and selected_placeable_def()
+BuildSystem still keeps DIRECTION_* constants for fence autotiling and _alternative_from_direction
+BuildPlacementService still has its own _is_directional_placeable / _alternative_from_direction logic
+get_preview_direction() remains a BuildSystem wrapper for turret_system.gd
+```
+
+Goal: perform one focused extraction: centralize build direction / orientation rules into a small shared helper/service.
 
 Do not run Godot, tests, compilation, export, or build commands. I will test manually.
 
 ## Target
 
-Create a focused state controller, for example:
+Create a focused helper/service, for example:
 
-```txt id="i9yczg"
-scripts/map/build_mode_state_controller.gd
+```txt id="f7erhf"
+scripts/map/build_direction_rules.gd
 ```
 
-Use another clear name only if it better matches the existing project style.
+or:
+
+```txt id="m2ho16"
+scripts/map/build_orientation_service.gd
+```
+
+Use the clearest name for the existing project style.
 
 ## Why this extraction
 
-`BuildSystem` should coordinate build subsystems, but it should not directly own all build-mode state.
+Direction/orientation rules are now duplicated across build state and placement code.
 
 The next coherent responsibility is:
 
-```txt id="d9u2q6"
-Track whether build mode is active, which build/remove/tool mode is selected, which item is selected, and how state resets when mode/tool/item changes.
+```txt id="7cphru"
+Given an item definition and a build direction:
+determine whether the item is directional,
+cycle direction forward/backward,
+convert direction to tile alternative/rotation data,
+and expose shared direction constants.
 ```
 
 This is separate from:
 
-```txt id="ykpb7k"
+```txt id="4mce86"
+build mode state
 input routing
 preview rendering
 placement commit
 removal commit
 drag processing
-UI menu rendering
-inventory mutation
+UI selection
 TileMap mutation
 ```
 
-This is architectural cleanup, not line-count cleanup.
+This is a cleanup extraction, not a behavior change.
 
 ## Candidate responsibility to move
 
-Move only build-mode and selection state.
+Move only direction/orientation rules.
 
-Candidate areas to inspect and possibly extract:
+Candidate duplicated or related code to inspect:
 
-```txt id="c5janl"
-build mode active/inactive state
-current selected tool
-current selected build item
-current selected item definition/cache
-current target layer/type derived from selection
-remove/unbuild mode state
-rotation/flip state if it is selection/mode state
-mode reset on cancel
-mode reset on item switch
-mode reset on tool switch
-public getters for current selection
-public setters called by UI/tool menu
-state validation when selected item becomes unavailable
+```gdscript id="rh09n4"
+DIRECTION_*
+_is_directional_placeable
+_next_build_direction
+_prev_build_direction
+_alternative_from_direction
+selected-placeable direction composition, only if pure
+direction-to-alternative mapping used by placement
+direction queries used by preview/turret range preview
 ```
 
-Move only functions/state that are clearly mode/selection state.
+Move only pure direction/orientation logic.
 
-If a function mixes UI, input, and mode state, extract only the state mutation/query part and leave UI/input routing in their existing controllers.
+Do not move selected item ownership, build mode state, input handling, preview nodes, or placement commit rules.
 
 ## Desired boundary
 
-`BuildSystem` may keep:
+Possible design:
 
-```gdscript id="1r1qrl"
-var _build_mode_state: BuildModeStateController = BuildModeStateController.new()
+```gdscript id="arh67h"
+class_name BuildDirectionRules
+extends RefCounted
 ```
 
-Initialize it with:
+With pure/static or instance methods such as:
 
-```gdscript id="8uwryq"
-_build_mode_state.setup(self)
+```gdscript id="ctlsce"
+func is_directional_placeable(item_def: Dictionary) -> bool
+func next_direction(direction: int) -> int
+func previous_direction(direction: int) -> int
+func alternative_from_direction(direction: int) -> int
+func normalize_direction(direction: int) -> int
 ```
 
-if this matches the current controller/service pattern and keeps the patch smaller.
+Static methods are acceptable if that fits the project style.
 
-Existing public methods on `BuildSystem` may remain as thin wrappers.
-
-Examples:
-
-```gdscript id="4lhha9"
-func is_build_mode_active() -> bool:
-	return _build_mode_state.is_build_mode_active()
-
-func set_build_mode_active(active: bool) -> void:
-	_build_mode_state.set_build_mode_active(active)
-
-func get_selected_build_item_id() -> String:
-	return _build_mode_state.get_selected_item_id()
-
-func set_selected_build_item_id(item_id: String) -> void:
-	_build_mode_state.set_selected_item_id(item_id)
-```
-
-Thin wrappers are acceptable and recommended if UI/tutorial/input code already calls `BuildSystem`.
-
-Do not rewrite the whole call graph just to remove wrappers.
+A `RefCounted` instance is also acceptable if it better matches existing controllers.
 
 ## Ownership rule
 
-`BuildModeStateController` may own:
+`BuildDirectionRules` may own:
 
-```txt id="2r549y"
-build mode active flag
-current tool/mode enum or string
-selected build item id
-selected item definition cache, if currently present
-remove/unbuild mode flag
-rotation/flip selection state, if currently present
-state reset rules
-state query helpers
-selection validity checks
+```txt id="wja443"
+DIRECTION_* constants
+direction cycling rules
+direction normalization
+directional-placeable detection
+direction -> TileMap alternative mapping
+```
+
+`BuildModeStateController` should still own:
+
+```txt id="gqqmbu"
+current _build_direction value
+rotate_selected_build_direction()
+selected_placeable_def() composition
+state reset behavior
+```
+
+`BuildPlacementService` should still own:
+
+```txt id="smax0z"
+actual placement commit
+TileMap writes
+item placement validation
+inventory/cost mutation
+placement side effects
 ```
 
 `BuildSystem` should still own:
 
-```txt id="hzoky4"
+```txt id="qhk8eh"
+compatibility wrappers
 subsystem orchestration
-preview controller
-placement service
-removal service
-drag controller
-input controller
-TileMap references
-BuildingObjectManager references
-inventory/cost mutation through services
-UI-facing compatibility wrappers
-save/load coordination
+public API used by turret_system.gd / input / UI
+fence autotiling call sites, unless only the direction mapping is moved
 ```
 
-If ownership is unclear, keep the state in `BuildSystem` and expose a narrow wrapper.
+If ownership is unclear, keep the state/function where it is and only centralize the pure helper logic.
 
-## Boundary with BuildInputController
+## Required compatibility
 
-`BuildInputController` may query mode/selection state:
+Keep these existing public/wrapper methods working:
 
-```txt id="pe7wct"
-is build mode active?
-is removal mode active?
-what tool is selected?
-what item is selected?
+```gdscript id="xjn0p1"
+rotate_selected_build_direction()
+get_preview_direction()
+_selected_placeable_def()
 ```
 
-It may request state changes through wrappers:
+Do not break external callers such as:
 
-```txt id="wp3h90"
-cancel build mode
-switch tool
-toggle remove mode
+```txt id="v8h05z"
+turret_system.gd
+BuildInputController
+BuildDragController
+BuildPreviewController
+BuildPlacementService
 ```
 
-But input controller should not own mode/selection state.
-
-## Boundary with BuildPreviewController
-
-`BuildPreviewController` may query:
-
-```txt id="4x2zb0"
-selected item id
-selected target layer
-selected rotation/flip
-is remove mode active
-```
-
-But preview controller should not own selected item/mode state.
-
-## Boundary with placement/removal services
-
-Placement/removal services may query selection state:
-
-```txt id="s0pgp8"
-selected item id
-current item definition
-selected target layer
-rotation/flip state
-```
-
-But they should not own selection state.
-
-## Do not extract
-
-Do not move or refactor:
-
-```txt id="bvm2pt"
-input event routing
-preview/cursor rendering internals
-actual placement commit rules
-actual removal commit rules
-drag processed-cell state
-shop/build menu UI
-save/load behavior
-combat/projectile behavior
-player movement
-BuildingManager behavior
-inventory/cost mutation except through existing APIs
-TileMap mutation except through existing services
-```
-
-This pass is only about build-mode and selection state.
+Prefer wrappers over broad caller rewrites.
 
 ## Behavior preservation
 
 Preserve existing behavior exactly:
 
-```txt id="ix10jr"
-same build mode enter behavior
-same build mode exit/cancel behavior
-same selected tool behavior
-same selected item behavior
-same remove/unbuild mode behavior
-same state reset when switching tools/items
-same preview refresh after state changes
-same input behavior after state changes
-same UI-facing public methods
-same tutorial/save-load compatibility if any
-same placement/removal results
+```txt id="j8zlhf"
+same direction order
+same forward rotation
+same backward rotation
+same behavior for non-directional items
+same selected_placeable_def result
+same preview direction
+same turret range preview direction
+same TileMap alternative chosen during placement
+same fence autotiling behavior
+same mouse wheel / R / gamepad rotate behavior
 ```
+
+Do not change rotation semantics.
+
+Do not change tile alternatives.
+
+Do not change item definitions.
+
+Do not change preview.
+
+Do not change placement.
 
 Do not change input bindings.
 
-Do not change placement/removal rules.
+## Boundary with BuildModeStateController
 
-Do not change preview visuals.
+`BuildModeStateController` should call the new direction rules helper for:
 
-Do not change UI menu behavior.
-
-Do not change inventory/cost behavior.
-
-## Compatibility rule
-
-If other scripts call `BuildSystem` methods for build mode or selected item state, keep those methods as wrappers.
-
-Do not break `has_method(...)` / `call(...)` compatibility if it exists.
-
-Before coding, search for external callers of build-system public methods related to:
-
-```txt id="v21mow"
-build mode
-selected item
-selected tool
-remove mode
-unbuild mode
-rotation
-cancel build
+```txt id="ny8byf"
+is this selected item directional?
+next direction
+previous direction
 ```
 
-Update only if necessary. Prefer preserving wrapper methods on `BuildSystem`.
+But it should continue to own the mutable current direction.
+
+Do not move `_build_direction` into the rules helper.
+
+## Boundary with BuildPlacementService
+
+`BuildPlacementService` should call the new direction rules helper for:
+
+```txt id="7q7vce"
+directional-placeable detection
+direction -> alternative mapping
+```
+
+Do not duplicate `_is_directional_placeable` or `_alternative_from_direction` in the placement service after this pass, unless there is a concrete incompatibility that you must report.
+
+## Boundary with BuildSystem
+
+`BuildSystem` may keep `DIRECTION_*` compatibility constants if external code or inspector usage depends on them.
+
+However, avoid having two independent sources of truth.
+
+Acceptable options:
+
+Option A:
+
+```txt id="s469zd"
+Move constants to BuildDirectionRules and have BuildSystem constants alias them if GDScript allows cleanly.
+```
+
+Option B:
+
+```txt id="3svcnt"
+Keep constants in BuildSystem for compatibility but make all logic call BuildDirectionRules, and report the remaining constant duplication.
+```
+
+Prefer Option A if safe. Use Option B if cyclic load/order/strict typing makes aliasing risky.
+
+## Do not extract
+
+Do not move or refactor:
+
+```txt id="xrtnnb"
+input routing
+preview/cursor rendering
+placement commit rules
+removal commit rules
+drag processed-cell state
+build mode active state
+selected item/tool state
+shop/build menu UI
+save/load behavior
+combat/projectile behavior
+player movement
+inventory/cost mutation
+TileMap mutation except replacing direction helper calls
+```
+
+This pass is only about pure build direction/orientation rules.
 
 ## Coupling rule
 
-If state is deeply mixed with UI or input code, do not extract the whole function blindly.
+If direction logic is mixed into placement or preview functions, do not extract the whole function.
 
 Instead:
 
-```txt id="n275gq"
-leave UI/input behavior in existing files/controllers
-extract only the state mutation/query part
-use small wrappers
-report remaining coupling
+```txt id="syxm9w"
+leave placement/preview logic where it is
+extract only the pure direction calculation
+replace duplicated helper bodies with calls to BuildDirectionRules
+report any duplication intentionally left
 ```
 
-If the extraction requires rewriting UI, input, placement, removal, preview, inventory, or save/load behavior, stop and report the coupling instead of expanding the task.
+If this extraction requires rewriting input, preview, placement, removal, UI, or item catalog behavior, stop and report the coupling instead of expanding the task.
 
 ## GDScript strict typing
 
@@ -280,7 +285,7 @@ Godot/GDScript strict typing is enabled.
 
 Avoid `:=` inference for:
 
-```txt id="pd8i9g"
+```txt id="6wss95"
 numeric expressions
 Dictionary / Array values
 signal or call() returns
@@ -304,38 +309,40 @@ Do not reformat unrelated code.
 
 Do not perform broad cleanup.
 
-Do not create generic `utils` files.
+Do not create a generic utility dumping ground.
 
-Do not continue into UI, input, preview, placement, removal, drag, inventory, or save/load redesign because the code is nearby.
+Do not continue into placement, preview, input, drag, UI, inventory, or save/load because the code is nearby.
 
 ## Before coding, report
 
-```txt id="kngdnp"
+```txt id="nywjdn"
 Owner:
 Caller:
 State owned:
 Public API:
 Files changed:
 Estimated lines moved:
-Mode/selection state ownership decision:
-BuildSystem state intentionally kept:
-Thin wrappers to preserve:
-External callers found:
+Direction constants ownership decision:
+Duplicated helpers found:
+BuildSystem compatibility wrappers/constants kept:
 Couplings found:
 Risk:
 ```
 
-Then implement only the build-mode / selection-state extraction.
+Then implement only the direction/orientation rules extraction.
 
 ## Final report
 
 After implementation, report:
 
-```txt id="pa7hbu"
+```txt id="ac5eal"
 What moved:
 What stayed in BuildSystem:
-Mode/selection state ownership decision:
-Thin wrappers kept:
+What stayed in BuildModeStateController:
+What stayed in BuildPlacementService:
+Direction constants ownership decision:
+Duplicated helper bodies removed:
+Compatibility wrappers kept:
 Files changed:
 Remaining risks:
 Manual test checklist:

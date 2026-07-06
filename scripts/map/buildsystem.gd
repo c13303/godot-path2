@@ -5,9 +5,9 @@ signal build_preview_changed(is_active: bool)
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
 const BUILD_FX_Z_INDEX: int = -62
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
-const TILE_TRANSFORM_FLIP_H: int = 4096
-const TILE_TRANSFORM_FLIP_V: int = 8192
-const TILE_TRANSFORM_TRANSPOSE: int = 16384
+# DIRECTION_* are fence-adjacency neighbor offsets used by the fence autotiler below.
+# Build orientation rules (facing rotation, direction -> tile alternative) live in
+# BuildDirectionRules, not here.
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
@@ -700,12 +700,3 @@ func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 
 func _alternative_from_placeable(placeable_def: Dictionary) -> int:
 	return _placement_service.alternative_from_placeable(placeable_def)
-
-func _alternative_from_direction(direction: Vector2i) -> int:
-	if direction == DIRECTION_LEFT:
-		return TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V
-	if direction == DIRECTION_DOWN:
-		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H
-	if direction == DIRECTION_UP:
-		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V
-	return 0
