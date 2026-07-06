@@ -367,6 +367,63 @@ static func get_weapon_ids() -> Array[StringName]:
 	weapon_ids.sort()
 	return weapon_ids
 
+static func get_giveable_starting_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		var item_type: String = str(get_item_def(item_id).get("type", ""))
+		if item_type == "placeable" or item_type == "resource":
+			ids.append(StringName(item_id))
+	ids.sort()
+	return ids
+
+static func get_gardening_shop_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		var item_def: Dictionary = get_item_def(item_id)
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		var category: String = str(item_def.get("category", ""))
+		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation":
+			ids.append(StringName(item_id))
+	return _ordered_known_first(ids, [&"rose", &"ronce", &"pasteque", &"turret1", &"turret_epine"])
+
+static func get_hammer_shop_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		var item_def: Dictionary = get_item_def(item_id)
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		var category: String = str(item_def.get("category", ""))
+		if category == "shop_counter" or category == "wall" or category == "fence" or category == "furniture":
+			ids.append(StringName(item_id))
+	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"fence"])
+
+static func get_tool_shop_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = get_gardening_shop_item_ids()
+	for item_id: StringName in get_hammer_shop_item_ids():
+		if not ids.has(item_id):
+			ids.append(item_id)
+	return ids
+
+static func get_merchant_shop_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if ITEM_DEFS.has("seed"):
+		ids.append(&"seed")
+	for weapon_id: StringName in get_weapon_ids():
+		var weapon_def: Dictionary = get_item_def(String(weapon_id))
+		if weapon_def.has("currency") and not ids.has(weapon_id):
+			ids.append(weapon_id)
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		if is_inventory_backed(item_id):
+			var id_name: StringName = StringName(item_id)
+			if not ids.has(id_name):
+				ids.append(id_name)
+	return _ordered_known_first(ids, [&"seed", &"sword", &"bomb", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+
 static func get_max_stack(item_id: String) -> int:
 	return maxi(1, int(get_item_def(item_id).get("max_stack", 999)))
 
@@ -423,3 +480,13 @@ static func _atlas_coords_from_variant(raw_atlas: Variant) -> Vector2i:
 	if raw_atlas is Array and raw_atlas.size() == 2:
 		return Vector2i(int(raw_atlas[0]), int(raw_atlas[1]))
 	return Vector2i(-1, -1)
+
+static func _ordered_known_first(ids: Array[StringName], preferred_order: Array[StringName]) -> Array[StringName]:
+	var ordered: Array[StringName] = []
+	for item_id: StringName in preferred_order:
+		if ids.has(item_id):
+			ordered.append(item_id)
+	for item_id: StringName in ids:
+		if not ordered.has(item_id):
+			ordered.append(item_id)
+	return ordered

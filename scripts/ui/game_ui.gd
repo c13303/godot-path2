@@ -30,11 +30,6 @@ const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_
 const QUICK_SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 const QUICK_SLOT_GAP: float = 6.0
 const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
-# Buildables offered by the gardening menu (mirrors toolbuild.GARDENING_ITEM_IDS); used to tell
-# whether a gardening buildable is currently equipped, which drives the tutorial's plant step.
-const GARDENING_BUILDABLE_IDS: Array[String] = ["rose", "ronce", "pasteque", "turret1", "turret_epine"]
-const HAMMER_BUILDABLE_IDS: Array[String] = ["rose_shop_counter", "wall", "fence"]
-
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/ToolbarPanel/toolbar"
 @onready var toolbar_panel: PanelContainer = $"bottom anchor/ToolbarPanel"
 @onready var toolbar_info: RichTextLabel = get_node_or_null("bottom anchor/toolbarInfo") as RichTextLabel
@@ -327,7 +322,7 @@ func is_gardening_selected() -> bool:
 	if get_active_menu_kind() == GARDENING_ID:
 		return true
 	var build_item_id: String = get_selected_build_item_id()
-	return build_item_id != "" and build_item_id in GARDENING_BUILDABLE_IDS
+	return build_item_id != "" and build_item_id in _gardening_buildable_ids()
 
 func is_unbuild_tool_selected() -> bool:
 	return false
@@ -357,10 +352,25 @@ func select_build_item_for_tool(tool_id: String, item_id: String) -> bool:
 
 func _tool_offers_build_item(tool_id: String, item_id: String) -> bool:
 	if tool_id == GARDENING_ID:
-		return item_id in GARDENING_BUILDABLE_IDS
+		return item_id in _gardening_buildable_ids()
 	if tool_id == HAMMER_ID:
-		return item_id in HAMMER_BUILDABLE_IDS
+		return item_id in _hammer_buildable_ids()
 	return false
+
+
+func _gardening_buildable_ids() -> Array[String]:
+	return _string_names_to_strings(ItemCatalog.get_gardening_shop_item_ids())
+
+
+func _hammer_buildable_ids() -> Array[String]:
+	return _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
+
+
+func _string_names_to_strings(item_ids: Array[StringName]) -> Array[String]:
+	var ids: Array[String] = []
+	for item_id: StringName in item_ids:
+		ids.append(String(item_id))
+	return ids
 
 ## Global-space center X of a quick slot's icon, or -1 if that slot has not been built yet.
 func get_quick_slot_center_x(index: int) -> float:

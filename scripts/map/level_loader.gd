@@ -27,9 +27,9 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
-const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"pasteque", &"rose_shop_counter"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
+const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 const RESERVOIR_Z_INDEX: int = 510
 ## Wall tile stamped on wallz under the reservoir base so its cell is non-walkable
@@ -235,7 +235,7 @@ func get_loaded_shop_available_items() -> Array[StringName]:
 
 func get_loaded_shop_prices() -> Dictionary:
 	var prices: Dictionary = _loaded_tool_shop_prices.duplicate()
-	for item_id: StringName in MERCHANT_ITEM_IDS:
+	for item_id: StringName in _merchant_item_ids():
 		prices[item_id] = int(_loaded_merchant_prices.get(item_id, ItemCatalog.get_price(String(item_id))))
 	return prices.duplicate()
 
@@ -261,27 +261,14 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_items = {}
 	_loaded_starting_item_toolbuild_hidden = []
 	_loaded_monster_drop_seed_chance_percent = 0
-	_loaded_tool_shop_available_items = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
-	_loaded_tool_shop_prices = {
-		&"rose": 1,
-		&"turret1": 5,
-		&"turret_epine": 5,
-		&"wall": 100,
-		&"ronce": 1,
-		&"fence": 1,
-	}
+	_loaded_tool_shop_available_items = _default_shop_available_items(DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS)
+	_loaded_tool_shop_prices = _default_shop_prices(_tool_shop_item_ids())
 	_loaded_tool_shop_growth_price_factors = {
 		&"ronce": 2.0,
 	}
 	_loaded_tool_shop_days = {}
-	_loaded_merchant_available_items = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
-	_loaded_merchant_prices = {
-		&"seed": 2,
-		&"spray": 100,
-		&"beam": 100,
-		&"sword": 100,
-		&"bomb": 100,
-	}
+	_loaded_merchant_available_items = _default_shop_available_items(DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS)
+	_loaded_merchant_prices = _default_shop_prices(_merchant_item_ids())
 	_loaded_merchant_days = {}
 	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
@@ -298,25 +285,25 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_items = _valid_starting_items(config.starting_items)
 		_loaded_starting_item_toolbuild_hidden = _valid_toolbuild_hidden_items(config.starting_item_toolbuild_hidden)
 		_loaded_monster_drop_seed_chance_percent = clampi(config.monster_drop_seed_chance_percent, 0, 100)
-		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, TOOL_SHOP_ITEM_IDS)
-		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, TOOL_SHOP_ITEM_IDS)
-		_loaded_tool_shop_growth_price_factors = _valid_shop_growth_price_factors(config.tool_shop_growth_price_factors, TOOL_SHOP_ITEM_IDS)
-		_loaded_tool_shop_days = _valid_shop_days(config.tool_shop_days, TOOL_SHOP_ITEM_IDS)
-		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, MERCHANT_ITEM_IDS)
-		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, MERCHANT_ITEM_IDS)
-		_loaded_merchant_days = _valid_shop_days(config.merchant_days, MERCHANT_ITEM_IDS)
-		var legacy_available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items, LEGACY_SHOP_ITEM_IDS)
-		var legacy_prices: Dictionary = _valid_shop_prices(config.shop_prices, LEGACY_SHOP_ITEM_IDS)
-		if not _same_string_name_array(legacy_available_items, _default_shop_available_items(LEGACY_SHOP_ITEM_IDS)):
-			if _same_string_name_array(_loaded_tool_shop_available_items, _default_shop_available_items(TOOL_SHOP_ITEM_IDS)):
-				_loaded_tool_shop_available_items = _valid_shop_available_items(legacy_available_items, TOOL_SHOP_ITEM_IDS)
-			if _same_string_name_array(_loaded_merchant_available_items, _default_shop_available_items(MERCHANT_ITEM_IDS)):
-				_loaded_merchant_available_items = _valid_shop_available_items(legacy_available_items, MERCHANT_ITEM_IDS)
-		if legacy_prices != _default_shop_prices(LEGACY_SHOP_ITEM_IDS):
-			if _loaded_tool_shop_prices == _default_shop_prices(TOOL_SHOP_ITEM_IDS):
-				_loaded_tool_shop_prices = _valid_shop_prices(legacy_prices, TOOL_SHOP_ITEM_IDS)
-			if _loaded_merchant_prices == _default_shop_prices(MERCHANT_ITEM_IDS):
-				_loaded_merchant_prices = _valid_shop_prices(legacy_prices, MERCHANT_ITEM_IDS)
+		_loaded_tool_shop_available_items = _valid_shop_available_items(config.tool_shop_available_items, _tool_shop_item_ids())
+		_loaded_tool_shop_prices = _valid_shop_prices(config.tool_shop_prices, _tool_shop_item_ids())
+		_loaded_tool_shop_growth_price_factors = _valid_shop_growth_price_factors(config.tool_shop_growth_price_factors, _tool_shop_item_ids())
+		_loaded_tool_shop_days = _valid_shop_days(config.tool_shop_days, _tool_shop_item_ids())
+		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, _merchant_item_ids())
+		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, _merchant_item_ids())
+		_loaded_merchant_days = _valid_shop_days(config.merchant_days, _merchant_item_ids())
+		var legacy_available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items, _legacy_shop_item_ids())
+		var legacy_prices: Dictionary = _valid_shop_prices(config.shop_prices, _legacy_shop_item_ids())
+		if not _same_string_name_array(legacy_available_items, _default_shop_available_items(DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS)):
+			if _same_string_name_array(_loaded_tool_shop_available_items, _default_shop_available_items(DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS)):
+				_loaded_tool_shop_available_items = _valid_shop_available_items(legacy_available_items, _tool_shop_item_ids())
+			if _same_string_name_array(_loaded_merchant_available_items, _default_shop_available_items(DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS)):
+				_loaded_merchant_available_items = _valid_shop_available_items(legacy_available_items, _merchant_item_ids())
+		if legacy_prices != _default_shop_prices(_legacy_shop_item_ids()):
+			if _loaded_tool_shop_prices == _default_shop_prices(_tool_shop_item_ids()):
+				_loaded_tool_shop_prices = _valid_shop_prices(legacy_prices, _tool_shop_item_ids())
+			if _loaded_merchant_prices == _default_shop_prices(_merchant_item_ids()):
+				_loaded_merchant_prices = _valid_shop_prices(legacy_prices, _merchant_item_ids())
 		_loaded_rose_shop_counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
 	if _loaded_spawn_playlist != null:
 		return
@@ -374,6 +361,22 @@ func _valid_toolbuild_hidden_items(raw_item_ids: Array) -> Array[StringName]:
 			continue
 		seen[item_id] = true
 		item_ids.append(item_id)
+	return item_ids
+
+
+func _tool_shop_item_ids() -> Array[StringName]:
+	return ItemCatalog.get_tool_shop_item_ids()
+
+
+func _merchant_item_ids() -> Array[StringName]:
+	return ItemCatalog.get_merchant_shop_item_ids()
+
+
+func _legacy_shop_item_ids() -> Array[StringName]:
+	var item_ids: Array[StringName] = _tool_shop_item_ids()
+	for item_id: StringName in _merchant_item_ids():
+		if not item_ids.has(item_id):
+			item_ids.append(item_id)
 	return item_ids
 
 

@@ -42,13 +42,9 @@ const HAMMER_TOOL_ID: String = "hammer"
 # Slot 0 of the quickbar is the weapons menu; this kind string matches game_ui.WEAPON_SLOT_KIND.
 const WEAPON_MENU_KIND: String = "weapon"
 const WEAPON_MENU_SLOT_INDEX: int = 0
-const GARDENING_ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine"]
-const HAMMER_ITEM_IDS: Array[String] = [COUNTER_ID, "wall", "fence"]
 const SEED_ITEM_ID: String = "seed"
 # The seed-merchant column also carries inventory-backed buildables (pasteque),
 # which are bought here and later placed from the gardening column above.
-const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam", PASTEQUE_ID, COUNTER_ID]
-const ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine", COUNTER_ID, "wall", "fence", SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
@@ -407,7 +403,7 @@ func _build_merchant_ui() -> void:
 	grid.add_theme_constant_override("v_separation", 6)
 	margin.add_child(grid)
 
-	for item_id: String in WEAPON_ITEM_IDS:
+	for item_id: String in _merchant_item_ids():
 		_build_merchant_item_cells(grid, item_id)
 	column.visible = false
 
@@ -557,7 +553,7 @@ func _build_bar() -> Control:
 	items_list.add_theme_constant_override("separation", 6)
 	margin.add_child(items_list)
 
-	for item_id: String in ITEM_IDS:
+	for item_id: String in _all_item_ids():
 		items_list.add_child(_build_slot_row(item_id))
 	return panel
 
@@ -926,7 +922,7 @@ func _visible_merchant_pad_item_ids() -> Array[String]:
 	var reward_keys: Array[String] = _active_special_reward_keys()
 	for reward_key: String in reward_keys:
 		ids.append(_special_reward_pad_id(reward_key))
-	for item_id: String in WEAPON_ITEM_IDS:
+	for item_id: String in _merchant_item_ids():
 		if _should_show_merchant_item(item_id):
 			ids.append(item_id)
 	return ids
@@ -1013,7 +1009,7 @@ func _is_merchant_item_available(item_id: String) -> bool:
 # --- Per-frame refresh -------------------------------------------------------
 
 func _refresh_slots() -> void:
-	for item_id: String in ITEM_IDS:
+	for item_id: String in _all_item_ids():
 		var row: Control = _slot_rows.get(item_id) as Control
 		if row == null:
 			continue
@@ -1161,7 +1157,7 @@ func _currency_texture(item_id: String) -> AtlasTexture:
 ## phase every row label stays hidden (the floating selected label is used instead).
 func _update_row_labels() -> void:
 	var show_rows: bool = false
-	for item_id: String in ITEM_IDS:
+	for item_id: String in _all_item_ids():
 		var group: HBoxContainer = _row_labels.get(item_id) as HBoxContainer
 		if group == null:
 			continue
@@ -1217,9 +1213,9 @@ func _selected_build_tool_id() -> String:
 func _active_build_item_ids() -> Array[String]:
 	match _selected_build_tool_id():
 		GARDENING_TOOL_ID:
-			return GARDENING_ITEM_IDS
+			return _string_names_to_strings(ItemCatalog.get_gardening_shop_item_ids())
 		HAMMER_TOOL_ID:
-			return HAMMER_ITEM_IDS
+			return _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
 	return []
 
 
@@ -1228,11 +1224,38 @@ func _should_show_item(item_id: String) -> bool:
 
 
 func _should_show_merchant_item(item_id: String) -> bool:
-	return item_id in WEAPON_ITEM_IDS and _is_merchant_item(item_id) and _is_merchant_item_available(item_id)
+	return item_id in _merchant_item_ids() and _is_merchant_item(item_id) and _is_merchant_item_available(item_id)
 
 
 func _is_merchant_item(item_id: String) -> bool:
 	return item_id == SEED_ITEM_ID or ItemCatalog.is_weapon(item_id) or ItemCatalog.is_inventory_backed(item_id)
+
+
+func _all_item_ids() -> Array[String]:
+	var ids: Array[String] = _active_candidate_item_ids()
+	for item_id: String in _merchant_item_ids():
+		if not ids.has(item_id):
+			ids.append(item_id)
+	return ids
+
+
+func _active_candidate_item_ids() -> Array[String]:
+	var ids: Array[String] = _string_names_to_strings(ItemCatalog.get_tool_shop_item_ids())
+	for item_id: String in _merchant_item_ids():
+		if ItemCatalog.is_inventory_backed(item_id) and not ids.has(item_id):
+			ids.append(item_id)
+	return ids
+
+
+func _merchant_item_ids() -> Array[String]:
+	return _string_names_to_strings(ItemCatalog.get_merchant_shop_item_ids())
+
+
+func _string_names_to_strings(item_ids: Array[StringName]) -> Array[String]:
+	var ids: Array[String] = []
+	for item_id: StringName in item_ids:
+		ids.append(String(item_id))
+	return ids
 
 
 func _player_near_seed_merchant() -> bool:
@@ -1248,7 +1271,7 @@ func _is_seed_merchant_shop_active() -> bool:
 func _refresh_merchant_slots() -> void:
 	_refresh_special_reward_row()
 	_refresh_special_reward_selection_style()
-	for item_id: String in WEAPON_ITEM_IDS:
+	for item_id: String in _merchant_item_ids():
 		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
 		if cells.is_empty():
 			continue

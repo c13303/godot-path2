@@ -38,7 +38,7 @@ class_name LevelSpawnConfig
 @export var tool_shop_days: Dictionary = {}
 @export_range(1, 99, 1) var rose_shop_counter_limit: int = 2
 
-@export_group("Merchent")
+@export_group("Merchant")
 @export var merchant_available_items: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 @export var merchant_prices: Dictionary = {
 	&"seed": 2,

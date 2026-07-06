@@ -12,9 +12,9 @@ const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 const DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT: int = 0
-const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
-const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"pasteque", &"rose_shop_counter"]
-const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
+const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const REWARD_CURRENCIES: Array[String] = ["seed", "money", "gem"]
 const WAVE_MOVE_WIDTH: float = 94.0
 const WAVE_NUMBER_WIDTH: float = 28.0
@@ -519,17 +519,32 @@ func _build_monster_drop_controls() -> void:
 
 
 func _build_shop_controls() -> void:
-	var heading: Label = Label.new()
-	heading.text = "Tool Shop"
-	heading.add_theme_font_size_override("font_size", 15)
-	_shop_controls.add_child(heading)
-	_build_shop_item_controls(TOOL_SHOP_ITEM_IDS, _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
+	_tool_shop_available_checkboxes.clear()
+	_tool_shop_price_spins.clear()
+	_tool_shop_day_spins.clear()
+	_tool_shop_growth_price_factor_spins.clear()
+
+	var gardening_heading: Label = Label.new()
+	gardening_heading.text = "Gardening Tool"
+	gardening_heading.add_theme_font_size_override("font_size", 15)
+	_shop_controls.add_child(gardening_heading)
+	_build_shop_item_controls(ItemCatalog.get_gardening_shop_item_ids(), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
+
+	var hammer_heading: Label = Label.new()
+	hammer_heading.text = "Hammer"
+	hammer_heading.add_theme_font_size_override("font_size", 15)
+	_shop_controls.add_child(hammer_heading)
+	_build_shop_item_controls(ItemCatalog.get_hammer_shop_item_ids(), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
+
+	_merchant_available_checkboxes.clear()
+	_merchant_price_spins.clear()
+	_merchant_day_spins.clear()
 
 	var merchant_heading: Label = Label.new()
-	merchant_heading.text = "Merchent"
+	merchant_heading.text = "Merchant"
 	merchant_heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(merchant_heading)
-	_build_shop_item_controls(MERCHANT_ITEM_IDS, _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed, {}, Callable())
+	_build_shop_item_controls(ItemCatalog.get_merchant_shop_item_ids(), _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed, {}, Callable())
 
 
 func _build_shop_item_controls(
@@ -567,10 +582,6 @@ func _build_shop_item_controls(
 		growth_factor_header.custom_minimum_size = Vector2(132.0, 0.0)
 		header.add_child(growth_factor_header)
 
-	available_checkboxes.clear()
-	price_spins.clear()
-	day_spins.clear()
-	growth_factor_spins.clear()
 	for item_id: StringName in item_ids:
 		var row: HBoxContainer = HBoxContainer.new()
 		_shop_controls.add_child(row)
@@ -2240,13 +2251,7 @@ func _toolbuild_hidden_has(hidden_items: Array, item_id: StringName) -> bool:
 ## Every non-weapon item that can be granted at start: placeables and resources
 ## (weapons have their own checkbox row; pure tools like the build tool are excluded).
 func _giveable_starting_item_ids() -> Array[StringName]:
-	var ids: Array[StringName] = []
-	for raw_id: Variant in ItemCatalog.ITEM_DEFS.keys():
-		var item_def: Dictionary = ItemCatalog.get_item_def(str(raw_id))
-		var item_type: String = str(item_def.get("type", ""))
-		if item_type == "placeable" or item_type == "resource":
-			ids.append(StringName(str(raw_id)))
-	return ids
+	return ItemCatalog.get_giveable_starting_item_ids()
 
 
 ## Reads the quantity for an item from an authored starting-items dict, tolerating either
@@ -2260,11 +2265,11 @@ func _starting_item_quantity(items: Dictionary, item_id: StringName) -> int:
 
 
 func _selected_tool_shop_available_items() -> Array[StringName]:
-	return _selected_shop_available_items_from(_tool_shop_available_checkboxes, TOOL_SHOP_ITEM_IDS)
+	return _selected_shop_available_items_from(_tool_shop_available_checkboxes, _tool_shop_item_ids())
 
 
 func _selected_merchant_available_items() -> Array[StringName]:
-	return _selected_shop_available_items_from(_merchant_available_checkboxes, MERCHANT_ITEM_IDS)
+	return _selected_shop_available_items_from(_merchant_available_checkboxes, _merchant_item_ids())
 
 
 func _selected_legacy_shop_available_items() -> Array[StringName]:
@@ -2286,29 +2291,29 @@ func _selected_shop_available_items_from(available_checkboxes: Dictionary, valid
 
 
 func _selected_tool_shop_prices() -> Dictionary:
-	return _selected_shop_prices_from(_tool_shop_price_spins, TOOL_SHOP_ITEM_IDS)
+	return _selected_shop_prices_from(_tool_shop_price_spins, _tool_shop_item_ids())
 
 
 func _selected_merchant_prices() -> Dictionary:
-	return _selected_shop_prices_from(_merchant_price_spins, MERCHANT_ITEM_IDS)
+	return _selected_shop_prices_from(_merchant_price_spins, _merchant_item_ids())
 
 
 func _selected_tool_shop_days() -> Dictionary:
-	return _selected_shop_days_from(_tool_shop_day_spins, TOOL_SHOP_ITEM_IDS)
+	return _selected_shop_days_from(_tool_shop_day_spins, _tool_shop_item_ids())
 
 
 func _selected_tool_shop_growth_price_factors() -> Dictionary:
-	return _selected_shop_growth_price_factors_from(_tool_shop_growth_price_factor_spins, TOOL_SHOP_ITEM_IDS)
+	return _selected_shop_growth_price_factors_from(_tool_shop_growth_price_factor_spins, _tool_shop_item_ids())
 
 
 func _selected_merchant_days() -> Dictionary:
-	return _selected_shop_days_from(_merchant_day_spins, MERCHANT_ITEM_IDS)
+	return _selected_shop_days_from(_merchant_day_spins, _merchant_item_ids())
 
 
 func _selected_legacy_shop_prices() -> Dictionary:
 	var prices: Dictionary = _selected_tool_shop_prices()
 	var merchant_prices: Dictionary = _selected_merchant_prices()
-	for item_id: StringName in MERCHANT_ITEM_IDS:
+	for item_id: StringName in _merchant_item_ids():
 		prices[item_id] = int(merchant_prices.get(item_id, ItemCatalog.get_price(String(item_id))))
 	return prices
 
@@ -2359,16 +2364,32 @@ func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
 	return weapons
 
 
+func _tool_shop_item_ids() -> Array[StringName]:
+	return ItemCatalog.get_tool_shop_item_ids()
+
+
+func _merchant_item_ids() -> Array[StringName]:
+	return ItemCatalog.get_merchant_shop_item_ids()
+
+
+func _legacy_shop_item_ids() -> Array[StringName]:
+	var item_ids: Array[StringName] = _tool_shop_item_ids()
+	for item_id: StringName in _merchant_item_ids():
+		if not item_ids.has(item_id):
+			item_ids.append(item_id)
+	return item_ids
+
+
 func _valid_tool_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
-	return _valid_shop_available_items(raw_item_ids, TOOL_SHOP_ITEM_IDS)
+	return _valid_shop_available_items(raw_item_ids, _tool_shop_item_ids())
 
 
 func _valid_merchant_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
-	return _valid_shop_available_items(raw_item_ids, MERCHANT_ITEM_IDS)
+	return _valid_shop_available_items(raw_item_ids, _merchant_item_ids())
 
 
 func _valid_legacy_shop_available_items(raw_item_ids: Array[StringName]) -> Array[StringName]:
-	return _valid_shop_available_items(raw_item_ids, LEGACY_SHOP_ITEM_IDS)
+	return _valid_shop_available_items(raw_item_ids, _legacy_shop_item_ids())
 
 
 func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids: Array[StringName]) -> Array[StringName]:
@@ -2383,27 +2404,27 @@ func _valid_shop_available_items(raw_item_ids: Array[StringName], valid_item_ids
 
 
 func _valid_tool_shop_prices(raw_prices: Dictionary) -> Dictionary:
-	return _valid_shop_prices(raw_prices, TOOL_SHOP_ITEM_IDS)
+	return _valid_shop_prices(raw_prices, _tool_shop_item_ids())
 
 
 func _valid_merchant_prices(raw_prices: Dictionary) -> Dictionary:
-	return _valid_shop_prices(raw_prices, MERCHANT_ITEM_IDS)
+	return _valid_shop_prices(raw_prices, _merchant_item_ids())
 
 
 func _valid_legacy_shop_prices(raw_prices: Dictionary) -> Dictionary:
-	return _valid_shop_prices(raw_prices, LEGACY_SHOP_ITEM_IDS)
+	return _valid_shop_prices(raw_prices, _legacy_shop_item_ids())
 
 
 func _valid_tool_shop_days(raw_days: Dictionary) -> Dictionary:
-	return _valid_shop_days(raw_days, TOOL_SHOP_ITEM_IDS)
+	return _valid_shop_days(raw_days, _tool_shop_item_ids())
 
 
 func _valid_tool_shop_growth_price_factors(raw_factors: Dictionary) -> Dictionary:
-	return _valid_shop_growth_price_factors(raw_factors, TOOL_SHOP_ITEM_IDS)
+	return _valid_shop_growth_price_factors(raw_factors, _tool_shop_item_ids())
 
 
 func _valid_merchant_days(raw_days: Dictionary) -> Dictionary:
-	return _valid_shop_days(raw_days, MERCHANT_ITEM_IDS)
+	return _valid_shop_days(raw_days, _merchant_item_ids())
 
 
 func _valid_shop_prices(raw_prices: Dictionary, item_ids: Array[StringName]) -> Dictionary:
@@ -2435,15 +2456,15 @@ func _valid_shop_growth_price_factors(raw_factors: Dictionary, item_ids: Array[S
 
 
 func _default_tool_shop_available_items() -> Array[StringName]:
-	return _default_shop_available_items(TOOL_SHOP_ITEM_IDS)
+	return _default_shop_available_items(DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS)
 
 
 func _default_merchant_available_items() -> Array[StringName]:
-	return _default_shop_available_items(MERCHANT_ITEM_IDS)
+	return _default_shop_available_items(DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS)
 
 
 func _default_legacy_shop_available_items() -> Array[StringName]:
-	return _default_shop_available_items(LEGACY_SHOP_ITEM_IDS)
+	return _default_shop_available_items(DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS)
 
 
 func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[StringName]:
@@ -2454,7 +2475,7 @@ func _default_shop_available_items(item_ids_source: Array[StringName]) -> Array[
 
 
 func _default_tool_shop_prices() -> Dictionary:
-	return _default_shop_prices(TOOL_SHOP_ITEM_IDS)
+	return _default_shop_prices(_tool_shop_item_ids())
 
 
 func _default_tool_shop_growth_price_factors() -> Dictionary:
@@ -2462,11 +2483,11 @@ func _default_tool_shop_growth_price_factors() -> Dictionary:
 
 
 func _default_merchant_prices() -> Dictionary:
-	return _default_shop_prices(MERCHANT_ITEM_IDS)
+	return _default_shop_prices(_merchant_item_ids())
 
 
 func _default_legacy_shop_prices() -> Dictionary:
-	return _default_shop_prices(LEGACY_SHOP_ITEM_IDS)
+	return _default_shop_prices(_legacy_shop_item_ids())
 
 
 func _default_shop_prices(item_ids_source: Array[StringName]) -> Dictionary:
