@@ -95,7 +95,6 @@ func set_building_phase(value: bool) -> void:
 	if value:
 		set_morning_phase(false)
 		set_client_phase(false)
-		set_seed_merchant_phase(false)
 	building_phase_changed.emit(is_building_phase)
 
 
@@ -105,7 +104,6 @@ func set_morning_phase(value: bool) -> void:
 	is_morning_phase = value
 	if value:
 		set_client_phase(false)
-		set_seed_merchant_phase(false)
 		is_building_phase = false
 		building_phase_changed.emit(is_building_phase)
 	morning_phase_changed.emit(is_morning_phase)
@@ -128,7 +126,6 @@ func set_seed_merchant_phase(value: bool) -> void:
 	is_seed_merchant_phase = value
 	if value:
 		seed_merchant_purchase_made = false
-		set_morning_phase(false)
 		is_building_phase = false
 		building_phase_changed.emit(is_building_phase)
 	seed_merchant_phase_changed.emit(is_seed_merchant_phase)

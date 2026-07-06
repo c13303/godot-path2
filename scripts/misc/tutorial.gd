@@ -28,6 +28,7 @@ const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_CLIENT_TIME: String = "tutorial.client_time"
 const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
+const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
 
@@ -163,7 +164,7 @@ func _refresh(delta: float = 0.0) -> void:
 		return
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
-	if GameState.is_seed_merchant_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
+	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
 		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
 		_displayed_key = ""
@@ -225,14 +226,16 @@ func _current_message_key() -> String:
 	if _sun_rising and not GameState.is_night:
 		return KEY_SUN_RISING
 	if GameState.is_morning_phase:
+		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
+			if not _has_counter_room_for_harvest():
+				return KEY_ADD_COUNTERS_TO_SELL_ROSES
+			return KEY_HARVEST_ROSE
 		if _rose_shop_counter_count() <= 0:
 			return KEY_PLACE_SHOP
-		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
-			return KEY_HARVEST_ROSE
 		return ""
 	if GameState.is_client_phase:
 		return KEY_CLIENT_TIME
-	if GameState.is_seed_merchant_phase and _has_active_night_reward():
+	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
 	# Nothing growing, no seeds, and no roses left on the counters: the run is lost.
 	if planted == 0 and seeds == 0 and _counter_stock() <= 0:
@@ -310,6 +313,12 @@ func _counter_stock() -> int:
 	if _building_manager != null and _building_manager.has_method("total_counter_stock"):
 		return int(_building_manager.call("total_counter_stock"))
 	return 0
+
+
+func _has_counter_room_for_harvest() -> bool:
+	if _building_manager != null and _building_manager.has_method("has_counter_room_for_harvest"):
+		return bool(_building_manager.call("has_counter_room_for_harvest"))
+	return false
 
 
 func _has_active_night_reward() -> bool:

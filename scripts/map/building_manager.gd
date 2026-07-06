@@ -2449,6 +2449,7 @@ func _drain_legacy_spawners_budgeted(delta: float) -> void:
 func _on_new_day_finished() -> void:
 	if GameState.is_night:
 		return
+	_begin_seed_merchant_phase()
 	_begin_morning_phase()
 
 
@@ -2476,11 +2477,16 @@ func _begin_morning_phase() -> void:
 		_begin_client_sale_phase()
 		return
 	_morning_harvest_active = true
+	if not has_counter_room_for_harvest() and not _can_install_new_counter():
+		_morning_harvest_active = false
+		GameState.set_morning_phase(false)
+		_begin_client_sale_phase()
+		return
 	# Grown roses can only be harvested onto shop counters. If none are placed the
 	# player must build them first ("placez les comptoirs du magasin"): auto-equip the
 	# hammer so its picker opens with the counter pre-selected (see
 	# toolbuild._open_build_picker), leaving the player ready to build straight away.
-	if _rose_shop_counter_cells().is_empty():
+	if not has_counter_room_for_harvest():
 		_auto_select_hammer()
 
 
@@ -2489,7 +2495,7 @@ func _process_morning_harvest_walkover() -> void:
 		return
 	if plant_manager == null or not plant_manager.has_method("harvest_grownup_rose"):
 		return
-	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells()
+	var counter_cells: Array[Vector2i] = _rose_shop_counter_cells_with_room()
 	if counter_cells.is_empty():
 		return
 	var rose_cell: Vector2i = _player_grownup_rose_cell()
@@ -2597,6 +2603,10 @@ func restore_day_phase(phase: String) -> void:
 
 func _check_morning_harvest_finished() -> void:
 	if _grownup_rose_count() > 0:
+		if not has_counter_room_for_harvest() and not _can_install_new_counter():
+			_morning_harvest_active = false
+			GameState.set_morning_phase(false)
+			_begin_client_sale_phase()
 		return
 	_morning_harvest_active = false
 	GameState.set_morning_phase(false)
@@ -2640,7 +2650,6 @@ func _activate_client_sale_phase() -> void:
 		_client_sale_pending_spawners.append(client_cells[random_index])
 	for cell: Vector2i in client_cells:
 		_client_sale_spawn_timers[cell] = 0.0
-	_begin_seed_merchant_phase()
 	_client_sale_active = true
 	GameState.set_client_phase(true)
 
@@ -2881,12 +2890,12 @@ func _process_seed_merchant_phase() -> void:
 	# happens _process_client_sale does NOT start the night and the merchant lingers,
 	# leaving the day stuck on "le marchand est là". Re-check here so that finishing the
 	# watering afterwards still ends the day (the merchant walks out via night prep).
-	if not GameState.is_night and can_start_night_after_clients():
+	if not GameState.is_night and not GameState.is_morning_phase and can_start_night_after_clients():
 		GameState.start_night()
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near_seed_merchant():
 		GameState.set_seed_merchant_phase(false)
-		if not _client_sale_active:
+		if not _client_sale_active and not GameState.is_client_phase and not GameState.is_morning_phase:
 			GameState.set_building_phase(true)
 
 
@@ -2930,7 +2939,8 @@ func request_seed_merchant_leave() -> void:
 		return
 	if not GameState.is_night:
 		GameState.set_seed_merchant_phase(false)
-		GameState.set_building_phase(true)
+		if not GameState.is_morning_phase and not GameState.is_client_phase:
+			GameState.set_building_phase(true)
 		return
 	_start_seed_merchant_leave_for_night()
 
@@ -2975,7 +2985,8 @@ func _clear_seed_merchant_phase(free_agent: bool) -> void:
 
 func _end_seed_merchant_phase() -> void:
 	_clear_seed_merchant_phase(false)
-	GameState.set_building_phase(true)
+	if not GameState.is_morning_phase and not GameState.is_client_phase:
+		GameState.set_building_phase(true)
 
 
 func _grownup_rose_count() -> int:
@@ -3004,8 +3015,27 @@ func _rose_shop_counter_cells() -> Array[Vector2i]:
 	return cells
 
 
+func _rose_shop_counter_cells_with_room() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for counter_cell: Vector2i in _rose_shop_counter_cells():
+		if _counter_stock_manager.has_room(counter_cell):
+			cells.append(counter_cell)
+	return cells
+
+
 func rose_shop_counter_count() -> int:
 	return _rose_shop_counter_cells().size()
+
+
+func has_counter_room_for_harvest() -> bool:
+	return not _rose_shop_counter_cells_with_room().is_empty()
+
+
+func counter_room_for_harvest() -> int:
+	var total: int = 0
+	for counter_cell: Vector2i in _rose_shop_counter_cells():
+		total += _counter_stock_manager.remaining_capacity(counter_cell)
+	return total
 
 
 func _total_counter_stock() -> int:
@@ -3123,6 +3153,20 @@ func _auto_select_hammer() -> void:
 			return
 	if game_ui != null and game_ui.has_method("select_build_tool"):
 		game_ui.call("select_build_tool", "hammer")
+
+
+func _can_install_new_counter() -> bool:
+	var scene: Node = get_tree().current_scene
+	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui == null:
+		return false
+	if game_ui.has_method("get_inventory_item_quantity"):
+		var owned_counters: int = int(game_ui.call("get_inventory_item_quantity", ROSE_SHOP_COUNTER_ID))
+		if owned_counters > 0:
+			return true
+	if game_ui.has_method("can_afford_merchant_item"):
+		return bool(game_ui.call("can_afford_merchant_item", ROSE_SHOP_COUNTER_ID, 1))
+	return false
 
 
 func _enqueue_playlist_spawn_requests(delta: float) -> void:
@@ -4648,7 +4692,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 		_seed_merchant_leave_at_night_pending = false
 		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
-		if not GameState.is_night:
+		if not GameState.is_night and not GameState.is_morning_phase and not GameState.is_client_phase:
 			GameState.set_building_phase(true)
 
 # Monster death uses the same authoritative owner that created and routed monsters.
@@ -4695,7 +4739,7 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		_seed_merchant_leave_at_night_pending = false
 		_seed_merchant_paused = false
 		GameState.set_seed_merchant_phase(false)
-		if not GameState.is_night:
+		if not GameState.is_night and not GameState.is_morning_phase and not GameState.is_client_phase:
 			GameState.set_building_phase(true)
 
 func _spawn_monster_death_drop(world_position: Vector2) -> void:

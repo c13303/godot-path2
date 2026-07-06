@@ -7,6 +7,7 @@ const COUNTER_PILE_ROSE_SCALE: float = 0.56
 const COUNTER_PILE_ROSE_FRAME_HEIGHT: float = 64.0
 const COUNTER_PILE_OVERLAP: float = 0.66
 const COUNTER_PILE_BASE_Y: float = -8.0
+const MAX_STOCK_PER_COUNTER: int = 10
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 # Total duration of the nightfall "counters emptying" animation. The per-rose tick is
@@ -49,13 +50,21 @@ func stock(counter_cell: Vector2i) -> int:
 	return int(_stock_by_cell.get(counter_cell, 0))
 
 
+func remaining_capacity(counter_cell: Vector2i) -> int:
+	return maxi(0, MAX_STOCK_PER_COUNTER - stock(counter_cell))
+
+
+func has_room(counter_cell: Vector2i) -> bool:
+	return remaining_capacity(counter_cell) > 0
+
+
 func add_stock(counter_cell: Vector2i, amount: int) -> Dictionary:
 	return set_stock(counter_cell, stock(counter_cell) + amount)
 
 
 func set_stock(counter_cell: Vector2i, amount: int) -> Dictionary:
 	var previous: int = stock(counter_cell)
-	var value: int = maxi(0, amount)
+	var value: int = clampi(amount, 0, MAX_STOCK_PER_COUNTER)
 	if value <= 0:
 		_stock_by_cell.erase(counter_cell)
 	else:
@@ -89,7 +98,7 @@ func restore(saved_stock: Array, counter_cells: Array[Vector2i]) -> void:
 			continue
 		var entry: Dictionary = raw_entry as Dictionary
 		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
-		var count: int = maxi(0, int(entry.get("count", 0)))
+		var count: int = clampi(int(entry.get("count", 0)), 0, MAX_STOCK_PER_COUNTER)
 		if count <= 0 or not counter_cells.has(cell):
 			continue
 		_stock_by_cell[cell] = count
