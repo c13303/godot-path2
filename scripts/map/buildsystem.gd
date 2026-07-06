@@ -3,18 +3,10 @@ extends Node
 signal build_preview_changed(is_active: bool)
 
 const REMOVE_HOLD_SECONDS: float = 0.2
-const REMOVE_PROGRESS_WIDTH: float = 6.0
-const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8
-const PREVIEW_NORMAL_COLOR: Color = Color(0.78, 0.90, 0.98, 0.80)
-const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
-const PREVIEW_Z_INDEX: int = 4095
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
 const BUILD_FX_Z_INDEX: int = -62
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
-# Green outline drawn around the whole drag rectangle (rose bulk build + bulk unbuild).
-const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
-const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
 const TILE_TRANSFORM_TRANSPOSE: int = 16384
@@ -67,12 +59,8 @@ var _atlas_source_id: int = -1
 # Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
+var _build_preview: BuildPreviewController = BuildPreviewController.new()
 
-var _hover_active: bool = false
-var _hover_cell: Vector2i
-var _hover_item_id: String = ""
-var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
-var _preview_cells: Array[Vector2i] = []
 # Generic click-drag chunk build. _drag_build_item_id records which item the
 # active drag is placing so affordability, validation, runtime objects, and sound
 # are resolved per item.
@@ -85,25 +73,19 @@ var _plant_layer_flush_queued: bool = false
 var _remove_active: bool = false
 var _remove_elapsed: float = 0.0
 var _remove_queue: Array[Dictionary] = []
-var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _remove_drag_active: bool = false
 var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
 var _keyboard_unbuild_held: bool = false
 var _keyboard_unbuild_cell: Vector2i = Vector2i.ZERO
-var _pad_cursor_active: bool = false
-var _pad_cursor_offset: Vector2i = Vector2i.ZERO
-# True while we have hidden the OS cursor because a build preview tile is showing.
-var _cursor_hidden_for_preview: bool = false
 var _build_direction: Vector2i = DIRECTION_RIGHT
 var _build_fx_pool: Array[Node2D] = []
 var _build_fx_pool_cursor: int = 0
-# Green outline panel that frames the active drag rectangle (built lazily).
-var _drag_selection_rect: Panel = null
 
 func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
+	_build_preview.setup(self)
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()
 	_preload_build_fx_pool()
@@ -125,10 +107,7 @@ func _resolve_level_layers() -> void:
 		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 func _configure_preview_layer() -> void:
-	if previewbuild == null:
-		return
-	previewbuild.z_index = PREVIEW_Z_INDEX
-	previewbuild.modulate = PREVIEW_NORMAL_COLOR
+	_build_preview.configure_layer()
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if not is_night:
@@ -167,14 +146,12 @@ func _process(delta: float) -> void:
 		_clear_hover()
 		return
 
-	if _hover_active and cell == _hover_cell and atlas_coords == _hover_atlas_coords and item_id == _hover_item_id:
+	if _build_preview.matches_hover(cell, atlas_coords, item_id):
 		_refresh_preview_visual_state(placeable_def)
 		return
 
 	_clear_hover()
-	_hover_cell = cell
-	_hover_atlas_coords = atlas_coords
-	_hover_active = true
+	_build_preview.set_hover(cell, atlas_coords)
 	_draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 func _input(event: InputEvent) -> void:
@@ -315,9 +292,7 @@ func _process_removal(delta: float) -> void:
 		_cancel_removal()
 		return
 	_remove_elapsed = minf(_remove_elapsed + delta, REMOVE_HOLD_SECONDS)
-	var active_progress: ProgressBar = _remove_progress_by_cell.get(active_cell, null) as ProgressBar
-	if active_progress != null:
-		active_progress.value = (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0
+	_build_preview.set_remove_progress_value(active_cell, (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0)
 	if _remove_elapsed >= REMOVE_HOLD_SECONDS:
 		_finish_removal()
 
@@ -416,7 +391,7 @@ func pad_is_build_preview_active() -> bool:
 
 
 func pad_is_cursor_active() -> bool:
-	return _pad_cursor_active
+	return _build_preview.is_pad_cursor_active()
 
 
 func pad_get_cursor_cell() -> Vector2i:
@@ -424,27 +399,18 @@ func pad_get_cursor_cell() -> Vector2i:
 
 
 func pad_set_cursor_active(active: bool) -> void:
-	_pad_cursor_active = active
-	if not active:
-		return
-	_pad_cursor_offset = _mouse_hovered_cell() - _player_cell()
+	_build_preview.set_pad_cursor_active(active)
 
 
 ## Snaps the pad build cursor to exactly one tile to the right of the player and activates
 ## it. Called when the toolbuild is (re-)equipped in pad mode so the cursor starts next to
 ## the player instead of wherever the hidden mouse last sat.
 func pad_place_cursor_right_of_player() -> void:
-	_pad_cursor_offset = Vector2i(1, 0)
-	_pad_cursor_active = true
+	_build_preview.place_cursor_right_of_player()
 
 
 func pad_move_cursor(direction: Vector2i) -> void:
-	if direction == Vector2i.ZERO:
-		return
-	if not _pad_cursor_active:
-		_pad_cursor_offset = _mouse_hovered_cell() - _player_cell()
-		_pad_cursor_active = true
-	_pad_cursor_offset += direction
+	_build_preview.move_pad_cursor(direction)
 
 
 func pad_unbuild_at_cursor() -> void:
@@ -562,36 +528,7 @@ func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[
 	return removals
 
 func _create_remove_progress(cell: Vector2i, value: float) -> void:
-	if not previewbuild or not previewbuild.tile_set:
-		return
-	var tile_size: Vector2i = previewbuild.tile_set.tile_size
-	var progress_height: float = float(tile_size.y) * REMOVE_PROGRESS_HEIGHT_RATIO
-	var remove_progress: ProgressBar = ProgressBar.new()
-	remove_progress.name = "BuildingRemovalProgress"
-	remove_progress.min_value = 0.0
-	remove_progress.max_value = 100.0
-	remove_progress.value = value
-	remove_progress.show_percentage = false
-	remove_progress.fill_mode = ProgressBar.FILL_BOTTOM_TO_TOP
-	remove_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	remove_progress.z_index = 100
-	remove_progress.size = Vector2(REMOVE_PROGRESS_WIDTH, progress_height)
-	var cell_center: Vector2 = previewbuild.map_to_local(cell)
-	remove_progress.position = cell_center - Vector2(REMOVE_PROGRESS_WIDTH * 0.5, progress_height * 0.5)
-
-	var background: StyleBoxFlat = StyleBoxFlat.new()
-	background.bg_color = Color(0.05, 0.05, 0.05, 0.8)
-	background.border_width_left = 1
-	background.border_width_top = 1
-	background.border_width_right = 1
-	background.border_width_bottom = 1
-	background.border_color = Color(0.9, 0.9, 0.9, 0.9)
-	var fill: StyleBoxFlat = StyleBoxFlat.new()
-	fill.bg_color = Color(0.85, 0.75, 0.25, 1.0)
-	remove_progress.add_theme_stylebox_override("background", background)
-	remove_progress.add_theme_stylebox_override("fill", fill)
-	previewbuild.add_child(remove_progress)
-	_remove_progress_by_cell[cell] = remove_progress
+	_build_preview.create_remove_progress(cell, value)
 
 func _cancel_removal() -> void:
 	_remove_active = false
@@ -602,11 +539,7 @@ func _cancel_removal() -> void:
 	_clear_remove_progress_bars()
 
 func _clear_remove_progress_bars() -> void:
-	for raw_progress: Variant in _remove_progress_by_cell.values():
-		var progress: ProgressBar = raw_progress as ProgressBar
-		if progress != null and is_instance_valid(progress):
-			progress.queue_free()
-	_remove_progress_by_cell.clear()
+	_build_preview.clear_remove_progress_bars()
 
 # Cells committed to the active removal queue (drives dedup + bar preservation when
 # a fresh drag stacks onto an in-progress removal).
@@ -620,19 +553,10 @@ func _committed_cell_set() -> Dictionary:
 # committed to the active removal queue.
 func _clear_preview_remove_progress_bars() -> void:
 	var committed: Dictionary = _committed_cell_set()
-	for cell: Variant in _remove_progress_by_cell.keys():
-		if committed.has(cell):
-			continue
-		var progress: ProgressBar = _remove_progress_by_cell[cell] as ProgressBar
-		if progress != null and is_instance_valid(progress):
-			progress.queue_free()
-		_remove_progress_by_cell.erase(cell)
+	_build_preview.clear_preview_remove_progress_bars(committed)
 
 func _free_remove_progress_for_cell(cell: Vector2i) -> void:
-	var progress: ProgressBar = _remove_progress_by_cell.get(cell, null) as ProgressBar
-	if progress != null and is_instance_valid(progress):
-		progress.queue_free()
-	_remove_progress_by_cell.erase(cell)
+	_build_preview.free_remove_progress_for_cell(cell)
 
 func _resolve_atlas_source_id() -> void:
 	var ref: TileMapLayer = previewbuild if previewbuild else wallz
@@ -750,8 +674,11 @@ func _refresh_fence_autotile(cell: Vector2i) -> void:
 	if fences == null or fences.get_cell_source_id(cell) < 0:
 		return
 	var mask: int = _fence_neighbor_mask(cell)
-	var atlas_coords: Vector2i = FENCE_ATLAS_BY_MASK.get(mask, Vector2i(5, 7)) as Vector2i
+	var atlas_coords: Vector2i = _fence_atlas_by_mask(mask)
 	fences.set_cell(cell, _atlas_source_id, atlas_coords)
+
+func _fence_atlas_by_mask(mask: int) -> Vector2i:
+	return FENCE_ATLAS_BY_MASK.get(mask, Vector2i(5, 7)) as Vector2i
 
 func _fence_neighbor_mask(cell: Vector2i) -> int:
 	var mask: int = 0
@@ -777,24 +704,7 @@ func _resolve_flow_field() -> Object:
 	return _flow_field
 
 func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, placeable_def: Dictionary) -> void:
-	if _atlas_source_id < 0:
-		return
-
-	if item_id == FENCE_ITEM_ID:
-		var fence_cells: Array[Vector2i] = [cell]
-		_preview_cells = _draw_fence_preview_cells(fence_cells)
-	else:
-		previewbuild.set_cell(
-			cell,
-			_atlas_source_id,
-			atlas_coords,
-			_alternative_from_placeable(placeable_def)
-		)
-		_preview_cells.append(cell)
-	_hover_item_id = item_id
-	_refresh_preview_visual_state(placeable_def)
-	previewbuild.update_internals()
-	_set_preview_cursor_hidden(true)
+	_build_preview.draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 # Placeables build as a click-drag rectangle chunk by default, placed up to the
 # affordable/limited count while skipping occupied or invalid cells. Specific
@@ -819,70 +729,8 @@ func _start_drag_build(placeable_def: Dictionary) -> void:
 	_draw_drag_build_preview(placeable_def, _affordable_quantity(item_id))
 
 func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
-	_clear_hover()
 	_drag_build_preview_limit = available
-	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	if atlas_coords == Vector2i(-1, -1) or available <= 0:
-		return
-	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
-	if not target_layer:
-		return
-	var valid_cells: Array[Vector2i] = _drag_build_rectangle_cells(
-		_drag_build_start_cell,
-		_drag_build_end_cell,
-		target_layer,
-		placeable_def,
-		available
-	)
-	if str(placeable_def.get("id", "")) == FENCE_ITEM_ID:
-		_preview_cells = _draw_fence_preview_cells(valid_cells)
-	else:
-		for cell: Vector2i in valid_cells:
-			previewbuild.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
-		_preview_cells = valid_cells
-	previewbuild.modulate = PREVIEW_NORMAL_COLOR
-	_hover_active = not _preview_cells.is_empty()
-	_hover_item_id = str(placeable_def.get("id", "")) if _hover_active else ""
-	_hover_atlas_coords = atlas_coords
-	_show_drag_selection_rect(_drag_build_start_cell, _drag_build_end_cell)
-	previewbuild.update_internals()
-	_set_preview_cursor_hidden(_hover_active)
-
-func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector2i]:
-	var candidate_set: Dictionary = {}
-	for cell: Vector2i in candidate_cells:
-		candidate_set[cell] = true
-	var touched: Dictionary = {}
-	for cell: Vector2i in candidate_cells:
-		for refresh_cell: Vector2i in _fence_refresh_cells(cell):
-			if candidate_set.has(refresh_cell) or _has_fence_cell(refresh_cell):
-				touched[refresh_cell] = true
-	var preview_cells: Array[Vector2i] = []
-	for raw_cell: Variant in touched.keys():
-		var preview_cell: Vector2i = raw_cell as Vector2i
-		var atlas_coords: Vector2i = _fence_preview_atlas(preview_cell, candidate_set)
-		previewbuild.set_cell(preview_cell, _atlas_source_id, atlas_coords)
-		preview_cells.append(preview_cell)
-	return preview_cells
-
-func _fence_preview_atlas(cell: Vector2i, candidate_set: Dictionary) -> Vector2i:
-	var mask: int = _fence_preview_neighbor_mask(cell, candidate_set)
-	return FENCE_ATLAS_BY_MASK.get(mask, Vector2i(5, 7)) as Vector2i
-
-func _fence_preview_neighbor_mask(cell: Vector2i, candidate_set: Dictionary) -> int:
-	var mask: int = 0
-	if _has_preview_fence_cell(cell + DIRECTION_UP, candidate_set):
-		mask |= FENCE_NEIGHBOR_NORTH
-	if _has_preview_fence_cell(cell + DIRECTION_RIGHT, candidate_set):
-		mask |= FENCE_NEIGHBOR_EAST
-	if _has_preview_fence_cell(cell + DIRECTION_DOWN, candidate_set):
-		mask |= FENCE_NEIGHBOR_SOUTH
-	if _has_preview_fence_cell(cell + DIRECTION_LEFT, candidate_set):
-		mask |= FENCE_NEIGHBOR_WEST
-	return mask
-
-func _has_preview_fence_cell(cell: Vector2i, candidate_set: Dictionary) -> bool:
-	return candidate_set.has(cell) or _has_fence_cell(cell)
+	_build_preview.draw_drag_build_preview(_drag_build_start_cell, _drag_build_end_cell, placeable_def, available)
 
 func _drag_build_rectangle_cells(
 	start_cell: Vector2i,
@@ -1037,9 +885,9 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 	if not target_layer:
 		return
 
-	_hover_cell = _hovered_cell()
-	if not _is_valid_placeable_cell(_hover_cell, target_layer, placeable_def):
-		if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(_hover_cell):
+	var hover_cell: Vector2i = _hovered_cell()
+	if not _is_valid_placeable_cell(hover_cell, target_layer, placeable_def):
+		if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(hover_cell):
 			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
 			return
 		_notify("invalid construction")
@@ -1055,21 +903,21 @@ func _apply_placeable(placeable_def: Dictionary) -> void:
 		_notify("can't afford")
 		return
 
-	_clear_other_build_layer(target_layer, _hover_cell)
+	_clear_other_build_layer(target_layer, hover_cell)
 	target_layer.set_cell(
-		_hover_cell,
+		hover_cell,
 		_atlas_source_id,
 		atlas_coords,
 		_alternative_from_placeable(placeable_def)
 	)
 	target_layer.update_internals()
 	if _target_layer_affects_collision(target_layer):
-		_refresh_cell_collision(_hover_cell)
-	_refresh_cell_terrain_speed(_hover_cell)
-	_after_placeable_placed(_hover_cell, placeable_def)
+		_refresh_cell_collision(hover_cell)
+	_refresh_cell_terrain_speed(hover_cell)
+	_after_placeable_placed(hover_cell, placeable_def)
 	if item_id == FENCE_ITEM_ID:
-		_refresh_fence_autotiles_around(_hover_cell)
-	_play_build_fx_at_cell(_hover_cell, target_layer)
+		_refresh_fence_autotiles_around(hover_cell)
+	_play_build_fx_at_cell(hover_cell, target_layer)
 	_clear_build_selection_if_unaffordable(item_id)
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
@@ -1243,8 +1091,7 @@ func _turret_data_from_placeable(placeable_def: Dictionary) -> TurretData:
 	return ItemCatalog.get_turret_data(item_id)
 
 func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
-	var blocked: bool = not _turret_range_blocker_for_cell(_hover_cell, placeable_def).is_empty()
-	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR if blocked else PREVIEW_NORMAL_COLOR
+	_build_preview.refresh_preview_visual_state(placeable_def)
 
 func _turret_item_id_at_cell(cell: Vector2i) -> String:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
@@ -1355,87 +1202,32 @@ func _notify(message: String) -> void:
 		notif.call("show_notif", message)
 
 func _clear_hover() -> void:
-	_set_preview_cursor_hidden(false)
-	previewbuild.modulate = PREVIEW_NORMAL_COLOR
-	if not _hover_active and _preview_cells.is_empty():
-		_hover_item_id = ""
-		return
-	for cell: Vector2i in _preview_cells:
-		previewbuild.erase_cell(cell)
-	_preview_cells.clear()
-	previewbuild.update_internals()
-	_hover_active = false
-	_hover_item_id = ""
-	_hover_atlas_coords = Vector2i(-1, -1)
-
-# Hides the OS cursor while a build preview tile is on screen (the tile itself acts as
-# the cursor). Skipped in pad mode, where the player controller already hides the mouse.
-func _set_preview_cursor_hidden(hidden: bool) -> void:
-	if _pad_cursor_active:
-		return
-	if hidden == _cursor_hidden_for_preview:
-		return
-	_cursor_hidden_for_preview = hidden
-	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN if hidden else Input.MOUSE_MODE_VISIBLE)
+	_build_preview.clear_hover()
 
 func _hovered_cell() -> Vector2i:
-	if _pad_cursor_active:
-		return _player_cell() + _pad_cursor_offset
-	return _mouse_hovered_cell()
+	return _build_preview.hovered_cell()
 
 func _mouse_hovered_cell() -> Vector2i:
-	var world: Vector2 = previewbuild.get_global_mouse_position()
-	return previewbuild.local_to_map(previewbuild.to_local(world))
+	return _build_preview.mouse_hovered_cell()
 
 func _player_cell() -> Vector2i:
-	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
-	if player == null:
-		return _mouse_hovered_cell()
-	return previewbuild.local_to_map(previewbuild.to_local(player.global_position))
-
-func _ensure_drag_selection_rect() -> void:
-	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
-		return
-	_drag_selection_rect = Panel.new()
-	_drag_selection_rect.name = "DragSelectionRect"
-	_drag_selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_drag_selection_rect.z_index = 60
-	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = DRAG_SELECT_FILL_COLOR
-	style.set_border_width_all(2)
-	style.border_color = DRAG_SELECT_BORDER_COLOR
-	style.set_corner_radius_all(2)
-	_drag_selection_rect.add_theme_stylebox_override("panel", style)
-	# Parented to previewbuild so it shares the tilemap's transform (cell-aligned).
-	previewbuild.add_child(_drag_selection_rect)
+	return _build_preview.player_cell()
 
 # Frames the bounding box spanning start_cell..end_cell with the green outline.
 func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
-	if previewbuild == null or previewbuild.tile_set == null:
-		return
-	_ensure_drag_selection_rect()
-	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
-	var min_cell: Vector2i = Vector2i(mini(start_cell.x, end_cell.x), mini(start_cell.y, end_cell.y))
-	var max_cell: Vector2i = Vector2i(maxi(start_cell.x, end_cell.x), maxi(start_cell.y, end_cell.y))
-	# map_to_local returns cell centers; expand by half a tile to cover the full cells.
-	var top_left: Vector2 = previewbuild.map_to_local(min_cell) - tile_size * 0.5
-	var bottom_right: Vector2 = previewbuild.map_to_local(max_cell) + tile_size * 0.5
-	_drag_selection_rect.position = top_left
-	_drag_selection_rect.size = bottom_right - top_left
-	_drag_selection_rect.visible = true
+	_build_preview.show_drag_selection_rect(start_cell, end_cell)
 
 func _hide_drag_selection_rect() -> void:
-	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
-		_drag_selection_rect.visible = false
+	_build_preview.hide_drag_selection_rect()
 
 func has_single_tile_preview() -> bool:
-	return _hover_active and _preview_cells.size() == 1
+	return _build_preview.has_single_tile_preview()
 
 func get_preview_item_id() -> String:
-	return _hover_item_id
+	return _build_preview.get_preview_item_id()
 
 func get_preview_cell() -> Vector2i:
-	return _hover_cell
+	return _build_preview.get_preview_cell()
 
 func get_preview_direction() -> Vector2i:
 	return _build_direction
