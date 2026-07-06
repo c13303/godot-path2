@@ -4,245 +4,275 @@ Review `scripts/map/buildsystem.gd` after the recent extractions:
 * `BuildPlacementService`
 * `BuildRemovalService`
 * `BuildDragController`
+* `BuildInputController`
 
-Goal: perform one focused extraction: move build-mode input routing into a dedicated controller.
+Goal: perform one focused extraction: move build-mode state and tool/item selection state into a dedicated controller.
 
 Do not run Godot, tests, compilation, export, or build commands. I will test manually.
 
 ## Target
 
-Create a focused input controller, for example:
+Create a focused state controller, for example:
 
-```txt id="ykol5t"
-scripts/map/build_input_controller.gd
+```txt id="i9yczg"
+scripts/map/build_mode_state_controller.gd
 ```
 
 Use another clear name only if it better matches the existing project style.
 
 ## Why this extraction
 
-`BuildSystem` should remain the public coordinator for building, but it should not directly own all raw input handling.
+`BuildSystem` should coordinate build subsystems, but it should not directly own all build-mode state.
 
 The next coherent responsibility is:
 
-```txt id="6533kq"
-Read mouse/gamepad/build actions, interpret them in the current build mode, and dispatch to preview, drag, placement, removal, or cancellation.
+```txt id="d9u2q6"
+Track whether build mode is active, which build/remove/tool mode is selected, which item is selected, and how state resets when mode/tool/item changes.
 ```
 
 This is separate from:
 
-```txt id="y9o787"
+```txt id="ykpb7k"
+input routing
 preview rendering
 placement commit
 removal commit
-drag state
-item/tool selection
-inventory/cost mutation
+drag processing
+UI menu rendering
+inventory mutation
 TileMap mutation
-UI menus
-save/load
 ```
 
 This is architectural cleanup, not line-count cleanup.
 
 ## Candidate responsibility to move
 
-Move only build-system input routing.
+Move only build-mode and selection state.
 
 Candidate areas to inspect and possibly extract:
 
-```txt id="z65yzm"
-_unhandled_input / _input handling related to building
-mouse click placement routing
-mouse click removal routing
-mouse release handling
-mouse motion build preview routing
-gamepad build cursor movement input routing
-gamepad confirm/cancel routing
-build mode cancel input
-tool action dispatch
-routing to drag controller
-routing to preview controller
-routing to placement service
-routing to removal service
+```txt id="c5janl"
+build mode active/inactive state
+current selected tool
+current selected build item
+current selected item definition/cache
+current target layer/type derived from selection
+remove/unbuild mode state
+rotation/flip state if it is selection/mode state
+mode reset on cancel
+mode reset on item switch
+mode reset on tool switch
+public getters for current selection
+public setters called by UI/tool menu
+state validation when selected item becomes unavailable
 ```
 
-Move only functions/state that are clearly input-specific.
+Move only functions/state that are clearly mode/selection state.
 
-If a function mixes input with placement/removal commit logic, leave commit logic in the placement/removal services and make the input controller call existing wrappers.
+If a function mixes UI, input, and mode state, extract only the state mutation/query part and leave UI/input routing in their existing controllers.
 
 ## Desired boundary
 
 `BuildSystem` may keep:
 
-```gdscript id="14j0ef"
-var _input_controller: BuildInputController = BuildInputController.new()
+```gdscript id="1r1qrl"
+var _build_mode_state: BuildModeStateController = BuildModeStateController.new()
 ```
 
 Initialize it with:
 
-```gdscript id="n58w3j"
-_input_controller.setup(self)
+```gdscript id="8uwryq"
+_build_mode_state.setup(self)
 ```
 
 if this matches the current controller/service pattern and keeps the patch smaller.
 
-Existing Godot callbacks may remain in `BuildSystem` as thin wrappers:
+Existing public methods on `BuildSystem` may remain as thin wrappers.
 
-```gdscript id="ioq7zk"
-func _unhandled_input(event: InputEvent) -> void:
-	_input_controller.unhandled_input(event)
+Examples:
 
-func _process(delta: float) -> void:
-	_input_controller.process(delta)
+```gdscript id="4lhha9"
+func is_build_mode_active() -> bool:
+	return _build_mode_state.is_build_mode_active()
+
+func set_build_mode_active(active: bool) -> void:
+	_build_mode_state.set_build_mode_active(active)
+
+func get_selected_build_item_id() -> String:
+	return _build_mode_state.get_selected_item_id()
+
+func set_selected_build_item_id(item_id: String) -> void:
+	_build_mode_state.set_selected_item_id(item_id)
 ```
 
-Thin wrappers are acceptable and recommended.
+Thin wrappers are acceptable and recommended if UI/tutorial/input code already calls `BuildSystem`.
 
-Do not rewrite the whole `BuildSystem` call graph just to avoid wrappers.
+Do not rewrite the whole call graph just to remove wrappers.
 
 ## Ownership rule
 
-`BuildInputController` may own:
+`BuildModeStateController` may own:
 
-```txt id="qnrgwo"
-raw build-mode input routing
-mouse press/release routing
-mouse motion routing
-gamepad confirm/cancel routing
-gamepad cursor repeat timing, if currently input-only
-input suppression/consumption logic
-dispatch to preview/drag/place/remove wrappers
+```txt id="2r549y"
+build mode active flag
+current tool/mode enum or string
+selected build item id
+selected item definition cache, if currently present
+remove/unbuild mode flag
+rotation/flip selection state, if currently present
+state reset rules
+state query helpers
+selection validity checks
 ```
 
 `BuildSystem` should still own:
 
-```txt id="y91355"
-build mode state, unless tiny read/write wrappers are enough
-selected tool/item state, unless already owned elsewhere
+```txt id="hzoky4"
+subsystem orchestration
 preview controller
 placement service
 removal service
 drag controller
-UI-facing public API
+input controller
+TileMap references
+BuildingObjectManager references
+inventory/cost mutation through services
+UI-facing compatibility wrappers
 save/load coordination
-inventory/cost mutation through placement/removal services
-TileMap mutation through placement/removal services
 ```
 
 If ownership is unclear, keep the state in `BuildSystem` and expose a narrow wrapper.
 
-## Boundary with BuildDragController
+## Boundary with BuildInputController
 
-`BuildInputController` decides:
+`BuildInputController` may query mode/selection state:
 
-```txt id="91v2ep"
-The user pressed/moved/released input in a way that starts, updates, or stops a drag.
+```txt id="pe7wct"
+is build mode active?
+is removal mode active?
+what tool is selected?
+what item is selected?
 ```
 
-`BuildDragController` decides:
+It may request state changes through wrappers:
 
-```txt id="inl5si"
-Which cells are processed during that drag and whether a drag step should attempt placement/removal.
+```txt id="wp3h90"
+cancel build mode
+switch tool
+toggle remove mode
 ```
 
-Do not move drag processed-cell state into the input controller.
+But input controller should not own mode/selection state.
 
 ## Boundary with BuildPreviewController
 
-`BuildInputController` may tell preview to update, show, hide, or refresh based on input/mode.
+`BuildPreviewController` may query:
 
-But it should not own:
-
-```txt id="eb7utk"
-preview nodes
-preview tint
-preview validity visuals
-footprint ghost visuals
-remove highlight visuals
+```txt id="4x2zb0"
+selected item id
+selected target layer
+selected rotation/flip
+is remove mode active
 ```
 
-Do not move preview rendering back into input.
+But preview controller should not own selected item/mode state.
 
-## Boundary with placement/removal
+## Boundary with placement/removal services
 
-`BuildInputController` may call placement/removal wrappers:
+Placement/removal services may query selection state:
 
-```gdscript id="05yb8v"
-manager.try_place_selected_item(cell)
-manager.try_remove_at_cell(cell)
+```txt id="s0pgp8"
+selected item id
+current item definition
+selected target layer
+rotation/flip state
 ```
 
-But it must not own placement/removal rules.
-
-Do not duplicate validation or commit logic in input.
+But they should not own selection state.
 
 ## Do not extract
 
 Do not move or refactor:
 
-```txt id="mc5qls"
+```txt id="bvm2pt"
+input event routing
 preview/cursor rendering internals
 actual placement commit rules
 actual removal commit rules
 drag processed-cell state
-tool selection UI
 shop/build menu UI
 save/load behavior
 combat/projectile behavior
 player movement
 BuildingManager behavior
-inventory/cost logic except calling existing placement/removal APIs
+inventory/cost mutation except through existing APIs
+TileMap mutation except through existing services
 ```
 
-This pass is only about input routing.
+This pass is only about build-mode and selection state.
 
 ## Behavior preservation
 
 Preserve existing behavior exactly:
 
-```txt id="sl6ted"
-same mouse click behavior
-same mouse release behavior
-same mouse drag behavior
-same mouse movement preview behavior
-same gamepad cursor behavior
-same gamepad confirm/cancel behavior
-same build-mode cancel behavior
-same input consumed/ignored behavior
-same interactions with UI/menu focus
-same click-place behavior
-same click-remove behavior
-same drag-place behavior
-same drag-remove behavior
-same preview update timing
-same selected tool/item behavior
+```txt id="ix10jr"
+same build mode enter behavior
+same build mode exit/cancel behavior
+same selected tool behavior
+same selected item behavior
+same remove/unbuild mode behavior
+same state reset when switching tools/items
+same preview refresh after state changes
+same input behavior after state changes
+same UI-facing public methods
+same tutorial/save-load compatibility if any
+same placement/removal results
 ```
 
 Do not change input bindings.
 
 Do not change placement/removal rules.
 
-Do not change drag behavior.
+Do not change preview visuals.
 
-Do not change preview behavior.
+Do not change UI menu behavior.
 
-Do not change UI behavior.
+Do not change inventory/cost behavior.
+
+## Compatibility rule
+
+If other scripts call `BuildSystem` methods for build mode or selected item state, keep those methods as wrappers.
+
+Do not break `has_method(...)` / `call(...)` compatibility if it exists.
+
+Before coding, search for external callers of build-system public methods related to:
+
+```txt id="v21mow"
+build mode
+selected item
+selected tool
+remove mode
+unbuild mode
+rotation
+cancel build
+```
+
+Update only if necessary. Prefer preserving wrapper methods on `BuildSystem`.
 
 ## Coupling rule
 
-If input routing is deeply mixed with mode state or UI selection, do not extract the entire function blindly.
+If state is deeply mixed with UI or input code, do not extract the whole function blindly.
 
 Instead:
 
-```txt id="jz2u30"
-leave mode/tool selection state in BuildSystem
-extract only the input routing and dispatch
-use small wrapper methods on BuildSystem
+```txt id="n275gq"
+leave UI/input behavior in existing files/controllers
+extract only the state mutation/query part
+use small wrappers
 report remaining coupling
 ```
 
-If the extraction requires rewriting UI, placement, removal, preview, drag, or save/load behavior, stop and report the coupling instead of expanding the task.
+If the extraction requires rewriting UI, input, placement, removal, preview, inventory, or save/load behavior, stop and report the coupling instead of expanding the task.
 
 ## GDScript strict typing
 
@@ -250,7 +280,7 @@ Godot/GDScript strict typing is enabled.
 
 Avoid `:=` inference for:
 
-```txt id="sxxsdy"
+```txt id="pd8i9g"
 numeric expressions
 Dictionary / Array values
 signal or call() returns
@@ -276,34 +306,35 @@ Do not perform broad cleanup.
 
 Do not create generic `utils` files.
 
-Do not continue into UI, preview, placement, removal, drag, inventory, or save/load redesign because the code is nearby.
+Do not continue into UI, input, preview, placement, removal, drag, inventory, or save/load redesign because the code is nearby.
 
 ## Before coding, report
 
-```txt id="ks18g4"
+```txt id="kngdnp"
 Owner:
 Caller:
 State owned:
 Public API:
 Files changed:
 Estimated lines moved:
-Input state ownership decision:
+Mode/selection state ownership decision:
 BuildSystem state intentionally kept:
 Thin wrappers to preserve:
+External callers found:
 Couplings found:
 Risk:
 ```
 
-Then implement only the build input routing extraction.
+Then implement only the build-mode / selection-state extraction.
 
 ## Final report
 
 After implementation, report:
 
-```txt id="l1vtul"
+```txt id="pa7hbu"
 What moved:
 What stayed in BuildSystem:
-Input state ownership decision:
+Mode/selection state ownership decision:
 Thin wrappers kept:
 Files changed:
 Remaining risks:
