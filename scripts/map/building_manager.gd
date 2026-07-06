@@ -116,13 +116,6 @@ var _spawner_spot_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
 var _client_spawners: Dictionary = {}  # Vector2i -> true
 var _client_frequency_by_cell: Dictionary = {}  # Vector2i -> float
 var _merchant_spawners: Dictionary = {}  # Vector2i -> true
-var _spawner_routes: Dictionary = {}
-var _spawner_garden_routes: Dictionary = {}
-# Route-cache hit/miss counters (lifetime-of-process), bumped in
-# _get_or_create_spawner_garden_route. Used by the _process_spawners lag detector
-# to attribute time to cache misses vs. hits.
-var _route_cache_hits: int = 0
-var _route_cache_misses: int = 0
 # Parent-triggered retarget breakdown profiling. Child functions always fill these
 # (cheap int writes) so the parent _retarget_agent_or_escape can emit ONE consolidated
 # "debug_garden_lag_breakdown" line when it exceeds threshold — even when every inner
@@ -193,14 +186,6 @@ var _night_preparation_ready: bool = false
 var _night_preparation_token: int = 0
 var _day_start_pending: bool = false
 var _client_preparing: bool = false
-var _dirty_spawner_escapes: Dictionary = {}
-# One escape flow field per exit-wall tile, shared by all monsters. Keyed by the
-# exit-wall cell. Each value: { "escape_group": int, "escape_target_cell":
-# Vector2i, "escape_world": Vector2, "ready": bool }. A finishing monster picks
-# the exit with the lowest route cost from its position (FlowFieldNative.
-# group_route_cost_at_world), so it leaves through the nearest reachable wall
-# exit. Rebuilt only on dirty events (level load / walls changed).
-var _exit_wall_escapes: Dictionary = {}  # Vector2i -> Dictionary
 var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
@@ -275,6 +260,7 @@ var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _building_scan: BuildingScanService = BuildingScanService.new()
+var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _counter_stock_manager: CounterStockManager
@@ -324,6 +310,7 @@ func _ready() -> void:
 	_turret_eating_controller.setup(self)
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
+	_spawner_route_service.setup(self)
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
@@ -518,34 +505,16 @@ func _night_preparation_budget_us() -> int:
 	return maxi(500, int(night_preparation_budget_ms * 1000.0))
 
 func _flow_uses_async_requests() -> bool:
-	return (
-		flow != null
-		and flow.has_method("request_flow_to_group")
-		and flow.has_method("are_async_flows_idle")
-		and flow.has_method("is_group_flow_request_ready")
-	)
+	return _spawner_route_service.flow_uses_async_requests()
 
 func _flow_supports_sync_assign() -> bool:
-	return flow != null and flow.has_method("assign_flow_to_group")
+	return _spawner_route_service.flow_supports_sync_assign()
 
 func _group_flow_id_is_ready(group_id: int) -> bool:
-	if group_id <= IDLE_GROUP:
-		return false
-	if flow == null:
-		return false
-	if flow.has_method("is_group_flow_request_ready"):
-		return bool(flow.call("is_group_flow_request_ready", group_id))
-	return flow.has_method("group_route_cost_at_world")
+	return _spawner_route_service.group_flow_id_is_ready(group_id)
 
 func _group_flow_is_ready_at_world(group_id: int, world_pos: Vector2) -> bool:
-	if group_id <= IDLE_GROUP:
-		return false
-	if flow == null or not flow.has_method("group_route_cost_at_world"):
-		return false
-	if not _group_flow_id_is_ready(group_id):
-		return false
-	var cost: float = float(flow.call("group_route_cost_at_world", group_id, world_pos))
-	return is_finite(cost)
+	return _spawner_route_service.group_flow_is_ready_at_world(group_id, world_pos)
 
 func _run_night_preparation(token: int) -> void:
 	# Start on a clean frame; the mode-change input frame performs no navigation.
@@ -691,146 +660,19 @@ func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringN
 	return agent_kinds.has(spawner_kind)
 
 func _initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: int) -> bool:
-	var slice_started_us: int = Time.get_ticks_usec()
-	for raw_spawner_cell: Variant in _spawners.keys():
-		if not _night_preparation_is_current(token):
-			return false
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
-			continue
-		_initialize_spawner_route(spawner_cell)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-			await get_tree().process_frame
-			slice_started_us = Time.get_ticks_usec()
-	return true
+	return bool(await _spawner_route_service.initialize_spawner_routes_for_kinds(agent_kinds, token))
 
 func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check_exit_wall_escapes: bool) -> bool:
-	if not flow or not flow.has_method("group_route_cost_at_world"):
-		return false
-	for raw_spawner_cell: Variant in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
-			continue
-		if not _spawner_routes.has(spawner_cell):
-			return false
-		var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
-		if not bool(route.get("escape_ready", false)):
-			return false
-		var group_id: int = int(route.get("escape_group", -1))
-		var goal_world: Vector2 = route.get("escape_world", Vector2.ZERO) as Vector2
-		if not _group_flow_is_ready_at_world(group_id, goal_world):
-			return false
-	if not check_exit_wall_escapes:
-		return true
-	for raw_escape: Variant in _exit_wall_escapes.values():
-		var escape: Dictionary = raw_escape as Dictionary
-		var exit_group_id: int = int(escape.get("escape_group", -1))
-		var exit_goal_world: Vector2 = escape.get("escape_world", Vector2.ZERO) as Vector2
-		if exit_group_id > IDLE_GROUP and not _group_flow_is_ready_at_world(exit_group_id, exit_goal_world):
-			return false
-	return true
+	return _spawner_route_service.night_flow_fields_are_ready_for_kinds(agent_kinds, check_exit_wall_escapes)
 
 func _prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
-	if not _flow_ready or not agent_manager or not flow:
-		return true
-	if not flow.has_method("group_route_cost_at_world"):
-		return false
-	var requested_groups: Dictionary = {}
-	var slice_started_us: int = Time.get_ticks_usec()
-	for raw_spawner_cell: Variant in _spawners.keys():
-		if not _night_preparation_is_current(token):
-			return false
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
-			continue
-		for raw_garden_id: Variant in _gardens.keys():
-			if not _night_preparation_is_current(token):
-				return false
-			var garden_id: int = int(raw_garden_id)
-			var garden: Dictionary = _gardens[garden_id] as Dictionary
-			if not bool(garden.get("targetable", false)):
-				continue
-			if not _garden_has_target_for_kind(garden_id, agent_kind):
-				continue
-			var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-			var group_id: int = int(route.get("plant_group", -1))
-			if group_id > IDLE_GROUP:
-				requested_groups[group_id] = true
-			if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-				await get_tree().process_frame
-				slice_started_us = Time.get_ticks_usec()
-	if _flow_uses_async_requests():
-		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-			await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return false
-	for raw_group_id: Variant in requested_groups.keys():
-		var group_id: int = int(raw_group_id)
-		if not _group_flow_id_is_ready(group_id):
-			return false
-	_mark_spawner_entry_routes_ready_for_groups(requested_groups)
-	return true
+	return bool(await _spawner_route_service.prewarm_spawner_entry_flows_for_kind(agent_kind, token))
 
 func _mark_spawner_entry_routes_ready_for_groups(group_ids: Dictionary) -> void:
-	for raw_spawner_cell: Variant in _spawner_garden_routes.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-		for raw_garden_id: Variant in routes.keys():
-			var garden_id: int = int(raw_garden_id)
-			var route: Dictionary = routes[garden_id] as Dictionary
-			var group_id: int = int(route.get("plant_group", -1))
-			if group_ids.has(group_id) and _garden_route_is_current(route, garden_id):
-				route["ready"] = _spawner_garden_route_flow_ready(route, spawner_cell)
-				routes[garden_id] = route
-		_spawner_garden_routes[spawner_cell] = routes
+	_spawner_route_service.mark_spawner_entry_routes_ready_for_groups(group_ids)
 
 func _rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
-	if not _flow_ready or not agent_manager or not flow:
-		return true
-	if not agent_manager.has_method("create_group"):
-		return true
-	_clear_garden_entry_resolve_cache("night_prepare_exit_escapes")
-	var current_exits: Dictionary = {}
-	if wallz:
-		for raw_cell: Variant in wallz.get_used_cells():
-			var wall_cell: Vector2i = raw_cell as Vector2i
-			if wallz.get_cell_atlas_coords(wall_cell) == EXIT_WALL_ATLAS:
-				current_exits[wall_cell] = true
-	for raw_exit_cell: Variant in _exit_wall_escapes.keys().duplicate():
-		var old_exit_cell: Vector2i = raw_exit_cell as Vector2i
-		if not current_exits.has(old_exit_cell):
-			_release_exit_wall_escape(old_exit_cell)
-
-	var slice_started_us: int = Time.get_ticks_usec()
-	for raw_exit_cell: Variant in current_exits.keys():
-		if not _night_preparation_is_current(token):
-			return false
-		var exit_cell: Vector2i = raw_exit_cell as Vector2i
-		var target_cell: Vector2i = _nearest_walkable_adjacent(exit_cell)
-		if target_cell == INVALID_CELL:
-			_release_exit_wall_escape(exit_cell)
-			continue
-		var escape: Dictionary = _exit_wall_escapes.get(exit_cell, {}) as Dictionary
-		var escape_group: int = int(escape.get("escape_group", -1))
-		if escape_group <= IDLE_GROUP:
-			escape_group = int(agent_manager.call("create_group"))
-		if escape_group <= IDLE_GROUP:
-			push_error("BuildingManager: could not allocate escape group for exit wall %s" % exit_cell)
-			continue
-		var escape_world: Vector2 = _cell_center(target_cell)
-		if not _is_finite_world(escape_world):
-			_release_exit_wall_escape(exit_cell)
-			continue
-		_request_group_flow_rebuild(escape_group, escape_world)
-		escape["escape_group"] = escape_group
-		escape["escape_target_cell"] = target_cell
-		escape["escape_world"] = escape_world
-		escape["ready"] = true
-		_exit_wall_escapes[exit_cell] = escape
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-			await get_tree().process_frame
-			slice_started_us = Time.get_ticks_usec()
-	return true
+	return bool(await _spawner_route_service.rebuild_exit_wall_escapes_budgeted(token))
 
 func _rebuild_walkable_map_cache_budgeted(token: int) -> bool:
 	_walkable_map_tiles.clear()
@@ -1141,9 +983,9 @@ func _process(delta: float) -> void:
 		_debug_telemetry.warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,
 			"spawners=%d" % _spawners.size())
 
-	if not _dirty_spawner_escapes.is_empty():
+	if _spawner_route_service.dirty_spawner_escape_count() > 0:
 		# Capture the count before the call: _drain_dirty_routes clears the dict.
-		var dirty_escapes_before: int = _dirty_spawner_escapes.size()
+		var dirty_escapes_before: int = _spawner_route_service.dirty_spawner_escape_count()
 		t = Time.get_ticks_usec()
 		_drain_dirty_routes()
 		_debug_telemetry.warn_garden_task_lag_us("_drain_dirty_routes", Time.get_ticks_usec() - t,
@@ -1232,8 +1074,8 @@ func _process(delta: float) -> void:
 				spawner_budget_ms,
 				float(stats.get("elapsed_ms", 0.0)),
 				int(stats.get("active_monsters", -1)),
-				_route_cache_hits,
-				_route_cache_misses,
+				_spawner_route_service.route_cache_hits(),
+				_spawner_route_service.route_cache_misses(),
 			])
 
 	t = Time.get_ticks_usec()
@@ -1274,11 +1116,11 @@ func _apply_navigation_topology_rebuild() -> void:
 	for raw_spawner_cell: Variant in _spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
 		_rebuild_spawner_plant_ff(spawner_cell)
-		_dirty_spawner_escapes[spawner_cell] = true
+		_spawner_route_service.mark_spawner_escape_dirty(spawner_cell)
 	var exits_us: int = Time.get_ticks_usec()
 	_rebuild_exit_wall_escapes()
 	_debug_telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
-		"exits=%d" % _exit_wall_escapes.size())
+		"exits=%d" % _spawner_route_service.exit_wall_escape_count())
 
 func _sync_flow_extra_blocking_cells() -> void:
 	if flow == null or not flow.has_method("set_extra_blocking_cells"):
@@ -1698,21 +1540,13 @@ func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, 
 	if is_new and GameState.is_night and _night_preparation_ready and _flow_ready and _plant_zone_built and _startup_ready:
 		_initialize_spawner_route(cell)
 
+func _remove_missing_scanned_spawner(cell: Vector2i) -> void:
+	_spawners.erase(cell)
+	_release_spawner_route(cell)
+	_spawner_route_service.clear_dirty_spawner_escape(cell)
+
 func _release_spawner_route(spawner_cell: Vector2i) -> void:
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var escape_group: int = int(route.get("escape_group", -1))
-	if agent_manager and agent_manager.has_method("dissolve_group"):
-		if escape_group > IDLE_GROUP:
-			agent_manager.call("dissolve_group", escape_group)
-		if _spawner_garden_routes.has(spawner_cell):
-			var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-			for raw_route in garden_routes.values():
-				var garden_route: Dictionary = raw_route as Dictionary
-				var plant_group: int = int(garden_route.get("plant_group", -1))
-				if plant_group > IDLE_GROUP:
-					agent_manager.call("dissolve_group", plant_group)
-	_spawner_routes.erase(spawner_cell)
-	_spawner_garden_routes.erase(spawner_cell)
+	_spawner_route_service.release_spawner_route(spawner_cell)
 	_spawner_kind_by_cell.erase(spawner_cell)
 	_spawner_exit_cell_by_cell.erase(spawner_cell)
 	_spawner_spot_cell_by_cell.erase(spawner_cell)
@@ -1721,232 +1555,37 @@ func _release_spawner_route(spawner_cell: Vector2i) -> void:
 	_merchant_spawners.erase(spawner_cell)
 
 func _drain_dirty_routes() -> void:
-	if not _flow_ready:
-		return
-	if not agent_manager or not agent_manager.has_method("create_group"):
-		return
-	if not flow or not flow.has_method("assign_flow_to_group"):
-		return
-
-	var escape_cells: Array = _dirty_spawner_escapes.keys()
-	_dirty_spawner_escapes.clear()
-
-	for raw_cell in escape_cells:
-		if _spawners.has(raw_cell):
-			_rebuild_spawner_escape_ff(raw_cell)
+	_spawner_route_service.drain_dirty_routes()
 
 func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	# One-shot: compute static escape cells. Plant-entry flow routes are created
-	# lazily when a spawner needs a target garden.
-	if not _flow_ready or not _plant_zone_built:
-		return
-	if not agent_manager or not flow:
-		return
-
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-
-	var bound_exit_cell: Vector2i = _spawner_exit_cell_by_cell.get(spawner_cell, INVALID_CELL) as Vector2i
-	# New authored spawners own a child "exit" marker. Legacy levels without that
-	# marker still fall back to the nearest exit-wall tile.
-	var exit_wall_cell: Vector2i = bound_exit_cell
-	if exit_wall_cell == INVALID_CELL:
-		exit_wall_cell = _nearest_exit_wall_for_spawner(spawner_cell)
-	route["exit_wall_cell"] = exit_wall_cell
-	route["has_bound_exit"] = bound_exit_cell != INVALID_CELL
-
-	# Floor tile adjacent to the exit wall that the FF can target.
-	var escape_wall_target_cell: Vector2i = INVALID_CELL
-	if exit_wall_cell != INVALID_CELL:
-		if bound_exit_cell != INVALID_CELL and _is_walkable(exit_wall_cell):
-			escape_wall_target_cell = exit_wall_cell
-		else:
-			escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
-	if escape_wall_target_cell == INVALID_CELL:
-		# Fallback to spawner cell if no walkable adjacency to an exit wall.
-		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "escape@%s" % spawner_cell)
-	route["escape_wall_target_cell"] = escape_wall_target_cell
-
-	# Escape FF: goal = floor tile adjacent to exit wall (static).
-	if escape_wall_target_cell != INVALID_CELL:
-		var escape_group: int = int(route.get("escape_group", -1))
-		if escape_group <= IDLE_GROUP:
-			escape_group = int(agent_manager.call("create_group"))
-		if escape_group > IDLE_GROUP:
-			var escape_world: Vector2 = _cell_center(escape_wall_target_cell)
-			if not _is_finite_world(escape_world):
-				push_warning("LOST-AGENT-GUARD: insane escape_world %s (cell %s) for spawner %s" % [
-					escape_world, escape_wall_target_cell, spawner_cell
-				])
-				route["escape_ready"] = false
-				_spawner_routes[spawner_cell] = route
-				return
-			_request_group_flow_rebuild(escape_group, escape_world)
-			route["escape_group"] = escape_group
-			route["escape_world"] = escape_world
-			route["escape_ready"] = true
-		else:
-			push_error("BuildingManager: spawner %s could not allocate escape group" % spawner_cell)
-			route["escape_ready"] = false
-	else:
-		route["escape_ready"] = false
-
-	_spawner_routes[spawner_cell] = route
-	_debug_telemetry.log("initialized spawner=%s exit_wall=%s escape_target=%s" % [
-		spawner_cell, exit_wall_cell, escape_wall_target_cell
-	])
+	_spawner_route_service.initialize_spawner_route(spawner_cell)
 
 func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
-	if not _spawner_garden_routes.has(spawner_cell):
-		return
-	var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-	for raw_garden_id in garden_routes.keys():
-		var garden_id: int = int(raw_garden_id)
-		var route: Dictionary = garden_routes[garden_id] as Dictionary
-		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-		if entry_cell == INVALID_CELL:
-			continue
-		var plant_group: int = int(route.get("plant_group", -1))
-		if plant_group <= IDLE_GROUP:
-			continue
-		var entry_world: Vector2 = _cell_center(entry_cell)
-		route["entry_world"] = entry_world
-		route["ready"] = false
-		route["flow_requested"] = true
-		_request_group_flow_rebuild(plant_group, entry_world)
-		garden_routes[garden_id] = route
-	_spawner_garden_routes[spawner_cell] = garden_routes
+	_spawner_route_service.rebuild_spawner_plant_ff(spawner_cell)
 
 func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
-	# Re-run escape FF after walls change. Goal is the cached escape_wall_target_cell.
-	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var target_cell: Vector2i = route.get("escape_wall_target_cell", INVALID_CELL) as Vector2i
-	if target_cell == INVALID_CELL:
-		return
-	var escape_group: int = int(route.get("escape_group", -1))
-	if escape_group <= IDLE_GROUP:
-		return
-	var escape_world: Vector2 = _cell_center(target_cell)
-	_request_group_flow_rebuild(escape_group, escape_world)
-	route["escape_world"] = escape_world
-	_spawner_routes[spawner_cell] = route
+	_spawner_route_service.rebuild_spawner_escape_ff(spawner_cell)
 
 func _rebuild_all_spawner_routes() -> void:
-	if not _flow_ready or not _plant_zone_built:
-		return
-	for raw_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_cell
-		_initialize_spawner_route(spawner_cell)
+	_spawner_route_service.rebuild_all_spawner_routes()
 
 # Build/refresh one escape flow field per exit-wall tile. Each is a per-group FF
 # whose goal is the floor tile adjacent to that exit wall. Runs only on dirty
 # events; at runtime a monster reads each group's route cost to pick the nearest
 # reachable exit. Stale exits (walls removed) are released.
 func _rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
-	if not _flow_ready:
-		return
-	if not agent_manager or not agent_manager.has_method("create_group"):
-		return
-	# Exit walls are only rebuilt on wall changes (which also re-cluster gardens and
-	# rebuild routes), but clear here too so this invalidation point is explicit.
-	_clear_garden_entry_resolve_cache("rebuild_exit_escapes")
-	if not flow:
-		return
-
-	var current_exits: Dictionary = {}  # Vector2i -> true
-	if wallz:
-		for raw_cell in wallz.get_used_cells():
-			var c: Vector2i = raw_cell
-			if wallz.get_cell_atlas_coords(c) == EXIT_WALL_ATLAS:
-				current_exits[c] = true
-
-	# Release escapes whose exit wall no longer exists.
-	for raw_exit_cell in _exit_wall_escapes.keys():
-		var exit_cell: Vector2i = raw_exit_cell
-		if not current_exits.has(exit_cell):
-			_release_exit_wall_escape(exit_cell)
-
-	# Create/refresh an escape FF for every current exit wall.
-	for raw_exit_cell in current_exits.keys():
-		var exit_cell: Vector2i = raw_exit_cell
-		var target_cell: Vector2i = _nearest_walkable_adjacent(exit_cell)
-		if target_cell == INVALID_CELL:
-			# No walkable tile next to this exit wall: drop any stale escape.
-			_release_exit_wall_escape(exit_cell)
-			continue
-		var escape: Dictionary = _exit_wall_escapes.get(exit_cell, {}) as Dictionary
-		var escape_group: int = int(escape.get("escape_group", -1))
-		if escape_group <= IDLE_GROUP:
-			escape_group = int(agent_manager.call("create_group"))
-		if escape_group <= IDLE_GROUP:
-			push_error("BuildingManager: could not allocate escape group for exit wall %s" % exit_cell)
-			continue
-		var escape_world: Vector2 = _cell_center(target_cell)
-		if not _is_finite_world(escape_world):
-			push_warning("LOST-AGENT-GUARD: insane exit-wall escape_world %s (cell %s) for exit %s" % [
-				escape_world, target_cell, exit_cell
-			])
-			_release_exit_wall_escape(exit_cell)
-			continue
-		# Night preparation submits these to the native worker and holds spawning
-		# until every result is applied. Runtime fallback keeps the prior synchronous
-		# behavior for callers that explicitly need an immediately queryable field.
-		if use_async_requests and _flow_uses_async_requests():
-			_request_group_flow_rebuild(escape_group, escape_world)
-		elif flow.has_method("assign_flow_to_group"):
-			flow.call("assign_flow_to_group", escape_group, escape_world, _fences_block_navigation())
-		else:
-			_request_group_flow_rebuild(escape_group, escape_world)
-		escape["escape_group"] = escape_group
-		escape["escape_target_cell"] = target_cell
-		escape["escape_world"] = escape_world
-		escape["ready"] = true
-		_exit_wall_escapes[exit_cell] = escape
+	_spawner_route_service.rebuild_exit_wall_escapes(use_async_requests)
 
 func _release_exit_wall_escape(exit_cell: Vector2i) -> void:
-	if not _exit_wall_escapes.has(exit_cell):
-		return
-	var escape: Dictionary = _exit_wall_escapes[exit_cell] as Dictionary
-	var escape_group: int = int(escape.get("escape_group", -1))
-	if escape_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
-		agent_manager.call("dissolve_group", escape_group)
-	_exit_wall_escapes.erase(exit_cell)
+	_spawner_route_service.release_exit_wall_escape(exit_cell)
 
 # Pick the exit-wall escape with the lowest walkable route cost from world_pos.
 # Returns {} if none is reachable (caller falls back to the per-spawner escape).
 func _nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
-	if not flow or not flow.has_method("group_route_cost_at_world"):
-		return {}
-	var best: Dictionary = {}
-	var best_cost: float = INF
-	for raw_exit_cell in _exit_wall_escapes.keys():
-		var escape: Dictionary = _exit_wall_escapes[raw_exit_cell] as Dictionary
-		if not bool(escape.get("ready", false)):
-			continue
-		var escape_group: int = int(escape.get("escape_group", -1))
-		if escape_group <= IDLE_GROUP:
-			continue
-		var cost: float = float(flow.call("group_route_cost_at_world", escape_group, world_pos))
-		if cost < best_cost:
-			best_cost = cost
-			best = escape
-	return best
+	return _spawner_route_service.nearest_reachable_exit_escape(world_pos)
 
 func _request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
-	# TEMP DEBUG (lost-agent guard): never push a non-finite / absurd goal into the
-	# flow system — that is what makes agents map out of bounds and go lost.
-	if not _is_finite_world(goal_world):
-		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
-		return
-	# Monster and client agents never coexist: monster flows are (re)built during night,
-	# client/merchant flows during the client-sale (day) phase. Fences are walls only for
-	# the client side, so the per-request block flag keys straight off the phase. Monster
-	# flows ignore fences entirely (slowed by the fence speed multiplier), client flows
-	# treat them as impassable.
-	var block_fences: bool = _fences_block_navigation()
-	if _flow_uses_async_requests():
-		flow.call("request_flow_to_group", group_id, goal_world, block_fences)
-	elif _flow_supports_sync_assign():
-		flow.call("assign_flow_to_group", group_id, goal_world, block_fences)
+	_spawner_route_service.request_group_flow_rebuild(group_id, goal_world)
 
 func _is_finite_world(p: Vector2) -> bool:
 	if not (is_finite(p.x) and is_finite(p.y)):
@@ -3279,8 +2918,8 @@ func _assign_agent_to_escape(agent: Node2D) -> bool:
 	var linked_spawner_cell: Vector2i = INVALID_CELL
 	if agent.has_meta("spawner_cell"):
 		linked_spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	if linked_spawner_cell != INVALID_CELL and _spawner_routes.has(linked_spawner_cell):
-		var linked_route: Dictionary = _spawner_routes[linked_spawner_cell] as Dictionary
+	if linked_spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(linked_spawner_cell):
+		var linked_route: Dictionary = _spawner_route_service.get_spawner_route(linked_spawner_cell)
 		if bool(linked_route.get("has_bound_exit", false)) and bool(linked_route.get("escape_ready", false)):
 			var linked_group: int = int(linked_route.get("escape_group", -1))
 			var linked_target: Vector2i = linked_route.get("escape_wall_target_cell", linked_spawner_cell) as Vector2i
@@ -3299,14 +2938,14 @@ func _assign_agent_to_escape(agent: Node2D) -> bool:
 	var spawner_cell: Vector2i = INVALID_CELL
 	if agent.has_meta("spawner_cell"):
 		var pre_linked: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-		if _spawner_routes.has(pre_linked):
+		if _spawner_route_service.has_spawner_route(pre_linked):
 			spawner_cell = pre_linked
 	if spawner_cell == INVALID_CELL:
 		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 		spawner_cell = _nearest_spawner_cell(from_cell)
-	if spawner_cell == INVALID_CELL or not _spawner_routes.has(spawner_cell):
+	if spawner_cell == INVALID_CELL or not _spawner_route_service.has_spawner_route(spawner_cell):
 		return false
-	var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+	var route: Dictionary = _spawner_route_service.get_spawner_route(spawner_cell)
 	if not bool(route.get("escape_ready", false)):
 		return false
 	var escape_group: int = int(route.get("escape_group", -1))
@@ -3571,7 +3210,7 @@ func _rebuild_plant_zone_from_layer() -> void:
 	t = Time.get_ticks_usec()
 	_rebuild_spawner_garden_route_cache()
 	_debug_telemetry.warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
-		"spawners=%d" % _spawner_garden_routes.size())
+		"spawners=%d" % _spawner_route_service.spawner_garden_route_count())
 	# Garden ids/topology just changed: cheaply detect agents now pointing at a
 	# deleted/empty garden, park them in "waiting_new_status", and queue them for
 	# budgeted retargeting over the next frames. No pathfinding happens here.
@@ -4028,56 +3667,16 @@ func _rebuild_plant_zone_compatibility_cache() -> void:
 # Iterating live .keys() while erasing is the Dictionary-mutation-during-iteration
 # that can silently crash; .duplicate() decouples the iteration from the mutation.
 func _rebuild_spawner_garden_route_cache() -> void:
-	# Routes are rebuilt against current entries; drop the memoized entry resolution
-	# so retargets after this re-score against the refreshed topology.
-	_clear_garden_entry_resolve_cache("rebuild_route_cache")
-	for raw_spawner_cell in _spawner_garden_routes.keys().duplicate():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		if not _spawner_garden_routes.has(spawner_cell):
-			continue
-		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-		for raw_garden_id in routes.keys().duplicate():
-			var garden_id: int = int(raw_garden_id)
-			if not routes.has(garden_id):
-				continue
-			var route: Dictionary = routes[garden_id] as Dictionary
-			if not _garden_route_is_current(route, garden_id):
-				_release_spawner_garden_route(spawner_cell, garden_id)
+	_spawner_route_service.rebuild_spawner_garden_route_cache()
 
 func _release_garden_routes(garden_id: int) -> void:
-	# Snapshot: _release_spawner_garden_route can erase from _spawner_garden_routes.
-	for raw_spawner_cell in _spawner_garden_routes.keys().duplicate():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		_release_spawner_garden_route(spawner_cell, garden_id)
+	_spawner_route_service.release_garden_routes(garden_id)
 
 func _release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> void:
-	if not _spawner_garden_routes.has(spawner_cell):
-		return
-	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-	if not routes.has(garden_id):
-		return
-	var route: Dictionary = routes[garden_id] as Dictionary
-	var plant_group: int = int(route.get("plant_group", -1))
-	if plant_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
-		agent_manager.call("dissolve_group", plant_group)
-	routes.erase(garden_id)
-	if routes.is_empty():
-		_spawner_garden_routes.erase(spawner_cell)
-	else:
-		_spawner_garden_routes[spawner_cell] = routes
+	_spawner_route_service.release_spawner_garden_route(spawner_cell, garden_id)
 
 func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
-	if not _gardens.has(garden_id):
-		return false
-	var garden: Dictionary = _gardens[garden_id] as Dictionary
-	if not bool(garden.get("reachable", false)):
-		return false
-	# Epoch first: a route from a previous full rebuild can never be current even if
-	# its (id, version) coincidentally matches a new garden. This is what stops
-	# night-2 agents from flowing to a deleted night-1 garden's entry tile.
-	if int(route.get("garden_epoch", -1)) != int(garden.get("epoch", -2)):
-		return false
-	return int(route.get("garden_version", -1)) == int(garden.get("version", 0))
+	return _spawner_route_service.garden_route_is_current(route, garden_id)
 
 func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 	var best_garden_id: int = 0
@@ -4147,7 +3746,7 @@ func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringNam
 		var spawner_cell: Vector2i = raw_spawner_cell
 		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
 			continue
-		if not _spawner_routes.has(spawner_cell):
+		if not _spawner_route_service.has_spawner_route(spawner_cell):
 			continue
 		for raw_garden_id in _gardens.keys():
 			var garden_id: int = int(raw_garden_id)
@@ -4188,7 +3787,7 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 		var spawner_cell: Vector2i = raw_spawner_cell
 		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
 			continue
-		if not _spawner_routes.has(spawner_cell):
+		if not _spawner_route_service.has_spawner_route(spawner_cell):
 			continue
 		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
@@ -4201,7 +3800,7 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 		if manhattan < best_dist:
 			best_dist = manhattan
 			best_spawner_cell = spawner_cell
-	if best_spawner_cell == INVALID_CELL and fallback_spawner_cell != INVALID_CELL and _spawner_routes.has(fallback_spawner_cell):
+	if best_spawner_cell == INVALID_CELL and fallback_spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(fallback_spawner_cell):
 		if (_spawner_kind_by_cell.get(fallback_spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
 			return INVALID_CELL
 		var fallback_route: Dictionary = _get_or_create_spawner_garden_route(fallback_spawner_cell, garden_id)
@@ -4448,61 +4047,10 @@ func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, g
 	return true
 
 func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i) -> bool:
-	var plant_group: int = int(route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		return false
-	return _group_flow_is_ready_at_world(plant_group, _cell_center(spawner_cell))
+	return _spawner_route_service.spawner_garden_route_flow_ready(route, spawner_cell)
 
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
-	if not _spawner_garden_routes.has(spawner_cell):
-		_spawner_garden_routes[spawner_cell] = {}
-	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-	var existing_route: Dictionary = routes.get(garden_id, {}) as Dictionary
-	if int(existing_route.get("plant_group", -1)) > IDLE_GROUP and _garden_route_is_current(existing_route, garden_id):
-		existing_route["ready"] = _spawner_garden_route_flow_ready(existing_route, spawner_cell)
-		routes[garden_id] = existing_route
-		_spawner_garden_routes[spawner_cell] = routes
-		_route_cache_hits += 1
-		return existing_route
-	# Cache miss: recompute the route (nearest garden entry + sanity checks) below.
-	_route_cache_misses += 1
-	if not _gardens.has(garden_id):
-		return {"ready": false}
-	var garden: Dictionary = _gardens[garden_id] as Dictionary
-	var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-	if entry_cell == INVALID_CELL:
-		return {"ready": false}
-	if not _is_sane_cell(entry_cell):
-		push_warning("LOST-AGENT-GUARD: garden %d gave insane entry_cell %s for spawner %s; route refused" % [
-			garden_id, entry_cell, spawner_cell
-		])
-		return {"ready": false}
-	var entry_world: Vector2 = _cell_center(entry_cell)
-	if not _is_finite_world(entry_world):
-		push_warning("LOST-AGENT-GUARD: insane entry_world %s (cell %s) for spawner %s garden %d; route refused" % [
-			entry_world, entry_cell, spawner_cell, garden_id
-		])
-		return {"ready": false}
-	if agent_manager == null or not agent_manager.has_method("create_group"):
-		return {"ready": false}
-	var plant_group: int = int(existing_route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		plant_group = int(agent_manager.call("create_group"))
-	if plant_group <= IDLE_GROUP:
-		return {"ready": false}
-	_request_group_flow_rebuild(plant_group, entry_world)
-	var route: Dictionary = {
-		"entry_cell": entry_cell,
-		"entry_world": entry_world,
-		"plant_group": plant_group,
-		"ready": _spawner_garden_route_flow_ready({"plant_group": plant_group}, spawner_cell),
-		"flow_requested": true,
-		"garden_version": int(garden.get("version", 0)),
-		"garden_epoch": int(garden.get("epoch", -1))
-	}
-	routes[garden_id] = route
-	_spawner_garden_routes[spawner_cell] = routes
-	return route
+	return _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
 
 # Returns true once the agent has a real new nav state (a garden entry flow, or a
 # successfully assigned escape). Returns false only when neither a garden route nor
@@ -4665,7 +4213,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	if pair.is_empty():
 		if spawner_cell == INVALID_CELL:
 			spawner_cell = _nearest_spawner_cell(from_cell)
-		if spawner_cell != INVALID_CELL and _spawner_routes.has(spawner_cell):
+		if spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(spawner_cell):
 			agent.set_meta("spawner_cell", spawner_cell)
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
 		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
@@ -5899,7 +5447,7 @@ func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
 
 func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
 	var exit_wall_cell: Vector2i = INVALID_CELL
-	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var spawner_route: Dictionary = _spawner_route_service.get_spawner_route(spawner_cell)
 	exit_wall_cell = spawner_route.get("exit_wall_cell", INVALID_CELL) as Vector2i
 	var escape_group: int = int(spawner_route.get("escape_group", -1))
 	if exit_wall_cell == INVALID_CELL:

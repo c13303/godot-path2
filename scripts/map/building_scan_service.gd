@@ -94,13 +94,10 @@ func scan_buildings() -> void:
 	debug_telemetry.log_scan_summary(seen_spawners, migrated, walls_changed)
 
 	var spawners: Dictionary = _spawners()
-	var dirty_spawner_escapes: Dictionary = _dirty_spawner_escapes()
 	for raw_spawner_cell: Variant in spawners.keys():
 		var cell: Vector2i = raw_spawner_cell as Vector2i
 		if not seen_spawners.has(cell):
-			spawners.erase(cell)
-			_manager.call("_release_spawner_route", cell)
-			dirty_spawner_escapes.erase(cell)
+			_manager.call("_remove_missing_scanned_spawner", cell)
 
 	if walls_changed:
 		_manager.set("_navigation_topology_dirty", true)
@@ -222,10 +219,6 @@ func _debug_telemetry() -> BuildingDebugTelemetry:
 
 func _spawners() -> Dictionary:
 	return _manager.get("_spawners") as Dictionary
-
-
-func _dirty_spawner_escapes() -> Dictionary:
-	return _manager.get("_dirty_spawner_escapes") as Dictionary
 
 
 func _wallz() -> TileMapLayer:

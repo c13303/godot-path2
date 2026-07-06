@@ -1,208 +1,212 @@
-Review the current `scripts/map/building_manager.gd` after the recent controller/helper extractions.
+Review the current `scripts/map/building_manager.gd`.
 
-Goal: perform one focused extraction: move building/spawner scanning and tile-special detection out of `BuildingManager`.
+Goal: perform the real `SpawnerRouteService` extraction.
+
+The previous pass was only a boundary/stabilization pass and recommended that the real route extraction be done as a separate explicit task. This is that task.
 
 Do not run Godot, tests, compilation, export, or build commands. I will test manually.
 
 ## Target
 
-Create a focused scanner/service, for example:
+Create a focused route service:
 
 ```txt
-scripts/map/building_scan_service.gd
+scripts/map/spawner_route_service.gd
 ```
 
 Use another clear name only if it better matches the existing project style.
 
-## Why this extraction
+## Responsibility
 
-`BuildingManager` should coordinate gameplay systems, but it should not directly own all low-level map scanning.
+`SpawnerRouteService` should own route / flow-field route state and behavior.
 
-Building/spawner scanning is a coherent responsibility:
-
-```txt
-Read TileMapLayer / configured spawner nodes, detect special cells, update spawner registries, and report topology changes.
-```
-
-This is architectural cleanup, not line-count cleanup.
-
-## Candidate logic to extract
-
-Move only building scan / special tile / spawner registration logic.
-
-Candidate functions:
-
-```gdscript
-_load_tile_definitions
-_scan_buildings
-_scan_configured_spawner_nodes
-_scan_special_layer
-_migrate_special_tiles_from_wallz
-_register_spawner
-_log_scan_summary
-_atlas_key
-_tile_layer_signature
-```
-
-Also inspect nearby small helpers, but do not broaden the extraction.
-
-Move related constants/state only if they are exclusively part of scanning:
-
-```gdscript
-BUILD_TILES_INDEX_PATH
-SPAWNER_KIND_MONSTER
-SPAWNER_KIND_CLIENT
-SPAWNER_KIND_MERCHANT
-EXIT_WALL_ATLAS
-_tile_defs_by_atlas
-_last_wall_signature
-_last_water_signature
-_last_blocking_signature
-_last_fence_signature
-_last_scan_summary
-```
-
-Only move a variable if all its reads/writes belong to scan responsibility.
-
-If a variable is used by gameplay systems outside scanning, keep it in `BuildingManager`.
-
-## State ownership rule
-
-The scanner may update these registries, but be careful with ownership:
-
-```gdscript
-_spawners
-_spawner_kind_by_cell
-_spawner_exit_cell_by_cell
-_spawner_spot_cell_by_cell
-_client_spawners
-_client_frequency_by_cell
-_merchant_spawners
-_spawner_bindings_by_id
-```
-
-Preferred safe first-pass boundary:
+It may own:
 
 ```txt
-BuildingManager keeps ownership of core gameplay registries.
-BuildingScanService performs scanning and calls narrow manager methods to register/erase/update entries.
-```
-
-Do not move route caches or route ownership into this service.
-
-Do not move:
-
-```gdscript
 _spawner_routes
 _spawner_garden_routes
 _dirty_spawner_escapes
 _exit_wall_escapes
 _route_cache_hits
 _route_cache_misses
+flow-field route creation
+flow-field route release
+route readiness checks
+exit-wall escape cache
+spawner-to-garden route cache
+dirty route draining
 ```
 
-Those belong to route / flow-field logic, not scanning.
+`BuildingManager` should still own:
+
+```txt
+spawner registries
+spawner kind lookup
+garden dictionaries
+garden epoch
+walkable map cache
+night preparation state
+client preparation state
+spawn playlist/spawn tick logic
+agent state dictionaries
+garden retargeting
+agent eating/escaping
+client systems
+save/load facade
+```
+
+## Candidate functions to move
+
+Move route-only functions such as:
+
+```gdscript
+_release_spawner_route
+_drain_dirty_routes
+_initialize_spawner_route
+_rebuild_spawner_plant_ff
+_rebuild_spawner_escape_ff
+_rebuild_all_spawner_routes
+_rebuild_spawner_garden_route_cache
+_release_garden_routes
+_release_spawner_garden_route
+_garden_route_is_current
+_get_or_create_spawner_garden_route
+_spawner_garden_route_flow_ready
+_request_group_flow_rebuild
+_rebuild_exit_wall_escapes_budgeted
+_release_exit_wall_escape
+_nearest_reachable_exit_escape
+_initialize_spawner_routes_for_kinds
+_prewarm_spawner_entry_flows_for_kind
+_mark_spawner_entry_routes_ready_for_groups
+_night_flow_fields_are_ready_for_kinds
+_group_flow_id_is_ready
+_group_flow_is_ready_at_world
+_flow_uses_async_requests
+_flow_supports_sync_assign
+```
+
+Do not move garden topology, retargeting, spawn tick behavior, or scan logic.
 
 ## Desired boundary
 
 `BuildingManager` may keep:
 
 ```gdscript
-var _building_scan: BuildingScanService = BuildingScanService.new()
+var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
 ```
 
 Initialize it with:
 
 ```gdscript
-_building_scan.setup(self)
+_spawner_route_service.setup(self)
 ```
 
-if that matches the current helper/controller pattern and keeps the patch smaller.
+if this matches the current project pattern and keeps the patch smaller.
 
-After extraction, `BuildingManager` should call something like:
+`BuildingManager` may keep thin private wrappers for compatibility if many existing internal methods call the old names.
+
+Examples:
 
 ```gdscript
-_building_scan.load_tile_definitions()
-_building_scan.scan_buildings()
+func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
+    return _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
+
+func _nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
+    return _spawner_route_service.nearest_reachable_exit_escape(world_pos)
 ```
 
-or keep thin wrappers if many call sites currently use private manager methods:
+Thin wrappers are acceptable. Do not rewrite the whole manager call graph just to avoid wrappers.
 
-```gdscript
-func _scan_buildings() -> void:
-    _building_scan.scan_buildings()
+## Dependency rule
+
+The route service may read required source-of-truth data from `BuildingManager` through narrow methods or through `setup(manager)`.
+
+Acceptable manager dependencies:
+
+```txt
+flow
+agent_manager
+spawner cells
+spawner kind lookup
+spawner exit/spot lookup
+garden lookup
+garden epoch
+walkability checks
+cell/world conversion
+night/client preparation token checks
+night preparation budget
+debug telemetry warnings
 ```
 
-Thin wrappers are acceptable if they reduce patch risk.
+Avoid copying source-of-truth gameplay registries into the route service unless they are route-owned dictionaries.
+
+Do not make the route service own spawner scanning.
+
+Do not make the route service own garden topology.
+
+Do not make the route service own spawn decisions.
+
+## Important behavior preservation
+
+Preserve exactly:
+
+```txt
+same flow-field group allocation
+same route release behavior
+same dirty route invalidation
+same route cache keys
+same garden epoch/version checks
+same async flow request behavior
+same sync fallback behavior
+same group readiness checks
+same route-cost checks
+same exit-wall escape selection
+same nearest reachable exit behavior
+same route cache hit/miss accounting
+same warning/error behavior
+same night preparation readiness behavior
+same client preparation readiness behavior
+```
+
+Do not tune route selection.
+
+Do not change route costs.
+
+Do not change which gardens are targetable.
+
+Do not change monster/client/merchant spawning behavior.
 
 ## Do not extract
 
 Do not move or refactor:
 
 ```txt
-garden topology
-garden access scoring
+building scan / special tile detection
+garden topology creation
+garden geometry rebuild
 garden retargeting
-spawner route creation
-flow-field ownership
-night preparation
-client preparation
-spawn tick logic
+garden access scoring
+spawn tick behavior
+spawn playlist behavior
+night preparation state machine
+client preparation state machine
 agent eating
 agent escaping
-astar-in logic
+astar-in arrival logic
 monster death/drop logic
 agent suspend/resume
 client systems
 save/load behavior
 tutorial behavior
-debug/telemetry except scan summary if already part of scanner
+debug/telemetry
 ```
 
-This pass is only about scanning / special tile detection / spawner registration.
+## Stop condition
 
-## Behavior preservation
+If the extraction requires deep changes to garden topology, retargeting, scan service, spawn tick logic, or night/client preparation state machines, stop and report the coupling instead of continuing.
 
-Preserve existing behavior exactly:
-
-```txt
-same spawner detection
-same spawner kind assignment
-same client spawner detection
-same merchant spawner detection
-same authored node spawner behavior
-same legacy tile marker behavior
-same migration behavior from wallz to traversable/special layers
-same wall/water/blocking/fence signature behavior
-same dirty topology detection
-same scan summary logging
-same playlist validation timing
-same route invalidation side effects
-```
-
-Do not change how spawners work.
-
-Do not change route initialization.
-
-Do not change night/client preparation.
-
-Do not change spawn playlist behavior.
-
-## Important coupling rule
-
-If scanning currently marks route/topology state dirty, preserve that side effect.
-
-But do not extract the route rebuild itself.
-
-Example acceptable boundary:
-
-```gdscript
-manager.mark_navigation_topology_dirty()
-manager.mark_spawner_escape_dirty(spawner_cell)
-manager.register_scanned_spawner(...)
-```
-
-Do not let the scan service directly own flow-field groups or garden routes.
+Do not “solve” the coupling by expanding the scope.
 
 ## GDScript strict typing
 
@@ -232,13 +236,11 @@ Do not rename unrelated symbols.
 
 Do not reformat unrelated code.
 
-Do not perform broad cleanup.
+Do not clean unrelated systems.
 
-Do not create generic `utils` files.
+Do not create generic utility files.
 
-Do not continue into spawner routes just because the code is nearby.
-
-If this extraction requires major changes to route caches, flow-field ownership, garden logic, or spawn playlist behavior, stop and report the coupling instead of continuing.
+Do not continue into garden topology or retargeting because the code is nearby.
 
 ## Before coding, report
 
@@ -249,13 +251,14 @@ State owned:
 Public API:
 Files changed:
 Estimated lines moved:
-Registry ownership decision:
-Why this split is architectural and bounded:
+Route state ownership decision:
+Manager state intentionally kept:
+Thin wrappers to preserve:
 Couplings found:
 Risk:
 ```
 
-Then implement only this extraction.
+Then implement only the route extraction.
 
 ## Final report
 
@@ -264,7 +267,8 @@ After implementation, report:
 ```txt
 What moved:
 What stayed in BuildingManager:
-Registry ownership decision:
+Route state ownership decision:
+Thin wrappers kept:
 Files changed:
 Remaining risks:
 Manual test checklist:
