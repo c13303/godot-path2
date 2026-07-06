@@ -157,7 +157,6 @@ var _find_path_in_zone_accum: Dictionary = {}
 # blocker-construction vs. the rest, without changing the void signature.
 var _last_zone_blocker_us: int = 0
 var _eating_agents: Dictionary = {}
-var _turret_eating_agents: Dictionary = {}
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
@@ -303,6 +302,7 @@ var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
 var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
+var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 var _counter_stock_manager: CounterStockManager
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
 # These are fed into the garden clustering as ordinary "plant cells" so a stocked
@@ -451,6 +451,7 @@ func _ready() -> void:
 	_morning_harvest.setup(self)
 	_client_tantrum.setup(self)
 	_drowning_controller.setup(self)
+	_turret_eating_controller.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -1291,11 +1292,11 @@ func _process(delta: float) -> void:
 				_escaping_agents.size()])
 
 	t = Time.get_ticks_usec()
-	_process_turret_eating_agents(delta)
-	_process_turret_overlaps()
+	_turret_eating_controller.process_turret_eating_agents(delta)
+	_turret_eating_controller.process_turret_overlaps()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
-			"turret_eating=%d" % _turret_eating_agents.size())
+			"turret_eating=%d" % _turret_eating_controller.turret_eating_count())
 
 	t = Time.get_ticks_usec()
 	_drowning_controller.process_drowning_agents(delta)
@@ -3680,75 +3681,6 @@ func show_damage_number(world_position: Vector2, damage: int) -> void:
 
 func tile_size() -> Vector2:
 	return _tile_size()
-
-func _process_turret_overlaps() -> void:
-	if blocking_buildings == null:
-		return
-	var agent_groups: Array[String] = ["monsters", "clients", "merchants"]
-	var checked_nav_ids: Dictionary = {}
-	for group_name: String in agent_groups:
-		for raw_node: Node in get_tree().get_nodes_in_group(group_name):
-			var agent: Node2D = raw_node as Node2D
-			if agent == null or not is_instance_valid(agent):
-				continue
-			var nav_id: int = int(agent.get("nav_id"))
-			if nav_id < 0 or checked_nav_ids.has(nav_id) or _eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or _drowning_controller.is_drowning(nav_id):
-				continue
-			checked_nav_ids[nav_id] = true
-			var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
-			if not _is_turret_cell(agent_cell):
-				continue
-			_consume_turret(agent, agent_cell)
-
-func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
-	var nav_id: int = int(agent.get("nav_id"))
-	if nav_id < 0:
-		return
-	var agent_kind: StringName = _agent_kind(agent)
-	if agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT:
-		_leave_turret_debris(turret_cell)
-		_remove_turret_cell(turret_cell)
-		Sfx.play_sound(&"crunsh")
-		return
-	var resume_state: Dictionary = _capture_agent_resume_state(nav_id, agent)
-	_turret_eating_agents[nav_id] = {
-		"node": agent,
-		"timer": _eating_time,
-		"resume_state": resume_state,
-	}
-	_suspend_agent_for_turret_eating(nav_id)
-	_leave_turret_debris(turret_cell)
-	_remove_turret_cell(turret_cell)
-	Sfx.play_sound(&"crunsh")
-	if agent.has_method("start_eating"):
-		agent.call("start_eating", _eating_time)
-
-func _process_turret_eating_agents(delta: float) -> void:
-	var finished: Array[int] = []
-	for raw_nav_id: Variant in _turret_eating_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _turret_eating_agents.has(nav_id):
-			continue
-		var data: Dictionary = _turret_eating_agents[nav_id] as Dictionary
-		var timer: float = float(data.get("timer", 0.0)) - delta
-		data["timer"] = timer
-		_turret_eating_agents[nav_id] = data
-		if timer <= 0.0:
-			finished.append(nav_id)
-
-	for nav_id: int in finished:
-		var data: Dictionary = _turret_eating_agents.get(nav_id, {}) as Dictionary
-		_turret_eating_agents.erase(nav_id)
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			continue
-		if agent.has_method("stop_eating"):
-			agent.call("stop_eating")
-		var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
-		_resume_agent_after_turret_eating(nav_id, agent, resume_state)
 
 func _suspend_agent_for_drowning(nav_id: int) -> void:
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):

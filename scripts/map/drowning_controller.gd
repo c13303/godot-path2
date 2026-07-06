@@ -36,7 +36,7 @@ func process_drowning_agents(delta: float) -> void:
 	if watersources == null:
 		return
 
-	var turret_eating: Dictionary = _manager.get("_turret_eating_agents") as Dictionary
+	var turret_eating: TurretEatingController = _manager.get("_turret_eating_controller") as TurretEatingController
 	for group_name: String in ["monsters", "clients", "merchants"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
@@ -46,7 +46,7 @@ func process_drowning_agents(delta: float) -> void:
 			if nav_id < 0:
 				continue
 			_update_monster_splash(agent, delta)
-			if turret_eating.has(nav_id):
+			if turret_eating.is_eating(nav_id):
 				continue
 			if _drowning_agents.has(nav_id):
 				continue
