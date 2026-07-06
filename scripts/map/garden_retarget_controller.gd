@@ -766,9 +766,9 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		return true
 	var t_res: int = Time.get_ticks_usec()
 	var pair: Dictionary = _manager.call("_select_spawner_garden_for_agent", from_cell, agent_kind) as Dictionary
-	_last_retarget_profile["entry_cache_hits"] = int(_manager.get("_garden_entry_resolve_hits"))
-	_last_retarget_profile["entry_cache_misses"] = int(_manager.get("_garden_entry_resolve_misses"))
-	_last_retarget_profile["entry_cache_size"] = (_manager.get("_garden_entry_resolve_cache") as Dictionary).size()
+	_last_retarget_profile["entry_cache_hits"] = int(_manager.call("_garden_entry_resolve_hits"))
+	_last_retarget_profile["entry_cache_misses"] = int(_manager.call("_garden_entry_resolve_misses"))
+	_last_retarget_profile["entry_cache_size"] = int(_manager.call("_garden_entry_resolve_cache_size"))
 	if pair.is_empty():
 		if spawner_cell == INVALID_CELL:
 			spawner_cell = _manager.call("_nearest_spawner_cell", from_cell) as Vector2i

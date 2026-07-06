@@ -1,350 +1,199 @@
-Review the current build-system code after the recent `BuildModeStateController` extraction.
+Task: reduce `scripts/map/building_manager.gd` by extracting garden access/entry resolution into a dedicated RefCounted controller/service.
 
-Recent state:
+Context:
+`BuildingManager` is still too large. A good next extraction is the garden access scoring + nearest-entry cache logic currently near the bottom of `building_manager.gd`.
 
-```txt id="ssob76"
-BuildModeStateController now owns _build_direction and selected_placeable_def()
-BuildSystem still keeps DIRECTION_* constants for fence autotiling and _alternative_from_direction
-BuildPlacementService still has its own _is_directional_placeable / _alternative_from_direction logic
-get_preview_direction() remains a BuildSystem wrapper for turret_system.gd
-```
+Create a new file:
 
-Goal: perform one focused extraction: centralize build direction / orientation rules into a small shared helper/service.
+`scripts/map/garden_access_resolver.gd`
 
-Do not run Godot, tests, compilation, export, or build commands. I will test manually.
+with:
 
-## Target
-
-Create a focused helper/service, for example:
-
-```txt id="f7erhf"
-scripts/map/build_direction_rules.gd
-```
-
-or:
-
-```txt id="m2ho16"
-scripts/map/build_orientation_service.gd
-```
-
-Use the clearest name for the existing project style.
-
-## Why this extraction
-
-Direction/orientation rules are now duplicated across build state and placement code.
-
-The next coherent responsibility is:
-
-```txt id="7cphru"
-Given an item definition and a build direction:
-determine whether the item is directional,
-cycle direction forward/backward,
-convert direction to tile alternative/rotation data,
-and expose shared direction constants.
-```
-
-This is separate from:
-
-```txt id="4mce86"
-build mode state
-input routing
-preview rendering
-placement commit
-removal commit
-drag processing
-UI selection
-TileMap mutation
-```
-
-This is a cleanup extraction, not a behavior change.
-
-## Candidate responsibility to move
-
-Move only direction/orientation rules.
-
-Candidate duplicated or related code to inspect:
-
-```gdscript id="rh09n4"
-DIRECTION_*
-_is_directional_placeable
-_next_build_direction
-_prev_build_direction
-_alternative_from_direction
-selected-placeable direction composition, only if pure
-direction-to-alternative mapping used by placement
-direction queries used by preview/turret range preview
-```
-
-Move only pure direction/orientation logic.
-
-Do not move selected item ownership, build mode state, input handling, preview nodes, or placement commit rules.
-
-## Desired boundary
-
-Possible design:
-
-```gdscript id="arh67h"
-class_name BuildDirectionRules
+```gdscript
 extends RefCounted
+class_name GardenAccessResolver
 ```
 
-With pure/static or instance methods such as:
+Goal:
+Move the garden access-cell scoring, garden-entry selection, and entry-resolve cache out of `BuildingManager` while preserving behavior exactly.
 
-```gdscript id="ctlsce"
-func is_directional_placeable(item_def: Dictionary) -> bool
-func next_direction(direction: int) -> int
-func previous_direction(direction: int) -> int
-func alternative_from_direction(direction: int) -> int
-func normalize_direction(direction: int) -> int
+Extract these responsibilities from `BuildingManager`:
+
+* `_garden_entry_resolve_cache`
+* `_garden_entry_resolve_cache_hit`
+* `_garden_entry_resolve_hits`
+* `_garden_entry_resolve_misses`
+* `_manhattan_cell`
+* `_garden_access_outside_neighbors`
+* `_valid_walkable_neighbors_no_corner_cut`
+* `_group_route_cost_at_cell`
+* `_score_garden_access_cell`
+* `_blocked_cardinal_count`
+* `_select_scored_garden_entry`
+* `_nearest_garden_entry_manhattan`
+* `_clear_garden_entry_resolve_cache`
+* `_garden_entry_resolve_cache_key`
+* `_nearest_garden_entry`
+* `_nearest_garden_entry_to_exit`
+
+Also move these access-scoring constants out of `BuildingManager` into the new resolver if they are only used by this block:
+
+* `ACCESS_NO_OUTSIDE_PENALTY`
+* `ACCESS_EXIT_WORSE_PENALTY`
+* `ACCESS_EXIT_FLAT_PENALTY`
+* `ACCESS_DEAD_CONTINUATION_PENALTY`
+* `ACCESS_NARROW_CONTINUATION_PENALTY`
+* `ACCESS_REVERSAL_PENALTY`
+* `ACCESS_TURN_PENALTY`
+* `ACCESS_BLOCKED_CARDINAL_PENALTY`
+* `ACCESS_ENTER_DEAD_CONTINUATION_PENALTY`
+* `ACCESS_ENTER_NARROW_CONTINUATION_PENALTY`
+
+Keep shared constants local to the resolver as needed:
+
+```gdscript
+const IDLE_GROUP: int = 0
+const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 ```
 
-Static methods are acceptable if that fits the project style.
+Architecture:
+Follow the existing RefCounted controller pattern already used by:
 
-A `RefCounted` instance is also acceptable if it better matches existing controllers.
+* `GardenTopologyService`
+* `GardenRetargetController`
+* `SpawnerRouteService`
+* `AgentSuspendService`
 
-## Ownership rule
+The new resolver should have:
 
-`BuildDirectionRules` may own:
+```gdscript
+var _manager: Node
 
-```txt id="wja443"
-DIRECTION_* constants
-direction cycling rules
-direction normalization
-directional-placeable detection
-direction -> TileMap alternative mapping
+func setup(manager: Node) -> void:
+    _manager = manager
 ```
 
-`BuildModeStateController` should still own:
+The resolver may call back into `BuildingManager` for source-of-truth state and low-level queries, same as the other controllers do.
 
-```txt id="gqqmbu"
-current _build_direction value
-rotate_selected_build_direction()
-selected_placeable_def() composition
-state reset behavior
+Required public API on `GardenAccessResolver`:
+
+```gdscript
+func nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i
+func nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i
+func clear_cache(reason: String = "") -> void
+
+func cache_hit() -> bool
+func consume_cache_hit_flag() -> bool # optional if cleaner
+func reset_resolve_counters() -> void
+func resolve_hits() -> int
+func resolve_misses() -> int
 ```
 
-`BuildPlacementService` should still own:
+The exact counter API can be adjusted, but existing profiling/debug behavior in `BuildingManager` and `GardenRetargetController` must remain unchanged.
 
-```txt id="smax0z"
-actual placement commit
-TileMap writes
-item placement validation
-inventory/cost mutation
-placement side effects
+Important behavior constraints:
+
+1. Do not change gameplay behavior.
+2. Do not change garden entry scoring results.
+3. Do not change the cache key semantics:
+
+   * key must remain based on source cell + garden id
+   * never cache only by `garden_id`
+4. Preserve stale-cache validation:
+
+   * cached `INVALID_CELL` is valid and should be reused
+   * finite cached cells must still be checked against current garden existence, `entry_cells`, and walkability
+5. Preserve the fallback to old Manhattan nearest-entry selection when scoring finds no finite candidate.
+6. Preserve debug print behavior gated by:
+
+   * `debug_logs`
+   * `CppDebugOptions.logs_enabled`
+7. No performance regression.
+8. No new topology recomputation.
+9. No change to public behavior of `BuildingManager`.
+
+Integration in `BuildingManager`:
+
+Add a member:
+
+```gdscript
+var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
 ```
 
-`BuildSystem` should still own:
+In `_ready()`:
 
-```txt id="qhk8eh"
-compatibility wrappers
-subsystem orchestration
-public API used by turret_system.gd / input / UI
-fence autotiling call sites, unless only the direction mapping is moved
+```gdscript
+_garden_access_resolver.setup(self)
 ```
 
-If ownership is unclear, keep the state/function where it is and only centralize the pure helper logic.
+Replace the old methods in `BuildingManager` with thin wrappers where external callers or other controllers still expect the old private method names:
 
-## Required compatibility
+```gdscript
+func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
+    return _garden_access_resolver.nearest_garden_entry(garden_id, from_cell)
 
-Keep these existing public/wrapper methods working:
+func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
+    return _garden_access_resolver.nearest_garden_entry_to_exit(garden_id, spawner_cell)
 
-```gdscript id="xjn0p1"
-rotate_selected_build_direction()
-get_preview_direction()
-_selected_placeable_def()
+func _clear_garden_entry_resolve_cache(reason: String = "") -> void:
+    _garden_access_resolver.clear_cache(reason)
 ```
 
-Do not break external callers such as:
+If `_garden_entry_resolve_cache_hit`, `_garden_entry_resolve_hits`, or `_garden_entry_resolve_misses` are read directly inside `BuildingManager`, replace those reads with resolver accessors. Do not keep duplicate state in both classes.
 
-```txt id="v8h05z"
-turret_system.gd
-BuildInputController
-BuildDragController
-BuildPreviewController
-BuildPlacementService
+The resolver can access dependencies through `_manager`, for example:
+
+```gdscript
+func _gardens() -> Dictionary:
+    return _manager.get("_garden_topology").gardens()
+
+func _is_walkable(cell: Vector2i) -> bool:
+    return bool(_manager.call("_is_walkable", cell))
+
+func _cell_center(cell: Vector2i) -> Vector2:
+    return _manager.call("_cell_center", cell) as Vector2
+
+func _flow() -> Node:
+    return _manager.get("flow") as Node
+
+func _spawner_route_service() -> Object:
+    return _manager.get("_spawner_route_service") as Object
 ```
 
-Prefer wrappers over broad caller rewrites.
+Use the same callback style as the other extracted controllers. Do not invent a new dependency-injection architecture.
 
-## Behavior preservation
+Check all references before deleting code from `BuildingManager`:
 
-Preserve existing behavior exactly:
+Search for:
 
-```txt id="j8zlhf"
-same direction order
-same forward rotation
-same backward rotation
-same behavior for non-directional items
-same selected_placeable_def result
-same preview direction
-same turret range preview direction
-same TileMap alternative chosen during placement
-same fence autotiling behavior
-same mouse wheel / R / gamepad rotate behavior
-```
+* `_nearest_garden_entry(`
+* `_nearest_garden_entry_to_exit(`
+* `_clear_garden_entry_resolve_cache(`
+* `_garden_entry_resolve_cache`
+* `_garden_entry_resolve_cache_hit`
+* `_garden_entry_resolve_hits`
+* `_garden_entry_resolve_misses`
+* `_select_scored_garden_entry(`
+* `_score_garden_access_cell(`
+* `_garden_access_outside_neighbors(`
+* `_valid_walkable_neighbors_no_corner_cut(`
+* `_group_route_cost_at_cell(`
+* `_blocked_cardinal_count(`
 
-Do not change rotation semantics.
+Expected result:
 
-Do not change tile alternatives.
+* `building_manager.gd` loses roughly 250–350 lines.
+* Garden access scoring lives in `garden_access_resolver.gd`.
+* `BuildingManager` keeps only thin compatibility wrappers.
+* Existing controllers such as `SpawnerRouteService` and `GardenRetargetController` can continue calling `_manager.call("_nearest_garden_entry", ...)` unchanged.
+* No scene/node changes required.
+* No `.tscn` changes required.
+* No gameplay behavior changes.
 
-Do not change item definitions.
+Do not do unrelated cleanup in this task.
 
-Do not change preview.
+Do not unify `BuildDirectionRules.direction_from_alternative()` here. That is a separate self-contained follow-up.
 
-Do not change placement.
+Do not rename garden concepts in this task.
 
-Do not change input bindings.
-
-## Boundary with BuildModeStateController
-
-`BuildModeStateController` should call the new direction rules helper for:
-
-```txt id="ny8byf"
-is this selected item directional?
-next direction
-previous direction
-```
-
-But it should continue to own the mutable current direction.
-
-Do not move `_build_direction` into the rules helper.
-
-## Boundary with BuildPlacementService
-
-`BuildPlacementService` should call the new direction rules helper for:
-
-```txt id="7q7vce"
-directional-placeable detection
-direction -> alternative mapping
-```
-
-Do not duplicate `_is_directional_placeable` or `_alternative_from_direction` in the placement service after this pass, unless there is a concrete incompatibility that you must report.
-
-## Boundary with BuildSystem
-
-`BuildSystem` may keep `DIRECTION_*` compatibility constants if external code or inspector usage depends on them.
-
-However, avoid having two independent sources of truth.
-
-Acceptable options:
-
-Option A:
-
-```txt id="s469zd"
-Move constants to BuildDirectionRules and have BuildSystem constants alias them if GDScript allows cleanly.
-```
-
-Option B:
-
-```txt id="3svcnt"
-Keep constants in BuildSystem for compatibility but make all logic call BuildDirectionRules, and report the remaining constant duplication.
-```
-
-Prefer Option A if safe. Use Option B if cyclic load/order/strict typing makes aliasing risky.
-
-## Do not extract
-
-Do not move or refactor:
-
-```txt id="xrtnnb"
-input routing
-preview/cursor rendering
-placement commit rules
-removal commit rules
-drag processed-cell state
-build mode active state
-selected item/tool state
-shop/build menu UI
-save/load behavior
-combat/projectile behavior
-player movement
-inventory/cost mutation
-TileMap mutation except replacing direction helper calls
-```
-
-This pass is only about pure build direction/orientation rules.
-
-## Coupling rule
-
-If direction logic is mixed into placement or preview functions, do not extract the whole function.
-
-Instead:
-
-```txt id="syxm9w"
-leave placement/preview logic where it is
-extract only the pure direction calculation
-replace duplicated helper bodies with calls to BuildDirectionRules
-report any duplication intentionally left
-```
-
-If this extraction requires rewriting input, preview, placement, removal, UI, or item catalog behavior, stop and report the coupling instead of expanding the task.
-
-## GDScript strict typing
-
-Godot/GDScript strict typing is enabled.
-
-Avoid `:=` inference for:
-
-```txt id="6wss95"
-numeric expressions
-Dictionary / Array values
-signal or call() returns
-mixed int / float math
-nullable or dynamic values
-```
-
-Prefer explicit local types.
-
-Cast dynamic values before use.
-
-## Patch discipline
-
-Preserve behavior.
-
-Keep the patch reviewable.
-
-Do not rename unrelated symbols.
-
-Do not reformat unrelated code.
-
-Do not perform broad cleanup.
-
-Do not create a generic utility dumping ground.
-
-Do not continue into placement, preview, input, drag, UI, inventory, or save/load because the code is nearby.
-
-## Before coding, report
-
-```txt id="nywjdn"
-Owner:
-Caller:
-State owned:
-Public API:
-Files changed:
-Estimated lines moved:
-Direction constants ownership decision:
-Duplicated helpers found:
-BuildSystem compatibility wrappers/constants kept:
-Couplings found:
-Risk:
-```
-
-Then implement only the direction/orientation rules extraction.
-
-## Final report
-
-After implementation, report:
-
-```txt id="ac5eal"
-What moved:
-What stayed in BuildSystem:
-What stayed in BuildModeStateController:
-What stayed in BuildPlacementService:
-Direction constants ownership decision:
-Duplicated helper bodies removed:
-Compatibility wrappers kept:
-Files changed:
-Remaining risks:
-Manual test checklist:
-Recommended next step:
-```
+Do not compile or run tests; I will do it.

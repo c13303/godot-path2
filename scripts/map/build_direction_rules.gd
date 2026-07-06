@@ -56,3 +56,17 @@ static func alternative_from_direction(direction: Vector2i) -> int:
 	if direction == DIRECTION_UP:
 		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V
 	return 0
+
+
+# Inverse of alternative_from_direction: recovers the facing from a committed tile's
+# alternative flags. Non-orientation bits are masked out first, so any extra alternative
+# data is ignored. Anything but the three rotated forms resolves to RIGHT (the identity).
+static func direction_from_alternative(alternative_tile: int) -> Vector2i:
+	var transform: int = alternative_tile & (TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V | TILE_TRANSFORM_TRANSPOSE)
+	if transform == (TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V):
+		return DIRECTION_LEFT
+	if transform == (TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H):
+		return DIRECTION_DOWN
+	if transform == (TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V):
+		return DIRECTION_UP
+	return DIRECTION_RIGHT
