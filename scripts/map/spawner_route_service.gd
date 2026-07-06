@@ -291,7 +291,7 @@ func drain_dirty_routes() -> void:
 
 
 func initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	if not bool(_manager.get("_flow_ready")) or not bool(_manager.get("_plant_zone_built")):
+	if not bool(_manager.get("_flow_ready")) or not bool(_manager.call("_plant_zone_is_built")):
 		return
 	var agent_manager: Node = _agent_manager()
 	var flow: Node = _flow()
@@ -382,7 +382,7 @@ func rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 
 
 func rebuild_all_spawner_routes() -> void:
-	if not bool(_manager.get("_flow_ready")) or not bool(_manager.get("_plant_zone_built")):
+	if not bool(_manager.get("_flow_ready")) or not bool(_manager.call("_plant_zone_is_built")):
 		return
 	var spawners: Dictionary = _spawners()
 	for raw_cell: Variant in spawners.keys():
@@ -640,7 +640,7 @@ func _spawner_exit_cell_by_cell() -> Dictionary:
 
 
 func _gardens() -> Dictionary:
-	return _manager.get("_gardens") as Dictionary
+	return _manager.call("_get_gardens") as Dictionary
 
 
 func _wallz() -> TileMapLayer:

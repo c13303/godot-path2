@@ -1,196 +1,250 @@
-Review the current `scripts/map/building_manager.gd`.
+Review the current `scripts/map/building_manager.gd` after the recent controller/helper/service extractions.
 
-Goal: perform the real `SpawnerRouteService` extraction.
-
-The previous pass was only a boundary/stabilization pass and recommended that the real route extraction be done as a separate explicit task. This is that task.
+Goal: perform one focused extraction: move garden topology ownership out of `BuildingManager`.
 
 Do not run Godot, tests, compilation, export, or build commands. I will test manually.
 
 ## Target
 
-Create a focused route service:
+Create a focused topology service:
 
 ```txt
-scripts/map/spawner_route_service.gd
+scripts/map/garden_topology_service.gd
 ```
 
 Use another clear name only if it better matches the existing project style.
 
-## Responsibility
+## Why this extraction
 
-`SpawnerRouteService` should own route / flow-field route state and behavior.
+`BuildingManager` should coordinate gameplay phases, but it should not own all garden topology state and rebuild logic.
 
-It may own:
-
-```txt
-_spawner_routes
-_spawner_garden_routes
-_dirty_spawner_escapes
-_exit_wall_escapes
-_route_cache_hits
-_route_cache_misses
-flow-field route creation
-flow-field route release
-route readiness checks
-exit-wall escape cache
-spawner-to-garden route cache
-dirty route draining
-```
-
-`BuildingManager` should still own:
+Garden topology is a coherent responsibility:
 
 ```txt
-spawner registries
-spawner kind lookup
-garden dictionaries
-garden epoch
-walkable map cache
-night preparation state
-client preparation state
-spawn playlist/spawn tick logic
-agent state dictionaries
-garden retargeting
-agent eating/escaping
-client systems
-save/load facade
+Given plant cells, counter access cells, walkability, and spawner reachability:
+build gardens, compute garden geometry, validate targetability, maintain plant-zone caches, and expose garden lookup data.
 ```
+
+This is architectural cleanup, not line-count cleanup.
+
+## Current responsibility to extract
+
+Move garden topology state and logic only.
+
+Candidate state:
+
+```gdscript
+_gardens
+_garden_by_plant_cell
+_dirty_gardens
+_next_garden_id
+_gardens_epoch
+_gardens_iter_depth
+_garden_debug_logs
+_pending_empty_gardens
+_spawner_reachable_cells
+_walkable_map_tiles
+_plant_zone_tiles
+_plant_zone_margin_tiles
+_plant_zone_built
+_counter_access_cells
+```
+
+Move state only if the topology service clearly owns it.
+
+If moving a variable creates too much coupling, keep it temporarily in `BuildingManager` and expose it through a thin wrapper.
 
 ## Candidate functions to move
 
-Move route-only functions such as:
+Move only garden topology / geometry / reachability / plant-zone cache logic.
+
+Candidate functions:
 
 ```gdscript
-_release_spawner_route
-_drain_dirty_routes
-_initialize_spawner_route
-_rebuild_spawner_plant_ff
-_rebuild_spawner_escape_ff
-_rebuild_all_spawner_routes
-_rebuild_spawner_garden_route_cache
-_release_garden_routes
-_release_spawner_garden_route
-_garden_route_is_current
-_get_or_create_spawner_garden_route
-_spawner_garden_route_flow_ready
-_request_group_flow_rebuild
-_rebuild_exit_wall_escapes_budgeted
-_release_exit_wall_escape
-_nearest_reachable_exit_escape
-_initialize_spawner_routes_for_kinds
-_prewarm_spawner_entry_flows_for_kind
-_mark_spawner_entry_routes_ready_for_groups
-_night_flow_fields_are_ready_for_kinds
-_group_flow_id_is_ready
-_group_flow_is_ready_at_world
-_flow_uses_async_requests
-_flow_supports_sync_assign
+_rebuild_walkable_map_cache_budgeted
+_build_gardens_from_plants_budgeted
+_validate_gardens_budgeted
+_recompute_garden_geometry_budgeted
+_recompute_spawner_reachable_cells_budgeted
+_rebuild_plant_zone_compatibility_cache_budgeted
+
+_rebuild_walkable_map_cache
+_build_plant_zone
+_rebuild_plant_zone_from_layer
+_build_gardens_from_plants
+_validate_dirty_gardens
+_recompute_garden_geometry
+_recompute_spawner_reachable_cells
+_apply_spawner_reachability
+_rebuild_plant_zone_compatibility_cache
+
+_create_garden
+_erase_garden
+_mark_garden_dirty
+_add_plant_to_gardens
+_remove_plant_from_garden_content_only
+_garden_has_target_for_kind
+_garden_has_counter_target
+_collect_counter_access_cells
 ```
 
-Do not move garden topology, retargeting, spawn tick behavior, or scan logic.
+Also inspect nearby small helpers, but do not broaden the extraction.
 
 ## Desired boundary
 
 `BuildingManager` may keep:
 
 ```gdscript
-var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
+var _garden_topology: GardenTopologyService = GardenTopologyService.new()
 ```
 
 Initialize it with:
 
 ```gdscript
-_spawner_route_service.setup(self)
+_garden_topology.setup(self)
 ```
 
-if this matches the current project pattern and keeps the patch smaller.
+if this matches the current controller/service pattern and keeps the patch smaller.
 
-`BuildingManager` may keep thin private wrappers for compatibility if many existing internal methods call the old names.
+`BuildingManager` may keep thin wrappers for compatibility if many internal call sites still expect old method names.
 
 Examples:
 
 ```gdscript
-func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
-    return _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
+func _build_gardens_from_plants_budgeted(token: int) -> bool:
+	return bool(await _garden_topology.build_gardens_from_plants_budgeted(token))
 
-func _nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
-    return _spawner_route_service.nearest_reachable_exit_escape(world_pos)
+func _validate_gardens_budgeted(token: int) -> bool:
+	return bool(await _garden_topology.validate_gardens_budgeted(token))
+
+func _garden_has_target_for_kind(garden_id: int, agent_kind: StringName) -> bool:
+	return _garden_topology.garden_has_target_for_kind(garden_id, agent_kind)
 ```
 
-Thin wrappers are acceptable. Do not rewrite the whole manager call graph just to avoid wrappers.
+Thin wrappers are acceptable. Do not rewrite the whole manager call graph just to remove wrappers.
 
-## Dependency rule
+## Ownership rule
 
-The route service may read required source-of-truth data from `BuildingManager` through narrow methods or through `setup(manager)`.
-
-Acceptable manager dependencies:
+`GardenTopologyService` should own:
 
 ```txt
-flow
-agent_manager
-spawner cells
-spawner kind lookup
-spawner exit/spot lookup
-garden lookup
+garden dictionaries
+plant-to-garden mapping
+dirty garden set
+garden id allocation
 garden epoch
-walkability checks
-cell/world conversion
-night/client preparation token checks
-night preparation budget
-debug telemetry warnings
+garden geometry
+garden reachability
+plant-zone caches
+walkable map cache, if practical
+counter access cells, if practical
 ```
 
-Avoid copying source-of-truth gameplay registries into the route service unless they are route-owned dictionaries.
-
-Do not make the route service own spawner scanning.
-
-Do not make the route service own garden topology.
-
-Do not make the route service own spawn decisions.
-
-## Important behavior preservation
-
-Preserve exactly:
+`BuildingManager` should still own:
 
 ```txt
-same flow-field group allocation
-same route release behavior
-same dirty route invalidation
-same route cache keys
-same garden epoch/version checks
-same async flow request behavior
-same sync fallback behavior
-same group readiness checks
-same route-cost checks
-same exit-wall escape selection
-same nearest reachable exit behavior
-same route cache hit/miss accounting
-same warning/error behavior
-same night preparation readiness behavior
-same client preparation readiness behavior
+phase orchestration
+night/client preparation state
+spawner registries
+spawner route service
+garden access scorer
+garden retarget queue
+agent eating
+agent escaping
+astar-in logic
+spawn tick logic
+client systems
+save/load facade
+debug/telemetry
+plant manager signal wiring
+zone overlay node wiring
 ```
 
-Do not tune route selection.
+If ownership is unclear, keep the state in `BuildingManager` for this pass and expose a wrapper.
 
-Do not change route costs.
+## Important boundary with SpawnerRouteService
 
-Do not change which gardens are targetable.
+Garden topology may tell route service when routes must be released or invalidated.
 
-Do not change monster/client/merchant spawning behavior.
+But do not move route ownership back into garden topology.
+
+Acceptable:
+
+```gdscript
+manager.release_garden_routes(garden_id)
+manager.rebuild_spawner_garden_route_cache()
+manager.clear_garden_entry_resolve_cache(reason)
+```
+
+or equivalent wrapper calls.
+
+Not acceptable:
+
+```txt
+GardenTopologyService owns _spawner_garden_routes
+GardenTopologyService creates flow-field groups
+GardenTopologyService decides route cache hit/miss behavior
+```
+
+Route caches belong to `SpawnerRouteService`.
+
+## Important boundary with GardenAccessScorer
+
+Garden topology may expose garden entry cells.
+
+But it should not own the scoring algorithm for choosing the best access cell if `GardenAccessScorer` already owns that.
+
+Acceptable:
+
+```txt
+GardenTopologyService computes entry cell candidates
+GardenAccessScorer selects/scorers the best entry for a spawner/source
+```
+
+Do not merge `GardenAccessScorer` back into topology.
+
+## Important boundary with retargeting
+
+Do not extract retargeting in this pass.
+
+Garden topology may notify/enable retargeting when topology changes.
+
+But the retarget queue and reassignment logic should stay in `BuildingManager` for now.
+
+Do not move:
+
+```gdscript
+_retarget_agents_for_garden_topology_change
+_garden_target_is_stale
+_clear_stale_garden_path
+_retarget_agents_targeting_removed_plant_only
+_find_local_retarget_plant
+_try_local_retarget_agent
+_retarget_agent_or_escape
+_retarget_agent_or_escape_impl
+_queue_agent_for_garden_retarget
+_queue_agents_after_garden_rebuild
+_handle_garden_became_empty
+_queue_affected_empty_garden_agent
+_process_garden_retarget_queue
+_retarget_single_waiting_agent
+_requeue_waiting_agent
+```
+
+Those belong to a later `GardenRetargetController` extraction.
 
 ## Do not extract
 
 Do not move or refactor:
 
 ```txt
-building scan / special tile detection
-garden topology creation
-garden geometry rebuild
-garden retargeting
+spawner route ownership
+flow-field route cache
 garden access scoring
+garden retargeting
 spawn tick behavior
 spawn playlist behavior
-night preparation state machine
-client preparation state machine
+night/client preparation state machines
 agent eating
 agent escaping
 astar-in arrival logic
@@ -200,13 +254,88 @@ client systems
 save/load behavior
 tutorial behavior
 debug/telemetry
+building scan
 ```
 
-## Stop condition
+This pass is only about garden topology.
 
-If the extraction requires deep changes to garden topology, retargeting, scan service, spawn tick logic, or night/client preparation state machines, stop and report the coupling instead of continuing.
+## Behavior preservation
 
-Do not “solve” the coupling by expanding the scope.
+Preserve existing behavior exactly:
+
+```txt
+same garden clustering behavior
+same GARDEN_LINK_DISTANCE behavior
+same wall-aware clustering
+same diagonal corner-cut prevention
+same plant-zone margin behavior
+same garden entry candidate generation
+same targetable/reachable behavior
+same counter access cells behavior
+same spawner reachability behavior
+same garden epoch behavior
+same dirty garden behavior
+same plant-zone debug overlay data
+same route invalidation calls
+same cache invalidation calls
+same night preparation behavior
+same client preparation behavior
+```
+
+Do not tune garden sizes.
+
+Do not change plant grouping.
+
+Do not change target selection.
+
+Do not change route selection.
+
+Do not change retarget behavior.
+
+## Budgeted async behavior
+
+Preserve the existing budgeted/yielding behavior.
+
+Methods that currently yield per frame must still yield in equivalent places.
+
+Preserve:
+
+```txt
+night_preparation_budget_ms behavior
+_night_preparation_is_current(token) checks
+process_frame yields
+false return on stale token
+true return on successful completion
+```
+
+Do not convert budgeted methods into blocking methods.
+
+## Zone overlay compatibility
+
+The plant-zone overlay may still read data from `BuildingManager`.
+
+If needed, keep wrapper methods on `BuildingManager` so overlay behavior does not change.
+
+Do not refactor the overlay in this pass.
+
+## Public / internal API compatibility
+
+If existing code expects garden-related methods or fields through `BuildingManager`, keep thin wrappers.
+
+Acceptable wrappers:
+
+```gdscript
+func _get_garden(garden_id: int) -> Dictionary:
+	return _garden_topology.get_garden(garden_id)
+
+func _get_gardens() -> Dictionary:
+	return _garden_topology.gardens()
+
+func _plant_zone_contains(cell: Vector2i) -> bool:
+	return _garden_topology.plant_zone_contains(cell)
+```
+
+Do not expose broad mutable dictionaries unless that is already how the current code works and changing it would make the patch risky.
 
 ## GDScript strict typing
 
@@ -230,17 +359,19 @@ Cast dynamic values before use.
 
 Preserve behavior.
 
-Keep the patch small and reviewable.
+Keep the patch reviewable.
 
 Do not rename unrelated symbols.
 
 Do not reformat unrelated code.
 
-Do not clean unrelated systems.
+Do not perform broad cleanup.
 
 Do not create generic utility files.
 
-Do not continue into garden topology or retargeting because the code is nearby.
+Do not continue into garden retargeting because the code is nearby.
+
+If this extraction requires deep changes to retargeting, spawner routes, flow-field ownership, spawn tick logic, or night/client preparation state machines, stop and report the coupling instead of continuing.
 
 ## Before coding, report
 
@@ -251,14 +382,14 @@ State owned:
 Public API:
 Files changed:
 Estimated lines moved:
-Route state ownership decision:
+Garden state ownership decision:
 Manager state intentionally kept:
 Thin wrappers to preserve:
 Couplings found:
 Risk:
 ```
 
-Then implement only the route extraction.
+Then implement only the garden topology extraction.
 
 ## Final report
 
@@ -267,7 +398,7 @@ After implementation, report:
 ```txt
 What moved:
 What stayed in BuildingManager:
-Route state ownership decision:
+Garden state ownership decision:
 Thin wrappers kept:
 Files changed:
 Remaining risks:
