@@ -171,6 +171,8 @@ var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
+var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
+var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -218,6 +220,8 @@ func _ready() -> void:
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
+	_building_invalidation_controller.setup(self)
+	_spawner_garden_selection_service.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -765,23 +769,7 @@ func _scan_buildings() -> void:
 	_building_scan.scan_buildings()
 
 func _apply_navigation_topology_rebuild() -> void:
-	if not _navigation_topology_dirty:
-		return
-	_navigation_topology_dirty = false
-	_sync_flow_extra_blocking_cells()
-	_rebuild_waterpool_directional_field()
-	_rebuild_walkable_map_cache()
-	if _garden_topology.plant_zone_built():
-		_rebuild_plant_zone_from_layer()
-	_rebuild_spawner_garden_route_cache()
-	for raw_spawner_cell: Variant in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		_rebuild_spawner_plant_ff(spawner_cell)
-		_spawner_route_service.mark_spawner_escape_dirty(spawner_cell)
-	var exits_us: int = Time.get_ticks_usec()
-	_rebuild_exit_wall_escapes()
-	_debug_telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
-		"exits=%d" % _spawner_route_service.exit_wall_escape_count())
+	_building_invalidation_controller.apply_navigation_topology_rebuild()
 
 func _sync_flow_extra_blocking_cells() -> void:
 	if flow == null or not flow.has_method("set_extra_blocking_cells"):
@@ -957,7 +945,7 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_set_player_cell_blocked(cell, true)
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
-		_navigation_topology_dirty = true
+		_building_invalidation_controller.after_walkability_changed("building_added")
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 
@@ -967,7 +955,7 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 		_set_player_cell_blocked(cell, false)
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
-		_navigation_topology_dirty = true
+		_building_invalidation_controller.after_walkability_changed("building_removed")
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 	_counter_stock_manager.clear_counter(cell)
@@ -1055,10 +1043,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 		# Day/client placement only dirties the next prepared snapshot. Freshly planted
 		# roses are not valid client targets, so client sale must not rebuild every
 		# existing garden per rose during rectangle placement.
-		_garden_topology.set_plant_zone_built(false)
-		_navigation_topology_dirty = true
-		if _zone_overlay:
-			_zone_overlay.queue_redraw()
+		_building_invalidation_controller.after_plant_layout_changed("plant_added")
 		return
 	_add_plant_to_gardens(_cell)
 	_retarget_agents_for_garden_topology_change(_cell)
@@ -1074,10 +1059,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 func _on_plant_removed(cell: Vector2i) -> void:
 	_sync_building_cell_speed(cell, "debris")
 	if not _runtime_agents_active():
-		_garden_topology.set_plant_zone_built(false)
-		_navigation_topology_dirty = true
-		if _zone_overlay:
-			_zone_overlay.queue_redraw()
+		_building_invalidation_controller.after_plant_layout_changed("plant_removed")
 		return
 	var removed_us: int = Time.get_ticks_usec()
 	var result: Dictionary = _remove_plant_from_garden_content_only(cell)
@@ -2359,131 +2341,23 @@ func _release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> vo
 func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 	return _spawner_route_service.garden_route_is_current(route, garden_id)
 
+# Garden/spawner target-selection scoring now lives in SpawnerGardenSelectionService.
+# These stay as thin compatibility wrappers: _spawn_agent_from calls the first two
+# directly, and GardenRetargetController reaches the last two via _manager.call(...).
 func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
-	var best_garden_id: int = 0
-	var best_dist: int = 2147483647
-	_garden_topology.begin_garden_iteration()
-	for raw_garden_id in _garden_topology.gardens().keys():
-		var garden_id: int = int(raw_garden_id)
-		var garden: Dictionary = _garden_topology.gardens()[garden_id] as Dictionary
-		if not bool(garden.get("targetable", false)):
-			continue
-		if not _garden_has_edible_plants(garden_id):
-			continue
-		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-		if entry_cell == INVALID_CELL:
-			continue
-		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
-			continue
-		var delta: Vector2i = entry_cell - spawner_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best_garden_id = garden_id
-	_garden_topology.end_garden_iteration()
-	_drain_pending_empty_gardens()
-	# The chosen garden may have just been drained as empty; fall through to 0.
-	if best_garden_id > 0 and not _garden_topology.gardens().has(best_garden_id):
-		return 0
-	return best_garden_id
+	return _spawner_garden_selection_service.select_garden_for_spawner(spawner_cell)
 
 
 func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
-	var best_garden_id: int = 0
-	var best_dist: int = 2147483647
-	_garden_topology.begin_garden_iteration()
-	for raw_garden_id: Variant in _garden_topology.gardens().keys():
-		var garden_id: int = int(raw_garden_id)
-		var garden: Dictionary = _garden_topology.gardens()[garden_id] as Dictionary
-		if not bool(garden.get("targetable", false)):
-			continue
-		if not _garden_has_target_for_kind(garden_id, SPAWNER_KIND_CLIENT):
-			continue
-		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-		if entry_cell == INVALID_CELL:
-			continue
-		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
-			continue
-		var delta: Vector2i = entry_cell - spawner_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best_garden_id = garden_id
-	_garden_topology.end_garden_iteration()
-	if best_garden_id > 0 and not _garden_topology.gardens().has(best_garden_id):
-		return 0
-	return best_garden_id
+	return _spawner_garden_selection_service.select_garden_for_client_spawner(spawner_cell)
+
 
 func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
-	var best_pair: Dictionary = {}
-	var best_dist: int = 2147483647
-	# Reset the per-resolve cache tallies; each _nearest_garden_entry below adds in.
-	_garden_access_resolver.reset_resolve_counters()
-	_garden_topology.begin_garden_iteration()
-	for raw_spawner_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
-			continue
-		if not _spawner_route_service.has_spawner_route(spawner_cell):
-			continue
-		for raw_garden_id in _garden_topology.gardens().keys():
-			var garden_id: int = int(raw_garden_id)
-			var garden: Dictionary = _garden_topology.gardens()[garden_id] as Dictionary
-			if not bool(garden.get("targetable", false)):
-				continue
-			if not _garden_has_target_for_kind(garden_id, agent_kind):
-				continue
-			var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-			_garden_access_resolver.record_resolve_result()
-			if entry_cell == INVALID_CELL:
-				continue
-			var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-			if not bool(route.get("ready", false)):
-				continue
-			var delta: Vector2i = entry_cell - from_cell
-			var manhattan: int = abs(delta.x) + abs(delta.y)
-			if manhattan < best_dist:
-				best_dist = manhattan
-				best_pair = {
-					"spawner_cell": spawner_cell,
-					"garden_id": garden_id
-				}
-	_garden_topology.end_garden_iteration()
-	_drain_pending_empty_gardens()
-	# The chosen garden may have just been drained as empty; drop the stale pair.
-	if not best_pair.is_empty() and not _garden_topology.gardens().has(int(best_pair.get("garden_id", 0))):
-		return {}
-	return best_pair
+	return _spawner_garden_selection_service.select_spawner_garden_for_agent(from_cell, agent_kind)
+
 
 func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fallback_spawner_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
-	var best_spawner_cell: Vector2i = INVALID_CELL
-	var best_dist: int = 2147483647
-	for raw_spawner_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
-			continue
-		if not _spawner_route_service.has_spawner_route(spawner_cell):
-			continue
-		var entry_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-		if entry_cell == INVALID_CELL:
-			continue
-		var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
-			continue
-		var delta: Vector2i = entry_cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best_spawner_cell = spawner_cell
-	if best_spawner_cell == INVALID_CELL and fallback_spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(fallback_spawner_cell):
-		if (_spawner_kind_by_cell.get(fallback_spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
-			return INVALID_CELL
-		var fallback_route: Dictionary = _get_or_create_spawner_garden_route(fallback_spawner_cell, garden_id)
-		if _nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL and bool(fallback_route.get("ready", false)):
-			best_spawner_cell = fallback_spawner_cell
-	return best_spawner_cell
+	return _spawner_garden_selection_service.select_spawner_for_garden_from_cell(garden_id, from_cell, fallback_spawner_cell, agent_kind)
 
 func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
 	return _agent_navigation_phases.assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)

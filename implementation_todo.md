@@ -1,44 +1,68 @@
-Task: reduce `scripts/map/building_manager.gd` by extracting agent definition / agent visual-data setup into a dedicated RefCounted service.
+Task: reduce `scripts/map/building_manager.gd` by extracting build/place/remove command orchestration into a dedicated RefCounted controller.
 
 Context:
-`BuildingManager` is still too large. Previous extractions have been tested. The next extraction should move agent definition lookup and visual/stat setup out of `BuildingManager`, while preserving behavior exactly.
+`BuildingManager` is still too large. Previous extraction passes have been tested, including path service, agent definition service, spawn controller, garden access resolver, and invalidation controller.
+
+The next extraction should move build/place/remove command orchestration out of `BuildingManager`, while preserving behavior exactly.
 
 Create a new file:
 
-`scripts/map/agent_definition_service.gd`
+`scripts/map/build_command_controller.gd`
 
 with:
 
 ```gdscript
 extends RefCounted
-class_name AgentDefinitionService
+class_name BuildCommandController
 ```
 
 Goal:
-Move monster/client definition resolution and setup logic out of `BuildingManager`.
+Move the high-level “apply a build/remove command” orchestration out of `BuildingManager`.
 
-Extract these responsibilities from `BuildingManager` if they currently live there:
+This controller should not invent new build rules.
 
-* monster scene resolution
-* monster catalog lookup
-* monster stat setup
-* monster texture/sprite setup
-* client texture/sprite setup
-* fallback handling for unknown monster types
+It should preserve current placement/removal behavior and delegate to existing systems exactly as before.
 
-Likely methods to extract:
+Extract logic related to:
 
-* `_resolve_monster_scene`
-* `_apply_monster_data`
+* placing a selected placeable
+* removing/unbuilding a placeable
+* successful placement side effects
+* successful removal side effects
+* cost/inventory application
+* refund behavior, if currently handled directly in `BuildingManager`
+* object manager placement/removal calls
+* tilemap/building-layer mutation calls
+* calling invalidation after successful mutation
+* debug logging around placement/removal
 
-Also extract any small helper used only by those methods.
+Likely methods/code blocks to search for:
 
-Do not extract spawning itself. `AgentSpawnController` should continue to own spawn orchestration.
+* `_place_selected`
+* `_place_building`
+* `_try_place`
+* `_try_place_at`
+* `_remove_building`
+* `_try_remove`
+* `_unbuild`
+* `_unbuild_at`
+* `_can_place`
+* `_can_remove`
+* `_commit_place`
+* `_commit_remove`
+* `_apply_build_cost`
+* `_refund_build_cost`
+* calls into `BuildingObjectManager`
+* calls into inventory/cost services
+* placement/removal success paths
+* calls into the new invalidation controller
+
+Exact method names may differ. Search the codebase and extract the coherent command orchestration, not unrelated preview/input/drag logic.
 
 Architecture:
-Follow the existing RefCounted service/controller pattern.
+Follow the existing RefCounted controller pattern.
 
-The new service should keep a manager reference:
+The controller should keep a manager reference:
 
 ```gdscript
 var _manager: Node
@@ -47,122 +71,187 @@ func setup(manager: Node) -> void:
 	_manager = manager
 ```
 
-Required public API:
+Suggested public API:
 
 ```gdscript
 func setup(manager: Node) -> void
 
-func resolve_monster_scene(monster_type: StringName) -> PackedScene
-func apply_monster_data(agent: Node, monster_type: StringName) -> void
-func apply_client_data(agent: Node) -> void
+func try_place_at(cell: Vector2i, placeable_def: Dictionary, source: StringName = &"") -> bool
+func try_remove_at(cell: Vector2i, source: StringName = &"") -> bool
+func can_place_at(cell: Vector2i, placeable_def: Dictionary) -> bool
+func can_remove_at(cell: Vector2i) -> bool
 ```
 
-If the current code has no separate client setup helper yet, create `apply_client_data(agent)` and move the client visual setup there from spawn orchestration.
+Adjust names/signatures to match the current codebase if necessary.
 
-Integration:
+Preserve compatibility:
+Keep thin wrappers in `BuildingManager` for old methods that other controllers, signals, or dynamic `call()` usage may still depend on.
 
-Add this member to `BuildingManager`:
+Example:
 
 ```gdscript
-var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
+func _try_place_at(cell: Vector2i, placeable_def: Dictionary) -> bool:
+	return _build_command_controller.try_place_at(cell, placeable_def)
+
+func _try_remove_at(cell: Vector2i) -> bool:
+	return _build_command_controller.try_remove_at(cell)
+```
+
+Add to `BuildingManager`:
+
+```gdscript
+var _build_command_controller: BuildCommandController = BuildCommandController.new()
 ```
 
 In `_ready()`:
 
 ```gdscript
-_agent_definition_service.setup(self)
+_build_command_controller.setup(self)
 ```
 
-Replace the old methods in `BuildingManager` with thin wrappers:
+Important ownership boundary:
+`BuildCommandController` owns command orchestration.
+
+It should not own:
+
+* preview logic
+* cursor hover logic
+* drag input
+* UI selection state
+* placeable definitions
+* direction rotation state
+* raw object storage
+* garden topology implementation
+* pathfinding implementation
+* flow-field implementation
+* spawning
+* agent retargeting
+
+Those should remain in their existing owners.
+
+The command controller may call existing services/controllers through `_manager`, for example:
 
 ```gdscript
-func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
-	return _agent_definition_service.resolve_monster_scene(monster_type)
-
-func _apply_monster_data(agent: Node, monster_type: StringName) -> void:
-	_agent_definition_service.apply_monster_data(agent, monster_type)
-
-func _apply_client_data(agent: Node) -> void:
-	_agent_definition_service.apply_client_data(agent)
+_manager.call("_can_place_at", cell, placeable_def)
+_manager.call("_clear_hover")
+_manager.call("_cell_center", cell)
+_manager.call("_is_walkable", cell)
+_manager.call("_apply_build_cost", placeable_def)
+_manager.call("_refund_build_cost", removed_def)
+_manager.call("_set_building_cell", cell, placeable_def)
+_manager.call("_remove_building_cell", cell)
 ```
 
-Then update `AgentSpawnController` to call:
+Use the actual existing method names from the codebase.
+
+For extracted controllers, direct property access is acceptable if consistent with existing code:
 
 ```gdscript
-_manager.call("_apply_client_data", agent)
+var invalidation: Object = _manager.get("_building_invalidation_controller")
 ```
 
-instead of directly applying client sprite/hframes itself, if that logic currently lives in `AgentSpawnController`.
-
-Keep compatibility wrappers in `BuildingManager` because other code may still use `_manager.call(...)`.
-
-Constants and resources:
-Move only constants/resources that are exclusively related to agent definitions or agent visual data.
-
-Examples of things that may move if they are only used here:
-
-* client texture preload
-* monster scene fallback preload
-* monster catalog dictionary
-* default monster values
-* sprite frame defaults
-
-Do not move unrelated spawn constants.
+Do not invent a new dependency-injection architecture.
 
 Behavior preservation requirements:
 
-1. Do not change monster type names.
-2. Do not change fallback monster behavior.
-3. Do not change default monster scene behavior.
-4. Do not change texture paths.
-5. Do not change sprite frame setup.
-6. Do not change animation setup.
-7. Do not change monster health/speed/damage/radius/stat values.
-8. Do not change metadata keys.
-9. Do not change group registration.
-10. Do not change spawn routing.
-11. Do not change desire registration.
-12. Do not change native agent registration order.
+1. Do not change placement rules.
+2. Do not change removal rules.
+3. Do not change inventory/cost behavior.
+4. Do not change refund behavior.
+5. Do not change object-manager behavior.
+6. Do not change tilemap mutation behavior.
+7. Do not change blocked/walkable behavior.
+8. Do not change light-source behavior.
+9. Do not change turret/furniture/wall/plant/trap behavior.
+10. Do not change build direction behavior.
+11. Do not change UI selection behavior.
+12. Do not change preview behavior.
+13. Do not change drag behavior.
+14. Do not change debug logs.
+15. Do not change telemetry names.
+16. Do not change return values.
+17. Do not change side-effect order.
 
-Important ordering rule:
-Monster data must still be applied before native agent registration, exactly as before.
+Side-effect order is critical.
 
-The service should only apply data to an already-instantiated agent. It should not spawn, register, route, assign, or free agents.
+Preserve the exact current order of:
+
+* validation
+* cost check
+* inventory mutation
+* object/tile mutation
+* light registration
+* turret/blocker registration
+* plant/garden dirty marks
+* route/cache invalidation
+* preview/hover refresh
+* debug logging
+* signal emission
+
+If the current code has rollback behavior on failed placement/removal, preserve it exactly.
+
+If the current code consumes cost before mutation, keep that order.
+
+If the current code mutates before invalidation, keep that order.
+
+If the current code clears hover/preview after mutation, keep that order.
 
 Search all references before editing:
 
-* `_resolve_monster_scene(`
-* `_apply_monster_data(`
-* `CLIENT_TEXTURE`
-* monster catalog constants/dictionaries
-* monster texture preloads
-* client sprite setup
-* `hframes`
+* place
+* placement
+* remove
+* unbuild
+* refund
+* cost
+* inventory
+* building_object_manager
+* light
+* turret
+* trap
+* furniture
+* wall
+* plant
+* `_building_invalidation_controller`
+* `_clear_hover`
+* `_refresh_preview`
+* `_placement_disabled`
 
 Expected result:
 
-* `building_manager.gd` loses another coherent block of data/setup code.
-* `AgentSpawnController` becomes cleaner because it delegates agent-specific setup.
-* `BuildingManager` keeps compatibility wrappers only.
+* `building_manager.gd` loses a large coherent block of build/remove command orchestration.
+* `BuildCommandController` owns command execution.
+* `BuildingManager` keeps selection/input/preview coordination and compatibility wrappers only.
+* Existing callers continue to work.
 * No `.tscn` changes required.
 * No gameplay behavior changes.
 
 Regression risks to avoid:
 
-1. Do not accidentally apply monster data after `agent_manager.spawn_agent(...)`.
-2. Do not move spawn failure cleanup into the definition service.
-3. Do not make the definition service select gardens or routes.
-4. Do not duplicate monster catalog state between `BuildingManager` and the service.
-5. Do not change resource preload paths.
-6. Do not change unknown monster fallback behavior.
-7. Do not change client group/desire registration.
-8. Do not rename concepts.
-9. Do not compile or run tests; I will do it.
+1. Do not move input handling into this controller.
+2. Do not move preview handling into this controller except existing post-command refresh calls if they already occur in the command path.
+3. Do not change build validation rules while extracting.
+4. Do not accidentally charge inventory on failed placement.
+5. Do not accidentally refund twice on removal.
+6. Do not skip invalidation after successful mutation.
+7. Do not invalidate before mutation if the old code invalidated after mutation.
+8. Do not change how directional placeables are resolved.
+9. Do not change light/turret/blocker registration order.
+10. Do not duplicate placement state between `BuildingManager` and the new controller.
+11. Do not rewrite `BuildingObjectManager`.
+12. Do not modify garden/path/spawn/agent services unless strictly required for call-site wiring.
+13. Do not rename concepts.
+14. Do not compile or run tests; I will do it.
 
 Non-goals:
-Do not extract spawn orchestration again.
-Do not modify pathfinding.
-Do not modify garden routing.
-Do not modify playlist logic.
-Do not modify build placement/removal.
+Do not refactor preview rendering.
+Do not refactor input handling.
+Do not refactor drag placement.
+Do not refactor placeable definitions.
+Do not refactor direction rules.
+Do not refactor garden topology.
+Do not refactor pathfinding.
+Do not refactor spawning.
+Do not change build costs.
+Do not optimize placement.
 Do not perform unrelated cleanup.
