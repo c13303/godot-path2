@@ -2656,7 +2656,7 @@ func _process_client_sale(delta: float) -> void:
 		return
 	if not _has_client_targets_remaining():
 		_client_sale_pending_spawners.clear()
-		if _client_count() > 0:
+		if _has_clients_without_rose():
 			_begin_client_tantrum()
 			return
 	for raw_cell: Variant in _client_sale_spawn_timers.keys():
@@ -2701,6 +2701,14 @@ func _current_night_client_count() -> int:
 	if night == null:
 		return 20
 	return maxi(0, night.clients)
+
+
+func _has_clients_without_rose() -> bool:
+	for raw_node: Node in get_tree().get_nodes_in_group("clients"):
+		var client: Node2D = raw_node as Node2D
+		if client != null and is_instance_valid(client) and not bool(client.get_meta("client_has_rose", false)):
+			return true
+	return false
 
 
 func can_start_night_after_clients() -> bool:
@@ -3641,6 +3649,7 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
+	agent.set_meta("client_has_rose", true)
 	_client_paying_agents[nav_id] = {
 		"node": agent,
 		"timer": CLIENT_PAYMENT_SECONDS,
@@ -3697,6 +3706,7 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 		return
 	var nav_id: int = int(agent.get("nav_id"))
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+	agent.set_meta("client_has_rose", true)
 	_client_paying_agents[nav_id] = {
 		"node": agent,
 		"timer": CLIENT_PAYMENT_SECONDS,
@@ -3758,7 +3768,6 @@ func _begin_client_tantrum() -> void:
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
-	_client_paying_agents.clear()
 	GameState.set_client_phase(true)
 	_client_tantrum_group = int(agent_manager.call("create_group"))
 	if _client_tantrum_group <= IDLE_GROUP:
@@ -3766,11 +3775,18 @@ func _begin_client_tantrum() -> void:
 		_client_tantrum_active = false
 		return
 	_rebuild_client_tantrum_flow(target_reservoir.global_position)
+	var hostile_count: int = 0
 	for raw_node: Node in get_tree().get_nodes_in_group("clients"):
 		var client: Node2D = raw_node as Node2D
 		if client == null or not is_instance_valid(client):
 			continue
-		_make_client_hostile(client, target_reservoir)
+		if bool(client.get_meta("client_has_rose", false)):
+			continue
+		if _make_client_hostile(client, target_reservoir):
+			hostile_count += 1
+	if hostile_count <= 0:
+		_end_client_tantrum()
+		return
 	_show_tantrum_alert()
 
 
@@ -3782,10 +3798,12 @@ func _end_client_tantrum() -> void:
 	_client_tantrum_group = -1
 
 
-func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> void:
+func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
 	var nav_id: int = int(client.get("nav_id"))
 	if nav_id < 0:
-		return
+		return false
+	if bool(client.get_meta("client_has_rose", false)):
+		return false
 	if agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
 	if agent_manager.has_method("detach_agent_flow"):
@@ -3803,6 +3821,8 @@ func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> void:
 	client.set_meta("hostile_client", true)
 	client.set("max_health", 100)
 	client.set("health", 100)
+	if client.has_method("queue_redraw"):
+		client.queue_redraw()
 	var sprite: Sprite2D = client.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
@@ -3818,6 +3838,7 @@ func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> void:
 	}
 	if _client_tantrum_group > IDLE_GROUP:
 		agent_manager.call("assign_agent", client, _client_tantrum_group)
+	return true
 
 
 func _process_hostile_clients(delta: float) -> void:
@@ -3849,8 +3870,7 @@ func _process_hostile_clients(delta: float) -> void:
 		if bool(data.get("attacking", false)):
 			_hostile_clients[nav_id] = data
 			continue
-		var target_cell: Vector2i = floorz.local_to_map(floorz.to_local(target.global_position))
-		if not _agent_within_tiles(client, target_cell, 1):
+		if not _hostile_client_can_hit_reservoir(client, target):
 			_hostile_clients[nav_id] = data
 			continue
 		var attack_timer: float = maxf(0.0, float(data.get("attack_timer", 0.0)) - delta)
@@ -3886,6 +3906,14 @@ func _deal_client_tantrum_hit(nav_id: int, target: Node) -> void:
 		return
 	if target != null and is_instance_valid(target) and target.has_method("take_damage"):
 		target.call("take_damage", CLIENT_TANTRUM_ATTACK_DAMAGE)
+
+
+func _hostile_client_can_hit_reservoir(client: Node2D, target: Node2D) -> bool:
+	if client == null or target == null:
+		return false
+	var tile_size: Vector2 = _tile_size()
+	var attack_distance: float = maxf(tile_size.x, tile_size.y) * 1.5
+	return client.global_position.distance_to(target.global_position) <= attack_distance
 
 
 func _finish_hostile_client_attack(nav_id: int, client: Node2D) -> void:

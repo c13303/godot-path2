@@ -41,6 +41,7 @@ const RESERVOIR_Z_INDEX: int = 510
 const RESERVOIR_BASE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
+const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_runtime.gd")
 
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
@@ -524,6 +525,7 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		reservoir.global_position = global_pos
 		reservoir.z_as_relative = false
 		reservoir.z_index = RESERVOIR_Z_INDEX
+		reservoir.script = RESERVOIR_RUNTIME_SCRIPT
 		_snap_reservoir_base_to_wall_tile(reservoir, wallz)
 		_add_reservoir_water_fill(reservoir)
 		reservoir.add_to_group("reservoirs")

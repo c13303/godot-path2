@@ -10,12 +10,14 @@ const FLASH_DURATION: float = 0.08
 var health: int = 100
 var _flash_left: float = 0.0
 var _destroyed: bool = false
-var _sprite: Sprite2D
+var _flash_item: CanvasItem
 
 
 func _ready() -> void:
 	health = maxi(1, max_health)
-	_sprite = get_node_or_null("Sprite2D") as Sprite2D
+	_flash_item = get_node_or_null("Sprite2D") as CanvasItem
+	if _flash_item == null:
+		_flash_item = self
 	queue_redraw()
 
 
@@ -23,12 +25,12 @@ func _process(delta: float) -> void:
 	if _flash_left <= 0.0:
 		return
 	_flash_left = maxf(0.0, _flash_left - delta)
-	if _sprite == null or not is_instance_valid(_sprite):
+	if _flash_item == null or not is_instance_valid(_flash_item):
 		return
 	if _flash_left > 0.0:
-		_sprite.modulate = Color(3.0, 3.0, 3.0, 1.0)
+		_flash_item.modulate = Color(3.0, 3.0, 3.0, 1.0)
 	else:
-		_sprite.modulate = Color.WHITE
+		_flash_item.modulate = Color.WHITE
 
 
 func take_damage(amount: int) -> bool:
@@ -36,8 +38,8 @@ func take_damage(amount: int) -> bool:
 		return false
 	health = maxi(0, health - amount)
 	_flash_left = FLASH_DURATION
-	if _sprite != null and is_instance_valid(_sprite):
-		_sprite.modulate = Color(3.0, 3.0, 3.0, 1.0)
+	if _flash_item != null and is_instance_valid(_flash_item):
+		_flash_item.modulate = Color(3.0, 3.0, 3.0, 1.0)
 	queue_redraw()
 	if health <= 0:
 		_destroyed = true
