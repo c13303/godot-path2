@@ -1,0 +1,286 @@
+extends RefCounted
+class_name SpawnTickController
+
+# Owns the per-frame spawn tick: each night it runs either playlist-driven spawning
+# or the legacy day-count fallback, drains the ready-spawner queue under a frame
+# budget, and tracks the per-pass telemetry the manager's lag warning consumes.
+# Mirrors the other manager-owned controllers (SeedMerchantController, etc.): it
+# holds a back-reference to BuildingManager and delegates the spawn primitives,
+# spawner-registry reads and lag instrumentation back to the manager. It owns only
+# its tick-local state (legacy timers, the ready queue, the empty-night timer and
+# the pass stats); the playlist-enabled decision and spawn-failure telemetry stay
+# in the manager.
+
+const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
+const LEGACY_SPAWN_INTERVAL_SECONDS: float = 3.0
+const SPAWNER_KIND_MONSTER: StringName = &"monster"
+const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+
+var _manager: Node
+
+# Ready playlist spawn requests awaiting a spawn slot this/next frame.
+var _ready_spawner_queue: Array[Dictionary] = []
+var _ready_spawner_queue_set: Dictionary = {}  # playlist track index -> true
+
+# Legacy day-count fallback spawn state (used when no playlist is enabled).
+var _legacy_spawn_timers: Dictionary = {}  # Vector2i -> float
+var _legacy_spawn_limit_this_night: int = 0
+var _legacy_spawned_this_night: int = 0
+
+# Seconds the current night has had zero monsters with no plants; flips back to day
+# once it passes EMPTY_NIGHT_DAY_DELAY_SECONDS.
+var _empty_night_elapsed: float = 0.0
+
+# Per-pass count summary consumed by the manager's lag warning at the call site.
+var _spawn_pass_stats: Dictionary = {}
+
+
+func setup(manager: Node) -> void:
+	_manager = manager
+
+
+func spawn_pass_stats() -> Dictionary:
+	return _spawn_pass_stats
+
+
+func increment_assigned_count() -> void:
+	_spawn_pass_stats["assigned_count"] = int(_spawn_pass_stats.get("assigned_count", 0)) + 1
+
+
+func reset_empty_night() -> void:
+	_empty_night_elapsed = 0.0
+
+
+func clear_ready_queue() -> void:
+	_ready_spawner_queue.clear()
+	_ready_spawner_queue_set.clear()
+
+
+func process(delta: float, playlist_enabled: bool) -> void:
+	# Reset the per-pass count summary consumed by the parent lag warning. Cheap;
+	# always done so the caller never reads a stale dictionary.
+	_spawn_pass_stats = {
+		"processed_spawners": 0,
+		"spawned_count": 0,
+		"assigned_count": 0,
+		"skipped_count": 0,
+		"active_monsters": -1,
+		"ready_queue_remaining": 0,
+		"elapsed_ms": 0.0,
+	}
+
+	# Day/night gating: monsters only spawn at night. When the last monster of the
+	# night is gone, the spawn passes flip back to day.
+	if not GameState.is_night:
+		return
+	if not bool(_manager.get("_night_preparation_ready")):
+		return
+	var t_mc: int = Time.get_ticks_usec()
+	var mc: int = int(_manager.call("_monster_count"))
+	_manager.call("_warn_garden_task_lag_us", "_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
+	_spawn_pass_stats["active_monsters"] = mc
+	if playlist_enabled:
+		_process_playlist_spawners(delta, mc)
+		return
+	_process_legacy_spawners(delta, mc)
+
+
+func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
+	var playlist: SpawnPlaylistController = _manager.get("_spawn_playlist_controller") as SpawnPlaylistController
+	if playlist.is_current_night_schedule_complete():
+		if active_monsters == 0:
+			GameState.start_day()
+		return
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = bool(_manager.call("_no_plants_remaining"))
+	_manager.call("_warn_garden_task_lag_us", "_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				_manager.call("_log", "Playlist night stalled because no plants remain; leaving schedule unfinished.")
+				GameState.start_day()
+				return
+		else:
+			_empty_night_elapsed = 0.0
+		if bool(_manager.get("debug_logs")) and not (_manager.get("_spawners") as Dictionary).is_empty():
+			_manager.call("_log", "no plants remaining for playlist spawners")
+		return
+	_empty_night_elapsed = 0.0
+	_enqueue_playlist_spawn_requests(delta)
+	_drain_ready_spawner_queue_budgeted()
+
+
+func begin_legacy_fallback_night() -> void:
+	_legacy_spawn_timers.clear()
+	_legacy_spawned_this_night = 0
+	_legacy_spawn_limit_this_night = _compute_legacy_spawn_limit()
+	var spawners: Dictionary = _manager.get("_spawners") as Dictionary
+	var spawner_kind_by_cell: Dictionary = _manager.get("_spawner_kind_by_cell") as Dictionary
+	for raw_spawner_cell: Variant in spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if (spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
+			continue
+		_legacy_spawn_timers[spawner_cell] = 0.0
+	CppDebugOptions.dlog("BuildingManager: legacy spawn fallback started: limit=%d spawners=%d" % [
+		_legacy_spawn_limit_this_night,
+		_legacy_spawn_timers.size(),
+	])
+
+
+func clear_legacy_fallback() -> void:
+	_legacy_spawn_timers.clear()
+	_legacy_spawn_limit_this_night = 0
+	_legacy_spawned_this_night = 0
+
+
+func _compute_legacy_spawn_limit() -> int:
+	var prog: Node = _manager.call("_get_progression") as Node
+	if prog == null:
+		return 1
+	var day_number: int = int(prog.call("get_value", &"nDays"))
+	var monsters_per_day: int = int(prog.call("get_value", &"monster_per_day"))
+	var monsters_per_rose: int = int(prog.call("get_value", &"monster_per_rose"))
+	var rose_count: int = 0
+	var plant_manager: Node = _manager.get("plant_manager") as Node
+	if plant_manager != null and plant_manager.has_method("rose_count"):
+		rose_count = int(plant_manager.call("rose_count"))
+	return maxi(1, day_number * monsters_per_day + rose_count * monsters_per_rose)
+
+
+func _process_legacy_spawners(delta: float, active_monsters: int) -> void:
+	if _legacy_spawn_timers.is_empty():
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				GameState.start_day()
+		return
+	if _legacy_spawned_this_night >= _legacy_spawn_limit_this_night:
+		if active_monsters == 0:
+			GameState.start_day()
+		return
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = bool(_manager.call("_no_plants_remaining"))
+	_manager.call("_warn_garden_task_lag_us", "_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
+		if active_monsters == 0:
+			_empty_night_elapsed += delta
+			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
+				_manager.call("_log", "Legacy fallback night stalled because no plants remain.")
+				GameState.start_day()
+				return
+		else:
+			_empty_night_elapsed = 0.0
+		return
+	_empty_night_elapsed = 0.0
+	_drain_legacy_spawners_budgeted(delta)
+
+
+func _drain_legacy_spawners_budgeted(delta: float) -> void:
+	var start_us: int = Time.get_ticks_usec()
+	var budget_us: int = int(float(_manager.get("spawner_budget_ms")) * 1000.0)
+	var budget_per_frame: int = int(_manager.get("spawner_budget_per_frame"))
+	var spawners: Dictionary = _manager.get("_spawners") as Dictionary
+	var processed: int = 0
+	var spawner_cells: Array = _legacy_spawn_timers.keys()
+	for raw_spawner_cell: Variant in spawner_cells:
+		if _legacy_spawned_this_night >= _legacy_spawn_limit_this_night:
+			break
+		if processed >= budget_per_frame:
+			break
+		if processed > 0 and budget_us > 0:
+			if Time.get_ticks_usec() - start_us >= budget_us:
+				break
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if not spawners.has(spawner_cell):
+			_legacy_spawn_timers.erase(spawner_cell)
+			continue
+		var time_left: float = maxf(0.0, float(_legacy_spawn_timers.get(spawner_cell, 0.0)) - delta)
+		_legacy_spawn_timers[spawner_cell] = time_left
+		if time_left > 0.0:
+			continue
+		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
+		processed += 1
+		var spawner_us: int = Time.get_ticks_usec()
+		var spawned: bool = bool(_manager.call("_spawn_monster_from", spawner_cell, &"basic"))
+		if spawned:
+			_legacy_spawned_this_night += 1
+			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
+			_legacy_spawn_timers[spawner_cell] = LEGACY_SPAWN_INTERVAL_SECONDS
+		else:
+			_spawn_pass_stats["skipped_count"] = int(_spawn_pass_stats["skipped_count"]) + 1
+			_legacy_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
+		if bool(_manager.call("_over_garden_threshold_us", spawner_elapsed_us)):
+			_manager.call("_warn_garden_task_lag_us", "_process_spawners.legacy_spawner_total", spawner_elapsed_us,
+				"spawner_cell=%s spawned=%s fallback=%d/%d" % [
+					str(spawner_cell),
+					str(spawned),
+					_legacy_spawned_this_night,
+					_legacy_spawn_limit_this_night,
+				])
+	_spawn_pass_stats["ready_queue_remaining"] = 0
+	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
+
+
+func _enqueue_playlist_spawn_requests(delta: float) -> void:
+	var playlist: SpawnPlaylistController = _manager.get("_spawn_playlist_controller") as SpawnPlaylistController
+	var requests: Array[Dictionary] = playlist.advance(delta)
+	for request: Dictionary in requests:
+		var track_index: int = int(request.get("track_index", -1))
+		if track_index < 0:
+			continue
+		if _ready_spawner_queue_set.has(track_index):
+			continue
+		_ready_spawner_queue.append(request)
+		_ready_spawner_queue_set[track_index] = true
+
+
+# Spawn from at most spawner_budget_per_frame ready playlist requests (and, if a
+# time budget is set, stop early once we exceed it — but always do at least one so
+# the queue drains). Remaining ready spawners are processed on following frames.
+func _drain_ready_spawner_queue_budgeted() -> void:
+	var start_us: int = Time.get_ticks_usec()
+	var budget_us: int = int(float(_manager.get("spawner_budget_ms")) * 1000.0)
+	var budget_per_frame: int = int(_manager.get("spawner_budget_per_frame"))
+	var spawners: Dictionary = _manager.get("_spawners") as Dictionary
+	var processed: int = 0
+
+	while not _ready_spawner_queue.is_empty():
+		if processed >= budget_per_frame:
+			break
+		# Time budget only applies after the first spawn this frame, so a single
+		# expensive spawner can't starve the queue entirely.
+		if processed > 0 and budget_us > 0:
+			if Time.get_ticks_usec() - start_us >= budget_us:
+				break
+
+		var request: Dictionary = _ready_spawner_queue.pop_front()
+		var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
+		_ready_spawner_queue_set.erase(int(request.get("track_index", -1)))
+		# A spawner may have been removed (rescan) while queued; skip stale entries
+		# without counting them against the budget.
+		if not spawners.has(cell):
+			_manager.call("_report_playlist_spawn_result", request, false, "physical spawner cell is missing")
+			continue
+
+		var spawner_us: int = Time.get_ticks_usec()
+		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
+		processed += 1
+
+		var monster_type: StringName = StringName(str(request.get("monster_type", "basic")))
+		var spawned: bool = bool(_manager.call("_spawn_monster_from", cell, monster_type))
+		if spawned:
+			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
+			_manager.call("_report_playlist_spawn_result", request, true)
+		else:
+			_manager.call("_report_playlist_spawn_result", request, false, _manager.get("_last_spawn_failure"))
+
+		# Whole spawner iteration. Build the (small) context only when over threshold.
+		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
+		if bool(_manager.call("_over_garden_threshold_us", spawner_elapsed_us)):
+			_manager.call("_warn_garden_task_lag_us", "_process_spawners.spawner_total", spawner_elapsed_us,
+				"spawner_cell=%s spawned=%s" % [str(cell), str(spawned)])
+
+	_spawn_pass_stats["ready_queue_remaining"] = _ready_spawner_queue.size()
+	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
