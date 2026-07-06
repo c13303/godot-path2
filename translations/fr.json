@@ -39,6 +39,9 @@
 	"item.turret_epine": "Tourelle epine",
 	"item.rose_shop_counter": "Comptoir de roses",
 	"ui.remaining": "restant",
+	"playlist.next_day": "Prochain Jour",
+	"playlist.night": "Nuit",
+	"playlist.day": "Jour",
 	"merchant.special_reward": "Récompense spéciale",
 	"merchant.free": "cadeau"
 }

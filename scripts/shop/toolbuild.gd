@@ -47,7 +47,7 @@ const HAMMER_ITEM_IDS: Array[String] = [COUNTER_ID, "wall", "fence"]
 const SEED_ITEM_ID: String = "seed"
 # The seed-merchant column also carries inventory-backed buildables (pasteque),
 # which are bought here and later placed from the gardening column above.
-const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam", PASTEQUE_ID]
+const WEAPON_ITEM_IDS: Array[String] = [SEED_ITEM_ID, "sword", "bomb", "spray", "beam", PASTEQUE_ID, COUNTER_ID]
 const ITEM_IDS: Array[String] = ["rose", "ronce", PASTEQUE_ID, "turret1", "turret_epine", COUNTER_ID, "wall", "fence", SEED_ITEM_ID, "sword", "bomb", "spray", "beam"]
 const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
 const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
@@ -1026,10 +1026,11 @@ func _refresh_slots() -> void:
 		var highlighted: bool = item_id == _hovered_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = _slot_badge_text(item_id)
-		# The counter's badge is a remaining-stock count, not a price, so it carries no
-		# currency icon; every other buildable shows the icon for the currency it costs.
+		# Inventory-backed buildables (pasteque, the rose shop counter) show an owned count
+		# rather than a placement price, so they carry no currency icon; every other buildable
+		# shows the icon for the currency it costs.
 		var slot_currency: TextureRect = _slot_currencies[item_id] as TextureRect
-		var slot_currency_texture: AtlasTexture = null if (item_id == COUNTER_ID or ItemCatalog.is_inventory_backed(item_id)) else _currency_texture(item_id)
+		var slot_currency_texture: AtlasTexture = null if ItemCatalog.is_inventory_backed(item_id) else _currency_texture(item_id)
 		slot_currency.texture = slot_currency_texture
 		slot_currency.visible = slot_currency_texture != null
 		# The merchant column signals unaffordability through the per-row label colour, so its
@@ -1136,9 +1137,6 @@ func _update_hover_label() -> void:
 
 
 func _slot_badge_text(item_id: String) -> String:
-	if item_id == COUNTER_ID:
-		var remaining: int = _limit_remaining(item_id)
-		return str(maxi(remaining, 0))
 	# Inventory-backed buildables show how many the player currently owns (already paid
 	# for at the merchant), not a placement price.
 	if ItemCatalog.is_inventory_backed(item_id):
@@ -1193,12 +1191,6 @@ func _position_selected_label(button: Control) -> void:
 	var pos_x: float = button.global_position.x + button.size.x + GAP
 	var pos_y: float = button.global_position.y + (button.size.y - _selected_label.size.y) * 0.5
 	_selected_label.global_position = Vector2(pos_x, pos_y)
-
-
-func _limit_remaining(item_id: String) -> int:
-	if game_ui != null and game_ui.has_method("get_build_limit_remaining"):
-		return int(game_ui.call("get_build_limit_remaining", item_id))
-	return -1
 
 
 func _build_price(item_id: String) -> int:
@@ -1453,7 +1445,7 @@ func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) ->
 		return
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
 	if item_id == SEED_ITEM_ID:
-		var seed_icon_node: Node = game_ui.get_node_or_null("top right/seedIcon")
+		var seed_icon_node: Node = game_ui.get_node_or_null("currenciesUI/seedIcon")
 		if seed_icon_node != null and seed_icon_node.has_method("animate_seed_harvest"):
 			seed_icon_node.call("animate_seed_harvest", world_position, 0, Callable(), false)
 		return

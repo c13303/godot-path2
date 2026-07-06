@@ -39,6 +39,9 @@
 	"item.turret_epine": "Epine Turret",
 	"item.rose_shop_counter": "Rose Shop Counter",
 	"ui.remaining": "remaining",
+	"playlist.next_day": "Next Day",
+	"playlist.night": "Night",
+	"playlist.day": "Day",
 	"merchant.special_reward": "Special reward",
 	"merchant.free": "free"
 }

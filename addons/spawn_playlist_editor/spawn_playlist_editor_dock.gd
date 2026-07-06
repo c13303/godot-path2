@@ -13,7 +13,7 @@ const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 const DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT: int = 0
 const TOOL_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
-const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"pasteque"]
+const MERCHANT_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb", &"pasteque", &"rose_shop_counter"]
 const LEGACY_SHOP_ITEM_IDS: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const REWARD_CURRENCIES: Array[String] = ["seed", "money", "gem"]
 const WAVE_MOVE_WIDTH: float = 94.0
@@ -76,7 +76,6 @@ var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
 var _starting_money: SpinBox
 var _monster_drop_seed_chance: SpinBox
-var _rose_shop_counter_limit: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _starting_items_box: GridContainer
@@ -526,22 +525,6 @@ func _build_shop_controls() -> void:
 	_shop_controls.add_child(heading)
 	_build_shop_item_controls(TOOL_SHOP_ITEM_IDS, _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
 
-	var counter_limit_row: HBoxContainer = HBoxContainer.new()
-	_shop_controls.add_child(counter_limit_row)
-
-	var counter_limit_label: Label = Label.new()
-	counter_limit_label.text = "Rose shop counters"
-	counter_limit_label.custom_minimum_size = Vector2(128.0, 0.0)
-	counter_limit_row.add_child(counter_limit_label)
-
-	_rose_shop_counter_limit = SpinBox.new()
-	_rose_shop_counter_limit.min_value = 1.0
-	_rose_shop_counter_limit.max_value = 99.0
-	_rose_shop_counter_limit.step = 1.0
-	_rose_shop_counter_limit.custom_minimum_size = Vector2(86.0, 0.0)
-	_rose_shop_counter_limit.value_changed.connect(_on_rose_shop_counter_limit_changed)
-	counter_limit_row.add_child(_rose_shop_counter_limit)
-
 	var merchant_heading: Label = Label.new()
 	merchant_heading.text = "Merchent"
 	merchant_heading.add_theme_font_size_override("font_size", 15)
@@ -959,7 +942,6 @@ func _refresh_shop_controls() -> void:
 	var config: LevelSpawnConfig = _get_level_config(_level_root)
 	var has_level: bool = _current_level_path != ""
 	_shop_section.visible = has_level
-	_rose_shop_counter_limit.editable = has_level
 	var tool_available_items: Array[StringName] = _default_tool_shop_available_items()
 	var tool_prices: Dictionary = _default_tool_shop_prices()
 	var tool_days: Dictionary = {}
@@ -967,7 +949,6 @@ func _refresh_shop_controls() -> void:
 	var merchant_available_items: Array[StringName] = _default_merchant_available_items()
 	var merchant_prices: Dictionary = _default_merchant_prices()
 	var merchant_days: Dictionary = {}
-	var counter_limit: int = 2
 	if config != null:
 		tool_available_items = _valid_tool_shop_available_items(config.tool_shop_available_items)
 		tool_prices = _valid_tool_shop_prices(config.tool_shop_prices)
@@ -988,10 +969,8 @@ func _refresh_shop_controls() -> void:
 				tool_prices = _valid_tool_shop_prices(legacy_prices)
 			if merchant_prices == _default_merchant_prices():
 				merchant_prices = _valid_merchant_prices(legacy_prices)
-		counter_limit = clampi(config.rose_shop_counter_limit, 1, 99)
 	_refresh_shop_item_controls(_tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, tool_available_items, tool_prices, tool_days, has_level, _tool_shop_growth_price_factor_spins, tool_growth_price_factors)
 	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, merchant_available_items, merchant_prices, merchant_days, has_level, {}, {})
-	_rose_shop_counter_limit.value = float(counter_limit)
 
 
 func _refresh_shop_item_controls(
@@ -1687,16 +1666,6 @@ func _on_monster_drop_seed_chance_changed(value: float) -> void:
 	mark_dirty()
 
 
-func _on_rose_shop_counter_limit_changed(value: float) -> void:
-	if _loading_ui:
-		return
-	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
-	if config == null:
-		return
-	config.rose_shop_counter_limit = clampi(int(value), 1, 99)
-	mark_dirty()
-
-
 func _on_tool_shop_item_available_toggled(enabled: bool, item_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -2007,7 +1976,6 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("merchant_days", _selected_merchant_days())
 		root.set("shop_available_items", _selected_legacy_shop_available_items())
 		root.set("shop_prices", _selected_legacy_shop_prices())
-		root.set("rose_shop_counter_limit", clampi(int(_rose_shop_counter_limit.value), 1, 99))
 	_apply_client_frequency_to_scene(root)
 	var new_scene: PackedScene = PackedScene.new()
 	var pack_error: Error = new_scene.pack(root)
@@ -2039,7 +2007,6 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.merchant_days = _selected_merchant_days()
 	config.shop_available_items = _selected_legacy_shop_available_items()
 	config.shop_prices = _selected_legacy_shop_prices()
-	config.rose_shop_counter_limit = clampi(int(_rose_shop_counter_limit.value), 1, 99)
 
 
 func _apply_client_frequency_to_scene(root: Node) -> void:

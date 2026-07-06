@@ -562,10 +562,11 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		GameState.set_seed_merchant_phase(false)
 		GameState.set_building_phase(false)
 		_morning_harvest_active = false
-		# Nightfall clears the counters: stock drops to zero immediately (so the night
-		# preparation below clusters no counter gardens and monsters never target roses),
-		# while the pile sprites animate away top-to-bottom over a few seconds.
-		_counter_stock_manager.dissolve_all_piles_at_nightfall()
+		# Counters normally empty the moment the last client of the sale leaves (see
+		# _dissolve_counter_piles_after_clients). This is only a fallback for days where no
+		# client sale ever runs (no client spawners / stock but no buyers): it's idempotent
+		# when the piles are already gone, so it never double-animates.
+		_counter_stock_manager.dissolve_all_piles()
 	if not is_night:
 		_night_preparation_token += 1
 		_night_preparing = false
@@ -2655,6 +2656,7 @@ func _process_client_sale(delta: float) -> void:
 			_end_client_tantrum()
 			_client_sale_active = false
 			GameState.set_client_phase(false)
+			_dissolve_counter_piles_after_clients()
 			if can_start_night_after_clients():
 				GameState.start_night()
 				return
@@ -2686,11 +2688,22 @@ func _process_client_sale(delta: float) -> void:
 	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_counter_agents.is_empty() and _hostile_clients.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
+		_dissolve_counter_piles_after_clients()
 		if can_start_night_after_clients():
 			GameState.start_night()
 			return
 		if not GameState.is_seed_merchant_phase:
 			GameState.set_building_phase(true)
+
+
+
+# Empty every counter the moment the last client of the sale has left the map. Previously
+# this waited for nightfall; clearing it here means the roses vanish as soon as the sale is
+# over, even if the day lingers (watering still pending, seed merchant on the map). The
+# nightfall call in _on_game_mode_changed remains as an idempotent fallback for days that
+# never run a client sale at all.
+func _dissolve_counter_piles_after_clients() -> void:
+	_counter_stock_manager.dissolve_all_piles()
 
 
 func _client_count() -> int:
@@ -3730,7 +3743,7 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 
 func _spawn_client_payment_money(world_position: Vector2) -> void:
 	var scene: Node = get_tree().current_scene
-	var money_icon: Node = scene.get_node_or_null("GameUI/top right/moneyIcon") if scene != null else null
+	var money_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/moneyIcon") if scene != null else null
 	if money_icon != null and money_icon.has_method("animate_money_harvest"):
 		var started: bool = bool(money_icon.call("animate_money_harvest", world_position, 0))
 		if started:
@@ -4693,10 +4706,10 @@ func _spawn_monster_death_drop(world_position: Vector2) -> void:
 	var animate_method: String = ""
 	if scene != null:
 		if drop_type == MONSTER_DEATH_DROP_SEED:
-			icon = scene.get_node_or_null("GameUI/top right/seedIcon")
+			icon = scene.get_node_or_null("GameUI/currenciesUI/seedIcon")
 			animate_method = "animate_seed_harvest"
 		else:
-			icon = scene.get_node_or_null("GameUI/top right/gemIcon")
+			icon = scene.get_node_or_null("GameUI/currenciesUI/gemIcon")
 			animate_method = "animate_gem_harvest"
 	if icon != null and icon.has_method(animate_method):
 		var animation_started: bool = bool(icon.call(animate_method, world_position))

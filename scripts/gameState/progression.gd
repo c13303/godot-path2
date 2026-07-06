@@ -279,21 +279,21 @@ func _get_seed_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top right/seedIcon/seedQT") as RichTextLabel
+	return scene.get_node_or_null("GameUI/currenciesUI/seedIcon/seedQT") as RichTextLabel
 
 
 func _get_gem_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top right/gemIcon/gemQT") as RichTextLabel
+	return scene.get_node_or_null("GameUI/currenciesUI/gemIcon/gemQT") as RichTextLabel
 
 
 func _get_money_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top right/moneyIcon/moneyQT") as RichTextLabel
+	return scene.get_node_or_null("GameUI/currenciesUI/moneyIcon/moneyQT") as RichTextLabel
 
 
 func _get_water_reserve_bar() -> ProgressBar:

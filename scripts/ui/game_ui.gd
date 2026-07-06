@@ -873,11 +873,11 @@ func _credit_reward_currency(currency: String, amount: int) -> void:
 func _reward_icon_node(currency: String) -> Node:
 	match currency:
 		"seed":
-			return get_node_or_null("top right/seedIcon")
+			return get_node_or_null("currenciesUI/seedIcon")
 		"gem":
-			return get_node_or_null("top right/gemIcon")
+			return get_node_or_null("currenciesUI/gemIcon")
 		"money":
-			return get_node_or_null("top right/moneyIcon")
+			return get_node_or_null("currenciesUI/moneyIcon")
 	return null
 
 
@@ -970,13 +970,13 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	var icon: Node = null
 	var animate_method: String = ""
 	if currency == &"seed":
-		icon = get_node_or_null("top right/seedIcon")
+		icon = get_node_or_null("currenciesUI/seedIcon")
 		animate_method = "animate_seed_harvest"
 	elif currency == &"gem":
-		icon = get_node_or_null("top right/gemIcon")
+		icon = get_node_or_null("currenciesUI/gemIcon")
 		animate_method = "animate_gem_harvest"
 	elif currency == &"money":
-		icon = get_node_or_null("top right/moneyIcon")
+		icon = get_node_or_null("currenciesUI/moneyIcon")
 		animate_method = "animate_money_harvest"
 	if icon != null and icon.has_method(animate_method):
 		# Deconstruct refunds fly the whole building's worth of currency within ~1s

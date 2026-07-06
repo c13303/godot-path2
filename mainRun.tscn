@@ -1262,9 +1262,12 @@ layout_mode = 3
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -40.0
-offset_bottom = 40.0
+offset_left = -210.0
+offset_top = 92.0
+offset_right = -16.0
+offset_bottom = 300.0
 grow_horizontal = 0
+mouse_filter = 2
 script = ExtResource("45_s6agy")
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]

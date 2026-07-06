@@ -256,13 +256,14 @@ func clear_all_piles() -> void:
 	_pile_nodes_by_cell.clear()
 
 
-# Nightfall: every counter is emptied. The logical stock drops to zero immediately so
-# monster garden clustering/targeting never sees counter roses (the monster-eat mechanic
-# is gone), while the already-built pile sprites are detached and popped top-to-bottom
-# for a visual "counters emptying" effect. All counters pop in sync — one rose per tick,
-# tick = total_seconds / tallest pile — so the whole sequence always finishes in exactly
-# total_seconds regardless of how tall each pile is (a 4-high pile just runs out early).
-func dissolve_all_piles_at_nightfall(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> void:
+# Every counter is emptied (triggered when the last client of the sale leaves). The
+# logical stock drops to zero immediately so monster garden clustering/targeting never
+# sees counter roses (the monster-eat mechanic is gone), while the already-built pile
+# sprites are detached and popped top-to-bottom for a visual "counters emptying" effect.
+# All counters pop in sync — one rose per tick, tick = total_seconds / tallest pile — so
+# the whole sequence always finishes in exactly total_seconds regardless of how tall each
+# pile is (a 4-high pile just runs out early).
+func dissolve_all_piles(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> void:
 	var piles: Array = []  # Array[Array[Node2D]] — each pile in bottom..top order (top == last)
 	var max_count: int = 0
 	for raw_cell: Variant in _pile_nodes_by_cell.keys():
