@@ -2,7 +2,7 @@ extends RefCounted
 class_name BuildPreviewController
 
 # Owns build preview rendering, placement cursor targeting, drag-selection visuals,
-# and removal progress bar nodes. BuildSystem keeps placement/removal commits.
+# and removal progress bar nodes. BuildSystem keeps removal commits.
 
 const REMOVE_PROGRESS_WIDTH: float = 6.0
 const REMOVE_PROGRESS_HEIGHT_RATIO: float = 0.8

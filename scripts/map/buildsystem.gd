@@ -60,6 +60,7 @@ var _atlas_source_id: int = -1
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
 var _build_preview: BuildPreviewController = BuildPreviewController.new()
+var _placement_service: BuildPlacementService = BuildPlacementService.new()
 
 # Generic click-drag chunk build. _drag_build_item_id records which item the
 # active drag is placing so affordability, validation, runtime objects, and sound
@@ -85,6 +86,7 @@ var _build_fx_pool_cursor: int = 0
 func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
+	_placement_service.setup(self)
 	_build_preview.setup(self)
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()
@@ -716,7 +718,7 @@ func _is_drag_buildable(placeable_def: Dictionary) -> bool:
 # behavior: roses play the plant sound, other buildings stay silent unless they
 # define a build sound later.
 func _drag_build_sound(item_id: String) -> StringName:
-	return &"plant" if item_id == "rose" else &""
+	return _placement_service.drag_build_sound(item_id)
 
 func _start_drag_build(placeable_def: Dictionary) -> void:
 	var item_id: String = str(placeable_def.get("id", ""))
@@ -739,30 +741,7 @@ func _drag_build_rectangle_cells(
 	placeable_def: Dictionary,
 	limit: int
 ) -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	if limit <= 0:
-		return cells
-	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
-	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
-	var y: int = start_cell.y
-	while true:
-		var x: int = start_cell.x
-		while true:
-			var cell: Vector2i = Vector2i(x, y)
-			if (
-				_is_valid_placeable_cell(cell, target_layer, placeable_def)
-				and not _drag_build_candidate_blocked_by_batch(cell, target_layer, placeable_def, cells)
-			):
-				cells.append(cell)
-				if cells.size() >= limit:
-					return cells
-			if x == end_cell.x:
-				break
-			x += x_step
-		if y == end_cell.y:
-			break
-		y += y_step
-	return cells
+	return _placement_service.drag_build_rectangle_cells(start_cell, end_cell, target_layer, placeable_def, limit)
 
 func _drag_build_candidate_blocked_by_batch(
 	cell: Vector2i,
@@ -770,25 +749,7 @@ func _drag_build_candidate_blocked_by_batch(
 	placeable_def: Dictionary,
 	accepted_cells: Array[Vector2i]
 ) -> bool:
-	if accepted_cells.is_empty():
-		return false
-	if str(placeable_def.get("category", "")) != "turret":
-		return false
-	var candidate_turret_data: TurretData = _turret_data_from_placeable(placeable_def)
-	if candidate_turret_data == null:
-		return false
-	if candidate_turret_data.build_in_range:
-		return false
-	var build_range: float = candidate_turret_data.build_range
-	if build_range <= 0.0:
-		return false
-	var candidate_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(cell))
-	var range_squared: float = build_range * build_range
-	for accepted_cell: Vector2i in accepted_cells:
-		var accepted_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(accepted_cell))
-		if candidate_world_position.distance_squared_to(accepted_world_position) <= range_squared:
-			return true
-	return false
+	return _placement_service.drag_build_candidate_blocked_by_batch(cell, target_layer, placeable_def, accepted_cells)
 
 func _finish_drag_build() -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()
@@ -796,46 +757,14 @@ func _finish_drag_build() -> void:
 	if _placement_disabled() or str(placeable_def.get("id", "")) != item_id:
 		_cancel_drag_build()
 		return
-	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
-	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	var available: int = _affordable_quantity(item_id)
-	var cells: Array[Vector2i] = []
 	_drag_build_end_cell = _hovered_cell()
-	if target_layer and atlas_coords != Vector2i(-1, -1):
-		cells = _drag_build_rectangle_cells(_drag_build_start_cell, _drag_build_end_cell, target_layer, placeable_def, available)
+	var start_cell: Vector2i = _drag_build_start_cell
+	var end_cell: Vector2i = _drag_build_end_cell
 	_clear_hover()
 	_hide_drag_selection_rect()
 	_set_drag_build_active(false)
 	_drag_build_item_id = ""
-	if cells.is_empty():
-		# The drag covered no valid cells: keep the buildable equipped so the player can
-		# retry the placement instead of forcing a re-select of the tool.
-		if _placement_attempt_needs_grass_alert(_drag_build_start_cell, _drag_build_end_cell, placeable_def):
-			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
-		return
-	# Pay for exactly the cells we are about to place; bail if the spend fails.
-	if not game_ui or not game_ui.has_method("try_purchase_build"):
-		_clear_build_selection()
-		return
-	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
-		_clear_build_selection()
-		return
-	for cell: Vector2i in cells:
-		target_layer.set_cell(cell, _atlas_source_id, atlas_coords, _alternative_from_placeable(placeable_def))
-		if _target_layer_affects_collision(target_layer):
-			_refresh_cell_collision(cell)
-		_refresh_cell_terrain_speed(cell)
-		_after_placeable_placed(cell, placeable_def, false)
-		_play_build_fx_at_cell(cell, target_layer)
-	target_layer.update_internals()
-	if item_id == FENCE_ITEM_ID:
-		_refresh_fence_autotiles_for_cells(cells)
-	if target_layer == plantz:
-		_flush_plant_layer_visuals()
-	var sound: StringName = _drag_build_sound(item_id)
-	if sound != &"":
-		Sfx.play_sound(sound)
-	_clear_build_selection_if_unaffordable(item_id)
+	_placement_service.commit_drag_build(placeable_def, item_id, start_cell, end_cell)
 
 func _cancel_drag_build() -> void:
 	_set_drag_build_active(false)
@@ -859,184 +788,53 @@ func _set_drag_build_active(active: bool) -> void:
 # How many of item_id the player can currently afford. Replaces the old inventory
 # count: buildings are paid for directly from currency, so affordability is the cap.
 func _affordable_quantity(item_id: String) -> int:
-	if not game_ui or not game_ui.has_method("get_build_affordable_quantity"):
-		return 0
-	return int(game_ui.call("get_build_affordable_quantity", item_id))
+	return _placement_service.affordable_quantity(item_id)
 
 func _can_afford(item_id: String) -> bool:
-	return game_ui and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
+	return _placement_service.can_afford(item_id)
 
 func _clear_build_selection() -> void:
 	if game_ui != null and game_ui.has_method("clear_build_selection"):
 		game_ui.call("clear_build_selection")
 
 func _clear_build_selection_if_unaffordable(item_id: String) -> void:
-	if item_id == "" or not _can_afford(item_id):
-		_clear_build_selection()
+	_placement_service.clear_build_selection_if_unaffordable(item_id)
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
-	if _atlas_source_id < 0:
-		return
-	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
-	if atlas_coords == Vector2i(-1, -1):
-		return
-
-	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
-	if not target_layer:
-		return
-
-	var hover_cell: Vector2i = _hovered_cell()
-	if not _is_valid_placeable_cell(hover_cell, target_layer, placeable_def):
-		if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(hover_cell):
-			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
-			return
-		_notify("invalid construction")
-		return
-
-	var item_id: String = str(placeable_def.get("id", ""))
-	if not _can_afford(item_id):
-		_notify("can't afford")
-		return
-	if not game_ui or not game_ui.has_method("try_purchase_build"):
-		return
-	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
-		_notify("can't afford")
-		return
-
-	_clear_other_build_layer(target_layer, hover_cell)
-	target_layer.set_cell(
-		hover_cell,
-		_atlas_source_id,
-		atlas_coords,
-		_alternative_from_placeable(placeable_def)
-	)
-	target_layer.update_internals()
-	if _target_layer_affects_collision(target_layer):
-		_refresh_cell_collision(hover_cell)
-	_refresh_cell_terrain_speed(hover_cell)
-	_after_placeable_placed(hover_cell, placeable_def)
-	if item_id == FENCE_ITEM_ID:
-		_refresh_fence_autotiles_around(hover_cell)
-	_play_build_fx_at_cell(hover_cell, target_layer)
-	_clear_build_selection_if_unaffordable(item_id)
+	_placement_service.try_apply_placeable(placeable_def, _hovered_cell())
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
-	if layer_name == "plantz":
-		return plantz
-	if layer_name == "traversable_buildings":
-		return traversable_buildings
-	if layer_name == "blocking_buildings":
-		return blocking_buildings
-	if layer_name == "fences":
-		return fences
-	# Backward compatibility: old "buildings" target maps to traversable_buildings.
-	if layer_name == "buildings":
-		return traversable_buildings
-	return wallz
+	return _placement_service.target_tile_layer(layer_name)
 
 func _target_layer_affects_collision(target_layer: TileMapLayer) -> bool:
-	return target_layer == wallz or target_layer == blocking_buildings
+	return _placement_service.target_layer_affects_collision(target_layer)
 
 func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
-	if target_layer != wallz and wallz:
-		wallz.erase_cell(cell)
-		wallz.update_internals()
-	if target_layer != plantz and plantz:
-		if not _is_debris_cell(cell):
-			plantz.erase_cell(cell)
-			_flush_plant_layer_visuals()
-			if plant_manager and plant_manager.has_method("remove_plant"):
-				plant_manager.call("remove_plant", cell, false)
-	if target_layer != traversable_buildings and traversable_buildings:
-		traversable_buildings.erase_cell(cell)
-		traversable_buildings.update_internals()
-		if building_object_manager and building_object_manager.has_method("remove_building"):
-			building_object_manager.call("remove_building", cell, false)
-		_refresh_cell_terrain_speed(cell)
-	if target_layer != blocking_buildings and blocking_buildings:
-		blocking_buildings.erase_cell(cell)
-		blocking_buildings.update_internals()
-		if building_object_manager and building_object_manager.has_method("remove_building"):
-			building_object_manager.call("remove_building", cell, false)
-	if target_layer != fences and fences:
-		fences.erase_cell(cell)
-		fences.update_internals()
-		if building_object_manager and building_object_manager.has_method("remove_building"):
-			building_object_manager.call("remove_building", cell, false)
-		_refresh_cell_terrain_speed(cell)
-		_refresh_fence_autotiles_around(cell)
+	_placement_service.clear_other_build_layer(target_layer, cell)
 
 # True only when `cell` is a real floor tile with no blocking wall on it. Used by
 # placeables (e.g. turret1) that may only be built on free walkable ground. This is
 # a placement-time guard; it does not affect navigation/flowfields.
 func _is_free_walkable_cell(cell: Vector2i) -> bool:
-	if floorz and floorz.get_cell_source_id(cell) < 0:
-		return false
-	if wallz and wallz.get_cell_source_id(cell) >= 0:
-		return false
-	return true
+	return _placement_service.is_free_walkable_cell(cell)
 
 func _is_debris_cell(cell: Vector2i) -> bool:
-	if plantz == null or plantz.get_cell_source_id(cell) < 0:
-		return false
-	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
-	return ItemCatalog.get_placeable_id_for_tile(str(plantz.name), atlas_coords) == "debris"
+	return _placement_service.is_debris_cell(cell)
 
 func _is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
-	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and _is_debris_cell(cell)):
-		return true
-	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
-		return true
-	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0 and not _is_debris_cell(cell):
-		return true
-	if traversable_buildings and traversable_buildings != target_layer and traversable_buildings.get_cell_source_id(cell) >= 0:
-		return true
-	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
-		return true
-	if fences and fences != target_layer and fences.get_cell_source_id(cell) >= 0:
-		return true
-	return _is_occupied_by_group_node(cell, placeable_def)
+	return _placement_service.is_placeable_occupied(cell, target_layer, placeable_def)
 
 func _is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
-	if _is_water_source_cell(cell):
-		return false
-	if _requires_grass_green_floor(placeable_def) and not _is_grass_green_floor_cell(cell):
-		return false
-	if bool(placeable_def.get("requires_walkable_floor", false)) and not _is_free_walkable_cell(cell):
-		return false
-	if not _turret_range_blocker_for_cell(cell, placeable_def).is_empty():
-		return false
-	return not _is_placeable_occupied(cell, target_layer, placeable_def)
+	return _placement_service.is_valid_placeable_cell(cell, target_layer, placeable_def)
 
 func _requires_grass_green_floor(placeable_def: Dictionary) -> bool:
-	var item_id: String = str(placeable_def.get("id", ""))
-	return item_id == "rose" or item_id == "turret1" or bool(placeable_def.get("requires_grass_green_floor", false))
+	return _placement_service.requires_grass_green_floor(placeable_def)
 
 func _is_grass_green_floor_cell(cell: Vector2i) -> bool:
-	if floorz == null or floorz.get_cell_source_id(cell) < 0:
-		return false
-	# Green grass is drawn with the beautified autotile block, not a single tile.
-	return GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell))
+	return _placement_service.is_grass_green_floor_cell(cell)
 
 func _placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
-	if not _requires_grass_green_floor(placeable_def):
-		return false
-	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
-	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
-	var y: int = start_cell.y
-	while true:
-		var x: int = start_cell.x
-		while true:
-			var cell: Vector2i = Vector2i(x, y)
-			if not _is_grass_green_floor_cell(cell):
-				return true
-			if x == end_cell.x:
-				break
-			x += x_step
-		if y == end_cell.y:
-			break
-		y += y_step
-	return false
+	return _placement_service.placement_attempt_needs_grass_alert(start_cell, end_cell, placeable_def)
 
 func _show_tutorial_alert(key: String) -> void:
 	var scene: Node = get_tree().current_scene
@@ -1047,74 +845,22 @@ func _show_tutorial_alert(key: String) -> void:
 		tutorial.call("show_alert", key)
 
 func _is_water_source_cell(cell: Vector2i) -> bool:
-	return watersources != null and watersources.get_cell_source_id(cell) >= 0
+	return _placement_service.is_water_source_cell(cell)
 
 func _turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
-	if str(placeable_def.get("category", "")) != "turret":
-		return {}
-	var candidate_turret_data: TurretData = _turret_data_from_placeable(placeable_def)
-	if candidate_turret_data == null:
-		return {}
-	if candidate_turret_data.build_in_range:
-		return {}
-	if blocking_buildings == null:
-		return {}
-	var candidate_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(cell))
-	var best_blocker: Dictionary = {}
-	var best_distance_squared: float = INF
-	for raw_turret_cell: Variant in blocking_buildings.get_used_cells():
-		var turret_cell: Vector2i = raw_turret_cell as Vector2i
-		var turret_item_id: String = _turret_item_id_at_cell(turret_cell)
-		if turret_item_id == "":
-			continue
-		var turret_data: TurretData = ItemCatalog.get_turret_data(turret_item_id)
-		if turret_data == null or turret_data.build_in_range:
-			continue
-		var build_range: float = turret_data.build_range
-		if build_range <= 0.0:
-			continue
-		var range_squared: float = build_range * build_range
-		var turret_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(turret_cell))
-		var distance_squared: float = candidate_world_position.distance_squared_to(turret_world_position)
-		if distance_squared <= range_squared and distance_squared < best_distance_squared:
-			best_distance_squared = distance_squared
-			best_blocker = {
-				"cell": turret_cell,
-				"range": build_range,
-			}
-	return best_blocker
+	return _placement_service.turret_range_blocker_for_cell(cell, placeable_def)
 
 func _turret_data_from_placeable(placeable_def: Dictionary) -> TurretData:
-	var item_id: String = str(placeable_def.get("id", ""))
-	if item_id == "":
-		return null
-	return ItemCatalog.get_turret_data(item_id)
+	return _placement_service.turret_data_from_placeable(placeable_def)
 
 func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 	_build_preview.refresh_preview_visual_state(placeable_def)
 
 func _turret_item_id_at_cell(cell: Vector2i) -> String:
-	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
-		return ""
-	var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_buildings.get_cell_atlas_coords(cell))
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if str(item_def.get("category", "")) != "turret":
-		return ""
-	return item_id
+	return _placement_service.turret_item_id_at_cell(cell)
 
 func _after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_placement_sound: bool = true) -> void:
-	var placeable_category: String = str(placeable_def.get("category", ""))
-	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
-		plant_manager.call("add_plant", cell)
-	var placeable_id: String = str(placeable_def.get("id", ""))
-	if placeable_id == "rose" and play_placement_sound:
-		Sfx.play_sound(&"plant")
-	if _uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
-		building_object_manager.call("add_building", cell, placeable_def)
-	if placeable_id == "reservoir" and reservoir_system != null and reservoir_system.has_method("request_reservoir_irrigation_from_cell"):
-		reservoir_system.call("request_reservoir_irrigation_from_cell", cell)
-	if placeable_id == "pasteque" and reservoir_system != null and reservoir_system.has_method("request_pasteque_irrigation_from_cell"):
-		reservoir_system.call("request_pasteque_irrigation_from_cell", cell)
+	_placement_service.after_placeable_placed(cell, placeable_def, play_placement_sound)
 
 func _preload_build_fx_pool() -> void:
 	var count: int = maxi(build_fx_pool_size, 0)
@@ -1172,28 +918,10 @@ func _collect_build_fx_particles(root: Node, particles: Array[CPUParticles2D]) -
 		_collect_build_fx_particles(child, particles)
 
 func _uses_building_object_manager(placeable_def: Dictionary) -> bool:
-	var placeable_category: String = str(placeable_def.get("category", ""))
-	var light_source: float = float(placeable_def.get("light_source", 0.0))
-	if light_source > 0.0:
-		return true
-	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation" or placeable_category == "fence"
+	return _placement_service.uses_building_object_manager(placeable_def)
 
 func _is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
-	var map_layer: TileMapLayer = previewbuild if previewbuild else wallz
-	if not map_layer:
-		return false
-	var item_id: String = str(placeable_def.get("id", ""))
-	for group_name in occupied_groups:
-		if item_id == "rose" and group_name == "player":
-			continue
-		var nodes: Array[Node] = get_tree().get_nodes_in_group(group_name)
-		for node in nodes:
-			if node is Node2D:
-				var occupant: Node2D = node as Node2D
-				var occupant_cell: Vector2i = map_layer.local_to_map(map_layer.to_local(occupant.global_position))
-				if occupant_cell == cell:
-					return true
-	return false
+	return _placement_service.is_occupied_by_group_node(cell, placeable_def)
 
 func _notify(message: String) -> void:
 	if not notif:
@@ -1270,14 +998,7 @@ func _placement_disabled() -> bool:
 	return false
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
-	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))
-	if raw is Vector2i:
-		return raw
-	if raw is Vector2:
-		return Vector2i(int(raw.x), int(raw.y))
-	if raw is Array and raw.size() == 2:
-		return Vector2i(int(raw[0]), int(raw[1]))
-	return Vector2i(-1, -1)
+	return _placement_service.atlas_coords_from_placeable(placeable_def)
 
 func _is_directional_placeable(placeable_def: Dictionary) -> bool:
 	return bool(placeable_def.get("directional", false))
@@ -1301,10 +1022,7 @@ func _prev_build_direction(direction: Vector2i) -> Vector2i:
 	return DIRECTION_RIGHT
 
 func _alternative_from_placeable(placeable_def: Dictionary) -> int:
-	if not _is_directional_placeable(placeable_def):
-		return 0
-	var direction: Vector2i = placeable_def.get("direction", DIRECTION_RIGHT) as Vector2i
-	return _alternative_from_direction(direction)
+	return _placement_service.alternative_from_placeable(placeable_def)
 
 func _alternative_from_direction(direction: Vector2i) -> int:
 	if direction == DIRECTION_LEFT:

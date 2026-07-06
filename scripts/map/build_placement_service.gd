@@ -1,0 +1,573 @@
+extends RefCounted
+class_name BuildPlacementService
+
+# Owns placement validation and placement commits. BuildSystem keeps input,
+# preview, selection state, drag state, removal, and save/load coordination.
+
+const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
+const TILE_TRANSFORM_FLIP_H: int = 4096
+const TILE_TRANSFORM_FLIP_V: int = 8192
+const TILE_TRANSFORM_TRANSPOSE: int = 16384
+const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
+const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
+const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
+const DIRECTION_UP: Vector2i = Vector2i(0, -1)
+const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
+const FENCE_ITEM_ID: String = "fence"
+
+var _manager: Node
+
+
+func setup(manager: Node) -> void:
+	_manager = manager
+
+
+func affordable_quantity(item_id: String) -> int:
+	var game_ui: CanvasLayer = _game_ui()
+	if not game_ui or not game_ui.has_method("get_build_affordable_quantity"):
+		return 0
+	return int(game_ui.call("get_build_affordable_quantity", item_id))
+
+
+func can_afford(item_id: String) -> bool:
+	var game_ui: CanvasLayer = _game_ui()
+	return game_ui and game_ui.has_method("can_afford_build") and bool(game_ui.call("can_afford_build", item_id, 1))
+
+
+func clear_build_selection_if_unaffordable(item_id: String) -> void:
+	if item_id == "" or not can_afford(item_id):
+		_clear_build_selection()
+
+
+func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
+	if _atlas_source_id() < 0:
+		return
+	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
+	if atlas_coords == Vector2i(-1, -1):
+		return
+
+	var target_layer: TileMapLayer = target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
+	if not target_layer:
+		return
+
+	if not is_valid_placeable_cell(cell, target_layer, placeable_def):
+		if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+			return
+		_notify("invalid construction")
+		return
+
+	var item_id: String = str(placeable_def.get("id", ""))
+	if not can_afford(item_id):
+		_notify("can't afford")
+		return
+	var game_ui: CanvasLayer = _game_ui()
+	if not game_ui or not game_ui.has_method("try_purchase_build"):
+		return
+	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
+		_notify("can't afford")
+		return
+
+	clear_other_build_layer(target_layer, cell)
+	target_layer.set_cell(
+		cell,
+		_atlas_source_id(),
+		atlas_coords,
+		alternative_from_placeable(placeable_def)
+	)
+	target_layer.update_internals()
+	if target_layer_affects_collision(target_layer):
+		_refresh_cell_collision(cell)
+	_refresh_cell_terrain_speed(cell)
+	after_placeable_placed(cell, placeable_def)
+	if item_id == FENCE_ITEM_ID:
+		_refresh_fence_autotiles_around(cell)
+	_play_build_fx_at_cell(cell, target_layer)
+	clear_build_selection_if_unaffordable(item_id)
+
+
+func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: Vector2i, end_cell: Vector2i) -> bool:
+	var target_layer: TileMapLayer = target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
+	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
+	var available: int = affordable_quantity(item_id)
+	var cells: Array[Vector2i] = []
+	if target_layer and atlas_coords != Vector2i(-1, -1):
+		cells = drag_build_rectangle_cells(start_cell, end_cell, target_layer, placeable_def, available)
+	if cells.is_empty():
+		if placement_attempt_needs_grass_alert(start_cell, end_cell, placeable_def):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+		return false
+
+	var game_ui: CanvasLayer = _game_ui()
+	if not game_ui or not game_ui.has_method("try_purchase_build"):
+		_clear_build_selection()
+		return false
+	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
+		_clear_build_selection()
+		return false
+
+	for cell: Vector2i in cells:
+		target_layer.set_cell(cell, _atlas_source_id(), atlas_coords, alternative_from_placeable(placeable_def))
+		if target_layer_affects_collision(target_layer):
+			_refresh_cell_collision(cell)
+		_refresh_cell_terrain_speed(cell)
+		after_placeable_placed(cell, placeable_def, false)
+		_play_build_fx_at_cell(cell, target_layer)
+	target_layer.update_internals()
+	if item_id == FENCE_ITEM_ID:
+		_refresh_fence_autotiles_for_cells(cells)
+	if target_layer == _plantz():
+		_flush_plant_layer_visuals()
+	var sound: StringName = drag_build_sound(item_id)
+	if sound != &"":
+		Sfx.play_sound(sound)
+	clear_build_selection_if_unaffordable(item_id)
+	return true
+
+
+func drag_build_sound(item_id: String) -> StringName:
+	return &"plant" if item_id == "rose" else &""
+
+
+func drag_build_rectangle_cells(
+	start_cell: Vector2i,
+	end_cell: Vector2i,
+	target_layer: TileMapLayer,
+	placeable_def: Dictionary,
+	limit: int
+) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if limit <= 0:
+		return cells
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if (
+				is_valid_placeable_cell(cell, target_layer, placeable_def)
+				and not drag_build_candidate_blocked_by_batch(cell, target_layer, placeable_def, cells)
+			):
+				cells.append(cell)
+				if cells.size() >= limit:
+					return cells
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return cells
+
+
+func drag_build_candidate_blocked_by_batch(
+	cell: Vector2i,
+	target_layer: TileMapLayer,
+	placeable_def: Dictionary,
+	accepted_cells: Array[Vector2i]
+) -> bool:
+	if accepted_cells.is_empty():
+		return false
+	if str(placeable_def.get("category", "")) != "turret":
+		return false
+	var candidate_turret_data: TurretData = turret_data_from_placeable(placeable_def)
+	if candidate_turret_data == null:
+		return false
+	if candidate_turret_data.build_in_range:
+		return false
+	var build_range: float = candidate_turret_data.build_range
+	if build_range <= 0.0:
+		return false
+	var candidate_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(cell))
+	var range_squared: float = build_range * build_range
+	for accepted_cell: Vector2i in accepted_cells:
+		var accepted_world_position: Vector2 = target_layer.to_global(target_layer.map_to_local(accepted_cell))
+		if candidate_world_position.distance_squared_to(accepted_world_position) <= range_squared:
+			return true
+	return false
+
+
+func target_tile_layer(layer_name: String) -> TileMapLayer:
+	if layer_name == "plantz":
+		return _plantz()
+	if layer_name == "traversable_buildings":
+		return _traversable_buildings()
+	if layer_name == "blocking_buildings":
+		return _blocking_buildings()
+	if layer_name == "fences":
+		return _fences()
+	if layer_name == "buildings":
+		return _traversable_buildings()
+	return _wallz()
+
+
+func target_layer_affects_collision(target_layer: TileMapLayer) -> bool:
+	return target_layer == _wallz() or target_layer == _blocking_buildings()
+
+
+func is_free_walkable_cell(cell: Vector2i) -> bool:
+	var floorz: TileMapLayer = _floorz()
+	var wallz: TileMapLayer = _wallz()
+	if floorz and floorz.get_cell_source_id(cell) < 0:
+		return false
+	if wallz and wallz.get_cell_source_id(cell) >= 0:
+		return false
+	return true
+
+
+func is_debris_cell(cell: Vector2i) -> bool:
+	var plantz: TileMapLayer = _plantz()
+	if plantz == null or plantz.get_cell_source_id(cell) < 0:
+		return false
+	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	return ItemCatalog.get_placeable_id_for_tile(str(plantz.name), atlas_coords) == "debris"
+
+
+func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	var wallz: TileMapLayer = _wallz()
+	var plantz: TileMapLayer = _plantz()
+	var traversable_buildings: TileMapLayer = _traversable_buildings()
+	var blocking_buildings: TileMapLayer = _blocking_buildings()
+	var fences: TileMapLayer = _fences()
+	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and is_debris_cell(cell)):
+		return true
+	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
+		return true
+	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0 and not is_debris_cell(cell):
+		return true
+	if traversable_buildings and traversable_buildings != target_layer and traversable_buildings.get_cell_source_id(cell) >= 0:
+		return true
+	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
+		return true
+	if fences and fences != target_layer and fences.get_cell_source_id(cell) >= 0:
+		return true
+	return is_occupied_by_group_node(cell, placeable_def)
+
+
+func is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	if is_water_source_cell(cell):
+		return false
+	if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
+		return false
+	if bool(placeable_def.get("requires_walkable_floor", false)) and not is_free_walkable_cell(cell):
+		return false
+	if not turret_range_blocker_for_cell(cell, placeable_def).is_empty():
+		return false
+	return not is_placeable_occupied(cell, target_layer, placeable_def)
+
+
+func requires_grass_green_floor(placeable_def: Dictionary) -> bool:
+	var item_id: String = str(placeable_def.get("id", ""))
+	return item_id == "rose" or item_id == "turret1" or bool(placeable_def.get("requires_grass_green_floor", false))
+
+
+func is_grass_green_floor_cell(cell: Vector2i) -> bool:
+	var floorz: TileMapLayer = _floorz()
+	if floorz == null or floorz.get_cell_source_id(cell) < 0:
+		return false
+	return GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell))
+
+
+func placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
+	if not requires_grass_green_floor(placeable_def):
+		return false
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if not is_grass_green_floor_cell(cell):
+				return true
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return false
+
+
+func is_water_source_cell(cell: Vector2i) -> bool:
+	var watersources: TileMapLayer = _watersources()
+	return watersources != null and watersources.get_cell_source_id(cell) >= 0
+
+
+func turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
+	if str(placeable_def.get("category", "")) != "turret":
+		return {}
+	var candidate_turret_data: TurretData = turret_data_from_placeable(placeable_def)
+	if candidate_turret_data == null:
+		return {}
+	if candidate_turret_data.build_in_range:
+		return {}
+	var blocking_buildings: TileMapLayer = _blocking_buildings()
+	if blocking_buildings == null:
+		return {}
+	var candidate_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(cell))
+	var best_blocker: Dictionary = {}
+	var best_distance_squared: float = INF
+	for raw_turret_cell: Variant in blocking_buildings.get_used_cells():
+		var turret_cell: Vector2i = raw_turret_cell as Vector2i
+		var turret_item_id: String = turret_item_id_at_cell(turret_cell)
+		if turret_item_id == "":
+			continue
+		var turret_data: TurretData = ItemCatalog.get_turret_data(turret_item_id)
+		if turret_data == null or turret_data.build_in_range:
+			continue
+		var build_range: float = turret_data.build_range
+		if build_range <= 0.0:
+			continue
+		var range_squared: float = build_range * build_range
+		var turret_world_position: Vector2 = blocking_buildings.to_global(blocking_buildings.map_to_local(turret_cell))
+		var distance_squared: float = candidate_world_position.distance_squared_to(turret_world_position)
+		if distance_squared <= range_squared and distance_squared < best_distance_squared:
+			best_distance_squared = distance_squared
+			best_blocker = {
+				"cell": turret_cell,
+				"range": build_range,
+			}
+	return best_blocker
+
+
+func turret_data_from_placeable(placeable_def: Dictionary) -> TurretData:
+	var item_id: String = str(placeable_def.get("id", ""))
+	if item_id == "":
+		return null
+	return ItemCatalog.get_turret_data(item_id)
+
+
+func turret_item_id_at_cell(cell: Vector2i) -> String:
+	var blocking_buildings: TileMapLayer = _blocking_buildings()
+	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
+		return ""
+	var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_buildings.get_cell_atlas_coords(cell))
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if str(item_def.get("category", "")) != "turret":
+		return ""
+	return item_id
+
+
+func uses_building_object_manager(placeable_def: Dictionary) -> bool:
+	var placeable_category: String = str(placeable_def.get("category", ""))
+	var light_source: float = float(placeable_def.get("light_source", 0.0))
+	if light_source > 0.0:
+		return true
+	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation" or placeable_category == "fence"
+
+
+func is_occupied_by_group_node(cell: Vector2i, placeable_def: Dictionary) -> bool:
+	var map_layer: TileMapLayer = _previewbuild() if _previewbuild() else _wallz()
+	if not map_layer:
+		return false
+	var item_id: String = str(placeable_def.get("id", ""))
+	for group_name: String in _occupied_groups():
+		if item_id == "rose" and group_name == "player":
+			continue
+		var nodes: Array[Node] = _manager.get_tree().get_nodes_in_group(group_name)
+		for node: Node in nodes:
+			if node is Node2D:
+				var occupant: Node2D = node as Node2D
+				var occupant_cell: Vector2i = map_layer.local_to_map(map_layer.to_local(occupant.global_position))
+				if occupant_cell == cell:
+					return true
+	return false
+
+
+func atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
+	var raw: Variant = placeable_def.get("atlas", Vector2i(-1, -1))
+	if raw is Vector2i:
+		return raw
+	if raw is Vector2:
+		return Vector2i(int(raw.x), int(raw.y))
+	if raw is Array and raw.size() == 2:
+		return Vector2i(int(raw[0]), int(raw[1]))
+	return Vector2i(-1, -1)
+
+
+func alternative_from_placeable(placeable_def: Dictionary) -> int:
+	if not _is_directional_placeable(placeable_def):
+		return 0
+	var direction: Vector2i = placeable_def.get("direction", DIRECTION_RIGHT) as Vector2i
+	return _alternative_from_direction(direction)
+
+
+func clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void:
+	var wallz: TileMapLayer = _wallz()
+	var plantz: TileMapLayer = _plantz()
+	var traversable_buildings: TileMapLayer = _traversable_buildings()
+	var blocking_buildings: TileMapLayer = _blocking_buildings()
+	var fences: TileMapLayer = _fences()
+	if target_layer != wallz and wallz:
+		wallz.erase_cell(cell)
+		wallz.update_internals()
+	if target_layer != plantz and plantz:
+		if not is_debris_cell(cell):
+			plantz.erase_cell(cell)
+			_flush_plant_layer_visuals()
+			var plant_manager: Node = _plant_manager()
+			if plant_manager and plant_manager.has_method("remove_plant"):
+				plant_manager.call("remove_plant", cell, false)
+	if target_layer != traversable_buildings and traversable_buildings:
+		traversable_buildings.erase_cell(cell)
+		traversable_buildings.update_internals()
+		var building_object_manager: Node = _building_object_manager()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
+		_refresh_cell_terrain_speed(cell)
+	if target_layer != blocking_buildings and blocking_buildings:
+		blocking_buildings.erase_cell(cell)
+		blocking_buildings.update_internals()
+		var building_object_manager: Node = _building_object_manager()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
+	if target_layer != fences and fences:
+		fences.erase_cell(cell)
+		fences.update_internals()
+		var building_object_manager: Node = _building_object_manager()
+		if building_object_manager and building_object_manager.has_method("remove_building"):
+			building_object_manager.call("remove_building", cell, false)
+		_refresh_cell_terrain_speed(cell)
+		_refresh_fence_autotiles_around(cell)
+
+
+func after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_placement_sound: bool = true) -> void:
+	var plant_manager: Node = _plant_manager()
+	var placeable_category: String = str(placeable_def.get("category", ""))
+	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
+		plant_manager.call("add_plant", cell)
+	var placeable_id: String = str(placeable_def.get("id", ""))
+	if placeable_id == "rose" and play_placement_sound:
+		Sfx.play_sound(&"plant")
+	var building_object_manager: Node = _building_object_manager()
+	if uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):
+		building_object_manager.call("add_building", cell, placeable_def)
+	var reservoir_system: Node = _reservoir_system()
+	if placeable_id == "reservoir" and reservoir_system != null and reservoir_system.has_method("request_reservoir_irrigation_from_cell"):
+		reservoir_system.call("request_reservoir_irrigation_from_cell", cell)
+	if placeable_id == "pasteque" and reservoir_system != null and reservoir_system.has_method("request_pasteque_irrigation_from_cell"):
+		reservoir_system.call("request_pasteque_irrigation_from_cell", cell)
+
+
+func _is_directional_placeable(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("directional", false))
+
+
+func _alternative_from_direction(direction: Vector2i) -> int:
+	if direction == DIRECTION_LEFT:
+		return TILE_TRANSFORM_FLIP_H | TILE_TRANSFORM_FLIP_V
+	if direction == DIRECTION_DOWN:
+		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_H
+	if direction == DIRECTION_UP:
+		return TILE_TRANSFORM_TRANSPOSE | TILE_TRANSFORM_FLIP_V
+	return 0
+
+
+func _clear_build_selection() -> void:
+	if _manager != null:
+		_manager.call("_clear_build_selection")
+
+
+func _show_tutorial_alert(key: String) -> void:
+	if _manager != null:
+		_manager.call("_show_tutorial_alert", key)
+
+
+func _notify(message: String) -> void:
+	if _manager != null:
+		_manager.call("_notify", message)
+
+
+func _refresh_cell_collision(cell: Vector2i) -> void:
+	if _manager != null:
+		_manager.call("_refresh_cell_collision", cell)
+
+
+func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
+	if _manager != null:
+		_manager.call("_refresh_cell_terrain_speed", cell)
+
+
+func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
+	if _manager != null:
+		_manager.call("_refresh_fence_autotiles_for_cells", cells)
+
+
+func _refresh_fence_autotiles_around(cell: Vector2i) -> void:
+	if _manager != null:
+		_manager.call("_refresh_fence_autotiles_around", cell)
+
+
+func _flush_plant_layer_visuals() -> void:
+	if _manager != null:
+		_manager.call("_flush_plant_layer_visuals")
+
+
+func _play_build_fx_at_cell(cell: Vector2i, target_layer: TileMapLayer) -> void:
+	if _manager != null:
+		_manager.call("_play_build_fx_at_cell", cell, target_layer)
+
+
+func _atlas_source_id() -> int:
+	if _manager == null:
+		return -1
+	return int(_manager.get("_atlas_source_id"))
+
+
+func _floorz() -> TileMapLayer:
+	return _manager.get("floorz") as TileMapLayer
+
+
+func _watersources() -> TileMapLayer:
+	return _manager.get("watersources") as TileMapLayer
+
+
+func _wallz() -> TileMapLayer:
+	return _manager.get("wallz") as TileMapLayer
+
+
+func _plantz() -> TileMapLayer:
+	return _manager.get("plantz") as TileMapLayer
+
+
+func _traversable_buildings() -> TileMapLayer:
+	return _manager.get("traversable_buildings") as TileMapLayer
+
+
+func _blocking_buildings() -> TileMapLayer:
+	return _manager.get("blocking_buildings") as TileMapLayer
+
+
+func _fences() -> TileMapLayer:
+	return _manager.get("fences") as TileMapLayer
+
+
+func _previewbuild() -> TileMapLayer:
+	return _manager.get("previewbuild") as TileMapLayer
+
+
+func _plant_manager() -> Node:
+	return _manager.get("plant_manager") as Node
+
+
+func _building_object_manager() -> Node:
+	return _manager.get("building_object_manager") as Node
+
+
+func _reservoir_system() -> Node:
+	return _manager.get("reservoir_system") as Node
+
+
+func _game_ui() -> CanvasLayer:
+	return _manager.get("game_ui") as CanvasLayer
+
+
+func _occupied_groups() -> Array[String]:
+	var raw_groups: Array = _manager.get("occupied_groups") as Array
+	var groups: Array[String] = []
+	for raw_group: Variant in raw_groups:
+		groups.append(str(raw_group))
+	return groups
