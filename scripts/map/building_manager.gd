@@ -2649,6 +2649,10 @@ func _process_client_sale(delta: float) -> void:
 		return
 	if _client_tantrum_active:
 		if _client_count() == 0 and _hostile_clients.is_empty():
+			# Clear the tantrum flag/group first: can_start_night_after_clients()
+			# gates on _clients_are_finished_for_day(), which requires the tantrum to
+			# be over. Leaving it active here deadlocks the day — night never starts.
+			_end_client_tantrum()
 			_client_sale_active = false
 			GameState.set_client_phase(false)
 			if can_start_night_after_clients():
@@ -3899,7 +3903,7 @@ func _start_hostile_client_attack(nav_id: int, client: Node2D, target: Node2D) -
 	tween.tween_callback(Callable(self, "_finish_hostile_client_attack").bind(nav_id, client))
 
 
-func _deal_client_tantrum_hit(nav_id: int, target: Node) -> void:
+func _deal_client_tantrum_hit(nav_id: int, target: Variant) -> void:
 	if not _hostile_clients.has(nav_id):
 		return
 	if target != null and is_instance_valid(target) and target.has_method("take_damage"):
@@ -3917,7 +3921,10 @@ func _hostile_client_can_hit_reservoir(client: Node2D, target: Node2D) -> bool:
 	return client.global_position.distance_to(target.global_position) <= attack_distance
 
 
-func _finish_hostile_client_attack(nav_id: int, client: Node2D) -> void:
+# client is bound into a tween callback, so it may already be freed by the time this
+# fires (the player killed the raging client mid-lunge). Take it untyped: a freed
+# instance cannot convert to a Node2D parameter and would raise a Tween step error.
+func _finish_hostile_client_attack(nav_id: int, client: Variant) -> void:
 	if client != null and is_instance_valid(client) and client.has_method("set_paused"):
 		client.call("set_paused", false)
 	if not _hostile_clients.has(nav_id):
