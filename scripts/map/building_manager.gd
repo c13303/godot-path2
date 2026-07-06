@@ -118,20 +118,6 @@ var _spawner_spot_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
 var _client_spawners: Dictionary = {}  # Vector2i -> true
 var _client_frequency_by_cell: Dictionary = {}  # Vector2i -> float
 var _merchant_spawners: Dictionary = {}  # Vector2i -> true
-# Parent-triggered retarget breakdown profiling. Child functions always fill these
-# (cheap int writes) so the parent _retarget_agent_or_escape can emit ONE consolidated
-# "debug_garden_lag_breakdown" line when it exceeds threshold — even when every inner
-# section is individually below threshold and so wouldn't self-report. Pure
-# instrumentation; never read by gameplay. See _reset_retarget_profile().
-#   _last_local_retarget_profile      - filled by _try_local_retarget_agent
-#   _last_find_local_retarget_profile - filled by _find_local_retarget_plant
-#   _find_path_in_zone_accum          - per-retarget accumulator across every
-#                                       _find_path_in_zone call (reset by the plant
-#                                       search, added to by each path query).
-var _last_retarget_profile: Dictionary = {}
-var _last_local_retarget_profile: Dictionary = {}
-var _last_find_local_retarget_profile: Dictionary = {}
-var _find_path_in_zone_accum: Dictionary = {}
 # Side-channel: _sync_pathfinder_zone_tiles writes the time it spent in
 # _wall_blockers_for_cells here so the caller can split sync time into
 # blocker-construction vs. the rest, without changing the void signature.
@@ -144,40 +130,15 @@ var _paused: bool = false
 var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
 var _astar_in_agents: Dictionary = {}
-# Reverse index: target plant cell -> { nav_id -> true }, plus nav_id -> target cell.
-# Lets plant removal find the (usually 0-2) agents heading for that exact plant in
-# O(agents_targeting_this_plant) instead of scanning every _astar_in_agents entry.
-# Maintained exclusively by _set_astar_in_agent / _erase_astar_in_agent (which call
-# _register_/_unregister_astar_in_target). _register ALWAYS unregisters the nav_id
-# from its previous bucket first, so a nav_id is in at most one bucket and the two
-# dictionaries can never disagree. The plant-removal retarget additionally validates
-# every bucket entry against the live record and scrubs any that don't match, so even
-# a stale entry that slipped in can never be double-counted across removals.
-var _astar_in_agents_by_target_plant: Dictionary = {}  # Vector2i -> { nav_id -> true }
-var _astar_in_target_by_nav_id: Dictionary = {}        # nav_id -> Vector2i
+var _garden_retarget: GardenRetargetController = GardenRetargetController.new()
 # When true, _retarget_agents_targeting_removed_plant_only also runs the old full
 # scan and warns on any mismatch with the index. OFF by default (reintroduces the
 # very scan cost the index removes); flip on only to debug index consistency.
-var _debug_check_retarget_index: bool = false
-# Side-channel counts from the last _retarget_agents_targeting_removed_plant_only
-# call, so the caller's lag warning can report what the index touched without the
-# function having to return anything.
-var _last_plant_retarget_astar_in: int = 0       # _astar_in_agents.size() at entry
-var _last_plant_retarget_bucket: int = 0         # raw bucket entries for the cell
-var _last_plant_retarget_affected: int = 0       # valid agents actually retargeted
-var _last_plant_retarget_queued: int = 0         # of those, deferred to the queue
-var _last_plant_retarget_stale: int = 0          # bucket entries dropped as invalid
-var _last_plant_retarget_already_queued: int = 0 # valid but already in retarget queue
-# Budgeted retargeting after a garden topology rebuild. When a rebuild invalidates
-# the garden an agent was targeting/eating-in, we cannot afford to re-path every
-# affected agent in the same frame (potential large spike). Instead each affected
-# agent is detached from its stale path/flow cheaply, parked in "waiting_new_status",
-# and queued here; _process_garden_retarget_queue() then re-assigns a bounded number
-# of them per frame. Queue items are Dictionaries:
-#   { "nav_id": int, "intent": String ("escape"|"retarget"), "spawner_cell": Vector2i }
-# _garden_retarget_queued mirrors the queued nav_ids so we never double-enqueue.
-var _garden_retarget_queue: Array[Dictionary] = []
-var _garden_retarget_queued: Dictionary = {}  # nav_id -> true
+var _debug_check_retarget_index: bool = false:
+	set(value):
+		_debug_check_retarget_index = value
+		if _garden_retarget != null:
+			_garden_retarget.set_debug_check_retarget_index(value)
 var _scan_timer: float = 0.0
 var _navigation_topology_dirty: bool = true
 var _flow_ready: bool = false
@@ -278,6 +239,7 @@ func _ready() -> void:
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
 	_spawner_route_service.setup(self)
+	_garden_retarget.setup(self)
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
@@ -774,7 +736,7 @@ func _process(delta: float) -> void:
 		_debug_telemetry.warn_garden_task_lag_us("_process_garden_retarget_queue", retarget_elapsed_us,
 			"processed=%d remaining=%d budget=%dms elapsed=%.1fms" % [
 				retarget_processed,
-				_garden_retarget_queue.size(),
+				_garden_retarget.queue_size(),
 				int(garden_retarget_budget_ms),
 				float(retarget_elapsed_us) / 1000.0,
 			])
@@ -815,7 +777,7 @@ func _process(delta: float) -> void:
 			_eating_agents.size(),
 			_astar_in_agents.size(),
 			_escaping_agents.size(),
-			_garden_retarget_queue.size(),
+			_garden_retarget.queue_size(),
 			_spawners.size(),
 			eat_exit_direct_ff_success,
 			eat_exit_direct_ff_failed
@@ -1174,16 +1136,16 @@ func _on_plant_removed(cell: Vector2i) -> void:
 		var empty_us: int = Time.get_ticks_usec()
 		_handle_garden_became_empty(garden_id)
 		_debug_telemetry.warn_garden_task_lag_us("_handle_garden_became_empty", Time.get_ticks_usec() - empty_us,
-			"garden=%d retarget_queue=%d" % [garden_id, _garden_retarget_queue.size()])
+			"garden=%d retarget_queue=%d" % [garden_id, _garden_retarget.queue_size()])
 	else:
 		var rt_us: int = Time.get_ticks_usec()
 		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
 		_debug_telemetry.warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
 			"garden=%d plant=%s astar_in=%d bucket_size=%d valid_affected=%d queued=%d already_queued=%d stale=%d indexed_targets=%d" % [
-				garden_id, str(cell), _last_plant_retarget_astar_in,
-				_last_plant_retarget_bucket, _last_plant_retarget_affected,
-				_last_plant_retarget_queued, _last_plant_retarget_already_queued,
-				_last_plant_retarget_stale, _astar_in_agents_by_target_plant.size()])
+				garden_id, str(cell), _garden_retarget.last_plant_retarget_astar_in(),
+				_garden_retarget.last_plant_retarget_bucket(), _garden_retarget.last_plant_retarget_affected(),
+				_garden_retarget.last_plant_retarget_queued(), _garden_retarget.last_plant_retarget_already_queued(),
+				_garden_retarget.last_plant_retarget_stale(), _garden_retarget.target_index_size()])
 
 	if _zone_overlay:
 		_zone_overlay.queue_redraw()
@@ -2040,58 +2002,11 @@ func _process_plant_arrivals() -> void:
 		_erase_astar_in_agent(nav_id)
 
 func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
-	var astar_ids: Array = _astar_in_agents.keys()
-	for raw_nav_id in astar_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_in_agents.has(nav_id):
-			continue
-		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
-		var garden_id: int = int(data.get("garden_id", 0))
-		if plant_cell != changed_cell and not _garden_target_is_stale(garden_id):
-			continue
-		_clear_stale_garden_path(nav_id, data)
-
-	var entry_ids: Array = _entry_path_agents.keys()
-	for raw_nav_id in entry_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _entry_path_agents.has(nav_id):
-			continue
-		var data: Dictionary = _entry_path_agents[nav_id] as Dictionary
-		var garden_id: int = int(data.get("garden_id", 0))
-		if not _garden_target_is_stale(garden_id):
-			continue
-		_clear_stale_garden_path(nav_id, data)
-	_drain_pending_empty_gardens()
-
-func _garden_target_is_stale(garden_id: int) -> bool:
-	if garden_id <= 0:
-		return true
-	if not _garden_topology.gardens().has(garden_id):
-		return true
-	return not _garden_has_edible_plants(garden_id)
-
-func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	var raw_agent: Variant = data.get("node", null)
-	if not is_instance_valid(raw_agent):
-		return
-	var agent: Node2D = raw_agent as Node2D
-	if agent == null:
-		return
-	if agent.has_method("stop_astar_in"):
-		agent.call("stop_astar_in")
-	var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	_retarget_agent_or_escape(agent, spawner_cell)
+	_garden_retarget.retarget_agents_for_garden_topology_change(changed_cell)
 
 # --- _astar_in_agents mutation funnel + target-plant reverse index --------------
 # All inserts into / erasures from _astar_in_agents go through these two helpers so
-# _astar_in_agents_by_target_plant and _astar_in_target_by_nav_id stay in lock-step.
+# GardenRetargetController's target-plant reverse index stays in lock-step.
 func _set_astar_in_agent(nav_id: int, data: Dictionary) -> void:
 	_astar_in_agents[nav_id] = data
 	var target_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
@@ -2102,26 +2017,10 @@ func _erase_astar_in_agent(nav_id: int) -> void:
 	_unregister_astar_in_target(nav_id)
 
 func _register_astar_in_target(nav_id: int, target_cell: Vector2i) -> void:
-	_unregister_astar_in_target(nav_id)
-	if target_cell == INVALID_CELL:
-		return
-	_astar_in_target_by_nav_id[nav_id] = target_cell
-	if not _astar_in_agents_by_target_plant.has(target_cell):
-		_astar_in_agents_by_target_plant[target_cell] = {}
-	var bucket: Dictionary = _astar_in_agents_by_target_plant[target_cell] as Dictionary
-	bucket[nav_id] = true
+	_garden_retarget.register_astar_in_target(nav_id, target_cell)
 
 func _unregister_astar_in_target(nav_id: int) -> void:
-	if not _astar_in_target_by_nav_id.has(nav_id):
-		return
-	var target_cell: Vector2i = _astar_in_target_by_nav_id[nav_id] as Vector2i
-	_astar_in_target_by_nav_id.erase(nav_id)
-	if not _astar_in_agents_by_target_plant.has(target_cell):
-		return
-	var bucket: Dictionary = _astar_in_agents_by_target_plant[target_cell] as Dictionary
-	bucket.erase(nav_id)
-	if bucket.is_empty():
-		_astar_in_agents_by_target_plant.erase(target_cell)
+	_garden_retarget.unregister_astar_in_target(nav_id)
 
 # NARROW retarget for content-only plant removal. Only handles agents whose A*-in
 # target was the exact removed plant; it does NOT broad-retarget the garden, does
@@ -2131,107 +2030,7 @@ func _unregister_astar_in_target(nav_id: int) -> void:
 # _handle_garden_became_empty). The eater that just consumed the plant is already
 # in _eating_agents (not _astar_in_agents), so it is never disturbed here.
 func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
-	_last_plant_retarget_astar_in = _astar_in_agents.size()
-	_last_plant_retarget_bucket = 0
-	_last_plant_retarget_affected = 0
-	_last_plant_retarget_queued = 0
-	_last_plant_retarget_stale = 0
-	_last_plant_retarget_already_queued = 0
-	# Side-effect call: _garden_has_edible_plants flags a now-empty garden into the
-	# pending-empty set, which _drain_pending_empty_gardens() (at the end of this func)
-	# acts on. The boolean result is no longer needed for branching — every affected
-	# agent is deferred to the budgeted queue regardless — but the call must stay.
-	if garden_id > 0:
-		_garden_has_edible_plants(garden_id)
-	# Reverse index lookup: only the agents heading for THIS exact plant, not a scan
-	# over every A*-in agent. Usually 0-2 entries. Snapshot the bucket keys first
-	# because _retarget_agent_or_escape / queueing mutate the index underneath us.
-	if _astar_in_agents_by_target_plant.has(cell):
-		var bucket: Dictionary = _astar_in_agents_by_target_plant[cell] as Dictionary
-		var nav_ids: Array = bucket.keys()
-		_last_plant_retarget_bucket = nav_ids.size()
-		for raw_nav_id in nav_ids:
-			var nav_id: int = int(raw_nav_id)
-			# --- Strict validation. A bucket entry is only "affected" if the live
-			# record agrees on every axis. Any disagreement is stale: unregister it so
-			# the same dirty entry can never be counted twice across removals. ---
-			if not _astar_in_agents.has(nav_id):
-				# No longer in A*-in (already retargeted/ate/escaped/freed elsewhere).
-				_unregister_astar_in_target(nav_id)
-				_last_plant_retarget_stale += 1
-				continue
-			if (_astar_in_target_by_nav_id.get(nav_id, INVALID_CELL) as Vector2i) != cell:
-				# Reverse map no longer points this nav_id at `cell` — the bucket entry
-				# is a leftover. Drop it; the nav_id (if still A*-in) is correctly
-				# bucketed under its real target by _astar_in_target_by_nav_id.
-				bucket.erase(nav_id)
-				if bucket.is_empty():
-					_astar_in_agents_by_target_plant.erase(cell)
-				_last_plant_retarget_stale += 1
-				continue
-			var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-			var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
-			if plant_cell != cell:
-				# Live record disagrees with the index: trust the record, re-sync the
-				# index to it, and treat this bucket entry as stale.
-				_register_astar_in_target(nav_id, plant_cell)
-				_last_plant_retarget_stale += 1
-				continue
-			var raw_agent: Variant = data.get("node", null)
-			if not is_instance_valid(raw_agent):
-				# Agent freed without going through the funnel: scrub and skip.
-				_erase_astar_in_agent(nav_id)
-				_last_plant_retarget_stale += 1
-				continue
-			var agent: Node2D = raw_agent as Node2D
-			if agent == null:
-				_erase_astar_in_agent(nav_id)
-				_last_plant_retarget_stale += 1
-				continue
-			# Validated: this agent is genuinely A*-in toward the removed plant.
-			_last_plant_retarget_affected += 1
-			var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-			# Detach the stale A*-in path and forget the phase before reassigning.
-			if agent_manager and agent_manager.has_method("detach_agent_path"):
-				agent_manager.call("detach_agent_path", nav_id)
-			_erase_astar_in_agent(nav_id)
-			if agent.has_method("stop_astar_in"):
-				agent.call("stop_astar_in")
-			if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-				spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-			# Always defer through the budgeted queue. Per-agent retarget is "cheap" only
-			# in isolation: _retarget_agent_or_escape runs a radius scan + per-candidate
-			# path validation (~ms each). When a single plant removal frees a whole bucket
-			# (e.g. 5 agents all heading for the same plant), retargeting them all
-			# synchronously here spikes the frame to 15-20ms. The budgeted queue spreads
-			# that same work across frames at garden_retarget_budget_ms/frame. Whether the
-			# garden still has edible plants only affects what the queued retarget resolves
-			# to (a fresh plant vs. an escape) — not whether it must run this frame.
-			if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id):
-				_last_plant_retarget_queued += 1
-			else:
-				_last_plant_retarget_already_queued += 1
-	# Optional consistency check: replay the old full scan and warn on any mismatch.
-	# OFF by default — it reintroduces the very O(all A*-in) cost the index removes.
-	if _debug_check_retarget_index:
-		_assert_retarget_index_matches_scan(cell)
-	# A stale-empty garden may have been flagged by _garden_has_edible_plants above;
-	# this function does not iterate _garden_topology.gardens(), so draining now is safe.
-	_drain_pending_empty_gardens()
-
-# Debug-only: confirm the reverse index would have found exactly the agents the old
-# full scan would have. Runs only when _debug_check_retarget_index is set. NOTE: this
-# is called AFTER the affected agents have already been erased, so the live scan
-# should find none of them; we instead verify no A*-in agent still claims `cell`.
-func _assert_retarget_index_matches_scan(cell: Vector2i) -> void:
-	var leftover: int = 0
-	for raw_nav_id in _astar_in_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		if (data.get("plant_cell", INVALID_CELL) as Vector2i) == cell:
-			leftover += 1
-	if leftover > 0:
-		push_warning("debug_garden_lag:retarget_index_mismatch plant=%s leftover_astar_in_targeting_cell=%d (index missed them)" % [str(cell), leftover])
+	_garden_retarget.retarget_agents_targeting_removed_plant_only(cell, garden_id)
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
 	var consume_us: int = Time.get_ticks_usec()
@@ -2780,11 +2579,7 @@ func _clear_removed_agent_state(nav_id: int) -> void:
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_tantrum.clear_hostile(nav_id)
-	_garden_retarget_queued.erase(nav_id)
-	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
-		var item: Dictionary = _garden_retarget_queue[index]
-		if int(item.get("nav_id", -1)) == nav_id:
-			_garden_retarget_queue.remove_at(index)
+	_garden_retarget.remove_queued_agent(nav_id)
 
 
 func _unregister_nav_agent(nav_id: int) -> void:
@@ -2963,7 +2758,7 @@ func _spawner_garden_route_count() -> int:
 	return _spawner_route_service.spawner_garden_route_count()
 
 func _garden_retarget_queue_size() -> int:
-	return _garden_retarget_queue.size()
+	return _garden_retarget.queue_size()
 
 func _queue_zone_overlay_redraw() -> void:
 	if _zone_overlay:
@@ -3105,209 +2900,6 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 			best_spawner_cell = fallback_spawner_cell
 	return best_spawner_cell
 
-func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
-	# Start fresh so the parent breakdown never reads a stale plant/path profile when
-	# this returns early (or isn't reached at all this retarget).
-	_last_find_local_retarget_profile = {}
-	if empty_garden_local_retarget_radius <= 0:
-		return {}
-	if plant_manager == null or not plant_manager.has_method("has_plant"):
-		return {}
-	# This scans a radius around from_cell and runs _find_path_in_zone per candidate,
-	# so it can spike when the radius is large or many candidates path. The path checks
-	# are the prime suspect, so we aggregate counts (NO per-candidate arrays/logs) and
-	# the total time spent in path checks, and warn on those separately. A single
-	# per-candidate path check is logged only if it alone exceeds the threshold.
-	# This is the only place that loops _find_path_in_zone during a retarget, so reset
-	# its accumulator here; each path query below adds into it for the parent breakdown.
-	_reset_find_path_in_zone_accum()
-	var local_us: int = Time.get_ticks_usec()
-	var radius: int = maxi(0, empty_garden_local_retarget_radius)
-	var best_target: Dictionary = {}
-	var best_path_len: int = 2147483647
-	var best_dist: int = 2147483647
-	# Aggregate counters only — cheap ints, no growing collections.
-	var cells_scanned: int = 0          # cells visited inside the manhattan disc
-	var plant_candidates: int = 0       # cells that actually held a plant
-	var rejected_no_garden: int = 0     # plant cell not mapped to a garden
-	var rejected_not_edible: int = 0    # garden has no edible plants
-	var path_checks: int = 0            # _find_path_in_zone calls made
-	var path_failures: int = 0          # path checks that returned empty
-	var path_checks_us: int = 0         # total time spent in path checks
-	for dy in range(-radius, radius + 1):
-		for dx in range(-radius, radius + 1):
-			var manhattan: int = abs(dx) + abs(dy)
-			if manhattan > radius:
-				continue
-			cells_scanned += 1
-			var plant_cell: Vector2i = from_cell + Vector2i(dx, dy)
-			if agent_kind == SPAWNER_KIND_CLIENT:
-				if not _is_client_target_cell(plant_cell):
-					continue
-			elif not _is_eatable_for_monster(plant_cell):
-				continue
-			plant_candidates += 1
-			if not _garden_topology.garden_by_plant_cell().has(plant_cell):
-				rejected_no_garden += 1
-				continue
-			var garden_id: int = int(_garden_topology.garden_by_plant_cell()[plant_cell])
-			if not _garden_has_target_for_kind(garden_id, agent_kind):
-				rejected_not_edible += 1
-				continue
-			# Per-candidate path check. Time each one so a single dominating check is
-			# attributable; only log the individual check when it alone spikes.
-			var check_us: int = Time.get_ticks_usec()
-			var path_cells: PackedVector2Array = _find_path_in_zone(from_cell, plant_cell, garden_id)
-			var this_check_us: int = Time.get_ticks_usec() - check_us
-			path_checks += 1
-			path_checks_us += this_check_us
-			if _debug_telemetry.over_garden_threshold_us(this_check_us):
-				_debug_telemetry.warn_garden_task_lag_us("_find_local_retarget_plant.path_check", this_check_us,
-					"from=%s to=%s garden=%d len=%d" % [str(from_cell), str(plant_cell), garden_id, path_cells.size()])
-			if path_cells.is_empty():
-				path_failures += 1
-				continue
-			var path_len: int = path_cells.size()
-			if path_len < best_path_len or (path_len == best_path_len and manhattan < best_dist):
-				best_path_len = path_len
-				best_dist = manhattan
-				best_target = {
-					"plant_cell": plant_cell,
-					"garden_id": garden_id,
-					"path_cells": path_cells
-				}
-	# _garden_has_edible_plants may have queued stale-empty gardens; this search
-	# does not iterate _garden_topology.gardens(), so draining here is safe.
-	_drain_pending_empty_gardens()
-	var total_us: int = Time.get_ticks_usec() - local_us
-	var found: bool = not best_target.is_empty()
-	# Stash the aggregate profile for the parent breakdown (cheap int writes; read by
-	# _try_local_retarget_agent and the consolidated _retarget_agent_or_escape line).
-	_last_find_local_retarget_profile = {
-		"radius": radius,
-		"cells_checked": cells_scanned,
-		"candidates_found": plant_candidates,
-		"rejected_wrong_garden": rejected_no_garden,
-		"rejected_not_edible": rejected_not_edible,
-		"path_checks": path_checks,
-		"path_failures": path_failures,
-		"path_checks_total_us": path_checks_us,
-		"total_us": total_us,
-		"success": found,
-	}
-	# Aggregate path-check total: when this dominates, the cost is the repeated
-	# _find_path_in_zone calls rather than the candidate scan itself. Both summary
-	# warnings build their context only on a real spike (this runs in a tight retarget
-	# loop, so unconditional formatting would be the wrong kind of overhead).
-	if _debug_telemetry.over_garden_threshold_us(path_checks_us):
-		_debug_telemetry.warn_garden_task_lag_us("_find_local_retarget_plant.path_checks_total", path_checks_us,
-			"path_checks=%d failures=%d" % [path_checks, path_failures])
-	if _debug_telemetry.over_garden_threshold_us(total_us):
-		push_warning("debug_garden_lag_breakdown:_find_local_retarget_plant total=%.1fms threshold=%dms from=%s radius=%d cells_checked=%d candidates=%d wrong_garden=%d not_edible=%d path_checks=%d path_fail=%d path_checks_total=%.1fms success=%s" % [
-			float(total_us) / 1000.0, int(_debug_telemetry.garden_lag_threshold_ms()), str(from_cell),
-			radius, cells_scanned, plant_candidates,
-			rejected_no_garden, rejected_not_edible, path_checks, path_failures,
-			float(path_checks_us) / 1000.0, str(found)
-		])
-	if not best_target.is_empty() and not _garden_topology.gardens().has(int(best_target.get("garden_id", 0))):
-		return {}
-	return best_target
-
-# Fills _last_local_retarget_profile at every exit so the parent breakdown can show
-# the local-retarget split (candidate search vs. path validation vs. assignment, plus
-# candidate/path-check counts) even when this whole call is below threshold. The
-# per-section .candidate_search / .assignment warnings are kept for the case where one
-# section alone spikes; this function also emits its own consolidated breakdown line
-# when its total exceeds threshold.
-# Sub-sections:
-#   candidate_search - radius scan + plant/garden filtering (search minus path checks)
-#   path_validation  - the per-candidate _find_path_in_zone calls
-#   assignment       - detach + assign_agent_path + phase-dict bookkeeping
-func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell: Vector2i) -> bool:
-	var total_us: int = Time.get_ticks_usec()
-	var nav_id_dbg: int = int(agent.get("nav_id"))
-	_last_local_retarget_profile = {
-		"candidates": 0,
-		"path_checks": 0,
-		"candidate_search_us": 0,
-		"path_validation_us": 0,
-		"assignment_us": 0,
-		"success": false,
-	}
-	var search_us: int = Time.get_ticks_usec()
-	var target: Dictionary = _find_local_retarget_plant(from_cell, _agent_kind(agent))
-	var search_elapsed: int = Time.get_ticks_usec() - search_us
-	# Split the search time: path validation (the find_path calls) vs. the rest of the
-	# scan. Counts/path-check time come from the plant-search profile filled just above.
-	var fl: Dictionary = _last_find_local_retarget_profile
-	var path_validation_us: int = int(fl.get("path_checks_total_us", 0))
-	_last_local_retarget_profile["candidates"] = int(fl.get("candidates_found", 0))
-	_last_local_retarget_profile["path_checks"] = int(fl.get("path_checks", 0))
-	_last_local_retarget_profile["path_validation_us"] = path_validation_us
-	_last_local_retarget_profile["candidate_search_us"] = maxi(0, search_elapsed - path_validation_us)
-	_debug_telemetry.warn_garden_task_lag_us("_try_local_retarget_agent.candidate_search", search_elapsed,
-		"nav_id=%d from=%s found=%s" % [nav_id_dbg, str(from_cell), str(not target.is_empty())])
-	if target.is_empty():
-		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
-		return false
-	var plant_cell: Vector2i = target.get("plant_cell", INVALID_CELL) as Vector2i
-	var garden_id: int = int(target.get("garden_id", 0))
-	var path_cells: PackedVector2Array = target.get("path_cells", PackedVector2Array()) as PackedVector2Array
-	if plant_cell == INVALID_CELL or garden_id <= 0 or path_cells.is_empty():
-		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
-		return false
-	var route_spawner_cell: Vector2i = _select_spawner_for_garden_from_cell(garden_id, from_cell, spawner_cell, _agent_kind(agent))
-	if route_spawner_cell == INVALID_CELL:
-		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
-		return false
-	var assign_us: int = Time.get_ticks_usec()
-	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
-	if agent_manager and agent_manager.has_method("assign_agent_path"):
-		agent_manager.call("assign_agent_path", nav_id, path_world)
-	_entry_path_agents.erase(nav_id)
-	_set_astar_in_agent(nav_id, {
-		"node": agent,
-		"plant_cell": plant_cell,
-		"spawner_cell": route_spawner_cell,
-		"garden_id": garden_id,
-		"path_world": path_world
-	})
-	agent.set_meta("spawner_cell", route_spawner_cell)
-	agent.set_meta("garden_id", garden_id)
-	# Record the entry tile once it is known valid so the in-garden entry is tracked.
-	var in_entry_cell: Vector2i = _nearest_garden_entry(garden_id, route_spawner_cell)
-	if in_entry_cell != INVALID_CELL:
-		agent.set_meta("garden_entry_cell", in_entry_cell)
-	if agent.has_method("start_astar_in"):
-		agent.call("start_astar_in")
-	var assignment_elapsed: int = Time.get_ticks_usec() - assign_us
-	_last_local_retarget_profile["assignment_us"] = assignment_elapsed
-	_debug_telemetry.warn_garden_task_lag_us("_try_local_retarget_agent.assignment", assignment_elapsed,
-		"nav_id=%d garden=%d plant=%s path_len=%d" % [nav_id, garden_id, str(plant_cell), path_cells.size()])
-	_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, true)
-	return true
-
-# Stamp the local-retarget total + success and emit a consolidated breakdown line when
-# this attempt alone exceeds threshold. (The parent reads _last_local_retarget_profile
-# directly for its own line, so this is only for the local-spike case.)
-func _finish_local_retarget_profile(nav_id: int, from_cell: Vector2i, total_start_us: int, success: bool) -> void:
-	var total_us: int = Time.get_ticks_usec() - total_start_us
-	_last_local_retarget_profile["success"] = success
-	_last_local_retarget_profile["total_us"] = total_us
-	if not _debug_telemetry.over_garden_threshold_us(total_us):
-		return
-	var p: Dictionary = _last_local_retarget_profile
-	push_warning("debug_garden_lag_breakdown:_try_local_retarget_agent total=%.1fms nav_id=%d from=%s success=%s candidates=%d path_checks=%d candidate_search=%.1fms path_validation=%.1fms assign=%.1fms" % [
-		float(total_us) / 1000.0, nav_id, str(from_cell), str(success),
-		int(p.get("candidates", 0)), int(p.get("path_checks", 0)),
-		float(p.get("candidate_search_us", 0)) / 1000.0,
-		float(p.get("path_validation_us", 0)) / 1000.0,
-		float(p.get("assignment_us", 0)) / 1000.0,
-	])
-
 func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
 	if not is_instance_valid(agent):
 		return false
@@ -3354,219 +2946,10 @@ func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int)
 # an escape could be assigned, so the budgeted queue can requeue it. Every escape
 # fallback below propagates _assign_agent_to_escape's own success/failure.
 #
-# Parent-triggered breakdown: _impl accumulates every inner section's time into a
-# fresh _last_retarget_profile (cheap int writes, no per-section warnings). Here, when
-# the total exceeds threshold, we emit ONE "debug_garden_lag_breakdown" line with the
-# full section split — so a 16-18ms total whose cost is spread across several
-# sub-threshold sections is still fully explained on a single line.
+# GardenRetargetController owns the breakdown profiling and emits the consolidated
+# "debug_garden_lag_breakdown" line when this path exceeds the debug threshold.
 func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
-	if not is_instance_valid(agent):
-		return false
-	var retarget_us: int = Time.get_ticks_usec()
-	var nav_id_dbg: int = int(agent.get("nav_id"))
-	var assigned: bool = _retarget_agent_or_escape_impl(agent, spawner_cell)
-	var total_us: int = Time.get_ticks_usec() - retarget_us
-	if _debug_telemetry.over_garden_threshold_us(total_us):
-		_emit_retarget_breakdown(nav_id_dbg, assigned, total_us)
-	return assigned
-
-# Build and push the single consolidated breakdown line. Reads the section timings
-# accumulated by _impl (_last_retarget_profile) plus the local-retarget and path-zone
-# profiles filled by the child functions. Only called when over threshold, so the
-# (larger) string is built only on a real spike.
-func _emit_retarget_breakdown(nav_id: int, assigned: bool, total_us: int) -> void:
-	var p: Dictionary = _last_retarget_profile
-	var lr: Dictionary = _last_local_retarget_profile
-	var fpz: Dictionary = _find_path_in_zone_accum
-	var entry_cache_misses: int = int(p.get("entry_cache_misses", 0))
-	var msg: String = "nav_id=%d assigned=%s reason=%s lookup=%.1fms resolve=%.1fms local_retarget=%.1fms escape=%.1fms assign=%.1fms entry_cache_hit=%s entry_cache_hits=%d entry_cache_misses=%d entry_cache_size=%d" % [
-		nav_id, str(assigned), str(p.get("reason", "")),
-		float(p.get("lookup_us", 0)) / 1000.0,
-		float(p.get("resolve_us", 0)) / 1000.0,
-		float(p.get("local_retarget_us", 0)) / 1000.0,
-		float(p.get("escape_us", 0)) / 1000.0,
-		float(p.get("assign_us", 0)) / 1000.0,
-		str(entry_cache_misses == 0),
-		int(p.get("entry_cache_hits", 0)),
-		entry_cache_misses,
-		int(p.get("entry_cache_size", 0)),
-	]
-	# Local-retarget detail (filled only when the local attempt actually ran).
-	if not lr.is_empty():
-		msg += " local_candidates=%d local_path_checks=%d local_search=%.1fms local_path_validation=%.1fms local_assign=%.1fms local_success=%s" % [
-			int(lr.get("candidates", 0)), int(lr.get("path_checks", 0)),
-			float(lr.get("candidate_search_us", 0)) / 1000.0,
-			float(lr.get("path_validation_us", 0)) / 1000.0,
-			float(lr.get("assignment_us", 0)) / 1000.0,
-			str(lr.get("success", false)),
-		]
-	# Path-in-zone aggregate (across every _find_path_in_zone call this retarget).
-	if int(fpz.get("call_count", 0)) > 0:
-		msg += " path_calls=%d path_total=%.1fms path_sync=%.1fms path_blockers=%.1fms path_find=%.1fms max_path=%.1fms max_path_from=%s max_path_to=%s max_zone_tiles=%d" % [
-			int(fpz.get("call_count", 0)),
-			float(fpz.get("total_us", 0)) / 1000.0,
-			float(fpz.get("sync_zone_total_us", 0)) / 1000.0,
-			float(fpz.get("blocker_total_us", 0)) / 1000.0,
-			float(fpz.get("find_path_total_us", 0)) / 1000.0,
-			float(fpz.get("max_single_call_us", 0)) / 1000.0,
-			str(fpz.get("max_single_call_from", INVALID_CELL)),
-			str(fpz.get("max_single_call_to", INVALID_CELL)),
-			int(fpz.get("max_zone_tiles", 0)),
-		]
-	var threshold_ms: float = _debug_telemetry.garden_lag_threshold_ms()
-	push_warning("debug_garden_lag_breakdown:_retarget_agent_or_escape total=%.1fms threshold=%dms %s" % [
-		float(total_us) / 1000.0, int(threshold_ms), msg
-	])
-
-# Reset all retarget profiling accumulators at the start of a retarget. Cheap; keeps a
-# stale profile from a previous (possibly different code path) retarget out of the next
-# breakdown line.
-func _reset_retarget_profile() -> void:
-	_last_retarget_profile = {
-		"reason": "",
-		"lookup_us": 0,
-		"resolve_us": 0,
-		"local_retarget_us": 0,
-		"escape_us": 0,
-		"assign_us": 0,
-		"entry_cache_hits": 0,
-		"entry_cache_misses": 0,
-		"entry_cache_size": 0,
-	}
-	_last_local_retarget_profile = {}
-	_last_find_local_retarget_profile = {}
-	_reset_find_path_in_zone_accum()
-
-# The path-zone accumulator is reset at the start of the local plant search (the only
-# place that loops _find_path_in_zone during retarget) so its aggregate reflects just
-# that retarget's path queries.
-func _reset_find_path_in_zone_accum() -> void:
-	_find_path_in_zone_accum = {
-		"call_count": 0,
-		"total_us": 0,
-		"sync_zone_total_us": 0,
-		"blocker_total_us": 0,
-		"find_path_total_us": 0,
-		"max_single_call_us": 0,
-		"max_single_call_from": INVALID_CELL,
-		"max_single_call_to": INVALID_CELL,
-		"max_zone_tiles": 0,
-	}
-
-# Sub-detectors (all gated on debug_gardens_lag_ms via debug telemetry) are
-# kept for the case where ONE section alone spikes. The accumulated section timings in
-# _last_retarget_profile are what feed the consolidated parent breakdown above.
-#   .validity       - is_instance_valid + no_plants_remaining gate + from_cell resolve
-#   .local_retarget - _try_local_retarget_agent (radius scan + per-candidate paths)
-#   .target_resolve - _select_spawner_garden_for_agent + route lookup/entry resolution
-#   .escape         - _assign_agent_to_escape fallback (whichever branch reaches it)
-#   .final_assign   - _assign_agent_to_garden_entry_flow + set_agent_never_rest
-func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bool:
-	_reset_retarget_profile()
-	var t_val: int = Time.get_ticks_usec()
-	if not is_instance_valid(agent):
-		return false
-	var nav_id_dbg: int = int(agent.get("nav_id"))
-	var agent_kind: StringName = _agent_kind(agent)
-	# Agent validity / target precondition: no valid targets left -> straight to escape.
-	var no_plants: bool = _no_targets_remaining_for_kind(agent_kind)
-	var from_cell: Vector2i = INVALID_CELL
-	if not no_plants:
-		from_cell = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var lookup_us: int = Time.get_ticks_usec() - t_val
-	_last_retarget_profile["lookup_us"] = lookup_us
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.validity", lookup_us,
-		"nav_id=%d no_plants=%s" % [nav_id_dbg, str(no_plants)])
-	if no_plants:
-		_last_retarget_profile["reason"] = "no_plants"
-		var t_esc0: int = Time.get_ticks_usec()
-		var esc0: bool = _assign_agent_to_escape(agent)
-		var esc0_us: int = Time.get_ticks_usec() - t_esc0
-		_last_retarget_profile["escape_us"] = esc0_us
-		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc0_us,
-			"nav_id=%d reason=no_plants assigned=%s" % [nav_id_dbg, str(esc0)])
-		return esc0
-
-	# Local retarget attempt: radius scan around the agent + per-candidate path checks.
-	var local_us: int = Time.get_ticks_usec()
-	var local_ok: bool = _try_local_retarget_agent(agent, from_cell, spawner_cell)
-	var local_retarget_us: int = Time.get_ticks_usec() - local_us
-	_last_retarget_profile["local_retarget_us"] = local_retarget_us
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.local_retarget", local_retarget_us,
-		"nav_id=%d from=%s ok=%s" % [nav_id_dbg, str(from_cell), str(local_ok)])
-	if local_ok:
-		_last_retarget_profile["reason"] = "local_retarget"
-		return true
-
-	# Current garden / target resolution: pick a (spawner, garden) pair and resolve its
-	# entry route. Cheap normally, but timed so a slow _select_spawner_garden_for_agent
-	# or route recompute is attributable rather than lumped into the parent total.
-	var t_res: int = Time.get_ticks_usec()
-	var pair: Dictionary = _select_spawner_garden_for_agent(from_cell, agent_kind)
-	# Cache stats for this resolve (set by _select_spawner_garden_for_agent's loop).
-	_last_retarget_profile["entry_cache_hits"] = _garden_entry_resolve_hits
-	_last_retarget_profile["entry_cache_misses"] = _garden_entry_resolve_misses
-	_last_retarget_profile["entry_cache_size"] = _garden_entry_resolve_cache.size()
-	if pair.is_empty():
-		if spawner_cell == INVALID_CELL:
-			spawner_cell = _nearest_spawner_cell(from_cell)
-		if spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(spawner_cell):
-			agent.set_meta("spawner_cell", spawner_cell)
-		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
-			"nav_id=%d pair=empty" % nav_id_dbg)
-		return _escape_with_detector(agent, nav_id_dbg, "no_pair")
-	spawner_cell = pair.get("spawner_cell", INVALID_CELL) as Vector2i
-	var garden_id: int = int(pair.get("garden_id", 0))
-	if garden_id <= 0:
-		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
-			"nav_id=%d garden=0" % nav_id_dbg)
-		return _escape_with_detector(agent, nav_id_dbg, "garden<=0")
-	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-	if not bool(route.get("ready", false)):
-		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
-			"nav_id=%d garden=%d route_not_ready" % [nav_id_dbg, garden_id])
-		return _escape_with_detector(agent, nav_id_dbg, "route_not_ready")
-	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-	if entry_cell == INVALID_CELL:
-		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
-			"nav_id=%d garden=%d no_entry" % [nav_id_dbg, garden_id])
-		return _escape_with_detector(agent, nav_id_dbg, "no_entry")
-	var resolve_us: int = Time.get_ticks_usec() - t_res
-	_last_retarget_profile["resolve_us"] = resolve_us
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", resolve_us,
-		"nav_id=%d garden=%d entry=%s" % [nav_id_dbg, garden_id, str(entry_cell)])
-
-	# Final assignment section: attach the garden-entry flow leg.
-	var t_fin: int = Time.get_ticks_usec()
-	var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
-	var fin_us: int = Time.get_ticks_usec() - t_fin
-	_last_retarget_profile["assign_us"] = fin_us
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.final_assign", fin_us,
-		"nav_id=%d garden=%d entry=%s assigned=%s" % [nav_id_dbg, garden_id, str(entry_cell), str(assigned)])
-	if not assigned:
-		return _escape_with_detector(agent, nav_id_dbg, "entry_flow_failed")
-	_last_retarget_profile["reason"] = "garden_entry"
-	var nav_id: int = int(agent.get("nav_id"))
-	if agent_manager.has_method("set_agent_never_rest"):
-		agent_manager.call("set_agent_never_rest", nav_id, true)
-	return true
-
-# Escape fallback wrapped with its own sub-detector so a slow _assign_agent_to_escape
-# is attributed to .escape (with the branch reason) instead of the parent total. Also
-# accumulates the escape time + reason into the parent breakdown profile.
-func _escape_with_detector(agent: Node2D, nav_id_dbg: int, reason: String) -> bool:
-	var t_esc: int = Time.get_ticks_usec()
-	var esc: bool = _assign_agent_to_escape(agent)
-	var esc_us: int = Time.get_ticks_usec() - t_esc
-	_last_retarget_profile["escape_us"] = esc_us
-	_last_retarget_profile["reason"] = "escape:" + reason
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc_us,
-		"nav_id=%d reason=%s assigned=%s" % [nav_id_dbg, reason, str(esc)])
-	return esc
+	return _garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
 
 # ---------------------------------------------------------------------------
 # Budgeted retargeting after a garden topology rebuild.
@@ -3582,113 +2965,15 @@ func _escape_with_detector(agent: Node2D, nav_id_dbg: int, reason: String) -> bo
 #      count cap), doing the expensive re-path/escape.
 # ---------------------------------------------------------------------------
 
-# Resolve the agent node for a nav_id without scanning the monsters group.
-# AgentManagerNative keeps an id -> node map, so find_node_by_agent is O(1).
-func _agent_from_nav_id(nav_id: int) -> Node2D:
-	if agent_manager and agent_manager.has_method("find_node_by_agent"):
-		var node: Variant = agent_manager.call("find_node_by_agent", nav_id)
-		if is_instance_valid(node) and node is Node2D:
-			return node as Node2D
-	return null
-
-# A garden assignment is stale (needs retargeting) when:
-#   - the garden no longer exists in _garden_topology.gardens(), or
-#   - it exists but has no edible plants (matches the route-validity logic used
-#     elsewhere). garden_id <= 0 means "no garden assigned" and is never stale.
-func _garden_assignment_is_stale(garden_id: int) -> bool:
-	if garden_id <= 0:
-		return false
-	if not _garden_topology.gardens().has(garden_id):
-		return true
-	if not _garden_has_edible_plants(garden_id):
-		return true
-	return false
-
-# Cheapest available view of which garden an agent is currently bound to, checked
-# in phase priority order (the dictionaries reflect the agent's live phase, the
-# meta is the last-known fallback). Returns 0 when no garden is referenced.
-func _agent_referenced_garden_id(nav_id: int, agent: Node2D) -> int:
-	if _entry_path_agents.has(nav_id):
-		return int((_entry_path_agents[nav_id] as Dictionary).get("garden_id", 0))
-	if _astar_in_agents.has(nav_id):
-		return int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0))
-	if _eating_agents.has(nav_id):
-		var eat_garden: int = int((_eating_agents[nav_id] as Dictionary).get("garden_id", 0))
-		if eat_garden > 0:
-			return eat_garden
-		# garden_id missing/0 on the eating entry: fall through to the meta below.
-	if is_instance_valid(agent) and agent.has_meta("garden_id"):
-		return int(agent.get_meta("garden_id"))
-	return 0
-
-# Shared enqueue path for ALL budgeted retargeting (full rebuild, empty-garden,
-# escape-all). Cheaply detaches the agent's stale path/flow, forgets its current
-# phase, parks it in "waiting_new_status", and appends one queue item. NO new
-# path/flow is computed here — that is deferred to _process_garden_retarget_queue.
-# Dedups on _garden_retarget_queued so an agent is never enqueued twice. Keeping
-# this in one place guarantees identical queue behaviour across every caller.
-# Returns true if the agent was newly enqueued this call, false if it was already
-# queued or could not be queued (invalid nav_id/agent). Callers use this to keep
-# accurate queued-vs-already-queued bookkeeping.
 func _queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String, spawner_cell: Vector2i, garden_id: int) -> bool:
-	if nav_id < 0 or not is_instance_valid(agent):
-		return false
-	if _garden_retarget_queued.has(nav_id):
-		return false
-	# Cheaply detach stale path/flow so the agent stops following an invalid route
-	# immediately. The real re-route happens later in the budgeted queue.
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	_escaping_agents.erase(nav_id)
-	if _eating_agents.has(nav_id):
-		_erase_eating_agent(nav_id)
-		if agent.has_method("stop_eating"):
-			agent.call("stop_eating")
-	if agent.has_method("start_waiting_new_status"):
-		agent.call("start_waiting_new_status")
-	_garden_retarget_queue.append({
-		"nav_id": nav_id,
-		"intent": intent,
-		"spawner_cell": spawner_cell,
-		"garden_id": garden_id
-	})
-	_garden_retarget_queued[nav_id] = true
-	return true
+	return _garden_retarget.queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
 
 # One-shot scan after a FULL garden rebuild. Cheap checks only: detect agents whose
 # garden reference is now stale, enqueue each via the shared helper. The expensive
 # re-path/escape is deferred to the budgeted queue. Iterates a snapshot of the
 # monsters group so the helper's per-agent erases never mutate a live iteration.
 func _queue_agents_after_garden_rebuild() -> void:
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D):
-			continue
-		var agent: Node2D = node
-		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0:
-			continue
-		if _garden_retarget_queued.has(nav_id):
-			continue
-		var garden_id: int = _agent_referenced_garden_id(nav_id, agent)
-		if not _garden_assignment_is_stale(garden_id):
-			continue
-		# Decide intent BEFORE the helper clears the agent's phase dictionaries:
-		# agents that were eating should head for the exit, everyone else retargets.
-		var intent: String = "retarget"
-		if _eating_agents.has(nav_id):
-			intent = "escape"
-		var spawner_cell: Vector2i = INVALID_CELL
-		if agent.has_meta("spawner_cell"):
-			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-		_queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
-	# _garden_has_edible_plants (via _garden_assignment_is_stale) may have queued
-	# stale-empty gardens; this loop iterates monsters, not _garden_topology.gardens(), so draining
-	# here is safe.
-	_drain_pending_empty_gardens()
+	_garden_retarget.queue_agents_after_garden_rebuild()
 
 # Content-only removal emptied a garden. Queue every agent bound to it through the
 # existing budgeted queue, then release the garden's routes and erase it. We must
@@ -3698,105 +2983,14 @@ func _queue_agents_after_garden_rebuild() -> void:
 # is computed here — that is the budgeted queue's job. We do NOT rebuild gardens
 # and do NOT recompute entry cells.
 func _handle_garden_became_empty(garden_id: int) -> void:
-	if garden_id <= 0:
-		return
-	# Intent per phase: agents heading in (entry/astar_in) look for another garden
-	# (retarget). Agents mid-eat are intentionally left untouched (see below) so they
-	# finish their eating delay before self-escaping.
-	for raw_nav_id in _entry_path_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _entry_path_agents.has(nav_id):
-			continue
-		if int((_entry_path_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
-			continue
-		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
-	for raw_nav_id in _astar_in_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_in_agents.has(nav_id):
-			continue
-		if int((_astar_in_agents[nav_id] as Dictionary).get("garden_id", 0)) != garden_id:
-			continue
-		_queue_affected_empty_garden_agent(nav_id, "retarget", garden_id)
-	# Agents mid-eat are deliberately NOT touched here. A garden empties precisely
-	# because an eater consumed its last plant (see _consume_plant: start_eating runs,
-	# then remove_plant fires this synchronously while the eater sits in _eating_agents).
-	# Pulling them out now would abort the eating delay and make the final eater leave
-	# instantly. Instead they finish their timer and self-escape via _process_eating_
-	# agents, whose exit-wall FF escape does not depend on the garden still existing.
-	# Meta-only fallback: agents that lost their phase entry but still carry this
-	# garden in meta (e.g. mid-transition). Scan the monsters group once.
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D):
-			continue
-		var agent: Node2D = node
-		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
-			continue
-		# Same rule as above: never disturb an agent that is currently eating.
-		if _eating_agents.has(nav_id):
-			continue
-		if not agent.has_meta("garden_id"):
-			continue
-		if int(agent.get_meta("garden_id")) != garden_id:
-			continue
-		var spawner_cell: Vector2i = INVALID_CELL
-		if agent.has_meta("spawner_cell"):
-			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-		_queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
-	# Now that affected agents are parked/queued, release routes and erase the
-	# garden. _mark_garden_empty clears plant_cells, releases routes, and erases.
-	_mark_garden_empty(garden_id)
-
-# Helper for _handle_garden_became_empty: resolve the agent node + spawner_cell
-# for a queued nav_id and hand it to the shared queue helper. Reads spawner_cell
-# from the phase entry if present, else from meta.
-func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: int) -> void:
-	if _garden_retarget_queued.has(nav_id):
-		return
-	var agent: Node2D = _agent_from_nav_id(nav_id)
-	if not is_instance_valid(agent):
-		# Agent is gone; still drop its stale phase entries so nothing dangles.
-		_entry_path_agents.erase(nav_id)
-		_erase_astar_in_agent(nav_id)
-		_erase_eating_agent(nav_id)
-		return
-	var spawner_cell: Vector2i = INVALID_CELL
-	if _entry_path_agents.has(nav_id):
-		spawner_cell = (_entry_path_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
-	elif _astar_in_agents.has(nav_id):
-		spawner_cell = (_astar_in_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
-	elif _eating_agents.has(nav_id):
-		spawner_cell = (_eating_agents[nav_id] as Dictionary).get("spawner_cell", INVALID_CELL) as Vector2i
-	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	_queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
+	_garden_retarget.handle_garden_became_empty(garden_id)
 
 # Budgeted "everyone escape" for the no-plants-left case. One scan of the monsters
 # group enqueues each valid agent (intent="escape") through the shared queue, so
 # the actual escape assignment is spread across frames by the budgeted queue
 # instead of being applied synchronously in a single frame.
 func _queue_escape_for_all_monsters_budgeted() -> void:
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D):
-			continue
-		var agent: Node2D = node
-		var nav_id: int = int(agent.get("nav_id"))
-		if nav_id < 0 or _garden_retarget_queued.has(nav_id):
-			continue
-		# Eating agents finish their delay and self-escape via _process_eating_agents;
-		# queueing them here would abort the eating timer (the last-plant case).
-		if _eating_agents.has(nav_id):
-			continue
-		# Already escaping (and not eating): leave it alone, it has a valid exit route.
-		if _escaping_agents.has(nav_id):
-			continue
-		var spawner_cell: Vector2i = INVALID_CELL
-		if agent.has_meta("spawner_cell"):
-			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-		var garden_id: int = 0
-		if agent.has_meta("garden_id"):
-			garden_id = int(agent.get_meta("garden_id"))
-		_queue_agent_for_garden_retarget(nav_id, agent, "escape", spawner_cell, garden_id)
+	_garden_retarget.queue_escape_for_all_monsters_budgeted()
 
 
 func _force_escape_for_all_monsters() -> void:
@@ -3807,11 +3001,7 @@ func _force_escape_for_all_monsters() -> void:
 		var nav_id: int = int(agent.get("nav_id"))
 		if nav_id < 0 or _drowning_controller.is_drowning(nav_id) or _escaping_agents.has(nav_id):
 			continue
-		_garden_retarget_queued.erase(nav_id)
-		for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
-			var item: Dictionary = _garden_retarget_queue[index]
-			if int(item.get("nav_id", -1)) == nav_id:
-				_garden_retarget_queue.remove_at(index)
+		_garden_retarget.remove_queued_agent(nav_id)
 		_assign_agent_to_escape(agent)
 
 # Time-budgeted: spend at most garden_retarget_budget_ms per frame on the expensive
@@ -3823,95 +3013,7 @@ func _force_escape_for_all_monsters() -> void:
 # against either budget so they can't stall the queue. Returns the number of agents
 # actually retargeted (expensive work done) for debug context.
 func _process_garden_retarget_queue() -> int:
-	if _garden_retarget_queue.is_empty():
-		return 0
-	var start_us: int = Time.get_ticks_usec()
-	var budget_us: int = int(garden_retarget_budget_ms * 1000.0)
-	var count_cap: int = garden_retarget_budget_per_frame
-	var processed: int = 0
-	while not _garden_retarget_queue.is_empty():
-		# Hard upper bound on expensive retargets per frame.
-		if processed >= count_cap:
-			break
-		# Time budget is the primary limiter: once we've done at least one expensive
-		# retarget and spent the budget, stop. When budget_us <= 0 this collapses to
-		# "one expensive retarget per frame" — the safest non-spiking fallback.
-		if processed > 0:
-			if budget_us <= 0:
-				break
-			if Time.get_ticks_usec() - start_us >= budget_us:
-				break
-		var item: Dictionary = _garden_retarget_queue.pop_front() as Dictionary
-		var nav_id: int = int(item.get("nav_id", -1))
-		_garden_retarget_queued.erase(nav_id)
-		if nav_id < 0:
-			continue
-		var agent: Node2D = _agent_from_nav_id(nav_id)
-		if not is_instance_valid(agent):
-			# Agent was freed before we got to it: nothing to do.
-			continue
-		# If the agent already received a newer valid state (e.g. another path was
-		# re-issued by other logic), it is no longer waiting — don't override it.
-		if str(agent.get("status")) != "waiting_new_status":
-			continue
-		_retarget_single_waiting_agent(nav_id, agent, item)
-		processed += 1
-	return processed
-
-# Re-assign one parked agent. intent "escape" routes it to a map exit; intent
-# "retarget" finds a new valid garden if one exists, otherwise escapes.
-#
-# CRITICAL: "waiting_new_status" is only cleared AFTER the assignment actually
-# succeeds. The assignment functions return bool now, so on failure we keep the
-# agent waiting and requeue it (bounded retries) instead of stranding it with no
-# nav state. This fixes the old bug where stop_waiting_new_status() ran first and
-# a silently-failing assignment left the agent in a dead empty status.
-func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary) -> void:
-	if not is_instance_valid(agent):
-		return
-	var single_us: int = Time.get_ticks_usec()
-	var intent: String = str(item.get("intent", "retarget"))
-	var spawner_cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
-
-	var assigned: bool = false
-	if intent == "escape":
-		assigned = _assign_agent_to_escape(agent)
-	else:
-		assigned = _retarget_agent_or_escape(agent, spawner_cell)
-	_debug_telemetry.warn_garden_task_lag_us("_retarget_single_waiting_agent", Time.get_ticks_usec() - single_us,
-		"nav_id=%d intent=%s assigned=%s" % [nav_id, intent, str(assigned)])
-
-	if assigned:
-		if agent.has_method("stop_waiting_new_status"):
-			agent.call("stop_waiting_new_status")
-		return
-	# Assignment failed (no escape route / garden route ready yet). Keep the agent
-	# parked in waiting_new_status and requeue it for a later frame.
-	_requeue_waiting_agent(item)
-
-# Max times a single agent is retried through the budgeted queue before we give
-# up. Prevents an unroutable agent (e.g. no escape ready at all) from being
-# requeued forever every frame. After the cap we clear waiting so it falls back to
-# the normal idle/arrival logic rather than spinning.
-const _GARDEN_RETARGET_MAX_RETRIES: int = 30
-
-func _requeue_waiting_agent(item: Dictionary) -> void:
-	var nav_id: int = int(item.get("nav_id", -1))
-	if nav_id < 0:
-		return
-	var retries: int = int(item.get("retries", 0)) + 1
-	if retries > _GARDEN_RETARGET_MAX_RETRIES:
-		# Give up requeuing; let the agent leave waiting so other systems can act on
-		# it. It keeps whatever (empty) status it has; arrival/idle logic recovers it.
-		var agent: Node2D = _agent_from_nav_id(nav_id)
-		if is_instance_valid(agent) and agent.has_method("stop_waiting_new_status"):
-			agent.call("stop_waiting_new_status")
-		return
-	if _garden_retarget_queued.has(nav_id):
-		return
-	item["retries"] = retries
-	_garden_retarget_queue.append(item)
-	_garden_retarget_queued[nav_id] = true
+	return _garden_retarget.process_queue()
 
 func get_plant_zone_tiles() -> Array:
 	return _garden_topology.plant_zone_tiles().keys()
@@ -4220,19 +3322,7 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 # call so the parent breakdown can show whether the path cost is spread across many
 # calls or dominated by one. Cheap; no per-call warning here.
 func _accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
-	var call_us: int = Time.get_ticks_usec() - call_start_us
-	var a: Dictionary = _find_path_in_zone_accum
-	a["call_count"] = int(a.get("call_count", 0)) + 1
-	a["total_us"] = int(a.get("total_us", 0)) + call_us
-	a["sync_zone_total_us"] = int(a.get("sync_zone_total_us", 0)) + sync_elapsed
-	a["blocker_total_us"] = int(a.get("blocker_total_us", 0)) + _last_zone_blocker_us
-	a["find_path_total_us"] = int(a.get("find_path_total_us", 0)) + find_elapsed
-	if call_us > int(a.get("max_single_call_us", 0)):
-		a["max_single_call_us"] = call_us
-		a["max_single_call_from"] = from_tile
-		a["max_single_call_to"] = to_tile
-	if zone_tiles > int(a.get("max_zone_tiles", 0)):
-		a["max_zone_tiles"] = zone_tiles
+	_garden_retarget.accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, zone_tiles)
 
 func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 	_last_zone_blocker_us = 0
