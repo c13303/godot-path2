@@ -4,8 +4,6 @@ class_name BuildingManager
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 
-const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
-const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
 const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_access_resolver.gd")
 const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/agent_navigation_phase_controller.gd")
@@ -172,6 +170,7 @@ var _building_path_service: BuildingPathService = BuildingPathService.new()
 var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
+var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -218,6 +217,7 @@ func _ready() -> void:
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
+	_agent_definition_service.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -903,38 +903,18 @@ func _valid_monster_types() -> Dictionary:
 	return types
 
 
+# Compatibility wrappers: agent definition resolution and visual/stat setup now live
+# in AgentDefinitionService. Other code may still reach these via _manager.call(...).
 func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
-	# Every monster type shares character.tscn; MonsterData (applied at spawn via
-	# _apply_monster_data) drives the per-type sprite and stats.
-	if MonsterCatalog.has_monster(monster_type):
-		return AGENT_SCENE
-	_debug_telemetry.log_spawn_failure("unknown monster_type '%s'" % String(monster_type))
-	return null
+	return _agent_definition_service.resolve_monster_scene(monster_type)
 
 
-# Apply a MonsterData bible entry to a freshly instantiated monster agent: swaps the
-# sprite, sets health, and stashes the per-agent stat overrides as metadata that the
-# native agent manager reads in spawn_agent (speed/crowd/smash scales). The
-# "monster_type" meta is also kept so the corpse can reuse the same sprite.
-func _apply_monster_data(agent: Node2D, monster_type: StringName) -> void:
-	agent.set_meta("monster_type", monster_type)
-	var data: MonsterData = MonsterCatalog.get_monster(monster_type)
-	if data == null:
-		return
-	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
-	if sprite != null:
-		if data.texture != null:
-			sprite.texture = data.texture
-		sprite.hframes = data.sprite_hframes
-		sprite.scale = data.sprite_scale
-		sprite.position = data.sprite_offset
-	# _ready() already ran (add_child), so override both the exported cap and the
-	# live pool.
-	agent.set("max_health", data.max_health)
-	agent.set("health", data.max_health)
-	agent.set_meta("monster_speed_scale", data.speed_scale)
-	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
-	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
+func _apply_monster_data(agent: Node, monster_type: StringName) -> void:
+	_agent_definition_service.apply_monster_data(agent, monster_type)
+
+
+func _apply_client_data(agent: Node) -> void:
+	_agent_definition_service.apply_client_data(agent)
 
 func _setup_plant_manager() -> void:
 	if not plant_manager:
@@ -1789,10 +1769,7 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	if agent_kind == SPAWNER_KIND_CLIENT:
 		agent.add_to_group("clients")
 		_register_desire_agent(agent, &"clients")
-		var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
-		if sprite != null:
-			sprite.texture = CLIENT_TEXTURE
-			sprite.hframes = 5
+		_apply_client_data(agent)
 	else:
 		agent.add_to_group("monsters")
 		_register_desire_agent(agent, &"monsters")

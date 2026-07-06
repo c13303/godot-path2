@@ -1,199 +1,168 @@
-Task: reduce `scripts/map/building_manager.gd` by extracting garden access/entry resolution into a dedicated RefCounted controller/service.
+Task: reduce `scripts/map/building_manager.gd` by extracting agent definition / agent visual-data setup into a dedicated RefCounted service.
 
 Context:
-`BuildingManager` is still too large. A good next extraction is the garden access scoring + nearest-entry cache logic currently near the bottom of `building_manager.gd`.
+`BuildingManager` is still too large. Previous extractions have been tested. The next extraction should move agent definition lookup and visual/stat setup out of `BuildingManager`, while preserving behavior exactly.
 
 Create a new file:
 
-`scripts/map/garden_access_resolver.gd`
+`scripts/map/agent_definition_service.gd`
 
 with:
 
 ```gdscript
 extends RefCounted
-class_name GardenAccessResolver
+class_name AgentDefinitionService
 ```
 
 Goal:
-Move the garden access-cell scoring, garden-entry selection, and entry-resolve cache out of `BuildingManager` while preserving behavior exactly.
+Move monster/client definition resolution and setup logic out of `BuildingManager`.
 
-Extract these responsibilities from `BuildingManager`:
+Extract these responsibilities from `BuildingManager` if they currently live there:
 
-* `_garden_entry_resolve_cache`
-* `_garden_entry_resolve_cache_hit`
-* `_garden_entry_resolve_hits`
-* `_garden_entry_resolve_misses`
-* `_manhattan_cell`
-* `_garden_access_outside_neighbors`
-* `_valid_walkable_neighbors_no_corner_cut`
-* `_group_route_cost_at_cell`
-* `_score_garden_access_cell`
-* `_blocked_cardinal_count`
-* `_select_scored_garden_entry`
-* `_nearest_garden_entry_manhattan`
-* `_clear_garden_entry_resolve_cache`
-* `_garden_entry_resolve_cache_key`
-* `_nearest_garden_entry`
-* `_nearest_garden_entry_to_exit`
+* monster scene resolution
+* monster catalog lookup
+* monster stat setup
+* monster texture/sprite setup
+* client texture/sprite setup
+* fallback handling for unknown monster types
 
-Also move these access-scoring constants out of `BuildingManager` into the new resolver if they are only used by this block:
+Likely methods to extract:
 
-* `ACCESS_NO_OUTSIDE_PENALTY`
-* `ACCESS_EXIT_WORSE_PENALTY`
-* `ACCESS_EXIT_FLAT_PENALTY`
-* `ACCESS_DEAD_CONTINUATION_PENALTY`
-* `ACCESS_NARROW_CONTINUATION_PENALTY`
-* `ACCESS_REVERSAL_PENALTY`
-* `ACCESS_TURN_PENALTY`
-* `ACCESS_BLOCKED_CARDINAL_PENALTY`
-* `ACCESS_ENTER_DEAD_CONTINUATION_PENALTY`
-* `ACCESS_ENTER_NARROW_CONTINUATION_PENALTY`
+* `_resolve_monster_scene`
+* `_apply_monster_data`
 
-Keep shared constants local to the resolver as needed:
+Also extract any small helper used only by those methods.
 
-```gdscript
-const IDLE_GROUP: int = 0
-const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
-```
+Do not extract spawning itself. `AgentSpawnController` should continue to own spawn orchestration.
 
 Architecture:
-Follow the existing RefCounted controller pattern already used by:
+Follow the existing RefCounted service/controller pattern.
 
-* `GardenTopologyService`
-* `GardenRetargetController`
-* `SpawnerRouteService`
-* `AgentSuspendService`
-
-The new resolver should have:
+The new service should keep a manager reference:
 
 ```gdscript
 var _manager: Node
 
 func setup(manager: Node) -> void:
-    _manager = manager
+	_manager = manager
 ```
 
-The resolver may call back into `BuildingManager` for source-of-truth state and low-level queries, same as the other controllers do.
-
-Required public API on `GardenAccessResolver`:
+Required public API:
 
 ```gdscript
-func nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i
-func nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i
-func clear_cache(reason: String = "") -> void
+func setup(manager: Node) -> void
 
-func cache_hit() -> bool
-func consume_cache_hit_flag() -> bool # optional if cleaner
-func reset_resolve_counters() -> void
-func resolve_hits() -> int
-func resolve_misses() -> int
+func resolve_monster_scene(monster_type: StringName) -> PackedScene
+func apply_monster_data(agent: Node, monster_type: StringName) -> void
+func apply_client_data(agent: Node) -> void
 ```
 
-The exact counter API can be adjusted, but existing profiling/debug behavior in `BuildingManager` and `GardenRetargetController` must remain unchanged.
+If the current code has no separate client setup helper yet, create `apply_client_data(agent)` and move the client visual setup there from spawn orchestration.
 
-Important behavior constraints:
+Integration:
 
-1. Do not change gameplay behavior.
-2. Do not change garden entry scoring results.
-3. Do not change the cache key semantics:
-
-   * key must remain based on source cell + garden id
-   * never cache only by `garden_id`
-4. Preserve stale-cache validation:
-
-   * cached `INVALID_CELL` is valid and should be reused
-   * finite cached cells must still be checked against current garden existence, `entry_cells`, and walkability
-5. Preserve the fallback to old Manhattan nearest-entry selection when scoring finds no finite candidate.
-6. Preserve debug print behavior gated by:
-
-   * `debug_logs`
-   * `CppDebugOptions.logs_enabled`
-7. No performance regression.
-8. No new topology recomputation.
-9. No change to public behavior of `BuildingManager`.
-
-Integration in `BuildingManager`:
-
-Add a member:
+Add this member to `BuildingManager`:
 
 ```gdscript
-var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
+var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
 ```
 
 In `_ready()`:
 
 ```gdscript
-_garden_access_resolver.setup(self)
+_agent_definition_service.setup(self)
 ```
 
-Replace the old methods in `BuildingManager` with thin wrappers where external callers or other controllers still expect the old private method names:
+Replace the old methods in `BuildingManager` with thin wrappers:
 
 ```gdscript
-func _nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
-    return _garden_access_resolver.nearest_garden_entry(garden_id, from_cell)
+func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
+	return _agent_definition_service.resolve_monster_scene(monster_type)
 
-func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
-    return _garden_access_resolver.nearest_garden_entry_to_exit(garden_id, spawner_cell)
+func _apply_monster_data(agent: Node, monster_type: StringName) -> void:
+	_agent_definition_service.apply_monster_data(agent, monster_type)
 
-func _clear_garden_entry_resolve_cache(reason: String = "") -> void:
-    _garden_access_resolver.clear_cache(reason)
+func _apply_client_data(agent: Node) -> void:
+	_agent_definition_service.apply_client_data(agent)
 ```
 
-If `_garden_entry_resolve_cache_hit`, `_garden_entry_resolve_hits`, or `_garden_entry_resolve_misses` are read directly inside `BuildingManager`, replace those reads with resolver accessors. Do not keep duplicate state in both classes.
-
-The resolver can access dependencies through `_manager`, for example:
+Then update `AgentSpawnController` to call:
 
 ```gdscript
-func _gardens() -> Dictionary:
-    return _manager.get("_garden_topology").gardens()
-
-func _is_walkable(cell: Vector2i) -> bool:
-    return bool(_manager.call("_is_walkable", cell))
-
-func _cell_center(cell: Vector2i) -> Vector2:
-    return _manager.call("_cell_center", cell) as Vector2
-
-func _flow() -> Node:
-    return _manager.get("flow") as Node
-
-func _spawner_route_service() -> Object:
-    return _manager.get("_spawner_route_service") as Object
+_manager.call("_apply_client_data", agent)
 ```
 
-Use the same callback style as the other extracted controllers. Do not invent a new dependency-injection architecture.
+instead of directly applying client sprite/hframes itself, if that logic currently lives in `AgentSpawnController`.
 
-Check all references before deleting code from `BuildingManager`:
+Keep compatibility wrappers in `BuildingManager` because other code may still use `_manager.call(...)`.
 
-Search for:
+Constants and resources:
+Move only constants/resources that are exclusively related to agent definitions or agent visual data.
 
-* `_nearest_garden_entry(`
-* `_nearest_garden_entry_to_exit(`
-* `_clear_garden_entry_resolve_cache(`
-* `_garden_entry_resolve_cache`
-* `_garden_entry_resolve_cache_hit`
-* `_garden_entry_resolve_hits`
-* `_garden_entry_resolve_misses`
-* `_select_scored_garden_entry(`
-* `_score_garden_access_cell(`
-* `_garden_access_outside_neighbors(`
-* `_valid_walkable_neighbors_no_corner_cut(`
-* `_group_route_cost_at_cell(`
-* `_blocked_cardinal_count(`
+Examples of things that may move if they are only used here:
+
+* client texture preload
+* monster scene fallback preload
+* monster catalog dictionary
+* default monster values
+* sprite frame defaults
+
+Do not move unrelated spawn constants.
+
+Behavior preservation requirements:
+
+1. Do not change monster type names.
+2. Do not change fallback monster behavior.
+3. Do not change default monster scene behavior.
+4. Do not change texture paths.
+5. Do not change sprite frame setup.
+6. Do not change animation setup.
+7. Do not change monster health/speed/damage/radius/stat values.
+8. Do not change metadata keys.
+9. Do not change group registration.
+10. Do not change spawn routing.
+11. Do not change desire registration.
+12. Do not change native agent registration order.
+
+Important ordering rule:
+Monster data must still be applied before native agent registration, exactly as before.
+
+The service should only apply data to an already-instantiated agent. It should not spawn, register, route, assign, or free agents.
+
+Search all references before editing:
+
+* `_resolve_monster_scene(`
+* `_apply_monster_data(`
+* `CLIENT_TEXTURE`
+* monster catalog constants/dictionaries
+* monster texture preloads
+* client sprite setup
+* `hframes`
 
 Expected result:
 
-* `building_manager.gd` loses roughly 250–350 lines.
-* Garden access scoring lives in `garden_access_resolver.gd`.
-* `BuildingManager` keeps only thin compatibility wrappers.
-* Existing controllers such as `SpawnerRouteService` and `GardenRetargetController` can continue calling `_manager.call("_nearest_garden_entry", ...)` unchanged.
-* No scene/node changes required.
+* `building_manager.gd` loses another coherent block of data/setup code.
+* `AgentSpawnController` becomes cleaner because it delegates agent-specific setup.
+* `BuildingManager` keeps compatibility wrappers only.
 * No `.tscn` changes required.
 * No gameplay behavior changes.
 
-Do not do unrelated cleanup in this task.
+Regression risks to avoid:
 
-Do not unify `BuildDirectionRules.direction_from_alternative()` here. That is a separate self-contained follow-up.
+1. Do not accidentally apply monster data after `agent_manager.spawn_agent(...)`.
+2. Do not move spawn failure cleanup into the definition service.
+3. Do not make the definition service select gardens or routes.
+4. Do not duplicate monster catalog state between `BuildingManager` and the service.
+5. Do not change resource preload paths.
+6. Do not change unknown monster fallback behavior.
+7. Do not change client group/desire registration.
+8. Do not rename concepts.
+9. Do not compile or run tests; I will do it.
 
-Do not rename garden concepts in this task.
-
-Do not compile or run tests; I will do it.
+Non-goals:
+Do not extract spawn orchestration again.
+Do not modify pathfinding.
+Do not modify garden routing.
+Do not modify playlist logic.
+Do not modify build placement/removal.
+Do not perform unrelated cleanup.
