@@ -6,7 +6,6 @@ signal startup_loading_finished
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
-const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster_corpse.tscn")
 const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
@@ -25,13 +24,10 @@ const TURRET_ID: String = "turret1"
 # diagonals) advances Chebyshev distance by 1, so a bound of 5 reproduces that
 # reach while remaining wall-aware.
 const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
-const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
-const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
-const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 # A client that has passed within this many tiles of a stocked counter's (walkable)
 # access tile grabs its rose right there and leaves, instead of finishing the walk to
 # the garden entrance / counter. Keyed off the walkable access tile, so a proximity hit
@@ -195,9 +191,6 @@ var _last_water_signature: int = 0
 var _last_blocking_signature: int = 0
 var _last_fence_signature: int = 0
 var _navigation_topology_dirty: bool = true
-var _last_scan_summary: String = ""
-var _last_spawn_failure: String = ""
-var _last_spawn_failure_at_ms: Dictionary = {}
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
@@ -286,6 +279,8 @@ var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 var _client_sale: ClientSaleController = ClientSaleController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
+var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
+var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _counter_stock_manager: CounterStockManager
 # Walkable tiles adjacent to a stocked counter, each mapped to its counter cell.
 # These are fed into the garden clustering as ordinary "plant cells" so a stocked
@@ -308,111 +303,6 @@ var _show_enters_exits: bool = false
 var _verbose: bool = false
 var _verbose_pushed: bool = false
 var _cpp_debug_options: Node = null
-
-const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
-const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
-
-# Master gate shared by every lag detector: when "Debug Enabled" is off on the
-# CPP node, all lag warnings are suppressed (mirrors _is_verbose()). Returns true
-# only when the CPP node exists AND its debug_enabled flag is explicitly false.
-func _debug_master_disabled() -> bool:
-	if _cpp_debug_options == null:
-		_cpp_debug_options = _find_cpp_debug_options()
-	if _cpp_debug_options and "debug_enabled" in _cpp_debug_options:
-		return not bool(_cpp_debug_options.get("debug_enabled"))
-	return false
-
-func _frame_lag_threshold_ms() -> float:
-	if _debug_master_disabled():
-		return 0.0
-	if global_config and global_config.has_method("get_debug_nav_frame_lag_ms"):
-		return float(global_config.call("get_debug_nav_frame_lag_ms"))
-	if global_config and global_config.has_method("get_debug_plantff_frame_lag_ms"):
-		return float(global_config.call("get_debug_plantff_frame_lag_ms"))
-	return DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK
-
-func _ff_lag_threshold_ms() -> float:
-	if _debug_master_disabled():
-		return 0.0
-	if global_config and global_config.has_method("get_debug_flowfield_rebuild_lag_ms"):
-		return float(global_config.call("get_debug_flowfield_rebuild_lag_ms"))
-	if global_config and global_config.has_method("get_debug_plantff_ff_lag_ms"):
-		return float(global_config.call("get_debug_plantff_ff_lag_ms"))
-	return DEBUG_PLANTFF_FF_LAG_MS_FALLBACK
-
-# ---------------------------------------------------------------------------
-# Granular garden/navigation lag instrumentation. The total-frame detector in
-# _process() only says "the frame was slow"; these per-task detectors say WHICH
-# garden/nav task spiked. Threshold comes from CppDebugOptions.debug_gardens_lag_ms
-# (read directly off the node; not pushed to C++). 0 disables per-task warnings.
-#
-# Overhead discipline: time with get_ticks_usec() and ONLY build the (potentially
-# large) context string when the elapsed time is over threshold. Never construct
-# context inside hot per-agent loops unless the individual op itself is over.
-# ---------------------------------------------------------------------------
-const DEBUG_GARDENS_LAG_MS_FALLBACK: float = 15.0
-
-func _find_cpp_debug_options() -> Node:
-	# The node is "CPP" in the current scene (same path _is_verbose() uses).
-	if not is_inside_tree():
-		return null
-	var scene: Node = get_tree().get_current_scene()
-	if scene == null:
-		return null
-	var node: Node = scene.get_node_or_null("CPP")
-	if node:
-		return node
-	node = scene.get_node_or_null("CppDebugOptions")
-	if node:
-		return node
-	node = scene.find_child("CppDebugOptions", true, false)
-	if node:
-		return node
-	return null
-
-func _garden_lag_threshold_ms() -> float:
-	# Master gate: when "Debug Enabled" is off on the CPP node, suppress the
-	# per-task garden-lag warnings entirely (0 = detector disabled).
-	if _debug_master_disabled():
-		return 0.0
-	if _cpp_debug_options == null:
-		_cpp_debug_options = _find_cpp_debug_options()
-	if _cpp_debug_options and "debug_gardens_lag_ms" in _cpp_debug_options:
-		return float(_cpp_debug_options.get("debug_gardens_lag_ms"))
-	return DEBUG_GARDENS_LAG_MS_FALLBACK
-
-# Warn when a timed block exceeds the per-task threshold. `elapsed_us` is in
-# microseconds (timed with get_ticks_usec()); output is reported in ms. `extra` is
-# pre-built context — callers must build it cheaply (it is unconditional here, so
-# only pass strings that are cheap to construct, or use the threshold check at the
-# call site to gate expensive context). Use _over_garden_threshold_us() to gate
-# heavy context construction before calling this.
-func _warn_garden_task_lag_us(task_name: String, elapsed_us: int, extra: String = "") -> void:
-	var threshold_ms: float = _garden_lag_threshold_ms()
-	if threshold_ms <= 0.0:
-		return
-	var elapsed_ms: float = float(elapsed_us) / 1000.0
-	if elapsed_ms <= threshold_ms:
-		return
-	var suffix: String = ""
-	if extra != "":
-		suffix = " " + extra
-	push_warning("debug_garden_lag:%s %dms (threshold=%dms)%s" % [
-		task_name,
-		int(round(elapsed_ms)),
-		int(threshold_ms),
-		suffix
-	])
-
-# True when `elapsed_us` is over the per-task threshold. Lets a call site decide
-# whether to spend cycles building an expensive context string before calling
-# _warn_garden_task_lag_us(); returns false (and skips) when the detector is
-# disabled (threshold <= 0).
-func _over_garden_threshold_us(elapsed_us: int) -> bool:
-	var threshold_ms: float = _garden_lag_threshold_ms()
-	if threshold_ms <= 0.0:
-		return false
-	return (float(elapsed_us) / 1000.0) > threshold_ms
 
 func set_empty_garden_local_retarget_radius(value: int) -> void:
 	empty_garden_local_retarget_radius = maxi(0, value)
@@ -437,6 +327,8 @@ func _ready() -> void:
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
 	_spawn_tick_controller.setup(self)
+	_debug_telemetry.setup(self)
+	_monster_death.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -1248,7 +1140,7 @@ func _process(delta: float) -> void:
 		_scan_timer = 0.25
 		t = Time.get_ticks_usec()
 		_scan_buildings()
-		_warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,
+		_debug_telemetry.warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,
 			"spawners=%d" % _spawners.size())
 
 	if not _dirty_spawner_escapes.is_empty():
@@ -1256,17 +1148,17 @@ func _process(delta: float) -> void:
 		var dirty_escapes_before: int = _dirty_spawner_escapes.size()
 		t = Time.get_ticks_usec()
 		_drain_dirty_routes()
-		_warn_garden_task_lag_us("_drain_dirty_routes", Time.get_ticks_usec() - t,
+		_debug_telemetry.warn_garden_task_lag_us("_drain_dirty_routes", Time.get_ticks_usec() - t,
 			"dirty_escapes=%d" % dirty_escapes_before)
 
-	# Per-frame tasks: gate context construction on _over_garden_threshold_us so the
+	# Per-frame tasks: gate context construction on debug telemetry thresholds so the
 	# (string-formatting) context is only built on a real spike, never every frame.
 	t = Time.get_ticks_usec()
 	_process_eating_agents(delta)
 	_process_creature_rose_trampling()
 	_process_pasteque_trampling()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
 				_eating_agents.size(), _astar_in_agents.size(),
 				_escaping_agents.size()])
@@ -1274,26 +1166,26 @@ func _process(delta: float) -> void:
 	t = Time.get_ticks_usec()
 	_turret_eating_controller.process_turret_eating_agents(delta)
 	_turret_eating_controller.process_turret_overlaps()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
 			"turret_eating=%d" % _turret_eating_controller.turret_eating_count())
 
 	t = Time.get_ticks_usec()
 	_drowning_controller.process_drowning_agents(delta)
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
 			"drowning=%d" % _drowning_controller.drowning_count())
 
 	t = Time.get_ticks_usec()
 	_process_astar_in_arrivals()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_astar_in_arrivals", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_astar_in_arrivals", Time.get_ticks_usec() - t,
 			"entry=%d astar_in=%d" % [_entry_path_agents.size(), _astar_in_agents.size()])
 
 	t = Time.get_ticks_usec()
 	_process_plant_arrivals()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_plant_arrivals", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_plant_arrivals", Time.get_ticks_usec() - t,
 			"astar_in=%d eating=%d" % [_astar_in_agents.size(), _eating_agents.size()])
 
 	t = Time.get_ticks_usec()
@@ -1301,21 +1193,21 @@ func _process(delta: float) -> void:
 	_client_tantrum.process(delta)
 	_seed_merchant.process_proximity()
 	_seed_merchant.process_arrival()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
 			"counter_agents=%d" % _client_counter_agents.size())
 
 	t = Time.get_ticks_usec()
 	_process_escape_arrivals()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
-		_warn_garden_task_lag_us("_process_escape_arrivals", Time.get_ticks_usec() - t,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		_debug_telemetry.warn_garden_task_lag_us("_process_escape_arrivals", Time.get_ticks_usec() - t,
 			"escaping=%d" % _escaping_agents.size())
 
 	t = Time.get_ticks_usec()
 	var retarget_processed: int = _process_garden_retarget_queue()
 	var retarget_elapsed_us: int = Time.get_ticks_usec() - t
-	if _over_garden_threshold_us(retarget_elapsed_us):
-		_warn_garden_task_lag_us("_process_garden_retarget_queue", retarget_elapsed_us,
+	if _debug_telemetry.over_garden_threshold_us(retarget_elapsed_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_garden_retarget_queue", retarget_elapsed_us,
 			"processed=%d remaining=%d budget=%dms elapsed=%.1fms" % [
 				retarget_processed,
 				_garden_retarget_queue.size(),
@@ -1327,10 +1219,10 @@ func _process(delta: float) -> void:
 	_spawn_tick_controller.process(delta, _playlist_spawning_enabled)
 	_client_sale.process(delta)
 	_seed_merchant.process_phase()
-	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
 		var stats: Dictionary = _spawn_tick_controller.spawn_pass_stats()
-		_warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
 			"spawners=%d processed=%d spawned=%d assigned=%d skipped=%d ready_remaining=%d budget_count=%d budget_ms=%.1f elapsed=%.1fms active_monsters=%d route_cache_hits=%d route_cache_misses=%d" % [
 				_spawners.size(),
 				int(stats.get("processed_spawners", 0)),
@@ -1348,10 +1240,10 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_sync_plant_zone_debug_visibility()
-	_warn_garden_task_lag_us("_sync_plant_zone_debug_visibility", Time.get_ticks_usec() - t)
+	_debug_telemetry.warn_garden_task_lag_us("_sync_plant_zone_debug_visibility", Time.get_ticks_usec() - t)
 
 	var frame_us: int = Time.get_ticks_usec() - frame_start_us
-	var frame_threshold_ms: float = _frame_lag_threshold_ms()
+	var frame_threshold_ms: float = _debug_telemetry.frame_lag_threshold_ms()
 	if frame_threshold_ms > 0.0 and (float(frame_us) / 1000.0) > frame_threshold_ms:
 		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_failed=%d" % [
 			int(round(float(frame_us) / 1000.0)),
@@ -1391,7 +1283,7 @@ func _scan_buildings() -> void:
 
 	var t: int = Time.get_ticks_usec()
 	var migrated: bool = _migrate_special_tiles_from_wallz()
-	_warn_garden_task_lag_us("_migrate_special_tiles_from_wallz", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_migrate_special_tiles_from_wallz", Time.get_ticks_usec() - t,
 		"migrated=%s" % str(migrated))
 
 	t = Time.get_ticks_usec()
@@ -1399,7 +1291,7 @@ func _scan_buildings() -> void:
 	var water_signature: int = _tile_layer_signature(watersources)
 	var blocking_signature: int = _tile_layer_signature(blocking_buildings)
 	var fence_signature: int = _tile_layer_signature(fences)
-	_warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
 		"wall_cells=%d water_cells=%d fence_cells=%d" % [
 			wallz.get_used_cells().size() if wallz else 0,
 			watersources.get_used_cells().size() if watersources else 0,
@@ -1424,9 +1316,9 @@ func _scan_buildings() -> void:
 	_scan_configured_spawner_nodes(seen_spawners)
 	_scan_special_layer(traversable_buildings, seen_spawners)
 	_scan_special_layer(wallz, seen_spawners)
-	_warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
 		"seen_spawners=%d" % seen_spawners.size())
-	_log_scan_summary(seen_spawners, migrated, walls_changed)
+	_debug_telemetry.log_scan_summary(seen_spawners, migrated, walls_changed)
 
 	for raw_spawner_cell in _spawners.keys():
 		var cell: Vector2i = raw_spawner_cell
@@ -1454,7 +1346,7 @@ func _apply_navigation_topology_rebuild() -> void:
 		_dirty_spawner_escapes[spawner_cell] = true
 	var exits_us: int = Time.get_ticks_usec()
 	_rebuild_exit_wall_escapes()
-	_warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
+	_debug_telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
 		"exits=%d" % _exit_wall_escapes.size())
 
 func _sync_flow_extra_blocking_cells() -> void:
@@ -1564,7 +1456,7 @@ func _validate_playlist_after_spawner_scan() -> void:
 		_spawner_bindings_by_id.size(),
 	])
 	if debug_logs:
-		_log("Configured spawn playlist nights=%d bindings=%d" % [
+		_debug_telemetry.log("Configured spawn playlist nights=%d bindings=%d" % [
 			_spawn_playlist_controller.get_total_night_count(),
 			_spawner_bindings_by_id.size(),
 		])
@@ -1582,7 +1474,7 @@ func _resolve_monster_scene(monster_type: StringName) -> PackedScene:
 	# _apply_monster_data) drives the per-type sprite and stats.
 	if MonsterCatalog.has_monster(monster_type):
 		return AGENT_SCENE
-	_log_spawn_failure("unknown monster_type '%s'" % String(monster_type))
+	_debug_telemetry.log_spawn_failure("unknown monster_type '%s'" % String(monster_type))
 	return null
 
 
@@ -1784,12 +1676,12 @@ func _on_plant_removed(cell: Vector2i) -> void:
 	if became_empty and garden_id > 0:
 		var empty_us: int = Time.get_ticks_usec()
 		_handle_garden_became_empty(garden_id)
-		_warn_garden_task_lag_us("_handle_garden_became_empty", Time.get_ticks_usec() - empty_us,
+		_debug_telemetry.warn_garden_task_lag_us("_handle_garden_became_empty", Time.get_ticks_usec() - empty_us,
 			"garden=%d retarget_queue=%d" % [garden_id, _garden_retarget_queue.size()])
 	else:
 		var rt_us: int = Time.get_ticks_usec()
 		_retarget_agents_targeting_removed_plant_only(cell, garden_id)
-		_warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agents_targeting_removed_plant_only", Time.get_ticks_usec() - rt_us,
 			"garden=%d plant=%s astar_in=%d bucket_size=%d valid_affected=%d queued=%d already_queued=%d stale=%d indexed_targets=%d" % [
 				garden_id, str(cell), _last_plant_retarget_astar_in,
 				_last_plant_retarget_bucket, _last_plant_retarget_affected,
@@ -1801,7 +1693,7 @@ func _on_plant_removed(cell: Vector2i) -> void:
 
 	if _no_plants_remaining():
 		_queue_escape_for_all_monsters_budgeted()
-	_warn_garden_task_lag_us("_on_plant_removed", Time.get_ticks_usec() - removed_us,
+	_debug_telemetry.warn_garden_task_lag_us("_on_plant_removed", Time.get_ticks_usec() - removed_us,
 		"garden=%d empty=%s" % [garden_id, str(became_empty)])
 
 
@@ -1826,7 +1718,7 @@ func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 			continue
 		if binding.kind != SPAWNER_KIND_MONSTER and binding.kind != SPAWNER_KIND_CLIENT and binding.kind != SPAWNER_KIND_MERCHANT:
 			continue
-		_log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
+		_debug_telemetry.log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
 			String(binding.spawner_id),
 			binding.cell,
 			_has_floor(binding.cell),
@@ -1850,7 +1742,7 @@ func _migrate_special_tiles_from_wallz() -> bool:
 			var legacy_atlas: Vector2i = wallz.get_cell_atlas_coords(cell)
 			wallz.erase_cell(cell)
 			migrated = true
-			_log("removed legacy spawner tile cell=%s atlas=%s from wallz; level spawner nodes are used instead" % [
+			_debug_telemetry.log("removed legacy spawner tile cell=%s atlas=%s from wallz; level spawner nodes are used instead" % [
 				cell,
 				legacy_atlas,
 			])
@@ -1867,7 +1759,7 @@ func _migrate_special_tiles_from_wallz() -> bool:
 		)
 		wallz.erase_cell(cell)
 		migrated = true
-		_log("migrated special tile kind=%s cell=%s atlas=%s from wallz to %s" % [
+		_debug_telemetry.log("migrated special tile kind=%s cell=%s atlas=%s from wallz to %s" % [
 			kind,
 			cell,
 			target_layer.get_cell_atlas_coords(cell),
@@ -2035,7 +1927,7 @@ func _initialize_spawner_route(spawner_cell: Vector2i) -> void:
 		route["escape_ready"] = false
 
 	_spawner_routes[spawner_cell] = route
-	_log("initialized spawner=%s exit_wall=%s escape_target=%s" % [
+	_debug_telemetry.log("initialized spawner=%s exit_wall=%s escape_target=%s" % [
 		spawner_cell, exit_wall_cell, escape_wall_target_cell
 	])
 
@@ -2657,10 +2549,7 @@ func _report_playlist_spawn_result(request: Dictionary, success: bool, failure_r
 	_spawn_playlist_controller.mark_spawn_result(track_index, success, failure_reason)
 	if not success:
 		var warning_key: String = "playlist:%d" % track_index
-		var now_ms: int = Time.get_ticks_msec()
-		var last_ms: int = int(_last_spawn_failure_at_ms.get(warning_key, -SPAWN_FAILURE_WARN_INTERVAL_MS))
-		if now_ms - last_ms >= SPAWN_FAILURE_WARN_INTERVAL_MS:
-			_last_spawn_failure_at_ms[warning_key] = now_ms
+		if _debug_telemetry.should_warn_spawn_failure_key(warning_key):
 			push_warning("BuildingManager: playlist spawn failed: %s reason=%s" % [
 				_spawn_playlist_controller.get_track_debug_context(track_index),
 				failure_reason,
@@ -2684,11 +2573,11 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	var t_sel: int = Time.get_ticks_usec()
 	var garden_id: int = _select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _select_garden_for_spawner(spawner_cell)
 	var sel_us: int = Time.get_ticks_usec() - t_sel
-	if _over_garden_threshold_us(sel_us):
-		_warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
+	if _debug_telemetry.over_garden_threshold_us(sel_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
 			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _gardens.size(), garden_id])
 	if garden_id <= 0:
-		_log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
+		_debug_telemetry.log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
 		return false
 
 	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute
@@ -2696,19 +2585,19 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	var t_route: int = Time.get_ticks_usec()
 	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	var route_us: int = Time.get_ticks_usec() - t_route
-	if _over_garden_threshold_us(route_us):
-		_warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
+	if _debug_telemetry.over_garden_threshold_us(route_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
 			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
 	if not bool(route.get("ready", false)):
-		_log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
+		_debug_telemetry.log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
 		return false
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
-		_log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
+		_debug_telemetry.log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
 		return false
 
 	if not _is_sane_cell(entry_cell):
-		_log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
+		_debug_telemetry.log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
 		return false
 
 	# Occupied-cell scan: walks the main_chars/monsters/player scene groups every
@@ -2716,8 +2605,8 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	var t_occ: int = Time.get_ticks_usec()
 	var occupied: Array[Vector2i] = _occupied_cells()
 	var occ_us: int = Time.get_ticks_usec() - t_occ
-	if _over_garden_threshold_us(occ_us):
-		_warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
+	if _debug_telemetry.over_garden_threshold_us(occ_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
 			"spawner_cell=%s occupied=%d" % [str(spawner_cell), occupied.size()])
 
 	# Free-cell search: spirals out from the spawner doing per-cell walkable/wall
@@ -2726,11 +2615,11 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 	var t_free: int = Time.get_ticks_usec()
 	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
 	var free_us: int = Time.get_ticks_usec() - t_free
-	if _over_garden_threshold_us(free_us):
-		_warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
+	if _debug_telemetry.over_garden_threshold_us(free_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
 			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
-		_log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
+		_debug_telemetry.log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
 		return false
 
 	# Instantiate + add_child + group registration of the agent scene.
@@ -2756,8 +2645,8 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 		_apply_monster_data(agent, monster_type)
 	agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
-	if _over_garden_threshold_us(inst_us):
-		_warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
+	if _debug_telemetry.over_garden_threshold_us(inst_us):
+		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
 			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 
 	if agent_manager and agent_manager.has_method("spawn_agent"):
@@ -2768,8 +2657,8 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 		if agent_manager.has_method("set_agent_never_rest"):
 			agent_manager.call("set_agent_never_rest", nav_id, true)
 		var reg_us: int = Time.get_ticks_usec() - t_reg
-		if _over_garden_threshold_us(reg_us):
-			_warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
+		if _debug_telemetry.over_garden_threshold_us(reg_us):
+			_debug_telemetry.warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
 				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
 
 		# Assign the garden-entry route: attaches the monster to the entry flow
@@ -2777,8 +2666,8 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 		var t_assign: int = Time.get_ticks_usec()
 		var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 		var assign_us: int = Time.get_ticks_usec() - t_assign
-		if _over_garden_threshold_us(assign_us):
-			_warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
+		if _debug_telemetry.over_garden_threshold_us(assign_us):
+			_debug_telemetry.warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
 				"spawner_cell=%s garden=%d entry=%s assigned=%s" % [
 					str(spawner_cell), garden_id, str(entry_cell), str(assigned)])
 		if not assigned:
@@ -2788,11 +2677,11 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 			_unregister_desire_agent(agent)
 			agent.remove_from_group(failed_group)
 			agent.queue_free()
-			_log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
+			_debug_telemetry.log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
 			return false
 		_spawn_tick_controller.increment_assigned_count()
 		var kind_label: String = "client" if agent_kind == SPAWNER_KIND_CLIENT else "monster"
-		_log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
+		_debug_telemetry.log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
 			kind_label, nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
@@ -3128,7 +3017,7 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 	var consume_us: int = Time.get_ticks_usec()
 	if _agent_kind(eater) == SPAWNER_KIND_CLIENT:
 		_start_client_payment(eater, plant_cell)
-		_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+		_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 			"client plant=%s" % str(plant_cell))
 		return
 	_start_agent_eating(eater, _eating_time, plant_cell)
@@ -3139,14 +3028,14 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 	if plant_manager and plant_manager.has_method("consume_plant"):
 		var remove_us: int = Time.get_ticks_usec()
 		plant_manager.call("consume_plant", plant_cell)
-		_warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
+		_debug_telemetry.warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
 			"plant=%s" % str(plant_cell))
 	elif plantz:
 		var source_id: int = plantz.get_cell_source_id(plant_cell)
 		var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
 		plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 		_flush_plant_layer_visuals()
-	_warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+	_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
 
 
@@ -3740,9 +3629,6 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	if is_merchant:
 		_seed_merchant.on_agent_removed(agent)
 
-# Monster death uses the same authoritative owner that created and routed monsters.
-# Clear every phase/index before unregistering the native agent so no deferred
-# garden work can retain or later re-route a dead nav_id.
 func skip_current_night_for_dev() -> bool:
 	if not GameState.is_night:
 		return false
@@ -3764,18 +3650,14 @@ func skip_current_night_for_dev() -> bool:
 	return true
 
 
+# Monster death uses the same authoritative owner that created and routed monsters.
+# Clear every phase/index before unregistering the native agent so no deferred
+# garden work can retain or later re-route a dead nav_id.
 func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
-	if not is_instance_valid(agent):
-		return
-	var is_client: bool = agent.is_in_group("clients")
-	var is_merchant: bool = agent.is_in_group("merchants")
-	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not is_merchant
-	var death_position: Vector2 = agent.global_position
-	if spawn_corpse and not is_client and not is_merchant:
-		_spawn_monster_corpse(agent)
-	if awards_monster_drop:
-		_spawn_monster_death_drop(death_position)
-	var nav_id: int = int(agent.get("nav_id"))
+	_monster_death.remove_dead_monster(agent, spawn_corpse)
+
+
+func _clear_removed_agent_state(nav_id: int) -> void:
 	_entry_path_agents.erase(nav_id)
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
@@ -3788,71 +3670,19 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 		var item: Dictionary = _garden_retarget_queue[index]
 		if int(item.get("nav_id", -1)) == nav_id:
 			_garden_retarget_queue.remove_at(index)
+
+
+func _unregister_nav_agent(nav_id: int) -> void:
 	if agent_manager and agent_manager.has_method("unregister_agent") and nav_id >= 0:
 		agent_manager.call("unregister_agent", nav_id)
-	_unregister_desire_agent(agent)
-	agent.remove_from_group("monsters")
-	agent.remove_from_group("clients")
-	agent.remove_from_group("merchants")
-	agent.queue_free()
-	if is_merchant:
-		_seed_merchant.on_agent_removed(agent)
 
-func _spawn_monster_death_drop(world_position: Vector2) -> void:
-	var seed_chance: float = float(clampi(_monster_drop_seed_chance_percent, 0, 100)) / 100.0
-	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
-	var scene: Node = get_tree().current_scene
-	var icon: Node = null
-	var animate_method: String = ""
-	if scene != null:
-		if drop_type == MONSTER_DEATH_DROP_SEED:
-			icon = scene.get_node_or_null("GameUI/currenciesUI/seedIcon")
-			animate_method = "animate_seed_harvest"
-		else:
-			icon = scene.get_node_or_null("GameUI/currenciesUI/gemIcon")
-			animate_method = "animate_gem_harvest"
-	if icon != null and icon.has_method(animate_method):
-		var animation_started: bool = bool(icon.call(animate_method, world_position))
-		if animation_started:
-			if drop_type == MONSTER_DEATH_DROP_GEM:
-				Sfx.play_sound(&"gem")
-			return
-	_credit_monster_death_drop(drop_type)
 
-func _credit_monster_death_drop(drop_type: StringName) -> void:
-	var scene: Node = get_tree().current_scene
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node == null:
-		return
-	if drop_type == MONSTER_DEATH_DROP_SEED:
-		if progression_node.has_method("update_seeds"):
-			progression_node.call("update_seeds", 1)
-	elif drop_type == MONSTER_DEATH_DROP_GEM:
-		if progression_node.has_method("update_gems"):
-			progression_node.call("update_gems", 1)
+func _on_removed_merchant_agent(agent: Node2D) -> void:
+	_seed_merchant.on_agent_removed(agent)
 
-func _spawn_monster_corpse(agent: Node2D) -> void:
-	var corpse: Node2D = MONSTER_CORPSE_SCENE.instantiate() as Node2D
-	if corpse == null:
-		return
-	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
-	if parent == null:
-		corpse.queue_free()
-		return
-	parent.add_child(corpse)
-	corpse.global_position = agent.global_position
-	var corpse_sprite: Sprite2D = corpse.get_node_or_null("Sprite2D") as Sprite2D
-	if corpse_sprite:
-		# Match the corpse to the monster's bible sprite (keep the corpse frame set by
-		# the scene). Non-bible/legacy monsters keep the default monster.png corpse.
-		var data: MonsterData = MonsterCatalog.get_monster(agent.get_meta("monster_type", &"basic")) if agent.has_meta("monster_type") else null
-		if data != null:
-			if data.texture != null:
-				corpse_sprite.texture = data.texture
-			corpse_sprite.hframes = data.sprite_hframes
-			corpse_sprite.scale = data.sprite_scale
-			corpse_sprite.position = data.sprite_offset
-		corpse_sprite.rotation = randf() * TAU
+
+func _monster_death_drop_seed_chance_percent() -> int:
+	return _monster_drop_seed_chance_percent
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 	var best_cell: Vector2i = INVALID_CELL
@@ -3987,24 +3817,24 @@ func _rebuild_plant_zone_from_layer() -> void:
 	var rebuild_us: int = Time.get_ticks_usec()
 	var t: int = Time.get_ticks_usec()
 	_build_gardens_from_plants()
-	_warn_garden_task_lag_us("_build_gardens_from_plants", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_build_gardens_from_plants", Time.get_ticks_usec() - t,
 		"gardens=%d" % _gardens.size())
 	t = Time.get_ticks_usec()
 	_validate_dirty_gardens()
-	_warn_garden_task_lag_us("_validate_dirty_gardens", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_validate_dirty_gardens", Time.get_ticks_usec() - t,
 		"gardens=%d" % _gardens.size())
 	t = Time.get_ticks_usec()
 	_rebuild_spawner_garden_route_cache()
-	_warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
 		"spawners=%d" % _spawner_garden_routes.size())
 	# Garden ids/topology just changed: cheaply detect agents now pointing at a
 	# deleted/empty garden, park them in "waiting_new_status", and queue them for
 	# budgeted retargeting over the next frames. No pathfinding happens here.
 	t = Time.get_ticks_usec()
 	_queue_agents_after_garden_rebuild()
-	_warn_garden_task_lag_us("_queue_agents_after_garden_rebuild", Time.get_ticks_usec() - t,
+	_debug_telemetry.warn_garden_task_lag_us("_queue_agents_after_garden_rebuild", Time.get_ticks_usec() - t,
 		"retarget_queue=%d" % _garden_retarget_queue.size())
-	_warn_garden_task_lag_us("_rebuild_plant_zone_from_layer", Time.get_ticks_usec() - rebuild_us,
+	_debug_telemetry.warn_garden_task_lag_us("_rebuild_plant_zone_from_layer", Time.get_ticks_usec() - rebuild_us,
 		"gardens=%d" % _gardens.size())
 
 func _build_gardens_from_plants() -> void:
@@ -4179,7 +4009,7 @@ func _erase_garden(garden_id: int, reason: String) -> void:
 			garden_id, reason, _gardens_iter_depth, _gardens.size()
 		])
 	if _garden_debug_logs:
-		_log("garden erase id=%d reason=%s gardens_now=%d" % [garden_id, reason, _gardens.size() - 1])
+		_debug_telemetry.log("garden erase id=%d reason=%s gardens_now=%d" % [garden_id, reason, _gardens.size() - 1])
 	_pending_empty_gardens.erase(garden_id)
 	_gardens.erase(garden_id)
 	_dirty_gardens.erase(garden_id)
@@ -4690,8 +4520,8 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 			var this_check_us: int = Time.get_ticks_usec() - check_us
 			path_checks += 1
 			path_checks_us += this_check_us
-			if _over_garden_threshold_us(this_check_us):
-				_warn_garden_task_lag_us("_find_local_retarget_plant.path_check", this_check_us,
+			if _debug_telemetry.over_garden_threshold_us(this_check_us):
+				_debug_telemetry.warn_garden_task_lag_us("_find_local_retarget_plant.path_check", this_check_us,
 					"from=%s to=%s garden=%d len=%d" % [str(from_cell), str(plant_cell), garden_id, path_cells.size()])
 			if path_cells.is_empty():
 				path_failures += 1
@@ -4728,12 +4558,12 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 	# _find_path_in_zone calls rather than the candidate scan itself. Both summary
 	# warnings build their context only on a real spike (this runs in a tight retarget
 	# loop, so unconditional formatting would be the wrong kind of overhead).
-	if _over_garden_threshold_us(path_checks_us):
-		_warn_garden_task_lag_us("_find_local_retarget_plant.path_checks_total", path_checks_us,
+	if _debug_telemetry.over_garden_threshold_us(path_checks_us):
+		_debug_telemetry.warn_garden_task_lag_us("_find_local_retarget_plant.path_checks_total", path_checks_us,
 			"path_checks=%d failures=%d" % [path_checks, path_failures])
-	if _over_garden_threshold_us(total_us):
+	if _debug_telemetry.over_garden_threshold_us(total_us):
 		push_warning("debug_garden_lag_breakdown:_find_local_retarget_plant total=%.1fms threshold=%dms from=%s radius=%d cells_checked=%d candidates=%d wrong_garden=%d not_edible=%d path_checks=%d path_fail=%d path_checks_total=%.1fms success=%s" % [
-			float(total_us) / 1000.0, int(_garden_lag_threshold_ms()), str(from_cell),
+			float(total_us) / 1000.0, int(_debug_telemetry.garden_lag_threshold_ms()), str(from_cell),
 			radius, cells_scanned, plant_candidates,
 			rejected_no_garden, rejected_not_edible, path_checks, path_failures,
 			float(path_checks_us) / 1000.0, str(found)
@@ -4774,7 +4604,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	_last_local_retarget_profile["path_checks"] = int(fl.get("path_checks", 0))
 	_last_local_retarget_profile["path_validation_us"] = path_validation_us
 	_last_local_retarget_profile["candidate_search_us"] = maxi(0, search_elapsed - path_validation_us)
-	_warn_garden_task_lag_us("_try_local_retarget_agent.candidate_search", search_elapsed,
+	_debug_telemetry.warn_garden_task_lag_us("_try_local_retarget_agent.candidate_search", search_elapsed,
 		"nav_id=%d from=%s found=%s" % [nav_id_dbg, str(from_cell), str(not target.is_empty())])
 	if target.is_empty():
 		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
@@ -4814,7 +4644,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 		agent.call("start_astar_in")
 	var assignment_elapsed: int = Time.get_ticks_usec() - assign_us
 	_last_local_retarget_profile["assignment_us"] = assignment_elapsed
-	_warn_garden_task_lag_us("_try_local_retarget_agent.assignment", assignment_elapsed,
+	_debug_telemetry.warn_garden_task_lag_us("_try_local_retarget_agent.assignment", assignment_elapsed,
 		"nav_id=%d garden=%d plant=%s path_len=%d" % [nav_id, garden_id, str(plant_cell), path_cells.size()])
 	_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, true)
 	return true
@@ -4826,7 +4656,7 @@ func _finish_local_retarget_profile(nav_id: int, from_cell: Vector2i, total_star
 	var total_us: int = Time.get_ticks_usec() - total_start_us
 	_last_local_retarget_profile["success"] = success
 	_last_local_retarget_profile["total_us"] = total_us
-	if not _over_garden_threshold_us(total_us):
+	if not _debug_telemetry.over_garden_threshold_us(total_us):
 		return
 	var p: Dictionary = _last_local_retarget_profile
 	push_warning("debug_garden_lag_breakdown:_try_local_retarget_agent total=%.1fms nav_id=%d from=%s success=%s candidates=%d path_checks=%d candidate_search=%.1fms path_validation=%.1fms assign=%.1fms" % [
@@ -4946,7 +4776,7 @@ func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
 	var nav_id_dbg: int = int(agent.get("nav_id"))
 	var assigned: bool = _retarget_agent_or_escape_impl(agent, spawner_cell)
 	var total_us: int = Time.get_ticks_usec() - retarget_us
-	if _over_garden_threshold_us(total_us):
+	if _debug_telemetry.over_garden_threshold_us(total_us):
 		_emit_retarget_breakdown(nav_id_dbg, assigned, total_us)
 	return assigned
 
@@ -4993,7 +4823,7 @@ func _emit_retarget_breakdown(nav_id: int, assigned: bool, total_us: int) -> voi
 			str(fpz.get("max_single_call_to", INVALID_CELL)),
 			int(fpz.get("max_zone_tiles", 0)),
 		]
-	var threshold_ms: float = _garden_lag_threshold_ms()
+	var threshold_ms: float = _debug_telemetry.garden_lag_threshold_ms()
 	push_warning("debug_garden_lag_breakdown:_retarget_agent_or_escape total=%.1fms threshold=%dms %s" % [
 		float(total_us) / 1000.0, int(threshold_ms), msg
 	])
@@ -5033,7 +4863,7 @@ func _reset_find_path_in_zone_accum() -> void:
 		"max_zone_tiles": 0,
 	}
 
-# Sub-detectors (all gated on debug_gardens_lag_ms via _warn_garden_task_lag_us) are
+# Sub-detectors (all gated on debug_gardens_lag_ms via debug telemetry) are
 # kept for the case where ONE section alone spikes. The accumulated section timings in
 # _last_retarget_profile are what feed the consolidated parent breakdown above.
 #   .validity       - is_instance_valid + no_plants_remaining gate + from_cell resolve
@@ -5055,7 +4885,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		from_cell = floorz.local_to_map(floorz.to_local(agent.global_position))
 	var lookup_us: int = Time.get_ticks_usec() - t_val
 	_last_retarget_profile["lookup_us"] = lookup_us
-	_warn_garden_task_lag_us("_retarget_agent_or_escape.validity", lookup_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.validity", lookup_us,
 		"nav_id=%d no_plants=%s" % [nav_id_dbg, str(no_plants)])
 	if no_plants:
 		_last_retarget_profile["reason"] = "no_plants"
@@ -5063,7 +4893,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		var esc0: bool = _assign_agent_to_escape(agent)
 		var esc0_us: int = Time.get_ticks_usec() - t_esc0
 		_last_retarget_profile["escape_us"] = esc0_us
-		_warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc0_us,
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc0_us,
 			"nav_id=%d reason=no_plants assigned=%s" % [nav_id_dbg, str(esc0)])
 		return esc0
 
@@ -5072,7 +4902,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	var local_ok: bool = _try_local_retarget_agent(agent, from_cell, spawner_cell)
 	var local_retarget_us: int = Time.get_ticks_usec() - local_us
 	_last_retarget_profile["local_retarget_us"] = local_retarget_us
-	_warn_garden_task_lag_us("_retarget_agent_or_escape.local_retarget", local_retarget_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.local_retarget", local_retarget_us,
 		"nav_id=%d from=%s ok=%s" % [nav_id_dbg, str(from_cell), str(local_ok)])
 	if local_ok:
 		_last_retarget_profile["reason"] = "local_retarget"
@@ -5093,31 +4923,31 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		if spawner_cell != INVALID_CELL and _spawner_routes.has(spawner_cell):
 			agent.set_meta("spawner_cell", spawner_cell)
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
 			"nav_id=%d pair=empty" % nav_id_dbg)
 		return _escape_with_detector(agent, nav_id_dbg, "no_pair")
 	spawner_cell = pair.get("spawner_cell", INVALID_CELL) as Vector2i
 	var garden_id: int = int(pair.get("garden_id", 0))
 	if garden_id <= 0:
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
 			"nav_id=%d garden=0" % nav_id_dbg)
 		return _escape_with_detector(agent, nav_id_dbg, "garden<=0")
 	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	if not bool(route.get("ready", false)):
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
 			"nav_id=%d garden=%d route_not_ready" % [nav_id_dbg, garden_id])
 		return _escape_with_detector(agent, nav_id_dbg, "route_not_ready")
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
-		_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
+		_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
 			"nav_id=%d garden=%d no_entry" % [nav_id_dbg, garden_id])
 		return _escape_with_detector(agent, nav_id_dbg, "no_entry")
 	var resolve_us: int = Time.get_ticks_usec() - t_res
 	_last_retarget_profile["resolve_us"] = resolve_us
-	_warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", resolve_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", resolve_us,
 		"nav_id=%d garden=%d entry=%s" % [nav_id_dbg, garden_id, str(entry_cell)])
 
 	# Final assignment section: attach the garden-entry flow leg.
@@ -5125,7 +4955,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 	var fin_us: int = Time.get_ticks_usec() - t_fin
 	_last_retarget_profile["assign_us"] = fin_us
-	_warn_garden_task_lag_us("_retarget_agent_or_escape.final_assign", fin_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.final_assign", fin_us,
 		"nav_id=%d garden=%d entry=%s assigned=%s" % [nav_id_dbg, garden_id, str(entry_cell), str(assigned)])
 	if not assigned:
 		return _escape_with_detector(agent, nav_id_dbg, "entry_flow_failed")
@@ -5144,7 +4974,7 @@ func _escape_with_detector(agent: Node2D, nav_id_dbg: int, reason: String) -> bo
 	var esc_us: int = Time.get_ticks_usec() - t_esc
 	_last_retarget_profile["escape_us"] = esc_us
 	_last_retarget_profile["reason"] = "escape:" + reason
-	_warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc_us,
 		"nav_id=%d reason=%s assigned=%s" % [nav_id_dbg, reason, str(esc)])
 	return esc
 
@@ -5458,7 +5288,7 @@ func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary
 		assigned = _assign_agent_to_escape(agent)
 	else:
 		assigned = _retarget_agent_or_escape(agent, spawner_cell)
-	_warn_garden_task_lag_us("_retarget_single_waiting_agent", Time.get_ticks_usec() - single_us,
+	_debug_telemetry.warn_garden_task_lag_us("_retarget_single_waiting_agent", Time.get_ticks_usec() - single_us,
 		"nav_id=%d intent=%s assigned=%s" % [nav_id, intent, str(assigned)])
 
 	if assigned:
@@ -5756,7 +5586,7 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 	# Use a local copy so the cached garden zone_tiles is not mutated.
 	# .prep: endpoint handling + zone duplicate cost (the duplicate can be the cost
 	# when a garden's zone_tiles dictionary is large and both endpoints are outside).
-	# Sub-warnings are gated on _over_garden_threshold_us so the context string is
+	# Sub-warnings are gated on debug telemetry thresholds so the context string is
 	# built only on a real spike — _find_path_in_zone is called in tight retarget
 	# loops, so unconditional formatting here would be the wrong kind of overhead.
 	var call_start_us: int = Time.get_ticks_usec()
@@ -5769,15 +5599,15 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 		if path_tiles == zone_tiles:
 			path_tiles = zone_tiles.duplicate()
 		path_tiles[to_tile] = true
-	if _over_garden_threshold_us(Time.get_ticks_usec() - prep_us):
-		_warn_garden_task_lag_us("_find_path_in_zone.prep", Time.get_ticks_usec() - prep_us,
+	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - prep_us):
+		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.prep", Time.get_ticks_usec() - prep_us,
 			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, zone_tiles.size(), str(from_tile), str(to_tile)])
 	# .sync_zone: pushes the walkable set + wall blockers into the pathfinder.
 	var sync_us: int = Time.get_ticks_usec()
 	_sync_pathfinder_zone_tiles(path_tiles)
 	var sync_elapsed: int = Time.get_ticks_usec() - sync_us
-	if _over_garden_threshold_us(sync_elapsed):
-		_warn_garden_task_lag_us("_find_path_in_zone.sync_zone", sync_elapsed,
+	if _debug_telemetry.over_garden_threshold_us(sync_elapsed):
+		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.sync_zone", sync_elapsed,
 			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, path_tiles.size(), str(from_tile), str(to_tile)])
 	# Snap endpoints to walkable tiles if needed (non-walkable endpoints only).
 	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
@@ -5789,8 +5619,8 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 	var find_us: int = Time.get_ticks_usec()
 	var result: PackedVector2Array = pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
 	var find_elapsed: int = Time.get_ticks_usec() - find_us
-	if _over_garden_threshold_us(find_elapsed):
-		_warn_garden_task_lag_us("_find_path_in_zone.find_path", find_elapsed,
+	if _debug_telemetry.over_garden_threshold_us(find_elapsed):
+		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.find_path", find_elapsed,
 			"garden=%d from=%s to=%s len=%d" % [garden_id, str(start_tile), str(end_tile), result.size()])
 	_accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, path_tiles.size())
 	return result
@@ -5836,8 +5666,8 @@ func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 		var blockers: PackedVector2Array = _wall_blockers_for_cells(zone_tiles)
 		var blocker_elapsed: int = Time.get_ticks_usec() - blockers_us
 		_last_zone_blocker_us = blocker_elapsed
-		if _over_garden_threshold_us(blocker_elapsed):
-			_warn_garden_task_lag_us("_wall_blockers_for_cells", blocker_elapsed,
+		if _debug_telemetry.over_garden_threshold_us(blocker_elapsed):
+			_debug_telemetry.warn_garden_task_lag_us("_wall_blockers_for_cells", blocker_elapsed,
 				"zone_tiles=%d blockers=%d" % [zone_tiles.size(), blockers.size()])
 		pathfinder.call("set_blockers", blockers)
 
@@ -6330,30 +6160,3 @@ func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Ve
 	if exit_wall_cell == INVALID_CELL:
 		return _select_scored_garden_entry(garden_id, spawner_cell, "exit", INVALID_CELL, escape_group)
 	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", INVALID_CELL, escape_group)
-
-func _log(message: String) -> void:
-	if debug_logs and CppDebugOptions.logs_enabled:
-		print("BuildingManager: ", message)
-
-func _log_spawn_failure(message: String) -> void:
-	var now_ms: int = Time.get_ticks_msec()
-	var last_ms: int = int(_last_spawn_failure_at_ms.get(message, -SPAWN_FAILURE_WARN_INTERVAL_MS))
-	if now_ms - last_ms < SPAWN_FAILURE_WARN_INTERVAL_MS:
-		return
-	_last_spawn_failure = message
-	_last_spawn_failure_at_ms[message] = now_ms
-	push_warning("BuildingManager: " + message)
-
-func _log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
-	var plant_count: int = int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else 0
-	var summary: String = "scan indexed_plants=%d spawners=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
-		plant_count,
-		seen_spawners.size(),
-		_spawners.size(),
-		migrated,
-		walls_changed
-	]
-	if summary == _last_scan_summary:
-		return
-	_last_scan_summary = summary
-	_log(summary)

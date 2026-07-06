@@ -69,6 +69,7 @@ func begin() -> void:
 func end() -> void:
 	_active = false
 	_hostile_clients.clear()
+	_hide_alert()
 	var agent_manager: Node = _agent_manager()
 	if _group > IDLE_GROUP and agent_manager != null and agent_manager.has_method("dissolve_group"):
 		agent_manager.call("dissolve_group", _group)
@@ -224,6 +225,15 @@ func _show_alert() -> void:
 	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
 	if tutorial != null and tutorial.has_method("show_alert"):
 		tutorial.call("show_alert", "tutorial.tantrum")
+
+
+func _hide_alert() -> void:
+	var scene: Node = _manager.get_tree().current_scene
+	if scene == null:
+		return
+	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	if tutorial != null and tutorial.has_method("clear_alert"):
+		tutorial.call("clear_alert", "tutorial.tantrum")
 
 
 func _agent_manager() -> Node:

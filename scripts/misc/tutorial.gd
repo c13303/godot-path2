@@ -138,6 +138,19 @@ func show_alert(key: String) -> void:
 	_set_glow(false)
 
 
+## Dismiss an active alert early. When key is non-empty only the matching alert is
+## cleared, so an unrelated alert that happens to be showing is left untouched.
+func clear_alert(key: String = "") -> void:
+	if _alert_key == "":
+		return
+	if key != "" and _alert_key != key:
+		return
+	_alert_key = ""
+	_alert_remaining = 0.0
+	modulate = Color.WHITE
+	_refresh()
+
+
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()

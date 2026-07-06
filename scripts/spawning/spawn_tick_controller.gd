@@ -6,10 +6,10 @@ class_name SpawnTickController
 # budget, and tracks the per-pass telemetry the manager's lag warning consumes.
 # Mirrors the other manager-owned controllers (SeedMerchantController, etc.): it
 # holds a back-reference to BuildingManager and delegates the spawn primitives,
-# spawner-registry reads and lag instrumentation back to the manager. It owns only
-# its tick-local state (legacy timers, the ready queue, the empty-night timer and
-# the pass stats); the playlist-enabled decision and spawn-failure telemetry stay
-# in the manager.
+# spawner-registry reads and spawn-failure reporting back to the manager, while
+# lag thresholds/output go through BuildingDebugTelemetry. It owns only its
+# tick-local state (legacy timers, the ready queue, the empty-night timer and the
+# pass stats); the playlist-enabled decision stays in the manager.
 
 const EMPTY_NIGHT_DAY_DELAY_SECONDS: float = 3.0
 const LEGACY_SPAWN_INTERVAL_SECONDS: float = 3.0
@@ -17,6 +17,7 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 
 var _manager: Node
+var _debug_telemetry: BuildingDebugTelemetry
 
 # Ready playlist spawn requests awaiting a spawn slot this/next frame.
 var _ready_spawner_queue: Array[Dictionary] = []
@@ -37,6 +38,8 @@ var _spawn_pass_stats: Dictionary = {}
 
 func setup(manager: Node) -> void:
 	_manager = manager
+	var telemetry: Variant = _manager.get("_debug_telemetry")
+	_debug_telemetry = telemetry as BuildingDebugTelemetry
 
 
 func spawn_pass_stats() -> Dictionary:
@@ -77,7 +80,7 @@ func process(delta: float, playlist_enabled: bool) -> void:
 		return
 	var t_mc: int = Time.get_ticks_usec()
 	var mc: int = int(_manager.call("_monster_count"))
-	_manager.call("_warn_garden_task_lag_us", "_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
+	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
 	_spawn_pass_stats["active_monsters"] = mc
 	if playlist_enabled:
 		_process_playlist_spawners(delta, mc)
@@ -93,18 +96,18 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 		return
 	var t_np: int = Time.get_ticks_usec()
 	var no_plants: bool = bool(_manager.call("_no_plants_remaining"))
-	_manager.call("_warn_garden_task_lag_us", "_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
 	if no_plants:
 		if active_monsters == 0:
 			_empty_night_elapsed += delta
 			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
-				_manager.call("_log", "Playlist night stalled because no plants remain; leaving schedule unfinished.")
+				_log("Playlist night stalled because no plants remain; leaving schedule unfinished.")
 				GameState.start_day()
 				return
 		else:
 			_empty_night_elapsed = 0.0
 		if bool(_manager.get("debug_logs")) and not (_manager.get("_spawners") as Dictionary).is_empty():
-			_manager.call("_log", "no plants remaining for playlist spawners")
+			_log("no plants remaining for playlist spawners")
 		return
 	_empty_night_elapsed = 0.0
 	_enqueue_playlist_spawn_requests(delta)
@@ -161,12 +164,12 @@ func _process_legacy_spawners(delta: float, active_monsters: int) -> void:
 		return
 	var t_np: int = Time.get_ticks_usec()
 	var no_plants: bool = bool(_manager.call("_no_plants_remaining"))
-	_manager.call("_warn_garden_task_lag_us", "_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
 	if no_plants:
 		if active_monsters == 0:
 			_empty_night_elapsed += delta
 			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
-				_manager.call("_log", "Legacy fallback night stalled because no plants remain.")
+				_log("Legacy fallback night stalled because no plants remain.")
 				GameState.start_day()
 				return
 		else:
@@ -211,8 +214,8 @@ func _drain_legacy_spawners_budgeted(delta: float) -> void:
 			_spawn_pass_stats["skipped_count"] = int(_spawn_pass_stats["skipped_count"]) + 1
 			_legacy_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
 		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
-		if bool(_manager.call("_over_garden_threshold_us", spawner_elapsed_us)):
-			_manager.call("_warn_garden_task_lag_us", "_process_spawners.legacy_spawner_total", spawner_elapsed_us,
+		if _over_garden_threshold_us(spawner_elapsed_us):
+			_warn_garden_task_lag_us("_process_spawners.legacy_spawner_total", spawner_elapsed_us,
 				"spawner_cell=%s spawned=%s fallback=%d/%d" % [
 					str(spawner_cell),
 					str(spawned),
@@ -278,9 +281,27 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 
 		# Whole spawner iteration. Build the (small) context only when over threshold.
 		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us
-		if bool(_manager.call("_over_garden_threshold_us", spawner_elapsed_us)):
-			_manager.call("_warn_garden_task_lag_us", "_process_spawners.spawner_total", spawner_elapsed_us,
+		if _over_garden_threshold_us(spawner_elapsed_us):
+			_warn_garden_task_lag_us("_process_spawners.spawner_total", spawner_elapsed_us,
 				"spawner_cell=%s spawned=%s" % [str(cell), str(spawned)])
 
 	_spawn_pass_stats["ready_queue_remaining"] = _ready_spawner_queue.size()
 	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
+
+
+func _warn_garden_task_lag_us(task_name: String, elapsed_us: int, extra: String = "") -> void:
+	if _debug_telemetry == null:
+		return
+	_debug_telemetry.warn_garden_task_lag_us(task_name, elapsed_us, extra)
+
+
+func _over_garden_threshold_us(elapsed_us: int) -> bool:
+	if _debug_telemetry == null:
+		return false
+	return _debug_telemetry.over_garden_threshold_us(elapsed_us)
+
+
+func _log(message: String) -> void:
+	if _debug_telemetry == null:
+		return
+	_debug_telemetry.log(message)
