@@ -7,6 +7,7 @@ signal startup_loading_finished
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
+const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/agent_navigation_phase_controller.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -122,14 +123,15 @@ var _merchant_spawners: Dictionary = {}  # Vector2i -> true
 # _wall_blockers_for_cells here so the caller can split sync time into
 # blocker-construction vs. the rest, without changing the void signature.
 var _last_zone_blocker_us: int = 0
-var _eating_agents: Dictionary = {}
+var _agent_navigation_phases: Variant = AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT.new()
+var _eating_agents: Dictionary = _agent_navigation_phases.eating_agents()
 var _eating_time: float = EATING_COOLDOWN
 var _number_of_roses_before_satiety: int = 3
 var _same_garden_only: bool = false
 var _paused: bool = false
-var _escaping_agents: Dictionary = {}
-var _entry_path_agents: Dictionary = {}
-var _astar_in_agents: Dictionary = {}
+var _escaping_agents: Dictionary = _agent_navigation_phases.escaping_agents()
+var _entry_path_agents: Dictionary = _agent_navigation_phases.entry_path_agents()
+var _astar_in_agents: Dictionary = _agent_navigation_phases.astar_in_agents()
 var _garden_retarget: GardenRetargetController = GardenRetargetController.new()
 # When true, _retarget_agents_targeting_removed_plant_only also runs the old full
 # scan and warns on any mismatch with the index. OFF by default (reintroduces the
@@ -187,7 +189,7 @@ var _playlist_spawning_enabled: bool = false
 var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
-var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
+var _client_counter_agents: Dictionary = _agent_navigation_phases.client_counter_agents()  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
 var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
@@ -229,6 +231,7 @@ func set_paused(value: bool) -> void:
 	_paused = value
 
 func _ready() -> void:
+	_agent_navigation_phases.setup(self)
 	_garden_topology.setup(self)
 	_seed_merchant.setup(self)
 	_morning_harvest.setup(self)
@@ -301,7 +304,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_day_start_pending = false
 		_client_tantrum.end()
 		_client_sale.reset()
-		_client_counter_agents.clear()
+		clear_client_counter_agents()
 		_seed_merchant.on_night_started()
 		GameState.set_building_phase(false)
 		_morning_harvest.clear_active()
@@ -1397,7 +1400,7 @@ func reset_client_state_for_morning() -> void:
 func _reset_client_sale_state() -> void:
 	_client_preparing = false
 	_client_sale.reset()
-	_client_counter_agents.clear()
+	clear_client_counter_agents()
 
 
 func begin_client_sale_phase() -> void:
@@ -1873,133 +1876,14 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 # Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
 # A* to a plant target inside that garden and attach that path.
 func _process_astar_in_arrivals() -> void:
-	var finished: Array[int] = []
-	var entry_ids: Array = _entry_path_agents.keys()
-	for raw_nav_id in entry_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _entry_path_agents.has(nav_id):
-			continue
-		var data: Dictionary = _entry_path_agents[nav_id] as Dictionary
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			finished.append(nav_id)
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			finished.append(nav_id)
-			continue
-		if _eating_agents.has(nav_id) or _escaping_agents.has(nav_id):
-			finished.append(nav_id)
-			continue
-		if _astar_in_agents.has(nav_id):
-			continue
-		# Grab a nearby counter's rose on the way to the garden entrance and leave early.
-		if _try_client_early_counter_fetch(agent):
-			continue
-		var entry_cell: Vector2i = data.get("entry_cell", INVALID_CELL) as Vector2i
-		if entry_cell == INVALID_CELL:
-			finished.append(nav_id)
-			continue
-		if not _agent_reached_cell(agent, entry_cell):
-			continue
-		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-		var garden_id: int = int(data.get("garden_id", 0))
-		if not _garden_has_target_for_kind(garden_id, _agent_kind(agent)):
-			_entry_path_agents.erase(nav_id)
-			_retarget_agent_or_escape(agent, spawner_cell)
-			continue
-		_entry_path_agents.erase(nav_id)
-		_start_astar_in(agent, spawner_cell)
-	for nav_id in finished:
-		_entry_path_agents.erase(nav_id)
-	# _garden_has_edible_plants may have queued stale-empty gardens; this loop
-	# iterates monsters, not _garden_topology.gardens(), so draining here is safe.
-	_drain_pending_empty_gardens()
+	_agent_navigation_phases.process_astar_in_arrivals()
 
 func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
-	var nav_id: int = int(agent.get("nav_id"))
-	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	var agent_kind: StringName = _agent_kind(agent)
-	if not _garden_has_target_for_kind(garden_id, agent_kind):
-		_retarget_agent_or_escape(agent, spawner_cell)
-		return
-	var target_plant_cell: Vector2i = _resolve_plant_target_for_agent_in_garden(agent_cell, garden_id, agent_kind)
-	if target_plant_cell == INVALID_CELL:
-		_retarget_agent_or_escape(agent, spawner_cell)
-		return
-	var path_cells: PackedVector2Array = _find_path_in_zone(agent_cell, target_plant_cell, garden_id)
-	if path_cells.is_empty():
-		_retarget_agent_or_escape(agent, spawner_cell)
-		return
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _path_cells_to_world(path_cells, nav_id, true)
-	if agent_manager and agent_manager.has_method("assign_agent_path"):
-		agent_manager.call("assign_agent_path", nav_id, path_world)
-	_entry_path_agents.erase(nav_id)
-	_set_astar_in_agent(nav_id, {
-		"node": agent,
-		"plant_cell": target_plant_cell,
-		"spawner_cell": spawner_cell,
-		"garden_id": garden_id,
-		"path_world": path_world
-	})
-	if agent.has_method("start_astar_in"):
-		agent.call("start_astar_in")
+	_agent_navigation_phases.start_astar_in(agent, spawner_cell)
 
 # Phase 2 -> 3: astar_in path complete. Verify plant still exists; consume it.
 func _process_plant_arrivals() -> void:
-	var finished: Array[int] = []
-	var astar_ids: Array = _astar_in_agents.keys()
-	for raw_nav_id in astar_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_in_agents.has(nav_id):
-			continue
-		var data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			finished.append(nav_id)
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			finished.append(nav_id)
-			continue
-		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
-			continue
-		# Grab a nearby counter's rose before the full A* path completes and leave early.
-		if _try_client_early_counter_fetch(agent):
-			continue
-		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
-			continue
-		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
-		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-		if agent.has_method("stop_astar_in"):
-			agent.call("stop_astar_in")
-		if plant_cell == INVALID_CELL:
-			finished.append(nav_id)
-			continue
-		# Counter access tile: grab a rose if the counter still has stock, otherwise
-		# retarget (another monster emptied it first) — same "arrive, check, retarget"
-		# contract as an already-eaten plant.
-		if _garden_topology.counter_access_cells().has(plant_cell):
-			_erase_astar_in_agent(nav_id)
-			var counter_cell: Vector2i = _garden_topology.counter_access_cells()[plant_cell] as Vector2i
-			if _counter_stock(counter_cell) <= 0:
-				_retarget_agent_or_escape(agent, spawner_cell)
-			elif _agent_kind(agent) == SPAWNER_KIND_CLIENT:
-				_start_client_counter_payment(agent, counter_cell)
-			else:
-				_consume_counter_rose(agent, spawner_cell, plant_cell)
-			continue
-		if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", plant_cell)):
-			_erase_astar_in_agent(nav_id)
-			_retarget_agent_or_escape(agent, spawner_cell)
-			continue
-		_erase_astar_in_agent(nav_id)
-		_consume_plant(agent, spawner_cell, plant_cell)
-	for nav_id in finished:
-		_erase_astar_in_agent(nav_id)
+	_agent_navigation_phases.process_plant_arrivals()
 
 func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
 	_garden_retarget.retarget_agents_for_garden_topology_change(changed_cell)
@@ -2008,13 +1892,10 @@ func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void
 # All inserts into / erasures from _astar_in_agents go through these two helpers so
 # GardenRetargetController's target-plant reverse index stays in lock-step.
 func _set_astar_in_agent(nav_id: int, data: Dictionary) -> void:
-	_astar_in_agents[nav_id] = data
-	var target_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
-	_register_astar_in_target(nav_id, target_cell)
+	_agent_navigation_phases.set_astar_in_agent(nav_id, data)
 
 func _erase_astar_in_agent(nav_id: int) -> void:
-	_astar_in_agents.erase(nav_id)
-	_unregister_astar_in_target(nav_id)
+	_agent_navigation_phases.erase_astar_in_agent(nav_id)
 
 func _register_astar_in_target(nav_id: int, target_cell: Vector2i) -> void:
 	_garden_retarget.register_astar_in_target(nav_id, target_cell)
@@ -2033,29 +1914,7 @@ func _retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: in
 	_garden_retarget.retarget_agents_targeting_removed_plant_only(cell, garden_id)
 
 func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
-	var consume_us: int = Time.get_ticks_usec()
-	if _agent_kind(eater) == SPAWNER_KIND_CLIENT:
-		_start_client_payment(eater, plant_cell)
-		_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
-			"client plant=%s" % str(plant_cell))
-		return
-	_start_agent_eating(eater, _eating_time, plant_cell)
-	Sfx.play_sound(&"crunsh")
-	# plant_manager.consume_plant() fires _on_plant_removed synchronously (garden
-	# content update + narrow retarget / empty handling), so it is the prime suspect
-	# for an eat-triggered spike. Time it on its own.
-	if plant_manager and plant_manager.has_method("consume_plant"):
-		var remove_us: int = Time.get_ticks_usec()
-		plant_manager.call("consume_plant", plant_cell)
-		_debug_telemetry.warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
-			"plant=%s" % str(plant_cell))
-	elif plantz:
-		var source_id: int = plantz.get_cell_source_id(plant_cell)
-		var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
-		plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
-		_flush_plant_layer_visuals()
-	_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
-		"plant=%s" % str(plant_cell))
+	_agent_navigation_phases.consume_plant(eater, _spawner_cell, plant_cell)
 
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
@@ -2072,31 +1931,11 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 
 
 func _process_client_counter_arrivals() -> void:
-	for raw_nav_id: Variant in _client_counter_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		if not _client_counter_agents.has(nav_id):
-			continue
-		var data: Dictionary = _client_counter_agents[nav_id] as Dictionary
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			_client_counter_agents.erase(nav_id)
-			continue
-		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
-			continue
-		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			_client_counter_agents.erase(nav_id)
-			continue
-		var counter_cell: Vector2i = data.get("counter_cell", INVALID_CELL) as Vector2i
-		_client_counter_agents.erase(nav_id)
-		if agent.has_method("stop_astar_in"):
-			agent.call("stop_astar_in")
-		if _counter_stock(counter_cell) <= 0:
-			_client_tantrum.begin()
-			continue
-		_start_client_counter_payment(agent, counter_cell)
+	_agent_navigation_phases.process_client_counter_arrivals()
+
+
+func _begin_client_tantrum() -> void:
+	_client_tantrum.begin()
 
 
 func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:
@@ -2135,9 +1974,7 @@ func _spawn_client_payment_money(world_position: Vector2) -> void:
 # carry sprite frame. _assign_agent_to_escape detaches the current path/flow and clears
 # the entry/astar/eating bookkeeping, so we only need to drop the counter-walk entry.
 func _finish_client_purchase(agent: Node2D) -> void:
-	var nav_id: int = int(agent.get("nav_id"))
-	_client_counter_agents.erase(nav_id)
-	_assign_agent_to_escape(agent)
+	_agent_navigation_phases.finish_client_purchase(agent)
 
 
 # Opportunistic counter grab: a client still walking toward the garden entrance (flow-in)
@@ -2147,24 +1984,7 @@ func _finish_client_purchase(agent: Node2D) -> void:
 # skips its normal arrival handling for this agent. Cheap: monsters bail on the kind check,
 # and clients only run the nearest-counter lookup while some counter actually holds stock.
 func _try_client_early_counter_fetch(agent: Node2D) -> bool:
-	if _agent_kind(agent) != SPAWNER_KIND_CLIENT:
-		return false
-	if _total_counter_stock() <= 0:
-		return false
-	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var target: Dictionary = _select_stocked_counter_target(agent_cell)
-	if target.is_empty():
-		return false
-	var access_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
-	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
-	if access_cell == INVALID_CELL or counter_cell == INVALID_CELL:
-		return false
-	var tile_dimensions: Vector2 = _tile_size()
-	var reach: float = maxf(tile_dimensions.x, tile_dimensions.y) * EARLY_COUNTER_FETCH_TILE_FACTOR
-	if agent.global_position.distance_to(_cell_center(access_cell)) > reach:
-		return false
-	_start_client_counter_payment(agent, counter_cell)
-	return true
+	return _agent_navigation_phases.try_client_early_counter_fetch(agent)
 
 
 func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
@@ -2198,14 +2018,11 @@ func clear_client_sale_spawns() -> void:
 
 
 func clear_client_counter_agents() -> void:
-	_client_counter_agents.clear()
+	_agent_navigation_phases.clear_client_counter_agents()
 
 
 func clear_agent_navigation_records(nav_id: int) -> void:
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	_escaping_agents.erase(nav_id)
-	_client_counter_agents.erase(nav_id)
+	_agent_navigation_phases.clear_agent_navigation_records(nav_id)
 
 
 func show_damage_number(world_position: Vector2, damage: int) -> void:
@@ -2308,112 +2125,19 @@ func _flush_plant_layer_visuals() -> void:
 	plantz.queue_redraw()
 
 func _process_eating_agents(delta: float) -> void:
-	var finished: Array[int] = []
-	var eating_ids: Array = _eating_agents.keys()
-	for raw_nav_id in eating_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _eating_agents.has(nav_id):
-			continue
-		var data: Dictionary = _eating_agents[nav_id] as Dictionary
-		var timer: float = float(data.get("timer", 0.0)) - delta
-		data["timer"] = timer
-		_eating_agents[nav_id] = data
-		if timer <= 0.0:
-			finished.append(nav_id)
-
-	for nav_id in finished:
-		var data: Dictionary = _eating_agents.get(nav_id, {}) as Dictionary
-		_erase_eating_agent(nav_id)
-		var raw_agent: Variant = data.get("node", null)
-		if is_instance_valid(raw_agent):
-			var agent: Node2D = raw_agent as Node2D
-			if agent == null:
-				continue
-			if agent.has_method("stop_eating"):
-				agent.call("stop_eating")
-			_decide_after_eating(nav_id, agent, data)
+	_agent_navigation_phases.process_eating_agents(delta)
 
 func _decide_after_eating(nav_id: int, agent: Node2D, data: Dictionary) -> void:
-	if not is_instance_valid(agent):
-		return
-	var roses_eaten: int = int(data.get("roses_eaten", 1))
-	var garden_id: int = int(data.get("garden_id", 0))
-	var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	if garden_id <= 0 and agent.has_meta("garden_id"):
-		garden_id = int(agent.get_meta("garden_id"))
-
-	if roses_eaten >= _number_of_roses_before_satiety:
-		_escape_finished_eater(nav_id, agent)
-		return
-
-	if garden_id > 0 and _garden_has_target_for_kind(garden_id, _agent_kind(agent)):
-		agent.set_meta("garden_id", garden_id)
-		if spawner_cell != INVALID_CELL:
-			agent.set_meta("spawner_cell", spawner_cell)
-		_start_astar_in(agent, spawner_cell)
-		_drain_pending_empty_gardens()
-		return
-	_drain_pending_empty_gardens()
-
-	if _same_garden_only:
-		_escape_finished_eater(nav_id, agent)
-		return
-
-	var retarget_garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else garden_id
-	if _queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, retarget_garden_id):
-		return
-	_escape_finished_eater(nav_id, agent)
+	_agent_navigation_phases.decide_after_eating(nav_id, agent, data)
 
 func _escape_finished_eater(nav_id: int, agent: Node2D) -> void:
-	# Direct wallexit-FF escape is the ONLY post-eating escape path. Every real
-	# exit wall already has a flow field covering the whole walkable map (floor
-	# minus walls; plant/garden cells are normal walkable cells), so a finished
-	# eater attaches straight to the nearest reachable escape FF — no garden-exit
-	# selection, no per-agent A* out of the garden.
-	if _assign_agent_to_escape(agent):
-		eat_exit_direct_ff_success += 1
-		return
-	eat_exit_direct_ff_failed += 1
-	# Should be rare: a walkable plant cell with no covering exit-wall FF means FF
-	# coverage/walkability is wrong and must be fixed there, not papered over with
-	# an A*-out fallback. Park the agent safely and warn.
-	var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
-	push_warning("direct_wallexit_ff_escape_failed nav_id=%d cell=%s" % [nav_id, fb_cell])
-	var fb_spawner: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-	var fb_garden: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	_queue_agent_for_garden_retarget(nav_id, agent, "escape", fb_spawner, fb_garden)
+	_agent_navigation_phases.escape_finished_eater(nav_id, agent)
 
 func _erase_eating_agent(nav_id: int) -> void:
-	_eating_agents.erase(nav_id)
+	_agent_navigation_phases.erase_eating_agent(nav_id)
 
 func _start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = INVALID_CELL) -> void:
-	var nav_id: int = int(agent.get("nav_id"))
-	# Carry the garden/spawner/plant context so an empty-garden event can find this
-	# eater and queue it for escape without a full rebuild (see _agent_referenced_
-	# garden_id / _handle_garden_became_empty).
-	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-	var roses_eaten: int = int(agent.get_meta("roses_eaten")) if agent.has_meta("roses_eaten") else 0
-	roses_eaten += 1
-	agent.set_meta("roses_eaten", roses_eaten)
-	_eating_agents[nav_id] = {
-		"node": agent,
-		"timer": seconds,
-		"garden_id": garden_id,
-		"spawner_cell": spawner_cell,
-		"plant_cell": plant_cell,
-		"roses_eaten": roses_eaten
-	}
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	if agent.has_method("start_eating"):
-		agent.call("start_eating", seconds)
+	_agent_navigation_phases.start_agent_eating(agent, seconds, plant_cell)
 
 func _start_escape_for_all_monsters() -> void:
 	for node in get_tree().get_nodes_in_group("monsters"):
@@ -2429,103 +2153,19 @@ func _start_escape_for_all_monsters() -> void:
 # budgeted queue can keep the agent in "waiting_new_status" and requeue it instead
 # of stranding it with no nav state.
 func _assign_agent_to_escape(agent: Node2D) -> bool:
-	if not agent_manager or not agent_manager.has_method("assign_agent"):
-		return false
-	var linked_spawner_cell: Vector2i = INVALID_CELL
-	if agent.has_meta("spawner_cell"):
-		linked_spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	if linked_spawner_cell != INVALID_CELL and _spawner_route_service.has_spawner_route(linked_spawner_cell):
-		var linked_route: Dictionary = _spawner_route_service.get_spawner_route(linked_spawner_cell)
-		if bool(linked_route.get("has_bound_exit", false)) and bool(linked_route.get("escape_ready", false)):
-			var linked_group: int = int(linked_route.get("escape_group", -1))
-			var linked_target: Vector2i = linked_route.get("escape_wall_target_cell", linked_spawner_cell) as Vector2i
-			if linked_group > IDLE_GROUP and linked_target != INVALID_CELL:
-				return _attach_agent_to_escape(agent, linked_group, linked_target, linked_spawner_cell)
-	# Prefer the nearest reachable per-exit-wall escape (chosen by walkable route
-	# cost from the monster), so monsters leave through the closest wall exit.
-	var exit_escape: Dictionary = _nearest_reachable_exit_escape(agent.global_position)
-	if not exit_escape.is_empty():
-		var exit_group: int = int(exit_escape.get("escape_group", -1))
-		var exit_target: Vector2i = exit_escape.get("escape_target_cell", INVALID_CELL) as Vector2i
-		if exit_group > IDLE_GROUP and exit_target != INVALID_CELL:
-			return _attach_agent_to_escape(agent, exit_group, exit_target)
-
-	# Fallback: the per-spawner escape (single shared exit for that spawner).
-	var spawner_cell: Vector2i = INVALID_CELL
-	if agent.has_meta("spawner_cell"):
-		var pre_linked: Vector2i = agent.get_meta("spawner_cell") as Vector2i
-		if _spawner_route_service.has_spawner_route(pre_linked):
-			spawner_cell = pre_linked
-	if spawner_cell == INVALID_CELL:
-		var from_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-		spawner_cell = _nearest_spawner_cell(from_cell)
-	if spawner_cell == INVALID_CELL or not _spawner_route_service.has_spawner_route(spawner_cell):
-		return false
-	var route: Dictionary = _spawner_route_service.get_spawner_route(spawner_cell)
-	if not bool(route.get("escape_ready", false)):
-		return false
-	var escape_group: int = int(route.get("escape_group", -1))
-	if escape_group <= IDLE_GROUP:
-		return false
-	var escape_target_cell: Vector2i = route.get("escape_wall_target_cell", spawner_cell) as Vector2i
-	return _attach_agent_to_escape(agent, escape_group, escape_target_cell, spawner_cell)
+	return _agent_navigation_phases.assign_agent_to_escape(agent)
 
 # Returns true once the agent has been switched to the escape flow group. Only
 # fails (false) if agent_manager is missing assign_agent — i.e. nav is unusable.
 func _attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell: Vector2i, spawner_cell: Vector2i = INVALID_CELL) -> bool:
-	if not agent_manager or not agent_manager.has_method("assign_agent"):
-		return false
-	var nav_id: int = int(agent.get("nav_id"))
-	# Ensure path-follow is cleared before switching to FF group.
-	if agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	agent_manager.call("assign_agent", agent, escape_group)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	_erase_eating_agent(nav_id)
-	if agent_manager.has_method("set_agent_never_rest"):
-		agent_manager.call("set_agent_never_rest", nav_id, true)
-	if spawner_cell != INVALID_CELL:
-		agent.set_meta("spawner_cell", spawner_cell)
-	_escaping_agents[nav_id] = {
-		"node": agent,
-		"target_cell": escape_target_cell,
-		"spawner_cell": spawner_cell
-	}
-	if agent.has_method("stop_eating"):
-		agent.call("stop_eating")
-	if agent.has_method("start_escape"):
-		agent.call("start_escape")
-	return true
+	return _agent_navigation_phases.attach_agent_to_escape(agent, escape_group, escape_target_cell, spawner_cell)
 
 func _process_escape_arrivals() -> void:
-	var arrived: Array[int] = []
-	var escaping_ids: Array = _escaping_agents.keys()
-	for raw_nav_id in escaping_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _escaping_agents.has(nav_id):
-			continue
-		var data: Dictionary = _escaping_agents[nav_id] as Dictionary
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			arrived.append(nav_id)
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null:
-			arrived.append(nav_id)
-			continue
-		# A paused merchant is frozen by the player standing next to it; never let it
-		# reach/vanish at the exit while held (that would end the phase behind the shop).
-		if _seed_merchant.is_paused_agent(agent):
-			continue
-		var target_cell: Vector2i = data.get("target_cell", INVALID_CELL) as Vector2i
-		if target_cell != INVALID_CELL and _agent_within_tiles(agent, target_cell, 1):
-			_remove_escaped_monster(agent)
-			arrived.append(nav_id)
+	_agent_navigation_phases.process_escape_arrivals()
 
-	for nav_id in arrived:
-		_escaping_agents.erase(nav_id)
-		_erase_eating_agent(nav_id)
+
+func _is_seed_merchant_paused_agent(agent: Node2D) -> bool:
+	return _seed_merchant.is_paused_agent(agent)
 
 func _remove_escaped_monster(agent: Node2D) -> void:
 	var is_merchant: bool = agent.is_in_group("merchants")
@@ -2901,39 +2541,7 @@ func _select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, f
 	return best_spawner_cell
 
 func _assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
-	if not is_instance_valid(agent):
-		return false
-	if entry_cell == INVALID_CELL or not _is_sane_cell(entry_cell):
-		return false
-	if agent_manager == null or not agent_manager.has_method("assign_agent"):
-		return false
-	var nav_id: int = int(agent.get("nav_id"))
-	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-	if not bool(route.get("ready", false)):
-		return false
-	var plant_group: int = int(route.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		return false
-	if agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	agent_manager.call("assign_agent", agent, plant_group)
-	_entry_path_agents[nav_id] = {
-		"node": agent,
-		"spawner_cell": spawner_cell,
-		"garden_id": garden_id,
-		"entry_cell": entry_cell,
-		"plant_group": plant_group
-	}
-	_erase_astar_in_agent(nav_id)
-	_escaping_agents.erase(nav_id)
-	agent.set_meta("spawner_cell", spawner_cell)
-	agent.set_meta("garden_id", garden_id)
-	agent.set_meta("garden_entry_cell", entry_cell)
-	if agent.has_method("start_flow_in"):
-		agent.call("start_flow_in")
-	return true
+	return _agent_navigation_phases.assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 
 func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i) -> bool:
 	return _spawner_route_service.spawner_garden_route_flow_ready(route, spawner_cell)
