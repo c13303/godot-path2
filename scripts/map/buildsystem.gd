@@ -5,7 +5,6 @@ signal build_preview_changed(is_active: bool)
 const REMOVE_HOLD_SECONDS: float = 0.2
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
 const BUILD_FX_Z_INDEX: int = -62
-const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const TILE_TRANSFORM_FLIP_H: int = 4096
 const TILE_TRANSFORM_FLIP_V: int = 8192
@@ -61,6 +60,7 @@ var _atlas_source_id: int = -1
 var _flow_field: Object = null
 var _build_preview: BuildPreviewController = BuildPreviewController.new()
 var _placement_service: BuildPlacementService = BuildPlacementService.new()
+var _removal_service: BuildRemovalService = BuildRemovalService.new()
 
 # Generic click-drag chunk build. _drag_build_item_id records which item the
 # active drag is placing so affordability, validation, runtime objects, and sound
@@ -87,6 +87,7 @@ func _ready() -> void:
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
 	_placement_service.setup(self)
+	_removal_service.setup(self)
 	_build_preview.setup(self)
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()
@@ -308,19 +309,15 @@ func _finish_removal() -> void:
 	var removal: Dictionary = _remove_queue.pop_front() as Dictionary
 	var removed_cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
 	var removed_item_id: String = str(removal.get("item_id", ""))
-	var removed_layer: TileMapLayer = removal.get("layer") as TileMapLayer
 	var current_removal: Dictionary = _removable_at_cell(removed_cell)
 	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != removed_item_id:
 		_cancel_removal()
 		return
 
 	_free_remove_progress_for_cell(removed_cell)
-	var refund_world_position: Vector2 = previewbuild.to_global(previewbuild.map_to_local(removed_cell))
-	_remove_tile(removed_layer, removed_cell)
-	# Refund the building's full price back to its currency, flying the seeds/gems
-	# to the HUD like a harvest (priceless items refund nothing).
-	if game_ui and game_ui.has_method("refund_build"):
-		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
+	if not _removal_service.commit_removal(removal):
+		_cancel_removal()
+		return
 	_remove_elapsed = 0.0
 	if _remove_queue.is_empty():
 		_cancel_removal()
@@ -424,14 +421,8 @@ func pad_unbuild_at_cursor() -> void:
 	var removal: Dictionary = _removable_at_cell(cell)
 	if removal.is_empty():
 		return
-	var removed_item_id: String = str(removal.get("item_id", ""))
-	var removed_layer: TileMapLayer = removal.get("layer") as TileMapLayer
-	if removed_layer == null:
+	if not _removal_service.commit_removal(removal):
 		return
-	var refund_world_position: Vector2 = previewbuild.to_global(previewbuild.map_to_local(cell))
-	_remove_tile(removed_layer, cell)
-	if game_ui and game_ui.has_method("refund_build"):
-		game_ui.call("refund_build", removed_item_id, refund_world_position, 1)
 	_clear_hover()
 
 
@@ -448,86 +439,19 @@ func rotate_selected_build_direction(reverse: bool = false) -> bool:
 	return true
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
-	if layer == plantz:
-		if plant_manager and plant_manager.has_method("remove_plant"):
-			plant_manager.call("remove_plant", cell, true)
-		if plantz.get_cell_source_id(cell) >= 0:
-			plantz.erase_cell(cell)
-			_flush_plant_layer_visuals()
-		_refresh_cell_terrain_speed(cell)
-		return
-	if layer == traversable_buildings or layer == blocking_buildings or layer == fences:
-		_clear_pasteque_irrigation_before_unbuild(layer, cell)
-		if building_object_manager and building_object_manager.has_method("remove_building"):
-			building_object_manager.call("remove_building", cell, true)
-		if layer.get_cell_source_id(cell) >= 0:
-			layer.erase_cell(cell)
-			layer.update_internals()
-		_refresh_cell_collision(cell)
-		_refresh_cell_terrain_speed(cell)
-		if layer == fences:
-			_refresh_fence_autotiles_around(cell)
-		return
-	layer.erase_cell(cell)
-	layer.update_internals()
-	_refresh_cell_collision(cell)
-	_refresh_cell_terrain_speed(cell)
+	_removal_service.remove_tile(layer, cell)
 
 func _clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2i) -> void:
-	if layer != traversable_buildings:
-		return
-	var item_id: String = ""
-	if building_object_manager and building_object_manager.has_method("get_building"):
-		var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
-		item_id = str(building.get("item_id", ""))
-	if item_id == "" and layer.get_cell_source_id(cell) >= 0:
-		item_id = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
-	if item_id != "pasteque":
-		return
-	if reservoir_system != null and reservoir_system.has_method("clear_pasteque_irrigation_from_cell"):
-		reservoir_system.call("clear_pasteque_irrigation_from_cell", cell)
+	_removal_service.clear_pasteque_irrigation_before_unbuild(layer, cell)
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
-	var layers: Array[TileMapLayer] = [blocking_buildings, fences, traversable_buildings, plantz, wallz]
-	for layer: TileMapLayer in layers:
-		if not layer or layer.get_cell_source_id(cell) < 0:
-			continue
-		var atlas_coords: Vector2i = layer.get_cell_atlas_coords(cell)
-		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), atlas_coords)
-		if building_object_manager and building_object_manager.has_method("get_building") and (layer == blocking_buildings or layer == traversable_buildings or layer == fences):
-			var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
-			item_id = str(building.get("item_id", item_id))
-		if item_id != "" and _can_unbuild_tile(layer, item_id, atlas_coords):
-			return {"item_id": item_id, "layer": layer, "cell": cell}
-	return {}
+	return _removal_service.removable_at_cell(cell)
 
 func _can_unbuild_tile(layer: TileMapLayer, item_id: String, atlas_coords: Vector2i) -> bool:
-	if layer == wallz:
-		return item_id == "wall" and atlas_coords == PLAYER_BUILDABLE_WALL_ATLAS
-	return true
+	return _removal_service.can_unbuild_tile(layer, item_id, atlas_coords)
 
 func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:
-	var removals: Array[Dictionary] = []
-	var seen_cells: Dictionary = {}
-	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
-	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
-	var y: int = start_cell.y
-	while true:
-		var x: int = start_cell.x
-		while true:
-			var cell: Vector2i = Vector2i(x, y)
-			if not seen_cells.has(cell):
-				var removal: Dictionary = _removable_at_cell(cell)
-				if not removal.is_empty():
-					removals.append(removal)
-					seen_cells[cell] = true
-			if x == end_cell.x:
-				break
-			x += x_step
-		if y == end_cell.y:
-			break
-		y += y_step
-	return removals
+	return _removal_service.remove_rectangle_cells(start_cell, end_cell)
 
 func _create_remove_progress(cell: Vector2i, value: float) -> void:
 	_build_preview.create_remove_progress(cell, value)
