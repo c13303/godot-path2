@@ -3140,8 +3140,8 @@ func _try_client_early_counter_fetch(agent: Node2D) -> bool:
 	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
 	if access_cell == INVALID_CELL or counter_cell == INVALID_CELL:
 		return false
-	var tile_size: Vector2 = _tile_size()
-	var reach: float = maxf(tile_size.x, tile_size.y) * EARLY_COUNTER_FETCH_TILE_FACTOR
+	var tile_dimensions: Vector2 = _tile_size()
+	var reach: float = maxf(tile_dimensions.x, tile_dimensions.y) * EARLY_COUNTER_FETCH_TILE_FACTOR
 	if agent.global_position.distance_to(_cell_center(access_cell)) > reach:
 		return false
 	_start_client_counter_payment(agent, counter_cell)

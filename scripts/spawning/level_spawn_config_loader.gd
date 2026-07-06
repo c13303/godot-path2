@@ -37,10 +37,10 @@ static func load_from_scene(scene: Node) -> LevelSpawnConfigLoader:
 				result.spawner_bindings.append(binding)
 	return result
 
-static func _load_default_playlist(level_scene_path: String) -> LevelSpawnPlaylist:
-	if level_scene_path == "":
+static func _load_default_playlist(scene_path: String) -> LevelSpawnPlaylist:
+	if scene_path == "":
 		return null
-	var playlist_path: String = DEFAULT_PLAYLIST_PATH_TEMPLATE % level_scene_path.get_file().get_basename()
+	var playlist_path: String = DEFAULT_PLAYLIST_PATH_TEMPLATE % scene_path.get_file().get_basename()
 	if not ResourceLoader.exists(playlist_path):
 		return null
 	var resource: Resource = load(playlist_path)
