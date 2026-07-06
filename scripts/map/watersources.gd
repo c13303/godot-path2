@@ -97,13 +97,13 @@ func rebuild_waterpool_directional_field(steering: Node) -> bool:
 		return false
 	if not waterpool_drift_enabled or waterpool_drift_speed <= 0.0:
 		_clear_waterpool_directional_field(steering)
-		print("Waterpools: disabled; field cleared")
+		CppDebugOptions.dlog("Waterpools: disabled; field cleared")
 		return true
 
 	var used_water_cells: Array[Vector2i] = get_used_cells()
 	if used_water_cells.is_empty():
 		_clear_waterpool_directional_field(steering)
-		print("Waterpools: no water cells; field cleared")
+		CppDebugOptions.dlog("Waterpools: no water cells; field cleared")
 		return true
 
 	var waterpool_field: Dictionary = Waterpools.build_directional_field(used_water_cells)
@@ -114,7 +114,7 @@ func rebuild_waterpool_directional_field(steering: Node) -> bool:
 
 	if field_cells.size() == 0:
 		_clear_waterpool_directional_field(steering)
-		print("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=0; field cleared" % [
+		CppDebugOptions.dlog("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=0; field cleared" % [
 			pool_count,
 			used_water_cells.size(),
 			deep_count,
@@ -135,7 +135,7 @@ func rebuild_waterpool_directional_field(steering: Node) -> bool:
 		waterpool_drift_sample_radius
 	)
 	steering.call("bind_phase_directional_cell_field", waterpool_bound_phase, waterpool_directional_field_id)
-	print("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=%d speed=%.1f sample_radius=%.1f field_id=%d phase=%d" % [
+	CppDebugOptions.dlog("Waterpools: pools=%d water_cells=%d deep_cells=%d field_cells=%d speed=%.1f sample_radius=%.1f field_id=%d phase=%d" % [
 		pool_count,
 		used_water_cells.size(),
 		deep_count,

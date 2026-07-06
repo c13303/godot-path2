@@ -47,6 +47,7 @@
 [ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
+[ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/playlistUI.gd" id="45_s6agy"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
@@ -683,7 +684,6 @@ script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
-debug_enabled = true
 dev_keys = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
@@ -893,7 +893,7 @@ text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
 
-[node name="top right" type="Control" parent="GameUI" unique_id=401142736]
+[node name="currenciesUI" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
 anchors_preset = 2
 anchor_top = 1.0
@@ -902,7 +902,7 @@ offset_top = -40.0
 offset_right = 40.0
 grow_vertical = 0
 
-[node name="seedIcon" type="TextureRect" parent="GameUI/top right" unique_id=1153248331]
+[node name="seedIcon" type="TextureRect" parent="GameUI/currenciesUI" unique_id=1153248331]
 layout_mode = 0
 offset_left = 168.0
 offset_top = -113.0
@@ -915,7 +915,7 @@ delay_between_seeds = 0.2
 animation_speed = 0.5
 curve_strength = 2.0
 
-[node name="seedQT" type="RichTextLabel" parent="GameUI/top right/seedIcon" unique_id=618629205]
+[node name="seedQT" type="RichTextLabel" parent="GameUI/currenciesUI/seedIcon" unique_id=618629205]
 layout_mode = 0
 offset_left = 40.0
 offset_top = 5.0
@@ -925,7 +925,7 @@ mouse_filter = 2
 text = "x 999"
 fit_content = true
 
-[node name="gemIcon" type="TextureRect" parent="GameUI/top right" unique_id=855508628]
+[node name="gemIcon" type="TextureRect" parent="GameUI/currenciesUI" unique_id=855508628]
 layout_mode = 0
 offset_left = 167.0
 offset_top = -64.0
@@ -938,7 +938,7 @@ delay_between_gems = 0.2
 animation_speed = 0.5
 curve_strength = 2.0
 
-[node name="gemQT" type="RichTextLabel" parent="GameUI/top right/gemIcon" unique_id=1609902140]
+[node name="gemQT" type="RichTextLabel" parent="GameUI/currenciesUI/gemIcon" unique_id=1609902140]
 layout_mode = 0
 offset_left = 40.0
 offset_top = 5.0
@@ -948,7 +948,7 @@ mouse_filter = 2
 text = "x 0"
 fit_content = true
 
-[node name="moneyIcon" type="TextureRect" parent="GameUI/top right" unique_id=8700093]
+[node name="moneyIcon" type="TextureRect" parent="GameUI/currenciesUI" unique_id=8700093]
 layout_mode = 0
 offset_left = 165.0
 offset_top = -165.0
@@ -961,7 +961,7 @@ delay_between_money = 0.2
 animation_speed = 0.5
 curve_strength = 2.0
 
-[node name="moneyQT" type="RichTextLabel" parent="GameUI/top right/moneyIcon" unique_id=1319827880]
+[node name="moneyQT" type="RichTextLabel" parent="GameUI/currenciesUI/moneyIcon" unique_id=1319827880]
 layout_mode = 0
 offset_left = 40.0
 offset_top = 5.0
@@ -1256,6 +1256,16 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("43_build_frame")
+
+[node name="playlistUI" type="Control" parent="GameUI" unique_id=306424859]
+layout_mode = 3
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -40.0
+offset_bottom = 40.0
+grow_horizontal = 0
+script = ExtResource("45_s6agy")
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")

@@ -13,12 +13,12 @@ var is_ready: bool = false
 func _ready() -> void:
 	
 	
-	print(">>> FlowFieldCode.gd _ready() triggered <<<")
+	CppDebugOptions.dlog(">>> FlowFieldCode.gd _ready() triggered <<<")
 	loading_progress.emit(0.05, "Preparing navigation")
 
 	await get_tree().process_frame
 
-	print("FlowFieldCode: _ready() called")
+	CppDebugOptions.dlog("FlowFieldCode: _ready() called")
 
 	if ff == null:
 		print("FlowFieldCode: FlowFieldNative node not found.")
@@ -49,7 +49,7 @@ func _ready() -> void:
 	is_ready = true
 	loading_progress.emit(0.45, "Flow field ready")
 	flow_field_ready.emit()
-	print("FlowFieldCode: initialization complete--------------------------------")
+	CppDebugOptions.dlog("FlowFieldCode: initialization complete--------------------------------")
 
 
 func _on_mouse_goal(world_pos: Vector2) -> void:

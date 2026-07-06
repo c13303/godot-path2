@@ -1074,4 +1074,4 @@ func _fail(message: String) -> void:
 
 
 func _log(message: String) -> void:
-	print("[SAVE] Progression: " + message)
+	CppDebugOptions.save_log("[SAVE] Progression: " + message)

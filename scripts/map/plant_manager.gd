@@ -524,4 +524,4 @@ func _max_bucket_search_radius(origin_bucket: Vector2i) -> int:
 	return max_radius
 
 func _log(message: String) -> void:
-	print("[SAVE] PlantManager: " + message)
+	CppDebugOptions.save_log("[SAVE] PlantManager: " + message)

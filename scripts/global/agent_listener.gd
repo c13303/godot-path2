@@ -11,11 +11,11 @@ func _ready() -> void:
 		push_warning("AgentListener: parent has no agent_event signal.")
 		return
 	mgr.connect("agent_event", Callable(self, "_on_agent_event"))
-	if debug_events:
+	if debug_events and CppDebugOptions.logs_enabled:
 		print("AgentListener: connected to agent_event")
 
 func _on_agent_event(event_name: String, agent_id: int, payload: Dictionary) -> void:
-	if debug_events:
+	if debug_events and CppDebugOptions.logs_enabled:
 		print("AgentListener event:", event_name, "agent:", agent_id, "payload:", payload)
 
 	match event_name:

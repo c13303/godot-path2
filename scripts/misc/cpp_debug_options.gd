@@ -1,4 +1,29 @@
+class_name CppDebugOptions
 extends Node
+
+# ---------------------------------------------------------------------------
+# Central console-log gate. Every routine/informational print() in the game is
+# routed through dlog()/save_log() below. Error/warning-style prints are left
+# alone so real failures stay visible even when debug is off.
+#
+# These mirrors are static so any script can read them via the global class name
+# (CppDebugOptions.logs_enabled) without holding a reference to this node, and so
+# they survive a scene reload. They are refreshed inside _apply_debug_settings(),
+# which the exported setters run at scene-instantiation time (before any _ready),
+# so the effective values are already in place when the earliest logs fire.
+static var logs_enabled: bool = false
+static var save_logs_enabled: bool = false
+
+## Routine/informational log. Printed only while Debug Enabled is ON.
+static func dlog(message: String) -> void:
+	if logs_enabled:
+		print(message)
+
+## Save-system log (the "[SAVE] ..." lines). Printed only while Debug Enabled is
+## ON *and* Save Debug Log is ON, so it can be silenced independently.
+static func save_log(message: String) -> void:
+	if logs_enabled and save_logs_enabled:
+		print(message)
 
 @export_group("Debug")
 @export var debug_enabled: bool = false:
@@ -61,6 +86,15 @@ static var _force_debug_on_restart: bool = false
 @export var verbose: bool = false:
 	set(value):
 		verbose = value
+		_apply_debug_settings()
+
+@export_group("Save")
+## Gates the "[SAVE] ..." save/progression console logs. When OFF, those lines
+## are hidden even while Debug Enabled is ON. (When Debug Enabled is OFF they are
+## hidden regardless, like every other debug log.)
+@export var save_debug_log: bool = false:
+	set(value):
+		save_debug_log = value
 		_apply_debug_settings()
 
 @export_group("Gardens")
@@ -390,6 +424,9 @@ func _apply_debug_settings() -> void:
 	# changes how the game actually plays. Compute the effective (gated) value of
 	# each debug-only flag once, here.
 	var dbg: bool = debug_enabled
+	# Refresh the static console-log gates read by dlog()/save_log() everywhere.
+	logs_enabled = dbg
+	save_logs_enabled = save_debug_log
 	var eff_world_hitboxes: bool = draw_world_hitboxes and dbg
 	var eff_combat_hitboxes: bool = draw_combat_hitboxes and dbg
 	var eff_bottleneck_zones: bool = draw_bottleneck_zones and dbg

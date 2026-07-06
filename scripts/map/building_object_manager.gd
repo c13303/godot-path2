@@ -342,7 +342,7 @@ func _set_runtime_node_light_enabled(runtime_node: Node, enabled: bool) -> void:
 			light.enabled = enabled
 
 func _log(message: String) -> void:
-	print("[SAVE] BuildingObjectManager: " + message)
+	CppDebugOptions.save_log("[SAVE] BuildingObjectManager: " + message)
 
 func _remove_runtime_node(cell: Vector2i) -> void:
 	if not _runtime_nodes_by_cell.has(cell):

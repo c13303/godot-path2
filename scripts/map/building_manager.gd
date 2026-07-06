@@ -34,7 +34,11 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
 const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
-const CLIENT_PAYMENT_SECONDS: float = 1.0
+# A client that has passed within this many tiles of a stocked counter's (walkable)
+# access tile grabs its rose right there and leaves, instead of finishing the walk to
+# the garden entrance / counter. Keyed off the walkable access tile, so a proximity hit
+# means the counter is genuinely reachable.
+const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
 const CLIENT_TANTRUM_ATTACK_INTERVAL_SECONDS: float = 3.0
 const CLIENT_TANTRUM_ATTACK_DAMAGE: int = 1
 const CLIENT_TANTRUM_ATTACK_LUNGE_SECONDS: float = 0.09
@@ -302,7 +306,6 @@ var _legacy_spawned_this_night: int = 0
 var _client_sale_active: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
-var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_tantrum_active: bool = false
 var _client_tantrum_group: int = -1
@@ -579,12 +582,12 @@ func _on_game_mode_changed(is_night: bool) -> void:
 			_playlist_spawning_enabled = false
 			_playlist_spawning_invalid = true
 		else:
-			print("BuildingManager: playlist night started: playable_night=%d total=%d" % [
+			CppDebugOptions.dlog("BuildingManager: playlist night started: playable_night=%d total=%d" % [
 				_current_playlist_night_index + 1,
 				_spawn_playlist_controller.get_total_night_count(),
 			])
 			for line: String in _spawn_playlist_controller.get_current_night_debug_lines():
-				print("BuildingManager: playlist " + line)
+				CppDebugOptions.dlog("BuildingManager: playlist " + line)
 	if _playlist_spawning_enabled:
 		_clear_legacy_spawn_fallback()
 	else:
@@ -779,7 +782,7 @@ func _run_night_preparation(token: int) -> void:
 	_night_preparation_ready = true
 	if _seed_merchant_leave_at_night_pending:
 		_start_seed_merchant_leave_for_night()
-	print("ff & gardens computed, monster night starts now")
+	CppDebugOptions.dlog("ff & gardens computed, monster night starts now")
 
 
 func _run_client_preparation(token: int) -> void:
@@ -1322,7 +1325,6 @@ func _process(delta: float) -> void:
 	# (string-formatting) context is only built on a real spike, never every frame.
 	t = Time.get_ticks_usec()
 	_process_eating_agents(delta)
-	_process_client_paying_agents(delta)
 	_process_creature_rose_trampling()
 	_process_pasteque_trampling()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
@@ -1363,7 +1365,7 @@ func _process(delta: float) -> void:
 	_process_seed_merchant_arrival()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		_warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
-			"counter_agents=%d paying=%d" % [_client_counter_agents.size(), _client_paying_agents.size()])
+			"counter_agents=%d" % _client_counter_agents.size())
 
 	t = Time.get_ticks_usec()
 	_process_escape_arrivals()
@@ -1617,7 +1619,7 @@ func _validate_playlist_after_spawner_scan() -> void:
 		push_error("BuildingManager: invalid level spawn playlist; playlist spawning disabled for safety.")
 		return
 	_playlist_spawning_enabled = true
-	print("BuildingManager: spawn playlist enabled for '%s' with %d night(s) and %d spawner binding(s)." % [
+	CppDebugOptions.dlog("BuildingManager: spawn playlist enabled for '%s' with %d night(s) and %d spawner binding(s)." % [
 		_loaded_level_scene_path,
 		_spawn_playlist_controller.get_total_night_count(),
 		_spawner_bindings_by_id.size(),
@@ -2342,7 +2344,7 @@ func _begin_legacy_spawn_fallback_night() -> void:
 		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
 			continue
 		_legacy_spawn_timers[spawner_cell] = 0.0
-	print("BuildingManager: legacy spawn fallback started: limit=%d spawners=%d" % [
+	CppDebugOptions.dlog("BuildingManager: legacy spawn fallback started: limit=%d spawners=%d" % [
 		_legacy_spawn_limit_this_night,
 		_legacy_spawn_timers.size(),
 	])
@@ -2452,7 +2454,6 @@ func _begin_morning_phase() -> void:
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
-	_client_paying_agents.clear()
 	var has_grownup_roses: bool = _grownup_rose_count() > 0
 	_morning_harvest_active = false
 	if not has_grownup_roses:
@@ -2579,7 +2580,6 @@ func restore_day_phase(phase: String) -> void:
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
 	_client_counter_agents.clear()
-	_client_paying_agents.clear()
 	match phase:
 		"morning":
 			call_deferred("_begin_morning_phase")
@@ -2676,7 +2676,7 @@ func _process_client_sale(delta: float) -> void:
 		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
 	if spawned_this_frame:
 		return
-	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty() and _hostile_clients.is_empty():
+	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_counter_agents.is_empty() and _hostile_clients.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
 		if can_start_night_after_clients():
@@ -2727,7 +2727,6 @@ func _clients_are_finished_for_day() -> bool:
 		and not GameState.is_client_phase
 		and _client_sale_pending_spawners.is_empty()
 		and _client_count() == 0
-		and _client_paying_agents.is_empty()
 		and _client_counter_agents.is_empty()
 		and _hostile_clients.is_empty()
 	)
@@ -2748,8 +2747,6 @@ func save_load_client_block_reason() -> String:
 		return "incoming clients pending"
 	if _client_count() > 0:
 		return "clients on map"
-	if not _client_paying_agents.is_empty():
-		return "clients paying"
 	if not _client_counter_agents.is_empty():
 		return "clients walking to counters"
 	return ""
@@ -3325,6 +3322,9 @@ func _process_astar_in_arrivals() -> void:
 			continue
 		if _astar_in_agents.has(nav_id):
 			continue
+		# Grab a nearby counter's rose on the way to the garden entrance and leave early.
+		if _try_client_early_counter_fetch(agent):
+			continue
 		var entry_cell: Vector2i = data.get("entry_cell", INVALID_CELL) as Vector2i
 		if entry_cell == INVALID_CELL:
 			finished.append(nav_id)
@@ -3395,6 +3395,9 @@ func _process_plant_arrivals() -> void:
 			finished.append(nav_id)
 			continue
 		if not (agent_manager and agent_manager.has_method("agent_path_arrived")):
+			continue
+		# Grab a nearby counter's rose before the full A* path completes and leave early.
+		if _try_client_early_counter_fetch(agent):
 			continue
 		if not bool(agent_manager.call("agent_path_arrived", nav_id)):
 			continue
@@ -3648,27 +3651,14 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
-	var nav_id: int = int(agent.get("nav_id"))
 	agent.set_meta("client_has_rose", true)
-	_client_paying_agents[nav_id] = {
-		"node": agent,
-		"timer": CLIENT_PAYMENT_SECONDS,
-		"plant_cell": plant_cell,
-	}
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
 	_spawn_client_payment_money(agent.global_position)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
 		plantz.erase_cell(plant_cell)
 		_flush_plant_layer_visuals()
-	if agent.has_method("start_eating"):
-		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
+	_finish_client_purchase(agent)
 
 
 func _process_client_counter_arrivals() -> void:
@@ -3704,21 +3694,10 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 		_retarget_agent_or_escape(agent, spawner_cell)
 		return
-	var nav_id: int = int(agent.get("nav_id"))
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
 	agent.set_meta("client_has_rose", true)
-	_client_paying_agents[nav_id] = {
-		"node": agent,
-		"timer": CLIENT_PAYMENT_SECONDS,
-		"counter_cell": counter_cell,
-	}
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
 	_spawn_client_payment_money(agent.global_position)
-	if agent.has_method("start_eating"):
-		agent.call("start_eating", CLIENT_PAYMENT_SECONDS)
+	_finish_client_purchase(agent)
 
 
 func _spawn_client_payment_money(world_position: Vector2) -> void:
@@ -3733,25 +3712,42 @@ func _spawn_client_payment_money(world_position: Vector2) -> void:
 		progression_node.call("update_money", 1)
 
 
-func _process_client_paying_agents(delta: float) -> void:
-	var finished: Array[int] = []
-	for raw_nav_id: Variant in _client_paying_agents.keys():
-		var nav_id: int = int(raw_nav_id)
-		var data: Dictionary = _client_paying_agents[nav_id] as Dictionary
-		var timer: float = float(data.get("timer", 0.0)) - delta
-		data["timer"] = timer
-		_client_paying_agents[nav_id] = data
-		if timer <= 0.0:
-			finished.append(nav_id)
-	for nav_id: int in finished:
-		var data: Dictionary = _client_paying_agents.get(nav_id, {}) as Dictionary
-		_client_paying_agents.erase(nav_id)
-		var raw_agent: Variant = data.get("node", null)
-		if not is_instance_valid(raw_agent):
-			continue
-		var agent: Node2D = raw_agent as Node2D
-		if agent != null:
-			_assign_agent_to_escape(agent)
+# A client that has taken its rose (from a counter or a garden plant) leaves the map
+# immediately — there is no eating/paying delay. The money pickup and the "carrying a
+# rose" look are already set up by the caller; start_escape's flow_out status drives the
+# carry sprite frame. _assign_agent_to_escape detaches the current path/flow and clears
+# the entry/astar/eating bookkeeping, so we only need to drop the counter-walk entry.
+func _finish_client_purchase(agent: Node2D) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	_client_counter_agents.erase(nav_id)
+	_assign_agent_to_escape(agent)
+
+
+# Opportunistic counter grab: a client still walking toward the garden entrance (flow-in)
+# or toward a counter access tile (A*-in) that passes within EARLY_COUNTER_FETCH_TILE_FACTOR
+# tiles of a stocked counter's access tile grabs its rose there and leaves — no need to
+# finish the walk. Returns true when the client fetched (and is now escaping) so the caller
+# skips its normal arrival handling for this agent. Cheap: monsters bail on the kind check,
+# and clients only run the nearest-counter lookup while some counter actually holds stock.
+func _try_client_early_counter_fetch(agent: Node2D) -> bool:
+	if _agent_kind(agent) != SPAWNER_KIND_CLIENT:
+		return false
+	if _total_counter_stock() <= 0:
+		return false
+	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var target: Dictionary = _select_stocked_counter_target(agent_cell)
+	if target.is_empty():
+		return false
+	var access_cell: Vector2i = target.get("target_cell", INVALID_CELL) as Vector2i
+	var counter_cell: Vector2i = target.get("counter_cell", INVALID_CELL) as Vector2i
+	if access_cell == INVALID_CELL or counter_cell == INVALID_CELL:
+		return false
+	var tile_size: Vector2 = _tile_size()
+	var reach: float = maxf(tile_size.x, tile_size.y) * EARLY_COUNTER_FETCH_TILE_FACTOR
+	if agent.global_position.distance_to(_cell_center(access_cell)) > reach:
+		return false
+	_start_client_counter_payment(agent, counter_cell)
+	return true
 
 
 func _begin_client_tantrum() -> void:
@@ -3812,7 +3808,6 @@ func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
 	_erase_astar_in_agent(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
-	_client_paying_agents.erase(nav_id)
 	if not client.is_in_group("monsters"):
 		client.add_to_group("monsters")
 	if client.has_method("stop_eating"):
@@ -4630,7 +4625,6 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	_drowning_agents.erase(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
-	_client_paying_agents.erase(nav_id)
 	_hostile_clients.erase(nav_id)
 	_garden_retarget_queued.erase(nav_id)
 	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
@@ -7115,7 +7109,7 @@ func _select_scored_garden_entry(
 	if best_cell != INVALID_CELL:
 		# Gated on the opt-in export (defaults off) so the debug overlay's
 		# per-frame path queries can't spam this; selection itself is rare.
-		if debug_logs:
+		if debug_logs and CppDebugOptions.logs_enabled:
 			print("BuildingManager: garden %d %s access %s score=%.1f target=%s" % [garden_id, mode, str(best_cell), best_score, str(target_cell)])
 		return best_cell
 	# Nothing scored finite: fall back to the old Manhattan nearest logic so
@@ -7191,7 +7185,7 @@ func _nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Ve
 	return _select_scored_garden_entry(garden_id, exit_wall_cell, "exit", INVALID_CELL, escape_group)
 
 func _log(message: String) -> void:
-	if debug_logs:
+	if debug_logs and CppDebugOptions.logs_enabled:
 		print("BuildingManager: ", message)
 
 func _log_spawn_failure(message: String) -> void:

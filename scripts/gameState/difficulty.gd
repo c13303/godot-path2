@@ -50,9 +50,9 @@ func _apply_hardcore_preset() -> void:
 	_spray.spray_visual_min_size = 1.0
 	_spray.spray_visual_threshold = 0.75
 	_spray.spray_visual_softness = 0.0
-	print("Difficulty changed: hardcore (F3)")
+	CppDebugOptions.dlog("Difficulty changed: hardcore (F3)")
 
 
 func _apply_easy_preset() -> void:
 	_water.damage = 50
-	print("Difficulty changed: easy (F2)")
+	CppDebugOptions.dlog("Difficulty changed: easy (F2)")
