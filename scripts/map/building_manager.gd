@@ -2927,6 +2927,9 @@ func _process_seed_merchant_proximity() -> void:
 	if not _seed_merchant_active or _seed_merchant_leaving or not is_instance_valid(_seed_merchant_agent):
 		return
 	var near: bool = is_player_near_seed_merchant()
+	if near and not GameState.is_night and not GameState.is_seed_merchant_phase:
+		GameState.set_building_phase(false)
+		GameState.set_seed_merchant_phase(true)
 	if near == _seed_merchant_paused:
 		return
 	_set_seed_merchant_paused(near)
