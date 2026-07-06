@@ -356,13 +356,12 @@ func _end_dev_night() -> void:
 		if scene:
 			manager = scene.get_node_or_null("Map/BuildingManager")
 			_building_manager = manager
+	if manager and manager.has_method("skip_current_night_for_dev"):
+		manager.call("skip_current_night_for_dev")
+		return
 	for node: Node in get_tree().get_nodes_in_group(&"monsters"):
 		var agent: Node2D = node as Node2D
-		if agent == null or not is_instance_valid(agent):
-			continue
-		if manager and manager.has_method("remove_dead_monster"):
-			manager.call("remove_dead_monster", agent, false)
-		else:
+		if agent != null and is_instance_valid(agent):
 			agent.queue_free()
 	GameState.start_day()
 

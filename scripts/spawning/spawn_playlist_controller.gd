@@ -95,6 +95,14 @@ func begin_night(night_index: int) -> bool:
 	return true
 
 
+func abort_current_night() -> void:
+	_current_night_index = -1
+	_current_night = null
+	_tracks.clear()
+	_events_emitted.clear()
+	_pending_emits.clear()
+
+
 func advance(delta: float) -> Array[Dictionary]:
 	var requests: Array[Dictionary] = []
 	if _current_night == null:

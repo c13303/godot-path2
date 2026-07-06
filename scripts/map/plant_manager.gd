@@ -49,8 +49,19 @@ func _connect_day_started() -> void:
 func _on_day_started(_day_number: int) -> void:
 	var delay_seconds: float = float(NEW_DAY_DELAY) / 1000.0
 	await get_tree().create_timer(delay_seconds).timeout
-	var grown_count: int = grow_green_roses()
 	var progression_node: Node = _get_progression_node()
+	if GameState.is_night:
+		_log("Rose-growth auto-save skipped: stale day-start handler reached night")
+		return
+	if progression_node != null and progression_node.has_method("get_value"):
+		var current_day_number: int = int(progression_node.call("get_value", &"nDays"))
+		if current_day_number != _day_number:
+			_log("Rose-growth auto-save skipped: stale day-start handler day=%d current=%d" % [
+				_day_number,
+				current_day_number,
+			])
+			return
+	var grown_count: int = grow_green_roses()
 	if progression_node == null or not progression_node.has_method("auto_save_after_rose_growth"):
 		_log("Rose-growth auto-save blocked: progression node missing")
 		return

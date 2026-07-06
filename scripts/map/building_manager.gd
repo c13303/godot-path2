@@ -224,6 +224,7 @@ var _startup_ready: bool = false
 var _night_preparing: bool = false
 var _night_preparation_ready: bool = false
 var _night_preparation_token: int = 0
+var _day_start_pending: bool = false
 var _client_preparing: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
 # One escape flow field per exit-wall tile, shared by all monsters. Keyed by the
@@ -553,6 +554,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	_client_preparing = false
 	if is_night:
+		_day_start_pending = false
 		_end_client_tantrum()
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
@@ -568,6 +570,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		# when the piles are already gone, so it never double-animates.
 		_counter_stock_manager.dissolve_all_piles()
 	if not is_night:
+		_day_start_pending = true
 		_night_preparation_token += 1
 		_night_preparing = false
 		_night_preparation_ready = false
@@ -2449,6 +2452,7 @@ func _drain_legacy_spawners_budgeted(delta: float) -> void:
 func _on_new_day_finished() -> void:
 	if GameState.is_night:
 		return
+	_day_start_pending = false
 	_begin_seed_merchant_phase()
 	_begin_morning_phase()
 
@@ -2746,7 +2750,7 @@ func can_start_night_after_clients() -> bool:
 	# spawns, yet the player must still be able to water their roses and end the day.
 	# _client_preparing covers the deferred window before clients spawn, so night
 	# can't jump ahead of a sale that is genuinely coming.
-	return not _client_preparing and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
+	return not _day_start_pending and not _client_preparing and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
 
 
 func _clients_are_finished_for_day() -> bool:
@@ -4698,6 +4702,28 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 # Monster death uses the same authoritative owner that created and routed monsters.
 # Clear every phase/index before unregistering the native agent so no deferred
 # garden work can retain or later re-route a dead nav_id.
+func skip_current_night_for_dev() -> bool:
+	if not GameState.is_night:
+		return false
+	_night_preparation_token += 1
+	_night_preparing = false
+	_night_preparation_ready = false
+	_empty_night_elapsed = 0.0
+	_ready_spawner_queue.clear()
+	_ready_spawner_queue_set.clear()
+	_clear_legacy_spawn_fallback()
+	_current_playlist_night_index = -1
+	if _spawn_playlist_controller != null:
+		_spawn_playlist_controller.abort_current_night()
+	for node: Node in get_tree().get_nodes_in_group(&"monsters"):
+		var agent: Node2D = node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		remove_dead_monster(agent, false)
+	GameState.start_day()
+	return true
+
+
 func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if not is_instance_valid(agent):
 		return
