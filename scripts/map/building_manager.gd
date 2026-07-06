@@ -279,6 +279,7 @@ var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 var _client_sale: ClientSaleController = ClientSaleController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
+var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _counter_stock_manager: CounterStockManager
@@ -326,6 +327,7 @@ func _ready() -> void:
 	_client_sale.setup(self)
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
+	_agent_suspend.setup(self)
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
@@ -3198,124 +3200,19 @@ func tile_size() -> Vector2:
 	return _tile_size()
 
 func _suspend_agent_for_drowning(nav_id: int) -> void:
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	_erase_eating_agent(nav_id)
-	_escaping_agents.erase(nav_id)
-	_client_counter_agents.erase(nav_id)
+	_agent_suspend.suspend_agent_for_drowning(nav_id)
 
 func _resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
-	_resume_agent_after_turret_eating(nav_id, agent, resume_state)
+	_agent_suspend.resume_agent_after_drowning(nav_id, agent, resume_state)
 
 func _capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
-	if _entry_path_agents.has(nav_id):
-		return {
-			"kind": "entry",
-			"data": (_entry_path_agents[nav_id] as Dictionary).duplicate(),
-		}
-	if _astar_in_agents.has(nav_id):
-		return {
-			"kind": "astar",
-			"data": (_astar_in_agents[nav_id] as Dictionary).duplicate(),
-		}
-	if _escaping_agents.has(nav_id):
-		return {
-			"kind": "escape",
-			"data": (_escaping_agents[nav_id] as Dictionary).duplicate(),
-		}
-	if _client_counter_agents.has(nav_id):
-		return {
-			"kind": "client_counter",
-			"data": (_client_counter_agents[nav_id] as Dictionary).duplicate(),
-		}
-	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
-	return {
-		"kind": "retarget",
-		"spawner_cell": spawner_cell,
-		"garden_id": garden_id,
-	}
+	return _agent_suspend.capture_agent_resume_state(nav_id, agent)
 
 func _suspend_agent_for_turret_eating(nav_id: int) -> void:
-	if agent_manager and agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager and agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	_entry_path_agents.erase(nav_id)
-	_erase_astar_in_agent(nav_id)
-	_escaping_agents.erase(nav_id)
-	_client_counter_agents.erase(nav_id)
+	_agent_suspend.suspend_agent_for_turret_eating(nav_id)
 
 func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
-	var kind: String = str(resume_state.get("kind", "retarget"))
-	var data: Dictionary = resume_state.get("data", {}) as Dictionary
-	if kind == "entry":
-		if _resume_agent_entry_flow(nav_id, agent, data):
-			_entry_path_agents[nav_id] = data
-			_erase_astar_in_agent(nav_id)
-			_escaping_agents.erase(nav_id)
-			if agent.has_method("start_flow_in"):
-				agent.call("start_flow_in")
-			return
-	elif kind == "astar":
-		if _resume_agent_path(nav_id, agent, data):
-			_entry_path_agents.erase(nav_id)
-			_set_astar_in_agent(nav_id, data)
-			_escaping_agents.erase(nav_id)
-			if agent.has_method("start_astar_in"):
-				agent.call("start_astar_in")
-			return
-	elif kind == "escape":
-		if _assign_agent_to_escape(agent):
-			return
-	elif kind == "client_counter":
-		if _resume_agent_path(nav_id, agent, data):
-			_client_counter_agents[nav_id] = data
-			_entry_path_agents.erase(nav_id)
-			_erase_astar_in_agent(nav_id)
-			_escaping_agents.erase(nav_id)
-			if agent.has_method("start_astar_in"):
-				agent.call("start_astar_in")
-			return
-
-	var spawner_cell: Vector2i = resume_state.get("spawner_cell", INVALID_CELL) as Vector2i
-	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	if _agent_kind(agent) == SPAWNER_KIND_CLIENT:
-		if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
-			agent.call("start_waiting_new_status")
-		return
-	if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
-		agent.call("start_waiting_new_status")
-
-func _resume_agent_entry_flow(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
-	if agent_manager == null or not agent_manager.has_method("assign_agent"):
-		return false
-	var plant_group: int = int(data.get("plant_group", -1))
-	if plant_group <= IDLE_GROUP:
-		return false
-	if agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	agent_manager.call("assign_agent", agent, plant_group)
-	return true
-
-func _resume_agent_path(nav_id: int, agent: Node2D, data: Dictionary) -> bool:
-	if agent_manager == null or not agent_manager.has_method("assign_agent_path"):
-		return false
-	var path_world: PackedVector2Array = data.get("path_world", PackedVector2Array()) as PackedVector2Array
-	if path_world.is_empty():
-		return false
-	if agent_manager.has_method("detach_agent_flow"):
-		agent_manager.call("detach_agent_flow", nav_id)
-	if agent_manager.has_method("detach_agent_path"):
-		agent_manager.call("detach_agent_path", nav_id)
-	data["node"] = agent
-	agent_manager.call("assign_agent_path", nav_id, path_world)
-	return true
+	_agent_suspend.resume_agent_after_turret_eating(nav_id, agent, resume_state)
 
 # A devoured turret leaves the same debris tile a consumed rose does, so the cell
 # reads as "something was eaten here". plantz/blocking_buildings share one TileSet

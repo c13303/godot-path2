@@ -1,164 +1,208 @@
-Review the current `scripts/map/building_manager.gd` after the recent controller extractions.
+Review the current `scripts/map/building_manager.gd` after the recent controller/helper extractions.
 
-Goal: perform one focused extraction: move agent suspend/resume logic out of `BuildingManager`.
+Goal: perform one focused extraction: move building/spawner scanning and tile-special detection out of `BuildingManager`.
 
 Do not run Godot, tests, compilation, export, or build commands. I will test manually.
 
 ## Target
 
-Create a focused helper/service for temporary agent suspension, for example:
+Create a focused scanner/service, for example:
 
-```txt id="f3s8a4"
-scripts/map/agent_suspend_service.gd
+```txt
+scripts/map/building_scan_service.gd
 ```
 
 Use another clear name only if it better matches the existing project style.
 
 ## Why this extraction
 
-Some systems temporarily take control of an agent, then need to restore its previous movement/path/eating/flow state.
+`BuildingManager` should coordinate gameplay systems, but it should not directly own all low-level map scanning.
 
-This is currently a shared responsibility used by systems such as:
+Building/spawner scanning is a coherent responsibility:
 
-* drowning
-* turret eating
-* possibly future grabs/stuns/traps
+```txt
+Read TileMapLayer / configured spawner nodes, detect special cells, update spawner registries, and report topology changes.
+```
 
-`BuildingManager` should coordinate these systems, but should not own all suspend/resume internals.
+This is architectural cleanup, not line-count cleanup.
 
 ## Candidate logic to extract
 
-Move only temporary agent suspend/resume logic.
+Move only building scan / special tile / spawner registration logic.
 
 Candidate functions:
 
-```gdscript id="vb9dy3"
-_suspend_agent_for_drowning
-_resume_agent_after_drowning
-_suspend_agent_for_turret_eating
-_resume_agent_after_turret_eating
-_capture_agent_resume_state
-_resume_agent_entry_flow
-_resume_agent_path
+```gdscript
+_load_tile_definitions
+_scan_buildings
+_scan_configured_spawner_nodes
+_scan_special_layer
+_migrate_special_tiles_from_wallz
+_register_spawner
+_log_scan_summary
+_atlas_key
+_tile_layer_signature
 ```
 
-Also inspect for small directly-related helpers, but do not broaden the extraction.
+Also inspect nearby small helpers, but do not broaden the extraction.
 
-Only move a helper if it is clearly part of the suspend/resume responsibility.
+Move related constants/state only if they are exclusively part of scanning:
+
+```gdscript
+BUILD_TILES_INDEX_PATH
+SPAWNER_KIND_MONSTER
+SPAWNER_KIND_CLIENT
+SPAWNER_KIND_MERCHANT
+EXIT_WALL_ATLAS
+_tile_defs_by_atlas
+_last_wall_signature
+_last_water_signature
+_last_blocking_signature
+_last_fence_signature
+_last_scan_summary
+```
+
+Only move a variable if all its reads/writes belong to scan responsibility.
+
+If a variable is used by gameplay systems outside scanning, keep it in `BuildingManager`.
+
+## State ownership rule
+
+The scanner may update these registries, but be careful with ownership:
+
+```gdscript
+_spawners
+_spawner_kind_by_cell
+_spawner_exit_cell_by_cell
+_spawner_spot_cell_by_cell
+_client_spawners
+_client_frequency_by_cell
+_merchant_spawners
+_spawner_bindings_by_id
+```
+
+Preferred safe first-pass boundary:
+
+```txt
+BuildingManager keeps ownership of core gameplay registries.
+BuildingScanService performs scanning and calls narrow manager methods to register/erase/update entries.
+```
+
+Do not move route caches or route ownership into this service.
+
+Do not move:
+
+```gdscript
+_spawner_routes
+_spawner_garden_routes
+_dirty_spawner_escapes
+_exit_wall_escapes
+_route_cache_hits
+_route_cache_misses
+```
+
+Those belong to route / flow-field logic, not scanning.
 
 ## Desired boundary
 
 `BuildingManager` may keep:
 
-```gdscript id="x7vhhf"
-var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
+```gdscript
+var _building_scan: BuildingScanService = BuildingScanService.new()
 ```
 
 Initialize it with:
 
-```gdscript id="s5ayww"
-_agent_suspend.setup(self)
+```gdscript
+_building_scan.setup(self)
 ```
 
-if that matches the current controller pattern.
+if that matches the current helper/controller pattern and keeps the patch smaller.
 
-Existing controllers should call the manager facade or the service through the manager. Keep the patch small.
+After extraction, `BuildingManager` should call something like:
 
-Acceptable pattern:
-
-```gdscript id="l0ux5e"
-func suspend_agent_for_drowning(nav_id: int, agent: Node2D) -> Dictionary:
-    return _agent_suspend.suspend_agent_for_drowning(nav_id, agent)
+```gdscript
+_building_scan.load_tile_definitions()
+_building_scan.scan_buildings()
 ```
 
-or direct internal use:
+or keep thin wrappers if many call sites currently use private manager methods:
 
-```gdscript id="n6x94m"
-_agent_suspend.suspend_agent_for_drowning(...)
+```gdscript
+func _scan_buildings() -> void:
+    _building_scan.scan_buildings()
 ```
 
-Prefer preserving existing public/private method names on `BuildingManager` as thin wrappers if current controllers call them via `call(...)`.
-
-Do not break `has_method(...)` / `call(...)` compatibility.
-
-## Responsibility
-
-The new service owns:
-
-```txt id="j9uw4g"
-capturing an agent's resumable state
-temporarily stopping/removing movement assignment
-restoring previous entry flow
-restoring previous path
-restoring previous eating/target state only if already part of the old suspend/resume behavior
-drowning-specific suspend/resume wrapper logic
-turret-eating-specific suspend/resume wrapper logic
-```
-
-`BuildingManager` still owns:
-
-```txt id="wnx2wn"
-agent registries
-garden logic
-retarget logic
-flow-field routes
-night preparation
-spawner routes
-client systems
-drowning controller
-turret eating controller
-process orchestration
-```
-
-The service may call narrow manager methods for existing state operations.
-
-Do not move unrelated state dictionaries into the service unless they are exclusively owned by suspend/resume behavior.
+Thin wrappers are acceptable if they reduce patch risk.
 
 ## Do not extract
 
 Do not move or refactor:
 
-```txt id="qg02po"
+```txt
 garden topology
+garden access scoring
 garden retargeting
-spawner routes
+spawner route creation
 flow-field ownership
 night preparation
 client preparation
-client sale
 spawn tick logic
+agent eating
+agent escaping
+astar-in logic
 monster death/drop logic
-agent eating state machine
-agent escaping state machine
-astar-in arrival logic
-tutorial behavior
+agent suspend/resume
+client systems
 save/load behavior
-building scan behavior
-debug/telemetry
+tutorial behavior
+debug/telemetry except scan summary if already part of scanner
 ```
 
-This pass is only about temporary suspend/resume.
+This pass is only about scanning / special tile detection / spawner registration.
 
 ## Behavior preservation
 
 Preserve existing behavior exactly:
 
-```txt id="i7c71v"
-same suspend timing
-same resume timing
-same path restoration
-same flow-field restoration
-same eating-state restoration
-same astar-in restoration
-same drowning behavior
-same turret-eating behavior
-same cleanup order
-same failure behavior if the agent is invalid
+```txt
+same spawner detection
+same spawner kind assignment
+same client spawner detection
+same merchant spawner detection
+same authored node spawner behavior
+same legacy tile marker behavior
+same migration behavior from wallz to traversable/special layers
+same wall/water/blocking/fence signature behavior
+same dirty topology detection
+same scan summary logging
+same playlist validation timing
+same route invalidation side effects
 ```
 
-Do not add new gameplay behavior.
+Do not change how spawners work.
 
-Do not “improve” the movement logic in this pass.
+Do not change route initialization.
+
+Do not change night/client preparation.
+
+Do not change spawn playlist behavior.
+
+## Important coupling rule
+
+If scanning currently marks route/topology state dirty, preserve that side effect.
+
+But do not extract the route rebuild itself.
+
+Example acceptable boundary:
+
+```gdscript
+manager.mark_navigation_topology_dirty()
+manager.mark_spawner_escape_dirty(spawner_cell)
+manager.register_scanned_spawner(...)
+```
+
+Do not let the scan service directly own flow-field groups or garden routes.
 
 ## GDScript strict typing
 
@@ -166,7 +210,7 @@ Godot/GDScript strict typing is enabled.
 
 Avoid `:=` inference for:
 
-```txt id="c29s07"
+```txt
 numeric expressions
 Dictionary / Array values
 signal or call() returns
@@ -192,20 +236,21 @@ Do not perform broad cleanup.
 
 Do not create generic `utils` files.
 
-Do not continue the refactor just because `BuildingManager` is still long.
+Do not continue into spawner routes just because the code is nearby.
 
-If the extraction requires touching garden retargeting, pathfinding internals, or flow-field route ownership deeply, stop and report the coupling instead of continuing.
+If this extraction requires major changes to route caches, flow-field ownership, garden logic, or spawn playlist behavior, stop and report the coupling instead of continuing.
 
 ## Before coding, report
 
-```txt id="xb5jw7"
+```txt
 Owner:
 Caller:
 State owned:
 Public API:
 Files changed:
 Estimated lines moved:
-Why this split is architectural and low-risk:
+Registry ownership decision:
+Why this split is architectural and bounded:
 Couplings found:
 Risk:
 ```
@@ -216,9 +261,10 @@ Then implement only this extraction.
 
 After implementation, report:
 
-```txt id="e0pi6r"
+```txt
 What moved:
 What stayed in BuildingManager:
+Registry ownership decision:
 Files changed:
 Remaining risks:
 Manual test checklist:
