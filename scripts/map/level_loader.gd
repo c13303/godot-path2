@@ -75,6 +75,7 @@ var _loaded_merchant_prices: Dictionary = {
 	&"bomb": 100,
 }
 var _loaded_merchant_days: Dictionary = {}
+var _loaded_merchant_growth_price_factors: Dictionary = {}
 var _loaded_rose_shop_counter_limit: int = 2
 
 func _enter_tree() -> void:
@@ -223,6 +224,10 @@ func get_loaded_merchant_days() -> Dictionary:
 	return _loaded_merchant_days.duplicate()
 
 
+func get_loaded_merchant_growth_price_factors() -> Dictionary:
+	return _loaded_merchant_growth_price_factors.duplicate()
+
+
 func get_loaded_shop_available_items() -> Array[StringName]:
 	var item_ids: Array[StringName] = []
 	for item_id: StringName in _loaded_tool_shop_available_items:
@@ -270,6 +275,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_merchant_available_items = _default_shop_available_items(DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS)
 	_loaded_merchant_prices = _default_shop_prices(_merchant_item_ids())
 	_loaded_merchant_days = {}
+	_loaded_merchant_growth_price_factors = {}
 	_loaded_rose_shop_counter_limit = 2
 	if level_root == null:
 		return
@@ -292,6 +298,7 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_merchant_available_items = _valid_shop_available_items(config.merchant_available_items, _merchant_item_ids())
 		_loaded_merchant_prices = _valid_shop_prices(config.merchant_prices, _merchant_item_ids())
 		_loaded_merchant_days = _valid_shop_days(config.merchant_days, _merchant_item_ids())
+		_loaded_merchant_growth_price_factors = _valid_shop_growth_price_factors(config.merchant_growth_price_factors, _merchant_item_ids())
 		var legacy_available_items: Array[StringName] = _valid_shop_available_items(config.shop_available_items, _legacy_shop_item_ids())
 		var legacy_prices: Dictionary = _valid_shop_prices(config.shop_prices, _legacy_shop_item_ids())
 		if not _same_string_name_array(legacy_available_items, _default_shop_available_items(DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS)):

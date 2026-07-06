@@ -48,6 +48,7 @@ class_name LevelSpawnConfig
 	&"bomb": 100,
 }
 @export var merchant_days: Dictionary = {}
+@export var merchant_growth_price_factors: Dictionary = {}
 
 @export_group("Legacy Shop")
 @export var shop_available_items: Array[StringName] = [&"rose", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]

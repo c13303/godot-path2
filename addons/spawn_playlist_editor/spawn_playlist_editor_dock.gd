@@ -88,6 +88,7 @@ var _tool_shop_growth_price_factor_spins: Dictionary = {}  # StringName -> SpinB
 var _merchant_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _merchant_day_spins: Dictionary = {}  # StringName -> SpinBox
+var _merchant_growth_price_factor_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
 var _night_clients_spin: SpinBox
 var _reward_box: VBoxContainer
@@ -539,12 +540,13 @@ func _build_shop_controls() -> void:
 	_merchant_available_checkboxes.clear()
 	_merchant_price_spins.clear()
 	_merchant_day_spins.clear()
+	_merchant_growth_price_factor_spins.clear()
 
 	var merchant_heading: Label = Label.new()
 	merchant_heading.text = "Merchant"
 	merchant_heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(merchant_heading)
-	_build_shop_item_controls(ItemCatalog.get_merchant_shop_item_ids(), _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed, {}, Callable())
+	_build_shop_item_controls(ItemCatalog.get_merchant_shop_item_ids(), _merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, _on_merchant_item_available_toggled, _on_merchant_price_changed, _on_merchant_day_changed, _merchant_growth_price_factor_spins, _on_merchant_growth_price_factor_changed)
 
 
 func _build_shop_item_controls(
@@ -558,40 +560,39 @@ func _build_shop_item_controls(
 	growth_factor_spins: Dictionary,
 	growth_factor_handler: Callable
 ) -> void:
-	var header: HBoxContainer = HBoxContainer.new()
-	_shop_controls.add_child(header)
+	var grid: GridContainer = GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 4)
+	_shop_controls.add_child(grid)
 	var available_header: Label = Label.new()
 	available_header.text = "Available"
-	available_header.custom_minimum_size = Vector2(128.0, 0.0)
-	header.add_child(available_header)
+	available_header.custom_minimum_size = Vector2(132.0, 0.0)
+	grid.add_child(available_header)
 	var price_header: Label = Label.new()
 	price_header.text = "Price"
 	price_header.custom_minimum_size = Vector2(86.0, 0.0)
-	header.add_child(price_header)
+	grid.add_child(price_header)
 	var day_header: Label = Label.new()
 	day_header.text = "Day"
 	day_header.custom_minimum_size = Vector2(70.0, 0.0)
-	header.add_child(day_header)
+	grid.add_child(day_header)
 	var currency_header: Label = Label.new()
 	currency_header.text = "Currency"
 	currency_header.custom_minimum_size = Vector2(86.0, 0.0)
-	header.add_child(currency_header)
-	if growth_factor_handler.is_valid():
-		var growth_factor_header: Label = Label.new()
-		growth_factor_header.text = "Growth price factor"
-		growth_factor_header.custom_minimum_size = Vector2(132.0, 0.0)
-		header.add_child(growth_factor_header)
+	grid.add_child(currency_header)
+	var growth_factor_header: Label = Label.new()
+	growth_factor_header.text = "Growth price factor"
+	growth_factor_header.custom_minimum_size = Vector2(132.0, 0.0)
+	grid.add_child(growth_factor_header)
 
 	for item_id: StringName in item_ids:
-		var row: HBoxContainer = HBoxContainer.new()
-		_shop_controls.add_child(row)
-
 		var checkbox: CheckBox = CheckBox.new()
 		checkbox.text = _item_display_name(item_id)
 		checkbox.tooltip_text = String(item_id)
-		checkbox.custom_minimum_size = Vector2(128.0, 0.0)
+		checkbox.custom_minimum_size = Vector2(132.0, 0.0)
 		checkbox.toggled.connect(toggled_handler.bind(item_id))
-		row.add_child(checkbox)
+		grid.add_child(checkbox)
 		available_checkboxes[item_id] = checkbox
 
 		var price_spin: SpinBox = SpinBox.new()
@@ -600,7 +601,7 @@ func _build_shop_item_controls(
 		price_spin.step = 1.0
 		price_spin.custom_minimum_size = Vector2(86.0, 0.0)
 		price_spin.value_changed.connect(price_handler.bind(item_id))
-		row.add_child(price_spin)
+		grid.add_child(price_spin)
 		price_spins[item_id] = price_spin
 
 		var day_spin: SpinBox = SpinBox.new()
@@ -609,23 +610,23 @@ func _build_shop_item_controls(
 		day_spin.step = 1.0
 		day_spin.custom_minimum_size = Vector2(70.0, 0.0)
 		day_spin.value_changed.connect(day_handler.bind(item_id))
-		row.add_child(day_spin)
+		grid.add_child(day_spin)
 		day_spins[item_id] = day_spin
 
 		var currency_label: Label = Label.new()
 		currency_label.text = String(ItemCatalog.get_currency(String(item_id)))
 		currency_label.custom_minimum_size = Vector2(86.0, 0.0)
-		row.add_child(currency_label)
+		grid.add_child(currency_label)
 
+		var growth_factor_spin: SpinBox = SpinBox.new()
+		growth_factor_spin.min_value = 1.0
+		growth_factor_spin.max_value = 100.0
+		growth_factor_spin.step = 0.1
+		growth_factor_spin.custom_minimum_size = Vector2(132.0, 0.0)
 		if growth_factor_handler.is_valid():
-			var growth_factor_spin: SpinBox = SpinBox.new()
-			growth_factor_spin.min_value = 1.0
-			growth_factor_spin.max_value = 100.0
-			growth_factor_spin.step = 0.1
-			growth_factor_spin.custom_minimum_size = Vector2(132.0, 0.0)
 			growth_factor_spin.value_changed.connect(growth_factor_handler.bind(item_id))
-			row.add_child(growth_factor_spin)
 			growth_factor_spins[item_id] = growth_factor_spin
+		grid.add_child(growth_factor_spin)
 
 
 func _build_reward_controls() -> void:
@@ -960,6 +961,7 @@ func _refresh_shop_controls() -> void:
 	var merchant_available_items: Array[StringName] = _default_merchant_available_items()
 	var merchant_prices: Dictionary = _default_merchant_prices()
 	var merchant_days: Dictionary = {}
+	var merchant_growth_price_factors: Dictionary = _default_merchant_growth_price_factors()
 	if config != null:
 		tool_available_items = _valid_tool_shop_available_items(config.tool_shop_available_items)
 		tool_prices = _valid_tool_shop_prices(config.tool_shop_prices)
@@ -968,6 +970,7 @@ func _refresh_shop_controls() -> void:
 		merchant_available_items = _valid_merchant_available_items(config.merchant_available_items)
 		merchant_prices = _valid_merchant_prices(config.merchant_prices)
 		merchant_days = _valid_merchant_days(config.merchant_days)
+		merchant_growth_price_factors = _valid_merchant_growth_price_factors(config.merchant_growth_price_factors)
 		var legacy_available_items: Array[StringName] = _valid_legacy_shop_available_items(config.shop_available_items)
 		var legacy_prices: Dictionary = _valid_legacy_shop_prices(config.shop_prices)
 		if not _same_string_name_array(legacy_available_items, _default_legacy_shop_available_items()):
@@ -981,7 +984,7 @@ func _refresh_shop_controls() -> void:
 			if merchant_prices == _default_merchant_prices():
 				merchant_prices = _valid_merchant_prices(legacy_prices)
 	_refresh_shop_item_controls(_tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, tool_available_items, tool_prices, tool_days, has_level, _tool_shop_growth_price_factor_spins, tool_growth_price_factors)
-	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, merchant_available_items, merchant_prices, merchant_days, has_level, {}, {})
+	_refresh_shop_item_controls(_merchant_available_checkboxes, _merchant_price_spins, _merchant_day_spins, merchant_available_items, merchant_prices, merchant_days, has_level, _merchant_growth_price_factor_spins, merchant_growth_price_factors)
 
 
 func _refresh_shop_item_controls(
@@ -1789,6 +1792,22 @@ func _on_merchant_day_changed(value: float, item_id: StringName) -> void:
 	mark_dirty()
 
 
+func _on_merchant_growth_price_factor_changed(value: float, item_id: StringName) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	var growth_price_factors: Dictionary = _valid_merchant_growth_price_factors(config.merchant_growth_price_factors)
+	var factor: float = maxf(1.0, value)
+	if factor > 1.0:
+		growth_price_factors[item_id] = factor
+	else:
+		growth_price_factors.erase(item_id)
+	config.merchant_growth_price_factors = growth_price_factors
+	mark_dirty()
+
+
 func _on_starting_weapon_toggled(enabled: bool, weapon_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -1985,6 +2004,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("merchant_available_items", _selected_merchant_available_items())
 		root.set("merchant_prices", _selected_merchant_prices())
 		root.set("merchant_days", _selected_merchant_days())
+		root.set("merchant_growth_price_factors", _selected_merchant_growth_price_factors())
 		root.set("shop_available_items", _selected_legacy_shop_available_items())
 		root.set("shop_prices", _selected_legacy_shop_prices())
 	_apply_client_frequency_to_scene(root)
@@ -2016,6 +2036,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.merchant_available_items = _selected_merchant_available_items()
 	config.merchant_prices = _selected_merchant_prices()
 	config.merchant_days = _selected_merchant_days()
+	config.merchant_growth_price_factors = _selected_merchant_growth_price_factors()
 	config.shop_available_items = _selected_legacy_shop_available_items()
 	config.shop_prices = _selected_legacy_shop_prices()
 
@@ -2165,6 +2186,7 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.merchant_available_items = _default_merchant_available_items()
 		config.merchant_prices = _default_merchant_prices()
 		config.merchant_days = {}
+		config.merchant_growth_price_factors = _default_merchant_growth_price_factors()
 		config.shop_available_items = _default_legacy_shop_available_items()
 		config.shop_prices = _default_legacy_shop_prices()
 		config.rose_shop_counter_limit = 2
@@ -2310,6 +2332,10 @@ func _selected_merchant_days() -> Dictionary:
 	return _selected_shop_days_from(_merchant_day_spins, _merchant_item_ids())
 
 
+func _selected_merchant_growth_price_factors() -> Dictionary:
+	return _selected_shop_growth_price_factors_from(_merchant_growth_price_factor_spins, _merchant_item_ids())
+
+
 func _selected_legacy_shop_prices() -> Dictionary:
 	var prices: Dictionary = _selected_tool_shop_prices()
 	var merchant_prices: Dictionary = _selected_merchant_prices()
@@ -2427,6 +2453,10 @@ func _valid_merchant_days(raw_days: Dictionary) -> Dictionary:
 	return _valid_shop_days(raw_days, _merchant_item_ids())
 
 
+func _valid_merchant_growth_price_factors(raw_factors: Dictionary) -> Dictionary:
+	return _valid_shop_growth_price_factors(raw_factors, _merchant_item_ids())
+
+
 func _valid_shop_prices(raw_prices: Dictionary, item_ids: Array[StringName]) -> Dictionary:
 	var prices: Dictionary = {}
 	for item_id: StringName in item_ids:
@@ -2484,6 +2514,10 @@ func _default_tool_shop_growth_price_factors() -> Dictionary:
 
 func _default_merchant_prices() -> Dictionary:
 	return _default_shop_prices(_merchant_item_ids())
+
+
+func _default_merchant_growth_price_factors() -> Dictionary:
+	return {}
 
 
 func _default_legacy_shop_prices() -> Dictionary:

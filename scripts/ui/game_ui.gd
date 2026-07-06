@@ -638,6 +638,15 @@ func _current_day_number() -> int:
 
 
 func get_merchant_price(item_id: String) -> int:
+	var base_price: int = _base_merchant_price(item_id)
+	var factor: float = _merchant_growth_price_factor(item_id)
+	if factor <= 1.0:
+		return base_price
+	var owned_count: int = _merchant_owned_count(item_id)
+	return _growth_build_price(base_price, factor, owned_count)
+
+
+func _base_merchant_price(item_id: String) -> int:
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	if loader != null and loader.has_method("get_loaded_merchant_prices"):
@@ -657,6 +666,44 @@ func get_merchant_price(item_id: String) -> int:
 			if legacy_prices.has(item_id):
 				return maxi(0, int(legacy_prices[item_id]))
 	return ItemCatalog.get_price(item_id)
+
+
+func _merchant_growth_price_factor(item_id: String) -> float:
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
+	if loader != null and loader.has_method("get_loaded_merchant_growth_price_factors"):
+		var raw_factors: Variant = loader.call("get_loaded_merchant_growth_price_factors")
+		if raw_factors is Dictionary:
+			var factors: Dictionary = raw_factors as Dictionary
+			if factors.has(StringName(item_id)):
+				return maxf(1.0, float(factors[StringName(item_id)]))
+			if factors.has(item_id):
+				return maxf(1.0, float(factors[item_id]))
+	return 1.0
+
+
+func _merchant_owned_count(item_id: String) -> int:
+	if item_id == "seed" and _progression_node != null and _progression_node.has_method("get_value"):
+		return maxi(0, int(_progression_node.call("get_value", SEED_KEY)))
+	return get_inventory_item_quantity(item_id)
+
+
+func _merchant_price_for_owned_count(item_id: String, owned_count: int) -> int:
+	var base_price: int = _base_merchant_price(item_id)
+	var factor: float = _merchant_growth_price_factor(item_id)
+	if factor <= 1.0:
+		return base_price
+	return _growth_build_price(base_price, factor, owned_count)
+
+
+func _merchant_price_total_for_next(item_id: String, count: int) -> int:
+	if count <= 0:
+		return 0
+	var total: int = 0
+	var owned_count: int = _merchant_owned_count(item_id)
+	for i: int in range(count):
+		total += _merchant_price_for_owned_count(item_id, owned_count + i)
+	return total
 
 
 ## How many of item_id the player can currently afford (floor(currency / price)).
@@ -703,8 +750,22 @@ func get_merchant_affordable_quantity(item_id: String) -> int:
 	if price <= 0 or key == &"" or _progression_node == null:
 		return 0
 	var owned: int = int(_progression_node.call("get_value", key))
-	@warning_ignore("integer_division")
-	var affordable: int = owned / price
+	var factor: float = _merchant_growth_price_factor(item_id)
+	if factor <= 1.0:
+		@warning_ignore("integer_division")
+		var flat_affordable: int = owned / price
+		return flat_affordable
+	var affordable: int = 0
+	var total: int = 0
+	var owned_count: int = _merchant_owned_count(item_id)
+	while true:
+		var next_price: int = _merchant_price_for_owned_count(item_id, owned_count + affordable)
+		if next_price <= 0:
+			break
+		if total + next_price > owned:
+			break
+		total += next_price
+		affordable += 1
 	return affordable
 
 
@@ -740,11 +801,11 @@ func try_purchase_merchant_item(item_id: String, count: int = 1) -> bool:
 		return false
 	if not is_merchant_item_available(item_id):
 		return false
-	var price: int = get_merchant_price(item_id)
+	var price: int = _merchant_price_total_for_next(item_id, count)
 	var key: StringName = _build_currency_prog_key(item_id)
 	if price <= 0 or key == &"" or _progression_node == null:
 		return false
-	return bool(_progression_node.call("spend", key, price * count))
+	return bool(_progression_node.call("spend", key, price))
 
 
 func try_purchase_shop_inventory_item(item_id: String, count: int = 1) -> bool:

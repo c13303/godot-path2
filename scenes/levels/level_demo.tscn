@@ -1247,33 +1247,41 @@ starting_items = {
 &"pasteque": 1
 }
 starting_item_toolbuild_hidden = Array[StringName]([&"turret1"])
-tool_shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence"])
+tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence"])
 tool_shop_prices = {
 &"fence": 1,
+&"lamp": 0,
+&"pasteque": 20,
+&"reservoir": 100,
 &"ronce": 1,
 &"rose": 1,
+&"rose_shop_counter": 20,
 &"turret1": 5,
 &"turret_epine": 5,
 &"wall": 10
 }
 tool_shop_growth_price_factors = {}
-merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque"])
+merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque", &"rose_shop_counter"])
 merchant_prices = {
 &"beam": 30,
 &"bomb": 100,
 &"pasteque": 50,
+&"rose_shop_counter": 20,
 &"seed": 2,
 &"spray": 10,
 &"sword": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"turret_epine", &"wall", &"ronce", &"fence", &"spray", &"beam", &"pasteque"])
+shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
 shop_prices = {
 &"beam": 30,
 &"bomb": 100,
 &"fence": 1,
+&"lamp": 0,
 &"pasteque": 50,
+&"reservoir": 100,
 &"ronce": 1,
 &"rose": 1,
+&"rose_shop_counter": 20,
 &"seed": 2,
 &"spray": 10,
 &"sword": 100,
