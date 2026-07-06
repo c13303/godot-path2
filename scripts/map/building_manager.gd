@@ -6,7 +6,6 @@ signal startup_loading_finished
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
-const BUILD_TILES_INDEX_PATH: String = "res://scripts/map/build_tiles_index.tres"
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -110,7 +109,6 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 			_zone_overlay.visible = value
 			_zone_overlay.queue_redraw()
 
-var _tile_defs_by_atlas: Dictionary = {}
 var _spawners: Dictionary = {}
 var _spawner_kind_by_cell: Dictionary = {}  # Vector2i -> StringName
 var _spawner_exit_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
@@ -186,10 +184,6 @@ var _last_plant_retarget_already_queued: int = 0 # valid but already in retarget
 var _garden_retarget_queue: Array[Dictionary] = []
 var _garden_retarget_queued: Dictionary = {}  # nav_id -> true
 var _scan_timer: float = 0.0
-var _last_wall_signature: int = 0
-var _last_water_signature: int = 0
-var _last_blocking_signature: int = 0
-var _last_fence_signature: int = 0
 var _navigation_topology_dirty: bool = true
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
@@ -280,6 +274,7 @@ var _client_sale: ClientSaleController = ClientSaleController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
+var _building_scan: BuildingScanService = BuildingScanService.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _counter_stock_manager: CounterStockManager
@@ -328,6 +323,7 @@ func _ready() -> void:
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
 	_agent_suspend.setup(self)
+	_building_scan.setup(self)
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
 	_monster_death.setup(self)
@@ -1260,77 +1256,10 @@ func _process(delta: float) -> void:
 		])
 
 func _load_tile_definitions() -> void:
-	_tile_defs_by_atlas.clear()
-	var res: Resource = load(BUILD_TILES_INDEX_PATH)
-	if not (res is JSON):
-		return
-
-	for key in res.data.keys():
-		var definition: Variant = res.data[key]
-		if not (definition is Dictionary):
-			continue
-		var tile_definition: Dictionary = definition as Dictionary
-		var atlas: Array = tile_definition.get("atlas", [])
-		if atlas.size() != 2:
-			continue
-		var atlas_key: String = _atlas_key(Vector2i(int(atlas[0]), int(atlas[1])))
-		_tile_defs_by_atlas[atlas_key] = {
-			"key": str(key),
-			"kind": str(tile_definition.get("kind", ""))
-		}
+	_building_scan.load_tile_definitions()
 
 func _scan_buildings() -> void:
-	if not traversable_buildings:
-		return
-
-	var t: int = Time.get_ticks_usec()
-	var migrated: bool = _migrate_special_tiles_from_wallz()
-	_debug_telemetry.warn_garden_task_lag_us("_migrate_special_tiles_from_wallz", Time.get_ticks_usec() - t,
-		"migrated=%s" % str(migrated))
-
-	t = Time.get_ticks_usec()
-	var wall_signature: int = _tile_layer_signature(wallz)
-	var water_signature: int = _tile_layer_signature(watersources)
-	var blocking_signature: int = _tile_layer_signature(blocking_buildings)
-	var fence_signature: int = _tile_layer_signature(fences)
-	_debug_telemetry.warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
-		"wall_cells=%d water_cells=%d fence_cells=%d" % [
-			wallz.get_used_cells().size() if wallz else 0,
-			watersources.get_used_cells().size() if watersources else 0,
-			fences.get_used_cells().size() if fences else 0,
-		])
-	var walls_changed: bool = (
-		wall_signature != _last_wall_signature
-		or water_signature != _last_water_signature
-		or blocking_signature != _last_blocking_signature
-		or fence_signature != _last_fence_signature
-		or migrated
-	)
-	_last_wall_signature = wall_signature
-	_last_water_signature = water_signature
-	_last_blocking_signature = blocking_signature
-	_last_fence_signature = fence_signature
-
-	var seen_spawners: Dictionary = {}
-	t = Time.get_ticks_usec()
-	# Spawners are authored as child nodes in the loaded level's spawner/spawners
-	# container. Tile special scanning is kept only for non-spawner legacy markers.
-	_scan_configured_spawner_nodes(seen_spawners)
-	_scan_special_layer(traversable_buildings, seen_spawners)
-	_scan_special_layer(wallz, seen_spawners)
-	_debug_telemetry.warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
-		"seen_spawners=%d" % seen_spawners.size())
-	_debug_telemetry.log_scan_summary(seen_spawners, migrated, walls_changed)
-
-	for raw_spawner_cell in _spawners.keys():
-		var cell: Vector2i = raw_spawner_cell
-		if not seen_spawners.has(cell):
-			_spawners.erase(cell)
-			_release_spawner_route(cell)
-			_dirty_spawner_escapes.erase(cell)
-
-	if walls_changed:
-		_navigation_topology_dirty = true
+	_building_scan.scan_buildings()
 
 func _apply_navigation_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
@@ -1703,80 +1632,17 @@ func _runtime_agents_active() -> bool:
 	return GameState.is_night or _client_sale.is_active()
 
 func _scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:
-	if not layer:
-		return
-
-	for raw_cell in layer.get_used_cells():
-		var map_cell: Vector2i = raw_cell
-		var definition: Dictionary = _definition_for_layer_cell(layer, map_cell)
-		var kind: String = str(definition.get("kind", ""))
-		if kind == "spawner":
-			continue
+	_building_scan.scan_special_layer(layer, _seen_spawners)
 
 
 func _scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
-	for binding: SpawnerBinding in _level_spawner_bindings:
-		if binding == null:
-			continue
-		if binding.kind != SPAWNER_KIND_MONSTER and binding.kind != SPAWNER_KIND_CLIENT and binding.kind != SPAWNER_KIND_MERCHANT:
-			continue
-		_debug_telemetry.log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
-			String(binding.spawner_id),
-			binding.cell,
-			_has_floor(binding.cell),
-			_has_wall(binding.cell),
-		])
-		seen_spawners[binding.cell] = true
-		_register_spawner(binding.cell, binding.kind, binding.exit_cell, binding.frequency_client, binding.spot_cell)
+	_building_scan.scan_configured_spawner_nodes(seen_spawners)
 
 func _migrate_special_tiles_from_wallz() -> bool:
-	if not wallz or not traversable_buildings:
-		return false
-
-	var migrated: bool = false
-	for raw_cell in wallz.get_used_cells():
-		var cell: Vector2i = raw_cell
-		var definition: Dictionary = _definition_for_layer_cell(wallz, cell)
-		var kind: String = str(definition.get("kind", ""))
-		if kind == "" or kind == "wall":
-			continue
-		if kind == "spawner":
-			var legacy_atlas: Vector2i = wallz.get_cell_atlas_coords(cell)
-			wallz.erase_cell(cell)
-			migrated = true
-			_debug_telemetry.log("removed legacy spawner tile cell=%s atlas=%s from wallz; level spawner nodes are used instead" % [
-				cell,
-				legacy_atlas,
-			])
-			continue
-
-		var target_layer: TileMapLayer = plantz if kind == "plantsToTarget" else traversable_buildings
-		if not target_layer:
-			continue
-		target_layer.set_cell(
-			cell,
-			wallz.get_cell_source_id(cell),
-			wallz.get_cell_atlas_coords(cell),
-			wallz.get_cell_alternative_tile(cell)
-		)
-		wallz.erase_cell(cell)
-		migrated = true
-		_debug_telemetry.log("migrated special tile kind=%s cell=%s atlas=%s from wallz to %s" % [
-			kind,
-			cell,
-			target_layer.get_cell_atlas_coords(cell),
-			target_layer.name
-		])
-
-	if migrated:
-		traversable_buildings.update_internals()
-		if plantz:
-			plantz.update_internals()
-		wallz.update_internals()
-	return migrated
+	return _building_scan.migrate_special_tiles_from_wallz()
 
 func _definition_for_cell(cell: Vector2i) -> Dictionary:
-	return _definition_for_layer_cell(traversable_buildings, cell)
+	return _building_scan.definition_for_cell(cell)
 
 # Cheap local-obstacle query for later monster local movement / combat. Returns true
 # when `cell` holds a breakable blocking building (e.g. turret1). This is intentionally
@@ -1805,11 +1671,7 @@ func _building_cell_blocks_movement(cell: Vector2i) -> bool:
 	return true
 
 func _definition_for_layer_cell(layer: TileMapLayer, cell: Vector2i) -> Dictionary:
-	if not layer:
-		return {}
-	var atlas: Vector2i = layer.get_cell_atlas_coords(cell)
-	var atlas_key: String = _atlas_key(atlas)
-	return _tile_defs_by_atlas.get(atlas_key, {}) as Dictionary
+	return _building_scan.definition_for_layer_cell(layer, cell)
 
 func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, exit_cell: Vector2i = INVALID_CELL, frequency_client: float = 1.0, spot_cell: Vector2i = INVALID_CELL) -> void:
 	var is_new: bool = not _spawners.has(cell)
@@ -3684,20 +3546,6 @@ func _has_water(cell: Vector2i) -> bool:
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	return floorz.to_global(floorz.map_to_local(cell))
-
-func _atlas_key(atlas: Vector2i) -> String:
-	return "%d,%d" % [atlas.x, atlas.y]
-
-func _tile_layer_signature(layer: TileMapLayer) -> int:
-	if not layer:
-		return 0
-	var signature: int = 17
-	for raw_cell in layer.get_used_cells():
-		var cell: Vector2i = raw_cell
-		var atlas: Vector2i = layer.get_cell_atlas_coords(cell)
-		signature += int(cell.x * 73856093 + cell.y * 19349663)
-		signature += int(atlas.x * 83492791 + atlas.y * 2654435761)
-	return signature
 
 # ---------------------------------------------------------------------------
 # Plant zone.
