@@ -44,8 +44,30 @@ func take_damage(amount: int) -> bool:
 	if health <= 0:
 		_destroyed = true
 		GameState.set_reservoir_destroyed(true)
+		_destroy_visuals()
 		return true
 	return false
+
+
+## Removes the reservoir's two sprites (the base tank and its child water fill)
+## when it is destroyed. Handles both reservoir layouts: shop-built reservoirs keep
+## the base as a "Sprite2D" child, while level-authored ones use this runtime node
+## itself as the base sprite.
+func _destroy_visuals() -> void:
+	var base_sprite: Sprite2D = get_node_or_null("Sprite2D") as Sprite2D
+	if base_sprite != null:
+		# Freeing the base sprite also frees its "WaterFill" child.
+		base_sprite.queue_free()
+	else:
+		var water_fill: Node = get_node_or_null("WaterFill")
+		if water_fill != null:
+			water_fill.queue_free()
+		# This script declares `extends Node2D`, but level-authored reservoirs attach
+		# it to a Sprite2D node, so probe the runtime type through a widened ref.
+		var self_node: Node = self
+		if self_node is Sprite2D:
+			(self_node as Sprite2D).texture = null
+	queue_redraw()
 
 
 func is_destroyed() -> bool:

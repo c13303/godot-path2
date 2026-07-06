@@ -310,6 +310,7 @@ var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_tantrum_active: bool = false
 var _client_tantrum_group: int = -1
 var _hostile_clients: Dictionary = {}  # nav_id -> Dictionary
+var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant_active: bool = false
 var _seed_merchant_agent: Node2D
 var _seed_merchant_nav_id: int = -1
@@ -481,6 +482,8 @@ func _ready() -> void:
 	_setup_zone_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
+	_damage_number_drawer = DamageNumberDrawer.new()
+	add_child(_damage_number_drawer)
 	set_process_input(true)
 
 
@@ -3900,6 +3903,9 @@ func _deal_client_tantrum_hit(nav_id: int, target: Node) -> void:
 	if not _hostile_clients.has(nav_id):
 		return
 	if target != null and is_instance_valid(target) and target.has_method("take_damage"):
+		if _damage_number_drawer != null:
+			var hit_position: Vector2 = (target as Node2D).global_position if target is Node2D else Vector2.ZERO
+			_damage_number_drawer.show_damage(hit_position, CLIENT_TANTRUM_ATTACK_DAMAGE)
 		target.call("take_damage", CLIENT_TANTRUM_ATTACK_DAMAGE)
 
 

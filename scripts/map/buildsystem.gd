@@ -951,9 +951,10 @@ func _finish_drag_build() -> void:
 	_set_drag_build_active(false)
 	_drag_build_item_id = ""
 	if cells.is_empty():
+		# The drag covered no valid cells: keep the buildable equipped so the player can
+		# retry the placement instead of forcing a re-select of the tool.
 		if _placement_attempt_needs_grass_alert(_drag_build_start_cell, _drag_build_end_cell, placeable_def):
 			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
-		_clear_build_selection()
 		return
 	# Pay for exactly the cells we are about to place; bail if the spend fails.
 	if not game_ui or not game_ui.has_method("try_purchase_build"):
