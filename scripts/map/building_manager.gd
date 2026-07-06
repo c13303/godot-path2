@@ -278,14 +278,12 @@ var _playlist_spawning_enabled: bool = false
 var _playlist_spawning_invalid: bool = false
 var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
-var _client_sale_active: bool = false
-var _client_sale_pending_spawners: Array[Vector2i] = []
-var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
 var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
+var _client_sale: ClientSaleController = ClientSaleController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 var _counter_stock_manager: CounterStockManager
@@ -435,6 +433,7 @@ func _ready() -> void:
 	_seed_merchant.setup(self)
 	_morning_harvest.setup(self)
 	_client_tantrum.setup(self)
+	_client_sale.setup(self)
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
 	_spawn_tick_controller.setup(self)
@@ -495,9 +494,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night:
 		_day_start_pending = false
 		_client_tantrum.end()
-		_client_sale_active = false
-		_client_sale_pending_spawners.clear()
-		_client_sale_spawn_timers.clear()
+		_client_sale.reset()
 		_client_counter_agents.clear()
 		_seed_merchant.on_night_started()
 		GameState.set_building_phase(false)
@@ -787,7 +784,7 @@ func _run_client_preparation(token: int) -> void:
 		return
 
 	_client_preparing = false
-	_activate_client_sale_phase()
+	_client_sale.activate()
 
 
 func _abort_client_preparation(token: int) -> void:
@@ -796,9 +793,7 @@ func _abort_client_preparation(token: int) -> void:
 	if GameState.is_night:
 		return
 	_client_preparing = false
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
+	_client_sale.reset()
 	GameState.set_building_phase(true)
 
 func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringName]) -> bool:
@@ -1330,7 +1325,7 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_spawn_tick_controller.process(delta, _playlist_spawning_enabled)
-	_process_client_sale(delta)
+	_client_sale.process(delta)
 	_seed_merchant.process_phase()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
@@ -1811,7 +1806,7 @@ func _on_plant_removed(cell: Vector2i) -> void:
 
 
 func _runtime_agents_active() -> bool:
-	return GameState.is_night or _client_sale_active
+	return GameState.is_night or _client_sale.is_active()
 
 func _scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:
 	if not layer:
@@ -2295,9 +2290,7 @@ func restore_day_phase(phase: String) -> void:
 		return
 	_morning_harvest.clear_active()
 	_client_preparing = false
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
+	_client_sale.reset()
 	_client_counter_agents.clear()
 	match phase:
 		"morning":
@@ -2316,9 +2309,7 @@ func _check_morning_harvest_finished() -> void:
 
 func reset_client_state_for_morning() -> void:
 	_client_preparing = false
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
+	_client_sale.reset()
 	_client_counter_agents.clear()
 
 
@@ -2327,11 +2318,9 @@ func begin_client_sale_phase() -> void:
 
 
 func _begin_client_sale_phase() -> void:
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
+	_client_sale.reset()
 	_client_tantrum.end()
-	var client_total: int = _current_night_client_count()
+	var client_total: int = _client_sale.current_night_client_count()
 	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
 		GameState.set_building_phase(true)
 		return
@@ -2341,166 +2330,33 @@ func _begin_client_sale_phase() -> void:
 	call_deferred("_run_client_preparation", _night_preparation_token)
 
 
-func _activate_client_sale_phase() -> void:
-	if GameState.is_night:
-		return
-	_client_sale_active = false
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
-	var client_total: int = _current_night_client_count()
-	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
-		GameState.set_building_phase(true)
-		return
-	var client_cells: Array[Vector2i] = []
-	for raw_cell: Variant in _client_spawners.keys():
-		client_cells.append(raw_cell as Vector2i)
-	if client_cells.is_empty():
-		GameState.set_building_phase(true)
-		return
-	for index: int in range(client_total):
-		var random_index: int = randi_range(0, client_cells.size() - 1)
-		_client_sale_pending_spawners.append(client_cells[random_index])
-	for cell: Vector2i in client_cells:
-		_client_sale_spawn_timers[cell] = 0.0
-	_client_sale_active = true
-	GameState.set_client_phase(true)
-
-
-func _process_client_sale(delta: float) -> void:
-	if GameState.is_night or not _client_sale_active:
-		return
-	if _client_tantrum.is_active():
-		if _client_count() == 0 and not _client_tantrum.has_hostiles():
-			# Clear the tantrum flag/group first: can_start_night_after_clients()
-			# gates on _clients_are_finished_for_day(), which requires the tantrum to
-			# be over. Leaving it active here deadlocks the day — night never starts.
-			_client_tantrum.end()
-			_client_sale_active = false
-			GameState.set_client_phase(false)
-			_dissolve_counter_piles_after_clients()
-			if can_start_night_after_clients():
-				GameState.start_night()
-				return
-			if not GameState.is_seed_merchant_phase:
-				GameState.set_building_phase(true)
-		return
-	if not _has_client_targets_remaining():
-		_client_sale_pending_spawners.clear()
-		if _has_clients_without_rose():
-			_client_tantrum.begin()
-			return
-	for raw_cell: Variant in _client_sale_spawn_timers.keys():
-		var cell: Vector2i = raw_cell as Vector2i
-		var time_left: float = maxf(0.0, float(_client_sale_spawn_timers[cell]) - delta)
-		_client_sale_spawn_timers[cell] = time_left
-	var spawned_this_frame: bool = false
-	for index: int in range(_client_sale_pending_spawners.size() - 1, -1, -1):
-		var spawner_cell: Vector2i = _client_sale_pending_spawners[index]
-		if float(_client_sale_spawn_timers.get(spawner_cell, 0.0)) > 0.0:
-			continue
-		if _spawn_client_from(spawner_cell):
-			_client_sale_pending_spawners.remove_at(index)
-			_client_sale_spawn_timers[spawner_cell] = maxf(0.0, float(_client_frequency_by_cell.get(spawner_cell, 1.0)))
-			spawned_this_frame = true
-			break
-		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
-	if spawned_this_frame:
-		return
-	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_counter_agents.is_empty() and not _client_tantrum.has_hostiles():
-		_client_sale_active = false
-		GameState.set_client_phase(false)
-		_dissolve_counter_piles_after_clients()
-		if can_start_night_after_clients():
-			GameState.start_night()
-			return
-		if not GameState.is_seed_merchant_phase:
-			GameState.set_building_phase(true)
-
-
-
-# Empty every counter the moment the last client of the sale has left the map. Previously
-# this waited for nightfall; clearing it here means the roses vanish as soon as the sale is
-# over, even if the day lingers (watering still pending, seed merchant on the map). The
-# nightfall call in _on_game_mode_changed remains as an idempotent fallback for days that
-# never run a client sale at all.
-func _dissolve_counter_piles_after_clients() -> void:
-	_counter_stock_manager.dissolve_all_piles()
-
-
-func _client_count() -> int:
-	return get_tree().get_nodes_in_group("clients").size()
-
-
-func _current_night_client_count() -> int:
-	if _level_spawn_playlist == null or _level_spawn_playlist.nights.is_empty():
-		return 20
-	var night_index: int = _current_playlist_night_index
-	if night_index < 0 or night_index >= _level_spawn_playlist.nights.size():
-		night_index = _get_playlist_night_index_from_progression()
-	night_index = clampi(night_index, 0, _level_spawn_playlist.nights.size() - 1)
-	var night: NightSpawnPlaylist = _level_spawn_playlist.nights[night_index]
-	if night == null:
-		return 20
-	return maxi(0, night.clients)
-
-
-func _has_clients_without_rose() -> bool:
-	for raw_node: Node in get_tree().get_nodes_in_group("clients"):
-		var client: Node2D = raw_node as Node2D
-		if client != null and is_instance_valid(client) and not bool(client.get_meta("client_has_rose", false)):
-			return true
-	return false
-
-
 func can_start_night_after_clients() -> bool:
 	# Gate on "no client sale is still pending" rather than "a client actually
 	# visited": on days with no counter stock the sale is skipped and no client ever
 	# spawns, yet the player must still be able to water their roses and end the day.
 	# _client_preparing covers the deferred window before clients spawn, so night
 	# can't jump ahead of a sale that is genuinely coming.
-	return not _day_start_pending and not _client_preparing and _clients_are_finished_for_day() and _all_planted_roses_are_wet()
-
-
-func _clients_are_finished_for_day() -> bool:
-	return (
-		not _client_sale_active
-		and not _client_tantrum.is_active()
-		and not GameState.is_client_phase
-		and _client_sale_pending_spawners.is_empty()
-		and _client_count() == 0
-		and _client_counter_agents.is_empty()
-		and not _client_tantrum.has_hostiles()
-	)
+	return not _day_start_pending and not _client_preparing and _client_sale.clients_finished_for_day() and _client_sale.all_planted_roses_are_wet()
 
 
 func has_clients_for_save_load() -> bool:
-	return _client_preparing or not _clients_are_finished_for_day()
+	return _client_preparing or not _client_sale.clients_finished_for_day()
 
 
 func save_load_client_block_reason() -> String:
 	if _client_preparing:
 		return "client preparation active"
-	if _client_sale_active:
+	if _client_sale.is_active():
 		return "client sale active"
 	if GameState.is_client_phase:
 		return "client phase active"
-	if not _client_sale_pending_spawners.is_empty():
+	if _client_sale.has_pending_spawners():
 		return "incoming clients pending"
-	if _client_count() > 0:
+	if _client_sale.client_count() > 0:
 		return "clients on map"
 	if not _client_counter_agents.is_empty():
 		return "clients walking to counters"
 	return ""
-
-
-func _all_planted_roses_are_wet() -> bool:
-	if plant_manager == null or not plant_manager.has_method("rose_count") or not plant_manager.has_method("unwatered_rose_count"):
-		return false
-	var planted: int = int(plant_manager.call("rose_count"))
-	if planted <= 0:
-		return false
-	var unwatered: int = int(plant_manager.call("unwatered_rose_count"))
-	return unwatered <= 0
 
 
 func _begin_seed_merchant_phase() -> void:
@@ -2545,7 +2401,7 @@ func _end_seed_merchant_phase() -> void:
 
 
 func is_client_sale_active() -> bool:
-	return _client_sale_active
+	return _client_sale.is_active()
 
 
 func is_night_preparation_ready() -> bool:
@@ -3424,8 +3280,7 @@ func _reservoir_is_destroyed(reservoir: Node) -> bool:
 
 
 func clear_client_sale_spawns() -> void:
-	_client_sale_pending_spawners.clear()
-	_client_sale_spawn_timers.clear()
+	_client_sale.clear_spawns()
 
 
 func clear_client_counter_agents() -> void:
