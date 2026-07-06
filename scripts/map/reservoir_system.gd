@@ -16,9 +16,19 @@ var _irrigation_queue: Array[Vector2i] = []
 var _queued_cells: Dictionary = {}
 
 func _ready() -> void:
+	GameState.set_reservoir_destroyed(false)
 	_resolve_level_nodes()
 	set_process(false)
 	call_deferred("irrigate_all_reservoirs")
+
+
+func any_reservoir_destroyed() -> bool:
+	if GameState.is_reservoir_destroyed:
+		return true
+	for reservoir_node: Node in get_tree().get_nodes_in_group(RESERVOIR_GROUP):
+		if reservoir_node != null and reservoir_node.has_method("is_destroyed") and bool(reservoir_node.call("is_destroyed")):
+			return true
+	return false
 
 func _process(_delta: float) -> void:
 	if _irrigation_queue.is_empty():

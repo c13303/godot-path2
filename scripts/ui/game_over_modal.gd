@@ -14,6 +14,7 @@ const KEY_QUIT: String = "game_over.quit"
 var _plant_manager: Node
 var _progression: Node
 var _building_manager: Node
+var _reservoir_system: Node
 var _game_over_shown: bool = false
 
 
@@ -45,9 +46,14 @@ func _resolve_nodes() -> void:
 	_plant_manager = scene.get_node_or_null("Map/PlantManager")
 	_progression = scene.get_node_or_null("progression")
 	_building_manager = scene.get_node_or_null("Map/BuildingManager")
+	_reservoir_system = scene.get_node_or_null("Map/ReservoirSystem")
 
 
 func _is_game_over() -> bool:
+	if GameState.is_reservoir_destroyed:
+		return true
+	if _reservoir_system != null and _reservoir_system.has_method("any_reservoir_destroyed") and bool(_reservoir_system.call("any_reservoir_destroyed")):
+		return true
 	if _plant_manager == null or _progression == null:
 		return false
 	# Game over is checked only once the next build phase starts; morning, client,

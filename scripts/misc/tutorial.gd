@@ -29,6 +29,7 @@ const KEY_CLIENT_TIME: String = "tutorial.client_time"
 const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
+const KEY_TANTRUM: String = "tutorial.tantrum"
 
 const ALERT_DURATION: float = 3.0
 const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)

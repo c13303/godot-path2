@@ -90,6 +90,7 @@ var _merchant_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _merchant_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _merchant_day_spins: Dictionary = {}  # StringName -> SpinBox
 var _night_option: OptionButton
+var _night_clients_spin: SpinBox
 var _reward_box: VBoxContainer
 var _reward_one_time_check: CheckBox
 var _reward_amount_spins: Dictionary = {}  # String currency -> SpinBox
@@ -352,6 +353,23 @@ func _build_nights_tab(tabs: TabContainer) -> void:
 	delete_night_button.text = "Delete Night"
 	delete_night_button.pressed.connect(_on_delete_night_pressed)
 	night_row.add_child(delete_night_button)
+
+	var clients_row: HBoxContainer = HBoxContainer.new()
+	clients_row.add_theme_constant_override("separation", 6)
+	body.add_child(clients_row)
+
+	var clients_label: Label = Label.new()
+	clients_label.text = "clients"
+	clients_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	clients_row.add_child(clients_label)
+
+	_night_clients_spin = SpinBox.new()
+	_night_clients_spin.min_value = 0.0
+	_night_clients_spin.max_value = 100000.0
+	_night_clients_spin.step = 1.0
+	_night_clients_spin.custom_minimum_size = Vector2(130.0, 0.0)
+	_night_clients_spin.value_changed.connect(_on_night_clients_changed)
+	clients_row.add_child(_night_clients_spin)
 
 	_reward_box = VBoxContainer.new()
 	_build_reward_controls()
@@ -666,6 +684,10 @@ func _build_beautifier_controls(parent: VBoxContainer) -> void:
 func _rebuild_reward_controls() -> void:
 	var night: NightSpawnPlaylist = _get_selected_night()
 	var has_night: bool = night != null
+	if _night_clients_spin != null:
+		_night_clients_spin.visible = has_night
+		if has_night:
+			_night_clients_spin.set_value_no_signal(float(night.clients))
 	_reward_section.visible = has_night
 	if not has_night:
 		return
@@ -702,6 +724,16 @@ func _on_reward_amount_changed(value: float, currency: String) -> void:
 	if night == null:
 		return
 	_set_reward_amount(night, currency, maxi(0, int(value)))
+	mark_dirty()
+
+
+func _on_night_clients_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var night: NightSpawnPlaylist = _get_selected_night()
+	if night == null:
+		return
+	night.clients = maxi(0, int(value))
 	mark_dirty()
 
 

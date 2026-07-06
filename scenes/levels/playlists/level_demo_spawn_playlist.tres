@@ -40,6 +40,7 @@ amount = 10
 [sub_resource type="Resource" id="Resource_1hais"]
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_0k8ip"), SubResource("Resource_5vf1s")])
+clients = 50
 special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_night1_seed_reward"), SubResource("Resource_yn215")])
 special_reward_one_time = true
 

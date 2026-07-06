@@ -15,6 +15,7 @@ var is_building_phase: bool = true
 var is_morning_phase: bool = false
 var is_client_phase: bool = false
 var is_seed_merchant_phase: bool = false
+var is_reservoir_destroyed: bool = false
 ## True once the player has bought at least one item during the current seed-merchant
 ## visit. Reset each time a new merchant phase begins; drives the "close the transaction"
 ## tutorial prompt once the player walks away from the (now hidden) merchant shop.
@@ -44,6 +45,10 @@ func start_night() -> void:
 ## Switch to day: monster spawning is suppressed.
 func start_day() -> void:
 	set_night(false)
+
+
+func set_reservoir_destroyed(value: bool) -> void:
+	is_reservoir_destroyed = value
 
 
 func set_building_phase(value: bool) -> void:

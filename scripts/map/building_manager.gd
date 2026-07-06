@@ -35,6 +35,10 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
 const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 const CLIENT_PAYMENT_SECONDS: float = 1.0
+const CLIENT_TANTRUM_ATTACK_INTERVAL_SECONDS: float = 3.0
+const CLIENT_TANTRUM_ATTACK_DAMAGE: int = 1
+const CLIENT_TANTRUM_ATTACK_LUNGE_SECONDS: float = 0.09
+const CLIENT_TANTRUM_ATTACK_RETURN_SECONDS: float = 0.12
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const SEED_MERCHANT_INTERACT_RADIUS_TILES: int = 2
 # Chebyshev tile radius around the player from which grown roses can be harvested
@@ -300,6 +304,9 @@ var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 var _client_paying_agents: Dictionary = {}  # nav_id -> Dictionary
 var _client_counter_agents: Dictionary = {}  # nav_id -> Dictionary
+var _client_tantrum_active: bool = false
+var _client_tantrum_group: int = -1
+var _hostile_clients: Dictionary = {}  # nav_id -> Dictionary
 var _seed_merchant_active: bool = false
 var _seed_merchant_agent: Node2D
 var _seed_merchant_nav_id: int = -1
@@ -540,6 +547,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_empty_night_elapsed = 0.0
 	_client_preparing = false
 	if is_night:
+		_end_client_tantrum()
 		_client_sale_active = false
 		_client_sale_pending_spawners.clear()
 		_client_sale_spawn_timers.clear()
@@ -1350,6 +1358,7 @@ func _process(delta: float) -> void:
 
 	t = Time.get_ticks_usec()
 	_process_client_counter_arrivals()
+	_process_hostile_clients(delta)
 	_process_seed_merchant_proximity()
 	_process_seed_merchant_arrival()
 	if _over_garden_threshold_us(Time.get_ticks_usec() - t):
@@ -2594,8 +2603,10 @@ func _begin_client_sale_phase() -> void:
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
-	var sale_stock: int = _total_counter_stock()
-	if sale_stock <= 0 or _client_spawners.is_empty():
+	_client_tantrum_active = false
+	_hostile_clients.clear()
+	var client_total: int = _current_night_client_count()
+	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
 		GameState.set_building_phase(true)
 		return
 	_night_preparation_token += 1
@@ -2610,8 +2621,8 @@ func _activate_client_sale_phase() -> void:
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
-	var sale_stock: int = _total_counter_stock()
-	if sale_stock <= 0 or _client_spawners.is_empty():
+	var client_total: int = _current_night_client_count()
+	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
 		GameState.set_building_phase(true)
 		return
 	var client_cells: Array[Vector2i] = []
@@ -2620,7 +2631,7 @@ func _activate_client_sale_phase() -> void:
 	if client_cells.is_empty():
 		GameState.set_building_phase(true)
 		return
-	for index: int in range(sale_stock):
+	for index: int in range(client_total):
 		var random_index: int = randi_range(0, client_cells.size() - 1)
 		_client_sale_pending_spawners.append(client_cells[random_index])
 	for cell: Vector2i in client_cells:
@@ -2633,8 +2644,21 @@ func _activate_client_sale_phase() -> void:
 func _process_client_sale(delta: float) -> void:
 	if GameState.is_night or not _client_sale_active:
 		return
-	if _total_counter_stock() <= 0:
+	if _client_tantrum_active:
+		if _client_count() == 0 and _hostile_clients.is_empty():
+			_client_sale_active = false
+			GameState.set_client_phase(false)
+			if can_start_night_after_clients():
+				GameState.start_night()
+				return
+			if not GameState.is_seed_merchant_phase:
+				GameState.set_building_phase(true)
+		return
+	if not _has_client_targets_remaining():
 		_client_sale_pending_spawners.clear()
+		if _client_count() > 0:
+			_begin_client_tantrum()
+			return
 	for raw_cell: Variant in _client_sale_spawn_timers.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		var time_left: float = maxf(0.0, float(_client_sale_spawn_timers[cell]) - delta)
@@ -2652,7 +2676,7 @@ func _process_client_sale(delta: float) -> void:
 		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
 	if spawned_this_frame:
 		return
-	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty():
+	if _client_sale_pending_spawners.is_empty() and _client_count() == 0 and _client_paying_agents.is_empty() and _client_counter_agents.is_empty() and _hostile_clients.is_empty():
 		_client_sale_active = false
 		GameState.set_client_phase(false)
 		if can_start_night_after_clients():
@@ -2664,6 +2688,19 @@ func _process_client_sale(delta: float) -> void:
 
 func _client_count() -> int:
 	return get_tree().get_nodes_in_group("clients").size()
+
+
+func _current_night_client_count() -> int:
+	if _level_spawn_playlist == null or _level_spawn_playlist.nights.is_empty():
+		return 20
+	var night_index: int = _current_playlist_night_index
+	if night_index < 0 or night_index >= _level_spawn_playlist.nights.size():
+		night_index = _get_playlist_night_index_from_progression()
+	night_index = clampi(night_index, 0, _level_spawn_playlist.nights.size() - 1)
+	var night: NightSpawnPlaylist = _level_spawn_playlist.nights[night_index]
+	if night == null:
+		return 20
+	return maxi(0, night.clients)
 
 
 func can_start_night_after_clients() -> bool:
@@ -2678,11 +2715,13 @@ func can_start_night_after_clients() -> bool:
 func _clients_are_finished_for_day() -> bool:
 	return (
 		not _client_sale_active
+		and not _client_tantrum_active
 		and not GameState.is_client_phase
 		and _client_sale_pending_spawners.is_empty()
 		and _client_count() == 0
 		and _client_paying_agents.is_empty()
 		and _client_counter_agents.is_empty()
+		and _hostile_clients.is_empty()
 	)
 
 
@@ -3202,6 +3241,7 @@ func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basi
 		var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 		if sprite != null:
 			sprite.texture = CLIENT_TEXTURE
+			sprite.hframes = 5
 	else:
 		agent.add_to_group("monsters")
 		_register_desire_agent(agent, &"monsters")
@@ -3645,8 +3685,7 @@ func _process_client_counter_arrivals() -> void:
 		if agent.has_method("stop_astar_in"):
 			agent.call("stop_astar_in")
 		if _counter_stock(counter_cell) <= 0:
-			var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-			_retarget_agent_or_escape(agent, spawner_cell)
+			_begin_client_tantrum()
 			continue
 		_start_client_counter_payment(agent, counter_cell)
 
@@ -3703,6 +3742,198 @@ func _process_client_paying_agents(delta: float) -> void:
 		var agent: Node2D = raw_agent as Node2D
 		if agent != null:
 			_assign_agent_to_escape(agent)
+
+
+func _begin_client_tantrum() -> void:
+	if _client_tantrum_active:
+		return
+	var target_reservoir: Node2D = _nearest_live_reservoir(Vector2.ZERO, false)
+	if target_reservoir == null:
+		push_warning("BuildingManager: client tantrum cannot start because no reservoir exists.")
+		return
+	if agent_manager == null or not agent_manager.has_method("create_group") or not agent_manager.has_method("assign_agent"):
+		push_warning("BuildingManager: client tantrum cannot start because AgentManagerNative is missing group APIs.")
+		return
+	_client_tantrum_active = true
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	_client_counter_agents.clear()
+	_client_paying_agents.clear()
+	GameState.set_client_phase(true)
+	_client_tantrum_group = int(agent_manager.call("create_group"))
+	if _client_tantrum_group <= IDLE_GROUP:
+		push_warning("BuildingManager: client tantrum cannot allocate a flow group.")
+		_client_tantrum_active = false
+		return
+	_rebuild_client_tantrum_flow(target_reservoir.global_position)
+	for raw_node: Node in get_tree().get_nodes_in_group("clients"):
+		var client: Node2D = raw_node as Node2D
+		if client == null or not is_instance_valid(client):
+			continue
+		_make_client_hostile(client, target_reservoir)
+	_show_tantrum_alert()
+
+
+func _end_client_tantrum() -> void:
+	_client_tantrum_active = false
+	_hostile_clients.clear()
+	if _client_tantrum_group > IDLE_GROUP and agent_manager != null and agent_manager.has_method("dissolve_group"):
+		agent_manager.call("dissolve_group", _client_tantrum_group)
+	_client_tantrum_group = -1
+
+
+func _make_client_hostile(client: Node2D, target_reservoir: Node2D) -> void:
+	var nav_id: int = int(client.get("nav_id"))
+	if nav_id < 0:
+		return
+	if agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+	if agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	_entry_path_agents.erase(nav_id)
+	_erase_astar_in_agent(nav_id)
+	_escaping_agents.erase(nav_id)
+	_client_counter_agents.erase(nav_id)
+	_client_paying_agents.erase(nav_id)
+	if not client.is_in_group("monsters"):
+		client.add_to_group("monsters")
+	if client.has_method("stop_eating"):
+		client.call("stop_eating")
+	client.set_meta("agent_kind", SPAWNER_KIND_CLIENT)
+	client.set_meta("hostile_client", true)
+	client.set("max_health", 100)
+	client.set("health", 100)
+	var sprite: Sprite2D = client.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = CLIENT_TEXTURE
+		sprite.hframes = 5
+		sprite.frame = 4
+	if client.has_method("start_angry"):
+		client.call("start_angry")
+	_hostile_clients[nav_id] = {
+		"node": client,
+		"target": target_reservoir,
+		"attack_timer": randf_range(0.0, CLIENT_TANTRUM_ATTACK_INTERVAL_SECONDS),
+		"attacking": false,
+	}
+	if _client_tantrum_group > IDLE_GROUP:
+		agent_manager.call("assign_agent", client, _client_tantrum_group)
+
+
+func _process_hostile_clients(delta: float) -> void:
+	if not _client_tantrum_active:
+		return
+	var nav_ids: Array = _hostile_clients.keys()
+	for raw_nav_id: Variant in nav_ids:
+		var nav_id: int = int(raw_nav_id)
+		if not _hostile_clients.has(nav_id):
+			continue
+		var data: Dictionary = _hostile_clients[nav_id] as Dictionary
+		var raw_client: Variant = data.get("node", null)
+		if not is_instance_valid(raw_client):
+			_hostile_clients.erase(nav_id)
+			continue
+		var client: Node2D = raw_client as Node2D
+		if client == null:
+			_hostile_clients.erase(nav_id)
+			continue
+		var target: Node2D = data.get("target", null) as Node2D
+		if target == null or not is_instance_valid(target) or _reservoir_is_destroyed(target):
+			target = _nearest_live_reservoir(client.global_position, true)
+			if target == null:
+				continue
+			data["target"] = target
+			_rebuild_client_tantrum_flow(target.global_position)
+			if _client_tantrum_group > IDLE_GROUP and agent_manager != null and agent_manager.has_method("assign_agent"):
+				agent_manager.call("assign_agent", client, _client_tantrum_group)
+		if bool(data.get("attacking", false)):
+			_hostile_clients[nav_id] = data
+			continue
+		var target_cell: Vector2i = floorz.local_to_map(floorz.to_local(target.global_position))
+		if not _agent_within_tiles(client, target_cell, 1):
+			_hostile_clients[nav_id] = data
+			continue
+		var attack_timer: float = maxf(0.0, float(data.get("attack_timer", 0.0)) - delta)
+		if attack_timer <= 0.0:
+			data["attack_timer"] = CLIENT_TANTRUM_ATTACK_INTERVAL_SECONDS
+			data["attacking"] = true
+			_hostile_clients[nav_id] = data
+			_start_hostile_client_attack(nav_id, client, target)
+		else:
+			data["attack_timer"] = attack_timer
+			_hostile_clients[nav_id] = data
+
+
+func _start_hostile_client_attack(nav_id: int, client: Node2D, target: Node2D) -> void:
+	if agent_manager != null and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+	if client.has_method("set_paused"):
+		client.call("set_paused", true)
+	var start_position: Vector2 = client.global_position
+	var direction: Vector2 = target.global_position - start_position
+	var lunge_position: Vector2 = start_position
+	if direction.length_squared() > 0.0001:
+		lunge_position = start_position + direction.normalized() * minf(10.0, direction.length())
+	var tween: Tween = create_tween()
+	tween.tween_property(client, "global_position", lunge_position, CLIENT_TANTRUM_ATTACK_LUNGE_SECONDS)
+	tween.tween_callback(Callable(self, "_deal_client_tantrum_hit").bind(nav_id, target))
+	tween.tween_property(client, "global_position", start_position, CLIENT_TANTRUM_ATTACK_RETURN_SECONDS)
+	tween.tween_callback(Callable(self, "_finish_hostile_client_attack").bind(nav_id, client))
+
+
+func _deal_client_tantrum_hit(nav_id: int, target: Node) -> void:
+	if not _hostile_clients.has(nav_id):
+		return
+	if target != null and is_instance_valid(target) and target.has_method("take_damage"):
+		target.call("take_damage", CLIENT_TANTRUM_ATTACK_DAMAGE)
+
+
+func _finish_hostile_client_attack(nav_id: int, client: Node2D) -> void:
+	if client != null and is_instance_valid(client) and client.has_method("set_paused"):
+		client.call("set_paused", false)
+	if not _hostile_clients.has(nav_id):
+		return
+	var data: Dictionary = _hostile_clients[nav_id] as Dictionary
+	data["attacking"] = false
+	_hostile_clients[nav_id] = data
+	if client != null and is_instance_valid(client) and _client_tantrum_group > IDLE_GROUP and agent_manager != null and agent_manager.has_method("assign_agent"):
+		agent_manager.call("assign_agent", client, _client_tantrum_group)
+
+
+func _rebuild_client_tantrum_flow(goal_world: Vector2) -> void:
+	if flow == null or _client_tantrum_group <= IDLE_GROUP:
+		return
+	if flow.has_method("assign_flow_to_group"):
+		flow.call("assign_flow_to_group", _client_tantrum_group, goal_world, false)
+	elif flow.has_method("request_flow_to_group"):
+		flow.call("request_flow_to_group", _client_tantrum_group, goal_world, false)
+
+
+func _nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
+	var best: Node2D = null
+	var best_distance: float = INF
+	for reservoir_node: Node in get_tree().get_nodes_in_group("reservoirs"):
+		var reservoir: Node2D = reservoir_node as Node2D
+		if reservoir == null or not is_instance_valid(reservoir) or _reservoir_is_destroyed(reservoir):
+			continue
+		var distance: float = from_world.distance_squared_to(reservoir.global_position) if use_distance else 0.0
+		if best == null or distance < best_distance:
+			best = reservoir
+			best_distance = distance
+	return best
+
+
+func _reservoir_is_destroyed(reservoir: Node) -> bool:
+	return reservoir != null and reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed"))
+
+
+func _show_tantrum_alert() -> void:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	if tutorial != null and tutorial.has_method("show_alert"):
+		tutorial.call("show_alert", "tutorial.tantrum")
 
 func _process_turret_overlaps() -> void:
 	if blocking_buildings == null:
@@ -4372,6 +4603,7 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_paying_agents.erase(nav_id)
+	_hostile_clients.erase(nav_id)
 	_garden_retarget_queued.erase(nav_id)
 	for index: int in range(_garden_retarget_queue.size() - 1, -1, -1):
 		var item: Dictionary = _garden_retarget_queue[index]
@@ -4538,7 +4770,7 @@ func _has_floor(cell: Vector2i) -> bool:
 # garden geometry / A* are rebuilt from _is_walkable each phase, so a single phase check is
 # the source of truth for both the flow field (see _request_group_flow_rebuild) and A*.
 func _fences_block_navigation() -> bool:
-	return not GameState.is_night
+	return not GameState.is_night and not _client_tantrum_active
 
 func _has_wall(cell: Vector2i) -> bool:
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:

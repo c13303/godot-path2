@@ -20,6 +20,7 @@ const LIGHT_ENERGY: float = 0.75
 const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir.png")
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
+const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_runtime.gd")
 const RESERVOIR_Z_INDEX: int = 510
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation", "fence"]
 const TILE_TRANSFORM_FLIP_H: int = 4096
@@ -240,6 +241,7 @@ func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 		return
 	var runtime_node: Node2D = Node2D.new()
 	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.script = RESERVOIR_RUNTIME_SCRIPT
 	runtime_node.global_position = _cell_center(cell)
 	runtime_node.add_to_group("reservoirs")
 

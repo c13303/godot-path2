@@ -4,6 +4,9 @@ class_name NightSpawnPlaylist
 @export_group("Spawner Tracks")
 @export var spawner_tracks: Array[SpawnerWaveTrack] = []
 
+@export_group("Clients")
+@export_range(0, 100000, 1, "or_greater") var clients: int = 20
+
 @export_group("Special Reward")
 ## Free currencies handed to the player at the merchant during this night's day.
 ## Every entry with a positive amount is granted together when collected.

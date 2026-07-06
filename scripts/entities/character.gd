@@ -66,6 +66,7 @@ var _is_previewed: bool = false
 const MONSTER_FRAME_IDLE: int = 0
 const MONSTER_FRAME_EATING: int = 1
 const MONSTER_FRAME_DROWNING: int = 3
+const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
 
 
@@ -130,7 +131,9 @@ func _update_monster_frame() -> void:
 	if not is_instance_valid(_monster_sprite):
 		return
 	var frame: int = MONSTER_FRAME_IDLE
-	if status == "eating":
+	if status == "angry":
+		frame = CLIENT_FRAME_ANGRY
+	elif status == "eating":
 		frame = MONSTER_FRAME_EATING
 	elif status == "flow_out" and _is_client_agent():
 		frame = MONSTER_FRAME_EATING
@@ -146,6 +149,8 @@ func _is_client_agent() -> bool:
 
 func _is_damage_immune_agent() -> bool:
 	if not has_meta("agent_kind"):
+		return false
+	if status == "angry":
 		return false
 	var agent_kind: StringName = StringName(str(get_meta("agent_kind")))
 	return agent_kind == &"client" or agent_kind == &"merchant"
@@ -222,6 +227,11 @@ func stop_waiting_new_status() -> void:
 	if status == "waiting_new_status":
 		status = ""
 		_set_phase(PHASE_NONE)
+
+func start_angry() -> void:
+	status = "angry"
+	_eating_timer = 0.0
+	_set_phase(PHASE_FLOW_IN)
 
 func _process_eating_status(delta: float) -> void:
 	if status != "eating" or _eating_timer <= 0.0:
