@@ -27,7 +27,6 @@ const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
-const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 # A client that has passed within this many tiles of a stocked counter's (walkable)
 # access tile grabs its rose right there and leaves, instead of finishing the walk to
 # the garden entrance / counter. Keyed off the walkable access tile, so a proximity hit
@@ -172,6 +171,7 @@ var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
+var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
@@ -221,6 +221,7 @@ func _ready() -> void:
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
 	_building_invalidation_controller.setup(self)
+	_building_navigation_sync.setup(self)
 	_spawner_garden_selection_service.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
@@ -772,27 +773,7 @@ func _apply_navigation_topology_rebuild() -> void:
 	_building_invalidation_controller.apply_navigation_topology_rebuild()
 
 func _sync_flow_extra_blocking_cells() -> void:
-	if flow == null or not flow.has_method("set_extra_blocking_cells"):
-		return
-	var cells: PackedVector2Array = PackedVector2Array()
-	if blocking_buildings != null:
-		for raw_cell: Variant in blocking_buildings.get_used_cells():
-			var cell: Vector2i = raw_cell as Vector2i
-			if not _building_cell_blocks_movement(cell):
-				continue
-			cells.append(Vector2(float(cell.x), float(cell.y)))
-	flow.call("set_extra_blocking_cells", cells)
-	# Fences are kept out of extra_blocking_cells (which feeds player collision and every
-	# group flow). They are pushed as a separate set that only client/merchant flows bake
-	# as walls (block_fences); monster flows ignore fences and are slowed by the fence
-	# cells' 0.3 speed multiplier instead. See _request_group_flow_rebuild / _has_wall.
-	if flow.has_method("set_fence_blocking_cells"):
-		var fence_cells: PackedVector2Array = PackedVector2Array()
-		if fences != null:
-			for raw_cell: Variant in fences.get_used_cells():
-				var fence_cell: Vector2i = raw_cell as Vector2i
-				fence_cells.append(Vector2(float(fence_cell.x), float(fence_cell.y)))
-		flow.call("set_fence_blocking_cells", fence_cells)
+	_building_navigation_sync.sync_flow_extra_blocking_cells()
 
 func _sync_runtime_state() -> void:
 	_scan_buildings()
@@ -973,70 +954,25 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 
 
 func _building_item_blocks_flow(item_id: String) -> bool:
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if item_def.is_empty():
-		return false
-	if bool(item_def.get("blocks_agents", false)):
-		return true
-	if str(item_def.get("target_layer", "")) != "blocking_buildings":
-		return false
-	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+	return _building_navigation_sync.building_item_blocks_flow(item_id)
 
 func _building_item_blocks_player(item_id: String) -> bool:
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if item_def.is_empty():
-		return false
-	if str(item_def.get("target_layer", "")) != "blocking_buildings":
-		return false
-	if item_def.has("blocks_player_movement"):
-		return bool(item_def.get("blocks_player_movement", false))
-	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+	return _building_navigation_sync.building_item_blocks_player(item_id)
 
 func _sync_player_blocking_cells() -> void:
-	if flow == null or not flow.has_method("set_cell_blocked") or blocking_buildings == null:
-		return
-	for raw_cell: Variant in blocking_buildings.get_used_cells():
-		var cell: Vector2i = raw_cell as Vector2i
-		var item_id: String = _blocking_building_item_id_at_cell(cell)
-		if item_id == "" or _building_item_blocks_player(item_id):
-			_set_player_cell_blocked(cell, true)
+	_building_navigation_sync.sync_player_blocking_cells()
 
 func _set_player_cell_blocked(cell: Vector2i, blocked: bool) -> void:
-	if flow == null or not flow.has_method("set_cell_blocked"):
-		return
-	flow.call("set_cell_blocked", cell, blocked)
+	_building_navigation_sync.set_player_cell_blocked(cell, blocked)
 
 func _blocking_building_item_id_at_cell(cell: Vector2i) -> String:
-	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
-		return ""
-	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
-	return ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), atlas)
+	return _building_navigation_sync.blocking_building_item_id_at_cell(cell)
 
 func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
-	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
-		return
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if item_def.is_empty() or not item_def.has("speed_multiplier"):
-		return
-	# The buildsystem's terrain-speed refresh and this signal-driven sync both write
-	# the same flow-field cell. A fence carries a speed_multiplier but lives on the
-	# `fences` layer, so if we only inspected blocking_buildings we'd reset the cell to
-	# 1.0 and clobber the fence slow the buildsystem just applied. Recompute the
-	# effective multiplier across every speed-carrying layer instead.
-	flow.call("set_cell_speed_multiplier", cell, _effective_cell_speed_multiplier(cell))
+	_building_navigation_sync.sync_building_cell_speed(cell, item_id)
 
 func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
-	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
-		if layer == null or layer.get_cell_source_id(cell) < 0:
-			continue
-		var layer_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
-		if layer_item_id == "":
-			continue
-		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
-		var layer_multiplier: float = clampf(float(layer_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-		speed_multiplier = minf(speed_multiplier, layer_multiplier)
-	return speed_multiplier
+	return _building_navigation_sync.effective_cell_speed_multiplier(cell)
 
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not GameState.is_night:
