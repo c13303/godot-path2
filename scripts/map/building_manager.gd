@@ -168,6 +168,7 @@ var _turret_eating_controller: TurretEatingController = TurretEatingController.n
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _building_scan: BuildingScanService = BuildingScanService.new()
 var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
+var _building_path_service: BuildingPathService = BuildingPathService.new()
 var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
@@ -211,6 +212,7 @@ func _ready() -> void:
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
 	_spawner_route_service.setup(self)
+	_building_path_service.setup(self)
 	_garden_access_resolver.setup(self)
 	_garden_retarget.setup(self)
 	_spawn_tick_controller.setup(self)
@@ -2732,34 +2734,7 @@ func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
 	return _wall_blockers_for_cells(_garden_topology.plant_zone_tiles())
 
 func _wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
-	var blockers: PackedVector2Array = PackedVector2Array()
-	if cells.is_empty():
-		return blockers
-	var min_cell: Vector2i = INVALID_CELL
-	var max_cell: Vector2i = Vector2i(-2147483648, -2147483648)
-	for raw_cell in cells.keys():
-		var c: Vector2i = raw_cell
-		if min_cell == INVALID_CELL:
-			min_cell = c
-			max_cell = c
-		else:
-			min_cell.x = mini(min_cell.x, c.x)
-			min_cell.y = mini(min_cell.y, c.y)
-			max_cell.x = maxi(max_cell.x, c.x)
-			max_cell.y = maxi(max_cell.y, c.y)
-
-	var blocker_layers: Array[TileMapLayer] = [wallz, blocking_buildings]
-	for layer: TileMapLayer in blocker_layers:
-		if layer == null:
-			continue
-		for raw_cell: Variant in layer.get_used_cells():
-			var c: Vector2i = raw_cell as Vector2i
-			if c.x < min_cell.x or c.x > max_cell.x or c.y < min_cell.y or c.y > max_cell.y:
-				continue
-			if layer == blocking_buildings and not _building_cell_blocks_movement(c):
-				continue
-			blockers.append(Vector2(float(c.x), float(c.y)))
-	return blockers
+	return _building_path_service.wall_blockers_for_cells(cells)
 
 # ---------------------------------------------------------------------------
 # Exit-wall & adjacency helpers.
@@ -2812,84 +2787,10 @@ func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
 # A* glue: find paths via PathfinderNative.
 # ---------------------------------------------------------------------------
 func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
-	if pathfinder == null or not pathfinder.has_method("find_path"):
-		return PackedVector2Array()
-	if _garden_topology.walkable_map_tiles().is_empty():
-		_rebuild_walkable_map_cache()
-	if _garden_topology.walkable_map_tiles().is_empty():
-		return PackedVector2Array()
-	var path_tiles: Dictionary = _garden_topology.walkable_map_tiles()
-	var path_tiles_copied: bool = false
-	if _is_walkable(from_tile) and not path_tiles.has(from_tile):
-		path_tiles = _garden_topology.walkable_map_tiles().duplicate()
-		path_tiles_copied = true
-		path_tiles[from_tile] = true
-	if _is_walkable(to_tile) and not path_tiles.has(to_tile):
-		if not path_tiles_copied:
-			path_tiles = _garden_topology.walkable_map_tiles().duplicate()
-			path_tiles_copied = true
-		path_tiles[to_tile] = true
-	_sync_pathfinder_zone_tiles(path_tiles)
-	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
-	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
-	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
-		return PackedVector2Array()
-	return pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
+	return _building_path_service.find_path_on_walkable_map(from_tile, to_tile)
 
 func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
-	if pathfinder == null or not pathfinder.has_method("find_path"):
-		return PackedVector2Array()
-	var zone_tiles: Dictionary = _garden_topology.plant_zone_tiles()
-	if garden_id > 0 and _garden_topology.gardens().has(garden_id):
-		var garden: Dictionary = _garden_topology.gardens()[garden_id] as Dictionary
-		zone_tiles = garden.get("zone_tiles", {}) as Dictionary
-	if zone_tiles.is_empty():
-		return PackedVector2Array()
-	# An agent arriving via the flow field can settle one tile *outside* the
-	# interior (FF overshoot at the entry), so its actual cell may not be in
-	# zone_tiles. Add any walkable endpoint to the A* walkable set so the path
-	# starts/ends where the agent really stands instead of snapping a tile short.
-	# Use a local copy so the cached garden zone_tiles is not mutated.
-	# .prep: endpoint handling + zone duplicate cost (the duplicate can be the cost
-	# when a garden's zone_tiles dictionary is large and both endpoints are outside).
-	# Sub-warnings are gated on debug telemetry thresholds so the context string is
-	# built only on a real spike — _find_path_in_zone is called in tight retarget
-	# loops, so unconditional formatting here would be the wrong kind of overhead.
-	var call_start_us: int = Time.get_ticks_usec()
-	var prep_us: int = Time.get_ticks_usec()
-	var path_tiles: Dictionary = zone_tiles
-	if _is_walkable(from_tile) and not zone_tiles.has(from_tile):
-		path_tiles = zone_tiles.duplicate()
-		path_tiles[from_tile] = true
-	if _is_walkable(to_tile) and not path_tiles.has(to_tile):
-		if path_tiles == zone_tiles:
-			path_tiles = zone_tiles.duplicate()
-		path_tiles[to_tile] = true
-	if _debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - prep_us):
-		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.prep", Time.get_ticks_usec() - prep_us,
-			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, zone_tiles.size(), str(from_tile), str(to_tile)])
-	# .sync_zone: pushes the walkable set + wall blockers into the pathfinder.
-	var sync_us: int = Time.get_ticks_usec()
-	_sync_pathfinder_zone_tiles(path_tiles)
-	var sync_elapsed: int = Time.get_ticks_usec() - sync_us
-	if _debug_telemetry.over_garden_threshold_us(sync_elapsed):
-		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.sync_zone", sync_elapsed,
-			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, path_tiles.size(), str(from_tile), str(to_tile)])
-	# Snap endpoints to walkable tiles if needed (non-walkable endpoints only).
-	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
-	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
-	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
-		_accumulate_find_path_in_zone(call_start_us, sync_elapsed, 0, from_tile, to_tile, path_tiles.size())
-		return PackedVector2Array()
-	# .find_path: the pathfinder A* itself.
-	var find_us: int = Time.get_ticks_usec()
-	var result: PackedVector2Array = pathfinder.call("find_path", start_tile, end_tile) as PackedVector2Array
-	var find_elapsed: int = Time.get_ticks_usec() - find_us
-	if _debug_telemetry.over_garden_threshold_us(find_elapsed):
-		_debug_telemetry.warn_garden_task_lag_us("_find_path_in_zone.find_path", find_elapsed,
-			"garden=%d from=%s to=%s len=%d" % [garden_id, str(start_tile), str(end_tile), result.size()])
-	_accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, path_tiles.size())
-	return result
+	return _building_path_service.find_path_in_zone(from_tile, to_tile, garden_id)
 
 # Fold one _find_path_in_zone call's timings into the per-retarget accumulator (reset
 # at the start of the local plant search). Tracks totals + the single most expensive
@@ -2899,76 +2800,10 @@ func _accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, find_e
 	_garden_retarget.accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, zone_tiles)
 
 func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
-	_last_zone_blocker_us = 0
-	if pathfinder == null:
-		return
-	var zone_arr: PackedVector2Array = PackedVector2Array()
-	zone_arr.resize(zone_tiles.size())
-	var i: int = 0
-	for raw_cell in zone_tiles.keys():
-		var cell: Vector2i = raw_cell
-		zone_arr[i] = Vector2(float(cell.x), float(cell.y))
-		i += 1
-	if pathfinder.has_method("set_walkable_tiles"):
-		pathfinder.call("set_walkable_tiles", zone_arr)
-	if pathfinder.has_method("set_blockers"):
-		# _wall_blockers_for_cells scans every wall tile against the zone bbox; time it
-		# separately since it can dominate sync on a large wall layer. Gated so context
-		# is built only on a spike (this runs once per path query). The time is also
-		# stashed in _last_zone_blocker_us so the caller can split it out of sync time.
-		var blockers_us: int = Time.get_ticks_usec()
-		var blockers: PackedVector2Array = _wall_blockers_for_cells(zone_tiles)
-		var blocker_elapsed: int = Time.get_ticks_usec() - blockers_us
-		_last_zone_blocker_us = blocker_elapsed
-		if _debug_telemetry.over_garden_threshold_us(blocker_elapsed):
-			_debug_telemetry.warn_garden_task_lag_us("_wall_blockers_for_cells", blocker_elapsed,
-				"zone_tiles=%d blockers=%d" % [zone_tiles.size(), blockers.size()])
-		pathfinder.call("set_blockers", blockers)
-
-func _nearest_zone_tile_to(cell: Vector2i, zone_tiles: Dictionary) -> Vector2i:
-	var best_cell: Vector2i = INVALID_CELL
-	var best_dist: int = 2147483647
-	for raw_cell in zone_tiles.keys():
-		var c: Vector2i = raw_cell
-		var d: Vector2i = c - cell
-		var manhattan: int = abs(d.x) + abs(d.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best_cell = c
-	return best_cell
+	_building_path_service.sync_pathfinder_zone_tiles(zone_tiles)
 
 func _path_cells_to_world(path_cells: PackedVector2Array, nav_id: int = -1, disperse_endpoint: bool = false) -> PackedVector2Array:
-	var out: PackedVector2Array = PackedVector2Array()
-	out.resize(path_cells.size())
-	var last_index: int = path_cells.size() - 1
-	for i in range(path_cells.size()):
-		var v: Vector2 = path_cells[i]
-		var cell: Vector2i = Vector2i(int(v.x), int(v.y))
-		if disperse_endpoint and i == last_index and nav_id >= 0:
-			out[i] = _cell_center_with_local_offset(cell, _path_endpoint_local_offset(cell, nav_id))
-		else:
-			out[i] = _cell_center(cell)
-	return out
-
-func _cell_center_with_local_offset(cell: Vector2i, local_offset: Vector2) -> Vector2:
-	return floorz.to_global(floorz.map_to_local(cell) + local_offset)
-
-func _path_endpoint_local_offset(cell: Vector2i, nav_id: int) -> Vector2:
-	var tile_size: Vector2 = _tile_size()
-	var radius: float = min(tile_size.x, tile_size.y) * 0.28
-	var h: int = nav_id * 1103515245 + cell.x * 73856093 + cell.y * 19349663
-	var slot: int = _positive_mod(h, 12)
-	@warning_ignore("integer_division")
-	var ring: int = _positive_mod(h / 12, 2)
-	var angle: float = (PI * 2.0 * float(slot)) / 12.0
-	var ring_scale: float = 0.65 + 0.35 * float(ring)
-	return Vector2(cos(angle), sin(angle)) * radius * ring_scale
-
-func _positive_mod(value: int, divisor: int) -> int:
-	var r: int = value % divisor
-	if r < 0:
-		r += divisor
-	return r
+	return _building_path_service.path_cells_to_world(path_cells, nav_id, disperse_endpoint)
 
 func _tile_size() -> Vector2:
 	if floorz and floorz.tile_set:
