@@ -1244,7 +1244,8 @@ script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
 starting_items = {
-&"pasteque": 1
+&"pasteque": 1,
+&"rose_shop_counter": 2
 }
 starting_item_toolbuild_hidden = Array[StringName]([&"turret1"])
 tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence"])

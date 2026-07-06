@@ -130,6 +130,10 @@ func _refresh() -> void:
 	_clear_rows(_night_rows)
 	_clear_rows(_day_rows)
 
+	if GameState.is_night:
+		visible = false
+		return
+
 	var playlist: LevelSpawnPlaylist = _get_playlist()
 	if playlist == null or playlist.nights.is_empty():
 		visible = false

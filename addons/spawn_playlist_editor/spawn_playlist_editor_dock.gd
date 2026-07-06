@@ -3,6 +3,7 @@ extends VBoxContainer
 
 const LEVELS_DIR: String = "res://scenes/levels"
 const PLAYLISTS_DIR: String = "res://scenes/levels/playlists"
+const DEFAULT_LEVEL_PATH: String = "res://scenes/levels/level_demo.tscn"
 const LEVEL_CONFIG_SCRIPT: Script = preload("res://scripts/spawning/level_spawn_config.gd")
 const WAVE_ROW_SCRIPT: Script = preload("res://addons/spawn_playlist_editor/wave_row.gd")
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
@@ -776,6 +777,10 @@ func _refresh_levels() -> void:
 		var previous_level_index: int = _level_paths.find(previous_path)
 		if previous_level_index >= 0:
 			selected_index = previous_level_index + 1
+	else:
+		var default_level_index: int = _level_paths.find(DEFAULT_LEVEL_PATH)
+		if default_level_index >= 0:
+			selected_index = default_level_index + 1
 	if selected_index >= 0 and selected_index < _level_option.get_item_count():
 		_level_option.select(selected_index)
 		_load_level(str(_level_option.get_item_metadata(selected_index)))
