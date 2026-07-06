@@ -792,9 +792,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _on_building_phase_changed(is_building_phase: bool) -> void:
 	if not is_building_phase:
 		_close_toolbuild()
-		# Leaving the building phase drops any pending build menu selection.
-		if game_ui != null and game_ui.has_method("clear_build_selection"):
-			game_ui.call("clear_build_selection")
 
 
 func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:

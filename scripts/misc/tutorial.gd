@@ -9,16 +9,14 @@ extends RichTextLabel
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
-##   2. no roses anywhere + no seeds ................ Game Over
-##   3. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
-##   4. seeds left, shop tool equipped .............. Plant roses
-##   5. planted roses still dry ..................... Water your roses
-##   6. all roses watered, nothing left ............. Start night automatically
+##   2. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
+##   3. seeds left, shop tool equipped .............. Plant roses
+##   4. planted roses still dry ..................... Water your roses
+##   5. all roses watered, nothing left ............. Start night automatically
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 
-const KEY_GAME_OVER: String = "tutorial.game_over"
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
@@ -208,10 +206,8 @@ func _refresh(delta: float = 0.0) -> void:
 
 
 func _current_message_key() -> String:
-	var planted: int = 0
 	var unwatered: int = 0
 	if _plant_manager != null:
-		planted = int(_plant_manager.call("rose_count"))
 		unwatered = int(_plant_manager.call("unwatered_rose_count"))
 	var seeds: int = 0
 	var water_reserve: int = 1
@@ -237,9 +233,6 @@ func _current_message_key() -> String:
 		return KEY_CLIENT_TIME
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
-	# Nothing growing, no seeds, and no roses left on the counters: the run is lost.
-	if planted == 0 and seeds == 0 and _counter_stock() <= 0:
-		return KEY_GAME_OVER
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
 	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
@@ -306,12 +299,6 @@ func _gardening_equipped() -> bool:
 func _rose_shop_counter_count() -> int:
 	if _building_object_manager != null and _building_object_manager.has_method("count_buildings_by_item_id"):
 		return int(_building_object_manager.call("count_buildings_by_item_id", "rose_shop_counter"))
-	return 0
-
-
-func _counter_stock() -> int:
-	if _building_manager != null and _building_manager.has_method("total_counter_stock"):
-		return int(_building_manager.call("total_counter_stock"))
 	return 0
 
 

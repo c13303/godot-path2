@@ -3155,10 +3155,8 @@ func _rose_pile_parent() -> Node:
 func _auto_select_hammer() -> void:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui != null and game_ui.has_method("select_build_item_for_tool"):
-		var equipped: bool = bool(game_ui.call("select_build_item_for_tool", "hammer", ROSE_SHOP_COUNTER_ID))
-		if equipped:
-			return
+	if game_ui != null and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected")):
+		return
 	if game_ui != null and game_ui.has_method("select_build_tool"):
 		game_ui.call("select_build_tool", "hammer")
 

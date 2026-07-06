@@ -1,6 +1,5 @@
 extends Panel
 
-const SEED_KEY: StringName = &"seeds"
 const LEVEL_MENU_SCENE: String = "res://scenes/menus/level_loader.tscn"
 
 const KEY_RESTART: String = "game_over.restart"
@@ -11,9 +10,7 @@ const KEY_QUIT: String = "game_over.quit"
 @onready var _main_menu_button: Button = $MarginContainer/Buttons/MainMenuButton
 @onready var _quit_button: Button = $MarginContainer/Buttons/QuitButton
 
-var _plant_manager: Node
 var _progression: Node
-var _building_manager: Node
 var _reservoir_system: Node
 var _game_over_shown: bool = false
 
@@ -33,7 +30,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if _game_over_shown:
 		return
-	if _plant_manager == null or _progression == null:
+	if _progression == null or _reservoir_system == null:
 		_resolve_nodes()
 	if _is_game_over():
 		_show()
@@ -43,9 +40,7 @@ func _resolve_nodes() -> void:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return
-	_plant_manager = scene.get_node_or_null("Map/PlantManager")
 	_progression = scene.get_node_or_null("progression")
-	_building_manager = scene.get_node_or_null("Map/BuildingManager")
 	_reservoir_system = scene.get_node_or_null("Map/ReservoirSystem")
 
 
@@ -54,18 +49,7 @@ func _is_game_over() -> bool:
 		return true
 	if _reservoir_system != null and _reservoir_system.has_method("any_reservoir_destroyed") and bool(_reservoir_system.call("any_reservoir_destroyed")):
 		return true
-	if _plant_manager == null or _progression == null:
-		return false
-	# Game over is checked only once the next build phase starts; morning, client,
-	# and merchant phases can still change the rose/seed economy.
-	if not GameState.is_building_phase:
-		return false
-	var planted: int = int(_plant_manager.call("rose_count"))
-	var seeds: int = int(_progression.call("get_value", SEED_KEY))
-	var counter_stock: int = 0
-	if _building_manager != null and _building_manager.has_method("total_counter_stock"):
-		counter_stock = int(_building_manager.call("total_counter_stock"))
-	return planted == 0 and seeds == 0 and counter_stock == 0
+	return false
 
 
 func _show() -> void:
