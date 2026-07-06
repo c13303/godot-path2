@@ -201,7 +201,7 @@ func rebuild_pile(counter_cell: Vector2i) -> void:
 		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
 		sprite.global_position = counter_world + _pile_offset(index)
 		sprite.z_index = int(counter_world.y) + index
-		_resolve_pile_parent().add_child(sprite)
+		_resolve_pile_parent().add_child.call_deferred(sprite)
 		nodes.append(sprite)
 	_pile_nodes_by_cell[counter_cell] = nodes
 

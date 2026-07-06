@@ -23,6 +23,14 @@ public:
 
     std::vector<int> query_neighbors(const Vec2& pos, double radius) const;
 
+    // Phase-1 diagnostics (cheap, O(cells)). Used to catch a spatial-grid ID leak:
+    // total_id_count() far exceeding the live agent count means stale/duplicate ids
+    // have accumulated; max_cell_occupancy() flags a single hot cell whose oversized
+    // list is what makes query_neighbors() (and thus a frame) suddenly explode.
+    size_t total_id_count() const;
+    size_t max_cell_occupancy() const;
+    size_t cell_count() const { return cells.size(); }
+
 private:
     double cell_size;
     std::unordered_map<long long, std::vector<int>> cells;
@@ -31,6 +39,7 @@ private:
     long long cell_key(int x, int y) const;
     Vec2i to_cell(const Vec2& pos) const;
     bool remove_from_cell(long long key, int id);
+    void remove_from_all_cells(int id);
 };
 
 } // namespace ffcore

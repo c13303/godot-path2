@@ -11,6 +11,7 @@
 #include "../flow/flow_field_manager.h"
 #include <cstdlib>
 #include <utility>
+#include <chrono> // Phase-1 diagnostic: time update_all() to catch silent per-frame spikes
 
 using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
@@ -601,6 +602,10 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
     Vec2 agent_foot = agent_foot_point(agent);
     std::vector<int> neighbor_ids = grid->query_neighbors(agent_foot, agent.profile.world_radius + max_world_radius);
+
+    // Phase-1 diagnostic: remember the biggest neighbor list handed back this frame.
+    if (cfg.debug_nav_frame_lag_ms > 0.0 && neighbor_ids.size() > debug_max_neighbor_query_size)
+        debug_max_neighbor_query_size = neighbor_ids.size();
 
     struct NeighborDist
     {
@@ -1538,6 +1543,24 @@ void SteeringSystem::update_all(double delta)
 
     const auto &cfg = globalconfig();
 
+    // --- Phase-1 diagnostic probe (debug-gated) --------------------------------
+    // update_all() is the only per-frame hot path with no timing, so a rare, sudden,
+    // silent near-freeze during day with many agents is invisible to the GDScript lag
+    // warnings. Time the whole sim pass and, on a spike over the nav-frame threshold,
+    // dump grid occupancy so a spatial-grid ID leak (grid_ids >> live agents) or a hot
+    // cell is caught in the act. Fires on the threshold regardless of the debug-draw
+    // toggle, matching the GDScript lag detectors (debug_nav_total_frame_lag et al.)
+    // which are tuning thresholds applied whether or not Debug Enabled is on — so the
+    // rare spike is caught even in a normal (non-debug) session. Set the threshold to 0
+    // to disable.
+    const bool debug_probe_enabled = cfg.debug_nav_frame_lag_ms > 0.0;
+    std::chrono::steady_clock::time_point probe_start;
+    if (debug_probe_enabled)
+    {
+        debug_max_neighbor_query_size = 0;
+        probe_start = std::chrono::steady_clock::now();
+    }
+
     // friction_factor = taux de perte de vitesse par seconde (1.0 => 100 % perdu en 1s)
     double loss_per_sec = std::clamp(cfg.friction_factor, 0.0, 1.0);
 
@@ -2380,5 +2403,30 @@ void SteeringSystem::update_all(double delta)
 
         a.update_motion_state(delta, cfg, force_motion_state);
 
+    }
+
+    // --- Phase-1 diagnostic probe: report on a spike ---------------------------
+    if (debug_probe_enabled)
+    {
+        const double elapsed_ms =
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - probe_start)
+                .count();
+        if (elapsed_ms > cfg.debug_nav_frame_lag_ms)
+        {
+            const long long grid_ids = (long long)grid->total_id_count();
+            const long long live_agents = (long long)agents.size();
+            // grid_leak > 0 => stale/duplicate ids in the grid (the snowball hypothesis).
+            // grid_max_cell huge with a small agent count => one hot cell driving the cost.
+            godot::UtilityFunctions::printerr(
+                "debug_steering_update_all_lag: elapsed_ms=", elapsed_ms,
+                " agents=", (int)live_agents,
+                " grid_ids=", (int)grid_ids,
+                " grid_leak=", (int)(grid_ids - live_agents),
+                " grid_max_cell=", (int)grid->max_cell_occupancy(),
+                " grid_cells=", (int)grid->cell_count(),
+                " max_neighbor_query=", (int)debug_max_neighbor_query_size,
+                " active_aoes=", (int)active_aoes.size());
+        }
     }
 }

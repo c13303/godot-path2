@@ -244,6 +244,12 @@ namespace ffcore
         double max_fight_query_padding = 0.0;
         double max_world_radius = 0.0;
 
+        // Phase-1 diagnostic: worst-case neighbor list size returned by
+        // query_neighbors() during the current update_all() frame. Reset at the top
+        // of update_all(), sampled in force_voisine(). A value far above realistic
+        // local crowding is the direct cost driver and points at a grid ID leak.
+        size_t debug_max_neighbor_query_size = 0;
+
         // Static obstacle storage. Touched only on register/unregister/clear, never per tick.
         std::unordered_map<int, StaticObstacle> static_obstacles;
         StaticObstacleGrid static_obstacle_grid;
