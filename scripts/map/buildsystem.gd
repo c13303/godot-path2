@@ -2,7 +2,6 @@ extends Node
 
 signal build_preview_changed(is_active: bool)
 
-const REMOVE_HOLD_SECONDS: float = 0.2
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
 const BUILD_FX_Z_INDEX: int = -62
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
@@ -61,24 +60,9 @@ var _flow_field: Object = null
 var _build_preview: BuildPreviewController = BuildPreviewController.new()
 var _placement_service: BuildPlacementService = BuildPlacementService.new()
 var _removal_service: BuildRemovalService = BuildRemovalService.new()
+var _drag_controller: BuildDragController = BuildDragController.new()
 
-# Generic click-drag chunk build. _drag_build_item_id records which item the
-# active drag is placing so affordability, validation, runtime objects, and sound
-# are resolved per item.
-var _drag_build_active: bool = false
-var _drag_build_item_id: String = ""
-var _drag_build_start_cell: Vector2i = Vector2i.ZERO
-var _drag_build_end_cell: Vector2i = Vector2i.ZERO
-var _drag_build_preview_limit: int = 0
 var _plant_layer_flush_queued: bool = false
-var _remove_active: bool = false
-var _remove_elapsed: float = 0.0
-var _remove_queue: Array[Dictionary] = []
-var _remove_drag_active: bool = false
-var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
-var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
-var _keyboard_unbuild_held: bool = false
-var _keyboard_unbuild_cell: Vector2i = Vector2i.ZERO
 var _build_direction: Vector2i = DIRECTION_RIGHT
 var _build_fx_pool: Array[Node2D] = []
 var _build_fx_pool_cursor: int = 0
@@ -89,6 +73,7 @@ func _ready() -> void:
 	_placement_service.setup(self)
 	_removal_service.setup(self)
 	_build_preview.setup(self)
+	_drag_controller.setup(self)
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()
 	_preload_build_fx_pool()
@@ -121,22 +106,14 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_cancel_drag_build()
 
 func _process(delta: float) -> void:
-	_update_keyboard_unbuild()
-	_process_removal(delta)
-	if _remove_drag_active:
+	_drag_controller.process(delta)
+	if _drag_controller.is_remove_drag_active():
 		_clear_hover()
 		return
 
 	var placeable_def: Dictionary = _selected_placeable_def()
-	if _drag_build_active:
-		if _placement_disabled() or _is_inventory_open() or str(placeable_def.get("id", "")) != _drag_build_item_id:
-			_cancel_drag_build()
-			return
-		var drag_cell: Vector2i = _hovered_cell()
-		var available: int = _affordable_quantity(_drag_build_item_id)
-		if drag_cell != _drag_build_end_cell or available != _drag_build_preview_limit:
-			_drag_build_end_cell = drag_cell
-			_draw_drag_build_preview(placeable_def, available)
+	if _drag_controller.is_build_drag_active():
+		_drag_controller.update_build_drag(placeable_def)
 		return
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
 		_clear_hover()
@@ -162,12 +139,12 @@ func _input(event: InputEvent) -> void:
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.physical_keycode == KEY_X:
 			if key_event.pressed and not key_event.echo:
-				_keyboard_unbuild_held = true
+				_drag_controller.set_keyboard_unbuild_held(true)
 				_start_keyboard_unbuild_at_hover()
 				get_viewport().set_input_as_handled()
 				return
 			if not key_event.pressed:
-				_keyboard_unbuild_held = false
+				_drag_controller.set_keyboard_unbuild_held(false)
 				_cancel_removal()
 				get_viewport().set_input_as_handled()
 				return
@@ -191,17 +168,14 @@ func _input(event: InputEvent) -> void:
 					get_viewport().set_input_as_handled()
 					return
 
-	if event is InputEventMouseMotion and _remove_drag_active:
-		var current_cell: Vector2i = _hovered_cell()
-		if current_cell != _remove_drag_end_cell:
-			_remove_drag_end_cell = current_cell
-			_preview_remove_drag()
+	if event is InputEventMouseMotion and _drag_controller.is_remove_drag_active():
+		_drag_controller.update_remove_drag()
 		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventMouseButton:
 		var drag_mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if drag_mouse_event.button_index == MOUSE_BUTTON_LEFT and not drag_mouse_event.pressed and _drag_build_active:
+		if drag_mouse_event.button_index == MOUSE_BUTTON_LEFT and not drag_mouse_event.pressed and _drag_controller.is_build_drag_active():
 			_finish_drag_build()
 			get_viewport().set_input_as_handled()
 			return
@@ -225,137 +199,26 @@ func _build_tool_selected() -> bool:
 	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
 
 func _start_remove_drag() -> void:
-	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
-		return
-	if _placement_disabled() or not _build_tool_selected():
-		return
-	# A new drag stacks onto any in-progress removal instead of cancelling it, so
-	# only clear leftover preview bars here (committed queue bars are preserved).
-	_clear_preview_remove_progress_bars()
-	_remove_drag_active = true
-	_remove_drag_start_cell = _hovered_cell()
-	_remove_drag_end_cell = _remove_drag_start_cell
-	_preview_remove_drag()
+	_drag_controller.start_remove_drag()
 
 func _preview_remove_drag() -> void:
-	_clear_preview_remove_progress_bars()
-	_show_drag_selection_rect(_remove_drag_start_cell, _remove_drag_end_cell)
-	var committed: Dictionary = _committed_cell_set()
-	var removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _remove_drag_end_cell)
-	for removal: Dictionary in removals:
-		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
-		# Cells already queued keep their committed bar; don't preview over them.
-		if committed.has(cell):
-			continue
-		_create_remove_progress(cell, 0.0)
+	_drag_controller.preview_remove_drag()
 
 func _finish_remove_drag() -> void:
-	if not _remove_drag_active:
-		return
-	_remove_drag_active = false
-	_hide_drag_selection_rect()
-	var was_active: bool = _remove_active
-	var new_removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _hovered_cell())
-	_clear_preview_remove_progress_bars()
-	# Stack the new selection behind whatever is already being removed instead of
-	# replacing it: append to the queue so removals run one after another (a waiting
-	# line), each keeping its own progress bar.
-	var committed: Dictionary = _committed_cell_set()
-	for removal: Dictionary in new_removals:
-		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
-		if committed.has(cell):
-			continue
-		committed[cell] = true
-		_remove_queue.append(removal)
-		_create_remove_progress(cell, 0.0)
-	if _remove_queue.is_empty():
-		_cancel_removal()
-		return
-	_remove_active = true
-	# Preserve the in-progress head's elapsed time when stacking; only reset for a
-	# brand-new removal run.
-	if not was_active:
-		_remove_elapsed = 0.0
-	_clear_hover()
+	_drag_controller.finish_remove_drag()
 
 func _process_removal(delta: float) -> void:
-	if not _remove_active:
-		return
-	if GameState.is_night or _is_inventory_open() or not _keyboard_unbuild_held:
-		_cancel_removal()
-		return
-	if _remove_queue.is_empty():
-		_cancel_removal()
-		return
-	var active_removal: Dictionary = _remove_queue[0] as Dictionary
-	var active_cell: Vector2i = active_removal.get("cell", Vector2i.ZERO) as Vector2i
-	var active_item_id: String = str(active_removal.get("item_id", ""))
-	var current_removal: Dictionary = _removable_at_cell(active_cell)
-	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != active_item_id:
-		_cancel_removal()
-		return
-	_remove_elapsed = minf(_remove_elapsed + delta, REMOVE_HOLD_SECONDS)
-	_build_preview.set_remove_progress_value(active_cell, (_remove_elapsed / REMOVE_HOLD_SECONDS) * 100.0)
-	if _remove_elapsed >= REMOVE_HOLD_SECONDS:
-		_finish_removal()
+	_drag_controller.process_removal(delta)
 
 func _finish_removal() -> void:
-	if not _remove_active or GameState.is_night:
-		_cancel_removal()
-		return
-	if _remove_queue.is_empty():
-		_cancel_removal()
-		return
-	var removal: Dictionary = _remove_queue.pop_front() as Dictionary
-	var removed_cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
-	var removed_item_id: String = str(removal.get("item_id", ""))
-	var current_removal: Dictionary = _removable_at_cell(removed_cell)
-	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != removed_item_id:
-		_cancel_removal()
-		return
-
-	_free_remove_progress_for_cell(removed_cell)
-	if not _removal_service.commit_removal(removal):
-		_cancel_removal()
-		return
-	_remove_elapsed = 0.0
-	if _remove_queue.is_empty():
-		_cancel_removal()
+	_drag_controller.finish_removal()
 
 func _update_keyboard_unbuild() -> void:
-	if not _keyboard_unbuild_held:
-		return
-	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
-		_cancel_removal()
-		return
-	var cell: Vector2i = _hovered_cell()
-	if _remove_active and cell == _keyboard_unbuild_cell:
-		return
-	if _remove_active:
-		_cancel_removal()
-	_keyboard_unbuild_cell = cell
-	_start_keyboard_unbuild_at_hover()
+	_drag_controller.update_keyboard_unbuild()
 
 
 func _start_keyboard_unbuild_at_hover() -> void:
-	if GameState.is_night or _is_inventory_open() or get_viewport().gui_get_hovered_control() != null:
-		return
-	if _placement_disabled():
-		return
-	_cancel_drag_build_preserving_selection()
-	_clear_preview_remove_progress_bars()
-	var cell: Vector2i = _hovered_cell()
-	var removal: Dictionary = _removable_at_cell(cell)
-	if removal.is_empty():
-		_cancel_removal()
-		return
-	_keyboard_unbuild_cell = cell
-	_remove_queue.clear()
-	_remove_queue.append(removal)
-	_remove_elapsed = 0.0
-	_remove_active = true
-	_create_remove_progress(cell, 0.0)
-	_clear_hover()
+	_drag_controller.start_keyboard_unbuild_at_hover()
 
 
 func pad_place_selected_at_cursor() -> void:
@@ -365,7 +228,7 @@ func pad_place_selected_at_cursor() -> void:
 	if placeable_def.is_empty():
 		return
 	_cancel_removal()
-	if _drag_build_active:
+	if _drag_controller.is_build_drag_active():
 		_finish_drag_build()
 		return
 	if _is_drag_buildable(placeable_def) and not _pad_skips_preview(placeable_def):
@@ -375,7 +238,7 @@ func pad_place_selected_at_cursor() -> void:
 
 
 func pad_cancel_build_preview() -> bool:
-	if not _drag_build_active:
+	if not _drag_controller.is_build_drag_active():
 		return false
 	_cancel_drag_build()
 	return true
@@ -386,7 +249,7 @@ func _pad_skips_preview(placeable_def: Dictionary) -> bool:
 
 
 func pad_is_build_preview_active() -> bool:
-	return _drag_build_active
+	return _drag_controller.is_build_drag_active()
 
 
 func pad_is_cursor_active() -> bool:
@@ -457,12 +320,7 @@ func _create_remove_progress(cell: Vector2i, value: float) -> void:
 	_build_preview.create_remove_progress(cell, value)
 
 func _cancel_removal() -> void:
-	_remove_active = false
-	_remove_drag_active = false
-	_remove_elapsed = 0.0
-	_remove_queue.clear()
-	_hide_drag_selection_rect()
-	_clear_remove_progress_bars()
+	_drag_controller.cancel_removal()
 
 func _clear_remove_progress_bars() -> void:
 	_build_preview.clear_remove_progress_bars()
@@ -470,19 +328,23 @@ func _clear_remove_progress_bars() -> void:
 # Cells committed to the active removal queue (drives dedup + bar preservation when
 # a fresh drag stacks onto an in-progress removal).
 func _committed_cell_set() -> Dictionary:
-	var cells: Dictionary = {}
-	for removal: Dictionary in _remove_queue:
-		cells[removal.get("cell", Vector2i.ZERO) as Vector2i] = true
-	return cells
+	return _drag_controller.committed_cell_set()
 
 # Free only transient drag-preview bars, keeping the bars for cells already
 # committed to the active removal queue.
-func _clear_preview_remove_progress_bars() -> void:
-	var committed: Dictionary = _committed_cell_set()
+func _clear_preview_remove_progress_bars(committed: Dictionary = {}) -> void:
+	if committed.is_empty():
+		committed = _committed_cell_set()
 	_build_preview.clear_preview_remove_progress_bars(committed)
 
 func _free_remove_progress_for_cell(cell: Vector2i) -> void:
 	_build_preview.free_remove_progress_for_cell(cell)
+
+func _set_remove_progress_value(cell: Vector2i, value: float) -> void:
+	_build_preview.set_remove_progress_value(cell, value)
+
+func _commit_removal(removal: Dictionary) -> bool:
+	return _removal_service.commit_removal(removal)
 
 func _resolve_atlas_source_id() -> void:
 	var ref: TileMapLayer = previewbuild if previewbuild else wallz
@@ -645,18 +507,10 @@ func _drag_build_sound(item_id: String) -> StringName:
 	return _placement_service.drag_build_sound(item_id)
 
 func _start_drag_build(placeable_def: Dictionary) -> void:
-	var item_id: String = str(placeable_def.get("id", ""))
-	if _affordable_quantity(item_id) <= 0:
-		return
-	_set_drag_build_active(true)
-	_drag_build_item_id = item_id
-	_drag_build_start_cell = _hovered_cell()
-	_drag_build_end_cell = _drag_build_start_cell
-	_draw_drag_build_preview(placeable_def, _affordable_quantity(item_id))
+	_drag_controller.start_drag_build(placeable_def)
 
-func _draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
-	_drag_build_preview_limit = available
-	_build_preview.draw_drag_build_preview(_drag_build_start_cell, _drag_build_end_cell, placeable_def, available)
+func _draw_drag_build_preview(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary, available: int) -> void:
+	_build_preview.draw_drag_build_preview(start_cell, end_cell, placeable_def, available)
 
 func _drag_build_rectangle_cells(
 	start_cell: Vector2i,
@@ -676,38 +530,22 @@ func _drag_build_candidate_blocked_by_batch(
 	return _placement_service.drag_build_candidate_blocked_by_batch(cell, target_layer, placeable_def, accepted_cells)
 
 func _finish_drag_build() -> void:
-	var placeable_def: Dictionary = _selected_placeable_def()
-	var item_id: String = _drag_build_item_id
-	if _placement_disabled() or str(placeable_def.get("id", "")) != item_id:
-		_cancel_drag_build()
-		return
-	_drag_build_end_cell = _hovered_cell()
-	var start_cell: Vector2i = _drag_build_start_cell
-	var end_cell: Vector2i = _drag_build_end_cell
-	_clear_hover()
-	_hide_drag_selection_rect()
-	_set_drag_build_active(false)
-	_drag_build_item_id = ""
-	_placement_service.commit_drag_build(placeable_def, item_id, start_cell, end_cell)
+	_drag_controller.finish_drag_build()
 
 func _cancel_drag_build() -> void:
-	_set_drag_build_active(false)
-	_drag_build_item_id = ""
-	_hide_drag_selection_rect()
-	_clear_hover()
-	_clear_build_selection()
+	_drag_controller.cancel_drag_build()
 
 func _cancel_drag_build_preserving_selection() -> void:
-	_set_drag_build_active(false)
-	_drag_build_item_id = ""
-	_hide_drag_selection_rect()
-	_clear_hover()
+	_drag_controller.cancel_drag_build_preserving_selection()
 
 func _set_drag_build_active(active: bool) -> void:
-	if _drag_build_active == active:
-		return
-	_drag_build_active = active
-	build_preview_changed.emit(_drag_build_active)
+	_drag_controller.set_drag_build_active(active)
+
+func _emit_build_preview_changed(active: bool) -> void:
+	build_preview_changed.emit(active)
+
+func _commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: Vector2i, end_cell: Vector2i) -> bool:
+	return _placement_service.commit_drag_build(placeable_def, item_id, start_cell, end_cell)
 
 # How many of item_id the player can currently afford. Replaces the old inventory
 # count: buildings are paid for directly from currency, so affordability is the cap.
