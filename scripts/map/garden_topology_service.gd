@@ -384,9 +384,9 @@ func rebuild_plant_zone_from_layer() -> void:
 	debug_telemetry.warn_garden_task_lag_us("_validate_dirty_gardens", Time.get_ticks_usec() - t,
 		"gardens=%d" % _gardens.size())
 	t = Time.get_ticks_usec()
-	_manager._rebuild_spawner_garden_route_cache()
+	_spawner_route_service().rebuild_spawner_garden_route_cache()
 	debug_telemetry.warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
-		"spawners=%d" % _manager._spawner_garden_route_count())
+		"spawners=%d" % _spawner_route_service().spawner_garden_route_count())
 	t = Time.get_ticks_usec()
 	_manager._queue_agents_after_garden_rebuild()
 	debug_telemetry.warn_garden_task_lag_us("_queue_agents_after_garden_rebuild", Time.get_ticks_usec() - t,
@@ -711,7 +711,7 @@ func resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: in
 
 
 func has_client_targets_remaining() -> bool:
-	if _manager._total_counter_stock() > 0:
+	if _manager.total_counter_stock() > 0:
 		return true
 	for raw_garden_id: Variant in _gardens.keys():
 		if garden_has_client_targets(int(raw_garden_id)):
@@ -913,12 +913,16 @@ func _night_preparation_budget_us() -> int:
 	return _manager._night_preparation_budget_us()
 
 
+func _spawner_route_service() -> SpawnerRouteService:
+	return _manager.get_spawner_route_service()
+
+
 func _clear_garden_entry_resolve_cache(reason: String) -> void:
-	_manager._clear_garden_entry_resolve_cache(reason)
+	_manager.get_garden_access_resolver().clear_cache(reason)
 
 
 func _release_garden_routes(garden_id: int) -> void:
-	_manager._release_garden_routes(garden_id)
+	_spawner_route_service().release_garden_routes(garden_id)
 
 
 func _queue_zone_overlay_redraw() -> void:

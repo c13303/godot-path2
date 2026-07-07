@@ -1,11 +1,12 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 10 = reduce unsafe manager-private coupling in the preparation and spawn orchestration services, without changing gameplay behavior.
+Batch 12 = production-readiness audit and small stabilization fixes after the previous coupling-cleanup batches.
 
-This is a refactor-only pass.
+This is primarily an audit/hardening pass.
+Do not perform broad extraction.
 Do not change gameplay behavior.
-Do not optimize logic unless required by the boundary cleanup.
+Do not optimize logic unless required to fix an obvious architecture or safety issue.
 Do not run Godot, tests, export, build, or compilation commands.
 
 Project rules:
@@ -17,247 +18,212 @@ Project rules:
 - Do not create generic abstractions without immediate use.
 - Do not perform a broad rewrite.
 - Preserve behavior exactly.
-- If unsure, keep the existing private access and report it.
+- If unsure, keep the existing code and report it.
 
 Current context:
-Previous batches reduced `BuildingManager` bloat, extracted runtime ticking, and started cleaning domain boundaries.
+Many BuildingManager responsibilities have been extracted or cleaned:
+- preparation orchestration
+- runtime ticking
+- agent spawning
+- rose counter/shop logic
+- debug/query helpers
+- some private manager coupling in runtime/retarget/navigation/preparation/spawn/spawner route/garden topology
 
-The next coupling hotspots are likely:
-
-```txt
-scripts/map/building_preparation_controller.gd
-scripts/map/agent_spawn_service.gd
-scripts/map/building_manager.gd
-
-These services coordinate important gameplay setup:
-
-night/client preparation
-scan/sync/rebuild sequence
-spawner route initialization
-async flow-field readiness
-agent scene instantiation
-spawn cell selection
-route/garden assignment
-agent registration
-
-This pass must stay conservative.
+Now stop automatic extraction and verify the resulting architecture.
 
 Main objective:
-Reduce the most dangerous direct _manager._xxx access in BuildingPreparationController and AgentSpawnService, especially raw mutable state access and service-through-manager-private access.
-
-Do not rewrite preparation.
-Do not rewrite spawning.
-Do not change spawn fallback behavior.
-Do not change preparation order.
-Do not change async/await behavior.
-Do not change route assignment.
-Do not change garden selection.
-Do not change agent registration.
+Decide whether the current code is production-readable or still at risk of becoming noodle code.
 
 Before editing:
+1. Inspect `scripts/map/building_manager.gd`.
+2. Inspect all extracted services/controllers under `scripts/map/` that are connected to BuildingManager.
+3. Get line counts for the important files.
+4. Count `_manager._` private accesses per extracted service.
+5. List all services/controllers initialized by `BuildingManager`.
+6. Identify which files are close to or above the warning zone.
 
-Inspect building_preparation_controller.gd.
-Inspect agent_spawn_service.gd.
-Inspect related wrappers/accessors in building_manager.gd.
-Count _manager._ references in both target services.
-Categorize each private access as:
-- preparation guard/state flag
-- scan/sync/rebuild orchestration
-- service/controller access
-- spawner registry/query
-- route/garden selection
-- spawn scene lookup
-- spawn placement query
-- agent registration
-- debug/telemetry only
-- unclear / keep
+Warning thresholds:
 
-Do not edit before this classification.
+```txt
+0-300 lines: good
+300-600 lines: acceptable if cohesive
+600-900 lines: warning zone
+900+ lines: high warning
+1000+ lines: do not grow; split by responsibility
 
-Priority 1 — service/controller access:
-If a target service accesses another manager-owned service through private fields, prefer typed getters on BuildingManager.
+Do not edit before completing this audit.
 
-Examples:
+Audit categories:
+For each relevant file, classify it as one of:
 
-func get_building_scan_service() -> BuildingScanService:
-	return _building_scan
+A. Clean focused owner
+B. Acceptable coordinator/façade
+C. Too coupled to BuildingManager
+D. Too large but still cohesive
+E. Too large and mixed responsibility
+F. Wrapper-heavy but acceptable for compatibility
+G. Noodle risk / should be next refactor target
+H. Unknown / needs human decision
 
-func get_building_navigation_sync_service() -> BuildingNavigationSyncService:
-	return _building_navigation_sync
+Primary task:
+Produce a concise production-readiness report inside the final output.
 
-func get_building_invalidation_controller() -> BuildingInvalidationController:
-	return _building_invalidation_controller
+Secondary task:
+Make only small, obvious stabilization edits if they are clearly safe.
 
-func get_spawner_route_service() -> SpawnerRouteService:
-	return _spawner_route_service
+Allowed small edits:
 
-func get_spawner_garden_selection_service() -> SpawnerGardenSelectionService:
-	return _spawner_garden_selection_service
+add missing boundary comments to coordinator files
+rename no methods unless absolutely safe
+add a tiny typed getter/wrapper if it removes repeated unsafe private access
+replace one or two obviously unsafe direct private service accesses with existing getters
+move no large logic blocks
+delete no wrappers unless proven dead and unrelated
+add no new architecture layer
 
-func get_agent_definition_service() -> AgentDefinitionService:
-	return _agent_definition_service
+Do not:
 
-func get_debug_telemetry() -> BuildingDebugTelemetry:
-	return _debug_telemetry
+extract another large service
+create a generic context/service locator
+rewrite ownership
+change route/garden/spawn/runtime behavior
+change save/load format
+delete compatibility wrappers casually
+chase zero _manager._ calls
+grow any file past 1000 lines
 
-Only add getters that are actually used.
-Use the real class names from the current codebase.
+Specific things to check:
 
-Priority 2 — preparation state flags:
-If BuildingPreparationController directly mutates preparation state flags on the manager, replace with narrow manager methods if safe.
+BuildingManager role
+Verify that BuildingManager is mostly:
+Godot lifecycle callbacks
+scene wiring
+service setup
+compatibility wrappers
+small orchestration entry points
 
-Bad:
+Flag any remaining large gameplay logic clusters.
 
-_manager._night_preparing = false
-_manager._night_preparation_ready = true
-_manager._client_preparing = false
+Runtime ticking
+Verify BuildingRuntimeTickController is only orchestration.
+It should preserve update order and delegate domain logic.
 
-Better:
+Flag any gameplay algorithm inside it.
 
-_manager.finish_night_preparation_success()
-_manager.finish_night_preparation_abort()
-_manager.finish_client_preparation_success()
-_manager.finish_client_preparation_abort()
+Garden/navigation cluster
+Inspect:
+garden_retarget_controller.gd
+agent_navigation_phase_controller.gd
+garden_topology_service.gd
+spawner_route_service.gd
+garden_access_resolver.gd
+building_path_service.gd
 
-Only create methods that exactly preserve current behavior.
-Do not move ownership of preparation state in this pass unless it is already clearly isolated.
+Flag:
 
-The manager may still own the flags; the controller should request transitions through explicit methods.
+unclear state ownership
+direct mutable state sharing
+excessive manager-private access
+circular controller dependencies
+route/garden logic duplication
+Preparation/spawn cluster
+Inspect:
+building_preparation_controller.gd
+agent_spawn_service.gd
+spawn_tick_controller.gd
+spawn_playlist_config_service.gd
+spawner_garden_selection_service.gd
 
-Priority 3 — readiness/guard queries:
-Replace raw reads with intention-revealing methods where simple.
+Flag:
 
-Examples:
+duplicated spawner/route/garden lookup logic
+unclear spawn failure handling ownership
+direct mutable manager state access
+overgrown orchestration
+Counter/client/harvest cluster
+Inspect:
+rose/counter service if present
+counter_stock_manager.gd
+morning_harvest_controller.gd
+client_sale_controller.gd
+seed_merchant_controller.gd
 
-func is_flow_ready() -> bool:
-	return _flow_ready
+Flag:
 
-func is_startup_ready() -> bool:
-	return _startup_ready
+counter stock state duplication
+save/load format risk
+animation helpers in wrong owner
+client/harvest/merchant coupling
+Debug/telemetry
+Inspect debug/query/telemetry services.
 
-func has_active_spawners() -> bool:
-	return _spawners.size() > 0
+Flag:
 
-Do not expose raw arrays/dictionaries unless necessary.
+debug logic affecting gameplay
+debug code mixed into domain services
+obsolete warnings
+heavy per-frame debug work
+Performance-sensitive loops
+Look for per-frame loops over:
+all agents
+all map cells
+all gardens
+all spawners
+all buildings
 
-Priority 4 — spawner and route access:
-Avoid exposing mutable spawner dictionaries directly if a narrow query is enough.
+Flag any loop that appears newly introduced or suspicious.
+Do not optimize it in this pass unless the fix is trivial and behavior-preserving.
 
-Prefer methods like:
+AGENTS.md compliance
+Verify recent code follows:
+no giant files
+no new god objects
+no over-abstracted generic framework
+explicit typing
+focused ownership
+behavior-preserving refactor style
 
-func get_registered_spawner_cells() -> Array[Vector2i]:
-	...
+Expected result:
 
-func get_spawner_data(spawner_cell: Vector2i) -> Dictionary:
-	...
+A clear architecture health report.
+At most small stabilization edits.
+No broad behavior changes.
+No new large files.
+A clear recommendation for whether more cleanup is needed.
 
-func has_spawner_route(spawner_cell: Vector2i) -> bool:
-	...
+If the code is good enough:
+Say so.
+Recommend stopping broad cleanup and switching to feature work.
 
-But only add what is needed for the current services.
-
-Priority 5 — spawn setup / agent registration:
-If AgentSpawnService directly performs manager-private calls for registration or route assignment, prefer explicit manager methods with names that describe the operation.
-
-Examples:
-
-func register_spawned_agent(agent: Node, spawner_cell: Vector2i, agent_kind: StringName) -> void:
-	...
-
-func assign_spawned_agent_route(agent: Node, route: PackedVector2Array, garden_id: int) -> void:
-	...
-
-Only do this if it reduces private coupling without hiding too much logic.
-Do not invent new behavior.
-
-Priority 6 — unclear or high-risk access:
-Keep it unchanged and report it.
-
-Do not chase zero _manager._xxx calls.
-
-A successful pass reduces the worst private accesses, not all of them.
-
-Expected target:
-Reduce _manager._ references in each target file by roughly 25-50% if safe.
-
-If safe replacements are not obvious, reduce less and report why.
-
-Strict behavior preservation:
-Preserve exactly:
-
-- preparation sequence order
-- async wait behavior
-- dirty/invalidation semantics
-- scan/rebuild order
-- route cache rebuild behavior
-- spawner route initialization
-- spawn timing
-- spawn scene lookup
-- spawn cell fallback
-- spawn failure cleanup
-- agent registration
-- garden route assignment
-- debug/telemetry output semantics
-
-Compatibility:
-Do not remove existing private methods.
-Do not remove wrappers.
-Do not rename public-ish methods.
-Do not change scene/signal/callable APIs.
-Do not delete dead code in this pass.
-
-This is not a pruning pass.
-
-Suggested workflow:
-
-Count _manager._ references in both target files.
-Classify each access.
-Pick the highest-value unsafe accesses.
-Add narrow typed getters/wrappers where useful.
-Replace only safe call sites.
-Keep unclear/private/debug-only access unchanged.
-Re-count _manager._ references.
-Report what remains.
-
-Safety checks by reading/searching only:
-
-Verify preparation order is unchanged.
-Verify async/await points are unchanged.
-Verify no agent status string changed.
-Verify spawn fallback and failure paths are unchanged.
-Verify route/garden assignment is unchanged.
-Verify no queue order changed.
-Verify no save/load structure changed.
-Verify no signal/Callable/call method was removed.
-Verify no scene/editor reference was broken.
-Verify strict typing in all changed code.
+If the code is not good enough:
+Identify the single best next target.
+Do not propose five simultaneous refactors.
 
 Output required:
 
-List changed files.
-Give before/after _manager._ count for:
-building_preparation_controller.gd
-agent_spawn_service.gd
-List new getters/wrappers added to BuildingManager.
-List any new public methods added to services/controllers.
-Explain which private accesses were replaced and why.
-Explain which private accesses were intentionally retained and why.
-Confirm preparation order was preserved.
-Confirm spawn behavior was preserved.
-Confirm no behavior changes were intended.
-Mention remaining production-quality concerns.
-Mention manual test scenarios.
+List changed files, if any.
+Give line counts for key files.
+Give _manager._ private access counts per major extracted service.
+Classify major files using the audit categories.
+Say whether the architecture is production-readable now.
+Say whether noodle risk is low, medium, or high.
+List the top 3 remaining risks.
+List any small stabilization edits made.
+If no edits were made, say that this was intentionally audit-only.
+Recommend either:
+stop broad cleanup and resume feature work; or
+one single next cleanup target.
+Mention manual test scenarios if any code changed.
 
-Manual test scenarios to suggest:
+Manual test scenarios if code changed:
 
 Start the game and reach day phase.
 Start a normal night.
-Verify night preparation completes.
 Spawn monsters from multiple spawners.
-Verify failed/blocked spawn cases do not crash.
 Let monsters target plants, eat, and exit.
-Run client phase if applicable.
-Verify client preparation completes.
-Place/remove buildings before night.
+Place/remove buildings.
 Verify navigation invalidation/rebuild still happens.
-Verify no new warnings/errors appear
+Run client phase if applicable.
+Verify save/load if touched.
+Enable debug overlays/telemetry if touched.
+Verify no new warnings/errors appear.
