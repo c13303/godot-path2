@@ -1,174 +1,153 @@
-Task: batched runtime-agent cleanup pass to make the map/building codebase easier for coding agents and humans to maintain.
+Task: batched debug / telemetry / overlay cleanup pass to make the map/building codebase easier for coding agents and humans to maintain.
 
 Targets:
 
-* `scripts/map/agent_navigation_phase_controller.gd`
-* `scripts/map/garden_retarget_controller.gd`
-* `scripts/map/agent_suspend_service.gd`
-* `scripts/map/monster_death_controller.gd`
-* `scripts/map/drowning_controller.gd`
-* `scripts/map/turret_eating_controller.gd`
+* `scripts/map/building_debug_telemetry.gd`
+* `scripts/map/building_debug_overlay_controller.gd`, if it exists
+* `scripts/map/garden_debug_overlay_controller.gd`, if it exists
+* `scripts/map/building_debug_options.gd`, if it exists
 * minimal related changes in `scripts/map/building_manager.gd`
 
 Goal:
-Reduce hidden runtime-agent coupling with `BuildingManager`, without changing gameplay behavior.
+Reduce hidden coupling with `BuildingManager` in debug, telemetry, and overlay code, without changing gameplay behavior.
 
 This is a cleanup pass, not a feature pass.
 
 Do not optimize.
-Do not move broad behavior.
+Do not move broad gameplay behavior.
 Do not run Godot, tests, builds, compilation, or exports.
 
 Problem:
-Runtime agent behavior is spread across extracted services, but `AgentNavigationPhaseController` still calls many `BuildingManager` private methods through `_manager.call(...)`.
-
-This makes future agent edits risky because the real dependencies are hidden.
+Debug and telemetry code should observe and report system state. It should not secretly own gameplay decisions or trigger gameplay side effects through hidden manager calls.
 
 Main objective:
-Make runtime agent dependencies clearer by replacing safe `_manager.call(...)`, `_manager.get(...)`, and `_manager.has_method(...)` usages with explicit direct calls, cached dependencies, or small typed accessors.
+Make debug/telemetry dependencies clearer where safe, while preserving behavior exactly.
 
-Focus especially on `agent_navigation_phase_controller.gd`, because it currently has the most hidden coupling.
-
-Before editing, search inside the target files for:
+Before editing, search inside each target file for:
 
 * `_manager.call(`
 * `_manager.get(`
 * `_manager.has_method(`
 * `_manager.set(`
 
+Also search debug/telemetry/overlay references in `building_manager.gd`.
+
 Classify each usage as:
 
-* manager wrapper around an existing service
-* manager state access
-* manager method call
+* manager state read
+* debug data lookup
+* gameplay method call
 * dependency lookup
 * compatibility/safety check
 * unclear / risky
 
-Clean the safest groups first.
+Clean only the safe ones.
 
 Preferred cleanup order:
 
 1. Replace calls to `BuildingManager` wrappers that simply forward to already-existing services.
 
-For example, if `BuildingManager._find_path_in_zone(...)` only forwards to `BuildingPathService`, prefer making the dependency explicit and calling the service directly.
+2. Cache stable debug dependencies during `setup(...)` when safe.
 
-2. Cache stable service dependencies during `setup(...)` when safe.
-
-Likely useful dependencies for `AgentNavigationPhaseController`:
+Possible dependencies, only if already used by the current code:
 
 * `GardenTopologyService`
-* `SpawnerRouteService`
 * `GardenRetargetController`
-* `BuildingPathService`
-* `BuildingDebugTelemetry`
+* `SpawnerRouteService`
+* `AgentNavigationPhaseController`
+* `BuildingNavigationSyncService`
+* `BuildingObjectManager`
 * `CounterStockManager`
-* `AgentDefinitionService`
-* `plant_manager`
 * `agent_manager`
+* `plant_manager`
 * `floorz`
 * `plantz`
 
-Only add dependencies that are actually needed by the existing code.
-
-3. Replace known manager method calls with direct typed manager calls only when the method clearly exists and keeping it on `BuildingManager` is intentional.
+3. Replace known manager method calls with direct typed calls only when the method clearly exists and keeping it on `BuildingManager` is intentional.
 
 4. Add small typed accessors on `BuildingManager` only when this avoids broad churn and makes ownership clearer.
 
-5. Keep `_manager.call(...)` only when there is a real dynamic-call reason or replacing it would be risky.
+5. Keep `_manager.call(...)`, `_manager.get(...)`, `_manager.has_method(...)`, or `_manager.set(...)` when replacing it would be risky or would require broad behavior movement.
 
 Do not try to remove every manager reference.
-The goal is a meaningful reduction of hidden coupling, not a perfect rewrite.
+The goal is meaningful coupling reduction, not a perfect rewrite.
 
 Ownership rules:
 
-`AgentNavigationPhaseController` should own:
+`BuildingDebugTelemetry` should own:
 
-* runtime agent navigation phases
-* entry flow handling
-* A*-in arrival handling
-* eating phase handling
-* escape phase handling
-* client counter phase handling
-* phase dictionaries such as eating / escaping / entry-path / astar-in agents
+* debug timing counters
+* lag detection counters
+* telemetry snapshots
+* debug logging helpers already assigned to it
+* read-only reporting of subsystem state
 
 It should not own:
 
+* gameplay state mutation
 * garden topology computation
-* spawner route creation internals
-* plant manager internals
-* counter stock storage
-* actual monster death cleanup
-* drowning/turret suspension internals
-* spawn playlist logic
-* spawn tick logic
-* build placement/removal
-
-`GardenRetargetController` should own:
-
-* retarget queues
-* stale target detection
-* plant-target reverse index
-* waiting-for-retarget state
 * retarget processing
+* navigation phase transitions
+* placement/removal
+* spawning
+* client/merchant behavior
 
-`AgentSuspendService` should own:
+Debug overlay controllers should own:
 
-* temporary suspension/resume records for agents
+* visual debug overlays
+* overlay refresh/clear behavior
+* converting existing state into debug visuals
 
-`MonsterDeathController` should own:
+They should not own:
 
-* monster death cleanup/drop behavior already assigned to it
+* gameplay rules
+* topology computation
+* retargeting decisions
+* placement/removal
+* spawn logic
+* navigation decisions
 
-`DrowningController` should own:
+Debug options should own:
 
-* drowning-specific suspension/kill behavior
+* exported debug thresholds/options
+* debug toggles
+* debug display configuration
 
-`TurretEatingController` should own:
+They should not own:
 
-* turret-eating-specific suspension/damage behavior
+* gameplay behavior
+* telemetry processing
+* overlay drawing logic beyond configuration
 
 `BuildingManager` should only:
 
-* wire runtime-agent services
-* coordinate lifecycle
-* keep compatibility wrappers when external callers may still need them
+* wire debug services/controllers
+* call debug lifecycle/update hooks
+* keep compatibility wrappers when external callers may need them
 * expose small accessors when needed
 
 Do not change:
 
-* monster movement behavior
-* entry flow behavior
-* A*-in behavior
-* eating behavior
-* escape behavior
-* retarget behavior
-* waiting-for-retarget behavior
-* client counter behavior
-* seed merchant escape behavior
-* drowning behavior
-* turret eating behavior
-* monster death behavior
-* agent spawn/despawn behavior
-* garden targeting behavior
-* route selection behavior
-* bottleneck behavior
+* gameplay behavior
+* debug toggle behavior
+* lag threshold behavior
+* telemetry values
+* debug overlay visuals
+* debug overlay refresh timing
 * debug log text
+* performance safeguards
 * public method names used by other files
 * `.tscn` files
 
 Important regression risks:
 
-* do not change when agents enter eating state
-* do not change when agents switch to escape flow
-* do not change direct eat-exit flow-field behavior
-* do not change garden retarget timing
-* do not change agent unregister timing
-* do not change plant consumption timing
-* do not change client payment/counter behavior
-* do not change seed merchant pause/escape handling
-* do not add broad per-agent scans
-* do not add extra hot-path work
+* do not make debug code mutate gameplay state
+* do not change lag detection thresholds
+* do not change when debug logs are emitted
+* do not add broad scans in hot paths
+* do not add extra per-agent work
+* do not change overlay visibility behavior
+* do not change exported debug option names
 
 Keep compatibility wrappers in `BuildingManager` if external callers may still need them.
 
@@ -176,8 +155,8 @@ If a hidden manager access cannot be safely replaced, leave it unchanged and exp
 
 Expected result:
 
-* `agent_navigation_phase_controller.gd` has significantly fewer `_manager.call(...)` usages
-* runtime-agent dependencies are easier to see from `setup(...)`
+* debug / telemetry / overlay files have fewer hidden manager calls where safe
+* debug ownership is clearer
 * behavior is unchanged
 * `BuildingManager` may gain small typed accessors if needed
 * no scene files are changed
@@ -189,5 +168,6 @@ Final report:
 * dependencies cached or added per file
 * usages intentionally left unchanged and why
 * any new accessors/wrappers added to `BuildingManager`
+* debug ownership clarified per file
 * behavior intentionally preserved
 * manual test risks

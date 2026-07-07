@@ -4,11 +4,11 @@ class_name MorningHarvestController
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PLAYER_HARVEST_RADIUS_TILES: int = 1
 
-var _manager: Node
+var _manager: BuildingManager
 var _active: bool = false
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -21,11 +21,11 @@ func is_active() -> bool:
 
 
 func begin_phase() -> void:
-	_manager.call("reset_client_state_for_morning")
-	var has_grownup_roses: bool = int(_manager.call("grownup_rose_count")) > 0
+	_manager.reset_client_state_for_morning()
+	var has_grownup_roses: bool = _manager.grownup_rose_count() > 0
 	_active = false
 	if not has_grownup_roses:
-		_manager.call("begin_client_sale_phase")
+		_manager.begin_client_sale_phase()
 		return
 	GameState.set_morning_phase(true)
 	var plant_manager: Node = _plant_manager()
@@ -33,18 +33,18 @@ func begin_phase() -> void:
 		await plant_manager.call("bloom_grownup_roses")
 	if GameState.is_night:
 		return
-	if int(_manager.call("grownup_rose_count")) <= 0:
+	if _manager.grownup_rose_count() <= 0:
 		GameState.set_morning_phase(false)
-		_manager.call("begin_client_sale_phase")
+		_manager.begin_client_sale_phase()
 		return
 	_active = true
-	if not bool(_manager.call("has_counter_room_for_harvest")) and not bool(_manager.call("can_install_new_counter")):
+	if not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
 		_active = false
 		GameState.set_morning_phase(false)
-		_manager.call("begin_client_sale_phase")
+		_manager.begin_client_sale_phase()
 		return
-	if not bool(_manager.call("has_counter_room_for_harvest")):
-		_manager.call("auto_select_hammer")
+	if not _manager.has_counter_room_for_harvest():
+		_manager.auto_select_hammer()
 
 
 func process_walkover() -> void:
@@ -53,35 +53,35 @@ func process_walkover() -> void:
 	var plant_manager: Node = _plant_manager()
 	if plant_manager == null or not plant_manager.has_method("harvest_grownup_rose"):
 		return
-	var counter_cells: Array[Vector2i] = _manager.call("rose_shop_counter_cells_with_room") as Array[Vector2i]
+	var counter_cells: Array[Vector2i] = _manager.rose_shop_counter_cells_with_room()
 	if counter_cells.is_empty():
 		return
 	var rose_cell: Vector2i = _player_grownup_rose_cell()
 	if rose_cell == INVALID_CELL:
 		return
 	var target_counter: Vector2i = counter_cells[randi_range(0, counter_cells.size() - 1)]
-	var rose_world: Vector2 = _manager.call("cell_center", rose_cell) as Vector2
+	var rose_world: Vector2 = _manager.cell_center(rose_cell)
 	if not bool(plant_manager.call("harvest_grownup_rose", rose_cell)):
 		return
-	_manager.call("add_counter_stock", target_counter, 1)
-	_manager.call("animate_harvested_rose_to_counter", rose_world, target_counter)
+	_manager.add_counter_stock(target_counter, 1)
+	_manager.animate_harvested_rose_to_counter(rose_world, target_counter)
 	check_finished()
 
 
 func has_grownup_roses_to_harvest() -> bool:
-	return _active and int(_manager.call("grownup_rose_count")) > 0
+	return _active and _manager.grownup_rose_count() > 0
 
 
 func check_finished() -> void:
-	if int(_manager.call("grownup_rose_count")) > 0:
-		if not bool(_manager.call("has_counter_room_for_harvest")) and not bool(_manager.call("can_install_new_counter")):
+	if _manager.grownup_rose_count() > 0:
+		if not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
 			_active = false
 			GameState.set_morning_phase(false)
-			_manager.call("begin_client_sale_phase")
+			_manager.begin_client_sale_phase()
 		return
 	_active = false
 	GameState.set_morning_phase(false)
-	_manager.call("begin_client_sale_phase")
+	_manager.begin_client_sale_phase()
 
 
 func _player_grownup_rose_cell() -> Vector2i:
@@ -106,8 +106,8 @@ func _player_grownup_rose_cell() -> Vector2i:
 
 
 func _plant_manager() -> Node:
-	return (_manager.get("plant_manager") as Node) if _manager != null else null
+	return _manager.get_plant_manager() if _manager != null else null
 
 
 func _floorz() -> TileMapLayer:
-	return (_manager.get("floorz") as TileMapLayer) if _manager != null else null
+	return _manager.get_floorz() if _manager != null else null

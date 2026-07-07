@@ -8,13 +8,13 @@ const ATTACK_DAMAGE: int = 1
 const ATTACK_LUNGE_SECONDS: float = 0.09
 const ATTACK_RETURN_SECONDS: float = 0.12
 
-var _manager: Node
+var _manager: BuildingManager
 var _active: bool = false
 var _group: int = -1
 var _hostile_clients: Dictionary = {}  # nav_id -> Dictionary
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -33,7 +33,7 @@ func clear_hostile(nav_id: int) -> void:
 func begin() -> void:
 	if _active:
 		return
-	var target_reservoir: Node2D = _manager.call("nearest_live_reservoir", Vector2.ZERO, false) as Node2D
+	var target_reservoir: Node2D = _manager.nearest_live_reservoir(Vector2.ZERO, false)
 	if target_reservoir == null:
 		push_warning("BuildingManager: client tantrum cannot start because no reservoir exists.")
 		return
@@ -42,8 +42,8 @@ func begin() -> void:
 		push_warning("BuildingManager: client tantrum cannot start because AgentManagerNative is missing group APIs.")
 		return
 	_active = true
-	_manager.call("clear_client_sale_spawns")
-	_manager.call("clear_client_counter_agents")
+	_manager.clear_client_sale_spawns()
+	_manager.clear_client_counter_agents()
 	GameState.set_client_phase(true)
 	_group = int(agent_manager.call("create_group"))
 	if _group <= IDLE_GROUP:
@@ -94,8 +94,8 @@ func process(delta: float) -> void:
 			_hostile_clients.erase(nav_id)
 			continue
 		var target: Node2D = data.get("target", null) as Node2D
-		if target == null or not is_instance_valid(target) or bool(_manager.call("reservoir_is_destroyed", target)):
-			target = _manager.call("nearest_live_reservoir", client.global_position, true) as Node2D
+		if target == null or not is_instance_valid(target) or _manager.reservoir_is_destroyed(target):
+			target = _manager.nearest_live_reservoir(client.global_position, true)
 			if target == null:
 				continue
 			data["target"] = target
@@ -131,7 +131,7 @@ func _make_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
 		agent_manager.call("detach_agent_path", nav_id)
 	if agent_manager != null and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
-	_manager.call("clear_agent_navigation_records", nav_id)
+	_manager.clear_agent_navigation_records(nav_id)
 	if not client.is_in_group("monsters"):
 		client.add_to_group("monsters")
 	if client.has_method("stop_eating"):
@@ -183,7 +183,7 @@ func _deal_hit(nav_id: int, target: Variant) -> void:
 		return
 	if target != null and is_instance_valid(target) and target.has_method("take_damage"):
 		var hit_position: Vector2 = (target as Node2D).global_position if target is Node2D else Vector2.ZERO
-		_manager.call("show_damage_number", hit_position, ATTACK_DAMAGE)
+		_manager.show_damage_number(hit_position, ATTACK_DAMAGE)
 		target.call("take_damage", ATTACK_DAMAGE)
 
 
@@ -203,7 +203,7 @@ func _finish_attack(nav_id: int, client: Variant) -> void:
 func _can_hit_reservoir(client: Node2D, target: Node2D) -> bool:
 	if client == null or target == null:
 		return false
-	var tile_size: Vector2 = _manager.call("tile_size") as Vector2
+	var tile_size: Vector2 = _manager.tile_size()
 	var attack_distance: float = maxf(tile_size.x, tile_size.y) * 1.5
 	return client.global_position.distance_to(target.global_position) <= attack_distance
 
@@ -237,8 +237,8 @@ func _hide_alert() -> void:
 
 
 func _agent_manager() -> Node:
-	return (_manager.get("agent_manager") as Node) if _manager != null else null
+	return _manager.get_agent_manager() if _manager != null else null
 
 
 func _flow() -> Node:
-	return (_manager.get("flow") as Node) if _manager != null else null
+	return _manager.get_flow() if _manager != null else null

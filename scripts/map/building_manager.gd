@@ -333,6 +333,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _get_playlist_night_index_from_progression() -> int:
 	return _spawn_playlist_config.get_playlist_night_index_from_progression()
 
+func get_playlist_night_index_from_progression() -> int:
+	return _get_playlist_night_index_from_progression()
+
 func _get_progression() -> Node:
 	if _progression != null and is_instance_valid(_progression):
 		return _progression
@@ -340,6 +343,18 @@ func _get_progression() -> Node:
 	if scene != null:
 		_progression = scene.get_node_or_null("progression")
 	return _progression
+
+func get_plant_manager() -> Node:
+	return plant_manager
+
+func get_flow() -> Node:
+	return flow
+
+func get_agent_manager() -> Node:
+	return agent_manager
+
+func get_parent_for_agents() -> Node:
+	return parent_for_agents
 
 func _get_steering_system() -> Node:
 	var scene: Node = get_tree().current_scene
@@ -1307,6 +1322,30 @@ func is_client_sale_active() -> bool:
 	return _client_sale.is_active()
 
 
+func get_client_tantrum_controller() -> ClientTantrumController:
+	return _client_tantrum
+
+
+func get_counter_stock_manager() -> CounterStockManager:
+	return _counter_stock_manager
+
+
+func get_spawn_playlist_config() -> SpawnPlaylistConfigService:
+	return _spawn_playlist_config
+
+
+func client_counter_agents() -> Dictionary:
+	return _client_counter_agents
+
+
+func client_spawners() -> Dictionary:
+	return _client_spawners
+
+
+func client_frequency_by_cell() -> Dictionary:
+	return _client_frequency_by_cell
+
+
 func is_night_preparation_ready() -> bool:
 	return _night_preparation_ready
 
@@ -1560,6 +1599,10 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
 	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
+
+
+func spawn_client_from_spawner(spawner_cell: Vector2i) -> bool:
+	return _spawn_client_from(spawner_cell)
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
@@ -2560,6 +2603,10 @@ func _no_targets_remaining_for_kind(agent_kind: StringName) -> bool:
 
 func _has_client_targets_remaining() -> bool:
 	return _garden_topology.has_client_targets_remaining()
+
+
+func has_client_targets_remaining() -> bool:
+	return _has_client_targets_remaining()
 
 func _garden_has_client_targets(garden_id: int) -> bool:
 	return _garden_topology.garden_has_client_targets(garden_id)

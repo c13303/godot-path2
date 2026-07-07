@@ -8,7 +8,7 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const INTERACT_RADIUS_TILES: int = 2
 
-var _manager: Node
+var _manager: BuildingManager
 var _active: bool = false
 var _agent: Node2D
 var _nav_id: int = -1
@@ -23,7 +23,7 @@ var _leave_at_night_pending: bool = false
 var _paused: bool = false
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -86,12 +86,12 @@ func process_phase() -> void:
 	# The client sale can finish before the player has watered every rose. When that
 	# happens client sale does NOT start the night and the merchant lingers. Re-check
 	# here so finishing the watering afterwards still ends the day.
-	if not GameState.is_night and not GameState.is_morning_phase and bool(_manager.call("can_start_night_after_clients")):
-		_manager.call("start_night_after_clients")
+	if not GameState.is_night and not GameState.is_morning_phase and _manager.can_start_night_after_clients():
+		_manager.start_night_after_clients()
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near():
 		GameState.set_seed_merchant_phase(false)
-		if not bool(_manager.call("is_client_sale_active")) and not GameState.is_client_phase and not GameState.is_morning_phase:
+		if not _manager.is_client_sale_active() and not GameState.is_client_phase and not GameState.is_morning_phase:
 			GameState.set_building_phase(true)
 
 
@@ -147,7 +147,7 @@ func start_leave_for_night() -> void:
 		_leave_at_night_pending = false
 		clear_phase(false)
 		return
-	if GameState.is_night and not bool(_manager.call("is_night_preparation_ready")):
+	if GameState.is_night and not _manager.is_night_preparation_ready():
 		_leave_at_night_pending = true
 		GameState.set_seed_merchant_phase(false)
 		return
@@ -158,13 +158,13 @@ func start_leave_for_night() -> void:
 	_leaving = true
 	_waiting = false
 	GameState.set_seed_merchant_phase(false)
-	if not bool(_manager.call("assign_agent_to_escape", _agent)):
-		_manager.call("remove_dead_monster", _agent, false)
+	if not _manager.assign_agent_to_escape(_agent):
+		_manager.remove_dead_monster(_agent, false)
 
 
 func clear_phase(free_agent: bool) -> void:
 	if free_agent and is_instance_valid(_agent):
-		_manager.call("remove_dead_monster", _agent, false)
+		_manager.remove_dead_monster(_agent, false)
 	_reset_state()
 	GameState.set_seed_merchant_phase(false)
 
@@ -188,18 +188,18 @@ func _spawn_from(spawner_cell: Vector2i) -> bool:
 	var agent_manager: Node = _agent_manager()
 	if agent_manager == null or not agent_manager.has_method("spawn_agent") or not agent_manager.has_method("assign_agent_path"):
 		return false
-	var occupied: Array[Vector2i] = _manager.call("occupied_cells_for_spawning") as Array[Vector2i]
-	var spawn_cell: Vector2i = _manager.call("find_free_cell_near_spawner", spawner_cell, occupied) as Vector2i
+	var occupied: Array[Vector2i] = _manager.occupied_cells_for_spawning()
+	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(spawner_cell, occupied)
 	if spawn_cell == INVALID_CELL:
 		return false
-	var target_cell: Vector2i = _manager.call("seed_merchant_spot_cell", spawner_cell) as Vector2i
+	var target_cell: Vector2i = _manager.seed_merchant_spot_cell(spawner_cell)
 	if target_cell == INVALID_CELL:
 		push_warning("BuildingManager: seed merchant spawner %s has no authored spot child; merchant not spawned." % spawner_cell)
 		return false
-	if not bool(_manager.call("is_walkable_cell", target_cell)):
+	if not _manager.is_walkable_cell(target_cell):
 		push_warning("BuildingManager: seed merchant spot %s is not walkable; merchant not spawned." % target_cell)
 		return false
-	var path_cells: PackedVector2Array = _manager.call("find_path_on_walkable_map", spawn_cell, target_cell) as PackedVector2Array
+	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(spawn_cell, target_cell)
 	if path_cells.is_empty():
 		push_warning("BuildingManager: seed merchant cannot path from %s to spot %s." % [spawn_cell, target_cell])
 		return false
@@ -210,10 +210,10 @@ func _spawn_from(spawner_cell: Vector2i) -> bool:
 		agent.queue_free()
 		return false
 	parent.add_child(agent)
-	agent.global_position = _manager.call("cell_center", spawn_cell) as Vector2
+	agent.global_position = _manager.cell_center(spawn_cell)
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group("merchants")
-	_manager.call("register_desire_agent", agent, &"merchants")
+	_manager.register_desire_agent(agent, &"merchants")
 	agent.set_meta("agent_kind", SPAWNER_KIND_MERCHANT)
 	agent.set_meta("spawner_cell", spawner_cell)
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
@@ -223,7 +223,7 @@ func _spawn_from(spawner_cell: Vector2i) -> bool:
 	agent.set("nav_id", nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, true)
-	var path_world: PackedVector2Array = _manager.call("path_cells_to_world", path_cells, nav_id, true) as PackedVector2Array
+	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, nav_id, true)
 	agent_manager.call("assign_agent_path", nav_id, path_world)
 	_agent = agent
 	_nav_id = nav_id
@@ -255,12 +255,12 @@ func _reset_state() -> void:
 
 
 func _agent_manager() -> Node:
-	return (_manager.get("agent_manager") as Node) if _manager != null else null
+	return _manager.get_agent_manager() if _manager != null else null
 
 
 func _floorz() -> TileMapLayer:
-	return (_manager.get("floorz") as TileMapLayer) if _manager != null else null
+	return _manager.get_floorz() if _manager != null else null
 
 
 func _parent_for_agents() -> Node:
-	return (_manager.get("parent_for_agents") as Node) if _manager != null else null
+	return _manager.get_parent_for_agents() if _manager != null else null
