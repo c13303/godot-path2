@@ -1,11 +1,11 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 4 = reduce `scripts/map/building_manager.gd` façade/wrapper bloat and move remaining debug/query/helper responsibilities into focused owners, while preserving behavior exactly.
+Batch 5 = audit the remaining `scripts/map/building_manager.gd` responsibilities, remove only clearly dead façade/wrapper clutter, and extract one small remaining coherent cluster if it is obvious.
 
 This is a refactor-only pass.
 Do not change gameplay behavior.
-Do not optimize logic unless required by the extraction.
+Do not optimize logic unless required by the refactor.
 Do not run Godot, tests, export, build, or compilation commands.
 
 Project rules:
@@ -16,215 +16,171 @@ Project rules:
 - Do not create or grow 1000+ line files.
 - Do not create generic abstractions without immediate use.
 - Do not perform a broad rewrite.
-- Preserve public/wrapper methods unless direct search proves removal is safe.
-- If unsure, keep the wrapper and report it.
+- Preserve behavior exactly.
+- If unsure, keep the method and report it.
 
 Current context:
-Earlier cleanup batches likely extracted:
-- shared night/client preparation into `BuildingPreparationController`
-- agent spawning into `AgentSpawnService`
-- rose counter/shop logic into `RoseCounterService` or `CounterStockManager`
-- some unsafe `_manager._private` coupling was reduced
+Previous batches likely extracted:
+- shared preparation orchestration
+- agent spawning
+- rose counter/shop logic
+- some unsafe `_manager._private` coupling
+- debug/query/helper logic
 
-Now `BuildingManager` should be treated as a façade/coordinator only.
-This pass should remove remaining low-risk implementation pockets that do not belong in the façade.
+Now avoid random “cleaning”.
+The priority is to understand what remains and prevent `BuildingManager` from becoming messy again.
+
+Main goal:
+Turn `BuildingManager` into a readable façade/coordinator by classifying the remaining methods and pruning only safe clutter.
 
 Before editing:
-1. Inspect `scripts/map/building_manager.gd`.
-2. Get the current line count.
-3. Identify remaining method clusters by responsibility.
-4. Do not touch core gameplay flows already extracted unless needed for wiring.
-5. Do not move state ownership unless small and obvious.
-6. Prefer moving coherent clusters, not individual random methods.
-
-Primary target:
-Move remaining debug/query/helper responsibilities out of `BuildingManager`.
-
-Likely clusters to inspect:
+1. Get current line count of `scripts/map/building_manager.gd`.
+2. List all remaining methods in `BuildingManager`.
+3. Categorize every method into one of these groups:
 
 ```txt
-debug
-telemetry
-path debug
-garden debug
-flow debug
-agent debug
-overlay
-route debug
-navigation query
-path query
-cell query
-building query
-helper
+A. Required lifecycle / Godot callbacks
+B. External/public compatibility API
+C. Thin service wrapper
+D. Phase orchestration still genuinely owned by BuildingManager
+E. Save/load compatibility
+F. Signal/editor/Callable/call entry point
+G. Debug/query wrapper
+H. Local helper still containing real logic
+I. Suspected dead code
+J. Unclear / keep
+Do not edit until this categorization is done.
 
-Likely existing destination:
-If BuildingDebugTelemetry or similar already exists, extend it carefully.
+Primary task:
+Remove or simplify only methods in category I. Suspected dead code, and only when direct search proves they are safe.
 
-Possible new focused files, only if needed:
+Deletion rule:
+A method can be deleted only if all are true:
 
-scripts/map/building_debug_query_service.gd
-scripts/map/building_navigation_query_service.gd
+- no direct references in `.gd`
+- no method-name string references in `.gd`
+- no references in `.tscn` / `.tres` text resources
+- not a Godot callback
+- not connected to a signal
+- not used by Callable
+- not likely called through `call()`
+- not a save/load method
+- not external/public-ish API
+- not useful as a compatibility wrapper
 
-Do not create both unless both are clearly needed.
+If any doubt exists, keep it.
 
-Preferred responsibility split:
+Secondary task:
+If, after categorization, there is one obvious small remaining cluster in category H. Local helper still containing real logic, extract it.
 
-BuildingDebugQueryService
-Owns debug-only helper methods, especially methods used by overlays, labels, telemetry, debug prints, or editor/debug visualization.
+Only extract a cluster if:
 
-Possible responsibilities:
+it has a clear owner;
+it is not phase-critical;
+it does not touch many unrelated domains;
+it can be moved into an existing service or one small new service;
+the new file will stay comfortably under 1000 lines;
+the diff stays easy to review.
 
-expose garden/route/debug label data
-debug path queries
-debug flow-field query wrappers
-debug cell summaries
-debug-only route inspection
-debug-only telemetry helpers
+Good extraction candidates:
 
-It must not own gameplay state.
+- purely local coordinate/cell conversion helpers
+- small building lookup helper group
+- small visual/debug helper group not already moved
+- small save helper group, only if save format remains untouched
+- small node lookup/cache helper group
 
-BuildingNavigationQueryService
-Owns read-only navigation/map/path query helpers if they are used by gameplay code and are not merely debug.
+Bad extraction candidates:
 
-Possible responsibilities:
+- day/night flow
+- spawn flow
+- preparation flow
+- garden topology mutation
+- retargeting mutation
+- client sale flow
+- harvest flow
+- merchant flow
+- save/load format changes
+- large mixed helper clusters
 
-read-only walkability queries
-read-only route lookup helpers
-read-only cell-to-room/cell-to-garden helpers
-read-only target/path inspection helpers
+If there is no obvious safe cluster, do not extract anything.
+In that case, only perform the audit and safe dead-code pruning.
 
-It must not own rebuild orchestration.
-It must not own invalidation.
-It must not own spawning.
-It must not own phase transitions.
+Compatibility wrappers:
+Do not delete wrappers just because they are thin.
+Thin wrappers are acceptable when they protect scenes, signals, dynamic calls, or external code from refactor churn.
 
-If a method mutates state, do not put it in a query service unless the mutation is purely debug-cache maintenance and clearly documented.
+Good wrapper:
 
-Compatibility rule:
-Keep thin wrappers in BuildingManager for any method that may be used by:
+func _spawn_agent_from(...) -> Node:
+	return _agent_spawn_service.spawn_agent_from(...)
 
-other scripts
-scenes
-signals
-Callable
-call()
-editor wiring
-debug UI
-saved references
+Bad wrapper only if proven unused:
 
-Wrapper style:
+func _old_unused_internal_method(...) -> void:
+	return _some_service.old_unused_internal_method(...)
 
-func debug_some_existing_method(...) -> SomeType:
-	return _building_debug_query_service.debug_some_existing_method(...)
-
-or:
-
-func get_some_navigation_query(...) -> SomeType:
-	return _building_navigation_query_service.get_some_navigation_query(...)
-
-Only delete wrappers if direct search proves:
-
-no references exist;
-the method name is not used dynamically;
-it is not public-ish API;
-it is not likely referenced by scenes/editor/debug overlay.
-
-When in doubt, keep the wrapper.
-
-Important:
-Do not make this a “delete wrappers” pass.
-This is a responsibility extraction pass.
-Wrapper deletion is allowed only when obviously safe.
-
-Extraction guidance:
-Good candidates to move:
-
-methods that only format/debug/report current state
-methods that only read data and return a value
-methods that are only used by debug overlays/telemetry
-repeated query helpers that make BuildingManager hard to scan
-helper methods whose domain owner already exists
-
-Bad candidates to move in this pass:
-
-day/night transition flow
-spawning flow
-preparation flow
-counter/shop flow
-garden topology mutation
-retarget mutation
-invalidation mutation
-save/load compatibility
-signal entry points
-exported/editor-facing methods
-methods with unclear dynamic call usage
+But even then, delete only if search proves safety.
 
 Manager-private coupling:
-It is acceptable for the new query/debug service to call some manager wrappers or manager-private methods if eliminating that coupling would require a risky rewrite.
-
-However:
-
-Prefer existing public wrappers created in Batch 3.
-Do not introduce new direct mutable state access if avoidable.
-Do not worsen coupling.
-Report any retained direct private coupling.
+Do not make private-coupling cleanup the main goal of this pass.
+If a tiny safe replacement is obvious, it is allowed.
+Otherwise leave it and report it.
 
 Expected result:
 
-BuildingManager loses another coherent block of implementation code.
-Debug/query/helper code has a clearer owner.
-BuildingManager remains a compatibility façade for methods likely called externally.
-No new file over 1000 lines.
+BuildingManager has an explicit responsibility map.
+Some clearly dead code may be removed.
+At most one small coherent helper cluster is extracted.
+No risky architecture rewrite.
 No gameplay behavior changes.
-No broad architecture rewrite.
+No new large files.
+A future agent can read the report and know what remains.
 
 Suggested workflow:
 
-Categorize remaining BuildingManager methods into groups:
-façade/wrapper
-phase orchestration
-debug/query/helper
-state ownership
-save/load
-unknown/dynamic risk
-Pick one or two clear debug/query/helper clusters.
-Move those clusters into a focused service.
-Add setup in _ready() if a new service is created.
-Replace internal calls with service calls.
-Keep compatibility wrappers where needed.
-Search references before deleting anything.
-Report what remains in BuildingManager.
+Count lines in building_manager.gd.
+List all method names.
+Categorize all methods.
+Search references for suspected dead methods.
+Delete only proven-safe dead methods.
+Optionally extract one small obvious cluster.
+Re-search moved/deleted names.
+Report remaining categories.
 
 Safety checks by reading/searching only:
 
-Search all moved method names before and after moving.
-Search for method-name strings in .gd, .tscn, .tres, .res text resources where possible.
-Verify no signal/Callable/call/editor references were broken.
-Verify all new files have correct preload/load paths.
-Verify _ready() setup order is correct.
-Verify strict typing on all new locals and returns.
-Verify no debug overlay/debug UI method disappeared.
-Verify save/load structure is untouched.
-Verify no gameplay method signature changed.
+Search deleted method names in .gd, .tscn, .tres.
+Search moved method names before and after.
+Search for string-based calls.
+Verify no Godot lifecycle callback was removed.
+Verify no signal target was removed.
+Verify no save/load method was removed.
+Verify no public-ish compatibility API was removed.
+Verify strict typing in any new or changed code.
+Verify preload/load paths if a new service is created.
+Verify setup order if a new service is added.
 
 Output required:
 
+Current building_manager.gd line count before and after.
+Method categorization summary.
 List changed files.
-Current line count of building_manager.gd before and after.
-Explain which debug/query/helper logic moved.
-Confirm which wrappers were preserved.
-Confirm whether any wrappers were removed, with reason.
-Mention any intentionally retained manager-private coupling.
-Mention what responsibility clusters still remain in BuildingManager.
+List deleted methods, with proof/reason.
+List moved methods, if any.
+Confirm preserved wrappers.
+Confirm no behavior changes were intended.
+List remaining responsibility clusters in BuildingManager.
 Mention manual test scenarios.
 
 Manual test scenarios to suggest:
 
+Start the game and reach day phase.
 Start a normal night.
 Spawn monsters from multiple spawners.
 Let monsters target/eat plants and exit.
-Place/remove buildings that trigger navigation invalidation.
-Open/enable any debug overlays used for gardens/routes/flow/pathing.
-Verify debug labels/telemetry still display correctly.
-Run client phase if applicable.
+Place/remove buildings that affect navigation.
+Run client phase.
+Save and reload if save state is involved.
+Enable debug overlays if available.
 Verify no new warnings/errors appear.

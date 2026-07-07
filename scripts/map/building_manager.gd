@@ -167,6 +167,7 @@ var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
 var _building_path_service: BuildingPathService = BuildingPathService.new()
 var _garden_access_resolver: GardenAccessResolver = GardenAccessResolver.new()
 var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
+var _debug_query_service: BuildingDebugQueryService = BuildingDebugQueryService.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
@@ -177,15 +178,6 @@ var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
-var _show_enters_exits: bool = false
-# When on, prints "x gardens recomputed with y entry points" every time gardens
-# (and their entry points) are recomputed. Pushed from CppDebugOptions.verbose;
-# _verbose_pushed flips true once that push has happened. Until then _is_verbose()
-# pulls the value straight off the CPP node so the startup recompute is logged
-# even if it runs before CppDebugOptions._ready().
-var _verbose: bool = false
-var _verbose_pushed: bool = false
-var _cpp_debug_options: Node = null
 
 func set_empty_garden_local_retarget_radius(value: int) -> void:
 	empty_garden_local_retarget_radius = maxi(0, value)
@@ -220,6 +212,7 @@ func _ready() -> void:
 	_garden_retarget.setup(self)
 	_spawn_tick_controller.setup(self)
 	_debug_telemetry.setup(self)
+	_debug_query_service.setup(self)
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
 	_building_invalidation_controller.setup(self)
@@ -2181,35 +2174,25 @@ func _process_garden_retarget_queue() -> int:
 	return _garden_retarget.process_queue()
 
 func get_plant_zone_tiles() -> Array:
-	return _garden_topology.plant_zone_tiles().keys()
+	return _debug_query_service.get_plant_zone_tiles()
 
 func get_plant_zone_margin_tiles() -> Array:
-	return _garden_topology.plant_zone_margin_tiles().keys()
+	return _debug_query_service.get_plant_zone_margin_tiles()
 
 func get_plant_zone_route_tiles() -> Array:
-	var route_tiles: Dictionary = {}
-	for raw_garden in _garden_topology.gardens().values():
-		var garden: Dictionary = raw_garden as Dictionary
-		var entry_cells: Array = garden.get("entry_cells", []) as Array
-		for raw_entry_cell in entry_cells:
-			var entry_cell: Vector2i = raw_entry_cell
-			route_tiles[entry_cell] = true
-	return route_tiles.keys()
+	return _debug_query_service.get_plant_zone_route_tiles()
 
 func get_garden_entry_cells() -> Array:
-	return get_plant_zone_route_tiles()
+	return _debug_query_service.get_garden_entry_cells()
 
 func set_show_enters_exits(value: bool) -> void:
-	_show_enters_exits = value
-	if _zone_overlay:
-		_zone_overlay.queue_redraw()
+	_debug_query_service.set_show_enters_exits(value)
 
 func get_show_enters_exits() -> bool:
-	return _show_enters_exits
+	return _debug_query_service.get_show_enters_exits()
 
 func set_verbose(value: bool) -> void:
-	_verbose = value
-	_verbose_pushed = true
+	_debug_query_service.set_verbose(value)
 
 # True when verbose garden logging is on. Once CppDebugOptions has pushed a value
 # via set_verbose() we trust that (it is already gated by debug_enabled there);
@@ -2217,107 +2200,32 @@ func set_verbose(value: bool) -> void:
 # CppDebugOptions._ready()) we pull the value straight from the CPP node AND its
 # debug_enabled flag, so the master debug gate holds even for the first recompute.
 func _is_verbose() -> bool:
-	if _verbose_pushed:
-		return _verbose
-	if _cpp_debug_options == null and is_inside_tree():
-		var scene: Node = get_tree().get_current_scene()
-		if scene:
-			_cpp_debug_options = scene.get_node_or_null("CPP")
-	if _cpp_debug_options and "verbose" in _cpp_debug_options and "debug_enabled" in _cpp_debug_options:
-		return bool(_cpp_debug_options.get("verbose")) and bool(_cpp_debug_options.get("debug_enabled"))
-	return _verbose
+	return _debug_query_service.is_verbose()
 
 # Garden border tiles a monster crosses to ENTER: per spawner, the garden
 # entry cell nearest that spawner. Aggregated across all spawners/gardens.
 func get_garden_enter_tiles() -> Array:
-	var tiles: Dictionary = {}
-	for raw_spawner_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		for raw_garden_id in _garden_topology.gardens().keys():
-			var garden_id: int = int(raw_garden_id)
-			var enter_cell: Vector2i = _nearest_garden_entry(garden_id, spawner_cell)
-			if enter_cell != INVALID_CELL:
-				tiles[enter_cell] = true
-	return tiles.keys()
+	return _debug_query_service.get_garden_enter_tiles()
 
 # Garden border tiles a monster crosses to EXIT: per spawner, the garden
 # entry cell nearest that spawner's exit-wall. Aggregated across all spawners.
 func get_garden_exit_tiles() -> Array:
-	var tiles: Dictionary = {}
-	for raw_spawner_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		for raw_garden_id in _garden_topology.gardens().keys():
-			var garden_id: int = int(raw_garden_id)
-			var exit_cell: Vector2i = _nearest_garden_entry_to_exit(garden_id, spawner_cell)
-			if exit_cell != INVALID_CELL:
-				tiles[exit_cell] = true
-	return tiles.keys()
+	return _debug_query_service.get_garden_exit_tiles()
 
 func get_unreachable_garden_cells() -> Array:
-	var cells: Dictionary = {}
-	for raw_garden in _garden_topology.gardens().values():
-		var garden: Dictionary = raw_garden as Dictionary
-		if bool(garden.get("reachable", false)):
-			continue
-		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
-		for raw_cell in zone_tiles.keys():
-			var zone_cell: Vector2i = raw_cell
-			cells[zone_cell] = true
-		for raw_cell in plant_cells.keys():
-			var plant_cell: Vector2i = raw_cell
-			cells[plant_cell] = true
-	return cells.keys()
+	return _debug_query_service.get_unreachable_garden_cells()
 
 func get_dirty_garden_cells() -> Array:
-	var cells: Dictionary = {}
-	for raw_garden in _garden_topology.gardens().values():
-		var garden: Dictionary = raw_garden as Dictionary
-		if not bool(garden.get("dirty", false)):
-			continue
-		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
-		for raw_cell in zone_tiles.keys():
-			var zone_cell: Vector2i = raw_cell
-			cells[zone_cell] = true
-		for raw_cell in plant_cells.keys():
-			var plant_cell: Vector2i = raw_cell
-			cells[plant_cell] = true
-	return cells.keys()
+	return _debug_query_service.get_dirty_garden_cells()
 
 func get_debug_monster_path(nav_id: int) -> PackedVector2Array:
-	if _entry_path_agents.has(nav_id):
-		var entry_data: Dictionary = _entry_path_agents[nav_id] as Dictionary
-		var entry_cell: Vector2i = entry_data.get("entry_cell", INVALID_CELL) as Vector2i
-		return _debug_path_to_cell(entry_cell)
-	if _astar_in_agents.has(nav_id):
-		var astar_in_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
-		return astar_in_data.get("path_world", PackedVector2Array()) as PackedVector2Array
-	if _escaping_agents.has(nav_id):
-		var escape_data: Dictionary = _escaping_agents[nav_id] as Dictionary
-		var escape_target: Vector2i = escape_data.get("target_cell", INVALID_CELL) as Vector2i
-		return _debug_path_to_cell(escape_target)
-	for node in get_tree().get_nodes_in_group("monsters"):
-		if not (node is Node2D):
-			continue
-		var agent: Node2D = node
-		if int(agent.get("nav_id")) != nav_id:
-			continue
-		if agent.has_meta("garden_entry_cell"):
-			var entry_cell: Vector2i = agent.get_meta("garden_entry_cell") as Vector2i
-			return _debug_path_to_cell(entry_cell)
-		break
-	return PackedVector2Array()
+	return _debug_query_service.get_debug_monster_path(nav_id)
 
 func _debug_path_to_cell(cell: Vector2i) -> PackedVector2Array:
-	var path: PackedVector2Array = PackedVector2Array()
-	if cell == INVALID_CELL:
-		return path
-	path.append(_cell_center(cell))
-	return path
+	return _debug_query_service._debug_path_to_cell(cell)
 
 func get_floorz() -> TileMapLayer:
-	return floorz
+	return _debug_query_service.get_floorz()
 
 func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
 	return _wall_blockers_for_cells(_garden_topology.plant_zone_tiles())
