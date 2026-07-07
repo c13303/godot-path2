@@ -1161,6 +1161,14 @@ func is_client_sale_active() -> bool:
 	return _client_sale.is_active()
 
 
+# True during the day when no client is present, preparing to spawn, or throwing a
+# tantrum — i.e. the present day's clients are gone (or have not arrived yet). The
+# planificator preview polls this so it shows at day start and after the sale, but
+# hides while clients are on the map.
+func day_clients_gone() -> bool:
+	return not _client_preparing and _client_sale.clients_finished_for_day()
+
+
 func is_runtime_ready_for_building_tick() -> bool:
 	return _flow_ready and _startup_ready
 

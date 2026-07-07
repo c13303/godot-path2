@@ -6,11 +6,9 @@ const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
-const KEY_TITLE: String = "playlist.next_day"
-const KEY_NIGHT: String = "playlist.night"
-const KEY_DAY: String = "playlist.day"
+const KEY_NIGHT: String = "planificator.tonight"
+const KEY_DAY: String = "planificator.tomorrow"
 
-var _title_label: Label
 var _night_label: Label
 var _day_label: Label
 var _night_rows: VBoxContainer
@@ -58,13 +56,6 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 6)
 	margin.add_child(content)
 
-	_title_label = Label.new()
-	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_title_label.add_theme_font_size_override("font_size", 13)
-	content.add_child(_title_label)
-
 	_night_label = _make_section_label()
 	content.add_child(_night_label)
 	_night_rows = VBoxContainer.new()
@@ -94,6 +85,8 @@ func _connect_refresh_signals() -> void:
 		GameState.mode_changed.connect(_on_refresh_signal)
 	if not GameState.building_phase_changed.is_connected(_on_refresh_signal):
 		GameState.building_phase_changed.connect(_on_refresh_signal)
+	if not GameState.client_phase_changed.is_connected(_on_refresh_signal):
+		GameState.client_phase_changed.connect(_on_refresh_signal)
 	if not Translations.locale_changed.is_connected(_on_locale_changed):
 		Translations.locale_changed.connect(_on_locale_changed)
 	var progression: Node = _get_progression()
@@ -116,8 +109,6 @@ func _on_locale_changed(_locale: String) -> void:
 
 
 func _apply_translations() -> void:
-	if _title_label != null:
-		_title_label.text = Translations.t(KEY_TITLE)
 	if _night_label != null:
 		_night_label.text = Translations.t(KEY_NIGHT)
 	if _day_label != null:
@@ -131,6 +122,11 @@ func _refresh() -> void:
 	_clear_rows(_day_rows)
 
 	if GameState.is_night:
+		visible = false
+		return
+
+	# Only preview once the present day's clients (and any tantrum) are gone.
+	if not _day_clients_gone():
 		visible = false
 		return
 
@@ -155,6 +151,20 @@ func _refresh() -> void:
 func _clear_rows(container: VBoxContainer) -> void:
 	for child: Node in container.get_children():
 		child.queue_free()
+
+
+func _day_clients_gone() -> bool:
+	var building_manager: Node = _get_building_manager()
+	if building_manager == null or not building_manager.has_method("day_clients_gone"):
+		return false
+	return bool(building_manager.call("day_clients_gone"))
+
+
+func _get_building_manager() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("Map/BuildingManager")
 
 
 func _get_playlist() -> LevelSpawnPlaylist:

@@ -48,7 +48,7 @@
 [ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
-[ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/playlistUI.gd" id="45_s6agy"]
+[ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
@@ -1319,7 +1319,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("43_build_frame")
 
-[node name="playlistUI" type="Control" parent="GameUI" unique_id=306424859]
+[node name="planificator" type="Control" parent="GameUI" unique_id=306424859]
 layout_mode = 3
 anchors_preset = 1
 anchor_left = 1.0
