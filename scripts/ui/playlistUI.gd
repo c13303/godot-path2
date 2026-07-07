@@ -176,7 +176,8 @@ func _get_preview_night_index(playlist: LevelSpawnPlaylist) -> int:
 		return 0
 	var day_number: int = int(progression.call("get_value", &"nDays"))
 	var day_index: int = maxi(0, day_number - 1)
-	return day_index % total_nights
+	# Nights no longer loop; clamp so the trailing client day previews the final night.
+	return mini(day_index, total_nights - 1)
 
 
 func _get_progression() -> Node:

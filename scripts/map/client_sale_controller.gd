@@ -49,13 +49,13 @@ func activate() -> void:
 	var client_total: int = current_night_client_count()
 	var client_spawners: Dictionary = _manager.get("_client_spawners") as Dictionary
 	if client_total <= 0 or client_spawners.is_empty() or not bool(_manager.call("_has_client_targets_remaining")):
-		GameState.set_building_phase(true)
+		_manager.call("on_client_sale_skipped")
 		return
 	var client_cells: Array[Vector2i] = []
 	for raw_cell: Variant in client_spawners.keys():
 		client_cells.append(raw_cell as Vector2i)
 	if client_cells.is_empty():
-		GameState.set_building_phase(true)
+		_manager.call("on_client_sale_skipped")
 		return
 	for index: int in range(client_total):
 		var random_index: int = randi_range(0, client_cells.size() - 1)
@@ -80,6 +80,10 @@ func process(delta: float) -> void:
 			_client_sale_active = false
 			GameState.set_client_phase(false)
 			_dissolve_counter_piles_after_clients()
+			# On the final client day the last client leaving wins the run outright,
+			# before the roses-watered night gate below (there is no next night).
+			if bool(_manager.call("try_finish_final_day")):
+				return
 			if bool(_manager.call("can_start_night_after_clients")):
 				GameState.start_night()
 				return
@@ -113,6 +117,10 @@ func process(delta: float) -> void:
 		_client_sale_active = false
 		GameState.set_client_phase(false)
 		_dissolve_counter_piles_after_clients()
+		# On the final client day the last client leaving wins the run outright,
+		# before the roses-watered night gate below (there is no next night).
+		if bool(_manager.call("try_finish_final_day")):
+			return
 		if bool(_manager.call("can_start_night_after_clients")):
 			GameState.start_night()
 			return

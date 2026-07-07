@@ -123,7 +123,16 @@ func get_playlist_night_index_from_progression() -> int:
 		return 0
 	var day_number: int = int(prog.call("get_value", &"nDays"))
 	var day_index: int = maxi(0, day_number - 1)
-	return day_index % total_nights
+	# Nights no longer loop: each day maps to its own night, and any day past the last
+	# authored night (the trailing client-only victory day) clamps to the final night.
+	return mini(day_index, total_nights - 1)
+
+
+## Authored night count from the loaded level playlist resource. Available from
+## startup (unlike SpawnPlaylistController.get_total_night_count(), which is only
+## populated once the playlist is configured on the first night).
+func total_night_count() -> int:
+	return _level_spawn_playlist.get_night_count() if _level_spawn_playlist != null else 0
 
 
 func playlist_spawning_enabled() -> bool:

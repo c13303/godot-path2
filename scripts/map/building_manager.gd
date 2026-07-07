@@ -155,6 +155,9 @@ var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
 var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 var _client_sale: ClientSaleController = ClientSaleController.new()
+# Owns run-length + victory decisioning (finite runs, final client day, win latch).
+# See RunCompletionController.
+var _run_completion: RunCompletionController = RunCompletionController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
@@ -203,6 +206,7 @@ func _ready() -> void:
 	_morning_harvest.setup(self)
 	_client_tantrum.setup(self)
 	_client_sale.setup(self)
+	_run_completion.setup(self)
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
 	_agent_suspend.setup(self)
@@ -1202,12 +1206,31 @@ func _begin_client_sale_phase() -> void:
 	_client_tantrum.end()
 	var client_total: int = _client_sale.current_night_client_count()
 	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
-		GameState.set_building_phase(true)
+		on_client_sale_skipped()
 		return
 	_night_preparation_token += 1
 	_client_preparing = true
 	_night_preparation_ready = false
 	call_deferred("_run_client_preparation", _night_preparation_token)
+
+
+# Run-length + victory seam. The decisioning lives in RunCompletionController; these
+# stay as thin delegates because progression.gd, tutorial.gd and the sibling day-phase
+# controllers reach them through the manager's public API.
+func total_run_days() -> int:
+	return _run_completion.total_run_days()
+
+
+func start_night_after_clients() -> void:
+	_run_completion.start_night_after_clients()
+
+
+func on_client_sale_skipped() -> void:
+	_run_completion.on_client_sale_skipped()
+
+
+func try_finish_final_day() -> bool:
+	return _run_completion.try_finish_final_day()
 
 
 func can_start_night_after_clients() -> bool:

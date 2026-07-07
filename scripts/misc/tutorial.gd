@@ -286,7 +286,12 @@ func _start_night_automatically() -> void:
 	text = ""
 	visible = false
 	_set_glow(false)
-	GameState.start_night()
+	# Route through the manager so the final client day wins instead of starting a
+	# night that no longer exists; falls back to a direct start when unavailable.
+	if _building_manager != null and _building_manager.has_method("start_night_after_clients"):
+		_building_manager.call("start_night_after_clients")
+	else:
+		GameState.start_night()
 
 
 ## True while the player stands next to the seed merchant, i.e. while its merchant bar is

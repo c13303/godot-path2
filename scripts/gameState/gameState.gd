@@ -16,6 +16,10 @@ var is_morning_phase: bool = false
 var is_client_phase: bool = false
 var is_seed_merchant_phase: bool = false
 var is_reservoir_destroyed: bool = false
+## True once the player has survived every authored night and the trailing client
+## day has finished with the reservoir still alive. Latched by BuildingManager and
+## polled by the victory modal; reset on any fresh run.
+var is_run_won: bool = false
 ## True once the player has bought at least one item during the current seed-merchant
 ## visit. Reset each time a new merchant phase begins; drives the "close the transaction"
 ## tutorial prompt once the player walks away from the (now hidden) merchant shop.
@@ -44,6 +48,7 @@ func reset_transient_run_state() -> void:
 	is_client_phase = false
 	is_seed_merchant_phase = false
 	is_reservoir_destroyed = false
+	is_run_won = false
 	seed_merchant_purchase_made = false
 
 
@@ -86,6 +91,10 @@ func start_day() -> void:
 
 func set_reservoir_destroyed(value: bool) -> void:
 	is_reservoir_destroyed = value
+
+
+func set_run_won(value: bool) -> void:
+	is_run_won = value
 
 
 func set_building_phase(value: bool) -> void:

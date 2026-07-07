@@ -245,6 +245,10 @@ func _ready() -> void:
 			_apply_save_to_fresh_scene(data)
 
 	_update_progression_ui()
+	# BuildingManager loads the level spawn config during its own _ready, which may not
+	# have run yet. Refresh the day label once the scene is fully built so day 1 shows
+	# the "/total" denominator instead of a bare "day 1".
+	call_deferred("_update_day_label", progression.get_value(&"nDays"))
 
 
 ## A night->day transition means a new day has begun.
@@ -254,11 +258,29 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	advance_day()
 
 
-## Show the current day on the dedicated day label, e.g. "day 3".
+## Show the current day on the dedicated day label. When the level has an authored
+## run length this includes the total, e.g. "day 3/10"; otherwise just "day 3".
 func _update_day_label(day_number: int) -> void:
 	var label: RichTextLabel = _get_day_label()
-	if label != null:
+	if label == null:
+		return
+	var total_days: int = _get_total_run_days()
+	if total_days > 0:
+		label.text = "day %d/%d" % [day_number, total_days]
+	else:
 		label.text = "day %d" % day_number
+
+
+## Total days in the current run (authored nights + the trailing client day), read
+## from BuildingManager. Zero when no run length is defined, which drops the "/total".
+func _get_total_run_days() -> int:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return 0
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager")
+	if building_manager != null and building_manager.has_method("total_run_days"):
+		return int(building_manager.call("total_run_days"))
+	return 0
 
 
 func _get_day_label() -> RichTextLabel:
