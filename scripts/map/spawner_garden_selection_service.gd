@@ -27,9 +27,9 @@ var _spawner_route_service: SpawnerRouteService
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
-	_garden_topology = manager._garden_topology as GardenTopologyService
-	_garden_access_resolver = manager._garden_access_resolver
-	_spawner_route_service = manager._spawner_route_service
+	_garden_topology = manager.get_garden_topology_service()
+	_garden_access_resolver = manager.get_garden_access_resolver()
+	_spawner_route_service = manager.get_spawner_route_service()
 
 
 func select_garden_for_spawner(spawner_cell: Vector2i) -> int:
@@ -192,8 +192,8 @@ func nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
 
 
 func _spawners() -> Dictionary:
-	return _manager._spawners
+	return _manager.get_spawners()
 
 
 func _spawner_kind_by_cell() -> Dictionary:
-	return _manager._spawner_kind_by_cell
+	return _manager.spawner_kind_by_cell()

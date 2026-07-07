@@ -1,11 +1,11 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 3 = reduce unsafe `_manager._private_method()` / `_manager._private_state` coupling in extracted services, without changing gameplay behavior.
+Batch 4 = reduce `scripts/map/building_manager.gd` façade/wrapper bloat and move remaining debug/query/helper responsibilities into focused owners, while preserving behavior exactly.
 
 This is a refactor-only pass.
 Do not change gameplay behavior.
-Do not optimize logic unless required to preserve behavior after the boundary cleanup.
+Do not optimize logic unless required by the extraction.
 Do not run Godot, tests, export, build, or compilation commands.
 
 Project rules:
@@ -16,218 +16,206 @@ Project rules:
 - Do not create or grow 1000+ line files.
 - Do not create generic abstractions without immediate use.
 - Do not perform a broad rewrite.
-- Do not rename public/wrapper methods unless direct search proves it is safe.
-- Preserve behavior exactly.
-- If unsure, keep the existing call and report it.
+- Preserve public/wrapper methods unless direct search proves removal is safe.
+- If unsure, keep the wrapper and report it.
 
-Context:
-`BuildingManager` has been progressively reduced by extracting focused RefCounted services/controllers.
-Some extracted services still call `BuildingManager` private methods or private variables directly.
-This was acceptable during extraction, but now we want to clean the most dangerous coupling.
+Current context:
+Earlier cleanup batches likely extracted:
+- shared night/client preparation into `BuildingPreparationController`
+- agent spawning into `AgentSpawnService`
+- rose counter/shop logic into `RoseCounterService` or `CounterStockManager`
+- some unsafe `_manager._private` coupling was reduced
 
-Main objective:
-Replace high-risk direct private manager access with explicit, stable access points.
-
-Do not try to eliminate every `_manager._xxx` call in one pass.
-Focus on the worst coupling first.
+Now `BuildingManager` should be treated as a façade/coordinator only.
+This pass should remove remaining low-risk implementation pockets that do not belong in the façade.
 
 Before editing:
-1. Search extracted services for direct manager-private access:
+1. Inspect `scripts/map/building_manager.gd`.
+2. Get the current line count.
+3. Identify remaining method clusters by responsibility.
+4. Do not touch core gameplay flows already extracted unless needed for wiring.
+5. Do not move state ownership unless small and obvious.
+6. Prefer moving coherent clusters, not individual random methods.
+
+Primary target:
+Move remaining debug/query/helper responsibilities out of `BuildingManager`.
+
+Likely clusters to inspect:
 
 ```txt
-_manager._
-Count occurrences per file.
-Identify the highest-risk / highest-frequency services.
-Inspect call purpose before changing anything.
-Prefer small explicit wrappers or query APIs over large abstractions.
+debug
+telemetry
+path debug
+garden debug
+flow debug
+agent debug
+overlay
+route debug
+navigation query
+path query
+cell query
+building query
+helper
 
-Likely files to inspect:
+Likely existing destination:
+If BuildingDebugTelemetry or similar already exists, extend it carefully.
 
-scripts/map/garden_retarget_controller.gd
-scripts/map/agent_navigation_phase_controller.gd
-scripts/map/spawner_route_service.gd
-scripts/map/garden_topology_service.gd
-scripts/map/agent_suspend_service.gd
-scripts/map/turret_eating_controller.gd
-scripts/map/building_invalidation_controller.gd
-scripts/map/building_path_service.gd
-scripts/map/building_preparation_controller.gd
-scripts/map/agent_spawn_service.gd
-scripts/map/rose_counter_service.gd or counter_stock_manager.gd
-scripts/map/building_manager.gd
+Possible new focused files, only if needed:
 
-Refactor strategy:
-Use one of these approaches, in this order.
+scripts/map/building_debug_query_service.gd
+scripts/map/building_navigation_query_service.gd
 
-Approach A — expose narrow public wrappers on BuildingManager
-Use this when the data/function still genuinely belongs to BuildingManager, but services should not call private methods.
+Do not create both unless both are clearly needed.
 
-Example:
+Preferred responsibility split:
 
-Before:
+BuildingDebugQueryService
+Owns debug-only helper methods, especially methods used by overlays, labels, telemetry, debug prints, or editor/debug visualization.
 
-_manager._is_walkable(cell)
+Possible responsibilities:
 
-After:
+expose garden/route/debug label data
+debug path queries
+debug flow-field query wrappers
+debug cell summaries
+debug-only route inspection
+debug-only telemetry helpers
 
-_manager.is_map_cell_walkable_for_navigation(cell)
+It must not own gameplay state.
 
-with a public-ish wrapper in BuildingManager:
+BuildingNavigationQueryService
+Owns read-only navigation/map/path query helpers if they are used by gameplay code and are not merely debug.
 
-func is_map_cell_walkable_for_navigation(cell: Vector2i) -> bool:
-	return _is_walkable(cell)
+Possible responsibilities:
 
-Use clear names that describe why the service needs the data.
+read-only walkability queries
+read-only route lookup helpers
+read-only cell-to-room/cell-to-garden helpers
+read-only target/path inspection helpers
 
-Approach B — use an existing service directly
-Use this when the called method already belongs to a service.
+It must not own rebuild orchestration.
+It must not own invalidation.
+It must not own spawning.
+It must not own phase transitions.
 
-Example:
+If a method mutates state, do not put it in a query service unless the mutation is purely debug-cache maintenance and clearly documented.
 
-Before:
+Compatibility rule:
+Keep thin wrappers in BuildingManager for any method that may be used by:
 
-_manager._rebuild_spawner_garden_route_cache()
+other scripts
+scenes
+signals
+Callable
+call()
+editor wiring
+debug UI
+saved references
 
-After:
+Wrapper style:
 
-_manager.spawner_route_service().rebuild_spawner_garden_route_cache()
+func debug_some_existing_method(...) -> SomeType:
+	return _building_debug_query_service.debug_some_existing_method(...)
 
-or a thin manager accessor if needed:
+or:
 
-func get_spawner_route_service() -> SpawnerRouteService:
-	return _spawner_route_service
+func get_some_navigation_query(...) -> SomeType:
+	return _building_navigation_query_service.get_some_navigation_query(...)
 
-Only do this if the service type and ownership are clear.
+Only delete wrappers if direct search proves:
 
-Approach C — create a small query/access service
-Use this only if many services repeatedly need the same kind of read-only map/building queries.
+no references exist;
+the method name is not used dynamically;
+it is not public-ish API;
+it is not likely referenced by scenes/editor/debug overlay.
 
-Possible file:
+When in doubt, keep the wrapper.
 
-scripts/map/building_query_service.gd
+Important:
+Do not make this a “delete wrappers” pass.
+This is a responsibility extraction pass.
+Wrapper deletion is allowed only when obviously safe.
 
-Possible responsibility:
+Extraction guidance:
+Good candidates to move:
 
-read-only map/building queries
-cell walkability checks
-plant/building lookup helpers
-room/cell conversion helpers if currently scattered
+methods that only format/debug/report current state
+methods that only read data and return a value
+methods that are only used by debug overlays/telemetry
+repeated query helpers that make BuildingManager hard to scan
+helper methods whose domain owner already exists
 
-Do not put orchestration, spawning, phase logic, or mutation in this query service.
+Bad candidates to move in this pass:
 
-Avoid creating this if 2-3 simple wrappers are enough.
+day/night transition flow
+spawning flow
+preparation flow
+counter/shop flow
+garden topology mutation
+retarget mutation
+invalidation mutation
+save/load compatibility
+signal entry points
+exported/editor-facing methods
+methods with unclear dynamic call usage
 
-Strongly avoid:
+Manager-private coupling:
+It is acceptable for the new query/debug service to call some manager wrappers or manager-private methods if eliminating that coupling would require a risky rewrite.
 
-giant “context” objects
-generic service locators
-moving random methods just to reduce _manager._
-changing state ownership during this pass
-changing routing, garden, spawn, client, harvest, or day/night behavior
-deleting wrappers unless obviously safe
-making files larger and less readable
+However:
 
-Priority targets:
-Focus on direct private access patterns like:
-
-_manager._some_private_method()
-_manager._some_private_dictionary
-_manager._some_private_array
-_manager._some_private_node
-_manager._some_private_flag
-
-Highest priority:
-
-Direct access to mutable dictionaries/arrays.
-Direct access to dirty flags/state flags.
-Direct calls that cross domain boundaries.
-Repeated private calls used by several services.
-Private calls from recently extracted services.
-
-Lower priority:
-
-One-off private calls that would need awkward abstraction.
-Compatibility wrappers.
-Debug-only calls.
-Calls that are clearly safe and local.
-
-State ownership rule:
-Do not move ownership of major state in this pass unless it is tiny and obvious.
-
-For example:
-
-Do not move all garden state again.
-Do not move all spawner state again.
-Do not move all agent phase state again.
-Do not rewrite preparation/spawn/counter flows.
-
-This batch is about safer boundaries, not new extractions.
-
-Naming rule:
-Public wrappers should be intention-revealing.
-
-Avoid vague names:
-
-get_data()
-do_rebuild()
-manager_call()
-
-Prefer explicit names:
-
-is_cell_walkable_for_agent_navigation(cell)
-get_registered_spawner_cells()
-request_exit_wall_escape_rebuild()
-mark_navigation_topology_dirty()
-
-Compatibility:
-Keep existing private methods unless you are certain they are unused internally.
-The goal is not to delete all private methods.
-The goal is to stop extracted services from depending on private manager internals.
+Prefer existing public wrappers created in Batch 3.
+Do not introduce new direct mutable state access if avoidable.
+Do not worsen coupling.
+Report any retained direct private coupling.
 
 Expected result:
 
-Fewer _manager._xxx calls in extracted services.
-The most dangerous private mutable state access is replaced by explicit methods.
-BuildingManager may gain a small number of clear public wrappers/accessors.
-No broad behavior changes.
-No new god-object service.
+BuildingManager loses another coherent block of implementation code.
+Debug/query/helper code has a clearer owner.
+BuildingManager remains a compatibility façade for methods likely called externally.
 No new file over 1000 lines.
-Existing manually tested behavior remains intact.
+No gameplay behavior changes.
+No broad architecture rewrite.
 
-Suggested concrete workflow:
+Suggested workflow:
 
-Generate a list of _manager._ calls by file.
-Pick 2-4 high-value files only.
-For each private access, classify it:
-read-only query
-mutation request
-service delegation
-state ownership leak
-debug-only
-Replace only the safe/high-value ones.
-Keep unclear cases unchanged.
-Report what remains and why.
-
-Do not attempt to reach zero _manager._ calls.
+Categorize remaining BuildingManager methods into groups:
+façade/wrapper
+phase orchestration
+debug/query/helper
+state ownership
+save/load
+unknown/dynamic risk
+Pick one or two clear debug/query/helper clusters.
+Move those clusters into a focused service.
+Add setup in _ready() if a new service is created.
+Replace internal calls with service calls.
+Keep compatibility wrappers where needed.
+Search references before deleting anything.
+Report what remains in BuildingManager.
 
 Safety checks by reading/searching only:
 
-Search all renamed or newly wrapped methods.
-Verify method signatures are unchanged where wrappers remain.
-Verify no call sites now bypass required side effects.
-Verify save/load structure is untouched.
-Verify no scene/signal/Callable/call references were broken.
-Verify no preload/load path typo if a new query service is created.
-Verify setup order in _ready() if a new service is added.
+Search all moved method names before and after moving.
+Search for method-name strings in .gd, .tscn, .tres, .res text resources where possible.
+Verify no signal/Callable/call/editor references were broken.
+Verify all new files have correct preload/load paths.
+Verify _ready() setup order is correct.
 Verify strict typing on all new locals and returns.
+Verify no debug overlay/debug UI method disappeared.
+Verify save/load structure is untouched.
+Verify no gameplay method signature changed.
 
 Output required:
 
 List changed files.
-Show before/after count of _manager._ occurrences per modified service.
-Explain which private accesses were replaced and why.
-Explain which private accesses were intentionally retained and why.
-Confirm no behavior changes were intended.
+Current line count of building_manager.gd before and after.
+Explain which debug/query/helper logic moved.
+Confirm which wrappers were preserved.
+Confirm whether any wrappers were removed, with reason.
+Mention any intentionally retained manager-private coupling.
+Mention what responsibility clusters still remain in BuildingManager.
 Mention manual test scenarios.
 
 Manual test scenarios to suggest:
@@ -235,8 +223,8 @@ Manual test scenarios to suggest:
 Start a normal night.
 Spawn monsters from multiple spawners.
 Let monsters target/eat plants and exit.
-Remove/place buildings that affect navigation invalidation.
+Place/remove buildings that trigger navigation invalidation.
+Open/enable any debug overlays used for gardens/routes/flow/pathing.
+Verify debug labels/telemetry still display correctly.
 Run client phase if applicable.
-Verify garden targeting/retargeting still works.
-Verify day/night transition still proceeds.
 Verify no new warnings/errors appear.

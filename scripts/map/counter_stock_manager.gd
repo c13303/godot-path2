@@ -68,7 +68,7 @@ func rose_shop_counter_cells() -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	if _manager == null:
 		return cells
-	var building_objects: BuildingObjectManager = _manager._get_building_object_manager()
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
 	if building_objects != null and building_objects.has_method("get_building_cells_by_item_id"):
 		var raw_cells: Array = building_objects.call("get_building_cells_by_item_id", ROSE_SHOP_COUNTER_ID) as Array
 		for raw_cell: Variant in raw_cells:
@@ -142,14 +142,7 @@ func set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 func after_counter_stock_changed(previous: int, value: int) -> void:
 	if _manager == null:
 		return
-	# A counter gaining its first rose turns it into an edible garden, which requires
-	# folding its access tiles into the garden topology (a full rebuild). Depletion
-	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
-	# the empty-garden machinery removes a counter-only garden like any other.
-	if previous == 0 and value > 0 and _manager._garden_topology.plant_zone_built():
-		_manager._rebuild_plant_zone_from_layer()
-	elif previous > 0 and value == 0 and _manager._no_plants_remaining():
-		_manager._force_escape_for_all_monsters()
+	_manager.notify_counter_stock_changed(previous, value)
 
 
 func serialize_counter_stock() -> Array[Dictionary]:
@@ -159,7 +152,7 @@ func serialize_counter_stock() -> Array[Dictionary]:
 func restore_counter_stock(saved_stock: Array) -> void:
 	restore(saved_stock, rose_shop_counter_cells())
 	if _manager != null:
-		_manager._building_invalidation_controller.mark_after_counter_stock_restored()
+		_manager.mark_counter_stock_restored_for_navigation()
 
 
 func serialize(counter_cells: Array[Vector2i]) -> Array[Dictionary]:
@@ -259,8 +252,8 @@ func nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) ->
 func consume_counter_rose(eater: Node2D, access_cell: Vector2i) -> void:
 	if _manager == null:
 		return
-	var counter_cell: Vector2i = _manager._garden_topology.counter_access_cells()[access_cell] as Vector2i
-	_manager._start_agent_eating(eater, _manager._eating_time, access_cell)
+	var counter_cell: Vector2i = _manager.counter_cell_for_access_cell(access_cell)
+	_manager.start_agent_eating_counter_rose(eater, access_cell)
 	Sfx.play_sound(&"crunsh")
 	set_counter_stock(counter_cell, stock(counter_cell) - 1)
 

@@ -21,9 +21,9 @@ var _navigation_topology_dirty: bool = true
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
-	_garden_topology = manager._garden_topology as GardenTopologyService
-	_spawner_route_service = manager._spawner_route_service
-	_debug_telemetry = manager._debug_telemetry
+	_garden_topology = manager.get_garden_topology_service()
+	_spawner_route_service = manager.get_spawner_route_service()
+	_debug_telemetry = manager.get_building_debug_telemetry()
 
 
 func mark_navigation_topology_dirty() -> void:
@@ -67,9 +67,7 @@ func after_plant_layout_changed(_reason: String = "") -> void:
 	var topology: GardenTopologyService = _garden_topology
 	topology.set_plant_zone_built(false)
 	mark_navigation_topology_dirty()
-	var overlay: Node2D = _manager._zone_overlay
-	if overlay:
-		overlay.queue_redraw()
+	_manager.queue_plant_zone_overlay_redraw()
 
 
 # Consumes a pending navigation-topology dirty mark: re-syncs flow blocking cells,
@@ -89,7 +87,7 @@ func apply_navigation_topology_rebuild() -> void:
 		_manager._rebuild_plant_zone_from_layer()
 	_manager._rebuild_spawner_garden_route_cache()
 	var route_service: SpawnerRouteService = _spawner_route_service
-	var spawners: Dictionary = _manager._spawners
+	var spawners: Dictionary = _manager.get_spawners()
 	for raw_spawner_cell: Variant in spawners.keys():
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
 		_manager._rebuild_spawner_plant_ff(spawner_cell)

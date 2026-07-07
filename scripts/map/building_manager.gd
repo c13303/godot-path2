@@ -370,6 +370,11 @@ func get_flow() -> Node:
 func get_agent_manager() -> Node:
 	return agent_manager
 
+
+func get_building_object_manager() -> BuildingObjectManager:
+	return _get_building_object_manager()
+
+
 func _agent_manager_can_assign_agent() -> bool:
 	return agent_manager != null and agent_manager.has_method("assign_agent")
 
@@ -1273,12 +1278,24 @@ func get_spawner_route_service() -> SpawnerRouteService:
 	return _spawner_route_service
 
 
+func get_garden_topology_service() -> GardenTopologyService:
+	return _garden_topology
+
+
+func get_garden_access_resolver() -> GardenAccessResolver:
+	return _garden_access_resolver
+
+
 func debug_logs_enabled() -> bool:
 	return debug_logs
 
 
 func get_spawners() -> Dictionary:
 	return _spawners
+
+
+func spawner_kind_by_cell() -> Dictionary:
+	return _spawner_kind_by_cell
 
 
 func client_counter_agents() -> Dictionary:
@@ -1401,7 +1418,35 @@ func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 
 
 func _after_counter_stock_changed(previous: int, value: int) -> void:
-	_counter_stock_manager.after_counter_stock_changed(previous, value)
+	notify_counter_stock_changed(previous, value)
+
+
+func notify_counter_stock_changed(previous: int, value: int) -> void:
+	# A counter gaining its first rose turns it into an edible garden, which requires
+	# folding its access tiles into the garden topology (a full rebuild). Depletion
+	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
+	# the empty-garden machinery removes a counter-only garden like any other.
+	if previous == 0 and value > 0 and _garden_topology.plant_zone_built():
+		_rebuild_plant_zone_from_layer()
+	elif previous > 0 and value == 0 and _no_plants_remaining():
+		_force_escape_for_all_monsters()
+
+
+func mark_counter_stock_restored_for_navigation() -> void:
+	_building_invalidation_controller.mark_after_counter_stock_restored()
+
+
+func counter_cell_for_access_cell(access_cell: Vector2i) -> Vector2i:
+	return _garden_topology.counter_access_cells()[access_cell] as Vector2i
+
+
+func start_agent_eating_counter_rose(agent: Node2D, access_cell: Vector2i) -> void:
+	_start_agent_eating(agent, _eating_time, access_cell)
+
+
+func queue_plant_zone_overlay_redraw() -> void:
+	if _zone_overlay:
+		_zone_overlay.queue_redraw()
 
 
 # Populates _garden_topology.counter_access_cells() from every stocked counter and returns the access
