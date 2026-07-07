@@ -353,6 +353,9 @@ func get_flow() -> Node:
 func get_agent_manager() -> Node:
 	return agent_manager
 
+func registered_spawner_count() -> int:
+	return _spawners.size()
+
 func get_parent_for_agents() -> Node:
 	return parent_for_agents
 

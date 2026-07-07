@@ -9,15 +9,17 @@ const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
 const DEBUG_GARDENS_LAG_MS_FALLBACK: float = 15.0
 
-var _manager: Node
+var _manager: BuildingManager
 var _cpp_debug_options: Node = null
+var _cached_global_config: Node = null
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _last_spawn_failure_at_ms: Dictionary = {}
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
+	_cached_global_config = manager.global_config
 
 
 func frame_lag_threshold_ms() -> float:
@@ -84,7 +86,7 @@ func over_garden_threshold_us(elapsed_us: int) -> bool:
 
 
 func log(message: String) -> void:
-	if _manager != null and bool(_manager.get("debug_logs")) and CppDebugOptions.logs_enabled:
+	if _manager != null and _manager.debug_logs and CppDebugOptions.logs_enabled:
 		print("BuildingManager: ", message)
 
 
@@ -108,13 +110,12 @@ func should_warn_spawn_failure_key(warning_key: String) -> bool:
 
 
 func log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
-	var plant_manager: Node = _manager.get("plant_manager") as Node
+	var plant_manager: Node = _manager.get_plant_manager()
 	var plant_count: int = int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else 0
-	var spawners: Dictionary = _manager.get("_spawners") as Dictionary
 	var summary: String = "scan indexed_plants=%d spawners=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
 		plant_count,
 		seen_spawners.size(),
-		spawners.size(),
+		_manager.registered_spawner_count(),
 		migrated,
 		walls_changed
 	]
@@ -125,9 +126,12 @@ func log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: 
 
 
 func _global_config() -> Node:
+	if _cached_global_config != null and is_instance_valid(_cached_global_config):
+		return _cached_global_config
 	if _manager == null:
 		return null
-	return _manager.get("global_config") as Node
+	_cached_global_config = _manager.global_config
+	return _cached_global_config
 
 
 func _debug_master_disabled() -> bool:
