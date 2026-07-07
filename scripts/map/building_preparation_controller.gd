@@ -63,9 +63,7 @@ func run_night_preparation(token: int) -> void:
 		push_error("BuildingManager: night flow-field preparation completed with an unusable route")
 		return
 
-	_manager._night_preparing = false
-	_manager._night_preparation_ready = true
-	_manager._seed_merchant.start_pending_leave_if_needed()
+	_manager.finish_night_preparation_success()
 	CppDebugOptions.dlog("ff & gardens computed, monster night starts now")
 
 
@@ -110,15 +108,14 @@ func run_client_preparation(token: int) -> void:
 		_manager._abort_client_preparation(token)
 		return
 
-	_manager._client_preparing = false
-	_manager._client_sale.activate()
+	_manager.finish_client_preparation_success()
 
 
 func _run_shared_preparation(token: int) -> bool:
 	_manager._scan_buildings()
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
-	_manager._building_invalidation_controller.clear_navigation_topology_dirty()
+	_manager.get_building_invalidation_controller().clear_navigation_topology_dirty()
 	await _manager.get_tree().process_frame
 	var prep_result: bool = await _manager._rebuild_walkable_map_cache_budgeted(token)
 	if not prep_result:

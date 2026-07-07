@@ -1,7 +1,7 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 9 = reduce unsafe manager coupling between garden retargeting and agent navigation phases, without changing gameplay behavior.
+Batch 10 = reduce unsafe manager-private coupling in the preparation and spawn orchestration services, without changing gameplay behavior.
 
 This is a refactor-only pass.
 Do not change gameplay behavior.
@@ -20,167 +20,184 @@ Project rules:
 - If unsure, keep the existing private access and report it.
 
 Current context:
-Previous batches reduced `BuildingManager` bloat and extracted runtime ticking.
-The next largest coupling hotspot is likely around:
+Previous batches reduced `BuildingManager` bloat, extracted runtime ticking, and started cleaning domain boundaries.
+
+The next coupling hotspots are likely:
 
 ```txt
-scripts/map/garden_retarget_controller.gd
-scripts/map/agent_navigation_phase_controller.gd
+scripts/map/building_preparation_controller.gd
+scripts/map/agent_spawn_service.gd
 scripts/map/building_manager.gd
 
-These controllers are important and performance-sensitive.
-They should not become noodles, but this pass must stay conservative.
+These services coordinate important gameplay setup:
+
+night/client preparation
+scan/sync/rebuild sequence
+spawner route initialization
+async flow-field readiness
+agent scene instantiation
+spawn cell selection
+route/garden assignment
+agent registration
+
+This pass must stay conservative.
 
 Main objective:
-Make ownership and communication between garden retargeting and agent navigation phases clearer.
+Reduce the most dangerous direct _manager._xxx access in BuildingPreparationController and AgentSpawnService, especially raw mutable state access and service-through-manager-private access.
 
-Do not rewrite the garden system.
-Do not rewrite pathfinding.
-Do not change retarget behavior.
-Do not change agent status names.
-Do not change queue order.
-Do not change per-frame limits.
-Do not change fallback behavior.
+Do not rewrite preparation.
+Do not rewrite spawning.
+Do not change spawn fallback behavior.
+Do not change preparation order.
+Do not change async/await behavior.
+Do not change route assignment.
+Do not change garden selection.
+Do not change agent registration.
 
 Before editing:
 
-Inspect garden_retarget_controller.gd.
-Inspect agent_navigation_phase_controller.gd.
+Inspect building_preparation_controller.gd.
+Inspect agent_spawn_service.gd.
 Inspect related wrappers/accessors in building_manager.gd.
-Count _manager._ references in both controllers.
-Categorize private accesses as:
-- read-only agent collection query
-- read-only garden/topology query
-- navigation phase mutation
-- retarget queue mutation
-- route/path lookup
+Count _manager._ references in both target services.
+Categorize each private access as:
+- preparation guard/state flag
+- scan/sync/rebuild orchestration
+- service/controller access
+- spawner registry/query
+- route/garden selection
+- spawn scene lookup
+- spawn placement query
+- agent registration
 - debug/telemetry only
-- compatibility wrapper call
 - unclear / keep
 
 Do not edit before this classification.
 
-Primary target:
-Reduce direct private access where one extracted controller calls through BuildingManager to reach another extracted controller or its state.
-
-Bad pattern:
-
-_manager._agent_navigation_phases._some_internal_state
-_manager._garden_retarget._some_internal_method()
-_manager._some_private_agent_collection
-
-Better patterns:
-
-_manager.get_agent_navigation_phase_controller().some_public_method(...)
-_manager.get_garden_retarget_controller().some_public_method(...)
-_manager.get_agents_waiting_for_navigation_retarget()
-_manager.agent_navigation_phase_for(agent)
-
-Only add wrappers/getters that are actually used.
-
-Priority 1 — controller-to-controller access:
-If GardenRetargetController needs to update navigation phase state, prefer a typed getter from BuildingManager:
-
-func get_agent_navigation_phase_controller() -> AgentNavigationPhaseController:
-	return _agent_navigation_phases
-
-Then call an explicit public method on AgentNavigationPhaseController.
-
-Example method names:
-
-func assign_agent_to_astar_in_phase(agent: Node, path: PackedVector2Array) -> void:
-	...
-
-func assign_agent_to_flow_exit_phase(agent: Node, exit_cell: Vector2i) -> void:
-	...
-
-func clear_agent_navigation_phase(agent: Node) -> void:
-	...
-
-Only create methods that correspond to existing behavior.
-Do not invent new phase semantics.
-
-Priority 2 — agent collection access:
-If controllers directly read manager-owned dictionaries/arrays of agents, prefer narrow read-only methods or count/query wrappers.
+Priority 1 — service/controller access:
+If a target service accesses another manager-owned service through private fields, prefer typed getters on BuildingManager.
 
 Examples:
 
-func has_eating_agent(agent: Node) -> bool:
-	return _eating_agents.has(agent)
+func get_building_scan_service() -> BuildingScanService:
+	return _building_scan
 
-func get_agents_targeting_removed_plant(plant_cell: Vector2i) -> Array[Node]:
-	...
+func get_building_navigation_sync_service() -> BuildingNavigationSyncService:
+	return _building_navigation_sync
 
-Do not expose raw dictionaries unless there is no clean alternative.
+func get_building_invalidation_controller() -> BuildingInvalidationController:
+	return _building_invalidation_controller
 
-Avoid:
+func get_spawner_route_service() -> SpawnerRouteService:
+	return _spawner_route_service
 
-func get_eating_agents() -> Dictionary:
-	return _eating_agents
+func get_spawner_garden_selection_service() -> SpawnerGardenSelectionService:
+	return _spawner_garden_selection_service
 
-unless absolutely necessary for compatibility.
+func get_agent_definition_service() -> AgentDefinitionService:
+	return _agent_definition_service
 
-Priority 3 — garden/topology queries:
-If controllers ask the manager for garden data that actually belongs to GardenTopologyService, prefer calling the topology service through a typed getter or existing public wrapper.
+func get_debug_telemetry() -> BuildingDebugTelemetry:
+	return _debug_telemetry
 
-Example:
+Only add getters that are actually used.
+Use the real class names from the current codebase.
 
-func get_garden_topology_service() -> GardenTopologyService:
-	return _garden_topology
-
-Then use explicit topology query methods.
-
-Good:
-
-_manager.get_garden_topology_service().garden_for_plant_cell(cell)
+Priority 2 — preparation state flags:
+If BuildingPreparationController directly mutates preparation state flags on the manager, replace with narrow manager methods if safe.
 
 Bad:
 
-_manager._garden_topology._garden_by_plant_cell[cell]
+_manager._night_preparing = false
+_manager._night_preparation_ready = true
+_manager._client_preparing = false
 
-Do not move garden state ownership in this pass.
+Better:
 
-Priority 4 — debug-only access:
-Debug/telemetry private access can remain if replacing it would add clutter.
+_manager.finish_night_preparation_success()
+_manager.finish_night_preparation_abort()
+_manager.finish_client_preparation_success()
+_manager.finish_client_preparation_abort()
 
-Only clean debug access if it is repeated or obviously unsafe.
+Only create methods that exactly preserve current behavior.
+Do not move ownership of preparation state in this pass unless it is already clearly isolated.
 
-Do not prioritize debug cleanup over gameplay boundary clarity.
+The manager may still own the flags; the controller should request transitions through explicit methods.
 
-Priority 5 — unclear coupling:
-If the clean boundary is not obvious, keep the current private access and report it.
+Priority 3 — readiness/guard queries:
+Replace raw reads with intention-revealing methods where simple.
 
-Expected result:
+Examples:
 
-Fewer _manager._xxx references in garden_retarget_controller.gd.
-Fewer _manager._xxx references in agent_navigation_phase_controller.gd.
-The most dangerous raw mutable state access is replaced by explicit methods.
-Controller-to-controller communication is more explicit.
-No gameplay behavior changes.
-No large new abstraction.
-No new service unless absolutely necessary.
-No file grows over 1000 lines.
+func is_flow_ready() -> bool:
+	return _flow_ready
 
-Do not try to reach zero _manager._xxx calls.
-A good target is to reduce the most unsafe calls by 25-50%, not eliminate everything.
+func is_startup_ready() -> bool:
+	return _startup_ready
+
+func has_active_spawners() -> bool:
+	return _spawners.size() > 0
+
+Do not expose raw arrays/dictionaries unless necessary.
+
+Priority 4 — spawner and route access:
+Avoid exposing mutable spawner dictionaries directly if a narrow query is enough.
+
+Prefer methods like:
+
+func get_registered_spawner_cells() -> Array[Vector2i]:
+	...
+
+func get_spawner_data(spawner_cell: Vector2i) -> Dictionary:
+	...
+
+func has_spawner_route(spawner_cell: Vector2i) -> bool:
+	...
+
+But only add what is needed for the current services.
+
+Priority 5 — spawn setup / agent registration:
+If AgentSpawnService directly performs manager-private calls for registration or route assignment, prefer explicit manager methods with names that describe the operation.
+
+Examples:
+
+func register_spawned_agent(agent: Node, spawner_cell: Vector2i, agent_kind: StringName) -> void:
+	...
+
+func assign_spawned_agent_route(agent: Node, route: PackedVector2Array, garden_id: int) -> void:
+	...
+
+Only do this if it reduces private coupling without hiding too much logic.
+Do not invent new behavior.
+
+Priority 6 — unclear or high-risk access:
+Keep it unchanged and report it.
+
+Do not chase zero _manager._xxx calls.
+
+A successful pass reduces the worst private accesses, not all of them.
+
+Expected target:
+Reduce _manager._ references in each target file by roughly 25-50% if safe.
+
+If safe replacements are not obvious, reduce less and report why.
 
 Strict behavior preservation:
 Preserve exactly:
 
-- agent statuses
-- queue ordering
-- queue limits
-- retarget timing
-- fallback paths
-- garden target selection
-- route assignment
-- astar-in behavior
-- flow-in / flow-out behavior
-- escape behavior
-- wait/new-status behavior
-- debug/lag reporting
-
-Do not change performance characteristics unless the existing code already does the same work through a safer method.
+- preparation sequence order
+- async wait behavior
+- dirty/invalidation semantics
+- scan/rebuild order
+- route cache rebuild behavior
+- spawner route initialization
+- spawn timing
+- spawn scene lookup
+- spawn cell fallback
+- spawn failure cleanup
+- agent registration
+- garden route assignment
+- debug/telemetry output semantics
 
 Compatibility:
 Do not remove existing private methods.
@@ -204,11 +221,12 @@ Report what remains.
 
 Safety checks by reading/searching only:
 
-Verify all changed method signatures.
+Verify preparation order is unchanged.
+Verify async/await points are unchanged.
 Verify no agent status string changed.
+Verify spawn fallback and failure paths are unchanged.
+Verify route/garden assignment is unchanged.
 Verify no queue order changed.
-Verify no per-frame limit changed.
-Verify no route/path fallback changed.
 Verify no save/load structure changed.
 Verify no signal/Callable/call method was removed.
 Verify no scene/editor reference was broken.
@@ -218,25 +236,28 @@ Output required:
 
 List changed files.
 Give before/after _manager._ count for:
-garden_retarget_controller.gd
-agent_navigation_phase_controller.gd
+building_preparation_controller.gd
+agent_spawn_service.gd
 List new getters/wrappers added to BuildingManager.
-List new public methods added to controllers.
+List any new public methods added to services/controllers.
 Explain which private accesses were replaced and why.
 Explain which private accesses were intentionally retained and why.
+Confirm preparation order was preserved.
+Confirm spawn behavior was preserved.
 Confirm no behavior changes were intended.
 Mention remaining production-quality concerns.
 Mention manual test scenarios.
 
 Manual test scenarios to suggest:
 
+Start the game and reach day phase.
 Start a normal night.
+Verify night preparation completes.
 Spawn monsters from multiple spawners.
+Verify failed/blocked spawn cases do not crash.
 Let monsters target plants, eat, and exit.
-Remove a plant while monsters are targeting it.
-Remove/place buildings that affect navigation.
-Verify agents enter waiting/retarget states correctly if applicable.
-Verify astar-in arrivals still work.
-Verify flow-in / flow-out behavior still works.
-Verify garden targeting/retargeting still works.
-Verify no new warnings/errors appear.
+Run client phase if applicable.
+Verify client preparation completes.
+Place/remove buildings before night.
+Verify navigation invalidation/rebuild still happens.
+Verify no new warnings/errors appear

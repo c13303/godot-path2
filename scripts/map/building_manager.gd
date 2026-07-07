@@ -518,6 +518,20 @@ func _abort_client_preparation(token: int) -> void:
 	_client_sale.reset()
 	GameState.set_building_phase(true)
 
+
+# Preparation-success transitions. The manager owns these flags and the
+# tightly-coupled follow-up service call; the preparation controller requests
+# the transition instead of mutating the flags directly.
+func finish_night_preparation_success() -> void:
+	_night_preparing = false
+	_night_preparation_ready = true
+	_seed_merchant.start_pending_leave_if_needed()
+
+
+func finish_client_preparation_success() -> void:
+	_client_preparing = false
+	_client_sale.activate()
+
 func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringName]) -> bool:
 	var spawner_kind: StringName = _spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
 	return agent_kinds.has(spawner_kind)

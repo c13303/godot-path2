@@ -21,16 +21,17 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	var agent_scene: PackedScene = _manager._resolve_monster_scene(monster_type)
 	if agent_scene == null:
 		return false
+	var telemetry: BuildingDebugTelemetry = _manager.get_building_debug_telemetry()
 	# Select target garden: iterates all gardens, checks targetable / edible plants,
 	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
 	var t_sel: int = Time.get_ticks_usec()
 	var garden_id: int = _manager._select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _manager._select_garden_for_spawner(spawner_cell)
 	var sel_us: int = Time.get_ticks_usec() - t_sel
-	if _manager._debug_telemetry.over_garden_threshold_us(sel_us):
-		_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
-			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager._garden_topology.gardens().size(), garden_id])
+	if telemetry.over_garden_threshold_us(sel_us):
+		telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
+			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager.get_garden_topology_service().gardens().size(), garden_id])
 	if garden_id <= 0:
-		_manager._debug_telemetry.log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
+		telemetry.log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
 		return false
 
 	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute
@@ -38,19 +39,19 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	var t_route: int = Time.get_ticks_usec()
 	var route: Dictionary = _manager._get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	var route_us: int = Time.get_ticks_usec() - t_route
-	if _manager._debug_telemetry.over_garden_threshold_us(route_us):
-		_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
+	if telemetry.over_garden_threshold_us(route_us):
+		telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
 			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
 	if not bool(route.get("ready", false)):
-		_manager._debug_telemetry.log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
+		telemetry.log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
 		return false
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
-		_manager._debug_telemetry.log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
+		telemetry.log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
 		return false
 
 	if not _manager._is_sane_cell(entry_cell):
-		_manager._debug_telemetry.log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
+		telemetry.log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
 		return false
 
 	# Occupied-cell scan: walks the main_chars/monsters/player scene groups every
@@ -58,8 +59,8 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	var t_occ: int = Time.get_ticks_usec()
 	var occupied: Array[Vector2i] = _manager._occupied_cells()
 	var occ_us: int = Time.get_ticks_usec() - t_occ
-	if _manager._debug_telemetry.over_garden_threshold_us(occ_us):
-		_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
+	if telemetry.over_garden_threshold_us(occ_us):
+		telemetry.warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
 			"spawner_cell=%s occupied=%d" % [str(spawner_cell), occupied.size()])
 
 	# Free-cell search: spirals out from the spawner doing per-cell walkable/wall
@@ -68,11 +69,11 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	var t_free: int = Time.get_ticks_usec()
 	var spawn_cell: Vector2i = _manager._find_free_cell_near(spawner_cell, occupied)
 	var free_us: int = Time.get_ticks_usec() - t_free
-	if _manager._debug_telemetry.over_garden_threshold_us(free_us):
-		_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
+	if telemetry.over_garden_threshold_us(free_us):
+		telemetry.warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
 			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 	if spawn_cell == INVALID_CELL or not _manager._is_sane_cell(spawn_cell):
-		_manager._debug_telemetry.log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
+		telemetry.log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
 		return false
 
 	# Instantiate + add_child + group registration of the agent scene.
@@ -95,8 +96,8 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		_manager._apply_monster_data(agent, monster_type)
 	agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
-	if _manager._debug_telemetry.over_garden_threshold_us(inst_us):
-		_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
+	if telemetry.over_garden_threshold_us(inst_us):
+		telemetry.warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
 			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 
 	if _manager.agent_manager and _manager.agent_manager.has_method("spawn_agent"):
@@ -107,8 +108,8 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		if _manager.agent_manager.has_method("set_agent_never_rest"):
 			_manager.agent_manager.call("set_agent_never_rest", nav_id, true)
 		var reg_us: int = Time.get_ticks_usec() - t_reg
-		if _manager._debug_telemetry.over_garden_threshold_us(reg_us):
-			_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
+		if telemetry.over_garden_threshold_us(reg_us):
+			telemetry.warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
 				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
 
 		# Assign the garden-entry route: attaches the monster to the entry flow
@@ -116,8 +117,8 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		var t_assign: int = Time.get_ticks_usec()
 		var assigned: bool = _manager._assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 		var assign_us: int = Time.get_ticks_usec() - t_assign
-		if _manager._debug_telemetry.over_garden_threshold_us(assign_us):
-			_manager._debug_telemetry.warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
+		if telemetry.over_garden_threshold_us(assign_us):
+			telemetry.warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
 				"spawner_cell=%s garden=%d entry=%s assigned=%s" % [
 					str(spawner_cell), garden_id, str(entry_cell), str(assigned)])
 		if not assigned:
@@ -127,11 +128,11 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 			_manager._unregister_desire_agent(agent)
 			agent.remove_from_group(failed_group)
 			agent.queue_free()
-			_manager._debug_telemetry.log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
+			telemetry.log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
 			return false
-		_manager._spawn_tick_controller.increment_assigned_count()
+		_manager.get_spawn_tick_controller().increment_assigned_count()
 		var kind_label: String = "client" if agent_kind == SPAWNER_KIND_CLIENT else "monster"
-		_manager._debug_telemetry.log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
+		telemetry.log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
 			kind_label, nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
 		])
 
