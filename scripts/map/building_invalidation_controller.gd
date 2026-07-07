@@ -41,6 +41,24 @@ func after_walkability_changed(_reason: String = "") -> void:
 	mark_navigation_topology_dirty()
 
 
+func mark_after_building_scan_changed() -> void:
+	after_walkability_changed("building_scan")
+
+
+func mark_after_blocking_building_added() -> void:
+	after_walkability_changed("building_added")
+
+
+func mark_after_blocking_building_removed() -> void:
+	after_walkability_changed("building_removed")
+
+
+func mark_after_counter_stock_restored() -> void:
+	_garden_topology.counter_access_cells().clear()
+	_garden_topology.set_plant_zone_built(false)
+	mark_navigation_topology_dirty()
+
+
 # A plant was added/removed during the day (or while no runtime agents are active).
 # Invalidates the built plant-zone snapshot, marks navigation topology dirty, and
 # refreshes the zone overlay. Matches the old inline sequence in _on_plant_added /

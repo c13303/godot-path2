@@ -97,10 +97,10 @@ func scan_buildings() -> void:
 	for raw_spawner_cell: Variant in spawners.keys():
 		var cell: Vector2i = raw_spawner_cell as Vector2i
 		if not seen_spawners.has(cell):
-			_manager.call("_remove_missing_scanned_spawner", cell)
+			_manager._remove_missing_scanned_spawner(cell)
 
 	if walls_changed:
-		_manager.get_building_invalidation_controller().after_walkability_changed("building_scan")
+		_manager.get_building_invalidation_controller().mark_after_building_scan_changed()
 
 
 func scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:
@@ -117,7 +117,7 @@ func scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void
 
 func scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 	var debug_telemetry: BuildingDebugTelemetry = _debug_telemetry()
-	var playlist_config: SpawnPlaylistConfigService = _manager.get("_spawn_playlist_config") as SpawnPlaylistConfigService
+	var playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
 	var level_spawner_bindings: Array = playlist_config.level_spawner_bindings()
 	for raw_binding: Variant in level_spawner_bindings:
 		var binding: SpawnerBinding = raw_binding as SpawnerBinding
@@ -128,11 +128,11 @@ func scan_configured_spawner_nodes(seen_spawners: Dictionary) -> void:
 		debug_telemetry.log("detected spawner node id=%s cell=%s floor=%s wall=%s" % [
 			String(binding.spawner_id),
 			binding.cell,
-			bool(_manager.call("_has_floor", binding.cell)),
-			bool(_manager.call("_has_wall", binding.cell)),
+			_manager._has_floor(binding.cell),
+			_manager._has_wall(binding.cell),
 		])
 		seen_spawners[binding.cell] = true
-		_manager.call("_register_spawner", binding.cell, binding.kind, binding.exit_cell, binding.frequency_client, binding.spot_cell)
+		_manager._register_spawner(binding.cell, binding.kind, binding.exit_cell, binding.frequency_client, binding.spot_cell)
 
 
 func migrate_special_tiles_from_wallz() -> bool:
@@ -215,32 +215,32 @@ func _atlas_key(atlas: Vector2i) -> String:
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager.get_building_debug_telemetry()
 
 
 func _spawners() -> Dictionary:
-	return _manager.get("_spawners") as Dictionary
+	return _manager.get_spawners()
 
 
 func _wallz() -> TileMapLayer:
-	return _manager.get("wallz") as TileMapLayer
+	return _manager.wallz
 
 
 func _watersources() -> TileMapLayer:
-	return _manager.get("watersources") as TileMapLayer
+	return _manager.watersources
 
 
 func _plantz() -> TileMapLayer:
-	return _manager.get("plantz") as TileMapLayer
+	return _manager.plantz
 
 
 func _traversable_buildings() -> TileMapLayer:
-	return _manager.get("traversable_buildings") as TileMapLayer
+	return _manager.traversable_buildings
 
 
 func _blocking_buildings() -> TileMapLayer:
-	return _manager.get("blocking_buildings") as TileMapLayer
+	return _manager.blocking_buildings
 
 
 func _fences() -> TileMapLayer:
-	return _manager.get("fences") as TileMapLayer
+	return _manager.fences

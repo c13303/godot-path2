@@ -904,7 +904,7 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_set_player_cell_blocked(cell, true)
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
-		_building_invalidation_controller.after_walkability_changed("building_added")
+		_building_invalidation_controller.mark_after_blocking_building_added()
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 
@@ -914,7 +914,7 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 		_set_player_cell_blocked(cell, false)
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
-		_building_invalidation_controller.after_walkability_changed("building_removed")
+		_building_invalidation_controller.mark_after_blocking_building_removed()
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 	_counter_stock_manager.clear_counter(cell)
@@ -1377,6 +1377,14 @@ func get_building_invalidation_controller() -> BuildingInvalidationController:
 	return _building_invalidation_controller
 
 
+func get_building_debug_telemetry() -> BuildingDebugTelemetry:
+	return _debug_telemetry
+
+
+func get_spawners() -> Dictionary:
+	return _spawners
+
+
 func client_counter_agents() -> Dictionary:
 	return _client_counter_agents
 
@@ -1501,9 +1509,7 @@ func serialize_counter_stock() -> Array[Dictionary]:
 
 func restore_counter_stock(saved_stock: Array) -> void:
 	_counter_stock_manager.restore(saved_stock, _rose_shop_counter_cells())
-	_garden_topology.counter_access_cells().clear()
-	_garden_topology.set_plant_zone_built(false)
-	_building_invalidation_controller.mark_navigation_topology_dirty()
+	_building_invalidation_controller.mark_after_counter_stock_restored()
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:

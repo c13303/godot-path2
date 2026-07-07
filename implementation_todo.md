@@ -1,264 +1,255 @@
-Task: map-change consequence cleanup pass.
+Task: final polish pass for the map/building cleanup.
 
 Targets:
 
-* `scripts/map/build_placement_service.gd`
-* `scripts/map/build_removal_service.gd`
-* `scripts/map/building_scan_service.gd`
-* `scripts/map/building_invalidation_controller.gd`
-* `scripts/map/building_navigation_sync_service.gd`
-* minimal related changes in `scripts/map/building_manager.gd`
+* `scripts/map/building_manager.gd`
+* all `scripts/map/*service.gd`
+* all `scripts/map/*controller.gd`
+* `AGENTS.md`, only if it exists and needs minor tuning
+* optional: `scripts/map/ARCHITECTURE.md`, only if useful
 
 Goal:
-Make map-change consequences easier to trace, without changing gameplay behavior.
+Verify the map/building codebase is in a clean enough state for future coding-agent and human maintenance.
 
-This is a cleanup pass, not a feature pass.
+This is the final cleanup pass, not a broad refactor pass.
 
 Do not optimize.
-Do not create a broad event bus.
 Do not move broad behavior.
+Do not create new systems.
 Do not run Godot, tests, builds, compilation, or exports.
-
-## Problem
-
-Placement, removal, scan, and restore operations can affect several systems:
-
-* garden topology
-* navigation topology dirty state
-* native/navigation sync
-* spawner routes
-* retargeting
-* debug overlays
-* object registries
-
-Some of these consequences may still be triggered through scattered calls. This makes it harder for coding agents and humans to understand what a map change does.
 
 ## Main objective
 
-Centralize or clarify **where map-change consequences are triggered**, especially dirty marking and invalidation.
+Confirm that the previous cleanup passes achieved the intended architecture:
 
-Prefer small explicit methods on `BuildingInvalidationController` over scattered direct calls.
+* `BuildingManager` is mostly coordinator/facade
+* extracted services/controllers have clear ownership
+* state mostly lives with the behavior that owns it
+* hidden manager coupling is rare and justified
+* compatibility wrappers are intentional
+* file sizes are reasonable for their responsibilities
+* future agents can understand where to edit without reading the whole codebase
 
-Do not change when consequences happen.
+## Step 1: final hidden-coupling audit
 
-## Current known state
-
-`BuildingInvalidationController` now owns:
-
-* `_navigation_topology_dirty`
-* `mark_navigation_topology_dirty()`
-* `clear_navigation_topology_dirty()`
-
-`BuildingScanService` should already use the invalidation controller instead of setting manager state directly.
-
-Build on this direction.
-
-## Step 1: audit map-change consequence calls
-
-Search the target files for calls related to:
-
-* dirty topology
-* navigation topology dirty
-* garden dirty marking
-* invalidation
-* route invalidation
-* flow-field refresh
-* native/navigation sync
-* scan-triggered updates
-* placement-triggered updates
-* removal-triggered updates
-* debug overlay refresh
-* retarget triggering
-
-Also search for:
+Search `scripts/map/` for:
 
 * `_manager.call(`
 * `_manager.get(`
 * `_manager.set(`
 * `_manager.has_method(`
 
-Classify each consequence as coming from:
+For each remaining usage, classify it as:
 
-* placement
-* removal
-* scan
-* startup restore
-* night prep
-* client prep
-* counter-stock restore
-* debug-only refresh
-* unclear
+* dynamic compatibility call
+* external/signal/scene safety
+* unavoidable manager-owned lifecycle/state access
+* safe to replace
+* risky / leave unchanged
 
-## Step 2: clarify consequence ownership
+Allowed changes:
 
-`BuildingInvalidationController` should own orchestration of dirty/invalidation consequences already assigned to it.
+* replace clearly safe hidden calls with direct calls or existing accessors
+* replace clearly safe manager state reads/writes with explicit service/controller accessors
+* leave dynamic or risky calls unchanged and report why
 
-It may expose small explicit methods if useful, for example methods with names like:
+Do not try to force the count to zero.
 
-* `mark_navigation_topology_dirty()`
-* `clear_navigation_topology_dirty()`
-* `mark_after_building_scan_changed()`
-* `mark_after_placement_changed()`
-* `mark_after_removal_changed()`
+Success condition:
 
-Only add methods if they clarify existing behavior.
+Remaining hidden manager access should be rare, localized, and explainable.
 
-Do not add abstract generic methods like:
+## Step 2: final BuildingManager role check
 
-* `handle_everything_changed()`
-* `process_event()`
-* `dispatch_change()`
+Review `building_manager.gd`.
 
-Avoid vague event-bus design.
+Classify remaining content into:
 
-## Allowed changes
+* lifecycle / `_ready()` / setup
+* service wiring
+* day/night orchestration
+* high-level build/map event dispatch
+* compatibility wrappers
+* scene-facing references
+* save/progression integration
+* still-detailed subsystem logic
+* unclear/mixed ownership
 
-Allowed:
+Allowed changes:
 
-* replace scattered dirty flag writes with explicit invalidation-controller calls
-* replace hidden manager state writes with explicit accessors/controller methods
-* group existing consequence calls behind small named methods if this improves traceability
-* update internal call sites to use the clearer method
-* keep compatibility wrappers in `BuildingManager` if external callers may need them
+* bypass internal-only wrappers if clearly safe
+* add short comments for compatibility wrappers that must stay
+* report remaining detailed logic blocks
+* perform tiny local cleanup only if risk is low
 
-Not allowed:
+Do not perform new large extraction in this pass.
 
-* changing consequence timing/order
-* adding new invalidation triggers
-* removing existing invalidation triggers
-* changing placement/removal rules
-* changing scan behavior
-* changing route selection
-* changing retarget timing
-* changing flow-field generation
-* changing native-extension sync behavior
-* changing debug log text
-* changing `.tscn` files
+Success condition:
 
-## Ownership rules
+`BuildingManager` should be understandable as the map/building coordinator, even if it still has compatibility wrappers.
 
-`BuildPlacementService` should own:
+## Step 3: final state ownership check
 
-* placement validation
-* placement application
-* placement-side direct tile/object mutation already assigned to it
+Look for obvious split or duplicate state.
 
-It should not own:
+Examples:
 
-* garden topology algorithms
-* retarget policy
-* route policy
-* navigation dirty state internals
+* a flag stored in `BuildingManager` but owned by a service
+* a dictionary stored in two places
+* a service reading/writing manager state through `_manager.get/_manager.set`
+* a service owning behavior while another class owns the related state
 
-`BuildRemovalService` should own:
+Allowed changes:
 
-* removal validation
-* removal application
-* removal-side direct tile/object mutation already assigned to it
+* move only tiny, obvious state if it has one clear owner and low risk
+* otherwise report the issue for a future task
 
-It should not own:
+Do not move lifecycle, save/progression, exported, or broadly shared state unless it is obviously wrong and safe.
 
-* garden topology algorithms
-* retarget policy
-* route policy
-* navigation dirty state internals
+Success condition:
 
-`BuildingScanService` should own:
+No obvious duplicate state remains in the core map/building systems.
 
-* scanning scene/map buildings
-* discovering/registering scanned objects/spawners
-* reporting scan consequences explicitly
+## Step 4: file size and cohesion check
 
-It should not own:
+Review large files in `scripts/map/`.
 
-* navigation dirty flag storage
-* topology rebuild algorithms
-* route policy
-* retarget policy
+Use these guidelines:
 
-`BuildingInvalidationController` should own:
+* 0–400 lines: usually fine
+* 400–800 lines: acceptable if cohesive
+* 800–1200 lines: review ownership
+* 1200+ lines: suspicious unless it is a coordinator/facade
+* `BuildingManager` may remain around 1500–2500 lines if mostly orchestration and compatibility
 
-* dirty/invalidation orchestration
-* navigation topology dirty flag
-* explicit invalidation methods used by scan/placement/removal/restore flows
-* preserving current invalidation order
+Allowed changes:
 
-It should not own:
+* no line-count-only splitting
+* report large but cohesive files as acceptable
+* report large mixed files as future cleanup candidates
 
-* placement/removal validation
-* object creation/removal
-* topology algorithms
-* pathfinding algorithms
-* actual spawning
-* agent phase transitions
+Success condition:
 
-`BuildingNavigationSyncService` should own:
+Files are organized by responsibility, not arbitrary line count.
 
-* applying map/object changes to navigation/native-extension state
-* blocker/static-agent sync already assigned to it
+## Step 5: optional architecture note
 
-It should not own:
+Only if useful, create or update:
 
-* deciding high-level invalidation policy
-* placement/removal validation
-* garden topology policy
+* `scripts/map/ARCHITECTURE.md`
 
-`BuildingManager` should only:
+Keep it short.
 
-* coordinate lifecycle
-* wire services
-* call high-level consequence methods at existing lifecycle points
-* keep compatibility wrappers where needed
+Use this format:
 
-## Important regression risks
+```txt
+# Map / Building Architecture
 
-Avoid:
+## BuildingManager
+Owns:
+- ...
 
-* changing invalidation order
-* clearing dirty flags too early
-* leaving dirty flags set forever
-* missing dirty marks after scan/placement/removal
-* duplicating dirty state between manager and invalidation controller
-* changing flow-field refresh timing
-* changing native-extension blocker sync timing
-* changing garden rebuild timing
-* changing retarget timing
-* changing route invalidation timing
-* adding broad scans in hot paths
-* adding extra per-agent work
+Does not own:
+- ...
+
+Notes:
+- ...
+
+## ServiceName
+Owns:
+- ...
+
+Does not own:
+- ...
+
+Notes:
+- ...
+```
+
+Do not add pseudo-code.
+Do not write a long essay.
+Do not document aspirational ownership as if it already exists.
+If ownership is still shared or messy, say so.
+
+If the code is clear enough without this file, skip it and report why.
+
+## Step 6: optional AGENTS.md tune-up
+
+Only if `AGENTS.md` exists and is clearly outdated or too broad, make minimal edits.
+
+Keep it short and generic.
+
+It should contain durable rules only:
+
+* do not guess; ask if unsure
+* do not run Godot/tests/builds unless explicitly authorized
+* strict GDScript typing
+* do not split files only for line count
+* preserve behavior unless requested
+* avoid hidden manager coupling when practical
+* report changed files and manual test risks
+
+Do not put task-specific extraction instructions in `AGENTS.md`.
+Do not add pseudo-code for current tasks.
+
+## Do not change
+
+Do not change:
+
+* gameplay behavior
+* public method behavior
+* signal-connected behavior
+* scene-facing method names
+* service setup order
+* day/night lifecycle order
+* spawning behavior
+* placement/removal behavior
+* garden behavior
+* retarget behavior
+* navigation behavior
+* client/merchant behavior
+* save/progression behavior
+* debug log text
+* `.tscn` files
+
+## Important Godot caution
+
+Godot may call methods dynamically through:
+
+* scenes
+* signals
+* `call(...)`
+* editor connections
+* animation tracks
+* UI scripts
+
+If unsure whether a method or wrapper is externally called, keep it and report it.
 
 ## Expected result
 
 After this pass:
 
-* map-change consequences are easier to follow
-* dirty/invalidation calls are more explicit
-* `BuildingInvalidationController` is the clear owner of dirty/invalidation orchestration
+* remaining hidden coupling is classified and reduced where safely possible
+* `BuildingManager` role is clear
+* obvious duplicate/split state is gone or reported
+* large files are justified or flagged
+* optional architecture documentation exists only if it is useful
+* optional `AGENTS.md` stays short and generic
 * behavior remains unchanged
-* no broad event system is introduced
-* no scene files are changed
-
-## If no safe cleanup is obvious
-
-Do not force changes.
-
-Report:
-
-* current consequence flow
-* what is already clean enough
-* what remains messy but risky to change
-* recommended next pass
 
 ## Final report
 
 Report:
 
 * files changed
-* consequence calls audited
-* invalidation methods added or reused
-* scattered dirty writes removed, if any
-* hidden manager calls removed, if any
-* consequence timing intentionally preserved
-* risky areas left unchanged
+* remaining `_manager.call/get/set/has_method` counts by file
+* hidden coupling removed, if any
+* remaining hidden coupling intentionally kept and why
+* `BuildingManager` role assessment
+* state ownership issues fixed or left for later
+* large file/cohesion review
+* architecture doc created/updated/skipped
+* `AGENTS.md` updated/skipped
+* behavior intentionally preserved
 * manual test risks
-* recommended next pass
+* whether the codebase is now clean enough to stop refactoring for cleanliness
