@@ -11,12 +11,12 @@ class_name BuildModeStateController
 # facing constants) live in BuildDirectionRules; this controller only owns the mutable
 # current _build_direction and the composed selected-placeable query.
 
-var _manager: Node
+var _manager: BuildSystem
 
 var _build_direction: Vector2i = BuildDirectionRules.DIRECTION_RIGHT
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildSystem) -> void:
 	_manager = manager
 
 
@@ -39,7 +39,7 @@ func rotate_selected_build_direction(reverse: bool = false) -> bool:
 # The placeable currently selected in game_ui, with the active build direction injected
 # for directional buildables. Returns {} when nothing is selected or placement is disabled.
 func selected_placeable_def() -> Dictionary:
-	var game_ui: Object = _manager.get("game_ui") as Object
+	var game_ui: Object = _manager.game_ui
 	if game_ui == null or not game_ui.has_method("get_selected_build_item_id"):
 		return {}
 	if _placement_disabled():
@@ -55,8 +55,8 @@ func selected_placeable_def() -> Dictionary:
 # --- BuildSystem wrappers -----------------------------------------------------
 
 func _placement_disabled() -> bool:
-	return bool(_manager.call("_placement_disabled"))
+	return _manager._placement_disabled()
 
 
 func _clear_hover() -> void:
-	_manager.call("_clear_hover")
+	_manager._clear_hover()

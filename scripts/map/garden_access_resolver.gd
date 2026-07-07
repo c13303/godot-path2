@@ -29,7 +29,7 @@ const ACCESS_BLOCKED_CARDINAL_PENALTY: float = 2.0
 const ACCESS_ENTER_DEAD_CONTINUATION_PENALTY: float = 30.0
 const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 
-var _manager: Node
+var _manager: BuildingManager
 
 # Memoizes the expensive scored garden-entry selection (nearest_garden_entry =
 # _select_scored_garden_entry in "enter" mode, no escape group). The chosen entry
@@ -53,7 +53,7 @@ var _garden_entry_resolve_hits: int = 0
 var _garden_entry_resolve_misses: int = 0
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -408,19 +408,19 @@ func _garden_entry_resolve_cache_key(garden_id: int, from_cell: Vector2i) -> Str
 # ---------------------------------------------------------------------------
 
 func _gardens() -> Dictionary:
-	return _manager.call("_get_gardens") as Dictionary
+	return _manager.get_gardens()
 
 func _is_walkable(cell: Vector2i) -> bool:
-	return bool(_manager.call("_is_walkable", cell))
+	return _manager.is_walkable_cell(cell)
 
 func _cell_center(cell: Vector2i) -> Vector2:
-	return _manager.call("_cell_center", cell) as Vector2
+	return _manager.cell_center(cell)
 
 func _flow() -> Node:
-	return _manager.get("flow") as Node
+	return _manager.get_flow()
 
 func _spawner_route_service() -> SpawnerRouteService:
-	return _manager.get("_spawner_route_service") as SpawnerRouteService
+	return _manager.get_spawner_route_service()
 
 func _debug_logs() -> bool:
-	return bool(_manager.get("debug_logs"))
+	return _manager.debug_logs_enabled()

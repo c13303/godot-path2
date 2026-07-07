@@ -11,10 +11,10 @@ class_name RunCompletionController
 # the reservoir still alive. Victory is latched on GameState.is_run_won, polled by the
 # victory modal.
 
-var _manager: Node
+var _manager: BuildingManager
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -32,7 +32,7 @@ func is_final_client_day() -> bool:
 	var nights: int = _total_night_count()
 	if nights <= 0:
 		return false
-	var prog: Node = _manager.call("_get_progression") as Node
+	var prog: Node = _manager.get_progression()
 	if prog == null:
 		return false
 	return int(prog.call("get_value", &"nDays")) > nights
@@ -76,7 +76,7 @@ func declare_victory() -> void:
 
 
 func _total_night_count() -> int:
-	var config: SpawnPlaylistConfigService = _manager.get("_spawn_playlist_config") as SpawnPlaylistConfigService
+	var config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
 	if config == null:
 		return 0
 	return config.total_night_count()

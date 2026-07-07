@@ -13,8 +13,7 @@ class_name SpawnerGardenSelectionService
 # edible / target-for-kind gating, the route-ready checks, the distance scoring, the
 # empty-garden draining, and the stale-garden fall-through are preserved exactly as
 # they were inline in BuildingManager. BuildingManager keeps thin compatibility
-# wrappers so existing callers (including _manager.call(...) from other controllers)
-# continue to work unchanged.
+# wrappers so older dynamic callers can continue to work unchanged.
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MONSTER: StringName = &"monster"

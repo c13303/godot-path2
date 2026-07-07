@@ -343,6 +343,9 @@ func _get_progression() -> Node:
 		_progression = scene.get_node_or_null("progression")
 	return _progression
 
+func get_progression() -> Node:
+	return _get_progression()
+
 func get_plant_manager() -> Node:
 	return plant_manager
 
@@ -1381,6 +1384,14 @@ func get_building_debug_telemetry() -> BuildingDebugTelemetry:
 	return _debug_telemetry
 
 
+func get_spawner_route_service() -> SpawnerRouteService:
+	return _spawner_route_service
+
+
+func debug_logs_enabled() -> bool:
+	return debug_logs
+
+
 func get_spawners() -> Dictionary:
 	return _spawners
 
@@ -2279,6 +2290,9 @@ func _release_garden_routes(garden_id: int) -> void:
 
 func _get_gardens() -> Dictionary:
 	return _garden_topology.gardens()
+
+func get_gardens() -> Dictionary:
+	return _get_gardens()
 
 func _plant_zone_is_built() -> bool:
 	return _garden_topology.plant_zone_built()

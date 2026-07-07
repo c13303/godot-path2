@@ -60,4 +60,4 @@ func apply_client_data(agent: Node) -> void:
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager.get_building_debug_telemetry()
