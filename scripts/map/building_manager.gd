@@ -7,6 +7,8 @@ signal startup_loading_finished
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
 const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_access_resolver.gd")
 const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/agent_navigation_phase_controller.gd")
+const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_preparation_controller.gd")
+const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -170,6 +172,8 @@ var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.n
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
+var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
+var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -221,6 +225,8 @@ func _ready() -> void:
 	_building_invalidation_controller.setup(self)
 	_building_navigation_sync.setup(self)
 	_spawner_garden_selection_service.setup(self)
+	_building_preparation_controller.setup(self)
+	_agent_spawn_service.setup(self)
 	_spawn_playlist_config.setup(self)
 	_resolve_level_layers()
 	_resolve_desire()
@@ -474,133 +480,11 @@ func _group_flow_is_ready_at_world(group_id: int, world_pos: Vector2) -> bool:
 	return _spawner_route_service.group_flow_is_ready_at_world(group_id, world_pos)
 
 func _run_night_preparation(token: int) -> void:
-	# Start on a clean frame; the mode-change input frame performs no navigation.
-	await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return
-
-	_scan_buildings()
-	_sync_flow_extra_blocking_cells()
-	_rebuild_waterpool_directional_field()
-	_building_invalidation_controller.clear_navigation_topology_dirty()
-	await get_tree().process_frame
-	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
-	if not bool(prep_result):
-		return
-	prep_result = await _build_gardens_from_plants_budgeted(token)
-	if not bool(prep_result):
-		return
-	prep_result = await _validate_gardens_budgeted(token)
-	if not bool(prep_result):
-		return
-
-	_rebuild_spawner_garden_route_cache()
-	prep_result = await _initialize_spawner_routes_for_kinds([SPAWNER_KIND_MONSTER], token)
-	if not bool(prep_result):
-		return
-
-	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_MONSTER, token)
-	if not bool(prep_result):
-		return
-
-	# Exit fields also use the native worker during preparation.
-	prep_result = await _rebuild_exit_wall_escapes_budgeted(token)
-	if not bool(prep_result):
-		return
-	await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return
-
-	var scene: Node = get_tree().current_scene
-	var fight_system: Node = scene.get_node_or_null("fightSystem") if scene else null
-	if fight_system and fight_system.has_method("prepare_night_static_colliders_budgeted"):
-		prep_result = await fight_system.call("prepare_night_static_colliders_budgeted", night_preparation_budget_ms)
-		if not bool(prep_result):
-			return
-	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
-		fight_system.call("prepare_night_static_colliders")
-
-	# Do not open the spawn gate until async work has finished. Older exported
-	# native DLLs may not expose async status methods; in that case requests are
-	# assigned synchronously by _request_group_flow_rebuild().
-	if not _flow_uses_async_requests() and not _flow_supports_sync_assign():
-		push_error("BuildingManager: FlowFieldNative cannot assign group routes; night preparation cannot spawn monsters.")
-		return
-	if _flow_uses_async_requests():
-		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-			await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return
-	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_MONSTER], true):
-		push_error("BuildingManager: night flow-field preparation completed with an unusable route")
-		return
-
-	_night_preparing = false
-	_night_preparation_ready = true
-	_seed_merchant.start_pending_leave_if_needed()
-	CppDebugOptions.dlog("ff & gardens computed, monster night starts now")
+	await _building_preparation_controller.run_night_preparation(token)
 
 
 func _run_client_preparation(token: int) -> void:
-	await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return
-
-	_scan_buildings()
-	_sync_flow_extra_blocking_cells()
-	_rebuild_waterpool_directional_field()
-	_building_invalidation_controller.clear_navigation_topology_dirty()
-	await get_tree().process_frame
-	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-	prep_result = await _build_gardens_from_plants_budgeted(token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-	prep_result = await _validate_gardens_budgeted(token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-
-	_rebuild_spawner_garden_route_cache()
-	prep_result = await _initialize_spawner_routes_for_kinds([SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT], token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-
-	prep_result = await _prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_CLIENT, token)
-	if not bool(prep_result):
-		_abort_client_preparation(token)
-		return
-
-	var scene: Node = get_tree().current_scene
-	var fight_system: Node = scene.get_node_or_null("fightSystem") if scene else null
-	if fight_system and fight_system.has_method("prepare_night_static_colliders_budgeted"):
-		prep_result = await fight_system.call("prepare_night_static_colliders_budgeted", night_preparation_budget_ms)
-		if not bool(prep_result):
-			_abort_client_preparation(token)
-			return
-	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
-		fight_system.call("prepare_night_static_colliders")
-
-	if not _flow_uses_async_requests() and not _flow_supports_sync_assign():
-		push_error("BuildingManager: FlowFieldNative cannot assign group routes; client preparation cannot spawn clients.")
-		_abort_client_preparation(token)
-		return
-	if _flow_uses_async_requests():
-		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-			await get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return
-	if not _night_flow_fields_are_ready_for_kinds([SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT], false):
-		push_error("BuildingManager: client flow-field preparation completed with an unusable route")
-		_abort_client_preparation(token)
-		return
-
-	_client_preparing = false
-	_client_sale.activate()
+	await _building_preparation_controller.run_client_preparation(token)
 
 
 func _abort_client_preparation(token: int) -> void:
@@ -1666,124 +1550,7 @@ func spawn_client_from_spawner(spawner_cell: Vector2i) -> bool:
 
 
 func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
-	var agent_scene: PackedScene = _resolve_monster_scene(monster_type)
-	if agent_scene == null:
-		return false
-	# Select target garden: iterates all gardens, checks targetable / edible plants,
-	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
-	var t_sel: int = Time.get_ticks_usec()
-	var garden_id: int = _select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _select_garden_for_spawner(spawner_cell)
-	var sel_us: int = Time.get_ticks_usec() - t_sel
-	if _debug_telemetry.over_garden_threshold_us(sel_us):
-		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
-			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _garden_topology.gardens().size(), garden_id])
-	if garden_id <= 0:
-		_debug_telemetry.log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
-		return false
-
-	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute
-	# the nearest garden entry. Hit/miss counters live in the called function.
-	var t_route: int = Time.get_ticks_usec()
-	var route: Dictionary = _get_or_create_spawner_garden_route(spawner_cell, garden_id)
-	var route_us: int = Time.get_ticks_usec() - t_route
-	if _debug_telemetry.over_garden_threshold_us(route_us):
-		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
-			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
-	if not bool(route.get("ready", false)):
-		_debug_telemetry.log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
-		return false
-	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-	if entry_cell == INVALID_CELL:
-		_debug_telemetry.log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
-		return false
-
-	if not _is_sane_cell(entry_cell):
-		_debug_telemetry.log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
-		return false
-
-	# Occupied-cell scan: walks the main_chars/monsters/player scene groups every
-	# spawn. Grows with active unit count.
-	var t_occ: int = Time.get_ticks_usec()
-	var occupied: Array[Vector2i] = _occupied_cells()
-	var occ_us: int = Time.get_ticks_usec() - t_occ
-	if _debug_telemetry.over_garden_threshold_us(occ_us):
-		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
-			"spawner_cell=%s occupied=%d" % [str(spawner_cell), occupied.size()])
-
-	# Free-cell search: spirals out from the spawner doing per-cell walkable/wall
-	# (TileMap) lookups until a free cell is found. Can spike when the spawner is
-	# boxed in.
-	var t_free: int = Time.get_ticks_usec()
-	var spawn_cell: Vector2i = _find_free_cell_near(spawner_cell, occupied)
-	var free_us: int = Time.get_ticks_usec() - t_free
-	if _debug_telemetry.over_garden_threshold_us(free_us):
-		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
-			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
-	if spawn_cell == INVALID_CELL or not _is_sane_cell(spawn_cell):
-		_debug_telemetry.log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
-		return false
-
-	# Instantiate + add_child + group registration of the agent scene.
-	var t_inst: int = Time.get_ticks_usec()
-	var agent: Node2D = agent_scene.instantiate() as Node2D
-	var parent: Node = parent_for_agents if parent_for_agents else get_tree().current_scene
-	parent.add_child(agent)
-	agent.global_position = _cell_center(spawn_cell)
-	agent.z_index = int(agent.global_position.y)
-	if agent_kind == SPAWNER_KIND_CLIENT:
-		agent.add_to_group("clients")
-		_register_desire_agent(agent, &"clients")
-		_apply_client_data(agent)
-	else:
-		agent.add_to_group("monsters")
-		_register_desire_agent(agent, &"monsters")
-		# Apply the monster bible entry (sprite + health + speed/inertia metas)
-		# before the agent is registered with the native manager, which reads the
-		# metas in spawn_agent.
-		_apply_monster_data(agent, monster_type)
-	agent.set_meta("agent_kind", agent_kind)
-	var inst_us: int = Time.get_ticks_usec() - t_inst
-	if _debug_telemetry.over_garden_threshold_us(inst_us):
-		_debug_telemetry.warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,
-			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
-
-	if agent_manager and agent_manager.has_method("spawn_agent"):
-		# Register the agent with the nav/agent manager (flowfield/pathfinder side).
-		var t_reg: int = Time.get_ticks_usec()
-		var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
-		agent.set("nav_id", nav_id)
-		if agent_manager.has_method("set_agent_never_rest"):
-			agent_manager.call("set_agent_never_rest", nav_id, true)
-		var reg_us: int = Time.get_ticks_usec() - t_reg
-		if _debug_telemetry.over_garden_threshold_us(reg_us):
-			_debug_telemetry.warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
-				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
-
-		# Assign the garden-entry route: attaches the monster to the entry flow
-		# group. Usually the heaviest leg when the route/flow is first created.
-		var t_assign: int = Time.get_ticks_usec()
-		var assigned: bool = _assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
-		var assign_us: int = Time.get_ticks_usec() - t_assign
-		if _debug_telemetry.over_garden_threshold_us(assign_us):
-			_debug_telemetry.warn_garden_task_lag_us("_process_spawners.assign_route", assign_us,
-				"spawner_cell=%s garden=%d entry=%s assigned=%s" % [
-					str(spawner_cell), garden_id, str(entry_cell), str(assigned)])
-		if not assigned:
-			if agent_manager.has_method("unregister_agent"):
-				agent_manager.call("unregister_agent", nav_id)
-			var failed_group: StringName = &"clients" if agent_kind == SPAWNER_KIND_CLIENT else &"monsters"
-			_unregister_desire_agent(agent)
-			agent.remove_from_group(failed_group)
-			agent.queue_free()
-			_debug_telemetry.log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])
-			return false
-		_spawn_tick_controller.increment_assigned_count()
-		var kind_label: String = "client" if agent_kind == SPAWNER_KIND_CLIENT else "monster"
-		_debug_telemetry.log("spawned %s nav_id=%d spawn_cell=%s entry=%s spawner=%s garden=%d" % [
-			kind_label, nav_id, spawn_cell, entry_cell, spawner_cell, garden_id
-		])
-
-	return true
+	return _agent_spawn_service.spawn_agent_from(spawner_cell, monster_type, agent_kind)
 
 
 # Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
