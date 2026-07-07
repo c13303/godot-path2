@@ -1,228 +1,193 @@
-Task: reduce scripts/map/building_manager.gd by extracting level spawn playlist setup/validation into a dedicated RefCounted service.
+Task: batched runtime-agent cleanup pass to make the map/building codebase easier for coding agents and humans to maintain.
 
-Context:
-BuildingManager is still too large. Previous extraction passes have been tested. The next extraction should move level spawn playlist loading and validation out of BuildingManager while preserving behavior exactly.
+Targets:
 
-Create:
-
-scripts/map/spawn_playlist_config_service.gd
-
-with:
-
-extends RefCounted
-class_name SpawnPlaylistConfigService
+* `scripts/map/agent_navigation_phase_controller.gd`
+* `scripts/map/garden_retarget_controller.gd`
+* `scripts/map/agent_suspend_service.gd`
+* `scripts/map/monster_death_controller.gd`
+* `scripts/map/drowning_controller.gd`
+* `scripts/map/turret_eating_controller.gd`
+* minimal related changes in `scripts/map/building_manager.gd`
 
 Goal:
-Move spawn playlist configuration, spawner-binding validation, playlist enable/invalid state, and valid-monster-type lookup out of BuildingManager.
+Reduce hidden runtime-agent coupling with `BuildingManager`, without changing gameplay behavior.
 
-Extract these responsibilities from BuildingManager:
+This is a cleanup pass, not a feature pass.
 
-- loading the level spawn config from the current scene
-- storing the loaded playlist
-- storing level spawner bindings
-- storing loaded level scene path
-- storing monster drop seed chance percent
-- validating spawner bindings after spawner scan
-- configuring SpawnPlaylistController
-- maintaining playlist enabled/invalid/validation-attempted flags
-- maintaining spawner_bindings_by_id
-- valid monster type dictionary construction
-- resolving current playlist night index from progression, if it is only used for playlist setup
+Do not optimize.
+Do not move broad behavior.
+Do not run Godot, tests, builds, compilation, or exports.
 
-Likely methods to extract:
+Problem:
+Runtime agent behavior is spread across extracted services, but `AgentNavigationPhaseController` still calls many `BuildingManager` private methods through `_manager.call(...)`.
 
-- _load_level_spawn_config
-- _validate_playlist_after_spawner_scan
-- _valid_monster_types
-- _get_playlist_night_index_from_progression
+This makes future agent edits risky because the real dependencies are hidden.
 
-Also move these state vars if they are only used by this playlist setup/validation responsibility:
+Main objective:
+Make runtime agent dependencies clearer by replacing safe `_manager.call(...)`, `_manager.get(...)`, and `_manager.has_method(...)` usages with explicit direct calls, cached dependencies, or small typed accessors.
 
-- _level_spawn_playlist
-- _level_spawner_bindings
-- _loaded_level_scene_path
-- _monster_drop_seed_chance_percent
-- _spawner_bindings_by_id
-- _playlist_spawning_enabled
-- _playlist_spawning_invalid
-- _playlist_validation_attempted
-- _current_playlist_night_index
+Focus especially on `agent_navigation_phase_controller.gd`, because it currently has the most hidden coupling.
 
-If some of these vars are still read directly by unrelated code, either:
-1. move the state and expose accessors on SpawnPlaylistConfigService, or
-2. keep the state in BuildingManager and let the service operate through manager accessors.
+Before editing, search inside the target files for:
 
-Prefer moving the state if it keeps ownership clean without broad call-site churn.
+* `_manager.call(`
+* `_manager.get(`
+* `_manager.has_method(`
+* `_manager.set(`
 
-Do not extract SpawnPlaylistController itself.
-Do not change LevelSpawnPlaylist.
-Do not change LevelSpawnConfigLoader.
-Do not change spawn orchestration.
-Do not change spawn tick processing.
-Do not change spawner scanning.
-Do not change monster spawning.
-Do not change progression logic beyond delegating the current existing lookup.
+Classify each usage as:
 
-Architecture:
-Follow the existing RefCounted service/controller pattern.
+* manager wrapper around an existing service
+* manager state access
+* manager method call
+* dependency lookup
+* compatibility/safety check
+* unclear / risky
 
-The new service should keep a manager reference:
+Clean the safest groups first.
 
-var _manager: Node
+Preferred cleanup order:
 
-func setup(manager: Node) -> void:
-	_manager = manager
+1. Replace calls to `BuildingManager` wrappers that simply forward to already-existing services.
 
-Suggested public API:
+For example, if `BuildingManager._find_path_in_zone(...)` only forwards to `BuildingPathService`, prefer making the dependency explicit and calling the service directly.
 
-func setup(manager: Node) -> void
-func load_level_spawn_config() -> void
-func validate_after_spawner_scan() -> void
-func get_playlist_night_index_from_progression() -> int
+2. Cache stable service dependencies during `setup(...)` when safe.
 
-func playlist_spawning_enabled() -> bool
-func playlist_spawning_invalid() -> bool
-func playlist_validation_attempted() -> bool
-func current_playlist_night_index() -> int
-func set_current_playlist_night_index(value: int) -> void
-func monster_drop_seed_chance_percent() -> int
-func spawner_bindings_by_id() -> Dictionary
-func loaded_level_scene_path() -> String
+Likely useful dependencies for `AgentNavigationPhaseController`:
 
-Adjust names/signatures only if the existing code makes another shape cleaner. Preserve behavior over preferred API shape.
+* `GardenTopologyService`
+* `SpawnerRouteService`
+* `GardenRetargetController`
+* `BuildingPathService`
+* `BuildingDebugTelemetry`
+* `CounterStockManager`
+* `AgentDefinitionService`
+* `plant_manager`
+* `agent_manager`
+* `floorz`
+* `plantz`
 
-Integration:
-Add to BuildingManager:
+Only add dependencies that are actually needed by the existing code.
 
-var _spawn_playlist_config: SpawnPlaylistConfigService = SpawnPlaylistConfigService.new()
+3. Replace known manager method calls with direct typed manager calls only when the method clearly exists and keeping it on `BuildingManager` is intentional.
 
-In _ready(), before any call that needs loaded playlist config:
+4. Add small typed accessors on `BuildingManager` only when this avoids broad churn and makes ownership clearer.
 
-_spawn_playlist_config.setup(self)
-_spawn_playlist_config.load_level_spawn_config()
+5. Keep `_manager.call(...)` only when there is a real dynamic-call reason or replacing it would be risky.
 
-Replace the extracted methods in BuildingManager with thin compatibility wrappers:
+Do not try to remove every manager reference.
+The goal is a meaningful reduction of hidden coupling, not a perfect rewrite.
 
-func _load_level_spawn_config() -> void:
-	_spawn_playlist_config.load_level_spawn_config()
+Ownership rules:
 
-func _validate_playlist_after_spawner_scan() -> void:
-	_spawn_playlist_config.validate_after_spawner_scan()
+`AgentNavigationPhaseController` should own:
 
-func _valid_monster_types() -> Dictionary:
-	return _spawn_playlist_config.valid_monster_types()
+* runtime agent navigation phases
+* entry flow handling
+* A*-in arrival handling
+* eating phase handling
+* escape phase handling
+* client counter phase handling
+* phase dictionaries such as eating / escaping / entry-path / astar-in agents
 
-func _get_playlist_night_index_from_progression() -> int:
-	return _spawn_playlist_config.get_playlist_night_index_from_progression()
+It should not own:
 
-Keep wrappers because other code may still call these methods.
+* garden topology computation
+* spawner route creation internals
+* plant manager internals
+* counter stock storage
+* actual monster death cleanup
+* drowning/turret suspension internals
+* spawn playlist logic
+* spawn tick logic
+* build placement/removal
 
-Then update BuildingManager call sites to use either the wrappers or the service accessors consistently.
+`GardenRetargetController` should own:
 
-Important:
-If _playlist_spawning_enabled, _playlist_spawning_invalid, _playlist_validation_attempted, or _current_playlist_night_index are moved into the service, update all BuildingManager reads/writes to use service accessors.
+* retarget queues
+* stale target detection
+* plant-target reverse index
+* waiting-for-retarget state
+* retarget processing
 
-For example:
+`AgentSuspendService` should own:
 
-if _spawn_playlist_config.playlist_spawning_enabled():
-	...
+* temporary suspension/resume records for agents
 
-_spawn_playlist_config.set_current_playlist_night_index(
-	_spawn_playlist_config.get_playlist_night_index_from_progression()
-)
+`MonsterDeathController` should own:
 
-Do not keep duplicate playlist state in both BuildingManager and SpawnPlaylistConfigService.
+* monster death cleanup/drop behavior already assigned to it
 
-Dependencies:
-The service may access manager-owned dependencies through _manager.
+`DrowningController` should own:
 
-Likely dependencies:
+* drowning-specific suspension/kill behavior
 
-var spawn_playlist_controller: SpawnPlaylistController = _manager.get("_spawn_playlist_controller") as SpawnPlaylistController
-var spawners: Dictionary = _manager.get("_spawners") as Dictionary
+`TurretEatingController` should own:
 
-For progression lookup, keep the same behavior as the existing code:
+* turret-eating-specific suspension/damage behavior
 
-- use manager._get_progression(), or
-- move only the playlist-night-index method and call _manager.call("_get_progression")
+`BuildingManager` should only:
 
-Do not change the day-number modulo behavior.
+* wire runtime-agent services
+* coordinate lifecycle
+* keep compatibility wrappers when external callers may still need them
+* expose small accessors when needed
 
-Constants:
-Use the existing spawner kind constants exactly.
+Do not change:
 
-If needed, define local copies only if they are exclusively playlist-config-related:
+* monster movement behavior
+* entry flow behavior
+* A*-in behavior
+* eating behavior
+* escape behavior
+* retarget behavior
+* waiting-for-retarget behavior
+* client counter behavior
+* seed merchant escape behavior
+* drowning behavior
+* turret eating behavior
+* monster death behavior
+* agent spawn/despawn behavior
+* garden targeting behavior
+* route selection behavior
+* bottleneck behavior
+* debug log text
+* public method names used by other files
+* `.tscn` files
 
-const SPAWNER_KIND_MONSTER: StringName = &"monster"
+Important regression risks:
 
-Do not move unrelated spawner constants unless they are part of this service’s ownership.
+* do not change when agents enter eating state
+* do not change when agents switch to escape flow
+* do not change direct eat-exit flow-field behavior
+* do not change garden retarget timing
+* do not change agent unregister timing
+* do not change plant consumption timing
+* do not change client payment/counter behavior
+* do not change seed merchant pause/escape handling
+* do not add broad per-agent scans
+* do not add extra hot-path work
 
-Behavior preservation requirements:
-- Do not change when playlist validation is attempted.
-- Do not change validation failure behavior.
-- Do not change validation error messages.
-- Do not change duplicate binding detection.
-- Do not change empty binding detection.
-- Do not change null binding detection.
-- Do not change empty spawner_id detection.
-- Do not change duplicate spawner_id behavior.
-- Do not change duplicate cell behavior.
-- Do not change filtering to monster bindings only.
-- Do not change valid monster type detection.
-- Do not change calls to SpawnPlaylistController.configure.
-- Do not change playlist enabled/invalid flags.
-- Do not change fallback spawning behavior.
-- Do not change debug log text.
-- Do not change current night index calculation.
-- Do not change monster_drop_seed_chance_percent behavior.
+Keep compatibility wrappers in `BuildingManager` if external callers may still need them.
 
-Search all references before editing:
-
-- _load_level_spawn_config(
-- _validate_playlist_after_spawner_scan(
-- _valid_monster_types(
-- _get_playlist_night_index_from_progression(
-- _level_spawn_playlist
-- _level_spawner_bindings
-- _loaded_level_scene_path
-- _monster_drop_seed_chance_percent
-- _spawner_bindings_by_id
-- _playlist_spawning_enabled
-- _playlist_spawning_invalid
-- _playlist_validation_attempted
-- _current_playlist_night_index
+If a hidden manager access cannot be safely replaced, leave it unchanged and explain why in the final report.
 
 Expected result:
-- building_manager.gd loses the spawn playlist loading/validation block.
-- SpawnPlaylistConfigService owns playlist config state and validation.
-- BuildingManager keeps only wrappers and high-level night/client orchestration.
-- SpawnPlaylistController remains unchanged.
-- SpawnTickController remains unchanged.
-- Existing spawning behavior remains unchanged.
-- No .tscn changes required.
-- No gameplay behavior changes.
 
-Regression risks to avoid:
-1. Do not accidentally validate before _scan_buildings has populated _spawners.
-2. Do not accidentally reset validation-attempted every scan.
-3. Do not accidentally enable playlist spawning after validation errors.
-4. Do not accidentally include client or merchant bindings in monster playlist validation.
-5. Do not change current night modulo behavior.
-6. Do not duplicate _spawner_bindings_by_id state.
-7. Do not silently swallow validation errors.
-8. Do not change debug/error strings unless absolutely necessary.
-9. Do not modify agent spawning.
-10. Do not modify spawner scan service.
-11. Do not modify spawn tick processing.
-12. Do not compile or run tests; I will do it.
+* `agent_navigation_phase_controller.gd` has significantly fewer `_manager.call(...)` usages
+* runtime-agent dependencies are easier to see from `setup(...)`
+* behavior is unchanged
+* `BuildingManager` may gain small typed accessors if needed
+* no scene files are changed
 
-Non-goals:
-Do not refactor LevelSpawnPlaylist.
-Do not refactor LevelSpawnConfigLoader.
-Do not refactor SpawnPlaylistController.
-Do not refactor SpawnTickController.
-Do not refactor spawner scanning.
-Do not refactor night preparation.
-Do not refactor spawn route creation.
-Do not optimize behavior.
-Do not perform unrelated cleanup.
+Final report:
+
+* files changed
+* `_manager.call/get/has_method/set` usages removed per file
+* dependencies cached or added per file
+* usages intentionally left unchanged and why
+* any new accessors/wrappers added to `BuildingManager`
+* behavior intentionally preserved
+* manual test risks

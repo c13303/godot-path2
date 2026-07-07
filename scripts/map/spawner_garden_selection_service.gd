@@ -169,6 +169,23 @@ func select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fa
 	return best_spawner_cell
 
 
+func nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist_sq: int = 2147483647
+	var spawners: Dictionary = _spawners()
+	var spawner_kind_by_cell: Dictionary = _spawner_kind_by_cell()
+	for raw_spawner_cell in spawners.keys():
+		var spawner_cell: Vector2i = raw_spawner_cell
+		if (spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
+			continue
+		var delta: Vector2i = spawner_cell - from_cell
+		var dist_sq: int = delta.x * delta.x + delta.y * delta.y
+		if dist_sq < best_dist_sq:
+			best_dist_sq = dist_sq
+			best_cell = spawner_cell
+	return best_cell
+
+
 func _garden_topology() -> Object:
 	return _manager.get("_garden_topology") as Object
 

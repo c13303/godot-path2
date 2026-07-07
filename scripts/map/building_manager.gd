@@ -2053,18 +2053,7 @@ func _monster_death_drop_seed_chance_percent() -> int:
 	return _spawn_playlist_config.monster_drop_seed_chance_percent()
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
-	var best_cell: Vector2i = INVALID_CELL
-	var best_dist_sq: int = 2147483647
-	for raw_spawner_cell in _spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell
-		if (_spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != SPAWNER_KIND_MONSTER:
-			continue
-		var d: Vector2i = spawner_cell - from_cell
-		var dist_sq: int = d.x * d.x + d.y * d.y
-		if dist_sq < best_dist_sq:
-			best_dist_sq = dist_sq
-			best_cell = spawner_cell
-	return best_cell
+	return _spawner_garden_selection_service.nearest_spawner_cell(from_cell)
 
 func _agent_reached_cell(agent: Node2D, cell: Vector2i) -> bool:
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
