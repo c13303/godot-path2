@@ -30,10 +30,28 @@ func clear_hostile(nav_id: int) -> void:
 	_hostile_clients.erase(nav_id)
 
 
+func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
+	var best: Node2D = null
+	var best_distance: float = INF
+	for reservoir_node: Node in _manager.get_tree().get_nodes_in_group("reservoirs"):
+		var reservoir: Node2D = reservoir_node as Node2D
+		if reservoir == null or not is_instance_valid(reservoir) or reservoir_is_destroyed(reservoir):
+			continue
+		var distance: float = from_world.distance_squared_to(reservoir.global_position) if use_distance else 0.0
+		if best == null or distance < best_distance:
+			best = reservoir
+			best_distance = distance
+	return best
+
+
+func reservoir_is_destroyed(reservoir: Node) -> bool:
+	return reservoir != null and reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed"))
+
+
 func begin() -> void:
 	if _active:
 		return
-	var target_reservoir: Node2D = _manager.nearest_live_reservoir(Vector2.ZERO, false)
+	var target_reservoir: Node2D = nearest_live_reservoir(Vector2.ZERO, false)
 	if target_reservoir == null:
 		push_warning("BuildingManager: client tantrum cannot start because no reservoir exists.")
 		return
@@ -94,8 +112,8 @@ func process(delta: float) -> void:
 			_hostile_clients.erase(nav_id)
 			continue
 		var target: Node2D = data.get("target", null) as Node2D
-		if target == null or not is_instance_valid(target) or _manager.reservoir_is_destroyed(target):
-			target = _manager.nearest_live_reservoir(client.global_position, true)
+		if target == null or not is_instance_valid(target) or reservoir_is_destroyed(target):
+			target = nearest_live_reservoir(client.global_position, true)
 			if target == null:
 				continue
 			data["target"] = target

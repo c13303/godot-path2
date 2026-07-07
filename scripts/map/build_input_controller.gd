@@ -2,17 +2,34 @@ extends RefCounted
 class_name BuildInputController
 
 # Reads raw mouse/keyboard build input, interprets it in the current build mode, and
-# dispatches to BuildSystem's preview, drag, placement, and removal wrappers.
+# dispatches to the preview, drag, placement, and removal owners.
 #
 # BuildSystem keeps build-mode state, tool/item selection, the preview/drag/placement/
 # removal owners, and the gamepad (pad_*) public API. This controller owns no gameplay
-# state - only input routing - and reaches everything through narrow BuildSystem wrappers.
+# state - only input routing - and uses explicit collaborators for the actions it routes.
 
-var _manager: Node
+var _manager: BuildSystem
+var _drag_controller: BuildDragController
+var _build_preview: BuildPreviewController
+var _placement_service: BuildPlacementService
+var _build_mode_state: BuildModeStateController
+var _game_ui: CanvasLayer
 
 
-func setup(manager: Node) -> void:
+func setup(
+	manager: BuildSystem,
+	drag_controller: BuildDragController,
+	build_preview: BuildPreviewController,
+	placement_service: BuildPlacementService,
+	build_mode_state: BuildModeStateController,
+	game_ui: CanvasLayer
+) -> void:
 	_manager = manager
+	_drag_controller = drag_controller
+	_build_preview = build_preview
+	_placement_service = placement_service
+	_build_mode_state = build_mode_state
+	_game_ui = game_ui
 
 
 func process(delta: float) -> void:
@@ -126,99 +143,99 @@ func _viewport() -> Viewport:
 	return _manager.get_viewport()
 
 
-# --- BuildSystem wrappers -----------------------------------------------------
+# --- Routed actions / state queries -------------------------------------------
 
 func _tick_drag(delta: float) -> void:
-	_manager.call("_tick_drag", delta)
+	_drag_controller.process(delta)
 
 
 func _is_remove_drag_active() -> bool:
-	return bool(_manager.call("_is_remove_drag_active"))
+	return _drag_controller.is_remove_drag_active()
 
 
 func _is_build_drag_active() -> bool:
-	return bool(_manager.call("_is_build_drag_active"))
+	return _drag_controller.is_build_drag_active()
 
 
 func _update_build_drag(placeable_def: Dictionary) -> void:
-	_manager.call("_update_build_drag", placeable_def)
+	_drag_controller.update_build_drag(placeable_def)
 
 
 func _update_remove_drag() -> void:
-	_manager.call("_update_remove_drag")
+	_drag_controller.update_remove_drag()
 
 
 func _set_keyboard_unbuild_held(held: bool) -> void:
-	_manager.call("_set_keyboard_unbuild_held", held)
+	_drag_controller.set_keyboard_unbuild_held(held)
 
 
 func _start_keyboard_unbuild_at_hover() -> void:
-	_manager.call("_start_keyboard_unbuild_at_hover")
+	_drag_controller.start_keyboard_unbuild_at_hover()
 
 
 func _cancel_removal() -> void:
-	_manager.call("_cancel_removal")
+	_drag_controller.cancel_removal()
 
 
 func _selected_placeable_def() -> Dictionary:
-	return _manager.call("_selected_placeable_def") as Dictionary
+	return _build_mode_state.selected_placeable_def()
 
 
 func _placement_disabled() -> bool:
-	return bool(_manager.call("_placement_disabled"))
+	return _manager._placement_disabled()
 
 
 func _is_inventory_open() -> bool:
-	return bool(_manager.call("_is_inventory_open"))
+	return _game_ui and _game_ui.has_method("is_inventory_open") and bool(_game_ui.call("is_inventory_open"))
 
 
 func _hovered_cell() -> Vector2i:
-	return _manager.call("_hovered_cell") as Vector2i
+	return _build_preview.hovered_cell()
 
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
-	return _manager.call("_atlas_coords_from_placeable", placeable_def) as Vector2i
+	return _placement_service.atlas_coords_from_placeable(placeable_def)
 
 
 func _can_afford(item_id: String) -> bool:
-	return bool(_manager.call("_can_afford", item_id))
+	return _placement_service.can_afford(item_id)
 
 
 func _preview_matches_hover(cell: Vector2i, atlas_coords: Vector2i, item_id: String) -> bool:
-	return bool(_manager.call("_preview_matches_hover", cell, atlas_coords, item_id))
+	return _build_preview.matches_hover(cell, atlas_coords, item_id)
 
 
 func _refresh_preview_visual_state(placeable_def: Dictionary) -> void:
-	_manager.call("_refresh_preview_visual_state", placeable_def)
+	_build_preview.refresh_preview_visual_state(placeable_def)
 
 
 func _clear_hover() -> void:
-	_manager.call("_clear_hover")
+	_build_preview.clear_hover()
 
 
 func _set_preview_hover(cell: Vector2i, atlas_coords: Vector2i) -> void:
-	_manager.call("_set_preview_hover", cell, atlas_coords)
+	_build_preview.set_hover(cell, atlas_coords)
 
 
 func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, placeable_def: Dictionary) -> void:
-	_manager.call("_draw_preview", cell, atlas_coords, item_id, placeable_def)
+	_build_preview.draw_preview(cell, atlas_coords, item_id, placeable_def)
 
 
 func _rotate_selected_build_direction(reverse: bool = false) -> bool:
-	return bool(_manager.call("rotate_selected_build_direction", reverse))
+	return _build_mode_state.rotate_selected_build_direction(reverse)
 
 
 func _finish_drag_build() -> void:
-	_manager.call("_finish_drag_build")
+	_drag_controller.finish_drag_build()
 
 
 func _is_drag_buildable(placeable_def: Dictionary) -> bool:
-	return bool(_manager.call("_is_drag_buildable", placeable_def))
+	return bool(placeable_def.get("drag_buildable", true))
 
 
 func _start_drag_build(placeable_def: Dictionary) -> void:
-	_manager.call("_start_drag_build", placeable_def)
+	_drag_controller.start_drag_build(placeable_def)
 
 
 func _apply_placeable(placeable_def: Dictionary) -> void:
-	_manager.call("_apply_placeable", placeable_def)
+	_placement_service.try_apply_placeable(placeable_def, _hovered_cell())

@@ -76,7 +76,14 @@ func _ready() -> void:
 	_removal_service.setup(self)
 	_build_preview.setup(self)
 	_drag_controller.setup(self)
-	_input_controller.setup(self)
+	_input_controller.setup(
+		self,
+		_drag_controller,
+		_build_preview,
+		_placement_service,
+		_build_mode_state,
+		game_ui
+	)
 	_build_mode_state.setup(self)
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()

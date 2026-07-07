@@ -347,11 +347,48 @@ func _get_progression() -> Node:
 func get_plant_manager() -> Node:
 	return plant_manager
 
+func _plant_manager_can_check_plants() -> bool:
+	return plant_manager != null and plant_manager.has_method("has_plant")
+
+func _plant_manager_consume_plant_cell(plant_cell: Vector2i) -> bool:
+	if plant_manager == null or not plant_manager.has_method("consume_plant"):
+		return false
+	plant_manager.call("consume_plant", plant_cell)
+	return true
+
 func get_flow() -> Node:
 	return flow
 
 func get_agent_manager() -> Node:
 	return agent_manager
+
+func _agent_manager_can_assign_agent() -> bool:
+	return agent_manager != null and agent_manager.has_method("assign_agent")
+
+func _agent_manager_detach_agent_flow(nav_id: int) -> void:
+	if agent_manager != null and agent_manager.has_method("detach_agent_flow"):
+		agent_manager.call("detach_agent_flow", nav_id)
+
+func _agent_manager_detach_agent_path(nav_id: int) -> void:
+	if agent_manager != null and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", nav_id)
+
+func _agent_manager_assign_agent(agent: Node2D, group_id: int) -> void:
+	if agent_manager != null and agent_manager.has_method("assign_agent"):
+		agent_manager.call("assign_agent", agent, group_id)
+
+func _agent_manager_assign_agent_path(nav_id: int, path_world: PackedVector2Array) -> void:
+	if agent_manager != null and agent_manager.has_method("assign_agent_path"):
+		agent_manager.call("assign_agent_path", nav_id, path_world)
+
+func _agent_manager_agent_path_arrived(nav_id: int) -> bool:
+	if agent_manager == null or not agent_manager.has_method("agent_path_arrived"):
+		return false
+	return bool(agent_manager.call("agent_path_arrived", nav_id))
+
+func _agent_manager_set_agent_never_rest(nav_id: int, value: bool) -> void:
+	if agent_manager != null and agent_manager.has_method("set_agent_never_rest"):
+		agent_manager.call("set_agent_never_rest", nav_id, value)
 
 func registered_spawner_count() -> int:
 	return _spawners.size()
@@ -1844,17 +1881,7 @@ func _try_client_early_counter_fetch(agent: Node2D) -> bool:
 
 
 func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
-	var best: Node2D = null
-	var best_distance: float = INF
-	for reservoir_node: Node in get_tree().get_nodes_in_group("reservoirs"):
-		var reservoir: Node2D = reservoir_node as Node2D
-		if reservoir == null or not is_instance_valid(reservoir) or reservoir_is_destroyed(reservoir):
-			continue
-		var distance: float = from_world.distance_squared_to(reservoir.global_position) if use_distance else 0.0
-		if best == null or distance < best_distance:
-			best = reservoir
-			best_distance = distance
-	return best
+	return _client_tantrum.nearest_live_reservoir(from_world, use_distance)
 
 
 func _nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
@@ -1862,7 +1889,7 @@ func _nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
 
 
 func reservoir_is_destroyed(reservoir: Node) -> bool:
-	return reservoir != null and reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed"))
+	return _client_tantrum.reservoir_is_destroyed(reservoir)
 
 
 func _reservoir_is_destroyed(reservoir: Node) -> bool:

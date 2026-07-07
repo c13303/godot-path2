@@ -6,11 +6,31 @@ class_name BuildRemovalService
 
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
 
-var _manager: Node
+var _manager: BuildSystem
+var _wallz_layer: TileMapLayer
+var _plantz_layer: TileMapLayer
+var _traversable_buildings_layer: TileMapLayer
+var _blocking_buildings_layer: TileMapLayer
+var _fences_layer: TileMapLayer
+var _previewbuild_layer: TileMapLayer
+var _plant_manager_node: Node
+var _building_object_manager_node: Node
+var _reservoir_system_node: Node
+var _game_ui_layer: CanvasLayer
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildSystem) -> void:
 	_manager = manager
+	_wallz_layer = manager.wallz
+	_plantz_layer = manager.plantz
+	_traversable_buildings_layer = manager.traversable_buildings
+	_blocking_buildings_layer = manager.blocking_buildings
+	_fences_layer = manager.fences
+	_previewbuild_layer = manager.previewbuild
+	_plant_manager_node = manager.plant_manager
+	_building_object_manager_node = manager.building_object_manager
+	_reservoir_system_node = manager.reservoir_system
+	_game_ui_layer = manager.game_ui
 
 
 func try_remove_at_cell(cell: Vector2i) -> bool:
@@ -154,59 +174,59 @@ func remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[D
 
 func _refresh_cell_collision(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_cell_collision", cell)
+		_manager._refresh_cell_collision(cell)
 
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_cell_terrain_speed", cell)
+		_manager._refresh_cell_terrain_speed(cell)
 
 
 func _refresh_fence_autotiles_around(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_fence_autotiles_around", cell)
+		_manager._refresh_fence_autotiles_around(cell)
 
 
 func _flush_plant_layer_visuals() -> void:
 	if _manager != null:
-		_manager.call("_flush_plant_layer_visuals")
+		_manager._flush_plant_layer_visuals()
 
 
 func _wallz() -> TileMapLayer:
-	return _manager.get("wallz") as TileMapLayer
+	return _wallz_layer
 
 
 func _plantz() -> TileMapLayer:
-	return _manager.get("plantz") as TileMapLayer
+	return _plantz_layer
 
 
 func _traversable_buildings() -> TileMapLayer:
-	return _manager.get("traversable_buildings") as TileMapLayer
+	return _traversable_buildings_layer
 
 
 func _blocking_buildings() -> TileMapLayer:
-	return _manager.get("blocking_buildings") as TileMapLayer
+	return _blocking_buildings_layer
 
 
 func _fences() -> TileMapLayer:
-	return _manager.get("fences") as TileMapLayer
+	return _fences_layer
 
 
 func _previewbuild() -> TileMapLayer:
-	return _manager.get("previewbuild") as TileMapLayer
+	return _previewbuild_layer
 
 
 func _plant_manager() -> Node:
-	return _manager.get("plant_manager") as Node
+	return _plant_manager_node
 
 
 func _building_object_manager() -> Node:
-	return _manager.get("building_object_manager") as Node
+	return _building_object_manager_node
 
 
 func _reservoir_system() -> Node:
-	return _manager.get("reservoir_system") as Node
+	return _reservoir_system_node
 
 
 func _game_ui() -> CanvasLayer:
-	return _manager.get("game_ui") as CanvasLayer
+	return _game_ui_layer

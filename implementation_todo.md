@@ -1,173 +1,179 @@
-Task: batched debug / telemetry / overlay cleanup pass to make the map/building codebase easier for coding agents and humans to maintain.
+Task: final targeted extraction pass after the `BuildingManager` responsibility review.
 
-Targets:
+Target:
 
-* `scripts/map/building_debug_telemetry.gd`
-* `scripts/map/building_debug_overlay_controller.gd`, if it exists
-* `scripts/map/garden_debug_overlay_controller.gd`, if it exists
-* `scripts/map/building_debug_options.gd`, if it exists
-* minimal related changes in `scripts/map/building_manager.gd`
+* `scripts/map/building_manager.gd`
+* one existing service/controller file, only if it is the clear owner
+* create a new service only if no existing owner fits cleanly
 
 Goal:
-Reduce hidden coupling with `BuildingManager` in debug, telemetry, and overlay code, without changing gameplay behavior.
+Move one remaining clearly misplaced responsibility out of `BuildingManager`, without changing gameplay behavior.
 
-This is a cleanup pass, not a feature pass.
+This is a targeted extraction pass, not a broad cleanup pass.
 
 Do not optimize.
-Do not move broad gameplay behavior.
+Do not extract multiple unrelated blocks.
 Do not run Godot, tests, builds, compilation, or exports.
 
-Problem:
-Debug and telemetry code should observe and report system state. It should not secretly own gameplay decisions or trigger gameplay side effects through hidden manager calls.
+## Main objective
 
-Main objective:
-Make debug/telemetry dependencies clearer where safe, while preserving behavior exactly.
+Use the previous responsibility review to choose **one** remaining block of detailed logic that clearly does not belong in `BuildingManager`.
 
-Before editing, search inside each target file for:
+Only extract if all of these are true:
 
-* `_manager.call(`
-* `_manager.get(`
-* `_manager.has_method(`
-* `_manager.set(`
+* the responsibility is cohesive
+* related methods and state are easy to identify
+* an existing service/controller clearly owns it, or a new service has an obvious narrow purpose
+* extraction does not require broad call-site churn
+* extraction does not create many new `_manager.call(...)`, `_manager.get(...)`, or `_manager.has_method(...)` usages
+* behavior can be preserved exactly
 
-Also search debug/telemetry/overlay references in `building_manager.gd`.
+If no block satisfies these conditions, do not extract. Report that no safe extraction is currently justified.
 
-Classify each usage as:
+## Good extraction candidates
 
-* manager state read
-* debug data lookup
-* gameplay method call
-* dependency lookup
-* compatibility/safety check
-* unclear / risky
+Good candidates look like:
 
-Clean only the safe ones.
+* one clear algorithm block still embedded in `BuildingManager`
+* one clear state group still living in `BuildingManager` but used mostly by one service
+* one detailed subsystem behavior that already has a matching service
+* one repeated wrapper/data-flow pattern that can be moved cleanly
 
-Preferred cleanup order:
+Examples of acceptable target shapes:
 
-1. Replace calls to `BuildingManager` wrappers that simply forward to already-existing services.
+* detailed debug overlay logic into an existing debug overlay controller
+* remaining path helper logic into `BuildingPathService`
+* remaining invalidation logic into `BuildingInvalidationController`
+* remaining placement/removal detail into `BuildPlacementService` or `BuildRemovalService`
+* remaining spawn config detail into `SpawnPlaylistConfigService`
+* remaining client/merchant/counter detail into the appropriate controller
 
-2. Cache stable debug dependencies during `setup(...)` when safe.
+## Bad extraction candidates
 
-Possible dependencies, only if already used by the current code:
+Do not extract if the block:
 
-* `GardenTopologyService`
-* `GardenRetargetController`
-* `SpawnerRouteService`
-* `AgentNavigationPhaseController`
-* `BuildingNavigationSyncService`
-* `BuildingObjectManager`
-* `CounterStockManager`
-* `agent_manager`
-* `plant_manager`
-* `floorz`
-* `plantz`
+* mixes several domains
+* needs many callbacks into `BuildingManager`
+* is mainly orchestration
+* is scene-facing lifecycle code
+* depends on unclear dynamic calls
+* would force broad rewiring across many files
+* would produce a helper service with no clear ownership
+* would only reduce line count without improving ownership
 
-3. Replace known manager method calls with direct typed calls only when the method clearly exists and keeping it on `BuildingManager` is intentional.
+## BuildingManager should keep
 
-4. Add small typed accessors on `BuildingManager` only when this avoids broad churn and makes ownership clearer.
+Keep these in `BuildingManager`:
 
-5. Keep `_manager.call(...)`, `_manager.get(...)`, `_manager.has_method(...)`, or `_manager.set(...)` when replacing it would be risky or would require broad behavior movement.
+* `_ready()` and Godot lifecycle entry points
+* service/controller construction and setup
+* high-level day/night orchestration
+* high-level map/building event dispatch
+* compatibility wrappers when external callers may need them
+* scene-facing exported references
+* methods likely called by scenes, signals, UI, animation, editor, or dynamic `call(...)`
 
-Do not try to remove every manager reference.
-The goal is meaningful coupling reduction, not a perfect rewrite.
+## Extraction rules
 
-Ownership rules:
+When extracting:
 
-`BuildingDebugTelemetry` should own:
+1. Move the behavior and its related state together when practical.
 
-* debug timing counters
-* lag detection counters
-* telemetry snapshots
-* debug logging helpers already assigned to it
-* read-only reporting of subsystem state
+2. Do not duplicate state between `BuildingManager` and the service.
 
-It should not own:
+3. If `BuildingManager` still needs the moved state, expose a small accessor on the service.
 
-* gameplay state mutation
-* garden topology computation
-* retarget processing
-* navigation phase transitions
-* placement/removal
-* spawning
-* client/merchant behavior
+4. Keep thin compatibility wrappers in `BuildingManager` for moved methods if external callers may still need them.
 
-Debug overlay controllers should own:
+5. Update internal call sites to use the clearer owner where safe.
 
-* visual debug overlays
-* overlay refresh/clear behavior
-* converting existing state into debug visuals
+6. Avoid adding hidden manager coupling to the extracted service.
 
-They should not own:
+7. Prefer explicit service dependencies or typed accessors over `_manager.call(...)`, `_manager.get(...)`, and `_manager.has_method(...)`.
 
-* gameplay rules
-* topology computation
-* retargeting decisions
-* placement/removal
-* spawn logic
-* navigation decisions
+8. Preserve method names where compatibility risk exists.
 
-Debug options should own:
+## New service rule
 
-* exported debug thresholds/options
-* debug toggles
-* debug display configuration
+Only create a new service if the responsibility has a clear narrow name and no existing service owns it.
 
-They should not own:
+A new service must follow the existing pattern:
 
-* gameplay behavior
-* telemetry processing
-* overlay drawing logic beyond configuration
+```gdscript
+extends RefCounted
+class_name ClearSpecificName
 
-`BuildingManager` should only:
+var _manager: Node
 
-* wire debug services/controllers
-* call debug lifecycle/update hooks
-* keep compatibility wrappers when external callers may need them
-* expose small accessors when needed
+func setup(manager: Node) -> void:
+	_manager = manager
+```
+
+Do not create generic names like:
+
+* `BuildingHelper`
+* `BuildingUtils`
+* `ManagerHelpers`
+* `CommonService`
+* `MiscController`
+
+## Do not change
 
 Do not change:
 
 * gameplay behavior
-* debug toggle behavior
-* lag threshold behavior
-* telemetry values
-* debug overlay visuals
-* debug overlay refresh timing
+* public method behavior
+* signal-connected behavior
+* scene-facing method names
+* service setup order
+* day/night lifecycle order
+* spawning behavior
+* placement/removal behavior
+* garden behavior
+* retarget behavior
+* navigation behavior
+* client/merchant behavior
+* save/progression behavior
 * debug log text
-* performance safeguards
-* public method names used by other files
 * `.tscn` files
 
-Important regression risks:
+## Important Godot caution
 
-* do not make debug code mutate gameplay state
-* do not change lag detection thresholds
-* do not change when debug logs are emitted
-* do not add broad scans in hot paths
-* do not add extra per-agent work
-* do not change overlay visibility behavior
-* do not change exported debug option names
+Godot code may call methods dynamically through scenes, signals, `call(...)`, editor connections, animation tracks, or UI scripts.
 
-Keep compatibility wrappers in `BuildingManager` if external callers may still need them.
+If unsure whether a method is externally called, keep a compatibility wrapper in `BuildingManager`.
 
-If a hidden manager access cannot be safely replaced, leave it unchanged and explain why in the final report.
+Do not remove methods merely because static search finds no `.gd` usage.
 
-Expected result:
+## Expected result
 
-* debug / telemetry / overlay files have fewer hidden manager calls where safe
-* debug ownership is clearer
-* behavior is unchanged
-* `BuildingManager` may gain small typed accessors if needed
-* no scene files are changed
+One of these outcomes is acceptable.
 
-Final report:
+### A. Safe extraction performed
 
+* one clearly-owned responsibility moves out of `BuildingManager`
+* related state moves with it if practical
+* `BuildingManager` keeps wrappers where needed
+* behavior remains unchanged
+
+### B. No extraction performed
+
+* no block was safe enough to extract
+* report why extraction was skipped
+* recommend the next cleanup target
+
+## Final report
+
+Report:
+
+* chosen responsibility block
+* why this block was safe to extract
 * files changed
-* `_manager.call/get/has_method/set` usages removed per file
-* dependencies cached or added per file
-* usages intentionally left unchanged and why
-* any new accessors/wrappers added to `BuildingManager`
-* debug ownership clarified per file
+* methods moved
+* state moved
+* wrappers kept in `BuildingManager`
+* internal call sites updated
+* hidden manager calls added or avoided
 * behavior intentionally preserved
 * manual test risks
+* recommended next pass
