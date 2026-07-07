@@ -124,7 +124,6 @@ var _debug_check_retarget_index: bool = false:
 		if _garden_retarget != null:
 			_garden_retarget.set_debug_check_retarget_index(value)
 var _scan_timer: float = 0.0
-var _navigation_topology_dirty: bool = true
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
@@ -480,7 +479,7 @@ func _run_night_preparation(token: int) -> void:
 	_scan_buildings()
 	_sync_flow_extra_blocking_cells()
 	_rebuild_waterpool_directional_field()
-	_navigation_topology_dirty = false
+	_building_invalidation_controller.clear_navigation_topology_dirty()
 	await get_tree().process_frame
 	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
 	if not bool(prep_result):
@@ -547,7 +546,7 @@ func _run_client_preparation(token: int) -> void:
 	_scan_buildings()
 	_sync_flow_extra_blocking_cells()
 	_rebuild_waterpool_directional_field()
-	_navigation_topology_dirty = false
+	_building_invalidation_controller.clear_navigation_topology_dirty()
 	await get_tree().process_frame
 	var prep_result: Variant = await _rebuild_walkable_map_cache_budgeted(token)
 	if not bool(prep_result):
@@ -1374,6 +1373,10 @@ func get_spawn_playlist_config() -> SpawnPlaylistConfigService:
 	return _spawn_playlist_config
 
 
+func get_building_invalidation_controller() -> BuildingInvalidationController:
+	return _building_invalidation_controller
+
+
 func client_counter_agents() -> Dictionary:
 	return _client_counter_agents
 
@@ -1500,7 +1503,7 @@ func restore_counter_stock(saved_stock: Array) -> void:
 	_counter_stock_manager.restore(saved_stock, _rose_shop_counter_cells())
 	_garden_topology.counter_access_cells().clear()
 	_garden_topology.set_plant_zone_built(false)
-	_navigation_topology_dirty = true
+	_building_invalidation_controller.mark_navigation_topology_dirty()
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:

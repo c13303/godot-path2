@@ -10,7 +10,7 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 
-var _manager: Node
+var _manager: BuildingManager
 var _tile_defs_by_atlas: Dictionary = {}
 var _last_wall_signature: int = 0
 var _last_water_signature: int = 0
@@ -18,7 +18,7 @@ var _last_blocking_signature: int = 0
 var _last_fence_signature: int = 0
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -100,7 +100,7 @@ func scan_buildings() -> void:
 			_manager.call("_remove_missing_scanned_spawner", cell)
 
 	if walls_changed:
-		_manager.set("_navigation_topology_dirty", true)
+		_manager.get_building_invalidation_controller().after_walkability_changed("building_scan")
 
 
 func scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:

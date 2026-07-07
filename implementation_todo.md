@@ -1,179 +1,264 @@
-Task: final targeted extraction pass after the `BuildingManager` responsibility review.
+Task: map-change consequence cleanup pass.
 
-Target:
+Targets:
 
-* `scripts/map/building_manager.gd`
-* one existing service/controller file, only if it is the clear owner
-* create a new service only if no existing owner fits cleanly
+* `scripts/map/build_placement_service.gd`
+* `scripts/map/build_removal_service.gd`
+* `scripts/map/building_scan_service.gd`
+* `scripts/map/building_invalidation_controller.gd`
+* `scripts/map/building_navigation_sync_service.gd`
+* minimal related changes in `scripts/map/building_manager.gd`
 
 Goal:
-Move one remaining clearly misplaced responsibility out of `BuildingManager`, without changing gameplay behavior.
+Make map-change consequences easier to trace, without changing gameplay behavior.
 
-This is a targeted extraction pass, not a broad cleanup pass.
+This is a cleanup pass, not a feature pass.
 
 Do not optimize.
-Do not extract multiple unrelated blocks.
+Do not create a broad event bus.
+Do not move broad behavior.
 Do not run Godot, tests, builds, compilation, or exports.
+
+## Problem
+
+Placement, removal, scan, and restore operations can affect several systems:
+
+* garden topology
+* navigation topology dirty state
+* native/navigation sync
+* spawner routes
+* retargeting
+* debug overlays
+* object registries
+
+Some of these consequences may still be triggered through scattered calls. This makes it harder for coding agents and humans to understand what a map change does.
 
 ## Main objective
 
-Use the previous responsibility review to choose **one** remaining block of detailed logic that clearly does not belong in `BuildingManager`.
+Centralize or clarify **where map-change consequences are triggered**, especially dirty marking and invalidation.
 
-Only extract if all of these are true:
+Prefer small explicit methods on `BuildingInvalidationController` over scattered direct calls.
 
-* the responsibility is cohesive
-* related methods and state are easy to identify
-* an existing service/controller clearly owns it, or a new service has an obvious narrow purpose
-* extraction does not require broad call-site churn
-* extraction does not create many new `_manager.call(...)`, `_manager.get(...)`, or `_manager.has_method(...)` usages
-* behavior can be preserved exactly
+Do not change when consequences happen.
 
-If no block satisfies these conditions, do not extract. Report that no safe extraction is currently justified.
+## Current known state
 
-## Good extraction candidates
+`BuildingInvalidationController` now owns:
 
-Good candidates look like:
+* `_navigation_topology_dirty`
+* `mark_navigation_topology_dirty()`
+* `clear_navigation_topology_dirty()`
 
-* one clear algorithm block still embedded in `BuildingManager`
-* one clear state group still living in `BuildingManager` but used mostly by one service
-* one detailed subsystem behavior that already has a matching service
-* one repeated wrapper/data-flow pattern that can be moved cleanly
+`BuildingScanService` should already use the invalidation controller instead of setting manager state directly.
 
-Examples of acceptable target shapes:
+Build on this direction.
 
-* detailed debug overlay logic into an existing debug overlay controller
-* remaining path helper logic into `BuildingPathService`
-* remaining invalidation logic into `BuildingInvalidationController`
-* remaining placement/removal detail into `BuildPlacementService` or `BuildRemovalService`
-* remaining spawn config detail into `SpawnPlaylistConfigService`
-* remaining client/merchant/counter detail into the appropriate controller
+## Step 1: audit map-change consequence calls
 
-## Bad extraction candidates
+Search the target files for calls related to:
 
-Do not extract if the block:
+* dirty topology
+* navigation topology dirty
+* garden dirty marking
+* invalidation
+* route invalidation
+* flow-field refresh
+* native/navigation sync
+* scan-triggered updates
+* placement-triggered updates
+* removal-triggered updates
+* debug overlay refresh
+* retarget triggering
 
-* mixes several domains
-* needs many callbacks into `BuildingManager`
-* is mainly orchestration
-* is scene-facing lifecycle code
-* depends on unclear dynamic calls
-* would force broad rewiring across many files
-* would produce a helper service with no clear ownership
-* would only reduce line count without improving ownership
+Also search for:
 
-## BuildingManager should keep
+* `_manager.call(`
+* `_manager.get(`
+* `_manager.set(`
+* `_manager.has_method(`
 
-Keep these in `BuildingManager`:
+Classify each consequence as coming from:
 
-* `_ready()` and Godot lifecycle entry points
-* service/controller construction and setup
-* high-level day/night orchestration
-* high-level map/building event dispatch
-* compatibility wrappers when external callers may need them
-* scene-facing exported references
-* methods likely called by scenes, signals, UI, animation, editor, or dynamic `call(...)`
+* placement
+* removal
+* scan
+* startup restore
+* night prep
+* client prep
+* counter-stock restore
+* debug-only refresh
+* unclear
 
-## Extraction rules
+## Step 2: clarify consequence ownership
 
-When extracting:
+`BuildingInvalidationController` should own orchestration of dirty/invalidation consequences already assigned to it.
 
-1. Move the behavior and its related state together when practical.
+It may expose small explicit methods if useful, for example methods with names like:
 
-2. Do not duplicate state between `BuildingManager` and the service.
+* `mark_navigation_topology_dirty()`
+* `clear_navigation_topology_dirty()`
+* `mark_after_building_scan_changed()`
+* `mark_after_placement_changed()`
+* `mark_after_removal_changed()`
 
-3. If `BuildingManager` still needs the moved state, expose a small accessor on the service.
+Only add methods if they clarify existing behavior.
 
-4. Keep thin compatibility wrappers in `BuildingManager` for moved methods if external callers may still need them.
+Do not add abstract generic methods like:
 
-5. Update internal call sites to use the clearer owner where safe.
+* `handle_everything_changed()`
+* `process_event()`
+* `dispatch_change()`
 
-6. Avoid adding hidden manager coupling to the extracted service.
+Avoid vague event-bus design.
 
-7. Prefer explicit service dependencies or typed accessors over `_manager.call(...)`, `_manager.get(...)`, and `_manager.has_method(...)`.
+## Allowed changes
 
-8. Preserve method names where compatibility risk exists.
+Allowed:
 
-## New service rule
+* replace scattered dirty flag writes with explicit invalidation-controller calls
+* replace hidden manager state writes with explicit accessors/controller methods
+* group existing consequence calls behind small named methods if this improves traceability
+* update internal call sites to use the clearer method
+* keep compatibility wrappers in `BuildingManager` if external callers may need them
 
-Only create a new service if the responsibility has a clear narrow name and no existing service owns it.
+Not allowed:
 
-A new service must follow the existing pattern:
+* changing consequence timing/order
+* adding new invalidation triggers
+* removing existing invalidation triggers
+* changing placement/removal rules
+* changing scan behavior
+* changing route selection
+* changing retarget timing
+* changing flow-field generation
+* changing native-extension sync behavior
+* changing debug log text
+* changing `.tscn` files
 
-```gdscript
-extends RefCounted
-class_name ClearSpecificName
+## Ownership rules
 
-var _manager: Node
+`BuildPlacementService` should own:
 
-func setup(manager: Node) -> void:
-	_manager = manager
-```
+* placement validation
+* placement application
+* placement-side direct tile/object mutation already assigned to it
 
-Do not create generic names like:
+It should not own:
 
-* `BuildingHelper`
-* `BuildingUtils`
-* `ManagerHelpers`
-* `CommonService`
-* `MiscController`
+* garden topology algorithms
+* retarget policy
+* route policy
+* navigation dirty state internals
 
-## Do not change
+`BuildRemovalService` should own:
 
-Do not change:
+* removal validation
+* removal application
+* removal-side direct tile/object mutation already assigned to it
 
-* gameplay behavior
-* public method behavior
-* signal-connected behavior
-* scene-facing method names
-* service setup order
-* day/night lifecycle order
-* spawning behavior
-* placement/removal behavior
-* garden behavior
-* retarget behavior
-* navigation behavior
-* client/merchant behavior
-* save/progression behavior
-* debug log text
-* `.tscn` files
+It should not own:
 
-## Important Godot caution
+* garden topology algorithms
+* retarget policy
+* route policy
+* navigation dirty state internals
 
-Godot code may call methods dynamically through scenes, signals, `call(...)`, editor connections, animation tracks, or UI scripts.
+`BuildingScanService` should own:
 
-If unsure whether a method is externally called, keep a compatibility wrapper in `BuildingManager`.
+* scanning scene/map buildings
+* discovering/registering scanned objects/spawners
+* reporting scan consequences explicitly
 
-Do not remove methods merely because static search finds no `.gd` usage.
+It should not own:
+
+* navigation dirty flag storage
+* topology rebuild algorithms
+* route policy
+* retarget policy
+
+`BuildingInvalidationController` should own:
+
+* dirty/invalidation orchestration
+* navigation topology dirty flag
+* explicit invalidation methods used by scan/placement/removal/restore flows
+* preserving current invalidation order
+
+It should not own:
+
+* placement/removal validation
+* object creation/removal
+* topology algorithms
+* pathfinding algorithms
+* actual spawning
+* agent phase transitions
+
+`BuildingNavigationSyncService` should own:
+
+* applying map/object changes to navigation/native-extension state
+* blocker/static-agent sync already assigned to it
+
+It should not own:
+
+* deciding high-level invalidation policy
+* placement/removal validation
+* garden topology policy
+
+`BuildingManager` should only:
+
+* coordinate lifecycle
+* wire services
+* call high-level consequence methods at existing lifecycle points
+* keep compatibility wrappers where needed
+
+## Important regression risks
+
+Avoid:
+
+* changing invalidation order
+* clearing dirty flags too early
+* leaving dirty flags set forever
+* missing dirty marks after scan/placement/removal
+* duplicating dirty state between manager and invalidation controller
+* changing flow-field refresh timing
+* changing native-extension blocker sync timing
+* changing garden rebuild timing
+* changing retarget timing
+* changing route invalidation timing
+* adding broad scans in hot paths
+* adding extra per-agent work
 
 ## Expected result
 
-One of these outcomes is acceptable.
+After this pass:
 
-### A. Safe extraction performed
-
-* one clearly-owned responsibility moves out of `BuildingManager`
-* related state moves with it if practical
-* `BuildingManager` keeps wrappers where needed
+* map-change consequences are easier to follow
+* dirty/invalidation calls are more explicit
+* `BuildingInvalidationController` is the clear owner of dirty/invalidation orchestration
 * behavior remains unchanged
+* no broad event system is introduced
+* no scene files are changed
 
-### B. No extraction performed
+## If no safe cleanup is obvious
 
-* no block was safe enough to extract
-* report why extraction was skipped
-* recommend the next cleanup target
+Do not force changes.
+
+Report:
+
+* current consequence flow
+* what is already clean enough
+* what remains messy but risky to change
+* recommended next pass
 
 ## Final report
 
 Report:
 
-* chosen responsibility block
-* why this block was safe to extract
 * files changed
-* methods moved
-* state moved
-* wrappers kept in `BuildingManager`
-* internal call sites updated
-* hidden manager calls added or avoided
-* behavior intentionally preserved
+* consequence calls audited
+* invalidation methods added or reused
+* scattered dirty writes removed, if any
+* hidden manager calls removed, if any
+* consequence timing intentionally preserved
+* risky areas left unchanged
 * manual test risks
 * recommended next pass
