@@ -149,6 +149,20 @@ func _process(delta: float) -> void:
 	_sprite.position = _base_position + Vector2(0.0, offset_y + feet)
 
 
+func animated_parent_position(rest_parent_position: Vector2) -> Vector2:
+	if not _initialized or _sprite == null:
+		return rest_parent_position
+
+	var offset_from_sprite: Vector2 = rest_parent_position - _base_position
+	var scale_x: float = 1.0
+	var scale_y: float = 1.0
+	if not is_zero_approx(_base_scale.x):
+		scale_x = _sprite.scale.x / _base_scale.x
+	if not is_zero_approx(_base_scale.y):
+		scale_y = _sprite.scale.y / _base_scale.y
+	return _sprite.position + Vector2(offset_from_sprite.x * scale_x, offset_from_sprite.y * scale_y)
+
+
 func _resolve_sprite() -> Sprite2D:
 	if not target_sprite_path.is_empty():
 		return get_node_or_null(target_sprite_path) as Sprite2D
@@ -189,9 +203,9 @@ func _is_parent_paused() -> bool:
 func _apply_preset() -> void:
 	match preset:
 		Preset.PLAYER:
-			bounce_height = 4.0
+			bounce_height = 3.0
 			bounce_speed = 4.5
-			walk_squash = 0.12
+			walk_squash = 0.09
 			breathe_amount = 0.03
 			breathe_speed = 0.8
 			velocity_threshold = 5.0
@@ -202,9 +216,9 @@ func _apply_preset() -> void:
 			speed_scales_with_velocity = true
 			randomize_phase = false
 		Preset.MONSTER:
-			bounce_height = 3.0
+			bounce_height = 2.25
 			bounce_speed = 3.5
-			walk_squash = 0.18
+			walk_squash = 0.135
 			breathe_amount = 0.05
 			breathe_speed = 1.1
 			velocity_threshold = 5.0

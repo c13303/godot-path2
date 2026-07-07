@@ -7,6 +7,7 @@ const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 const INPUT_MODE_PAD: String = "pad"
 const INPUT_MODE_KMOUSE: String = "kmouse"
 const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
+const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 
 @onready var steering: Node = $"../../CPP/SteeringSystemNative"
 @onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
@@ -487,9 +488,18 @@ func _update_lance_sprite() -> void:
 		_last_lance_facing = facing
 	var throw_offset: float = _lance_throw_offset(weapon_id)
 	var local_origin: Vector2 = _weapon_origin_offset(player)
-	lance.position = local_origin + facing * throw_offset
+	var visual_anchor: Vector2 = _lance_visual_anchor(player, local_origin)
+	lance.position = visual_anchor + facing * throw_offset
 	lance.rotation = facing.angle() + PI * 0.5
 	lance.visible = true
+
+func _lance_visual_anchor(player: Node2D, local_origin: Vector2) -> Vector2:
+	var rest_anchor: Vector2 = local_origin + LANCE_VISUAL_ANCHOR_OFFSET
+	for child: Node in player.get_children():
+		if child is CharacterAnimation:
+			var animation: CharacterAnimation = child
+			return animation.animated_parent_position(rest_anchor)
+	return rest_anchor
 
 func _lance_throw_offset(weapon_id: String) -> float:
 	if _is_lance_weapon(weapon_id):

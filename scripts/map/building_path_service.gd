@@ -12,6 +12,7 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 var _manager: BuildingManager
 var _garden_topology: GardenTopologyService
 var _debug_telemetry: BuildingDebugTelemetry
+var _last_zone_blocker_us: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -96,7 +97,7 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
 	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
-		_manager._accumulate_find_path_in_zone(call_start_us, sync_elapsed, 0, from_tile, to_tile, path_tiles.size())
+		_manager._accumulate_find_path_in_zone(call_start_us, sync_elapsed, _last_zone_blocker_us, 0, from_tile, to_tile, path_tiles.size())
 		return PackedVector2Array()
 	# .find_path: the pathfinder A* itself.
 	var find_us: int = Time.get_ticks_usec()
@@ -105,11 +106,11 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 	if telemetry.over_garden_threshold_us(find_elapsed):
 		telemetry.warn_garden_task_lag_us("_find_path_in_zone.find_path", find_elapsed,
 			"garden=%d from=%s to=%s len=%d" % [garden_id, str(start_tile), str(end_tile), result.size()])
-	_manager._accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, path_tiles.size())
+	_manager._accumulate_find_path_in_zone(call_start_us, sync_elapsed, _last_zone_blocker_us, find_elapsed, from_tile, to_tile, path_tiles.size())
 	return result
 
 func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
-	_manager._last_zone_blocker_us = 0
+	_last_zone_blocker_us = 0
 	var pf: Node = _pathfinder()
 	if pf == null:
 		return
@@ -131,7 +132,7 @@ func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 		var blockers_us: int = Time.get_ticks_usec()
 		var blockers: PackedVector2Array = wall_blockers_for_cells(zone_tiles)
 		var blocker_elapsed: int = Time.get_ticks_usec() - blockers_us
-		_manager._last_zone_blocker_us = blocker_elapsed
+		_last_zone_blocker_us = blocker_elapsed
 		if telemetry.over_garden_threshold_us(blocker_elapsed):
 			telemetry.warn_garden_task_lag_us("_wall_blockers_for_cells", blocker_elapsed,
 				"zone_tiles=%d blockers=%d" % [zone_tiles.size(), blockers.size()])

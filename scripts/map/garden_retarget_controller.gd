@@ -343,13 +343,13 @@ func retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
 	return assigned
 
 
-func accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
+func accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, blocker_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
 	var call_us: int = Time.get_ticks_usec() - call_start_us
 	var a: Dictionary = _find_path_in_zone_accum
 	a["call_count"] = int(a.get("call_count", 0)) + 1
 	a["total_us"] = int(a.get("total_us", 0)) + call_us
 	a["sync_zone_total_us"] = int(a.get("sync_zone_total_us", 0)) + sync_elapsed
-	a["blocker_total_us"] = int(a.get("blocker_total_us", 0)) + _manager._last_zone_blocker_us
+	a["blocker_total_us"] = int(a.get("blocker_total_us", 0)) + blocker_elapsed
 	a["find_path_total_us"] = int(a.get("find_path_total_us", 0)) + find_elapsed
 	if call_us > int(a.get("max_single_call_us", 0)):
 		a["max_single_call_us"] = call_us

@@ -7,6 +7,8 @@ class_name AgentDefinitionService
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const BIG_MONSTER_BOUNCE_HEIGHT: float = 1.5
+const BIG_MONSTER_WALK_SQUASH: float = 0.09
 
 var _manager: Node
 
@@ -49,6 +51,8 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set_meta("monster_speed_scale", data.speed_scale)
 	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
 	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
+	if monster_type == MonsterCatalog.BIG_MONSTER_ID:
+		_apply_bigmonster_animation(agent)
 
 
 # Apply the client visual setup to a freshly instantiated client agent.
@@ -57,6 +61,14 @@ func apply_client_data(agent: Node) -> void:
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
 		sprite.hframes = 5
+
+
+func _apply_bigmonster_animation(agent: Node) -> void:
+	var animation: CharacterAnimation = agent.get_node_or_null("characterAnimation") as CharacterAnimation
+	if animation == null:
+		return
+	animation.bounce_height = BIG_MONSTER_BOUNCE_HEIGHT
+	animation.walk_squash = BIG_MONSTER_WALK_SQUASH
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:

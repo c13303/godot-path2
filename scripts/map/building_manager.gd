@@ -2281,8 +2281,8 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 # at the start of the local plant search). Tracks totals + the single most expensive
 # call so the parent breakdown can show whether the path cost is spread across many
 # calls or dominated by one. Cheap; no per-call warning here.
-func _accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
-	_garden_retarget.accumulate_find_path_in_zone(call_start_us, sync_elapsed, find_elapsed, from_tile, to_tile, zone_tiles)
+func _accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, blocker_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
+	_garden_retarget.accumulate_find_path_in_zone(call_start_us, sync_elapsed, blocker_elapsed, find_elapsed, from_tile, to_tile, zone_tiles)
 
 func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 	_building_path_service.sync_pathfinder_zone_tiles(zone_tiles)
