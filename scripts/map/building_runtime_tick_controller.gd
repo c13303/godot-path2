@@ -6,6 +6,10 @@ class_name BuildingRuntimeTickController
 # Do not add new gameplay algorithms here; add them to the owning service/controller.
 
 var _manager: BuildingManager = null
+# Countdown (seconds) gating the periodic building rescan cadence. Owned here because
+# this controller is the sole driver of the scan tick; starts at 0.0 so the first
+# eligible frame scans immediately, then resets to the 0.25s interval.
+var _scan_timer: float = 0.0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -43,9 +47,9 @@ func _should_skip_paused_runtime() -> bool:
 
 
 func _process_building_scan(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
-	_manager._scan_timer -= delta
-	if _manager._scan_timer <= 0.0:
-		_manager._scan_timer = 0.25
+	_scan_timer -= delta
+	if _scan_timer <= 0.0:
+		_scan_timer = 0.25
 		var t: int = Time.get_ticks_usec()
 		_manager._scan_buildings()
 		debug_telemetry.warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,

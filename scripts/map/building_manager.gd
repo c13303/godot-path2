@@ -1,6 +1,17 @@
 extends Node
 class_name BuildingManager
 
+# Coordinator / façade. This file is large by design (see scripts/map/ARCHITECTURE.md).
+# It should contain: exported scene references, service/controller setup and wiring,
+# Godot lifecycle + day/night orchestration entry points, and thin compatibility
+# wrappers kept for scenes, signals, saves, and older callers.
+#
+# It must NOT grow new gameplay algorithms: garden topology, spawner routing, agent
+# navigation phases, retargeting, spawning, counter stock, and debug/telemetry all live
+# in focused services under scripts/map/. When adding behavior, extend the owning
+# service and expose a thin wrapper here if a scene/signal/save needs it — do not add
+# the logic to this file. Do not let this file pass 1000 lines of real logic.
+
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 
