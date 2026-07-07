@@ -28,11 +28,11 @@ var _client_counter_agents: Dictionary = {}
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
-	_garden_topology = manager._garden_topology as GardenTopologyService
-	_spawner_route_service = manager._spawner_route_service
-	_building_path_service = manager._building_path_service
-	_garden_retarget = manager._garden_retarget
-	_debug_telemetry = manager._debug_telemetry
+	_garden_topology = manager.get_garden_topology_service()
+	_spawner_route_service = manager.get_spawner_route_service()
+	_building_path_service = manager.get_building_path_service()
+	_garden_retarget = manager.get_garden_retarget_controller()
+	_debug_telemetry = manager.get_building_debug_telemetry()
 
 
 func eating_agents() -> Dictionary:
@@ -134,9 +134,9 @@ func start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 	if path_cells.is_empty():
 		_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
 		return
-	_manager._agent_manager_detach_agent_flow(nav_id)
+	_manager.detach_agent_flow(nav_id)
 	var path_world: PackedVector2Array = _building_path_service.path_cells_to_world(path_cells, nav_id, true)
-	_manager._agent_manager_assign_agent_path(nav_id, path_world)
+	_manager.assign_agent_path(nav_id, path_world)
 	_entry_path_agents.erase(nav_id)
 	set_astar_in_agent(nav_id, {
 		"node": agent,
@@ -167,7 +167,7 @@ func process_plant_arrivals() -> void:
 			continue
 		if try_client_early_counter_fetch(agent):
 			continue
-		if not _manager._agent_manager_agent_path_arrived(nav_id):
+		if not _manager.agent_path_arrived(nav_id):
 			continue
 		var plant_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
 		var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
@@ -246,7 +246,7 @@ func process_client_counter_arrivals() -> void:
 		if not is_instance_valid(raw_agent):
 			_client_counter_agents.erase(nav_id)
 			continue
-		if not _manager._agent_manager_agent_path_arrived(nav_id):
+		if not _manager.agent_path_arrived(nav_id):
 			continue
 		var agent: Node2D = raw_agent as Node2D
 		if agent == null:
@@ -399,8 +399,8 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 		"plant_cell": plant_cell,
 		"roses_eaten": roses_eaten
 	}
-	_manager._agent_manager_detach_agent_flow(nav_id)
-	_manager._agent_manager_detach_agent_path(nav_id)
+	_manager.detach_agent_flow(nav_id)
+	_manager.detach_agent_path(nav_id)
 	_entry_path_agents.erase(nav_id)
 	erase_astar_in_agent(nav_id)
 	if agent.has_method("start_eating"):
@@ -408,7 +408,7 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 
 
 func assign_agent_to_escape(agent: Node2D) -> bool:
-	if not _manager._agent_manager_can_assign_agent():
+	if not _manager.can_assign_agent_navigation():
 		return false
 	var linked_spawner_cell: Vector2i = INVALID_CELL
 	if agent.has_meta("spawner_cell"):
@@ -450,15 +450,15 @@ func assign_agent_to_escape(agent: Node2D) -> bool:
 
 
 func attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell: Vector2i, spawner_cell: Vector2i = INVALID_CELL) -> bool:
-	if not _manager._agent_manager_can_assign_agent():
+	if not _manager.can_assign_agent_navigation():
 		return false
 	var nav_id: int = int(agent.get("nav_id"))
-	_manager._agent_manager_detach_agent_path(nav_id)
-	_manager._agent_manager_assign_agent(agent, escape_group)
+	_manager.detach_agent_path(nav_id)
+	_manager.assign_agent_to_group(agent, escape_group)
 	_entry_path_agents.erase(nav_id)
 	erase_astar_in_agent(nav_id)
 	erase_eating_agent(nav_id)
-	_manager._agent_manager_set_agent_never_rest(nav_id, true)
+	_manager.set_agent_never_rest(nav_id, true)
 	if spawner_cell != INVALID_CELL:
 		agent.set_meta("spawner_cell", spawner_cell)
 	_escaping_agents[nav_id] = {
@@ -506,7 +506,7 @@ func assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, ga
 		return false
 	if entry_cell == INVALID_CELL or not _manager._is_sane_cell(entry_cell):
 		return false
-	if not _manager._agent_manager_can_assign_agent():
+	if not _manager.can_assign_agent_navigation():
 		return false
 	var nav_id: int = int(agent.get("nav_id"))
 	var route: Dictionary = _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
@@ -515,9 +515,9 @@ func assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, ga
 	var plant_group: int = int(route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
 		return false
-	_manager._agent_manager_detach_agent_flow(nav_id)
-	_manager._agent_manager_detach_agent_path(nav_id)
-	_manager._agent_manager_assign_agent(agent, plant_group)
+	_manager.detach_agent_flow(nav_id)
+	_manager.detach_agent_path(nav_id)
+	_manager.assign_agent_to_group(agent, plant_group)
 	_entry_path_agents[nav_id] = {
 		"node": agent,
 		"spawner_cell": spawner_cell,

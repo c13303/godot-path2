@@ -1,7 +1,7 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 8 = reduce unsafe private-manager coupling in `scripts/map/building_runtime_tick_controller.gd` only, while preserving behavior and runtime update order exactly.
+Batch 9 = reduce unsafe manager coupling between garden retargeting and agent navigation phases, without changing gameplay behavior.
 
 This is a refactor-only pass.
 Do not change gameplay behavior.
@@ -20,182 +20,223 @@ Project rules:
 - If unsure, keep the existing private access and report it.
 
 Current context:
-`BuildingManager._process(delta)` has been extracted into:
+Previous batches reduced `BuildingManager` bloat and extracted runtime ticking.
+The next largest coupling hotspot is likely around:
 
-`scripts/map/building_runtime_tick_controller.gd`
+```txt
+scripts/map/garden_retarget_controller.gd
+scripts/map/agent_navigation_phase_controller.gd
+scripts/map/building_manager.gd
 
-The new controller is small and organized, but it still directly accesses many `BuildingManager` private fields/methods through `_manager._xxx`.
+These controllers are important and performance-sensitive.
+They should not become noodles, but this pass must stay conservative.
 
 Main objective:
-Reduce the most unsafe private coupling in `BuildingRuntimeTickController` without changing runtime order or moving major state ownership.
+Make ownership and communication between garden retargeting and agent navigation phases clearer.
+
+Do not rewrite the garden system.
+Do not rewrite pathfinding.
+Do not change retarget behavior.
+Do not change agent status names.
+Do not change queue order.
+Do not change per-frame limits.
+Do not change fallback behavior.
 
 Before editing:
-1. Inspect `building_runtime_tick_controller.gd`.
-2. Count `_manager._` references.
-3. Categorize each private access as:
-   - runtime guard state
-   - timing/scan state
-   - service/controller access
-   - queue/count debug access
-   - domain processing method
-   - debug/telemetry-only access
-4. Only replace accesses where the clean replacement is obvious.
 
-Do not try to eliminate every `_manager._xxx` call.
+Inspect garden_retarget_controller.gd.
+Inspect agent_navigation_phase_controller.gd.
+Inspect related wrappers/accessors in building_manager.gd.
+Count _manager._ references in both controllers.
+Categorize private accesses as:
+- read-only agent collection query
+- read-only garden/topology query
+- navigation phase mutation
+- retarget queue mutation
+- route/path lookup
+- debug/telemetry only
+- compatibility wrapper call
+- unclear / keep
 
-Priority 1 — service/controller access:
-Where `BuildingRuntimeTickController` directly accesses a manager-owned service/controller, prefer an explicit public getter on `BuildingManager`.
+Do not edit before this classification.
+
+Primary target:
+Reduce direct private access where one extracted controller calls through BuildingManager to reach another extracted controller or its state.
+
+Bad pattern:
+
+_manager._agent_navigation_phases._some_internal_state
+_manager._garden_retarget._some_internal_method()
+_manager._some_private_agent_collection
+
+Better patterns:
+
+_manager.get_agent_navigation_phase_controller().some_public_method(...)
+_manager.get_garden_retarget_controller().some_public_method(...)
+_manager.get_agents_waiting_for_navigation_retarget()
+_manager.agent_navigation_phase_for(agent)
+
+Only add wrappers/getters that are actually used.
+
+Priority 1 — controller-to-controller access:
+If GardenRetargetController needs to update navigation phase state, prefer a typed getter from BuildingManager:
+
+func get_agent_navigation_phase_controller() -> AgentNavigationPhaseController:
+	return _agent_navigation_phases
+
+Then call an explicit public method on AgentNavigationPhaseController.
+
+Example method names:
+
+func assign_agent_to_astar_in_phase(agent: Node, path: PackedVector2Array) -> void:
+	...
+
+func assign_agent_to_flow_exit_phase(agent: Node, exit_cell: Vector2i) -> void:
+	...
+
+func clear_agent_navigation_phase(agent: Node) -> void:
+	...
+
+Only create methods that correspond to existing behavior.
+Do not invent new phase semantics.
+
+Priority 2 — agent collection access:
+If controllers directly read manager-owned dictionaries/arrays of agents, prefer narrow read-only methods or count/query wrappers.
 
 Examples:
 
-Before:
+func has_eating_agent(agent: Node) -> bool:
+	return _eating_agents.has(agent)
 
-```gdscript
-_manager._turret_eating_controller.process_turret_eating_agents(delta)
-_manager._drowning_controller.process_drowning_agents(delta)
-_manager._client_sale.process(delta)
-_manager._seed_merchant.process_phase()
+func get_agents_targeting_removed_plant(plant_cell: Vector2i) -> Array[Node]:
+	...
 
-After:
+Do not expose raw dictionaries unless there is no clean alternative.
 
-_manager.get_turret_eating_controller().process_turret_eating_agents(delta)
-_manager.get_drowning_controller().process_drowning_agents(delta)
-_manager.get_client_sale_controller().process(delta)
-_manager.get_seed_merchant_controller().process_phase()
+Avoid:
 
-Only add getters that are actually used.
+func get_eating_agents() -> Dictionary:
+	return _eating_agents
 
-Getter names should be explicit and typed.
+unless absolutely necessary for compatibility.
+
+Priority 3 — garden/topology queries:
+If controllers ask the manager for garden data that actually belongs to GardenTopologyService, prefer calling the topology service through a typed getter or existing public wrapper.
 
 Example:
 
-func get_drowning_controller() -> DrowningController:
-	return _drowning_controller
+func get_garden_topology_service() -> GardenTopologyService:
+	return _garden_topology
 
-Priority 2 — runtime guard state:
-Replace direct reads like:
+Then use explicit topology query methods.
 
-_manager._flow_ready
-_manager._startup_ready
-_manager._paused
-_manager._night_preparing
-_manager._client_preparing
+Good:
 
-with intention-revealing public methods if simple.
+_manager.get_garden_topology_service().garden_for_plant_cell(cell)
 
-Possible wrappers:
+Bad:
 
-func is_runtime_ready_for_building_tick() -> bool:
-	return _flow_ready and _startup_ready
+_manager._garden_topology._garden_by_plant_cell[cell]
 
-func should_skip_building_runtime_tick() -> bool:
-	return _paused or _night_preparing or _client_preparing
+Do not move garden state ownership in this pass.
 
-Use names that match the current behavior.
-Do not change the guard semantics.
+Priority 4 — debug-only access:
+Debug/telemetry private access can remain if replacing it would add clutter.
 
-Priority 3 — scan timer:
-_scan_timer is mutable tick state.
+Only clean debug access if it is repeated or obviously unsafe.
 
-Do not expose it as a raw public variable.
+Do not prioritize debug cleanup over gameplay boundary clarity.
 
-Either:
-
-keep it as private manager access for now, or
-move the scan timer responsibility into BuildingRuntimeTickController only if this is clearly safe and does not change behavior.
-
-Conservative recommendation:
-For this pass, keep _scan_timer access unless the move is trivial and low-risk.
-
-Priority 4 — debug count access:
-For debug-only counters like:
-
-_manager._eating_agents.size()
-_manager._astar_in_agents.size()
-_manager._escaping_agents.size()
-_manager._entry_path_agents.size()
-
-prefer small read-only count wrappers if they already exist or are easy to add.
-
-Possible wrappers:
-
-func eating_agent_count() -> int:
-	return _eating_agents.size()
-
-func astar_in_agent_count() -> int:
-	return _astar_in_agents.size()
-
-func escaping_agent_count() -> int:
-	return _escaping_agents.size()
-
-func entry_path_agent_count() -> int:
-	return _entry_path_agents.size()
-
-Only add these if they meaningfully reduce repeated private access.
-
-Priority 5 — domain processing methods:
-Methods like:
-
-_manager._process_eating_agents(delta)
-_manager._process_creature_rose_trampling()
-_manager._process_pasteque_trampling()
-_manager._process_astar_in_arrivals()
-_manager._process_plant_arrivals()
-_manager._process_escape_arrivals()
-
-may remain private for now unless a clear public wrapper already exists.
-
-Do not move these methods in this pass.
-Do not extract new services in this pass.
-Do not change update order.
-
-Compatibility:
-Do not remove existing private methods.
-Do not rename existing methods unless all call sites are safely updated.
-Do not delete wrappers.
-This pass is about safer access boundaries, not deletion.
+Priority 5 — unclear coupling:
+If the clean boundary is not obvious, keep the current private access and report it.
 
 Expected result:
 
-BuildingRuntimeTickController has fewer _manager._xxx accesses.
-Service/controller accesses use typed getters.
-Runtime guard state is accessed through explicit methods if safe.
-Debug count access is reduced through read-only wrappers if useful.
-Runtime update order is unchanged.
+Fewer _manager._xxx references in garden_retarget_controller.gd.
+Fewer _manager._xxx references in agent_navigation_phase_controller.gd.
+The most dangerous raw mutable state access is replaced by explicit methods.
+Controller-to-controller communication is more explicit.
 No gameplay behavior changes.
+No large new abstraction.
 No new service unless absolutely necessary.
 No file grows over 1000 lines.
 
+Do not try to reach zero _manager._xxx calls.
+A good target is to reduce the most unsafe calls by 25-50%, not eliminate everything.
+
+Strict behavior preservation:
+Preserve exactly:
+
+- agent statuses
+- queue ordering
+- queue limits
+- retarget timing
+- fallback paths
+- garden target selection
+- route assignment
+- astar-in behavior
+- flow-in / flow-out behavior
+- escape behavior
+- wait/new-status behavior
+- debug/lag reporting
+
+Do not change performance characteristics unless the existing code already does the same work through a safer method.
+
+Compatibility:
+Do not remove existing private methods.
+Do not remove wrappers.
+Do not rename public-ish methods.
+Do not change scene/signal/callable APIs.
+Do not delete dead code in this pass.
+
+This is not a pruning pass.
+
+Suggested workflow:
+
+Count _manager._ references in both target files.
+Classify each access.
+Pick the highest-value unsafe accesses.
+Add narrow typed getters/wrappers where useful.
+Replace only safe call sites.
+Keep unclear/private/debug-only access unchanged.
+Re-count _manager._ references.
+Report what remains.
+
 Safety checks by reading/searching only:
 
-Count _manager._ references before and after.
-Verify runtime update order is unchanged.
-Verify all new getters/wrappers are typed.
-Verify no public/signal/Callable/call method was removed.
-Verify no lifecycle callback was changed.
-Verify no queue-drain order changed.
-Verify no lag/debug timing label changed.
+Verify all changed method signatures.
+Verify no agent status string changed.
+Verify no queue order changed.
+Verify no per-frame limit changed.
+Verify no route/path fallback changed.
+Verify no save/load structure changed.
+Verify no signal/Callable/call method was removed.
+Verify no scene/editor reference was broken.
 Verify strict typing in all changed code.
 
 Output required:
 
 List changed files.
-Give before/after _manager._ count in building_runtime_tick_controller.gd.
-List new public getters/wrappers added to BuildingManager.
+Give before/after _manager._ count for:
+garden_retarget_controller.gd
+agent_navigation_phase_controller.gd
+List new getters/wrappers added to BuildingManager.
+List new public methods added to controllers.
+Explain which private accesses were replaced and why.
 Explain which private accesses were intentionally retained and why.
-Confirm runtime update order was preserved.
 Confirm no behavior changes were intended.
+Mention remaining production-quality concerns.
 Mention manual test scenarios.
 
 Manual test scenarios to suggest:
 
-Start the game and reach day phase.
 Start a normal night.
 Spawn monsters from multiple spawners.
 Let monsters target plants, eat, and exit.
-Place/remove buildings during day.
-Verify building scan/invalidation still runs.
-Verify turret eating, drowning, trampling, and retargeting still run.
-Run client phase if applicable.
-Enable debug overlays/telemetry if available.
+Remove a plant while monsters are targeting it.
+Remove/place buildings that affect navigation.
+Verify agents enter waiting/retarget states correctly if applicable.
+Verify astar-in arrivals still work.
+Verify flow-in / flow-out behavior still works.
+Verify garden targeting/retargeting still works.
 Verify no new warnings/errors appear.

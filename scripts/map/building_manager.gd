@@ -399,6 +399,27 @@ func _agent_manager_set_agent_never_rest(nav_id: int, value: bool) -> void:
 	if agent_manager != null and agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", nav_id, value)
 
+func can_assign_agent_navigation() -> bool:
+	return _agent_manager_can_assign_agent()
+
+func detach_agent_flow(nav_id: int) -> void:
+	_agent_manager_detach_agent_flow(nav_id)
+
+func detach_agent_path(nav_id: int) -> void:
+	_agent_manager_detach_agent_path(nav_id)
+
+func assign_agent_to_group(agent: Node2D, group_id: int) -> void:
+	_agent_manager_assign_agent(agent, group_id)
+
+func assign_agent_path(nav_id: int, path_world: PackedVector2Array) -> void:
+	_agent_manager_assign_agent_path(nav_id, path_world)
+
+func agent_path_arrived(nav_id: int) -> bool:
+	return _agent_manager_agent_path_arrived(nav_id)
+
+func set_agent_never_rest(nav_id: int, value: bool) -> void:
+	_agent_manager_set_agent_never_rest(nav_id, value)
+
 func registered_spawner_count() -> int:
 	return _spawners.size()
 
@@ -1170,12 +1191,24 @@ func get_building_invalidation_controller() -> BuildingInvalidationController:
 	return _building_invalidation_controller
 
 
+func get_agent_navigation_phase_controller() -> AgentNavigationPhaseController:
+	return _agent_navigation_phases as AgentNavigationPhaseController
+
+
+func get_garden_retarget_controller() -> GardenRetargetController:
+	return _garden_retarget
+
+
 func get_building_debug_telemetry() -> BuildingDebugTelemetry:
 	return _debug_telemetry
 
 
 func get_spawner_route_service() -> SpawnerRouteService:
 	return _spawner_route_service
+
+
+func get_building_path_service() -> BuildingPathService:
+	return _building_path_service
 
 
 func get_garden_topology_service() -> GardenTopologyService:
