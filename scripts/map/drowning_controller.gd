@@ -10,12 +10,12 @@ class_name DrowningController
 
 const DEFAULT_AGENT_WORLD_RADIUS: float = 12.0
 
-var _manager: Node
+var _manager: BuildingManager
 # nav_id -> drowning timeline state (node, duration, timers, damage, resume_state).
 var _drowning_agents: Dictionary = {}
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -36,7 +36,7 @@ func process_drowning_agents(delta: float) -> void:
 	if watersources == null:
 		return
 
-	var turret_eating: TurretEatingController = _manager.get("_turret_eating_controller") as TurretEatingController
+	var turret_eating: TurretEatingController = _manager._turret_eating_controller
 	for group_name: String in ["monsters", "clients", "merchants"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
@@ -91,7 +91,7 @@ func process_drowning_agents(delta: float) -> void:
 		_drowning_agents[nav_id] = data
 
 	for agent: Node2D in dead_agents:
-		_manager.call("remove_dead_monster", agent, false)
+		_manager.remove_dead_monster(agent, false)
 
 
 func _update_monster_splash(agent: Node2D, delta: float) -> void:
@@ -150,7 +150,7 @@ func _agent_water_footprint_rect(agent: Node2D) -> Rect2:
 
 
 func _agent_world_radius() -> float:
-	var global_config: Node = _manager.get("global_config") as Node
+	var global_config: Node = _manager.global_config
 	if global_config and global_config.has_method("get_agent_world_radius"):
 		return float(global_config.call("get_agent_world_radius"))
 	return DEFAULT_AGENT_WORLD_RADIUS
@@ -160,7 +160,7 @@ func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	var duration: float = maxf(float(agent.get("drowning")), 0.001)
 	var raw_update_freq: Variant = agent.get("drowning_update_freq")
 	var update_freq: float = maxf(float(raw_update_freq) if raw_update_freq != null else 0.1, 0.01)
-	var resume_state: Dictionary = _manager.call("_capture_agent_resume_state", nav_id, agent) as Dictionary
+	var resume_state: Dictionary = _manager._capture_agent_resume_state(nav_id, agent)
 	_drowning_agents[nav_id] = {
 		"node": agent,
 		"duration": duration,
@@ -171,7 +171,7 @@ func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
 		"dealt_damage": 0,
 		"resume_state": resume_state,
 	}
-	_manager.call("_suspend_agent_for_drowning", nav_id)
+	_manager._suspend_agent_for_drowning(nav_id)
 	if agent.has_method("start_drowning"):
 		agent.call("start_drowning", duration)
 
@@ -182,8 +182,8 @@ func _stop_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	if agent.has_method("stop_drowning"):
 		agent.call("stop_drowning")
 	var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
-	_manager.call("_resume_agent_after_drowning", nav_id, agent, resume_state)
+	_manager._resume_agent_after_drowning(nav_id, agent, resume_state)
 
 
 func _watersources() -> WaterSources:
-	return (_manager.get("watersources") as WaterSources) if _manager != null else null
+	return _manager.watersources if _manager != null else null

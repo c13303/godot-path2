@@ -8,10 +8,10 @@ const MONSTER_CORPSE_SCENE: PackedScene = preload("res://scenes/entities/monster
 const MONSTER_DEATH_DROP_SEED: StringName = &"seed"
 const MONSTER_DEATH_DROP_GEM: StringName = &"gem"
 
-var _manager: Node
+var _manager: BuildingManager
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -27,20 +27,19 @@ func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
 	if awards_monster_drop:
 		_spawn_monster_death_drop(death_position)
 	var nav_id: int = int(agent.get("nav_id"))
-	_manager.call("_clear_removed_agent_state", nav_id)
-	_manager.call("_unregister_nav_agent", nav_id)
-	_manager.call("_unregister_desire_agent", agent)
+	_manager._clear_removed_agent_state(nav_id)
+	_manager._unregister_nav_agent(nav_id)
+	_manager._unregister_desire_agent(agent)
 	agent.remove_from_group("monsters")
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.queue_free()
 	if is_merchant:
-		_manager.call("_on_removed_merchant_agent", agent)
+		_manager._on_removed_merchant_agent(agent)
 
 
 func _spawn_monster_death_drop(world_position: Vector2) -> void:
-	var raw_seed_chance: Variant = _manager.call("_monster_death_drop_seed_chance_percent")
-	var seed_chance_percent: int = int(raw_seed_chance)
+	var seed_chance_percent: int = _manager._monster_death_drop_seed_chance_percent()
 	var seed_chance: float = float(clampi(seed_chance_percent, 0, 100)) / 100.0
 	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
 	var scene: Node = _manager.get_tree().current_scene
@@ -79,7 +78,7 @@ func _spawn_monster_corpse(agent: Node2D) -> void:
 	var corpse: Node2D = MONSTER_CORPSE_SCENE.instantiate() as Node2D
 	if corpse == null:
 		return
-	var parent_for_agents: Node = _manager.get("parent_for_agents") as Node
+	var parent_for_agents: Node = _manager.parent_for_agents
 	var parent: Node = parent_for_agents if parent_for_agents else _manager.get_tree().current_scene
 	if parent == null:
 		corpse.queue_free()

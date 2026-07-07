@@ -8,18 +8,18 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
-var _manager: Node
+var _manager: BuildingManager
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
 func suspend_agent_for_drowning(nav_id: int) -> void:
 	_detach_agent_navigation(nav_id)
 	_entry_path_agents().erase(nav_id)
-	_manager.call("_erase_astar_in_agent", nav_id)
-	_manager.call("_erase_eating_agent", nav_id)
+	_manager._erase_astar_in_agent(nav_id)
+	_manager._erase_eating_agent(nav_id)
 	_escaping_agents().erase(nav_id)
 	_client_counter_agents().erase(nav_id)
 
@@ -69,7 +69,7 @@ func capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 func suspend_agent_for_turret_eating(nav_id: int) -> void:
 	_detach_agent_navigation(nav_id)
 	_entry_path_agents().erase(nav_id)
-	_manager.call("_erase_astar_in_agent", nav_id)
+	_manager._erase_astar_in_agent(nav_id)
 	_escaping_agents().erase(nav_id)
 	_client_counter_agents().erase(nav_id)
 
@@ -80,7 +80,7 @@ func resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: 
 	if kind == "entry":
 		if _resume_agent_entry_flow(nav_id, agent, data):
 			_entry_path_agents()[nav_id] = data
-			_manager.call("_erase_astar_in_agent", nav_id)
+			_manager._erase_astar_in_agent(nav_id)
 			_escaping_agents().erase(nav_id)
 			if agent.has_method("start_flow_in"):
 				agent.call("start_flow_in")
@@ -88,20 +88,19 @@ func resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: 
 	elif kind == "astar":
 		if _resume_agent_path(nav_id, agent, data):
 			_entry_path_agents().erase(nav_id)
-			_manager.call("_set_astar_in_agent", nav_id, data)
+			_manager._set_astar_in_agent(nav_id, data)
 			_escaping_agents().erase(nav_id)
 			if agent.has_method("start_astar_in"):
 				agent.call("start_astar_in")
 			return
 	elif kind == "escape":
-		var escape_result: Variant = _manager.call("_assign_agent_to_escape", agent)
-		if bool(escape_result):
+		if _manager._assign_agent_to_escape(agent):
 			return
 	elif kind == "client_counter":
 		if _resume_agent_path(nav_id, agent, data):
 			_client_counter_agents()[nav_id] = data
 			_entry_path_agents().erase(nav_id)
-			_manager.call("_erase_astar_in_agent", nav_id)
+			_manager._erase_astar_in_agent(nav_id)
 			_escaping_agents().erase(nav_id)
 			if agent.has_method("start_astar_in"):
 				agent.call("start_astar_in")
@@ -110,7 +109,7 @@ func resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: 
 	var spawner_cell: Vector2i = resume_state.get("spawner_cell", INVALID_CELL) as Vector2i
 	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
 		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	var agent_kind: StringName = StringName(_manager.call("_agent_kind", agent))
+	var agent_kind: StringName = _manager._agent_kind(agent)
 	if agent_kind == SPAWNER_KIND_CLIENT:
 		if not _retarget_agent_or_escape(agent, spawner_cell) and agent.has_method("start_waiting_new_status"):
 			agent.call("start_waiting_new_status")
@@ -157,27 +156,26 @@ func _detach_agent_navigation(nav_id: int) -> void:
 
 
 func _retarget_agent_or_escape(agent: Node2D, spawner_cell: Vector2i) -> bool:
-	var result: Variant = _manager.call("_retarget_agent_or_escape", agent, spawner_cell)
-	return bool(result)
+	return _manager._retarget_agent_or_escape(agent, spawner_cell)
 
 
 func _agent_manager() -> Node:
 	if _manager == null:
 		return null
-	return _manager.get("agent_manager") as Node
+	return _manager.agent_manager
 
 
 func _entry_path_agents() -> Dictionary:
-	return _manager.get("_entry_path_agents") as Dictionary
+	return _manager._entry_path_agents
 
 
 func _astar_in_agents() -> Dictionary:
-	return _manager.get("_astar_in_agents") as Dictionary
+	return _manager._astar_in_agents
 
 
 func _escaping_agents() -> Dictionary:
-	return _manager.get("_escaping_agents") as Dictionary
+	return _manager._escaping_agents
 
 
 func _client_counter_agents() -> Dictionary:
-	return _manager.get("_client_counter_agents") as Dictionary
+	return _manager._client_counter_agents

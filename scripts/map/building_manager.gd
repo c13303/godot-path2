@@ -2540,28 +2540,7 @@ func _tile_size() -> Vector2:
 	return Vector2(32, 32)
 
 func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
-	if not _garden_topology.gardens().has(garden_id):
-		return INVALID_CELL
-	var garden: Dictionary = _garden_topology.gardens()[garden_id] as Dictionary
-	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-	var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
-	var best_cell: Vector2i = INVALID_CELL
-	var best_dist: int = 2147483647
-	for raw_cell in plant_cells.keys():
-		var c: Vector2i = raw_cell
-		if not zone_tiles.has(c):
-			continue
-		if agent_kind == SPAWNER_KIND_CLIENT:
-			if not _is_client_target_cell(c):
-				continue
-		elif not _is_eatable_for_monster(c):
-			continue
-		var d: Vector2i = c - from_cell
-		var manhattan: int = abs(d.x) + abs(d.y)
-		if manhattan < best_dist:
-			best_dist = manhattan
-			best_cell = c
-	return best_cell
+	return _garden_topology.resolve_plant_target_for_agent_in_garden(from_cell, garden_id, agent_kind)
 
 
 func _agent_kind(agent: Node) -> StringName:

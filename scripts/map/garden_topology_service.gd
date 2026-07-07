@@ -685,6 +685,31 @@ func garden_has_target_for_kind(garden_id: int, agent_kind: StringName) -> bool:
 	return garden_has_edible_plants(garden_id)
 
 
+func resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
+	if not _gardens.has(garden_id):
+		return INVALID_CELL
+	var garden: Dictionary = _gardens[garden_id] as Dictionary
+	var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
+	var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
+	var best_cell: Vector2i = INVALID_CELL
+	var best_dist: int = 2147483647
+	for raw_cell: Variant in plant_cells.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if not zone_tiles.has(cell):
+			continue
+		if agent_kind == SPAWNER_KIND_CLIENT:
+			if not is_client_target_cell(cell):
+				continue
+		elif not is_eatable_for_monster(cell):
+			continue
+		var delta: Vector2i = cell - from_cell
+		var manhattan: int = abs(delta.x) + abs(delta.y)
+		if manhattan < best_dist:
+			best_dist = manhattan
+			best_cell = cell
+	return best_cell
+
+
 func has_client_targets_remaining() -> bool:
 	if _manager._total_counter_stock() > 0:
 		return true
