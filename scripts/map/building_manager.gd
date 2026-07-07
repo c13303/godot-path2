@@ -104,10 +104,6 @@ var _spawner_spot_cell_by_cell: Dictionary = {}  # Vector2i -> Vector2i
 var _client_spawners: Dictionary = {}  # Vector2i -> true
 var _client_frequency_by_cell: Dictionary = {}  # Vector2i -> float
 var _merchant_spawners: Dictionary = {}  # Vector2i -> true
-# Side-channel: _sync_pathfinder_zone_tiles writes the time it spent in
-# _wall_blockers_for_cells here so the caller can split sync time into
-# blocker-construction vs. the rest, without changing the void signature.
-var _last_zone_blocker_us: int = 0
 var _agent_navigation_phases: Variant = AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT.new()
 var _eating_agents: Dictionary = _agent_navigation_phases.eating_agents()
 var _eating_time: float = EATING_COOLDOWN
@@ -126,7 +122,6 @@ var _debug_check_retarget_index: bool = false:
 		_debug_check_retarget_index = value
 		if _garden_retarget != null:
 			_garden_retarget.set_debug_check_retarget_index(value)
-var _scan_timer: float = 0.0
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
@@ -1884,11 +1879,11 @@ func _agent_reached_cell(agent: Node2D, cell: Vector2i) -> bool:
 	var agent_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 	if agent_cell == cell:
 		return true
-	var tile_size: Vector2 = Vector2(32, 32)
+	var cell_size: Vector2 = Vector2(32, 32)
 	if floorz and floorz.tile_set:
 		var raw_tile_size: Vector2i = floorz.tile_set.get_tile_size()
-		tile_size = Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
-	return agent.global_position.distance_to(_cell_center(cell)) <= max(tile_size.x, tile_size.y) * 0.5
+		cell_size = Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
+	return agent.global_position.distance_to(_cell_center(cell)) <= max(cell_size.x, cell_size.y) * 0.5
 
 func _agent_within_tiles(agent: Node2D, cell: Vector2i, tiles: int) -> bool:
 	if cell == INVALID_CELL:
