@@ -778,6 +778,7 @@ func _setup_counter_stock_manager() -> void:
 		_counter_stock_manager = CounterStockManager.new()
 		_counter_stock_manager.name = "CounterStockManager"
 		add_child(_counter_stock_manager)
+	_counter_stock_manager.setup(self)
 	_counter_stock_manager.configure(
 		_rose_pile_parent(),
 		Callable(self, "_cell_center"),
@@ -1343,50 +1344,27 @@ func _grownup_rose_count() -> int:
 
 
 func _rose_shop_counter_cells() -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	var building_objects: BuildingObjectManager = _get_building_object_manager()
-	if building_objects != null and building_objects.has_method("get_building_cells_by_item_id"):
-		var raw_cells: Array = building_objects.call("get_building_cells_by_item_id", ROSE_SHOP_COUNTER_ID) as Array
-		for raw_cell: Variant in raw_cells:
-			cells.append(raw_cell as Vector2i)
-		return cells
-	var item_def: Dictionary = ItemCatalog.get_item_def(ROSE_SHOP_COUNTER_ID)
-	var atlas: Vector2i = item_def.get("atlas", Vector2i(-1, -1)) as Vector2i
-	for layer: TileMapLayer in [traversable_buildings, blocking_buildings]:
-		if layer == null:
-			continue
-		for raw_cell: Variant in layer.get_used_cells():
-			var cell: Vector2i = raw_cell as Vector2i
-			if layer.get_cell_atlas_coords(cell) == atlas and not cells.has(cell):
-				cells.append(cell)
-	return cells
+	return _counter_stock_manager.rose_shop_counter_cells()
 
 
 func _rose_shop_counter_cells_with_room() -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	for counter_cell: Vector2i in _rose_shop_counter_cells():
-		if _counter_stock_manager.has_room(counter_cell):
-			cells.append(counter_cell)
-	return cells
+	return _counter_stock_manager.rose_shop_counter_cells_with_room()
 
 
 func rose_shop_counter_count() -> int:
-	return _rose_shop_counter_cells().size()
+	return _counter_stock_manager.rose_shop_counter_count()
 
 
 func has_counter_room_for_harvest() -> bool:
-	return not _rose_shop_counter_cells_with_room().is_empty()
+	return _counter_stock_manager.has_counter_room_for_harvest()
 
 
 func rose_shop_counter_cells_with_room() -> Array[Vector2i]:
-	return _rose_shop_counter_cells_with_room()
+	return _counter_stock_manager.rose_shop_counter_cells_with_room()
 
 
 func counter_room_for_harvest() -> int:
-	var total: int = 0
-	for counter_cell: Vector2i in _rose_shop_counter_cells():
-		total += _counter_stock_manager.remaining_capacity(counter_cell)
-	return total
+	return _counter_stock_manager.counter_room_for_harvest()
 
 
 func _total_counter_stock() -> int:
@@ -1399,12 +1377,11 @@ func total_counter_stock() -> int:
 
 
 func serialize_counter_stock() -> Array[Dictionary]:
-	return _counter_stock_manager.serialize(_rose_shop_counter_cells())
+	return _counter_stock_manager.serialize_counter_stock()
 
 
 func restore_counter_stock(saved_stock: Array) -> void:
-	_counter_stock_manager.restore(saved_stock, _rose_shop_counter_cells())
-	_building_invalidation_controller.mark_after_counter_stock_restored()
+	_counter_stock_manager.restore_counter_stock(saved_stock)
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:
@@ -1412,8 +1389,7 @@ func _counter_stock(counter_cell: Vector2i) -> int:
 
 
 func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
-	var change: Dictionary = _counter_stock_manager.add_stock(counter_cell, amount)
-	_after_counter_stock_changed(int(change.get("previous", 0)), int(change.get("value", 0)))
+	_counter_stock_manager.add_counter_stock(counter_cell, amount)
 
 
 func add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
@@ -1421,21 +1397,11 @@ func add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 
 
 func _set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
-	var change: Dictionary = _counter_stock_manager.set_stock(counter_cell, amount)
-	var previous: int = int(change.get("previous", 0))
-	var value: int = int(change.get("value", 0))
-	_after_counter_stock_changed(previous, value)
+	_counter_stock_manager.set_counter_stock(counter_cell, amount)
 
 
 func _after_counter_stock_changed(previous: int, value: int) -> void:
-	# A counter gaining its first rose turns it into an edible garden, which requires
-	# folding its access tiles into the garden topology (a full rebuild). Depletion
-	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
-	# the empty-garden machinery removes a counter-only garden like any other.
-	if previous == 0 and value > 0 and _garden_topology.plant_zone_built():
-		_rebuild_plant_zone_from_layer()
-	elif previous > 0 and value == 0 and _no_plants_remaining():
-		_force_escape_for_all_monsters()
+	_counter_stock_manager.after_counter_stock_changed(previous, value)
 
 
 # Populates _garden_topology.counter_access_cells() from every stocked counter and returns the access
@@ -1452,10 +1418,7 @@ func _is_eatable_for_monster(cell: Vector2i) -> bool:
 	return _garden_topology.is_eatable_for_monster(cell)
 
 func _consume_counter_rose(eater: Node2D, _spawner_cell: Vector2i, access_cell: Vector2i) -> void:
-	var counter_cell: Vector2i = _garden_topology.counter_access_cells()[access_cell] as Vector2i
-	_start_agent_eating(eater, _eating_time, access_cell)
-	Sfx.play_sound(&"crunsh")
-	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+	_counter_stock_manager.consume_counter_rose(eater, access_cell)
 
 
 
@@ -1508,17 +1471,7 @@ func auto_select_hammer() -> void:
 
 
 func _can_install_new_counter() -> bool:
-	var scene: Node = get_tree().current_scene
-	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui == null:
-		return false
-	if game_ui.has_method("get_inventory_item_quantity"):
-		var owned_counters: int = int(game_ui.call("get_inventory_item_quantity", ROSE_SHOP_COUNTER_ID))
-		if owned_counters > 0:
-			return true
-	if game_ui.has_method("can_afford_merchant_item"):
-		return bool(game_ui.call("can_afford_merchant_item", ROSE_SHOP_COUNTER_ID, 1))
-	return false
+	return _counter_stock_manager.can_install_new_counter()
 
 
 func can_install_new_counter() -> bool:
