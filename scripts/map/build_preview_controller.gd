@@ -21,7 +21,7 @@ const FENCE_NEIGHBOR_EAST: int = 2
 const FENCE_NEIGHBOR_SOUTH: int = 4
 const FENCE_NEIGHBOR_WEST: int = 8
 
-var _manager: Node
+var _manager: BuildSystem
 var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_item_id: String = ""
@@ -34,7 +34,7 @@ var _drag_selection_rect: Panel = null
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildSystem) -> void:
 	_manager = manager
 
 
@@ -113,8 +113,7 @@ func refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 	var previewbuild: TileMapLayer = _preview_layer()
 	if previewbuild == null:
 		return
-	var blocker_result: Variant = _manager.call("_turret_range_blocker_for_cell", _hover_cell, placeable_def)
-	var blocker: Dictionary = blocker_result as Dictionary
+	var blocker: Dictionary = _manager._turret_range_blocker_for_cell(_hover_cell, placeable_def)
 	var blocked: bool = not blocker.is_empty()
 	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR if blocked else PREVIEW_NORMAL_COLOR
 
@@ -329,8 +328,7 @@ func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector
 		candidate_set[cell] = true
 	var touched: Dictionary = {}
 	for cell: Vector2i in candidate_cells:
-		var refresh_result: Variant = _manager.call("_fence_refresh_cells", cell)
-		var refresh_cells: Array[Vector2i] = refresh_result as Array[Vector2i]
+		var refresh_cells: Array[Vector2i] = _manager._fence_refresh_cells(cell)
 		for refresh_cell: Vector2i in refresh_cells:
 			if candidate_set.has(refresh_cell) or _has_fence_cell(refresh_cell):
 				touched[refresh_cell] = true
@@ -345,8 +343,7 @@ func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector
 
 func _fence_preview_atlas(cell: Vector2i, candidate_set: Dictionary) -> Vector2i:
 	var mask: int = _fence_preview_neighbor_mask(cell, candidate_set)
-	var result: Variant = _manager.call("_fence_atlas_by_mask", mask)
-	return result as Vector2i
+	return _manager._fence_atlas_by_mask(mask)
 
 
 func _fence_preview_neighbor_mask(cell: Vector2i, candidate_set: Dictionary) -> int:
@@ -367,29 +364,27 @@ func _has_preview_fence_cell(cell: Vector2i, candidate_set: Dictionary) -> bool:
 
 
 func _has_fence_cell(cell: Vector2i) -> bool:
-	return bool(_manager.call("_has_fence_cell", cell))
+	return _manager._has_fence_cell(cell)
 
 
 func _preview_layer() -> TileMapLayer:
-	return _manager.get("previewbuild") as TileMapLayer
+	return _manager.previewbuild
 
 
 func _atlas_source_id() -> int:
-	return int(_manager.get("_atlas_source_id"))
+	return _manager._atlas_source_id
 
 
 func _alternative_from_placeable(placeable_def: Dictionary) -> int:
-	return int(_manager.call("_alternative_from_placeable", placeable_def))
+	return _manager._alternative_from_placeable(placeable_def)
 
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
-	var result: Variant = _manager.call("_atlas_coords_from_placeable", placeable_def)
-	return result as Vector2i
+	return _manager._atlas_coords_from_placeable(placeable_def)
 
 
 func _target_tile_layer(layer_name: String) -> TileMapLayer:
-	var result: Variant = _manager.call("_target_tile_layer", layer_name)
-	return result as TileMapLayer
+	return _manager._target_tile_layer(layer_name)
 
 
 func _drag_build_rectangle_cells(
@@ -399,8 +394,7 @@ func _drag_build_rectangle_cells(
 	placeable_def: Dictionary,
 	limit: int
 ) -> Array[Vector2i]:
-	var result: Variant = _manager.call("_drag_build_rectangle_cells", start_cell, end_cell, target_layer, placeable_def, limit)
-	return result as Array[Vector2i]
+	return _manager._drag_build_rectangle_cells(start_cell, end_cell, target_layer, placeable_def, limit)
 
 
 func _empty_cells() -> Array[Vector2i]:

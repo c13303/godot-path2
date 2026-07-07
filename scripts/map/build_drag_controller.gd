@@ -6,7 +6,7 @@ class_name BuildDragController
 
 const REMOVE_HOLD_SECONDS: float = 0.2
 
-var _manager: Node
+var _manager: BuildSystem
 
 var _drag_build_active: bool = false
 var _drag_build_item_id: String = ""
@@ -24,7 +24,7 @@ var _keyboard_unbuild_held: bool = false
 var _keyboard_unbuild_cell: Vector2i = Vector2i.ZERO
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildSystem) -> void:
 	_manager = manager
 
 
@@ -71,8 +71,7 @@ func start_drag_build(placeable_def: Dictionary) -> void:
 
 func draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
 	_drag_build_preview_limit = available
-	_manager.call(
-		"_draw_drag_build_preview",
+	_manager._draw_drag_build_preview(
 		_drag_build_start_cell,
 		_drag_build_end_cell,
 		placeable_def,
@@ -93,7 +92,7 @@ func finish_drag_build() -> void:
 	_hide_drag_selection_rect()
 	set_drag_build_active(false)
 	_drag_build_item_id = ""
-	_manager.call("_commit_drag_build", placeable_def, item_id, start_cell, end_cell)
+	_manager._commit_drag_build(placeable_def, item_id, start_cell, end_cell)
 
 
 func cancel_drag_build() -> void:
@@ -212,7 +211,7 @@ func finish_removal() -> void:
 		return
 
 	_free_remove_progress_for_cell(removed_cell)
-	if not bool(_manager.call("_commit_removal", removal)):
+	if not _manager._commit_removal(removal):
 		cancel_removal()
 		return
 	_remove_elapsed = 0.0
@@ -277,26 +276,26 @@ func committed_cell_set() -> Dictionary:
 # Free only transient drag-preview bars, keeping the bars for cells already
 # committed to the active removal queue.
 func clear_preview_remove_progress_bars() -> void:
-	_manager.call("_clear_preview_remove_progress_bars", committed_cell_set())
+	_manager._clear_preview_remove_progress_bars(committed_cell_set())
 
 
 func set_drag_build_active(active: bool) -> void:
 	if _drag_build_active == active:
 		return
 	_drag_build_active = active
-	_manager.call("_emit_build_preview_changed", _drag_build_active)
+	_manager._emit_build_preview_changed(_drag_build_active)
 
 
 func _selected_placeable_def() -> Dictionary:
-	return _manager.call("_selected_placeable_def") as Dictionary
+	return _manager._selected_placeable_def()
 
 
 func _placement_disabled() -> bool:
-	return bool(_manager.call("_placement_disabled"))
+	return _manager._placement_disabled()
 
 
 func _is_inventory_open() -> bool:
-	return bool(_manager.call("_is_inventory_open"))
+	return _manager._is_inventory_open()
 
 
 func _gui_hovered_control() -> Control:
@@ -309,57 +308,52 @@ func _gui_hovered_control() -> Control:
 
 
 func _build_tool_selected() -> bool:
-	return bool(_manager.call("_build_tool_selected"))
+	return _manager._build_tool_selected()
 
 
 func _hovered_cell() -> Vector2i:
-	return _manager.call("_hovered_cell") as Vector2i
+	return _manager._hovered_cell()
 
 
 func _affordable_quantity(item_id: String) -> int:
-	return int(_manager.call("_affordable_quantity", item_id))
+	return _manager._affordable_quantity(item_id)
 
 
 func _clear_hover() -> void:
-	_manager.call("_clear_hover")
+	_manager._clear_hover()
 
 
 func _clear_build_selection() -> void:
-	_manager.call("_clear_build_selection")
+	_manager._clear_build_selection()
 
 
 func _hide_drag_selection_rect() -> void:
-	_manager.call("_hide_drag_selection_rect")
+	_manager._hide_drag_selection_rect()
 
 
 func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
-	_manager.call("_show_drag_selection_rect", start_cell, end_cell)
+	_manager._show_drag_selection_rect(start_cell, end_cell)
 
 
 func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:
-	var result: Variant = _manager.call("_remove_rectangle_cells", start_cell, end_cell)
-	var raw_removals: Array = result as Array
-	var removals: Array[Dictionary] = []
-	for raw_removal: Variant in raw_removals:
-		removals.append(raw_removal as Dictionary)
-	return removals
+	return _manager._remove_rectangle_cells(start_cell, end_cell)
 
 
 func _removable_at_cell(cell: Vector2i) -> Dictionary:
-	return _manager.call("_removable_at_cell", cell) as Dictionary
+	return _manager._removable_at_cell(cell)
 
 
 func _create_remove_progress(cell: Vector2i, value: float) -> void:
-	_manager.call("_create_remove_progress", cell, value)
+	_manager._create_remove_progress(cell, value)
 
 
 func _set_remove_progress_value(cell: Vector2i, value: float) -> void:
-	_manager.call("_set_remove_progress_value", cell, value)
+	_manager._set_remove_progress_value(cell, value)
 
 
 func _free_remove_progress_for_cell(cell: Vector2i) -> void:
-	_manager.call("_free_remove_progress_for_cell", cell)
+	_manager._free_remove_progress_for_cell(cell)
 
 
 func _clear_remove_progress_bars() -> void:
-	_manager.call("_clear_remove_progress_bars")
+	_manager._clear_remove_progress_bars()

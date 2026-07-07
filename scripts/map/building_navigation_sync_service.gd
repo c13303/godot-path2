@@ -6,8 +6,8 @@ class_name BuildingNavigationSyncService
 # building tile layers into the flow node's extra-blocking-cell set, fence-blocking-cell
 # set, per-cell player blocking, and per-cell speed multipliers. It never mutates the tile
 # layers or performs placement/removal; BuildingManager keeps the source-of-truth state
-# (the exported layers, the flow node) and thin compatibility wrappers, and this reaches
-# back through _manager for all of it.
+# (the exported layers, the flow node) and thin compatibility wrappers, and this reads them
+# back through the typed _manager reference (BuildingManager) rather than string lookups.
 #
 # Behavior note: this is an extraction only. Which items block flow, which block the
 # player, fence slow behavior, the min/clamp speed logic, the layer order, and the
@@ -16,24 +16,24 @@ class_name BuildingNavigationSyncService
 
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 
-var _manager: Node
+var _manager: BuildingManager
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
 func sync_flow_extra_blocking_cells() -> void:
-	var flow: Node = _manager.get("flow") as Node
+	var flow: Node = _manager.flow
 	if flow == null or not flow.has_method("set_extra_blocking_cells"):
 		return
-	var blocking_buildings: TileMapLayer = _manager.get("blocking_buildings") as TileMapLayer
-	var fences: TileMapLayer = _manager.get("fences") as TileMapLayer
+	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
+	var fences: TileMapLayer = _manager.fences
 	var cells: PackedVector2Array = PackedVector2Array()
 	if blocking_buildings != null:
 		for raw_cell: Variant in blocking_buildings.get_used_cells():
 			var cell: Vector2i = raw_cell as Vector2i
-			if not bool(_manager.call("_building_cell_blocks_movement", cell)):
+			if not _manager._building_cell_blocks_movement(cell):
 				continue
 			cells.append(Vector2(float(cell.x), float(cell.y)))
 	flow.call("set_extra_blocking_cells", cells)
@@ -73,8 +73,8 @@ func building_item_blocks_player(item_id: String) -> bool:
 
 
 func sync_player_blocking_cells() -> void:
-	var flow: Node = _manager.get("flow") as Node
-	var blocking_buildings: TileMapLayer = _manager.get("blocking_buildings") as TileMapLayer
+	var flow: Node = _manager.flow
+	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	if flow == null or not flow.has_method("set_cell_blocked") or blocking_buildings == null:
 		return
 	for raw_cell: Variant in blocking_buildings.get_used_cells():
@@ -85,14 +85,14 @@ func sync_player_blocking_cells() -> void:
 
 
 func set_player_cell_blocked(cell: Vector2i, blocked: bool) -> void:
-	var flow: Node = _manager.get("flow") as Node
+	var flow: Node = _manager.flow
 	if flow == null or not flow.has_method("set_cell_blocked"):
 		return
 	flow.call("set_cell_blocked", cell, blocked)
 
 
 func blocking_building_item_id_at_cell(cell: Vector2i) -> String:
-	var blocking_buildings: TileMapLayer = _manager.get("blocking_buildings") as TileMapLayer
+	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
 		return ""
 	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
@@ -100,7 +100,7 @@ func blocking_building_item_id_at_cell(cell: Vector2i) -> String:
 
 
 func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
-	var flow: Node = _manager.get("flow") as Node
+	var flow: Node = _manager.flow
 	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
 		return
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
@@ -115,10 +115,10 @@ func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 
 
 func effective_cell_speed_multiplier(cell: Vector2i) -> float:
-	var plantz: TileMapLayer = _manager.get("plantz") as TileMapLayer
-	var traversable_buildings: TileMapLayer = _manager.get("traversable_buildings") as TileMapLayer
-	var blocking_buildings: TileMapLayer = _manager.get("blocking_buildings") as TileMapLayer
-	var fences: TileMapLayer = _manager.get("fences") as TileMapLayer
+	var plantz: TileMapLayer = _manager.plantz
+	var traversable_buildings: TileMapLayer = _manager.traversable_buildings
+	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
+	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:

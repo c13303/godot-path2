@@ -13,7 +13,7 @@ class_name SpawnPlaylistConfigService
 
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 
-var _manager: Node
+var _manager: BuildingManager
 
 var _level_spawn_playlist: LevelSpawnPlaylist
 var _level_spawner_bindings: Array[SpawnerBinding] = []
@@ -26,7 +26,7 @@ var _playlist_validation_attempted: bool = false
 var _current_playlist_night_index: int = -1
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -100,7 +100,7 @@ func validate_after_spawner_scan() -> void:
 		controller.get_total_night_count(),
 		_spawner_bindings_by_id.size(),
 	])
-	if bool(_manager.get("debug_logs")):
+	if _manager.debug_logs:
 		_debug_telemetry().log("Configured spawn playlist nights=%d bindings=%d" % [
 			controller.get_total_night_count(),
 			_spawner_bindings_by_id.size(),
@@ -118,7 +118,7 @@ func get_playlist_night_index_from_progression() -> int:
 	var total_nights: int = _spawn_playlist_controller().get_total_night_count()
 	if total_nights <= 0:
 		return 0
-	var prog: Node = _manager.call("_get_progression")
+	var prog: Node = _manager._get_progression()
 	if prog == null:
 		return 0
 	var day_number: int = int(prog.call("get_value", &"nDays"))
@@ -184,12 +184,12 @@ func level_spawner_bindings() -> Array[SpawnerBinding]:
 
 
 func _spawn_playlist_controller() -> SpawnPlaylistController:
-	return _manager.get("_spawn_playlist_controller") as SpawnPlaylistController
+	return _manager._spawn_playlist_controller
 
 
 func _spawners() -> Dictionary:
-	return _manager.get("_spawners") as Dictionary
+	return _manager._spawners
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager._debug_telemetry
