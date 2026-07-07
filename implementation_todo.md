@@ -1,11 +1,11 @@
 We are continuing the BuildingManager cleanup.
 
 Goal:
-Batch 7 = review and harden the new runtime tick architecture after extracting `BuildingManager._process()`, without broad new extraction.
+Batch 8 = reduce unsafe private-manager coupling in `scripts/map/building_runtime_tick_controller.gd` only, while preserving behavior and runtime update order exactly.
 
-This is a refactor-only / audit-hardening pass.
+This is a refactor-only pass.
 Do not change gameplay behavior.
-Do not optimize logic unless required to preserve behavior or prevent obvious architecture regression.
+Do not optimize logic unless required by the boundary cleanup.
 Do not run Godot, tests, export, build, or compilation commands.
 
 Project rules:
@@ -17,202 +17,174 @@ Project rules:
 - Do not create generic abstractions without immediate use.
 - Do not perform a broad rewrite.
 - Preserve behavior exactly.
-- If unsure, keep the existing code and report it.
+- If unsure, keep the existing private access and report it.
 
 Current context:
-Previous batch extracted the frame runtime orchestration from:
-
-`scripts/map/building_manager.gd::_process(delta)`
-
-into something like:
+`BuildingManager._process(delta)` has been extracted into:
 
 `scripts/map/building_runtime_tick_controller.gd`
 
-Now we need to verify that the extraction did not simply move the noodle loop into a new god file.
+The new controller is small and organized, but it still directly accesses many `BuildingManager` private fields/methods through `_manager._xxx`.
 
 Main objective:
-Make sure `BuildingRuntimeTickController` is a readable runtime coordinator, not a new dumping ground.
+Reduce the most unsafe private coupling in `BuildingRuntimeTickController` without changing runtime order or moving major state ownership.
 
 Before editing:
-1. Inspect `scripts/map/building_runtime_tick_controller.gd`.
-2. Inspect `scripts/map/building_manager.gd::_process(delta)`.
-3. Get line counts for both files.
-4. List all methods in `BuildingRuntimeTickController`.
-5. Identify all direct `_manager._xxx` calls in the runtime tick controller.
-6. Identify whether the controller contains real domain logic or only orchestration.
+1. Inspect `building_runtime_tick_controller.gd`.
+2. Count `_manager._` references.
+3. Categorize each private access as:
+   - runtime guard state
+   - timing/scan state
+   - service/controller access
+   - queue/count debug access
+   - domain processing method
+   - debug/telemetry-only access
+4. Only replace accesses where the clean replacement is obvious.
 
-Do not edit before completing this review.
+Do not try to eliminate every `_manager._xxx` call.
 
-Expected good state:
-`BuildingRuntimeTickController` should mostly do this:
-
-```txt
-- check frame/runtime gates
-- call existing services/controllers in the existing order
-- preserve lag/debug timing
-- preserve queue-drain order
-- preserve phase-specific runtime updates
-
-It should not own:
-
-- garden topology algorithms
-- spawn placement logic
-- agent retargeting algorithms
-- turret-eating internals
-- drowning internals
-- client-sale internals
-- harvest internals
-- save/load logic
-- building scan internals
-- large debug-overlay logic
-
-Primary task:
-If the runtime tick controller now contains small chunks of real domain logic that clearly belong to existing services, move those chunks to the existing owner.
+Priority 1 — service/controller access:
+Where `BuildingRuntimeTickController` directly accesses a manager-owned service/controller, prefer an explicit public getter on `BuildingManager`.
 
 Examples:
 
-- turret eating logic -> TurretEatingController
-- drowning logic -> DrowningController
-- garden retarget queue internals -> GardenRetargetController
-- spawn ticking internals -> SpawnTickController
-- client sale ticking internals -> ClientSaleController
-- seed merchant ticking internals -> SeedMerchantController
-- debug telemetry logic -> BuildingDebugTelemetry / debug service
-- building scan internals -> BuildingScanService
-
-Important:
-Do not create new services unless absolutely necessary.
-Prefer moving logic into existing owners.
-If the runtime tick controller only has orchestration and method calls, do not extract anything.
-
-Secondary task:
-Reduce only the most obvious unsafe _manager._private calls in BuildingRuntimeTickController.
-
-Allowed improvements:
-
-Replace direct manager-private calls with existing public wrappers if they already exist.
-Add small public wrappers on BuildingManager only when the name makes ownership clearer.
-Replace calls with direct calls to the owning service if the service is already exposed safely.
-
-Do not attempt to eliminate all _manager._xxx calls.
-Do not introduce a generic context object.
-Do not create a service locator.
-Do not move major state ownership in this pass.
-
-Good replacement example:
-
 Before:
 
-_manager._garden_retarget.process_queue(delta)
+```gdscript
+_manager._turret_eating_controller.process_turret_eating_agents(delta)
+_manager._drowning_controller.process_drowning_agents(delta)
+_manager._client_sale.process(delta)
+_manager._seed_merchant.process_phase()
 
-After, if available:
+After:
 
-_manager.process_garden_retarget_queue(delta)
+_manager.get_turret_eating_controller().process_turret_eating_agents(delta)
+_manager.get_drowning_controller().process_drowning_agents(delta)
+_manager.get_client_sale_controller().process(delta)
+_manager.get_seed_merchant_controller().process_phase()
 
-or:
+Only add getters that are actually used.
 
-_manager.get_garden_retarget_controller().process_queue(delta)
-
-Only do this when it improves clarity.
-
-Bad replacement:
-
-_manager.get_everything_context().garden_retarget.process_queue(delta)
-
-Do not do that.
-
-Runtime tick controller structure:
-If useful, organize process(delta) into small private methods inside the controller, but only by frame-stage.
-
-Good:
-
-func process(delta: float) -> void:
-	if _should_skip_runtime_tick():
-		return
-
-	_process_day_runtime(delta)
-	_process_navigation_runtime(delta)
-	_process_agent_runtime(delta)
-	_process_phase_runtime(delta)
-	_process_debug_runtime(delta)
-
-Only do this if it improves readability and preserves order.
-
-Bad:
-
-func _process_everything_related_to_agents_and_gardens_and_clients(delta: float) -> void:
-	...
-
-Keep method names explicit and ordered.
-
-Order preservation:
-The exact update order from Batch 6 must be preserved.
-
-If splitting process(delta) into stage methods, add short comments that make the order obvious.
+Getter names should be explicit and typed.
 
 Example:
 
-# Keep this before spawn ticks: removed/retargeted agents must settle first.
+func get_drowning_controller() -> DrowningController:
+	return _drowning_controller
 
-Only add comments where order matters.
+Priority 2 — runtime guard state:
+Replace direct reads like:
 
-Anti-noodle guard:
-Add a short comment at the top of building_runtime_tick_controller.gd explaining its boundary.
+_manager._flow_ready
+_manager._startup_ready
+_manager._paused
+_manager._night_preparing
+_manager._client_preparing
 
-Example:
+with intention-revealing public methods if simple.
 
-# Coordinates per-frame runtime updates for BuildingManager.
-# This controller should preserve update order and delegate domain logic to focused services.
-# Do not add new gameplay algorithms here; add them to the owning service/controller.
+Possible wrappers:
 
-Do not over-comment obvious code.
+func is_runtime_ready_for_building_tick() -> bool:
+	return _flow_ready and _startup_ready
 
-BuildingManager:
-BuildingManager._process(delta) should remain tiny.
+func should_skip_building_runtime_tick() -> bool:
+	return _paused or _night_preparing or _client_preparing
 
-Acceptable:
+Use names that match the current behavior.
+Do not change the guard semantics.
 
-func _process(delta: float) -> void:
-	_runtime_tick_controller.process(delta)
+Priority 3 — scan timer:
+_scan_timer is mutable tick state.
 
-or with minimal guards if that was intentionally preserved.
+Do not expose it as a raw public variable.
 
-Do not move runtime logic back into BuildingManager.
+Either:
+
+keep it as private manager access for now, or
+move the scan timer responsibility into BuildingRuntimeTickController only if this is clearly safe and does not change behavior.
+
+Conservative recommendation:
+For this pass, keep _scan_timer access unless the move is trivial and low-risk.
+
+Priority 4 — debug count access:
+For debug-only counters like:
+
+_manager._eating_agents.size()
+_manager._astar_in_agents.size()
+_manager._escaping_agents.size()
+_manager._entry_path_agents.size()
+
+prefer small read-only count wrappers if they already exist or are easy to add.
+
+Possible wrappers:
+
+func eating_agent_count() -> int:
+	return _eating_agents.size()
+
+func astar_in_agent_count() -> int:
+	return _astar_in_agents.size()
+
+func escaping_agent_count() -> int:
+	return _escaping_agents.size()
+
+func entry_path_agent_count() -> int:
+	return _entry_path_agents.size()
+
+Only add these if they meaningfully reduce repeated private access.
+
+Priority 5 — domain processing methods:
+Methods like:
+
+_manager._process_eating_agents(delta)
+_manager._process_creature_rose_trampling()
+_manager._process_pasteque_trampling()
+_manager._process_astar_in_arrivals()
+_manager._process_plant_arrivals()
+_manager._process_escape_arrivals()
+
+may remain private for now unless a clear public wrapper already exists.
+
+Do not move these methods in this pass.
+Do not extract new services in this pass.
+Do not change update order.
+
+Compatibility:
+Do not remove existing private methods.
+Do not rename existing methods unless all call sites are safely updated.
+Do not delete wrappers.
+This pass is about safer access boundaries, not deletion.
 
 Expected result:
 
-BuildingRuntimeTickController is clearly an orchestration coordinator.
-It does not become a new god object.
-Any obvious misplaced domain logic is moved to existing owners.
-The most obvious unsafe private manager calls are reduced if easy.
-BuildingManager._process(delta) remains tiny.
-No new file over 1000 lines.
+BuildingRuntimeTickController has fewer _manager._xxx accesses.
+Service/controller accesses use typed getters.
+Runtime guard state is accessed through explicit methods if safe.
+Debug count access is reduced through read-only wrappers if useful.
+Runtime update order is unchanged.
 No gameplay behavior changes.
+No new service unless absolutely necessary.
+No file grows over 1000 lines.
 
 Safety checks by reading/searching only:
 
-Verify runtime update order is unchanged from Batch 6.
-Verify all moved helper methods are still called.
-Verify no queue-drain order changed.
-Verify no phase guard changed.
-Verify no lag/debug timing label changed.
+Count _manager._ references before and after.
+Verify runtime update order is unchanged.
+Verify all new getters/wrappers are typed.
 Verify no public/signal/Callable/call method was removed.
+Verify no lifecycle callback was changed.
+Verify no queue-drain order changed.
+Verify no lag/debug timing label changed.
 Verify strict typing in all changed code.
-Verify no new circular dependency or preload path typo.
-Verify no new service was created unless clearly justified.
 
 Output required:
 
 List changed files.
-Give line counts for:
-building_manager.gd
-building_runtime_tick_controller.gd
-Summarize whether the runtime tick controller is orchestration-only or still contains domain logic.
-List any logic moved out of the runtime tick controller.
-Show before/after _manager._ private-call count in the runtime tick controller.
+Give before/after _manager._ count in building_runtime_tick_controller.gd.
+List new public getters/wrappers added to BuildingManager.
+Explain which private accesses were intentionally retained and why.
 Confirm runtime update order was preserved.
-Mention any private coupling intentionally retained.
-Mention remaining production-quality concerns.
+Confirm no behavior changes were intended.
 Mention manual test scenarios.
 
 Manual test scenarios to suggest:

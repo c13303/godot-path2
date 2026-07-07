@@ -1120,8 +1120,42 @@ func is_client_sale_active() -> bool:
 	return _client_sale.is_active()
 
 
+func is_runtime_ready_for_building_tick() -> bool:
+	return _flow_ready and _startup_ready
+
+
+func should_skip_building_runtime_tick() -> bool:
+	if _paused:
+		return true
+	return _night_preparing or _client_preparing
+
+
 func get_client_tantrum_controller() -> ClientTantrumController:
 	return _client_tantrum
+
+
+func get_client_sale_controller() -> ClientSaleController:
+	return _client_sale
+
+
+func get_seed_merchant_controller() -> SeedMerchantController:
+	return _seed_merchant
+
+
+func get_morning_harvest_controller() -> MorningHarvestController:
+	return _morning_harvest
+
+
+func get_drowning_controller() -> DrowningController:
+	return _drowning_controller
+
+
+func get_turret_eating_controller() -> TurretEatingController:
+	return _turret_eating_controller
+
+
+func get_spawn_tick_controller() -> SpawnTickController:
+	return _spawn_tick_controller
 
 
 func get_counter_stock_manager() -> CounterStockManager:
@@ -1166,6 +1200,26 @@ func spawner_kind_by_cell() -> Dictionary:
 
 func client_counter_agents() -> Dictionary:
 	return _client_counter_agents
+
+
+func eating_agent_count() -> int:
+	return _eating_agents.size()
+
+
+func astar_in_agent_count() -> int:
+	return _astar_in_agents.size()
+
+
+func escaping_agent_count() -> int:
+	return _escaping_agents.size()
+
+
+func entry_path_agent_count() -> int:
+	return _entry_path_agents.size()
+
+
+func garden_retarget_queue_size() -> int:
+	return _garden_retarget.queue_size()
 
 
 func client_spawners() -> Dictionary:

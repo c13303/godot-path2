@@ -15,14 +15,14 @@ func setup(manager: BuildingManager) -> void:
 func process(delta: float) -> void:
 	if _manager == null:
 		return
-	if not _manager._flow_ready or not _manager._startup_ready:
+	if not _manager.is_runtime_ready_for_building_tick():
 		return
 
 	if _should_skip_paused_runtime():
 		_manager._sync_plant_zone_debug_visibility()
 		return
-	if _manager._morning_harvest.is_active():
-		_manager._morning_harvest.process_walkover()
+	if _manager.get_morning_harvest_controller().is_active():
+		_manager.get_morning_harvest_controller().process_walkover()
 
 	var frame_start_us: int = Time.get_ticks_usec()
 	var debug_telemetry: BuildingDebugTelemetry = _manager.get_building_debug_telemetry()
@@ -39,9 +39,7 @@ func process(delta: float) -> void:
 
 
 func _should_skip_paused_runtime() -> bool:
-	if _manager._paused:
-		return true
-	return _manager._night_preparing or _manager._client_preparing
+	return _manager.should_skip_building_runtime_tick()
 
 
 func _process_building_scan(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
@@ -75,39 +73,39 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
-				_manager._eating_agents.size(), _manager._astar_in_agents.size(),
-				_manager._escaping_agents.size()])
+				_manager.eating_agent_count(), _manager.astar_in_agent_count(),
+				_manager.escaping_agent_count()])
 
 	t = Time.get_ticks_usec()
-	_manager._turret_eating_controller.process_turret_eating_agents(delta)
-	_manager._turret_eating_controller.process_turret_overlaps()
+	_manager.get_turret_eating_controller().process_turret_eating_agents(delta)
+	_manager.get_turret_eating_controller().process_turret_overlaps()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
-			"turret_eating=%d" % _manager._turret_eating_controller.turret_eating_count())
+			"turret_eating=%d" % _manager.get_turret_eating_controller().turret_eating_count())
 
 	t = Time.get_ticks_usec()
-	_manager._drowning_controller.process_drowning_agents(delta)
+	_manager.get_drowning_controller().process_drowning_agents(delta)
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
-			"drowning=%d" % _manager._drowning_controller.drowning_count())
+			"drowning=%d" % _manager.get_drowning_controller().drowning_count())
 
 	t = Time.get_ticks_usec()
 	_manager._process_astar_in_arrivals()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_astar_in_arrivals", Time.get_ticks_usec() - t,
-			"entry=%d astar_in=%d" % [_manager._entry_path_agents.size(), _manager._astar_in_agents.size()])
+			"entry=%d astar_in=%d" % [_manager.entry_path_agent_count(), _manager.astar_in_agent_count()])
 
 	t = Time.get_ticks_usec()
 	_manager._process_plant_arrivals()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_plant_arrivals", Time.get_ticks_usec() - t,
-			"astar_in=%d eating=%d" % [_manager._astar_in_agents.size(), _manager._eating_agents.size()])
+			"astar_in=%d eating=%d" % [_manager.astar_in_agent_count(), _manager.eating_agent_count()])
 
 	t = Time.get_ticks_usec()
 	_manager._process_client_counter_arrivals()
-	_manager._client_tantrum.process(delta)
-	_manager._seed_merchant.process_proximity()
-	_manager._seed_merchant.process_arrival()
+	_manager.get_client_tantrum_controller().process(delta)
+	_manager.get_seed_merchant_controller().process_proximity()
+	_manager.get_seed_merchant_controller().process_arrival()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
 			"counter_agents=%d" % _manager.client_counter_agents().size())
@@ -116,7 +114,7 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	_manager._process_escape_arrivals()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_escape_arrivals", Time.get_ticks_usec() - t,
-			"escaping=%d" % _manager._escaping_agents.size())
+			"escaping=%d" % _manager.escaping_agent_count())
 
 
 func _process_retarget_runtime(debug_telemetry: BuildingDebugTelemetry) -> void:
@@ -127,7 +125,7 @@ func _process_retarget_runtime(debug_telemetry: BuildingDebugTelemetry) -> void:
 		debug_telemetry.warn_garden_task_lag_us("_process_garden_retarget_queue", retarget_elapsed_us,
 			"processed=%d remaining=%d budget=%dms elapsed=%.1fms" % [
 				retarget_processed,
-				_manager._garden_retarget.queue_size(),
+				_manager.garden_retarget_queue_size(),
 				int(_manager.garden_retarget_budget_ms),
 				float(retarget_elapsed_us) / 1000.0,
 			])
@@ -136,12 +134,12 @@ func _process_retarget_runtime(debug_telemetry: BuildingDebugTelemetry) -> void:
 func _process_phase_runtime(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
 	var t: int = Time.get_ticks_usec()
 	var spawn_playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
-	_manager._spawn_tick_controller.process(delta, spawn_playlist_config.playlist_spawning_enabled())
-	_manager._client_sale.process(delta)
-	_manager._seed_merchant.process_phase()
+	_manager.get_spawn_tick_controller().process(delta, spawn_playlist_config.playlist_spawning_enabled())
+	_manager.get_client_sale_controller().process(delta)
+	_manager.get_seed_merchant_controller().process_phase()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
-		var stats: Dictionary = _manager._spawn_tick_controller.spawn_pass_stats()
+		var stats: Dictionary = _manager.get_spawn_tick_controller().spawn_pass_stats()
 		var spawner_route_service: SpawnerRouteService = _manager.get_spawner_route_service()
 		debug_telemetry.warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
 			"spawners=%d processed=%d spawned=%d assigned=%d skipped=%d ready_remaining=%d budget_count=%d budget_ms=%.1f elapsed=%.1fms active_monsters=%d route_cache_hits=%d route_cache_misses=%d" % [
@@ -173,10 +171,10 @@ func _warn_total_frame_lag(debug_telemetry: BuildingDebugTelemetry, frame_start_
 		push_warning("debug_nav_total_frame_lag: %dms (threshold=%dms) eating=%d astar_in=%d escaping=%d retarget_queue=%d spawners=%d direct_ff_exit_success=%d direct_ff_exit_failed=%d" % [
 			int(round(float(frame_us) / 1000.0)),
 			int(frame_threshold_ms),
-			_manager._eating_agents.size(),
-			_manager._astar_in_agents.size(),
-			_manager._escaping_agents.size(),
-			_manager._garden_retarget.queue_size(),
+			_manager.eating_agent_count(),
+			_manager.astar_in_agent_count(),
+			_manager.escaping_agent_count(),
+			_manager.garden_retarget_queue_size(),
 			_manager.get_spawners().size(),
 			_manager.eat_exit_direct_ff_success,
 			_manager.eat_exit_direct_ff_failed
