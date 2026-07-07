@@ -1,12 +1,18 @@
 # AGENTS.md
 
+## Core rule
+
+Do not guess. Ask when requirements, ownership, or behavior are unclear.
+
+For every coding task, watch file growth. Do not let files silently grow into large managers.
+
 ## Test / build policy
 
 Do not run Godot, tests, compilation, export, or build commands.
 
 The user runs tests manually.
 
-Only run Godot if the user explicitly authorizes it in the current conversation.
+Only run Godot if explicitly authorized in the current conversation.
 
 Godot executable, only if authorized:
 
@@ -18,7 +24,7 @@ C:\GAMETOOLS\godot
 
 Godot/GDScript strict typing is enabled.
 
-When editing GDScript, avoid `:=` inference for:
+Avoid `:=` inference for:
 
 * numeric expressions
 * Dictionary / Array values
@@ -42,47 +48,63 @@ var result: Variant = call(...)
 var value: int = int(result)
 ```
 
-## File size and architecture
+## File size watch
 
-Avoid creating huge source files.
+Before editing an existing source file, check its line count.
 
-Before editing a large or central source file, check its line count and consider whether the change belongs there.
+Report the line count when the file is already large or central.
 
-A file over ~800 lines is not automatically wrong, but it requires caution.
+Use these thresholds:
 
-Do not split files only to satisfy a line count.
+```txt
+0–500 lines: normal
+500–800 lines: caution
+800–1000 lines: high caution
+1000+ lines: avoid adding more logic unless clearly justified
+```
 
-Split only when there is a real architectural reason, such as:
+A file over 800 lines is not automatically wrong, but every new responsibility must be questioned.
 
-* a separate gameplay responsibility
-* a reusable subsystem
-* isolated state
-* a clear public API
-* logic that can be tested or reasoned about independently
-* a manager accumulating unrelated domain behavior
+A file over 1000 lines should usually stop growing. Prefer extracting new responsibilities instead of adding more logic to it.
 
-If a planned change would add more than ~150 lines to one existing file, pause before coding and explain whether:
+Never create or expand a 1000+ line file by accident.
 
-* the file is still the correct owner
-* the new logic should become a separate class/module/resource/node
-* the existing file should only delegate to the new module
+If a planned change would add more than ~150 lines to one file, pause before coding and explain the ownership choice.
 
-If a change would push a file far beyond ~800 lines, do not automatically split it. First justify whether keeping it together is cleaner than extracting a new responsibility.
+If a file is already over ~800 lines, consider extraction before adding new behavior.
 
-## Responsibility rules
+If a file is already over ~1000 lines, do not add substantial new logic unless there is a strong reason.
 
-No class should own multiple unrelated gameplay responsibilities.
+## Architecture rules
 
-Do not implement a new domain concept by only expanding an existing manager.
+Do not implement new domain concepts by only expanding an existing manager.
 
-A new domain concept should usually become one of:
+Managers may coordinate systems, but should not accumulate unrelated gameplay logic.
+
+A new responsibility should usually become one of:
 
 * a new class
 * a new node/component
 * a new Resource
 * a helper module with a narrow API
 
-Managers may coordinate systems, but should not accumulate domain logic.
+Split files for architectural reasons, not just to satisfy a number.
+
+Good reasons to split:
+
+* separate gameplay responsibility
+* isolated state
+* reusable subsystem
+* clear public API
+* logic that can be reasoned about independently
+* manager accumulating unrelated behavior
+
+Bad reasons to split:
+
+* line count only
+* tiny artificial files
+* unclear ownership
+* moving code without improving structure
 
 Prefer coherent files over artificially tiny files.
 
@@ -96,11 +118,29 @@ Caller:
 State owned:
 Public API:
 Files changed:
+Current line count of touched files:
 Estimated line additions per file:
+Does this push any file over 800 or 1000 lines?
 Should anything be split? Why / why not:
 ```
 
 If ownership is unclear, propose the smallest safe architecture first.
+
+## Cleanup and refactor
+
+Cleanup is allowed when it directly supports the requested change.
+
+Refactor when it:
+
+* clarifies ownership
+* reduces duplication
+* extracts a real responsibility
+* prevents a large file from growing further
+* makes the requested change safer
+
+Do not bundle unrelated cleanup with the task.
+
+Do not mix unrelated feature work and unrelated fixes in one patch unless explicitly requested.
 
 ## Patch discipline
 
@@ -110,4 +150,6 @@ Preserve existing behavior unless a behavior change was requested.
 
 Avoid unrelated rewrites, renames, formatting changes, or cleanup.
 
-Do not mix refactor, new feature, cleanup, and unrelated fixes in one patch unless explicitly requested.
+When touching large files, prefer delegation and extraction over adding more logic.
+
+When extracting, keep the public behavior stable and make the existing file delegate to the new owner.
