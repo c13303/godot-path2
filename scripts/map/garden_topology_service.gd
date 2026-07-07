@@ -11,7 +11,7 @@ const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
-var _manager: Node
+var _manager: BuildingManager
 var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
@@ -28,7 +28,7 @@ var _plant_zone_built: bool = false
 var _counter_access_cells: Dictionary = {}
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -384,13 +384,13 @@ func rebuild_plant_zone_from_layer() -> void:
 	debug_telemetry.warn_garden_task_lag_us("_validate_dirty_gardens", Time.get_ticks_usec() - t,
 		"gardens=%d" % _gardens.size())
 	t = Time.get_ticks_usec()
-	_manager.call("_rebuild_spawner_garden_route_cache")
+	_manager._rebuild_spawner_garden_route_cache()
 	debug_telemetry.warn_garden_task_lag_us("_rebuild_spawner_garden_route_cache", Time.get_ticks_usec() - t,
-		"spawners=%d" % int(_manager.call("_spawner_garden_route_count")))
+		"spawners=%d" % _manager._spawner_garden_route_count())
 	t = Time.get_ticks_usec()
-	_manager.call("_queue_agents_after_garden_rebuild")
+	_manager._queue_agents_after_garden_rebuild()
 	debug_telemetry.warn_garden_task_lag_us("_queue_agents_after_garden_rebuild", Time.get_ticks_usec() - t,
-		"retarget_queue=%d" % int(_manager.call("_garden_retarget_queue_size")))
+		"retarget_queue=%d" % _manager._garden_retarget_queue_size())
 	debug_telemetry.warn_garden_task_lag_us("_rebuild_plant_zone_from_layer", Time.get_ticks_usec() - rebuild_us,
 		"gardens=%d" % _gardens.size())
 
@@ -672,10 +672,10 @@ func rebuild_plant_zone_compatibility_cache() -> void:
 
 
 func collect_counter_access_cells() -> Array[Vector2i]:
-	var raw_cells: Array = _manager.call("_collect_counter_access_cells_into", _counter_access_cells) as Array
+	var raw_cells: Array[Vector2i] = _manager._collect_counter_access_cells_into(_counter_access_cells)
 	var cells: Array[Vector2i] = []
-	for raw_cell: Variant in raw_cells:
-		cells.append(raw_cell as Vector2i)
+	for raw_cell: Vector2i in raw_cells:
+		cells.append(raw_cell)
 	return cells
 
 
@@ -686,7 +686,7 @@ func garden_has_target_for_kind(garden_id: int, agent_kind: StringName) -> bool:
 
 
 func has_client_targets_remaining() -> bool:
-	if int(_manager.call("_total_counter_stock")) > 0:
+	if _manager._total_counter_stock() > 0:
 		return true
 	for raw_garden_id: Variant in _gardens.keys():
 		if garden_has_client_targets(int(raw_garden_id)):
@@ -710,11 +710,11 @@ func garden_has_client_targets(garden_id: int) -> bool:
 
 func is_client_target_cell(cell: Vector2i) -> bool:
 	if _counter_access_cells.has(cell):
-		return int(_manager.call("_counter_stock", _counter_access_cells[cell] as Vector2i)) > 0
+		return _manager._counter_stock(_counter_access_cells[cell] as Vector2i) > 0
 	var plant_manager: Node = _plant_manager()
 	if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", cell)):
 		return false
-	return bool(_manager.call("_is_grownup_rose_cell", cell))
+	return _manager._is_grownup_rose_cell(cell)
 
 
 func garden_has_grownup_roses(garden_id: int) -> bool:
@@ -726,7 +726,7 @@ func garden_has_grownup_roses(garden_id: int) -> bool:
 		return false
 	for raw_cell: Variant in plant_cells.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		if bool(_manager.call("_is_grownup_rose_cell", cell)):
+		if _manager._is_grownup_rose_cell(cell):
 			return true
 	return false
 
@@ -781,7 +781,7 @@ func mark_garden_empty(garden_id: int) -> void:
 
 func is_eatable_for_monster(cell: Vector2i) -> bool:
 	if _counter_access_cells.has(cell):
-		return int(_manager.call("_counter_stock", _counter_access_cells[cell] as Vector2i)) > 0
+		return _manager._counter_stock(_counter_access_cells[cell] as Vector2i) > 0
 	var plant_manager: Node = _plant_manager()
 	return plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell))
 
@@ -861,44 +861,44 @@ func _bounded_walkable_plant_search(seed_cell: Vector2i, unassigned: Dictionary)
 
 
 func _floorz() -> TileMapLayer:
-	return _manager.get("floorz") as TileMapLayer
+	return _manager.floorz
 
 
 func _plant_manager() -> Node:
-	return _manager.get("plant_manager") as Node
+	return _manager.plant_manager
 
 
 func _spawners() -> Dictionary:
-	return _manager.get("_spawners") as Dictionary
+	return _manager._spawners
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager._debug_telemetry
 
 
 func _is_walkable(cell: Vector2i) -> bool:
-	return bool(_manager.call("_is_walkable", cell))
+	return _manager._is_walkable(cell)
 
 
 func _night_preparation_is_current(token: int) -> bool:
-	return bool(_manager.call("_night_preparation_is_current", token))
+	return _manager._night_preparation_is_current(token)
 
 
 func _night_preparation_budget_us() -> int:
-	return int(_manager.call("_night_preparation_budget_us"))
+	return _manager._night_preparation_budget_us()
 
 
 func _clear_garden_entry_resolve_cache(reason: String) -> void:
-	_manager.call("_clear_garden_entry_resolve_cache", reason)
+	_manager._clear_garden_entry_resolve_cache(reason)
 
 
 func _release_garden_routes(garden_id: int) -> void:
-	_manager.call("_release_garden_routes", garden_id)
+	_manager._release_garden_routes(garden_id)
 
 
 func _queue_zone_overlay_redraw() -> void:
-	_manager.call("_queue_zone_overlay_redraw")
+	_manager._queue_zone_overlay_redraw()
 
 
 func _is_verbose() -> bool:
-	return bool(_manager.call("_is_verbose"))
+	return _manager._is_verbose()

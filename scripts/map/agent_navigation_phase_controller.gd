@@ -11,6 +11,12 @@ const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
 var _manager: Node
+# Manager-owned services that are created once and never reassigned.
+# Cached explicitly at setup so the dependency is visible instead of being
+# fetched by string name (_manager.get(...)) on every access.
+var _garden_topology: Object = null
+var _spawner_route_service: SpawnerRouteService = null
+var _debug_telemetry: BuildingDebugTelemetry = null
 var _eating_agents: Dictionary = {}
 var _escaping_agents: Dictionary = {}
 var _entry_path_agents: Dictionary = {}
@@ -20,6 +26,9 @@ var _client_counter_agents: Dictionary = {}
 
 func setup(manager: Node) -> void:
 	_manager = manager
+	_garden_topology = manager.get("_garden_topology") as Object
+	_spawner_route_service = manager.get("_spawner_route_service") as SpawnerRouteService
+	_debug_telemetry = manager.get("_debug_telemetry") as BuildingDebugTelemetry
 
 
 func eating_agents() -> Dictionary:
@@ -206,7 +215,7 @@ func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i)
 	var consume_us: int = Time.get_ticks_usec()
 	if _agent_kind(eater) == SPAWNER_KIND_CLIENT:
 		start_client_payment(eater, plant_cell)
-		_debug_telemetry().warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+		_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 			"client plant=%s" % str(plant_cell))
 		return
 	start_agent_eating(eater, float(_manager.get("_eating_time")), plant_cell)
@@ -215,7 +224,7 @@ func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i)
 	if plant_manager and plant_manager.has_method("consume_plant"):
 		var remove_us: int = Time.get_ticks_usec()
 		plant_manager.call("consume_plant", plant_cell)
-		_debug_telemetry().warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
+		_debug_telemetry.warn_garden_task_lag_us("_consume_plant.remove_plant", Time.get_ticks_usec() - remove_us,
 			"plant=%s" % str(plant_cell))
 	else:
 		var plantz: TileMapLayer = _plantz()
@@ -224,7 +233,7 @@ func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i)
 			var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
 			plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 			_manager.call("_flush_plant_layer_visuals")
-	_debug_telemetry().warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
+	_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
 
 
@@ -368,11 +377,9 @@ func decide_after_eating(nav_id: int, agent: Node2D, data: Dictionary) -> void:
 
 func escape_finished_eater(nav_id: int, agent: Node2D) -> void:
 	if assign_agent_to_escape(agent):
-		var success_count: int = int(_manager.get("eat_exit_direct_ff_success")) + 1
-		_manager.set("eat_exit_direct_ff_success", success_count)
+		_manager.call("note_eat_exit_direct_ff", true)
 		return
-	var failed_count: int = int(_manager.get("eat_exit_direct_ff_failed")) + 1
-	_manager.set("eat_exit_direct_ff_failed", failed_count)
+	_manager.call("note_eat_exit_direct_ff", false)
 	var floorz: TileMapLayer = _floorz()
 	var fb_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position)) if floorz else INVALID_CELL
 	push_warning("direct_wallexit_ff_escape_failed nav_id=%d cell=%s" % [nav_id, fb_cell])
@@ -418,7 +425,7 @@ func assign_agent_to_escape(agent: Node2D) -> bool:
 	var linked_spawner_cell: Vector2i = INVALID_CELL
 	if agent.has_meta("spawner_cell"):
 		linked_spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	var route_service: Object = _spawner_route_service()
+	var route_service: Object = _spawner_route_service
 	if linked_spawner_cell != INVALID_CELL and bool(route_service.call("has_spawner_route", linked_spawner_cell)):
 		var linked_route: Dictionary = route_service.call("get_spawner_route", linked_spawner_cell) as Dictionary
 		if bool(linked_route.get("has_bound_exit", false)) and bool(linked_route.get("escape_ready", false)):
@@ -570,17 +577,5 @@ func _plantz() -> TileMapLayer:
 	return _manager.get("plantz") as TileMapLayer
 
 
-func _garden_topology() -> Object:
-	return _manager.get("_garden_topology") as Object
-
-
-func _spawner_route_service() -> Object:
-	return _manager.get("_spawner_route_service") as Object
-
-
-func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
-
-
 func _counter_access_cells() -> Dictionary:
-	return _garden_topology().call("counter_access_cells") as Dictionary
+	return _garden_topology.call("counter_access_cells") as Dictionary

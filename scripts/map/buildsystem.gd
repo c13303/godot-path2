@@ -1,4 +1,5 @@
 extends Node
+class_name BuildSystem
 
 signal build_preview_changed(is_active: bool)
 

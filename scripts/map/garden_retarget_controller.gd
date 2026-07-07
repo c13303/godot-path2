@@ -10,7 +10,7 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const _GARDEN_RETARGET_MAX_RETRIES: int = 30
 
-var _manager: Node
+var _manager: BuildingManager
 var _astar_in_agents_by_target_plant: Dictionary = {}
 var _astar_in_target_by_nav_id: Dictionary = {}
 var _debug_check_retarget_index: bool = false
@@ -28,7 +28,7 @@ var _last_find_local_retarget_profile: Dictionary = {}
 var _find_path_in_zone_accum: Dictionary = {}
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -123,7 +123,7 @@ func retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
 		if not _garden_target_is_stale(garden_id):
 			continue
 		_clear_stale_garden_path(nav_id, data)
-	_manager.call("_drain_pending_empty_gardens")
+	_manager._drain_pending_empty_gardens()
 
 
 func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
@@ -134,7 +134,7 @@ func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int
 	_last_plant_retarget_stale = 0
 	_last_plant_retarget_already_queued = 0
 	if garden_id > 0:
-		_manager.call("_garden_has_edible_plants", garden_id)
+		_manager._garden_has_edible_plants(garden_id)
 	if _astar_in_agents_by_target_plant.has(cell):
 		var bucket: Dictionary = _astar_in_agents_by_target_plant[cell] as Dictionary
 		var nav_ids: Array = bucket.keys()
@@ -159,12 +159,12 @@ func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int
 				continue
 			var raw_agent: Variant = data.get("node", null)
 			if not is_instance_valid(raw_agent):
-				_manager.call("_erase_astar_in_agent", nav_id)
+				_manager._erase_astar_in_agent(nav_id)
 				_last_plant_retarget_stale += 1
 				continue
 			var agent: Node2D = raw_agent as Node2D
 			if agent == null:
-				_manager.call("_erase_astar_in_agent", nav_id)
+				_manager._erase_astar_in_agent(nav_id)
 				_last_plant_retarget_stale += 1
 				continue
 			_last_plant_retarget_affected += 1
@@ -172,7 +172,7 @@ func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int
 			var agent_manager: Node = _agent_manager()
 			if agent_manager and agent_manager.has_method("detach_agent_path"):
 				agent_manager.call("detach_agent_path", nav_id)
-			_manager.call("_erase_astar_in_agent", nav_id)
+			_manager._erase_astar_in_agent(nav_id)
 			if agent.has_method("stop_astar_in"):
 				agent.call("stop_astar_in")
 			if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
@@ -183,7 +183,7 @@ func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int
 				_last_plant_retarget_already_queued += 1
 	if _debug_check_retarget_index:
 		_assert_retarget_index_matches_scan(cell)
-	_manager.call("_drain_pending_empty_gardens")
+	_manager._drain_pending_empty_gardens()
 
 
 func queue_agents_after_garden_rebuild() -> void:
@@ -206,7 +206,7 @@ func queue_agents_after_garden_rebuild() -> void:
 		if agent.has_meta("spawner_cell"):
 			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 		queue_agent_for_garden_retarget(nav_id, agent, intent, spawner_cell, garden_id)
-	_manager.call("_drain_pending_empty_gardens")
+	_manager._drain_pending_empty_gardens()
 
 
 func handle_garden_became_empty(garden_id: int) -> void:
@@ -243,7 +243,7 @@ func handle_garden_became_empty(garden_id: int) -> void:
 		if agent.has_meta("spawner_cell"):
 			spawner_cell = agent.get_meta("spawner_cell") as Vector2i
 		queue_agent_for_garden_retarget(nav_id, agent, "retarget", spawner_cell, garden_id)
-	_manager.call("_mark_garden_empty", garden_id)
+	_manager._mark_garden_empty(garden_id)
 
 
 func queue_escape_for_all_monsters_budgeted() -> void:
@@ -278,10 +278,10 @@ func queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String,
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
 	_entry_path_agents().erase(nav_id)
-	_manager.call("_erase_astar_in_agent", nav_id)
+	_manager._erase_astar_in_agent(nav_id)
 	_escaping_agents().erase(nav_id)
 	if _eating_agents().has(nav_id):
-		_manager.call("_erase_eating_agent", nav_id)
+		_manager._erase_eating_agent(nav_id)
 		if agent.has_method("stop_eating"):
 			agent.call("stop_eating")
 	if agent.has_method("start_waiting_new_status"):
@@ -300,8 +300,8 @@ func process_queue() -> int:
 	if _garden_retarget_queue.is_empty():
 		return 0
 	var start_us: int = Time.get_ticks_usec()
-	var budget_us: int = int(float(_manager.get("garden_retarget_budget_ms")) * 1000.0)
-	var count_cap: int = int(_manager.get("garden_retarget_budget_per_frame"))
+	var budget_us: int = int(_manager.garden_retarget_budget_ms * 1000.0)
+	var count_cap: int = _manager.garden_retarget_budget_per_frame
 	var processed: int = 0
 	while not _garden_retarget_queue.is_empty():
 		if processed >= count_cap:
@@ -344,7 +344,7 @@ func accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, find_el
 	a["call_count"] = int(a.get("call_count", 0)) + 1
 	a["total_us"] = int(a.get("total_us", 0)) + call_us
 	a["sync_zone_total_us"] = int(a.get("sync_zone_total_us", 0)) + sync_elapsed
-	a["blocker_total_us"] = int(a.get("blocker_total_us", 0)) + int(_manager.get("_last_zone_blocker_us"))
+	a["blocker_total_us"] = int(a.get("blocker_total_us", 0)) + _manager._last_zone_blocker_us
 	a["find_path_total_us"] = int(a.get("find_path_total_us", 0)) + find_elapsed
 	if call_us > int(a.get("max_single_call_us", 0)):
 		a["max_single_call_us"] = call_us
@@ -359,12 +359,12 @@ func _garden_target_is_stale(garden_id: int) -> bool:
 		return true
 	if not _gardens().has(garden_id):
 		return true
-	return not bool(_manager.call("_garden_has_edible_plants", garden_id))
+	return not bool(_manager._garden_has_edible_plants(garden_id))
 
 
 func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
 	_entry_path_agents().erase(nav_id)
-	_manager.call("_erase_astar_in_agent", nav_id)
+	_manager._erase_astar_in_agent(nav_id)
 	var agent_manager: Node = _agent_manager()
 	if agent_manager and agent_manager.has_method("detach_agent_path"):
 		agent_manager.call("detach_agent_path", nav_id)
@@ -407,7 +407,7 @@ func _garden_assignment_is_stale(garden_id: int) -> bool:
 		return false
 	if not _gardens().has(garden_id):
 		return true
-	if not bool(_manager.call("_garden_has_edible_plants", garden_id)):
+	if not bool(_manager._garden_has_edible_plants(garden_id)):
 		return true
 	return false
 
@@ -432,8 +432,8 @@ func _queue_affected_empty_garden_agent(nav_id: int, intent: String, garden_id: 
 	var agent: Node2D = _agent_from_nav_id(nav_id)
 	if not is_instance_valid(agent):
 		_entry_path_agents().erase(nav_id)
-		_manager.call("_erase_astar_in_agent", nav_id)
-		_manager.call("_erase_eating_agent", nav_id)
+		_manager._erase_astar_in_agent(nav_id)
+		_manager._erase_eating_agent(nav_id)
 		return
 	var spawner_cell: Vector2i = INVALID_CELL
 	if _entry_path_agents().has(nav_id):
@@ -455,7 +455,7 @@ func _retarget_single_waiting_agent(nav_id: int, agent: Node2D, item: Dictionary
 	var spawner_cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
 	var assigned: bool = false
 	if intent == "escape":
-		assigned = bool(_manager.call("_assign_agent_to_escape", agent))
+		assigned = bool(_manager._assign_agent_to_escape(agent))
 	else:
 		assigned = retarget_agent_or_escape(agent, spawner_cell)
 	_debug_telemetry().warn_garden_task_lag_us("_retarget_single_waiting_agent", Time.get_ticks_usec() - single_us,
@@ -486,14 +486,14 @@ func _requeue_waiting_agent(item: Dictionary) -> void:
 
 func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
 	_last_find_local_retarget_profile = {}
-	if int(_manager.get("empty_garden_local_retarget_radius")) <= 0:
+	if _manager.empty_garden_local_retarget_radius <= 0:
 		return {}
 	var plant_manager: Node = _plant_manager()
 	if plant_manager == null or not plant_manager.has_method("has_plant"):
 		return {}
 	_reset_find_path_in_zone_accum()
 	var local_us: int = Time.get_ticks_usec()
-	var radius: int = maxi(0, int(_manager.get("empty_garden_local_retarget_radius")))
+	var radius: int = maxi(0, _manager.empty_garden_local_retarget_radius)
 	var best_target: Dictionary = {}
 	var best_path_len: int = 2147483647
 	var best_dist: int = 2147483647
@@ -512,20 +512,20 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 			cells_scanned += 1
 			var plant_cell: Vector2i = from_cell + Vector2i(dx, dy)
 			if agent_kind == SPAWNER_KIND_CLIENT:
-				if not bool(_manager.call("_is_client_target_cell", plant_cell)):
+				if not _manager._is_client_target_cell(plant_cell):
 					continue
-			elif not bool(_manager.call("_is_eatable_for_monster", plant_cell)):
+			elif not _manager._is_eatable_for_monster(plant_cell):
 				continue
 			plant_candidates += 1
 			if not _garden_by_plant_cell().has(plant_cell):
 				rejected_no_garden += 1
 				continue
 			var garden_id: int = int(_garden_by_plant_cell()[plant_cell])
-			if not bool(_manager.call("_garden_has_target_for_kind", garden_id, agent_kind)):
+			if not _manager._garden_has_target_for_kind(garden_id, agent_kind):
 				rejected_not_edible += 1
 				continue
 			var check_us: int = Time.get_ticks_usec()
-			var path_cells: PackedVector2Array = _manager.call("_find_path_in_zone", from_cell, plant_cell, garden_id) as PackedVector2Array
+			var path_cells: PackedVector2Array = _manager._find_path_in_zone(from_cell, plant_cell, garden_id)
 			var this_check_us: int = Time.get_ticks_usec() - check_us
 			path_checks += 1
 			path_checks_us += this_check_us
@@ -544,7 +544,7 @@ func _find_local_retarget_plant(from_cell: Vector2i, agent_kind: StringName = SP
 					"garden_id": garden_id,
 					"path_cells": path_cells
 				}
-	_manager.call("_drain_pending_empty_gardens")
+	_manager._drain_pending_empty_gardens()
 	var total_us: int = Time.get_ticks_usec() - local_us
 	var found: bool = not best_target.is_empty()
 	_last_find_local_retarget_profile = {
@@ -605,7 +605,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	if plant_cell == INVALID_CELL or garden_id <= 0 or path_cells.is_empty():
 		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
 		return false
-	var route_spawner_cell: Vector2i = _manager.call("_select_spawner_for_garden_from_cell", garden_id, from_cell, spawner_cell, _agent_kind(agent)) as Vector2i
+	var route_spawner_cell: Vector2i = _manager._select_spawner_for_garden_from_cell(garden_id, from_cell, spawner_cell, _agent_kind(agent))
 	if route_spawner_cell == INVALID_CELL:
 		_finish_local_retarget_profile(nav_id_dbg, from_cell, total_us, false)
 		return false
@@ -614,11 +614,11 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	var agent_manager: Node = _agent_manager()
 	if agent_manager and agent_manager.has_method("detach_agent_flow"):
 		agent_manager.call("detach_agent_flow", nav_id)
-	var path_world: PackedVector2Array = _manager.call("_path_cells_to_world", path_cells, nav_id, true) as PackedVector2Array
+	var path_world: PackedVector2Array = _manager._path_cells_to_world(path_cells, nav_id, true)
 	if agent_manager and agent_manager.has_method("assign_agent_path"):
 		agent_manager.call("assign_agent_path", nav_id, path_world)
 	_entry_path_agents().erase(nav_id)
-	_manager.call("_set_astar_in_agent", nav_id, {
+	_manager._set_astar_in_agent(nav_id, {
 		"node": agent,
 		"plant_cell": plant_cell,
 		"spawner_cell": route_spawner_cell,
@@ -627,7 +627,7 @@ func _try_local_retarget_agent(agent: Node2D, from_cell: Vector2i, spawner_cell:
 	})
 	agent.set_meta("spawner_cell", route_spawner_cell)
 	agent.set_meta("garden_id", garden_id)
-	var in_entry_cell: Vector2i = _manager.call("_nearest_garden_entry", garden_id, route_spawner_cell) as Vector2i
+	var in_entry_cell: Vector2i = _manager._nearest_garden_entry(garden_id, route_spawner_cell)
 	if in_entry_cell != INVALID_CELL:
 		agent.set_meta("garden_entry_cell", in_entry_cell)
 	if agent.has_method("start_astar_in"):
@@ -737,7 +737,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		return false
 	var nav_id_dbg: int = int(agent.get("nav_id"))
 	var agent_kind: StringName = _agent_kind(agent)
-	var no_plants: bool = bool(_manager.call("_no_targets_remaining_for_kind", agent_kind))
+	var no_plants: bool = _manager._no_targets_remaining_for_kind(agent_kind)
 	var from_cell: Vector2i = INVALID_CELL
 	if not no_plants:
 		var floorz: TileMapLayer = _floorz()
@@ -749,7 +749,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	if no_plants:
 		_last_retarget_profile["reason"] = "no_plants"
 		var t_esc0: int = Time.get_ticks_usec()
-		var esc0: bool = bool(_manager.call("_assign_agent_to_escape", agent))
+		var esc0: bool = bool(_manager._assign_agent_to_escape(agent))
 		var esc0_us: int = Time.get_ticks_usec() - t_esc0
 		_last_retarget_profile["escape_us"] = esc0_us
 		_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.escape", esc0_us,
@@ -765,13 +765,13 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		_last_retarget_profile["reason"] = "local_retarget"
 		return true
 	var t_res: int = Time.get_ticks_usec()
-	var pair: Dictionary = _manager.call("_select_spawner_garden_for_agent", from_cell, agent_kind) as Dictionary
-	_last_retarget_profile["entry_cache_hits"] = int(_manager.call("_garden_entry_resolve_hits"))
-	_last_retarget_profile["entry_cache_misses"] = int(_manager.call("_garden_entry_resolve_misses"))
-	_last_retarget_profile["entry_cache_size"] = int(_manager.call("_garden_entry_resolve_cache_size"))
+	var pair: Dictionary = _manager._select_spawner_garden_for_agent(from_cell, agent_kind)
+	_last_retarget_profile["entry_cache_hits"] = _manager._garden_entry_resolve_hits()
+	_last_retarget_profile["entry_cache_misses"] = _manager._garden_entry_resolve_misses()
+	_last_retarget_profile["entry_cache_size"] = _manager._garden_entry_resolve_cache_size()
 	if pair.is_empty():
 		if spawner_cell == INVALID_CELL:
-			spawner_cell = _manager.call("_nearest_spawner_cell", from_cell) as Vector2i
+			spawner_cell = _manager._nearest_spawner_cell(from_cell)
 		if spawner_cell != INVALID_CELL and bool(_spawner_route_service().call("has_spawner_route", spawner_cell)):
 			agent.set_meta("spawner_cell", spawner_cell)
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
@@ -785,7 +785,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
 			"nav_id=%d garden=0" % nav_id_dbg)
 		return _escape_with_detector(agent, nav_id_dbg, "garden<=0")
-	var route: Dictionary = _manager.call("_get_or_create_spawner_garden_route", spawner_cell, garden_id) as Dictionary
+	var route: Dictionary = _manager._get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	if not bool(route.get("ready", false)):
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
 		_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
@@ -802,7 +802,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", resolve_us,
 		"nav_id=%d garden=%d entry=%s" % [nav_id_dbg, garden_id, str(entry_cell)])
 	var t_fin: int = Time.get_ticks_usec()
-	var assigned: bool = bool(_manager.call("_assign_agent_to_garden_entry_flow", agent, spawner_cell, garden_id, entry_cell))
+	var assigned: bool = _manager._assign_agent_to_garden_entry_flow(agent, spawner_cell, garden_id, entry_cell)
 	var fin_us: int = Time.get_ticks_usec() - t_fin
 	_last_retarget_profile["assign_us"] = fin_us
 	_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.final_assign", fin_us,
@@ -819,7 +819,7 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 
 func _escape_with_detector(agent: Node2D, nav_id_dbg: int, reason: String) -> bool:
 	var t_esc: int = Time.get_ticks_usec()
-	var esc: bool = bool(_manager.call("_assign_agent_to_escape", agent))
+	var esc: bool = bool(_manager._assign_agent_to_escape(agent))
 	var esc_us: int = Time.get_ticks_usec() - t_esc
 	_last_retarget_profile["escape_us"] = esc_us
 	_last_retarget_profile["reason"] = "escape:" + reason
@@ -829,19 +829,19 @@ func _escape_with_detector(agent: Node2D, nav_id_dbg: int, reason: String) -> bo
 
 
 func _entry_path_agents() -> Dictionary:
-	return _manager.get("_entry_path_agents") as Dictionary
+	return _manager._entry_path_agents
 
 
 func _astar_in_agents() -> Dictionary:
-	return _manager.get("_astar_in_agents") as Dictionary
+	return _manager._astar_in_agents
 
 
 func _eating_agents() -> Dictionary:
-	return _manager.get("_eating_agents") as Dictionary
+	return _manager._eating_agents
 
 
 func _escaping_agents() -> Dictionary:
-	return _manager.get("_escaping_agents") as Dictionary
+	return _manager._escaping_agents
 
 
 func _gardens() -> Dictionary:
@@ -853,28 +853,28 @@ func _garden_by_plant_cell() -> Dictionary:
 
 
 func _agent_manager() -> Node:
-	return _manager.get("agent_manager") as Node
+	return _manager.agent_manager
 
 
 func _plant_manager() -> Node:
-	return _manager.get("plant_manager") as Node
+	return _manager.plant_manager
 
 
 func _garden_topology() -> Object:
-	return _manager.get("_garden_topology") as Object
+	return _manager._garden_topology as Object
 
 
 func _spawner_route_service() -> Object:
-	return _manager.get("_spawner_route_service") as Object
+	return _manager._spawner_route_service
 
 
 func _floorz() -> TileMapLayer:
-	return _manager.get("floorz") as TileMapLayer
+	return _manager.floorz
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager._debug_telemetry
 
 
 func _agent_kind(agent: Node2D) -> StringName:
-	return _manager.call("_agent_kind", agent) as StringName
+	return _manager._agent_kind(agent)

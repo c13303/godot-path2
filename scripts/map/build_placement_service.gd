@@ -8,10 +8,10 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 const FENCE_ITEM_ID: String = "fence"
 
-var _manager: Node
+var _manager: BuildSystem
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildSystem) -> void:
 	_manager = manager
 
 
@@ -447,106 +447,106 @@ func after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_plac
 
 func _clear_build_selection() -> void:
 	if _manager != null:
-		_manager.call("_clear_build_selection")
+		_manager._clear_build_selection()
 
 
 func _show_tutorial_alert(key: String) -> void:
 	if _manager != null:
-		_manager.call("_show_tutorial_alert", key)
+		_manager._show_tutorial_alert(key)
 
 
 func _notify(message: String) -> void:
 	if _manager != null:
-		_manager.call("_notify", message)
+		_manager._notify(message)
 
 
 func _refresh_cell_collision(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_cell_collision", cell)
+		_manager._refresh_cell_collision(cell)
 
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_cell_terrain_speed", cell)
+		_manager._refresh_cell_terrain_speed(cell)
 
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
 	if _manager != null:
-		_manager.call("_refresh_fence_autotiles_for_cells", cells)
+		_manager._refresh_fence_autotiles_for_cells(cells)
 
 
 func _refresh_fence_autotiles_around(cell: Vector2i) -> void:
 	if _manager != null:
-		_manager.call("_refresh_fence_autotiles_around", cell)
+		_manager._refresh_fence_autotiles_around(cell)
 
 
 func _flush_plant_layer_visuals() -> void:
 	if _manager != null:
-		_manager.call("_flush_plant_layer_visuals")
+		_manager._flush_plant_layer_visuals()
 
 
 func _play_build_fx_at_cell(cell: Vector2i, target_layer: TileMapLayer) -> void:
 	if _manager != null:
-		_manager.call("_play_build_fx_at_cell", cell, target_layer)
+		_manager._play_build_fx_at_cell(cell, target_layer)
 
 
 func _atlas_source_id() -> int:
 	if _manager == null:
 		return -1
-	return int(_manager.get("_atlas_source_id"))
+	return _manager._atlas_source_id
 
 
 func _floorz() -> TileMapLayer:
-	return _manager.get("floorz") as TileMapLayer
+	return _manager.floorz
 
 
 func _watersources() -> TileMapLayer:
-	return _manager.get("watersources") as TileMapLayer
+	return _manager.watersources
 
 
 func _wallz() -> TileMapLayer:
-	return _manager.get("wallz") as TileMapLayer
+	return _manager.wallz
 
 
 func _plantz() -> TileMapLayer:
-	return _manager.get("plantz") as TileMapLayer
+	return _manager.plantz
 
 
 func _traversable_buildings() -> TileMapLayer:
-	return _manager.get("traversable_buildings") as TileMapLayer
+	return _manager.traversable_buildings
 
 
 func _blocking_buildings() -> TileMapLayer:
-	return _manager.get("blocking_buildings") as TileMapLayer
+	return _manager.blocking_buildings
 
 
 func _fences() -> TileMapLayer:
-	return _manager.get("fences") as TileMapLayer
+	return _manager.fences
 
 
 func _previewbuild() -> TileMapLayer:
-	return _manager.get("previewbuild") as TileMapLayer
+	return _manager.previewbuild
 
 
 func _plant_manager() -> Node:
-	return _manager.get("plant_manager") as Node
+	return _manager.plant_manager
 
 
 func _building_object_manager() -> Node:
-	return _manager.get("building_object_manager") as Node
+	return _manager.building_object_manager
 
 
 func _reservoir_system() -> Node:
-	return _manager.get("reservoir_system") as Node
+	return _manager.reservoir_system
 
 
 func _game_ui() -> CanvasLayer:
-	return _manager.get("game_ui") as CanvasLayer
+	return _manager.game_ui
 
 
 func _occupied_groups() -> Array[String]:
-	var raw_groups: Array = _manager.get("occupied_groups") as Array
+	var raw_groups: Array[String] = _manager.occupied_groups
 	var groups: Array[String] = []
-	for raw_group: Variant in raw_groups:
-		groups.append(str(raw_group))
+	for raw_group: String in raw_groups:
+		groups.append(raw_group)
 	return groups

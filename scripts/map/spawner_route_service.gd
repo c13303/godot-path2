@@ -9,7 +9,7 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 
-var _manager: Node
+var _manager: BuildingManager
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
 var _dirty_spawner_escapes: Dictionary = {}
@@ -18,7 +18,7 @@ var _route_cache_hits: int = 0
 var _route_cache_misses: int = 0
 
 
-func setup(manager: Node) -> void:
+func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
@@ -142,7 +142,7 @@ func night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check
 
 
 func prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
-	if not bool(_manager.get("_flow_ready")) or _agent_manager() == null or _flow() == null:
+	if not _manager._flow_ready or _agent_manager() == null or _flow() == null:
 		return true
 	var flow: Node = _flow()
 	if not flow.has_method("group_route_cost_at_world"):
@@ -165,7 +165,7 @@ func prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) ->
 			var garden: Dictionary = gardens[garden_id] as Dictionary
 			if not bool(garden.get("targetable", false)):
 				continue
-			if not bool(_manager.call("_garden_has_target_for_kind", garden_id, agent_kind)):
+			if not _manager._garden_has_target_for_kind(garden_id, agent_kind):
 				continue
 			var route: Dictionary = get_or_create_spawner_garden_route(spawner_cell, garden_id)
 			var group_id: int = int(route.get("plant_group", -1))
@@ -202,12 +202,12 @@ func mark_spawner_entry_routes_ready_for_groups(group_ids: Dictionary) -> void:
 
 
 func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
-	if not bool(_manager.get("_flow_ready")) or _agent_manager() == null or _flow() == null:
+	if not _manager._flow_ready or _agent_manager() == null or _flow() == null:
 		return true
 	var agent_manager: Node = _agent_manager()
 	if not agent_manager.has_method("create_group"):
 		return true
-	_manager.call("_clear_garden_entry_resolve_cache", "night_prepare_exit_escapes")
+	_manager._clear_garden_entry_resolve_cache("night_prepare_exit_escapes")
 	var current_exits: Dictionary = {}
 	var wallz: TileMapLayer = _wallz()
 	if wallz:
@@ -271,7 +271,7 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 
 
 func drain_dirty_routes() -> void:
-	if not bool(_manager.get("_flow_ready")):
+	if not _manager._flow_ready:
 		return
 	var agent_manager: Node = _agent_manager()
 	var flow: Node = _flow()
@@ -291,7 +291,7 @@ func drain_dirty_routes() -> void:
 
 
 func initialize_spawner_route(spawner_cell: Vector2i) -> void:
-	if not bool(_manager.get("_flow_ready")) or not bool(_manager.call("_plant_zone_is_built")):
+	if not _manager._flow_ready or not _manager._plant_zone_is_built():
 		return
 	var agent_manager: Node = _agent_manager()
 	var flow: Node = _flow()
@@ -382,7 +382,7 @@ func rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 
 
 func rebuild_all_spawner_routes() -> void:
-	if not bool(_manager.get("_flow_ready")) or not bool(_manager.call("_plant_zone_is_built")):
+	if not _manager._flow_ready or not _manager._plant_zone_is_built():
 		return
 	var spawners: Dictionary = _spawners()
 	for raw_cell: Variant in spawners.keys():
@@ -391,12 +391,12 @@ func rebuild_all_spawner_routes() -> void:
 
 
 func rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
-	if not bool(_manager.get("_flow_ready")):
+	if not _manager._flow_ready:
 		return
 	var agent_manager: Node = _agent_manager()
 	if not agent_manager or not agent_manager.has_method("create_group"):
 		return
-	_manager.call("_clear_garden_entry_resolve_cache", "rebuild_exit_escapes")
+	_manager._clear_garden_entry_resolve_cache("rebuild_exit_escapes")
 	var flow: Node = _flow()
 	if not flow:
 		return
@@ -491,7 +491,7 @@ func request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
 
 
 func rebuild_spawner_garden_route_cache() -> void:
-	_manager.call("_clear_garden_entry_resolve_cache", "rebuild_route_cache")
+	_manager._clear_garden_entry_resolve_cache("rebuild_route_cache")
 	for raw_spawner_cell: Variant in _spawner_garden_routes.keys().duplicate():
 		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
 		if not _spawner_garden_routes.has(spawner_cell):
@@ -608,76 +608,76 @@ func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringN
 
 
 func _night_preparation_is_current(token: int) -> bool:
-	return bool(_manager.call("_night_preparation_is_current", token))
+	return _manager._night_preparation_is_current(token)
 
 
 func _night_preparation_budget_us() -> int:
-	return int(_manager.call("_night_preparation_budget_us"))
+	return _manager._night_preparation_budget_us()
 
 
 func _flow() -> Node:
-	return _manager.get("flow") as Node
+	return _manager.flow
 
 
 func _agent_manager() -> Node:
-	return _manager.get("agent_manager") as Node
+	return _manager.agent_manager
 
 
 func _debug_telemetry() -> BuildingDebugTelemetry:
-	return _manager.get("_debug_telemetry") as BuildingDebugTelemetry
+	return _manager._debug_telemetry
 
 
 func _spawners() -> Dictionary:
-	return _manager.get("_spawners") as Dictionary
+	return _manager._spawners
 
 
 func _spawner_kind_by_cell() -> Dictionary:
-	return _manager.get("_spawner_kind_by_cell") as Dictionary
+	return _manager._spawner_kind_by_cell
 
 
 func _spawner_exit_cell_by_cell() -> Dictionary:
-	return _manager.get("_spawner_exit_cell_by_cell") as Dictionary
+	return _manager._spawner_exit_cell_by_cell
 
 
 func _gardens() -> Dictionary:
-	return _manager.call("_get_gardens") as Dictionary
+	return _manager._get_gardens()
 
 
 func _wallz() -> TileMapLayer:
-	return _manager.get("wallz") as TileMapLayer
+	return _manager.wallz
 
 
 func _nearest_exit_wall_for_spawner(spawner_cell: Vector2i) -> Vector2i:
-	return _manager.call("_nearest_exit_wall_for_spawner", spawner_cell) as Vector2i
+	return _manager._nearest_exit_wall_for_spawner(spawner_cell)
 
 
 func _nearest_walkable_adjacent(cell: Vector2i) -> Vector2i:
-	return _manager.call("_nearest_walkable_adjacent", cell) as Vector2i
+	return _manager._nearest_walkable_adjacent(cell)
 
 
 func _resolve_walkable_goal(cell: Vector2i, purpose: String) -> Vector2i:
-	return _manager.call("_resolve_walkable_goal", cell, purpose) as Vector2i
+	return _manager._resolve_walkable_goal(cell, purpose)
 
 
 func _is_walkable(cell: Vector2i) -> bool:
-	return bool(_manager.call("_is_walkable", cell))
+	return _manager._is_walkable(cell)
 
 
 func _cell_center(cell: Vector2i) -> Vector2:
-	return _manager.call("_cell_center", cell) as Vector2
+	return _manager._cell_center(cell)
 
 
 func _is_finite_world(world_pos: Vector2) -> bool:
-	return bool(_manager.call("_is_finite_world", world_pos))
+	return _manager._is_finite_world(world_pos)
 
 
 func _fences_block_navigation() -> bool:
-	return bool(_manager.call("_fences_block_navigation"))
+	return _manager._fences_block_navigation()
 
 
 func _nearest_garden_entry(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
-	return _manager.call("_nearest_garden_entry", garden_id, spawner_cell) as Vector2i
+	return _manager._nearest_garden_entry(garden_id, spawner_cell)
 
 
 func _is_sane_cell(cell: Vector2i) -> bool:
-	return bool(_manager.call("_is_sane_cell", cell))
+	return _manager._is_sane_cell(cell)

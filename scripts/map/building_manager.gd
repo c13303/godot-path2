@@ -1943,6 +1943,14 @@ func _decide_after_eating(nav_id: int, agent: Node2D, data: Dictionary) -> void:
 func _escape_finished_eater(nav_id: int, agent: Node2D) -> void:
 	_agent_navigation_phases.escape_finished_eater(nav_id, agent)
 
+# Owns the direct-exit-FF escape telemetry tally so callers do not read-modify-write
+# these counters by string name. See eat_exit_direct_ff_success/_failed above.
+func note_eat_exit_direct_ff(success: bool) -> void:
+	if success:
+		eat_exit_direct_ff_success += 1
+	else:
+		eat_exit_direct_ff_failed += 1
+
 func _erase_eating_agent(nav_id: int) -> void:
 	_agent_navigation_phases.erase_eating_agent(nav_id)
 
@@ -2222,7 +2230,8 @@ func _garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 
 # Garden/spawner target-selection scoring now lives in SpawnerGardenSelectionService.
 # These stay as thin compatibility wrappers: _spawn_agent_from calls the first two
-# directly, and GardenRetargetController reaches the last two via _manager.call(...).
+# directly, and GardenRetargetController calls the last two directly on its typed
+# BuildingManager reference.
 func _select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 	return _spawner_garden_selection_service.select_garden_for_spawner(spawner_cell)
 
