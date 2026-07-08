@@ -101,9 +101,12 @@ func cancel_drag_build_preserving_selection() -> void:
 
 
 func start_remove_drag() -> void:
+	# Unbuild works any time during the day, whether or not a build tool is equipped, so
+	# this deliberately does not gate on _build_tool_selected() - only night / inventory /
+	# hovering a UI control block it.
 	if GameState.is_night or _is_inventory_open() or _gui_hovered_control() != null:
 		return
-	if _placement_disabled() or not _build_tool_selected():
+	if _placement_disabled():
 		return
 	# A new drag stacks onto any in-progress removal instead of cancelling it, so
 	# only clear leftover preview bars here (committed queue bars are preserved).
@@ -169,10 +172,10 @@ func finish_remove_drag() -> void:
 func process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	# The committed queue drains one cell at a time while the build tool stays equipped;
-	# leaving build mode (or night / inventory) abandons the remaining removals. The X /
-	# pad button no longer needs to be held here - release already committed the queue.
-	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
+	# Unbuild works any time during the day, without a build tool equipped: the committed
+	# queue drains one cell at a time and is only abandoned by night or an open inventory.
+	# The X / pad button no longer needs to be held - release already committed the queue.
+	if GameState.is_night or _is_inventory_open():
 		cancel_removal()
 		return
 	if _remove_queue.is_empty():
@@ -265,10 +268,6 @@ func _gui_hovered_control() -> Control:
 	if viewport == null:
 		return null
 	return viewport.gui_get_hovered_control()
-
-
-func _build_tool_selected() -> bool:
-	return _manager._build_tool_selected()
 
 
 func _hovered_cell() -> Vector2i:

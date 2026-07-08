@@ -148,11 +148,6 @@ func _preview_matches_hover(cell: Vector2i, atlas_coords: Vector2i, item_id: Str
 func _set_preview_hover(cell: Vector2i, atlas_coords: Vector2i) -> void:
 	_build_preview.set_hover(cell, atlas_coords)
 
-# True while any build tool (gardening or hammer) is equipped: right-click removal works for
-# either, so the player can deconstruct regardless of which build tool is in hand.
-func _build_tool_selected() -> bool:
-	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
-
 func _start_remove_drag() -> void:
 	_drag_controller.start_remove_drag()
 
