@@ -13,6 +13,5 @@ sprite_scale = Vector2(0.75, 0.75)
 sprite_offset = Vector2(0, -16)
 max_health = 100
 speed_scale = 1.0
-crowd_push_scale = 1.5
-crowd_resist_scale = 2.0
+crowd_resist_scale = 1.0
 smash_resist_scale = 1.0

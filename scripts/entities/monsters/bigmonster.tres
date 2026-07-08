@@ -11,6 +11,5 @@ texture = ExtResource("2_texture")
 sprite_offset = Vector2(0, -28)
 max_health = 300
 speed_scale = 0.5
-crowd_push_scale = 6.0
-crowd_resist_scale = 75.0
+crowd_resist_scale = 3.0
 smash_resist_scale = 3.0

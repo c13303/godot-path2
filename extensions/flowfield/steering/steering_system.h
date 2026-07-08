@@ -264,7 +264,6 @@ namespace ffcore
         AgentManager *agent_manager = nullptr;
 
         double movement_priority(const AgentData &agent) const;
-        double crowd_push_intent_multiplier(const AgentData &agent) const;
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);

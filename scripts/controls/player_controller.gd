@@ -409,8 +409,7 @@ func _setup_player() -> void:
 			fight_half_size = sprite_size * 0.5
 			fight_offset_y = sprite.position.y
 		var profile: Dictionary = {
-			"crowd_push_strength": 12.0,
-			"crowd_resist_strength": 2.0,
+			"crowd_push_strength": 2.0,
 			"world_radius": player_world_radius,
 			"foot_offset_y": -player_world_radius,
 			"fight_offset_y": fight_offset_y,
