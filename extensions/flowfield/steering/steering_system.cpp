@@ -665,6 +665,8 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     double self_priority = movement_priority(agent);
     double priority_bias = std::clamp(cfg.priority_separation_bias, 0.0, 1.0);
     double priority_scale_sum = 0.0;
+    double player_push_scale_sum = 0.0;
+    int player_push_count = 0;
 
     for (int i = 0; i < limit; ++i)
     {
@@ -684,7 +686,15 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
         double weight = 1.0;
         double resist = std::max(0.001, agent.profile.crowd_resist_strength);
-        weight *= std::max(0.0, n.profile.crowd_push_strength) / resist;
+        double push_scale = std::max(0.0, n.profile.crowd_push_strength) / resist;
+        if ((n.profile.smash_class & SMASH_CLASS_PLAYER) != 0)
+        {
+            const double player_neighbor_push_multiplier = 4.0;
+            push_scale *= player_neighbor_push_multiplier;
+            player_push_scale_sum += std::clamp(push_scale, 1.0, 8.0);
+            player_push_count++;
+        }
+        weight *= push_scale;
 
         double neighbor_priority = movement_priority(n);
         double priority_delta = self_priority - neighbor_priority;
@@ -702,7 +712,8 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     if (!separation_force.is_zero())
     {
         double priority_scale = count > 0 ? std::clamp(priority_scale_sum / (double)count, 0.65, 1.35) : 1.0;
-        separation_force = safe_normalize(separation_force) * cfg.separation_strength * priority_scale;
+        double player_push_scale = player_push_count > 0 ? player_push_scale_sum / (double)player_push_count : 1.0;
+        separation_force = safe_normalize(separation_force) * cfg.separation_strength * priority_scale * player_push_scale;
     }
 
     return separation_force;
