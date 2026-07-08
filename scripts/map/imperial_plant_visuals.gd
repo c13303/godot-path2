@@ -3,7 +3,10 @@ class_name ImperialPlantVisuals
 
 const IMPERIAL_DRY_TEXTURE: Texture2D = preload("res://assets/sprites/legval/imperial_dry.png")
 const IMPERIAL_WET_TEXTURE: Texture2D = preload("res://assets/sprites/legval/imperial_wet.png")
+const IMPERIAL_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const FRAME_COUNT: int = 6
+const IMPERIAL_ROSE_FRAME_COUNT: int = 3
+const IMPERIAL_ROSE_FRAME: int = 2
 const VISUAL_OFFSET_FROM_SORT_POINT: Vector2 = Vector2(0.0, -18.0)
 const POP_DURATION: float = 0.32
 const POP_JUMP_PIXELS: float = 8.0
@@ -133,8 +136,14 @@ func _apply_visual(cell: Vector2i, stage: int, watered: bool) -> void:
 		_sprites_by_cell[cell] = sprite
 	else:
 		sprite.offset = VISUAL_OFFSET_FROM_SORT_POINT
-	sprite.texture = IMPERIAL_WET_TEXTURE if watered else IMPERIAL_DRY_TEXTURE
-	sprite.frame = clampi(stage, 0, FRAME_COUNT - 1)
+	if stage >= FRAME_COUNT - 1:
+		sprite.texture = IMPERIAL_ROSE_TEXTURE
+		sprite.hframes = IMPERIAL_ROSE_FRAME_COUNT
+		sprite.frame = IMPERIAL_ROSE_FRAME
+	else:
+		sprite.texture = IMPERIAL_WET_TEXTURE if watered else IMPERIAL_DRY_TEXTURE
+		sprite.hframes = FRAME_COUNT
+		sprite.frame = clampi(stage, 0, FRAME_COUNT - 1)
 	var world_center: Vector2 = _plantz.to_global(_plantz.map_to_local(cell))
 	sprite.global_position = world_center
 	sprite.z_index = int(world_center.y)

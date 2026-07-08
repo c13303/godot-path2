@@ -1399,6 +1399,11 @@ position = Vector2(1639, -311)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
+[node name="sheep" type="Sprite2D" parent="spawners/seedmerchent" unique_id=17673017]
+position = Vector2(1639, -247)
+texture = ExtResource("7_wyhb5")
+metadata/id = ""
+
 [node name="monster3" type="Sprite2D" parent="spawners" unique_id=2123954901]
 position = Vector2(1534, 52)
 texture = ExtResource("4_drkbx")

@@ -85,6 +85,14 @@ const ITEM_DEFS: Dictionary = {
 		"speed_multiplier": 0.3,
 		"max_stack": 999,
 	},
+	"imperial_rose": {
+		"id": "imperial_rose",
+		"name": "Imperial Rose",
+		"type": "resource",
+		"category": "resources",
+		"frame": 21,
+		"max_stack": 999,
+	},
 	# Selecting this quick-slot tool opens the build picker in gardening mode (rose, ronce,
 	# pasteque, turrets). It is not a weapon or a placeable itself; the picker chooses which
 	# building to place.

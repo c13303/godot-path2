@@ -351,10 +351,25 @@ func grownup_rose_count() -> int:
 			count += 1
 	return count
 
+func harvestable_imperial_count() -> int:
+	var count: int = 0
+	for raw_cell: Variant in _plants.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if is_imperial_harvestable(cell):
+			count += 1
+	return count
+
 func is_rose_grownup(cell: Vector2i) -> bool:
 	if not is_rose_cell(cell):
 		return false
 	return bool((_plants[cell] as Dictionary).get("grownup", false))
+
+func is_imperial_harvestable(cell: Vector2i) -> bool:
+	if not is_imperial_cell(cell):
+		return false
+	var plant_data: Dictionary = _plants[cell] as Dictionary
+	var stage: int = clampi(int(plant_data.get("stage", 0)), 0, IMPERIAL_MAX_STAGE)
+	return stage >= IMPERIAL_MAX_STAGE
 
 func get_grownup_rose_cells() -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
@@ -371,6 +386,12 @@ func harvest_grownup_rose(cell: Vector2i) -> bool:
 	if not is_rose_grownup(cell):
 		return false
 	remove_plant(cell, true)
+	return true
+
+func harvest_imperial_rose(cell: Vector2i) -> bool:
+	if not is_imperial_harvestable(cell):
+		return false
+	consume_plant(cell)
 	return true
 
 func set_rose_visual_hidden(cell: Vector2i, hidden: bool) -> void:

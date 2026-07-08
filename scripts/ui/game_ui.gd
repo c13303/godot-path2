@@ -432,6 +432,19 @@ func animate_inventory_item_to_slot(
 	)
 
 
+func collect_inventory_item_from_world(item_id: String, world_position: Vector2, count: int = 1) -> bool:
+	if count <= 0:
+		return false
+	if not add_inventory(item_id, count):
+		return false
+	var start_global_position: Vector2 = get_viewport().get_canvas_transform() * world_position
+	var target_position: Vector2 = _inventory_backed_refund_target_position(item_id)
+	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
+	for i: int in range(count):
+		_animate_inventory_item_to_position(item_id, start_global_position, target_position, i, stagger)
+	return true
+
+
 func _animate_inventory_item_to_position(
 	item_id: String,
 	start_global_position: Vector2,
