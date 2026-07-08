@@ -1244,7 +1244,6 @@ script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
 starting_items = {
-&"imperial_seed": 10,
 &"pasteque": 1,
 &"rose_shop_counter": 2
 }
@@ -1264,7 +1263,7 @@ tool_shop_prices = {
 &"wall": 10
 }
 tool_shop_growth_price_factors = {}
-merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+merchant_available_items = Array[StringName]([&"imperial_seed", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
 merchant_prices = {
 &"beam": 30,
 &"bomb": 100,
@@ -1275,7 +1274,7 @@ merchant_prices = {
 &"spray": 10,
 &"sword": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence", &"imperial_seed", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
 shop_prices = {
 &"beam": 30,
 &"bomb": 100,

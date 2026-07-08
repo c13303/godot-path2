@@ -274,7 +274,7 @@ const ITEM_DEFS: Dictionary = {
 	"turret1": {
 		"id": "turret1",
 		"name": "Spitter",
-		"currency": &"seed",
+		"currency": &"gem",
 		"type": "placeable",
 		"category": "turret",
 		"frame": 6,
@@ -299,7 +299,7 @@ const ITEM_DEFS: Dictionary = {
 	"turret_epine": {
 		"id": "turret_epine",
 		"name": "Epine Turret",
-		"currency": &"seed",
+		"currency": &"gem",
 		"type": "placeable",
 		"category": "turret",
 		"frame": 6,
