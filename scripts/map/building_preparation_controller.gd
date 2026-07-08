@@ -54,9 +54,10 @@ func run_night_preparation(token: int) -> void:
 	if not _manager._flow_uses_async_requests() and not _manager._flow_supports_sync_assign():
 		push_error("BuildingManager: FlowFieldNative cannot assign group routes; night preparation cannot spawn monsters.")
 		return
-	if _manager._flow_uses_async_requests():
-		while _manager._night_preparation_is_current(token) and not bool(_manager.flow.call("are_async_flows_idle")):
-			await _manager.get_tree().process_frame
+	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
+	while _manager._night_preparation_is_current(token) and _flow_requests_are_busy(route_service):
+		route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
+		await _manager.get_tree().process_frame
 	if not _manager._night_preparation_is_current(token):
 		return
 	if not _manager._night_flow_fields_are_ready_for_kinds(monster_kinds, true):
@@ -98,9 +99,10 @@ func run_client_preparation(token: int) -> void:
 		push_error("BuildingManager: FlowFieldNative cannot assign group routes; client preparation cannot spawn clients.")
 		_manager._abort_client_preparation(token)
 		return
-	if _manager._flow_uses_async_requests():
-		while _manager._night_preparation_is_current(token) and not bool(_manager.flow.call("are_async_flows_idle")):
-			await _manager.get_tree().process_frame
+	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
+	while _manager._night_preparation_is_current(token) and _flow_requests_are_busy(route_service):
+		route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
+		await _manager.get_tree().process_frame
 	if not _manager._night_preparation_is_current(token):
 		return
 	if not _manager._night_flow_fields_are_ready_for_kinds(client_kinds, false):
@@ -116,6 +118,7 @@ func _run_shared_preparation(token: int) -> bool:
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
 	_manager.get_building_invalidation_controller().clear_navigation_topology_dirty()
+	_manager.get_building_invalidation_controller().clear_plant_layout_dirty()
 	await _manager.get_tree().process_frame
 	var prep_result: bool = await _manager._rebuild_walkable_map_cache_budgeted(token)
 	if not prep_result:
@@ -139,3 +142,11 @@ func _prepare_static_colliders() -> bool:
 	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
 		fight_system.call("prepare_night_static_colliders")
 	return true
+
+
+func _flow_requests_are_busy(route_service: SpawnerRouteService) -> bool:
+	if route_service.queued_flow_request_count() > 0:
+		return true
+	if _manager._flow_uses_async_requests():
+		return not bool(_manager.flow.call("are_async_flows_idle"))
+	return false

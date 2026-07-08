@@ -17,6 +17,10 @@ var _garden_topology: GardenTopologyService
 var _spawner_route_service: SpawnerRouteService
 var _debug_telemetry: BuildingDebugTelemetry
 var _navigation_topology_dirty: bool = true
+var _plant_layout_dirty: bool = false
+var _walkability_quiet_seconds_remaining: float = 0.0
+
+const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
 
 func setup(manager: BuildingManager) -> void:
@@ -28,10 +32,20 @@ func setup(manager: BuildingManager) -> void:
 
 func mark_navigation_topology_dirty() -> void:
 	_navigation_topology_dirty = true
+	_walkability_quiet_seconds_remaining = WALKABILITY_REBUILD_QUIET_SECONDS
 
 
 func clear_navigation_topology_dirty() -> void:
 	_navigation_topology_dirty = false
+	_walkability_quiet_seconds_remaining = 0.0
+
+
+func mark_plant_layout_dirty() -> void:
+	_plant_layout_dirty = true
+
+
+func clear_plant_layout_dirty() -> void:
+	_plant_layout_dirty = false
 
 
 # A wall / blocking-building change altered map walkability (which cells block
@@ -56,7 +70,7 @@ func mark_after_blocking_building_removed() -> void:
 func mark_after_counter_stock_restored() -> void:
 	_garden_topology.counter_access_cells().clear()
 	_garden_topology.set_plant_zone_built(false)
-	mark_navigation_topology_dirty()
+	mark_plant_layout_dirty()
 
 
 # A plant was added/removed during the day (or while no runtime agents are active).
@@ -66,7 +80,7 @@ func mark_after_counter_stock_restored() -> void:
 func after_plant_layout_changed(_reason: String = "") -> void:
 	var topology: GardenTopologyService = _garden_topology
 	topology.set_plant_zone_built(false)
-	mark_navigation_topology_dirty()
+	mark_plant_layout_dirty()
 	_manager.queue_plant_zone_overlay_redraw()
 
 
@@ -75,13 +89,26 @@ func after_plant_layout_changed(_reason: String = "") -> void:
 # route caches, re-plans per-spawner plant flow fields, marks spawner escapes dirty,
 # and rebuilds the exit-wall escape fields (with the same telemetry span). No-op when
 # nothing is dirty. Preserves the exact order the sequence had inline.
-func apply_navigation_topology_rebuild() -> void:
+func apply_navigation_topology_rebuild(delta: float = -1.0) -> void:
+	if _navigation_topology_dirty and delta > 0.0:
+		_walkability_quiet_seconds_remaining = maxf(0.0, _walkability_quiet_seconds_remaining - delta)
+		if _walkability_quiet_seconds_remaining > 0.0:
+			return
+	if _navigation_topology_dirty:
+		_apply_walkability_topology_rebuild()
+	elif _plant_layout_dirty and delta <= 0.0:
+		_apply_plant_layout_rebuild()
+
+
+func _apply_walkability_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
 		return
 	clear_navigation_topology_dirty()
+	clear_plant_layout_dirty()
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
 	_manager._rebuild_walkable_map_cache()
+	_manager.get_seed_merchant_controller().repath_for_walkability_change()
 	var topology: GardenTopologyService = _garden_topology
 	if topology.plant_zone_built():
 		_manager._rebuild_plant_zone_from_layer()
@@ -97,3 +124,13 @@ func apply_navigation_topology_rebuild() -> void:
 	_manager._rebuild_exit_wall_escapes()
 	telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
 		"exits=%d" % route_service.exit_wall_escape_count())
+
+
+func _apply_plant_layout_rebuild() -> void:
+	if not _plant_layout_dirty:
+		return
+	clear_plant_layout_dirty()
+	_manager._rebuild_walkable_map_cache()
+	var topology: GardenTopologyService = _garden_topology
+	if topology.plant_zone_built():
+		_manager._rebuild_plant_zone_from_layer()

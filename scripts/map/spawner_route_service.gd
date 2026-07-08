@@ -16,6 +16,9 @@ var _dirty_spawner_escapes: Dictionary = {}
 var _exit_wall_escapes: Dictionary = {}
 var _route_cache_hits: int = 0
 var _route_cache_misses: int = 0
+var _flow_request_queue: Array[Dictionary] = []
+var _queued_flow_group_ids: Dictionary = {}
+var _flow_group_labels: Dictionary = {}
 
 
 func setup(manager: BuildingManager) -> void:
@@ -40,6 +43,10 @@ func exit_wall_escape_count() -> int:
 
 func spawner_garden_route_count() -> int:
 	return _spawner_garden_routes.size()
+
+
+func queued_flow_request_count() -> int:
+	return _flow_request_queue.size()
 
 
 func has_spawner_route(spawner_cell: Vector2i) -> bool:
@@ -75,6 +82,8 @@ func flow_supports_sync_assign() -> bool:
 
 func group_flow_id_is_ready(group_id: int) -> bool:
 	if group_id <= IDLE_GROUP:
+		return false
+	if _queued_flow_group_ids.has(group_id):
 		return false
 	var flow: Node = _flow()
 	if flow == null:
@@ -174,9 +183,9 @@ func prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) ->
 			if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
 				await _manager.get_tree().process_frame
 				slice_started_us = Time.get_ticks_usec()
-	if flow_uses_async_requests():
-		while _night_preparation_is_current(token) and not bool(flow.call("are_async_flows_idle")):
-			await _manager.get_tree().process_frame
+	while _night_preparation_is_current(token) and _flow_requests_are_busy(flow):
+		process_queued_flow_requests(1, _night_preparation_budget_us())
+		await _manager.get_tree().process_frame
 	if not _night_preparation_is_current(token):
 		return false
 	for raw_group_id: Variant in requested_groups.keys():
@@ -240,7 +249,7 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 		if not _is_finite_world(escape_world):
 			release_exit_wall_escape(exit_cell)
 			continue
-		request_group_flow_rebuild(escape_group, escape_world)
+			request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
 		escape["escape_group"] = escape_group
 		escape["escape_target_cell"] = target_cell
 		escape["escape_world"] = escape_world
@@ -329,7 +338,7 @@ func initialize_spawner_route(spawner_cell: Vector2i) -> void:
 				route["escape_ready"] = false
 				_spawner_routes[spawner_cell] = route
 				return
-			request_group_flow_rebuild(escape_group, escape_world)
+			request_group_flow_rebuild(escape_group, escape_world, "spawner %s escape" % str(spawner_cell))
 			route["escape_group"] = escape_group
 			route["escape_world"] = escape_world
 			route["escape_ready"] = true
@@ -362,7 +371,7 @@ func rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 		route["entry_world"] = entry_world
 		route["ready"] = false
 		route["flow_requested"] = true
-		request_group_flow_rebuild(plant_group, entry_world)
+		request_group_flow_rebuild(plant_group, entry_world, "spawner %s garden %d" % [str(spawner_cell), garden_id])
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
 
@@ -376,7 +385,7 @@ func rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	if escape_group <= IDLE_GROUP:
 		return
 	var escape_world: Vector2 = _cell_center(target_cell)
-	request_group_flow_rebuild(escape_group, escape_world)
+	request_group_flow_rebuild(escape_group, escape_world, "spawner %s escape" % str(spawner_cell))
 	route["escape_world"] = escape_world
 	_spawner_routes[spawner_cell] = route
 
@@ -390,7 +399,7 @@ func rebuild_all_spawner_routes() -> void:
 		initialize_spawner_route(spawner_cell)
 
 
-func rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
+func rebuild_exit_wall_escapes(_use_async_requests: bool = false) -> void:
 	if not _flow_is_ready():
 		return
 	var agent_manager: Node = _agent_manager()
@@ -434,12 +443,7 @@ func rebuild_exit_wall_escapes(use_async_requests: bool = false) -> void:
 			])
 			release_exit_wall_escape(exit_cell)
 			continue
-		if use_async_requests and flow_uses_async_requests():
-			request_group_flow_rebuild(escape_group, escape_world)
-		elif flow.has_method("assign_flow_to_group"):
-			flow.call("assign_flow_to_group", escape_group, escape_world, _fences_block_navigation())
-		else:
-			request_group_flow_rebuild(escape_group, escape_world)
+		request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
 		escape["escape_group"] = escape_group
 		escape["escape_target_cell"] = target_cell
 		escape["escape_world"] = escape_world
@@ -478,16 +482,77 @@ func nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
 	return best
 
 
-func request_group_flow_rebuild(group_id: int, goal_world: Vector2) -> void:
+func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: String = "") -> void:
 	if not _is_finite_world(goal_world):
 		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
 		return
+	if group_id <= IDLE_GROUP:
+		return
+	var resolved_label: String = label
+	if resolved_label == "":
+		resolved_label = str(_flow_group_labels.get(group_id, "group %d" % group_id))
+	_flow_group_labels[group_id] = resolved_label
+	var request: Dictionary = {
+		"group_id": group_id,
+		"goal_world": goal_world,
+		"block_fences": _fences_block_navigation(),
+		"label": resolved_label,
+	}
+	if _queued_flow_group_ids.has(group_id):
+		var existing_index: int = int(_queued_flow_group_ids[group_id])
+		if existing_index >= 0 and existing_index < _flow_request_queue.size():
+			_flow_request_queue[existing_index] = request
+			return
+	_queued_flow_group_ids[group_id] = _flow_request_queue.size()
+	_flow_request_queue.append(request)
+
+
+func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> int:
+	if _flow_request_queue.is_empty():
+		return 0
+	if not flow_uses_async_requests() and not flow_supports_sync_assign():
+		return 0
+	var started_us: int = Time.get_ticks_usec()
+	var processed: int = 0
+	while not _flow_request_queue.is_empty():
+		if processed >= max_requests:
+			break
+		if processed > 0 and budget_us > 0 and Time.get_ticks_usec() - started_us >= budget_us:
+			break
+		var request: Dictionary = _flow_request_queue.pop_front() as Dictionary
+		_reindex_queued_flow_groups()
+		var group_id: int = int(request.get("group_id", IDLE_GROUP))
+		_queued_flow_group_ids.erase(group_id)
+		var goal_world: Vector2 = request.get("goal_world", Vector2.ZERO) as Vector2
+		var block_fences: bool = bool(request.get("block_fences", false))
+		var label: String = str(request.get("label", "group %d" % group_id))
+		_submit_group_flow_rebuild(group_id, goal_world, block_fences, label)
+		processed += 1
+	return processed
+
+
+func _flow_requests_are_busy(flow: Node) -> bool:
+	if queued_flow_request_count() > 0:
+		return flow_uses_async_requests() or flow_supports_sync_assign()
+	if flow_uses_async_requests():
+		return not bool(flow.call("are_async_flows_idle"))
+	return false
+
+
+func _reindex_queued_flow_groups() -> void:
+	_queued_flow_group_ids.clear()
+	for index: int in range(_flow_request_queue.size()):
+		var request: Dictionary = _flow_request_queue[index] as Dictionary
+		_queued_flow_group_ids[int(request.get("group_id", IDLE_GROUP))] = index
+
+
+func _submit_group_flow_rebuild(group_id: int, goal_world: Vector2, block_fences: bool, label: String) -> void:
 	var flow: Node = _flow()
-	var block_fences: bool = _fences_block_navigation()
 	if flow_uses_async_requests():
 		flow.call("request_flow_to_group", group_id, goal_world, block_fences)
 	elif flow_supports_sync_assign():
 		flow.call("assign_flow_to_group", group_id, goal_world, block_fences)
+	print("FF built : %s" % label)
 
 
 func rebuild_spawner_garden_route_cache() -> void:
@@ -587,7 +652,7 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		plant_group = int(agent_manager.call("create_group"))
 	if plant_group <= IDLE_GROUP:
 		return {"ready": false}
-	request_group_flow_rebuild(plant_group, entry_world)
+	request_group_flow_rebuild(plant_group, entry_world, "spawner %s garden %d" % [str(spawner_cell), garden_id])
 	var route: Dictionary = {
 		"entry_cell": entry_cell,
 		"entry_world": entry_world,

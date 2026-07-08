@@ -687,9 +687,11 @@ script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+debug_enabled = true
 dev_keys = true
 draw_bottleneck_zones = false
 refresh_interval = 0.0
+draw_flow_field = true
 verbose = true
 show_gardens = false
 monster_eating_time = 1.0

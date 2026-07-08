@@ -33,7 +33,9 @@ func process(delta: float) -> void:
 
 	# Keep scan and route drains before agent ticks so fresh topology is visible this frame.
 	_process_building_scan(debug_telemetry, delta)
+	_process_navigation_topology_rebuild(debug_telemetry, delta)
 	_process_dirty_routes(debug_telemetry)
+	_process_flow_request_queue(debug_telemetry)
 	_process_agent_runtime(debug_telemetry, delta)
 	# Retargeting stays after arrivals/escapes and before spawn/client phase ticks.
 	_process_retarget_runtime(debug_telemetry)
@@ -67,6 +69,27 @@ func _process_dirty_routes(debug_telemetry: BuildingDebugTelemetry) -> void:
 			"dirty_escapes=%d" % dirty_escapes_before)
 
 
+func _process_navigation_topology_rebuild(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
+	var t: int = Time.get_ticks_usec()
+	_manager.get_building_invalidation_controller().apply_navigation_topology_rebuild(delta)
+	debug_telemetry.warn_garden_task_lag_us("_apply_navigation_topology_rebuild", Time.get_ticks_usec() - t)
+
+
+func _process_flow_request_queue(debug_telemetry: BuildingDebugTelemetry) -> void:
+	var spawner_route_service: SpawnerRouteService = _manager.get_spawner_route_service()
+	if spawner_route_service.queued_flow_request_count() <= 0:
+		return
+	var queued_before: int = spawner_route_service.queued_flow_request_count()
+	var t: int = Time.get_ticks_usec()
+	var processed: int = spawner_route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
+	debug_telemetry.warn_garden_task_lag_us("_process_flow_request_queue", Time.get_ticks_usec() - t,
+		"processed=%d queued_before=%d queued_after=%d" % [
+			processed,
+			queued_before,
+			spawner_route_service.queued_flow_request_count(),
+		])
+
+
 func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
 	# Per-frame tasks: gate context construction on debug telemetry thresholds so the
 	# (string-formatting) context is only built on a real spike, never every frame.
@@ -93,6 +116,12 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
 			"drowning=%d" % _manager.get_drowning_controller().drowning_count())
+
+	t = Time.get_ticks_usec()
+	_manager.get_agent_navigation_phase_controller().process_waiting_entry_flows()
+	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		debug_telemetry.warn_garden_task_lag_us("_process_waiting_entry_flows", Time.get_ticks_usec() - t,
+			"waiting=%d" % _manager.get_agent_navigation_phase_controller().waiting_entry_flow_count())
 
 	t = Time.get_ticks_usec()
 	_manager._process_astar_in_arrivals()

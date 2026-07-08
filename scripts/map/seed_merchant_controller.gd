@@ -7,6 +7,7 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const INTERACT_RADIUS_TILES: int = 2
+const REPATH_START_SEARCH_RADIUS: int = 4
 
 var _manager: BuildingManager
 var _active: bool = false
@@ -107,6 +108,48 @@ func process_proximity() -> void:
 	if near == _paused:
 		return
 	_set_paused(near)
+
+
+func repath_for_walkability_change() -> void:
+	if not _active or _waiting or _leaving:
+		return
+	if not is_instance_valid(_agent):
+		return
+	var agent_manager: Node = _agent_manager()
+	if _nav_id < 0 or agent_manager == null or not agent_manager.has_method("assign_agent_path"):
+		return
+	var floorz: TileMapLayer = _floorz()
+	if floorz == null:
+		return
+	if _target_cell == INVALID_CELL or not _manager.is_walkable_cell(_target_cell):
+		return
+	var current_cell: Vector2i = floorz.local_to_map(floorz.to_local(_agent.global_position))
+	if not _manager.is_walkable_cell(current_cell):
+		current_cell = _nearest_walkable_cell(current_cell, REPATH_START_SEARCH_RADIUS)
+		if current_cell == INVALID_CELL:
+			return
+	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(current_cell, _target_cell)
+	if path_cells.is_empty():
+		push_warning("BuildingManager: seed merchant cannot repath from %s to spot %s after walkability change." % [current_cell, _target_cell])
+		return
+	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, _nav_id, true)
+	agent_manager.call("assign_agent_path", _nav_id, path_world)
+	if _agent.has_method("start_astar_in"):
+		_agent.call("start_astar_in")
+
+
+func _nearest_walkable_cell(start_cell: Vector2i, max_radius: int) -> Vector2i:
+	if _manager.is_walkable_cell(start_cell):
+		return start_cell
+	for radius: int in range(1, max_radius + 1):
+		for y: int in range(start_cell.y - radius, start_cell.y + radius + 1):
+			for x: int in range(start_cell.x - radius, start_cell.x + radius + 1):
+				if abs(x - start_cell.x) != radius and abs(y - start_cell.y) != radius:
+					continue
+				var candidate: Vector2i = Vector2i(x, y)
+				if _manager.is_walkable_cell(candidate):
+					return candidate
+	return INVALID_CELL
 
 
 func is_player_near() -> bool:

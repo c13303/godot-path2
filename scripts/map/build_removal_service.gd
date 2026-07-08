@@ -51,7 +51,7 @@ func commit_removal(removal: Dictionary) -> bool:
 	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != item_id:
 		return false
 
-	remove_tile(layer, cell)
+	remove_tile(layer, cell, item_id)
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui and game_ui.has_method("refund_build"):
 		game_ui.call("refund_build", item_id, refund_world_position(cell), 1)
@@ -65,7 +65,7 @@ func refund_world_position(cell: Vector2i) -> Vector2:
 	return previewbuild.to_global(previewbuild.map_to_local(cell))
 
 
-func remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
+func remove_tile(layer: TileMapLayer, cell: Vector2i, item_id: String = "") -> void:
 	var plantz: TileMapLayer = _plantz()
 	if layer == plantz:
 		var plant_manager: Node = _plant_manager()
@@ -90,6 +90,8 @@ func remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 			layer.update_internals()
 		_refresh_cell_collision(cell)
 		_refresh_cell_terrain_speed(cell)
+		if removed_tile_affects_navigation(layer, item_id):
+			_notify_navigation_topology_changed(cell, "placeable_removed")
 		if layer == fences:
 			_refresh_fence_autotiles_around(cell)
 		return
@@ -98,6 +100,23 @@ func remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	layer.update_internals()
 	_refresh_cell_collision(cell)
 	_refresh_cell_terrain_speed(cell)
+	if layer == _wallz():
+		_notify_navigation_topology_changed(cell, "wall_removed")
+
+
+func removed_tile_affects_navigation(layer: TileMapLayer, item_id: String) -> bool:
+	if layer == _wallz():
+		return true
+	if layer == _fences():
+		return true
+	if layer != _blocking_buildings():
+		return false
+	if item_id == "":
+		return true
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if bool(item_def.get("blocks_agents", false)):
+		return true
+	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 
 func clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2i) -> void:
@@ -191,6 +210,11 @@ func remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[D
 func _refresh_cell_collision(cell: Vector2i) -> void:
 	if _manager != null:
 		_manager._refresh_cell_collision(cell)
+
+
+func _notify_navigation_topology_changed(cell: Vector2i, reason: String) -> void:
+	if _manager != null:
+		_manager._notify_navigation_topology_changed(cell, reason)
 
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:

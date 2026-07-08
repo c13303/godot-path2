@@ -58,6 +58,7 @@ var _atlas_source_id: int = -1
 # Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
+var _building_manager: Object = null
 var _build_preview: BuildPreviewController = BuildPreviewController.new()
 var _placement_service: BuildPlacementService = BuildPlacementService.new()
 var _removal_service: BuildRemovalService = BuildRemovalService.new()
@@ -311,6 +312,15 @@ func _refresh_cell_collision(cell: Vector2i) -> void:
 		blocked = true
 	ff.call("set_cell_blocked", cell, blocked)
 
+func _notify_navigation_topology_changed(_cell: Vector2i, reason: String) -> void:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager == null or not building_manager.has_method("get_building_invalidation_controller"):
+		return
+	var invalidation_controller: Object = building_manager.call("get_building_invalidation_controller")
+	if invalidation_controller == null or not invalidation_controller.has_method("after_walkability_changed"):
+		return
+	invalidation_controller.call("after_walkability_changed", reason)
+
 func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
 		return false
@@ -438,6 +448,18 @@ func _resolve_flow_field() -> Object:
 	if scene:
 		_flow_field = scene.get_node_or_null("CPP/FlowFieldNative")
 	return _flow_field
+
+func _resolve_building_manager() -> Object:
+	if _building_manager and is_instance_valid(_building_manager):
+		return _building_manager
+	var parent_node: Node = get_parent()
+	if parent_node:
+		_building_manager = parent_node.get_node_or_null("BuildingManager")
+	if _building_manager == null:
+		var scene: Node = get_tree().get_current_scene()
+		if scene:
+			_building_manager = scene.get_node_or_null("Map/BuildingManager")
+	return _building_manager
 
 func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, placeable_def: Dictionary) -> void:
 	_build_preview.draw_preview(cell, atlas_coords, item_id, placeable_def)

@@ -80,6 +80,8 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		target_layer.update_internals()
 	if target_layer_affects_collision(target_layer):
 		_refresh_cell_collision(cell)
+	if target_layer_affects_navigation(target_layer, placeable_def):
+		_notify_navigation_topology_changed(cell, "placeable_placed")
 	if not is_logical_plant(placeable_def):
 		_refresh_cell_terrain_speed(cell)
 	after_placeable_placed(cell, placeable_def)
@@ -118,6 +120,8 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 			target_layer.set_cell(cell, _atlas_source_id(), atlas_coords, alternative_from_placeable(placeable_def))
 		if target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
+		if target_layer_affects_navigation(target_layer, placeable_def):
+			_notify_navigation_topology_changed(cell, "drag_placeable_placed")
 		if not is_logical_plant(placeable_def):
 			_refresh_cell_terrain_speed(cell)
 		after_placeable_placed(cell, placeable_def, false)
@@ -216,6 +220,22 @@ func target_tile_layer(layer_name: String) -> TileMapLayer:
 
 func target_layer_affects_collision(target_layer: TileMapLayer) -> bool:
 	return target_layer == _wallz() or target_layer == _blocking_buildings()
+
+
+func target_layer_affects_navigation(target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	if target_layer == _wallz():
+		return true
+	if target_layer == _fences():
+		return true
+	if target_layer != _blocking_buildings():
+		return false
+	var item_id: String = str(placeable_def.get("id", ""))
+	if item_id == "":
+		return true
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if bool(item_def.get("blocks_agents", false)):
+		return true
+	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 
 func is_free_walkable_cell(cell: Vector2i) -> bool:
@@ -515,6 +535,11 @@ func _notify(message: String) -> void:
 func _refresh_cell_collision(cell: Vector2i) -> void:
 	if _manager != null:
 		_manager._refresh_cell_collision(cell)
+
+
+func _notify_navigation_topology_changed(cell: Vector2i, reason: String) -> void:
+	if _manager != null:
+		_manager._notify_navigation_topology_changed(cell, reason)
 
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
