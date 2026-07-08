@@ -1244,6 +1244,7 @@ script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 10
 starting_items = {
+&"imperial_seed": 10,
 &"pasteque": 1,
 &"rose_shop_counter": 2
 }
@@ -1251,6 +1252,7 @@ starting_item_toolbuild_hidden = Array[StringName]([&"turret1"])
 tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence"])
 tool_shop_prices = {
 &"fence": 1,
+&"imperial_seed": 20,
 &"lamp": 0,
 &"pasteque": 20,
 &"reservoir": 100,
@@ -1266,6 +1268,7 @@ merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque", &"
 merchant_prices = {
 &"beam": 30,
 &"bomb": 100,
+&"imperial_seed": 20,
 &"pasteque": 50,
 &"rose_shop_counter": 20,
 &"seed": 2,
@@ -1277,6 +1280,7 @@ shop_prices = {
 &"beam": 30,
 &"bomb": 100,
 &"fence": 1,
+&"imperial_seed": 20,
 &"lamp": 0,
 &"pasteque": 50,
 &"reservoir": 100,

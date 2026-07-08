@@ -50,6 +50,8 @@
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
+[ext_resource type="Script" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
+[ext_resource type="Script" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -777,6 +779,11 @@ navigation_enabled = false
 script = ExtResource("22_plant")
 plantz = NodePath("../MonTilemap/plantz")
 
+[node name="ImperialPlantVisuals" type="Node2D" parent="Map" node_paths=PackedStringArray("plant_manager_path", "plantz_path")]
+script = ExtResource("49_imperial_visuals")
+plant_manager_path = NodePath("../PlantManager")
+plantz_path = NodePath("../MonTilemap/plantz")
+
 [node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
 
 [node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("traversable_buildings", "blocking_buildings", "runtime_parent", "steering_system")]
@@ -902,6 +909,7 @@ anchor_bottom = 1.0
 offset_top = -40.0
 offset_right = 40.0
 grow_vertical = 0
+script = ExtResource("48_possessed_hud")
 
 [node name="seedIcon" type="TextureRect" parent="GameUI/currenciesUI" unique_id=1153248331]
 layout_mode = 0

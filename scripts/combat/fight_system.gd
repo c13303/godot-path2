@@ -159,7 +159,7 @@ func _drain_damage_events() -> void:
 func _water_roses_under_spray_projectiles() -> void:
 	if not _projectiles or _spray_type_ids.is_empty() or not _plant_manager or not _plant_layer:
 		return
-	if not _plant_manager.has_method("is_rose_cell") or not _plant_manager.has_method("wet_rose"):
+	if not _plant_manager.has_method("has_plant") or not _plant_manager.has_method("wet_plant"):
 		return
 	var checked_cells: Dictionary = {}
 	for weapon_id_variant: Variant in _spray_type_ids.keys():
@@ -176,8 +176,8 @@ func _water_roses_under_spray_projectiles() -> void:
 					if checked_cells.has(cell):
 						continue
 					checked_cells[cell] = true
-					if bool(_plant_manager.call("is_rose_cell", cell)):
-						_plant_manager.call("wet_rose", cell)
+					if bool(_plant_manager.call("has_plant", cell)):
+						_plant_manager.call("wet_plant", cell)
 
 func _remove_dead_enemy(enemy: Node2D, agent_id: int) -> void:
 	if _building_manager and _building_manager.has_method("remove_dead_monster"):
@@ -235,10 +235,10 @@ func _handle_static_projectile_impact(impact: Dictionary, waters_plants: bool) -
 		return
 	var collision_cell: Vector2i = raw_collision_cell as Vector2i
 	var rose_cell: Vector2i = _static_grid_cell_to_layer_cell(collision_cell, _plant_layer)
-	if _plant_manager.has_method("is_rose_cell") and not bool(_plant_manager.call("is_rose_cell", rose_cell)):
+	if _plant_manager.has_method("has_plant") and not bool(_plant_manager.call("has_plant", rose_cell)):
 		return
-	if _plant_manager.has_method("wet_rose"):
-		_plant_manager.call("wet_rose", rose_cell)
+	if _plant_manager.has_method("wet_plant"):
+		_plant_manager.call("wet_plant", rose_cell)
 
 func _static_grid_cell_to_layer_cell(collision_cell: Vector2i, layer: TileMapLayer) -> Vector2i:
 	var tile_size: float = 1.0

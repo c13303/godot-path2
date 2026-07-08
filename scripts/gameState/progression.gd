@@ -1,6 +1,7 @@
 extends Node
 
 signal day_started(day_number: int)
+signal values_changed
 
 ## Manual save slot, written/read by the F5/F9 hotkeys.
 const SAVE_PATH: String = "user://progression_save.json"
@@ -328,6 +329,7 @@ func _get_water_reserve_bar() -> ProgressBar:
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
 func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false, animate_money_label: bool = false) -> void:
+	values_changed.emit()
 	var seed_label: RichTextLabel = _get_seed_label()
 	if seed_label != null:
 		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
@@ -999,6 +1001,10 @@ func _validate_save(data: Dictionary) -> String:
 					return "invalid plant state entry"
 			if not (entry["watered_once"] is bool) or not (entry["grownup"] is bool):
 				return "invalid plant state value"
+			if entry.has("plant_kind") and not (entry["plant_kind"] is String):
+				return "invalid plant state kind"
+			if entry.has("stage") and int(entry["stage"]) < 0:
+				return "invalid plant state stage"
 	if data.has("day_phase"):
 		var phase: String = str(data["day_phase"])
 		if not ["building", "morning", "client", "seed_merchant"].has(phase):

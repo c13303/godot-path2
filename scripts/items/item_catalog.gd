@@ -64,6 +64,26 @@ const ITEM_DEFS: Dictionary = {
 		"category": "resources",
 		"price": 2,
 	},
+	"imperial_seed": {
+		"id": "imperial_seed",
+		"name": "Imperial Seed",
+		"currency": &"money",
+		"type": "placeable",
+		"category": "plant",
+		"frame": 20,
+		"price": 20,
+		"target_layer": "plantz",
+		"occupies_cell": true,
+		"blocks_movement": false,
+		"blocks_projectiles": false,
+		"requires_grass_green_floor": true,
+		"runtime_id": "imperial_plant",
+		"logical_plant": true,
+		"plant_kind": "imperial",
+		"inventory_backed": true,
+		"drag_buildable": false,
+		"max_stack": 999,
+	},
 	# Selecting this quick-slot tool opens the build picker in gardening mode (rose, ronce,
 	# pasteque, turrets). It is not a weapon or a placeable itself; the picker chooses which
 	# building to place.
@@ -388,7 +408,7 @@ static func get_gardening_shop_item_ids() -> Array[StringName]:
 		var category: String = str(item_def.get("category", ""))
 		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose", &"ronce", &"pasteque", &"turret1", &"turret_epine"])
+	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret1", &"turret_epine"])
 
 static func get_hammer_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []
@@ -423,7 +443,7 @@ static func get_merchant_shop_item_ids() -> Array[StringName]:
 			var id_name: StringName = StringName(item_id)
 			if not ids.has(id_name):
 				ids.append(id_name)
-	return _ordered_known_first(ids, [&"seed", &"sword", &"bomb", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+	return _ordered_known_first(ids, [&"seed", &"imperial_seed", &"sword", &"bomb", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
 
 static func get_max_stack(item_id: String) -> int:
 	return maxi(1, int(get_item_def(item_id).get("max_stack", 999)))

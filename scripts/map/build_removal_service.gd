@@ -119,6 +119,9 @@ func clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2
 
 
 func removable_at_cell(cell: Vector2i) -> Dictionary:
+	var logical_plant_removal: Dictionary = logical_plant_removable_at_cell(cell)
+	if not logical_plant_removal.is_empty():
+		return logical_plant_removal
 	var blocking_buildings: TileMapLayer = _blocking_buildings()
 	var fences: TileMapLayer = _fences()
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
@@ -139,6 +142,19 @@ func removable_at_cell(cell: Vector2i) -> Dictionary:
 			item_id = str(building.get("item_id", item_id))
 		if item_id != "" and can_unbuild_tile(layer, item_id, atlas_coords):
 			return {"item_id": item_id, "layer": layer, "cell": cell}
+	return {}
+
+
+func logical_plant_removable_at_cell(cell: Vector2i) -> Dictionary:
+	var plant_manager: Node = _plant_manager()
+	var plantz: TileMapLayer = _plantz()
+	if plant_manager == null or plantz == null:
+		return {}
+	if not plant_manager.has_method("get_plant_kind"):
+		return {}
+	var plant_kind: String = str(plant_manager.call("get_plant_kind", cell))
+	if plant_kind == "imperial":
+		return {"item_id": "imperial_seed", "layer": plantz, "cell": cell}
 	return {}
 
 

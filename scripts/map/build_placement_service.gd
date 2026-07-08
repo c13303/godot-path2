@@ -33,10 +33,10 @@ func clear_build_selection_if_unaffordable(item_id: String) -> void:
 
 
 func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
-	if _atlas_source_id() < 0:
+	if _atlas_source_id() < 0 and not is_logical_plant(placeable_def):
 		return
 	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
-	if atlas_coords == Vector2i(-1, -1):
+	if atlas_coords == Vector2i(-1, -1) and not is_logical_plant(placeable_def):
 		return
 
 	var target_layer: TileMapLayer = target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
@@ -62,13 +62,17 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		return
 
 	clear_other_build_layer(target_layer, cell)
-	target_layer.set_cell(
-		cell,
-		_atlas_source_id(),
-		atlas_coords,
-		alternative_from_placeable(placeable_def)
-	)
-	target_layer.update_internals()
+	if is_logical_plant(placeable_def) and target_layer == _plantz() and target_layer.get_cell_source_id(cell) >= 0:
+		target_layer.erase_cell(cell)
+		_flush_plant_layer_visuals()
+	if not is_logical_plant(placeable_def):
+		target_layer.set_cell(
+			cell,
+			_atlas_source_id(),
+			atlas_coords,
+			alternative_from_placeable(placeable_def)
+		)
+		target_layer.update_internals()
 	if target_layer_affects_collision(target_layer):
 		_refresh_cell_collision(cell)
 	_refresh_cell_terrain_speed(cell)
@@ -84,7 +88,7 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
 	var available: int = affordable_quantity(item_id)
 	var cells: Array[Vector2i] = []
-	if target_layer and atlas_coords != Vector2i(-1, -1):
+	if target_layer and (atlas_coords != Vector2i(-1, -1) or is_logical_plant(placeable_def)):
 		cells = drag_build_rectangle_cells(start_cell, end_cell, target_layer, placeable_def, available)
 	if cells.is_empty():
 		if placement_attempt_needs_grass_alert(start_cell, end_cell, placeable_def):
@@ -100,7 +104,8 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 		return false
 
 	for cell: Vector2i in cells:
-		target_layer.set_cell(cell, _atlas_source_id(), atlas_coords, alternative_from_placeable(placeable_def))
+		if not is_logical_plant(placeable_def):
+			target_layer.set_cell(cell, _atlas_source_id(), atlas_coords, alternative_from_placeable(placeable_def))
 		if target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
 		_refresh_cell_terrain_speed(cell)
@@ -226,6 +231,9 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 	var fences: TileMapLayer = _fences()
 	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and is_debris_cell(cell)):
 		return true
+	var plant_manager: Node = _plant_manager()
+	if plant_manager and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell)):
+		return true
 	if wallz and wallz != target_layer and wallz.get_cell_source_id(cell) >= 0:
 		return true
 	if plantz and plantz != target_layer and plantz.get_cell_source_id(cell) >= 0 and not is_debris_cell(cell):
@@ -249,6 +257,10 @@ func is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeab
 	if not turret_range_blocker_for_cell(cell, placeable_def).is_empty():
 		return false
 	return not is_placeable_occupied(cell, target_layer, placeable_def)
+
+
+func is_logical_plant(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("logical_plant", false))
 
 
 func requires_grass_green_floor(placeable_def: Dictionary) -> bool:
@@ -378,6 +390,8 @@ func atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:
 		return Vector2i(int(raw.x), int(raw.y))
 	if raw is Array and raw.size() == 2:
 		return Vector2i(int(raw[0]), int(raw[1]))
+	if is_logical_plant(placeable_def):
+		return PlantManager.ROSE_DRY_ATLAS
 	return Vector2i(-1, -1)
 
 
@@ -431,9 +445,9 @@ func after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_plac
 	var plant_manager: Node = _plant_manager()
 	var placeable_category: String = str(placeable_def.get("category", ""))
 	if placeable_category == "plant" and plant_manager and plant_manager.has_method("add_plant"):
-		plant_manager.call("add_plant", cell)
+		plant_manager.call("add_plant", cell, str(placeable_def.get("plant_kind", "rose")))
 	var placeable_id: String = str(placeable_def.get("id", ""))
-	if placeable_id == "rose" and play_placement_sound:
+	if placeable_category == "plant" and play_placement_sound:
 		Sfx.play_sound(&"plant")
 	var building_object_manager: Node = _building_object_manager()
 	if uses_building_object_manager(placeable_def) and building_object_manager and building_object_manager.has_method("add_building"):

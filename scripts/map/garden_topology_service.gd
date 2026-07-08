@@ -737,8 +737,11 @@ func is_client_target_cell(cell: Vector2i) -> bool:
 	if _counter_access_cells.has(cell):
 		return _manager._counter_stock(_counter_access_cells[cell] as Vector2i) > 0
 	var plant_manager: Node = _plant_manager()
-	if plant_manager and plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", cell)):
-		return false
+	if plant_manager != null:
+		if plant_manager.has_method("is_client_target_cell"):
+			return bool(plant_manager.call("is_client_target_cell", cell))
+		if plant_manager.has_method("has_plant") and not bool(plant_manager.call("has_plant", cell)):
+			return false
 	return _manager._is_grownup_rose_cell(cell)
 
 

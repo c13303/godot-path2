@@ -1,5 +1,7 @@
 extends CanvasLayer
 
+signal inventory_changed
+
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
@@ -264,6 +266,16 @@ func get_inventory_item_quantity(item_id: String) -> int:
 		if _slot_item_id(slot_data) == item_id:
 			total += _slot_quantity(slot_data)
 	return total
+
+func get_possessed_inventory_item_counts() -> Dictionary:
+	var counts: Dictionary = {}
+	for slot_data: Dictionary in inventory_slots:
+		var item_id: String = _slot_item_id(slot_data)
+		var quantity: int = _slot_quantity(slot_data)
+		if item_id == "" or quantity <= 0:
+			continue
+		counts[item_id] = int(counts.get(item_id, 0)) + quantity
+	return counts
 
 func consume_inventory_item(item_id: String, quantity: int) -> bool:
 	if item_id == "" or quantity <= 0 or get_inventory_item_quantity(item_id) < quantity:
@@ -1410,6 +1422,7 @@ func _refresh_all_slots() -> void:
 		_apply_inventory_slot(_inventory_slot_nodes[i], i)
 
 	_refresh_toolbar_info()
+	inventory_changed.emit()
 
 ## Strips items that are not real backpack contents (the build tools and the ephemeral unbuild
 ## tool) from the inventory — e.g. when loading an older save that stored them as inventory items.

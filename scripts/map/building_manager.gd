@@ -968,16 +968,15 @@ func _process_morning_harvest_walkover() -> void:
 	_morning_harvest.process_walkover()
 
 
-# Clients and merchants crush any rose they walk over, leaving debris behind.
-# Monsters reach roses through the garden targeting/eating system; this covers the
+# Clients and merchants crush any plant they walk over, leaving debris behind.
+# Monsters reach plants through the garden targeting/eating system; this covers the
 # shop-bound creatures that cross the garden without ever targeting a plant. The
-# player is exempt (it harvests roses instead). consume_plant() swaps the rose tile
-# for the debris tile and fires plant_removed, so any monster targeting that cell
-# retargets synchronously — the same path a normal eat takes.
+# player is exempt (it harvests roses instead). consume_plant() swaps to debris and
+# fires plant_removed, so any monster targeting that cell retargets synchronously.
 func _process_creature_rose_trampling() -> void:
 	if plant_manager == null or floorz == null:
 		return
-	if not plant_manager.has_method("is_rose_cell") or not plant_manager.has_method("consume_plant"):
+	if not plant_manager.has_method("has_plant") or not plant_manager.has_method("consume_plant"):
 		return
 	for group_name: StringName in [&"clients", &"merchants"]:
 		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
@@ -985,7 +984,7 @@ func _process_creature_rose_trampling() -> void:
 			if not is_instance_valid(agent):
 				continue
 			var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-			if bool(plant_manager.call("is_rose_cell", cell)):
+			if bool(plant_manager.call("has_plant", cell)):
 				plant_manager.call("consume_plant", cell)
 
 
