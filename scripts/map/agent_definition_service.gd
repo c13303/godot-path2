@@ -50,6 +50,9 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set("health", data.max_health)
 	agent.set_meta("monster_speed_scale", data.speed_scale)
 	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
+	agent.set_meta("agent_contact_push_power", data.contact_push_power)
+	agent.set_meta("agent_contact_push_resist", data.contact_push_resist)
+	agent.set_meta("agent_contact_push_cooldown", data.contact_push_cooldown)
 	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
 	if monster_type == MonsterCatalog.BIG_MONSTER_ID:
 		_apply_bigmonster_animation(agent)

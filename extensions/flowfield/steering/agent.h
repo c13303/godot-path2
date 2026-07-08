@@ -41,6 +41,9 @@ namespace ffcore
     {
         double crowd_push_strength = 1.0;
         double crowd_resist_strength = 1.0;
+        double contact_push_power = 0.0;
+        double contact_push_resist = 1.0;
+        double contact_push_cooldown = 0.20;
         // Resistance to smash/knockback impulses (see apply_smash_impulse). 1.0 =
         // normal; 2.0 halves the received impulse velocity (twice the inertia).
         double smash_resist = 1.0;

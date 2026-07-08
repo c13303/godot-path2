@@ -46,6 +46,9 @@ static func _make_basic() -> MonsterData:
 	data.max_health = 100
 	data.speed_scale = 1.0
 	data.crowd_resist_scale = 1.0
+	data.contact_push_power = 0.0
+	data.contact_push_resist = 1.0
+	data.contact_push_cooldown = 0.2
 	data.smash_resist_scale = 1.0
 	return data
 
@@ -61,5 +64,8 @@ static func _make_bigmonster() -> MonsterData:
 	data.max_health = 200
 	data.speed_scale = 0.5
 	data.crowd_resist_scale = 2.0
+	data.contact_push_power = 520.0
+	data.contact_push_resist = 8.0
+	data.contact_push_cooldown = 0.2
 	data.smash_resist_scale = 2.0
 	return data

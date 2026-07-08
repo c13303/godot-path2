@@ -139,6 +139,9 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
 
     sanitized.crowd_push_strength = std::isfinite(sanitized.crowd_push_strength) ? std::max(0.0, sanitized.crowd_push_strength) : 1.0;
     sanitized.crowd_resist_strength = std::isfinite(sanitized.crowd_resist_strength) ? std::max(0.001, sanitized.crowd_resist_strength) : 1.0;
+    sanitized.contact_push_power = std::isfinite(sanitized.contact_push_power) ? std::max(0.0, sanitized.contact_push_power) : 0.0;
+    sanitized.contact_push_resist = std::isfinite(sanitized.contact_push_resist) ? std::max(0.001, sanitized.contact_push_resist) : 1.0;
+    sanitized.contact_push_cooldown = std::isfinite(sanitized.contact_push_cooldown) ? std::max(0.0, sanitized.contact_push_cooldown) : 0.20;
     sanitized.smash_resist = (std::isfinite(sanitized.smash_resist) && sanitized.smash_resist > 0.0) ? sanitized.smash_resist : 1.0;
     sanitized.world_radius = std::isfinite(sanitized.world_radius) && sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
     sanitized.foot_offset_y = std::isfinite(sanitized.foot_offset_y) ? sanitized.foot_offset_y : cfg.agent_offset_y;
@@ -230,6 +233,9 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     agents.pop_back();
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
+    contact_push_cooldowns.erase(id);
+    for (auto &entry : contact_push_cooldowns)
+        entry.second.erase(id);
     recompute_hitbox_query_extents();
 }
 
@@ -611,6 +617,93 @@ double SteeringSystem::movement_priority(const AgentData &agent) const
     return std::clamp(velocity_dir.dot(intent), 0.0, 1.0);
 }
 
+void SteeringSystem::update_contact_push_cooldowns(double delta)
+{
+    if (contact_push_cooldowns.empty())
+        return;
+
+    for (auto outer = contact_push_cooldowns.begin(); outer != contact_push_cooldowns.end();)
+    {
+        auto &inner_map = outer->second;
+        for (auto inner = inner_map.begin(); inner != inner_map.end();)
+        {
+            inner->second -= delta;
+            if (inner->second <= 0.0)
+                inner = inner_map.erase(inner);
+            else
+                ++inner;
+        }
+
+        if (inner_map.empty())
+            outer = contact_push_cooldowns.erase(outer);
+        else
+            ++outer;
+    }
+}
+
+void SteeringSystem::apply_contact_pushes(double delta)
+{
+    (void)delta;
+    if (!grid)
+        return;
+
+    for (const AgentData &agent : agents)
+    {
+        if (is_drowning_agent(agent))
+            continue;
+        if (agent.profile.contact_push_power <= 0.0)
+            continue;
+
+        Vec2 agent_foot = agent_foot_point(agent);
+        std::vector<int> neighbor_ids = grid->query_neighbors(agent_foot, agent.profile.world_radius + max_world_radius);
+        for (int nid : neighbor_ids)
+        {
+            if (nid == agent.id)
+                continue;
+
+            auto it = id_to_index.find(nid);
+            if (it == id_to_index.end())
+                continue;
+
+            const AgentData &neighbor = agents[it->second];
+            if (is_drowning_agent(neighbor))
+                continue;
+            auto cooldowns_it = contact_push_cooldowns.find(agent.id);
+            if (cooldowns_it != contact_push_cooldowns.end() && cooldowns_it->second.find(neighbor.id) != cooldowns_it->second.end())
+                continue;
+
+            double sum_radius = agent.profile.world_radius + neighbor.profile.world_radius;
+            if (sum_radius <= 0.0)
+                continue;
+
+            Vec2 neighbor_foot = agent_foot_point(neighbor);
+            Vec2 delta_pos = neighbor_foot - agent_foot;
+            double dist_sq = delta_pos.length_squared();
+            if (dist_sq > sum_radius * sum_radius)
+                continue;
+
+            Vec2 dir = safe_normalize(delta_pos);
+            if (dir.is_zero())
+                dir = hashed_unit_dir(agent.id);
+
+            double agent_pressure = agent.profile.contact_push_power / std::max(0.001, neighbor.profile.contact_push_resist);
+            double neighbor_pressure = neighbor.profile.contact_push_power / std::max(0.001, agent.profile.contact_push_resist);
+            double net_pressure = agent_pressure - neighbor_pressure;
+            if (std::abs(net_pressure) < 1e-3)
+                continue;
+
+            int target_id = net_pressure > 0.0 ? neighbor.id : agent.id;
+            Vec2 impulse_dir = net_pressure > 0.0 ? dir : dir * -1.0;
+            double force = std::abs(net_pressure);
+            double cooldown = std::max(agent.profile.contact_push_cooldown, neighbor.profile.contact_push_cooldown);
+
+            queue_smash_impulse(target_id, impulse_dir, force, 0.65, 0.0, false, 0.0, 0.0, false);
+            contact_push_cooldowns[agent.id][neighbor.id] = cooldown;
+            contact_push_cooldowns[neighbor.id][agent.id] = cooldown;
+        }
+    }
+}
+
 Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 {
     const auto &cfg = globalconfig();
@@ -665,8 +758,6 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     double self_priority = movement_priority(agent);
     double priority_bias = std::clamp(cfg.priority_separation_bias, 0.0, 1.0);
     double priority_scale_sum = 0.0;
-    double player_push_scale_sum = 0.0;
-    int player_push_count = 0;
 
     for (int i = 0; i < limit; ++i)
     {
@@ -686,15 +777,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
 
         double weight = 1.0;
         double resist = std::max(0.001, agent.profile.crowd_resist_strength);
-        double push_scale = std::max(0.0, n.profile.crowd_push_strength) / resist;
-        if ((n.profile.smash_class & SMASH_CLASS_PLAYER) != 0)
-        {
-            const double player_neighbor_push_multiplier = 4.0;
-            push_scale *= player_neighbor_push_multiplier;
-            player_push_scale_sum += std::clamp(push_scale, 1.0, 8.0);
-            player_push_count++;
-        }
-        weight *= push_scale;
+        weight *= std::max(0.0, n.profile.crowd_push_strength) / resist;
 
         double neighbor_priority = movement_priority(n);
         double priority_delta = self_priority - neighbor_priority;
@@ -712,8 +795,7 @@ Vec2 SteeringSystem::force_voisine(const AgentData &agent)
     if (!separation_force.is_zero())
     {
         double priority_scale = count > 0 ? std::clamp(priority_scale_sum / (double)count, 0.65, 1.35) : 1.0;
-        double player_push_scale = player_push_count > 0 ? player_push_scale_sum / (double)player_push_count : 1.0;
-        separation_force = safe_normalize(separation_force) * cfg.separation_strength * priority_scale * player_push_scale;
+        separation_force = safe_normalize(separation_force) * cfg.separation_strength * priority_scale;
     }
 
     return separation_force;
@@ -1139,12 +1221,17 @@ void SteeringSystem::set_agent_manual_motion(int id, double acceleration, double
 
 void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
 {
+    queue_smash_impulse(id, direction, force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration, true);
+}
+
+void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune)
+{
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
 
     AgentData &agent = agents[it->second];
-    if (agent.profile.weapon_immune)
+    if (respect_weapon_immune && agent.profile.weapon_immune)
         return;
     if (is_drowning_agent(agent))
         return;
@@ -1733,6 +1820,9 @@ void SteeringSystem::update_all(double delta)
     active_aoes.erase(std::remove_if(active_aoes.begin(), active_aoes.end(),
                                      [](const ActiveAoE &z) { return z.continuous_id < 0 && z.time_left <= 0.0; }),
                       active_aoes.end());
+
+    update_contact_push_cooldowns(delta);
+    apply_contact_pushes(delta);
 
     for (auto &a : agents)
     {

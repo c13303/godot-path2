@@ -410,6 +410,9 @@ func _setup_player() -> void:
 			fight_offset_y = sprite.position.y
 		var profile: Dictionary = {
 			"crowd_push_strength": 2.0,
+			"contact_push_power": 216.0,
+			"contact_push_resist": 2.0,
+			"contact_push_cooldown": 0.16,
 			"world_radius": player_world_radius,
 			"foot_offset_y": -player_world_radius,
 			"fight_offset_y": fight_offset_y,

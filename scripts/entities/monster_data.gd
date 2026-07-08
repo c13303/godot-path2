@@ -29,6 +29,13 @@ class_name MonsterData
 ## Resistance to neighbor crowd/separation push. 1.0 = normal,
 ## 2.0 = pushed half as much by neighbours (twice the inertia).
 @export_range(0.05, 100.0, 0.01, "or_greater") var crowd_resist_scale: float = 1.0
+## Discrete physical bump strength used only on direct contact. 0.0 disables
+## contact pushing for this monster type.
+@export_range(0.0, 1000.0, 1.0, "or_greater") var contact_push_power: float = 0.0
+## Resistance against another agent's contact push. 2.0 receives half the contact
+## pressure before normal smash resistance is applied.
+@export_range(0.05, 100.0, 0.01, "or_greater") var contact_push_resist: float = 1.0
+@export_range(0.0, 2.0, 0.01, "or_greater") var contact_push_cooldown: float = 0.2
 ## Resistance to smash / knockback impulses. 1.0 = normal,
 ## 2.0 = receives half the knockback velocity (twice the inertia).
 @export_range(0.05, 100.0, 0.01, "or_greater") var smash_resist_scale: float = 1.0

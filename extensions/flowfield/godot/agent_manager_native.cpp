@@ -229,6 +229,24 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         if (std::isfinite(resist) && resist > 0.0)
             profile.crowd_resist_strength = resist;
     }
+    if (node->has_meta(StringName("agent_contact_push_power")))
+    {
+        double power = (double)node->get_meta(StringName("agent_contact_push_power"));
+        if (std::isfinite(power) && power >= 0.0)
+            profile.contact_push_power = power;
+    }
+    if (node->has_meta(StringName("agent_contact_push_resist")))
+    {
+        double resist = (double)node->get_meta(StringName("agent_contact_push_resist"));
+        if (std::isfinite(resist) && resist > 0.0)
+            profile.contact_push_resist = resist;
+    }
+    if (node->has_meta(StringName("agent_contact_push_cooldown")))
+    {
+        double cooldown = (double)node->get_meta(StringName("agent_contact_push_cooldown"));
+        if (std::isfinite(cooldown) && cooldown >= 0.0)
+            profile.contact_push_cooldown = cooldown;
+    }
     if (node->has_meta(StringName("monster_smash_resist")))
     {
         double resist = (double)node->get_meta(StringName("monster_smash_resist"));

@@ -14,4 +14,7 @@ sprite_offset = Vector2(0, -16)
 max_health = 100
 speed_scale = 1.0
 crowd_resist_scale = 1.0
+contact_push_power = 0.0
+contact_push_resist = 1.0
+contact_push_cooldown = 0.2
 smash_resist_scale = 1.0

@@ -239,6 +239,7 @@ namespace ffcore
         int next_continuous_aoe_id = 1;
         std::vector<ActiveAoE> active_aoes;
         std::vector<DamageEvent> damage_events;
+        std::unordered_map<int, std::unordered_map<int, double>> contact_push_cooldowns;
         std::unordered_map<FlowField *, std::unordered_map<int, BottleneckReservation>> bottleneck_reservations;
         std::unordered_map<FlowField *, std::unordered_map<int, int>> bottleneck_core_occupancy;
         double max_fight_query_padding = 0.0;
@@ -264,6 +265,9 @@ namespace ffcore
         AgentManager *agent_manager = nullptr;
 
         double movement_priority(const AgentData &agent) const;
+        void update_contact_push_cooldowns(double delta);
+        void apply_contact_pushes(double delta);
+        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune);
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);

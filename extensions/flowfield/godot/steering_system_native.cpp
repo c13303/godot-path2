@@ -347,6 +347,12 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.crowd_push_strength = double(profile["crowd_push_strength"]);
     if (profile.has("crowd_resist_strength"))
         native_profile.crowd_resist_strength = double(profile["crowd_resist_strength"]);
+    if (profile.has("contact_push_power"))
+        native_profile.contact_push_power = double(profile["contact_push_power"]);
+    if (profile.has("contact_push_resist"))
+        native_profile.contact_push_resist = double(profile["contact_push_resist"]);
+    if (profile.has("contact_push_cooldown"))
+        native_profile.contact_push_cooldown = double(profile["contact_push_cooldown"]);
     if (profile.has("world_radius"))
         native_profile.world_radius = double(profile["world_radius"]);
     if (profile.has("max_speed"))

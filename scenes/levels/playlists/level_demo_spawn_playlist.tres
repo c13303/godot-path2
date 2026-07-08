@@ -12,10 +12,15 @@ monster_count = 3
 spawn_interval_seconds = 1.0
 emit_event = &"wave1"
 
+[sub_resource type="Resource" id="Resource_g8l62"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+spawn_interval_seconds = 1.0
+
 [sub_resource type="Resource" id="Resource_0k8ip"]
 script = ExtResource("3_track")
 spawner_id = &"monster1"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_rk5yt")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_rk5yt"), SubResource("Resource_g8l62")])
 
 [sub_resource type="Resource" id="Resource_jab7j"]
 script = ExtResource("4_wave")
