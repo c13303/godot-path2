@@ -414,10 +414,44 @@ func get_quick_slot_left_x(index: int) -> float:
 	return _toolbar_slot_nodes[index].get_global_rect().position.x
 
 
-func animate_inventory_item_to_slot(item_id: String, start_global_position: Vector2) -> bool:
+func animate_inventory_item_to_slot(
+	item_id: String,
+	start_global_position: Vector2,
+	sequence_index: int = 0,
+	stagger_seconds: float = 0.0
+) -> bool:
 	var target_slot: Control = _find_inventory_item_slot(item_id)
-	if target_slot == null:
+	if target_slot == null or not is_instance_valid(target_slot):
 		return false
+	return _animate_inventory_item_to_position(
+		item_id,
+		start_global_position,
+		target_slot.get_global_rect().get_center(),
+		sequence_index,
+		stagger_seconds
+	)
+
+
+func _animate_inventory_item_to_position(
+	item_id: String,
+	start_global_position: Vector2,
+	end_global_position: Vector2,
+	sequence_index: int = 0,
+	stagger_seconds: float = 0.0
+) -> bool:
+	var texture: AtlasTexture = _inventory_item_texture(item_id)
+	if texture == null:
+		return false
+	var start_delay: float = float(sequence_index) * maxf(0.0, stagger_seconds)
+	if start_delay <= 0.0:
+		return _start_inventory_item_flight(item_id, start_global_position, end_global_position)
+	var delay_tween: Tween = create_tween()
+	delay_tween.tween_interval(start_delay)
+	delay_tween.tween_callback(Callable(self, "_start_inventory_item_flight").bind(item_id, start_global_position, end_global_position))
+	return true
+
+
+func _start_inventory_item_flight(item_id: String, start_global_position: Vector2, end_global_position: Vector2) -> bool:
 	var texture: AtlasTexture = _inventory_item_texture(item_id)
 	if texture == null:
 		return false
@@ -431,17 +465,16 @@ func animate_inventory_item_to_slot(item_id: String, start_global_position: Vect
 	item_sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
 	add_child(item_sprite)
 
-	var end_position: Vector2 = target_slot.get_global_rect().get_center()
-	var distance: float = start_global_position.distance_to(end_position)
+	var distance: float = start_global_position.distance_to(end_global_position)
 	var arc_height: float = clampf(distance * 0.22, 70.0, 180.0)
-	var curve_position: Vector2 = (start_global_position + end_position) * 0.5 + Vector2(0.0, -arc_height)
+	var curve_position: Vector2 = (start_global_position + end_global_position) * 0.5 + Vector2(0.0, -arc_height)
 	item_sprite.position = start_global_position - PURCHASE_FLIGHT_SIZE * 0.5
 	item_sprite.scale = Vector2(0.45, 0.45)
 
 	var flight_tween: Tween = create_tween()
 	flight_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	flight_tween.tween_method(
-		Callable(self, "_update_purchase_flight").bind(item_sprite, start_global_position, curve_position, end_position),
+		Callable(self, "_update_purchase_flight").bind(item_sprite, start_global_position, curve_position, end_global_position),
 		0.0,
 		1.0,
 		PURCHASE_FLIGHT_DURATION
@@ -461,6 +494,16 @@ func _find_inventory_item_slot(item_id: String) -> Control:
 		if _slot_item_id(inventory_slots[i]) == item_id and i < _inventory_slot_nodes.size():
 			return _inventory_slot_nodes[i]
 	return null
+
+
+func _inventory_backed_refund_target_position(item_id: String) -> Vector2:
+	var possessed_hud: Node = get_node_or_null("currenciesUI")
+	if possessed_hud != null and possessed_hud.has_method("get_item_flight_target_global_position"):
+		return possessed_hud.call("get_item_flight_target_global_position", item_id) as Vector2
+	var target_slot: Control = _find_inventory_item_slot(item_id)
+	if target_slot != null and is_instance_valid(target_slot):
+		return target_slot.get_global_rect().get_center()
+	return Vector2.ZERO
 
 
 func _inventory_item_texture(item_id: String) -> AtlasTexture:
@@ -1042,7 +1085,7 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	# Inventory-backed buildables are returned to the inventory rather than refunded as
 	# currency (their stored contents, e.g. a tank's water, are discarded).
 	if ItemCatalog.is_inventory_backed(item_id):
-		add_inventory(item_id, count)
+		_refund_inventory_backed_build(item_id, world_position, count)
 		return
 	var price: int = get_build_price(item_id)
 	var units: int = price * count
@@ -1074,6 +1117,16 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	var key: StringName = _build_currency_prog_key(item_id)
 	if key != &"" and _progression_node != null:
 		_progression_node.call("update_value", key, units)
+
+
+func _refund_inventory_backed_build(item_id: String, world_position: Vector2, count: int) -> void:
+	var target_position: Vector2 = _inventory_backed_refund_target_position(item_id)
+	if not add_inventory(item_id, count):
+		return
+	var start_global_position: Vector2 = get_viewport().get_canvas_transform() * world_position
+	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
+	for i: int in range(count):
+		_animate_inventory_item_to_position(item_id, start_global_position, target_position, i, stagger)
 
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)

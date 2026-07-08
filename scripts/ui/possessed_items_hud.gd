@@ -49,12 +49,14 @@ func _ready() -> void:
 		_progression.connect("values_changed", Callable(self, "refresh"))
 	if _game_ui != null and _game_ui.has_signal("inventory_changed"):
 		_game_ui.connect("inventory_changed", Callable(self, "refresh"))
-	call_deferred("refresh")
+	refresh()
 
 
 func refresh() -> void:
 	var counts: Dictionary = _collect_possessed_counts()
 	var ordered_ids: Array[String] = _ordered_item_ids(counts)
+	for item_id: String in ["money", "seed", "gem"]:
+		_ensure_row(item_id)
 	for item_id: String in ordered_ids:
 		_ensure_row(item_id)
 	for raw_item_id: Variant in _rows.keys():
@@ -67,6 +69,20 @@ func refresh() -> void:
 		if label != null:
 			label.text = "x %d" % quantity
 	_layout_rows(ordered_ids, counts)
+
+
+func get_item_flight_target_global_position(item_id: String) -> Vector2:
+	if item_id == "":
+		return global_position
+	if not _rows.has(item_id):
+		_ensure_row(item_id)
+	var row: Control = _rows.get(item_id, null) as Control
+	if row == null:
+		return global_position
+	var rect: Rect2 = row.get_global_rect()
+	if row.visible:
+		return rect.get_center()
+	return rect.position
 
 
 func _collect_possessed_counts() -> Dictionary:
@@ -123,6 +139,7 @@ func _ensure_row(item_id: String) -> void:
 		icon.name = item_id + "Icon"
 		add_child(icon)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.visible = false
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.texture = _item_texture(item_id)

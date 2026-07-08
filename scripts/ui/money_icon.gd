@@ -42,7 +42,8 @@ func _start_money_flight(world_position: Vector2) -> void:
 	game_ui.add_child(money_sprite)
 
 	var start_position: Vector2 = get_viewport().get_canvas_transform() * world_position
-	var end_position: Vector2 = get_global_rect().get_center()
+	var target_rect: Rect2 = get_global_rect()
+	var end_position: Vector2 = target_rect.get_center() if visible else target_rect.position
 	var distance: float = start_position.distance_to(end_position)
 	var base_arc_height: float = clampf(distance * 0.22, 70.0, 180.0)
 	var arc_height: float = base_arc_height * curve_strength
