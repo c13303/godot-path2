@@ -352,12 +352,23 @@ func _sync_terrain_speed_cells() -> void:
 		for raw_cell: Variant in layer.get_used_cells():
 			var cell: Vector2i = raw_cell as Vector2i
 			_refresh_cell_terrain_speed(cell)
+	if plant_manager != null and plant_manager.has_method("get_plant_cells"):
+		var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
+		for raw_cell: Variant in plant_cells:
+			var cell: Vector2i = raw_cell as Vector2i
+			_refresh_cell_terrain_speed(cell)
 
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	var ff: Object = _resolve_flow_field()
 	if ff == null or not ff.has_method("set_cell_speed_multiplier"):
 		return
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
+		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
+		if logical_plant_item_id != "":
+			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
+			var logical_plant_speed_multiplier: float = clampf(float(logical_plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, logical_plant_speed_multiplier)
 	if plantz != null and plantz.get_cell_source_id(cell) >= 0:
 		var plant_atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
 		var plant_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(plantz.name), plant_atlas_coords)

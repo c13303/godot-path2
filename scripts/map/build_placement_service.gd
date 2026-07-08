@@ -75,8 +75,11 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		target_layer.update_internals()
 	if target_layer_affects_collision(target_layer):
 		_refresh_cell_collision(cell)
-	_refresh_cell_terrain_speed(cell)
+	if not is_logical_plant(placeable_def):
+		_refresh_cell_terrain_speed(cell)
 	after_placeable_placed(cell, placeable_def)
+	if is_logical_plant(placeable_def):
+		_refresh_cell_terrain_speed(cell)
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(cell)
 	_play_build_fx_at_cell(cell, target_layer)
@@ -108,8 +111,11 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 			target_layer.set_cell(cell, _atlas_source_id(), atlas_coords, alternative_from_placeable(placeable_def))
 		if target_layer_affects_collision(target_layer):
 			_refresh_cell_collision(cell)
-		_refresh_cell_terrain_speed(cell)
+		if not is_logical_plant(placeable_def):
+			_refresh_cell_terrain_speed(cell)
 		after_placeable_placed(cell, placeable_def, false)
+		if is_logical_plant(placeable_def):
+			_refresh_cell_terrain_speed(cell)
 		_play_build_fx_at_cell(cell, target_layer)
 	target_layer.update_internals()
 	if item_id == FENCE_ITEM_ID:

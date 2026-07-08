@@ -120,6 +120,13 @@ func effective_cell_speed_multiplier(cell: Vector2i) -> float:
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var plant_manager: Node = _manager.plant_manager
+	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
+		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
+		if logical_plant_item_id != "":
+			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
+			var logical_plant_multiplier: float = clampf(float(logical_plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+			speed_multiplier = minf(speed_multiplier, logical_plant_multiplier)
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue

@@ -11,6 +11,8 @@ signal day_seed_harvest_finished
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PLANT_KIND_ROSE: String = "rose"
 const PLANT_KIND_IMPERIAL: String = "imperial"
+const PLANT_ITEM_ROSE: String = "rose"
+const PLANT_ITEM_IMPERIAL: String = "imperial_seed"
 const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 1)
 const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 2)
@@ -145,6 +147,14 @@ func get_plant_kind(cell: Vector2i) -> String:
 		return ""
 	var plant_data: Dictionary = _plants[cell] as Dictionary
 	return str(plant_data.get("plant_kind", PLANT_KIND_ROSE))
+
+func get_plant_item_id(cell: Vector2i) -> String:
+	match get_plant_kind(cell):
+		PLANT_KIND_ROSE:
+			return PLANT_ITEM_ROSE
+		PLANT_KIND_IMPERIAL:
+			return PLANT_ITEM_IMPERIAL
+	return ""
 
 func is_client_target_cell(cell: Vector2i) -> bool:
 	return is_rose_cell(cell) and is_rose_grownup(cell)
