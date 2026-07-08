@@ -44,7 +44,10 @@ func selected_placeable_def() -> Dictionary:
 		return {}
 	if _placement_disabled():
 		return {}
-	var placeable_def: Dictionary = ItemCatalog.get_placeable_def(String(game_ui.call("get_selected_build_item_id")))
+	var item_id: String = String(game_ui.call("get_selected_build_item_id"))
+	if game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id)):
+		return {}
+	var placeable_def: Dictionary = ItemCatalog.get_placeable_def(item_id)
 	if BuildDirectionRules.is_directional_placeable(placeable_def):
 		var directed_def: Dictionary = placeable_def.duplicate(true)
 		directed_def["direction"] = _build_direction

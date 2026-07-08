@@ -150,14 +150,14 @@ func _ready() -> void:
 
 
 ## Toolbuild picker visibility is derived from the quick-bar selection: open only while the
-## Build tool is the selected quick slot and it is daytime.
+## Build tool is the selected quick slot and building is currently allowed.
 func _process(_delta: float) -> void:
 	var merchant_should_show: bool = _is_seed_merchant_shop_active()
 	var menu_kind: String = _active_menu_kind()
 	var build_tool_id: String = _selected_build_tool_id()
 	var build_should_show: bool = (
 		build_tool_id != ""
-		and not GameState.is_night
+		and not _tool_blocked_by_night(build_tool_id)
 		and not merchant_should_show
 	)
 	# The weapons menu is available day and night (weapons are wielded at night); it only yields
@@ -777,14 +777,15 @@ func _close_merchant_shop() -> void:
 
 # --- Phase handling ----------------------------------------------------------
 
-## Night closes the toolbuild picker. Day/building phase no longer changes the selected quick slot.
+## Night closes only the hammer picker. Day/building phase changes still close the picker
+## for client/merchant transitions.
 func _on_game_mode_changed(is_night: bool) -> void:
-	if is_night:
+	if is_night and _shown_build_tool_id == HAMMER_TOOL_ID:
 		_close_all()
 
 
 func _on_building_phase_changed(is_building_phase: bool) -> void:
-	if not is_building_phase:
+	if not is_building_phase and not GameState.is_night:
 		_close_toolbuild()
 
 
@@ -797,7 +798,7 @@ func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
 # --- Selection ---------------------------------------------------------------
 
 func _on_item_pressed(item_id: String) -> void:
-	if _toolbuild_column == null or not _toolbuild_column.visible or GameState.is_night:
+	if _toolbuild_column == null or not _toolbuild_column.visible or _item_blocked_by_night(item_id):
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
@@ -828,7 +829,7 @@ func _on_merchant_item_pressed(item_id: String) -> void:
 
 
 func step_pad_selection(direction: int) -> void:
-	if direction == 0 or GameState.is_night:
+	if direction == 0:
 		return
 	if _merchant_column != null and _merchant_column.visible:
 		_step_merchant_pad_selection(direction)
@@ -838,8 +839,6 @@ func step_pad_selection(direction: int) -> void:
 
 
 func activate_pad_selection() -> bool:
-	if GameState.is_night:
-		return false
 	if _merchant_column != null and _merchant_column.visible:
 		_ensure_merchant_pad_selection()
 		if _is_special_reward_pad_id(_selected_merchant_item_id):
@@ -850,6 +849,8 @@ func activate_pad_selection() -> bool:
 			return true
 	# Gamepad: confirming while the build menu is open commits the highlighted buildable.
 	if _toolbuild_column != null and _toolbuild_column.visible and _selected_item_id != "":
+		if _item_blocked_by_night(_selected_item_id):
+			return false
 		_commit_item(_selected_item_id)
 		return true
 	return false
@@ -857,6 +858,14 @@ func activate_pad_selection() -> bool:
 
 func is_merchant_shop_open() -> bool:
 	return _merchant_column != null and _merchant_column.visible
+
+
+func _tool_blocked_by_night(tool_id: String) -> bool:
+	return GameState.is_night and tool_id == HAMMER_TOOL_ID
+
+
+func _item_blocked_by_night(item_id: String) -> bool:
+	return GameState.is_night and item_id in _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
 
 
 func _step_build_pad_selection(direction: int) -> void:

@@ -111,10 +111,9 @@ func _configure_preview_layer() -> void:
 func _on_game_mode_changed(is_night: bool) -> void:
 	if not is_night:
 		return
-	# Removal is forbidden at night. Cancel immediately rather than waiting for
-	# the next process tick to clear a hold that began during the day.
+	# Removal stays forbidden at night because it can change blocker topology while
+	# monster flow fields are active.
 	_cancel_removal()
-	_cancel_drag_build()
 
 # Godot input/tick callbacks are thin wrappers: BuildInputController owns build-mode
 # input routing (mouse/keyboard press/release/motion/wheel, hover preview dispatch,
@@ -695,8 +694,6 @@ func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))
 
 func _placement_disabled() -> bool:
-	if GameState.is_night:
-		return true
 	return false
 
 func _atlas_coords_from_placeable(placeable_def: Dictionary) -> Vector2i:

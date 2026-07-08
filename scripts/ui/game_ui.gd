@@ -102,9 +102,8 @@ func _setup_day_toggle() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
-	# Night: the build-tool menus are disabled and any equipped buildable is cleared so the
-	# player wields their weapon. The quickbar closes either way. Day re-enables the build slots.
-	if is_night:
+	# Night disables hammer construction only. Gardening stays available.
+	if is_night and _selected_build_item_is_hammer():
 		deactivate_quickbar()
 		clear_build_selection()
 		if equipped_weapon_id == "":
@@ -250,7 +249,7 @@ func _first_possessed_weapon_id() -> String:
 func _is_quickbar_slot_disabled(kind: String) -> bool:
 	if kind == WEAPON_SLOT_KIND:
 		return _first_possessed_weapon_id() == ""
-	return GameState.is_night
+	return GameState.is_night and kind == HAMMER_ID
 
 ## The active quick item: explicit build preview first, otherwise the equipped weapon.
 func get_selected_quick_item_id() -> String:
@@ -296,7 +295,10 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 	return true
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
-	return GameState.is_night and ItemCatalog.is_placeable(item_id)
+	return GameState.is_night and item_id in _hammer_buildable_ids()
+
+func _selected_build_item_is_hammer() -> bool:
+	return selected_build_item_id != "" and selected_build_item_id in _hammer_buildable_ids()
 
 # --- Build menu state --------------------------------------------------------
 

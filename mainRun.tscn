@@ -40,7 +40,7 @@
 [ext_resource type="Script" uid="uid://bmti7g3rbm2dg" path="res://scripts/map/level_loader.gd" id="36_lvload"]
 [ext_resource type="PackedScene" uid="uid://bdi57o0hf3tu5" path="res://scenes/levels/level_demo.tscn" id="37_lvdemo"]
 [ext_resource type="Script" uid="uid://bkpo3r2bsqrcn" path="res://scripts/ui/game_over_modal.gd" id="38_game_over"]
-[ext_resource type="Script" uid="uid://cvymdl2k3n8qva" path="res://scripts/ui/victory_modal.gd" id="38_victory"]
+[ext_resource type="Script" uid="uid://28c1rgbolmgo" path="res://scripts/ui/victory_modal.gd" id="38_victory"]
 [ext_resource type="Script" uid="uid://ccmupt03fhiga" path="res://scripts/visual_fx/smoke_trail.gd" id="39_smktrl"]
 [ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
 [ext_resource type="Script" uid="uid://q776h0tybxkw" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
@@ -50,8 +50,8 @@
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
-[ext_resource type="Script" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
-[ext_resource type="Script" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
+[ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
+[ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -779,10 +779,8 @@ navigation_enabled = false
 script = ExtResource("22_plant")
 plantz = NodePath("../MonTilemap/plantz")
 
-[node name="ImperialPlantVisuals" type="Node2D" parent="Map" node_paths=PackedStringArray("plant_manager_path", "plantz_path")]
+[node name="ImperialPlantVisuals" type="Node2D" parent="Map" unique_id=283075584]
 script = ExtResource("49_imperial_visuals")
-plant_manager_path = NodePath("../PlantManager")
-plantz_path = NodePath("../MonTilemap/plantz")
 
 [node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
 

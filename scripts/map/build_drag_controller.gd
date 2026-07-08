@@ -101,12 +101,11 @@ func cancel_drag_build_preserving_selection() -> void:
 
 
 func start_remove_drag() -> void:
-	# Unbuild works any time during the day, whether or not a build tool is equipped, so
-	# this deliberately does not gate on _build_tool_selected() - only night / inventory /
-	# hovering a UI control block it.
-	if GameState.is_night or _is_inventory_open() or _gui_hovered_control() != null:
+	# Unbuild does not require a build tool. It is blocked by inventory/UI hover and,
+	# at night, because removing blockers can stale active monster flow fields.
+	if GameState.is_night or _placement_disabled():
 		return
-	if _placement_disabled():
+	if _is_inventory_open() or _gui_hovered_control() != null:
 		return
 	# A new drag stacks onto any in-progress removal instead of cancelling it, so
 	# only clear leftover preview bars here (committed queue bars are preserved).
@@ -172,10 +171,10 @@ func finish_remove_drag() -> void:
 func process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	# Unbuild works any time during the day, without a build tool equipped: the committed
-	# queue drains one cell at a time and is only abandoned by night or an open inventory.
+	# Unbuild works without a build tool equipped: the committed queue drains one cell
+	# at a time and is only abandoned by night, disabled placement, or an open inventory.
 	# The X / pad button no longer needs to be held - release already committed the queue.
-	if GameState.is_night or _is_inventory_open():
+	if GameState.is_night or _placement_disabled() or _is_inventory_open():
 		cancel_removal()
 		return
 	if _remove_queue.is_empty():
@@ -195,7 +194,7 @@ func process_removal(delta: float) -> void:
 
 
 func finish_removal() -> void:
-	if not _remove_active or GameState.is_night:
+	if not _remove_active or GameState.is_night or _placement_disabled():
 		cancel_removal()
 		return
 	if _remove_queue.is_empty():

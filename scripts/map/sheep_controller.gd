@@ -10,6 +10,7 @@ const SHEEP_SPEED_SCALE: float = 0.5
 const SHEEP_CROWD_RESIST: float = 1.0
 const SHEEP_SMASH_RESIST: float = 1.0
 const MAX_PATH_TARGET_ATTEMPTS: int = 8
+const DEBRIS_REWARD_GEMS: int = 1
 
 var _manager: BuildingManager
 var _agent: SheepAgent
@@ -171,6 +172,7 @@ func _finish_eating() -> void:
 	var eaten_cell: Vector2i = _target_cell
 	_cancel_eating()
 	if _is_debris_cell(eaten_cell):
+		var reward_position: Vector2 = _manager.cell_center(eaten_cell)
 		var plantz: TileMapLayer = _manager.get_plantz()
 		if plantz != null:
 			plantz.erase_cell(eaten_cell)
@@ -180,7 +182,28 @@ func _finish_eating() -> void:
 		_debris_cells.erase(eaten_cell)
 		_unreachable_debris.erase(eaten_cell)
 		Sfx.play_sound(&"crunsh")
+		_spawn_debris_reward_gems(reward_position)
 	_pick_next_day_target()
+
+
+func _spawn_debris_reward_gems(world_position: Vector2) -> void:
+	var scene: Node = _manager.get_tree().current_scene
+	var gem_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/gemIcon") if scene != null else null
+	if gem_icon != null and gem_icon.has_method("animate_gem_harvest"):
+		for i: int in range(DEBRIS_REWARD_GEMS):
+			var started: bool = bool(gem_icon.call("animate_gem_harvest", world_position, i))
+			if not started:
+				_credit_debris_reward_gem()
+		return
+	for i: int in range(DEBRIS_REWARD_GEMS):
+		_credit_debris_reward_gem()
+
+
+func _credit_debris_reward_gem() -> void:
+	var scene: Node = _manager.get_tree().current_scene
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node != null and progression_node.has_method("update_gems"):
+		progression_node.call("update_gems", 1)
 
 
 func _cancel_eating() -> void:
