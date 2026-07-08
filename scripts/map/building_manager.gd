@@ -21,6 +21,7 @@ const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/
 const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_preparation_controller.gd")
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
+const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -177,6 +178,7 @@ var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _debug_query_service: BuildingDebugQueryService = BuildingDebugQueryService.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
+var _sheep_controller: SheepController = SHEEP_CONTROLLER_SCRIPT.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
@@ -223,6 +225,7 @@ func _ready() -> void:
 	_debug_query_service.setup(self)
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
+	_sheep_controller.setup(self)
 	_building_invalidation_controller.setup(self)
 	_building_navigation_sync.setup(self)
 	_spawner_garden_selection_service.setup(self)
@@ -282,6 +285,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_client_preparing = false
 	if is_night:
 		_day_start_pending = false
+		_sheep_controller.on_game_mode_changed(true)
 		_client_tantrum.end()
 		_client_sale.reset()
 		clear_client_counter_agents()
@@ -294,6 +298,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		# when the piles are already gone, so it never double-animates.
 		_counter_stock_manager.dissolve_all_piles()
 	if not is_night:
+		_sheep_controller.on_game_mode_changed(false)
 		_day_start_pending = true
 		_night_preparation_token += 1
 		_night_preparing = false
@@ -1188,6 +1193,10 @@ func get_client_sale_controller() -> ClientSaleController:
 
 func get_seed_merchant_controller() -> SeedMerchantController:
 	return _seed_merchant
+
+
+func get_sheep_controller() -> SheepController:
+	return _sheep_controller
 
 
 func get_morning_harvest_controller() -> MorningHarvestController:
@@ -2214,6 +2223,10 @@ func _debug_path_to_cell(cell: Vector2i) -> PackedVector2Array:
 func get_floorz() -> TileMapLayer:
 	return _debug_query_service.get_floorz()
 
+
+func get_plantz() -> TileMapLayer:
+	return plantz
+
 func _wall_blockers_for_zone_bounds() -> PackedVector2Array:
 	return _wall_blockers_for_cells(_garden_topology.plant_zone_tiles())
 
@@ -2273,6 +2286,10 @@ func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
 func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
 	return _building_path_service.find_path_on_walkable_map(from_tile, to_tile)
 
+
+func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
+	return _building_path_service.find_sheep_path(from_tile, to_tile)
+
 func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	return _building_path_service.find_path_in_zone(from_tile, to_tile, garden_id)
 
@@ -2294,6 +2311,14 @@ func _tile_size() -> Vector2:
 		var raw_tile_size: Vector2i = floorz.tile_set.get_tile_size()
 		return Vector2(float(raw_tile_size.x), float(raw_tile_size.y))
 	return Vector2(32, 32)
+
+
+func is_sheep_walkable_cell(cell: Vector2i) -> bool:
+	if not _has_floor(cell):
+		return false
+	if wallz != null and wallz.get_cell_tile_data(cell) != null:
+		return false
+	return not _building_cell_blocks_movement(cell)
 
 func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
 	return _garden_topology.resolve_plant_target_for_agent_in_garden(from_cell, garden_id, agent_kind)

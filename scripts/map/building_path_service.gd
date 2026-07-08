@@ -51,6 +51,26 @@ func find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> Packed
 		return PackedVector2Array()
 	return pf.call("find_path", start_tile, end_tile) as PackedVector2Array
 
+
+func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
+	var pf: Node = _pathfinder()
+	var floorz: TileMapLayer = _floorz()
+	if pf == null or not pf.has_method("find_path") or floorz == null:
+		return PackedVector2Array()
+	var path_tiles: Dictionary = {}
+	for raw_cell: Variant in floorz.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		if _manager.is_sheep_walkable_cell(cell):
+			path_tiles[cell] = true
+	if path_tiles.is_empty():
+		return PackedVector2Array()
+	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
+	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
+	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
+		return PackedVector2Array()
+	sync_pathfinder_zone_tiles(path_tiles)
+	return pf.call("find_path", start_tile, end_tile) as PackedVector2Array
+
 func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	var pf: Node = _pathfinder()
 	if pf == null or not pf.has_method("find_path"):

@@ -37,7 +37,7 @@ func process_drowning_agents(delta: float) -> void:
 		return
 
 	var turret_eating: TurretEatingController = _manager._turret_eating_controller
-	for group_name: String in ["monsters", "clients", "merchants"]:
+	for group_name: String in ["monsters", "clients", "merchants", "sheep"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
 			if agent == null or not is_instance_valid(agent):

@@ -209,7 +209,7 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         profile.smash_class = ffcore::SMASH_CLASS_PLAYER;
         profile.weapon_immune = true;
     }
-    else if (node->is_in_group(StringName("monsters")) || node->is_in_group(StringName("clients")))
+    else if (node->is_in_group(StringName("monsters")) || node->is_in_group(StringName("clients")) || node->is_in_group(StringName("sheep")))
         profile.smash_class = ffcore::SMASH_CLASS_MONSTER;
     else if (node->is_in_group(StringName("main_chars")))
         profile.smash_class = ffcore::SMASH_CLASS_MAIN_CHAR;
