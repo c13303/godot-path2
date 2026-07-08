@@ -16,6 +16,7 @@ const ROSE_DRY_ATLAS: Vector2i = Vector2i(0, 0)
 const ROSE_GREEN_ATLAS: Vector2i = Vector2i(0, 2)
 const ROSE_WET_ATLAS: Vector2i = Vector2i(0, 2)
 const DEBRIS_ATLAS: Vector2i = Vector2i(1, 1)
+const DEFAULT_ALTERNATIVE_TILE: int = 0
 const IMPERIAL_MAX_STAGE: int = 5
 const NEW_DAY_DELAY: int = 3000
 const GROWNUP_BLOOM_TOTAL_SECONDS: float = 1.5
@@ -467,6 +468,8 @@ func consume_plant(cell: Vector2i) -> void:
 	_emit_visual_removed(cell)
 	if source_id < 0:
 		source_id = _plant_layer_source_id()
+	if alternative_tile < 0:
+		alternative_tile = DEFAULT_ALTERNATIVE_TILE
 	if source_id >= 0:
 		plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
 		_flush_plant_layer_now()
