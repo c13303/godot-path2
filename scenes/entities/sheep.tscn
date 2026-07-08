@@ -10,7 +10,7 @@ max_speed = 50.0
 drownable = false
 
 [node name="SheepSprite2D" type="Sprite2D" parent="."]
-position = Vector2(0, -16)
+position = Vector2(0, -32)
 texture = ExtResource("2_sheep_texture")
 hframes = 4
 vframes = 5

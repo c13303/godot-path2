@@ -2,6 +2,8 @@ extends Node
 class_name CounterStockManager
 
 const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
+const ROSE_TEXTURE_FRAME_COUNT: int = 3
+const ROSE_TEXTURE_FRAME: int = 0
 const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
 const COUNTER_PILE_ROSE_SCALE: float = 0.56
 const COUNTER_PILE_ROSE_FRAME_HEIGHT: float = 64.0
@@ -261,8 +263,8 @@ func consume_counter_rose(eater: Node2D, access_cell: Vector2i) -> void:
 func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> void:
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.texture = ROSE_TEXTURE
-	sprite.hframes = 2
-	sprite.frame = 0
+	sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
+	sprite.frame = ROSE_TEXTURE_FRAME
 	sprite.centered = true
 	sprite.scale = Vector2(0.75, 0.75)
 	sprite.global_position = start_world
@@ -296,8 +298,8 @@ func animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, tar
 	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _pile_offset(maxi(0, pile_index))
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.texture = ROSE_TEXTURE
-	sprite.hframes = 2
-	sprite.frame = 0
+	sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
+	sprite.frame = ROSE_TEXTURE_FRAME
 	sprite.centered = true
 	sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
 	sprite.global_position = start_world
@@ -341,8 +343,8 @@ func rebuild_pile(counter_cell: Vector2i) -> void:
 	for index: int in range(count):
 		var sprite: Sprite2D = Sprite2D.new()
 		sprite.texture = ROSE_TEXTURE
-		sprite.hframes = 2
-		sprite.frame = 0
+		sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
+		sprite.frame = ROSE_TEXTURE_FRAME
 		sprite.centered = true
 		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
 		sprite.global_position = counter_world + _pile_offset(index)
