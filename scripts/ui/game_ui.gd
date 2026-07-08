@@ -427,7 +427,6 @@ func animate_inventory_item_to_slot(item_id: String, start_global_position: Vect
 	item_sprite.size = PURCHASE_FLIGHT_SIZE
 	item_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	item_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	item_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	item_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	item_sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
 	add_child(item_sprite)

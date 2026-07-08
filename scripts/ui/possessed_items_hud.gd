@@ -123,7 +123,6 @@ func _ensure_row(item_id: String) -> void:
 		icon.name = item_id + "Icon"
 		add_child(icon)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.texture = _item_texture(item_id)

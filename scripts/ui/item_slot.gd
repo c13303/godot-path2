@@ -65,7 +65,6 @@ func _build() -> void:
 	_icon.custom_minimum_size = Vector2(40, 40)
 	_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_icon.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_icon.offset_left = 8.0
@@ -151,7 +150,6 @@ func _get_drag_data(_at_position: Vector2) -> Variant:
 	preview.custom_minimum_size = Vector2(40, 40)
 	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	preview.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	set_drag_preview(preview)
 
 	return {

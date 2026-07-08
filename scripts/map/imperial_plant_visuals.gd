@@ -128,7 +128,6 @@ func _apply_visual(cell: Vector2i, stage: int, watered: bool) -> void:
 		sprite.vframes = 1
 		sprite.centered = true
 		sprite.offset = VISUAL_OFFSET_FROM_SORT_POINT
-		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		sprite.z_as_relative = false
 		add_child(sprite)
 		_sprites_by_cell[cell] = sprite

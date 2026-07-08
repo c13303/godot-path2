@@ -300,7 +300,6 @@ func _build_weapon_slot(item_id: String) -> Button:
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -455,7 +454,6 @@ func _build_price_group() -> HBoxContainer:
 
 	var currency: TextureRect = TextureRect.new()
 	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	currency.custom_minimum_size = Vector2(20.0, 20.0)
 	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -475,7 +473,6 @@ func _build_merchant_slot(item_id: String) -> Button:
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -594,7 +591,6 @@ func _build_row_label(item_id: String) -> HBoxContainer:
 
 	var currency: TextureRect = TextureRect.new()
 	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	currency.custom_minimum_size = Vector2(20.0, 20.0)
 	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -633,7 +629,6 @@ func _build_slot(item_id: String) -> Button:
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _item_frame_texture(item_def)
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -669,7 +664,6 @@ func _build_slot(item_id: String) -> Button:
 
 	var currency: TextureRect = TextureRect.new()
 	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	currency.custom_minimum_size = Vector2(14.0, 14.0)
 	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -1402,7 +1396,6 @@ func _build_reward_row_cells(currency: String, amount: int, reward_key: String) 
 
 	var icon: TextureRect = TextureRect.new()
 	icon.texture = _currency_icon_for(currency)
-	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
