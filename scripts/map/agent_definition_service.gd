@@ -9,6 +9,8 @@ const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 1.5
 const BIG_MONSTER_WALK_SQUASH: float = 0.09
+const CLIENT_CROWD_PUSH: float = 1.5
+const CLIENT_CROWD_RESIST: float = 2.0
 
 var _manager: Node
 
@@ -49,7 +51,8 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set("max_health", data.max_health)
 	agent.set("health", data.max_health)
 	agent.set_meta("monster_speed_scale", data.speed_scale)
-	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
+	agent.set_meta("agent_crowd_push", data.crowd_push_scale)
+	agent.set_meta("agent_crowd_resist", data.crowd_resist_scale)
 	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
 	if monster_type == MonsterCatalog.BIG_MONSTER_ID:
 		_apply_bigmonster_animation(agent)
@@ -61,6 +64,8 @@ func apply_client_data(agent: Node) -> void:
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
 		sprite.hframes = 5
+	agent.set_meta("agent_crowd_push", CLIENT_CROWD_PUSH)
+	agent.set_meta("agent_crowd_resist", CLIENT_CROWD_RESIST)
 
 
 func _apply_bigmonster_animation(agent: Node) -> void:

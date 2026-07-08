@@ -7,7 +7,8 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EAT_SECONDS: float = 2.0
 const DEBRIS_RESCAN_SECONDS: float = 0.5
 const SHEEP_SPEED_SCALE: float = 0.5
-const SHEEP_CROWD_RESIST: float = 1.0
+const SHEEP_CROWD_PUSH: float = 1.5
+const SHEEP_CROWD_RESIST: float = 2.0
 const SHEEP_SMASH_RESIST: float = 1.0
 const MAX_PATH_TARGET_ATTEMPTS: int = 8
 
@@ -80,7 +81,8 @@ func _ensure_spawned() -> bool:
 	agent.add_to_group("sheep")
 	agent.set_meta("agent_kind", &"sheep")
 	agent.set_meta("monster_speed_scale", SHEEP_SPEED_SCALE)
-	agent.set_meta("monster_crowd_resist", SHEEP_CROWD_RESIST)
+	agent.set_meta("agent_crowd_push", SHEEP_CROWD_PUSH)
+	agent.set_meta("agent_crowd_resist", SHEEP_CROWD_RESIST)
 	agent.set_meta("monster_smash_resist", SHEEP_SMASH_RESIST)
 	var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
 	agent.nav_id = nav_id

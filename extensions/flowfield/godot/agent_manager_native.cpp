@@ -223,7 +223,25 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         if (std::isfinite(scale) && scale > 0.0 && scale != 1.0)
             profile.max_speed = max_speed * scale;
     }
-    if (node->has_meta(StringName("monster_crowd_resist")))
+    if (node->has_meta(StringName("agent_crowd_push")))
+    {
+        double push = (double)node->get_meta(StringName("agent_crowd_push"));
+        if (std::isfinite(push) && push >= 0.0)
+            profile.crowd_push_strength = push;
+    }
+    else if (node->has_meta(StringName("monster_crowd_push")))
+    {
+        double push = (double)node->get_meta(StringName("monster_crowd_push"));
+        if (std::isfinite(push) && push >= 0.0)
+            profile.crowd_push_strength = push;
+    }
+    if (node->has_meta(StringName("agent_crowd_resist")))
+    {
+        double resist = (double)node->get_meta(StringName("agent_crowd_resist"));
+        if (std::isfinite(resist) && resist > 0.0)
+            profile.crowd_resist_strength = resist;
+    }
+    else if (node->has_meta(StringName("monster_crowd_resist")))
     {
         double resist = (double)node->get_meta(StringName("monster_crowd_resist"));
         if (std::isfinite(resist) && resist > 0.0)

@@ -26,6 +26,9 @@ class_name MonsterData
 ## Movement speed as a fraction of the global agent speed. 1.0 = normal,
 ## 0.5 = twice as slow.
 @export_range(0.05, 10.0, 0.01, "or_greater") var speed_scale: float = 1.0
+## How strongly this monster pushes overlapping neighbours through crowd separation.
+## 1.0 = normal; higher values make moving/pressing agents displace others more.
+@export_range(0.0, 100.0, 0.01, "or_greater") var crowd_push_scale: float = 1.0
 ## Resistance to neighbor crowd/separation push. 1.0 = normal,
 ## 2.0 = pushed half as much by neighbours (twice the inertia).
 @export_range(0.05, 100.0, 0.01, "or_greater") var crowd_resist_scale: float = 1.0

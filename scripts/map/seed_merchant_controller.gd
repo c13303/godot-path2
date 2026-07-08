@@ -7,6 +7,8 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const INTERACT_RADIUS_TILES: int = 2
+const MERCHANT_CROWD_PUSH: float = 1.5
+const MERCHANT_CROWD_RESIST: float = 2.0
 
 var _manager: BuildingManager
 var _active: bool = false
@@ -215,6 +217,8 @@ func _spawn_from(spawner_cell: Vector2i) -> bool:
 	agent.add_to_group("merchants")
 	_manager.register_desire_agent(agent, &"merchants")
 	agent.set_meta("agent_kind", SPAWNER_KIND_MERCHANT)
+	agent.set_meta("agent_crowd_push", MERCHANT_CROWD_PUSH)
+	agent.set_meta("agent_crowd_resist", MERCHANT_CROWD_RESIST)
 	agent.set_meta("spawner_cell", spawner_cell)
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
