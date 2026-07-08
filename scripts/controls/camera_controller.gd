@@ -3,12 +3,17 @@ class_name CameraController
 
 @export var min_zoom: float = 0.25
 @export var max_zoom: float = 4.0
+@export var default_zoom: float = 1.125
 var follow_smoothing: float = 8.0
 var zoom_snap_step: float = 0.125
 var position_snap_step: float = 0.5
 
 var _mouse_locked: bool = false
 var _follow_target: Node2D = null
+
+func _ready() -> void:
+	var clamped_zoom: float = clamp(default_zoom, min_zoom, max_zoom)
+	zoom = Vector2(clamped_zoom, clamped_zoom)
 
 func process(delta: float, paused: bool) -> void:
 	if paused:

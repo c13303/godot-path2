@@ -81,7 +81,6 @@ const ITEM_DEFS: Dictionary = {
 		"logical_plant": true,
 		"plant_kind": "imperial",
 		"inventory_backed": true,
-		"drag_buildable": false,
 		"max_stack": 999,
 	},
 	# Selecting this quick-slot tool opens the build picker in gardening mode (rose, ronce,

@@ -4,12 +4,12 @@ class_name ImperialPlantVisuals
 const IMPERIAL_DRY_TEXTURE: Texture2D = preload("res://assets/sprites/legval/imperial_dry.png")
 const IMPERIAL_WET_TEXTURE: Texture2D = preload("res://assets/sprites/legval/imperial_wet.png")
 const FRAME_COUNT: int = 6
-const TILE_FOOT_OFFSET_Y: float = -18.0
-const POP_DURATION: float = 0.22
-const POP_JUMP_PIXELS: float = 6.0
-const POP_START_SCALE: Vector2 = Vector2(0.70, 1.20)
-const POP_OVERSHOOT_SCALE: Vector2 = Vector2(1.16, 0.88)
-const POP_TWIST_DEGREES: float = 8.0
+const VISUAL_OFFSET_FROM_SORT_POINT: Vector2 = Vector2(0.0, -18.0)
+const POP_DURATION: float = 0.32
+const POP_JUMP_PIXELS: float = 8.0
+const POP_START_SCALE: Vector2 = Vector2(0.45, 1.30)
+const POP_OVERSHOOT_SCALE: Vector2 = Vector2(1.22, 0.84)
+const POP_TWIST_DEGREES: float = 10.0
 
 @export var plant_manager_path: NodePath
 @export var plantz_path: NodePath
@@ -127,18 +127,20 @@ func _apply_visual(cell: Vector2i, stage: int, watered: bool) -> void:
 		sprite.hframes = FRAME_COUNT
 		sprite.vframes = 1
 		sprite.centered = true
+		sprite.offset = VISUAL_OFFSET_FROM_SORT_POINT
 		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		sprite.z_as_relative = false
 		add_child(sprite)
 		_sprites_by_cell[cell] = sprite
+	else:
+		sprite.offset = VISUAL_OFFSET_FROM_SORT_POINT
 	sprite.texture = IMPERIAL_WET_TEXTURE if watered else IMPERIAL_DRY_TEXTURE
 	sprite.frame = clampi(stage, 0, FRAME_COUNT - 1)
 	var world_center: Vector2 = _plantz.to_global(_plantz.map_to_local(cell))
-	var base_position: Vector2 = world_center + Vector2(0.0, TILE_FOOT_OFFSET_Y)
-	sprite.global_position = base_position
+	sprite.global_position = world_center
 	sprite.z_index = int(world_center.y)
 	if should_pop:
-		_play_pop(cell, sprite, base_position)
+		_play_pop(cell, sprite, world_center)
 
 
 func _play_pop(cell: Vector2i, sprite: Sprite2D, base_position: Vector2) -> void:
