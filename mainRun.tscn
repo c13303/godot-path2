@@ -664,7 +664,7 @@ weapon_origin = Vector2(0, -12)
 [node name="rosa" type="Sprite2D" parent="Player" unique_id=1539923288]
 position = Vector2(0, -20)
 texture = ExtResource("2_gtwxa")
-hframes = 2
+hframes = 3
 metadata/_edit_lock_ = true
 
 [node name="PlayerController" type="Node2D" parent="Player" unique_id=1943697114]

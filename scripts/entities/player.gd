@@ -21,10 +21,23 @@ class_name PlayerCharacter
 ## sprites/effects they spawn. Use get_weapon_origin() to read it in world space.
 @export var weapon_origin: Vector2 = Vector2.ZERO
 
+const FRAME_SOUTH: int = 0
+const FRAME_EAST: int = 1
+const FRAME_NORTH: int = 2
+const LANCE_Z_BEHIND_PLAYER: int = -1
+const LANCE_Z_IN_FRONT_OF_PLAYER: int = 2
+const SPRITESHEET_PADDING: int = 2
+const SPRITESHEET_FRAME_SIZE: Vector2 = Vector2(64.0, 64.0)
+const SPRITESHEET_CELL_SIZE: int = 68
+
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
 var _velocity_len: float = 0.0
+var _facing_frame: int = FRAME_SOUTH
+var _facing_west: bool = false
+var _spritesheet_texture: Texture2D
+var _direction_textures: Array[AtlasTexture] = []
 
 var nav_id: int = -1:
 	get:
@@ -34,8 +47,11 @@ var nav_id: int = -1:
 
 func _ready() -> void:
 	_apply_sprite_offset()
-	_update_day_night_frame(GameState.is_night)
-	GameState.mode_changed.connect(_on_game_mode_changed)
+	var sprite: Sprite2D = get_sprite()
+	if sprite:
+		_spritesheet_texture = sprite.texture
+		_ensure_direction_textures()
+	_apply_facing_visual()
 	set_physics_process(false)
 
 func _process(_delta: float) -> void:
@@ -66,18 +82,50 @@ func get_sprite() -> Sprite2D:
 			return child
 	return null
 
+func set_facing_direction(direction: Vector2) -> void:
+	if direction.length_squared() <= 0.000001:
+		return
+
+	if absf(direction.x) >= absf(direction.y):
+		_facing_frame = FRAME_EAST
+		_facing_west = direction.x < 0.0
+	else:
+		_facing_frame = FRAME_NORTH if direction.y < 0.0 else FRAME_SOUTH
+		_facing_west = false
+	_apply_facing_visual()
+
 func _apply_sprite_offset() -> void:
 	var sprite: Sprite2D = get_sprite()
 	if sprite:
 		sprite.position = sprite_offset
 
-func _on_game_mode_changed(is_night: bool) -> void:
-	_update_day_night_frame(is_night)
-
-func _update_day_night_frame(is_night: bool) -> void:
+func _apply_facing_visual() -> void:
 	var sprite: Sprite2D = get_sprite()
 	if sprite:
-		sprite.frame = 1 if is_night else 0
+		_ensure_direction_textures()
+		if _facing_frame >= 0 and _facing_frame < _direction_textures.size():
+			sprite.texture = _direction_textures[_facing_frame]
+		sprite.hframes = 1
+		sprite.vframes = 1
+		sprite.frame = 0
+		sprite.flip_h = _facing_frame == FRAME_EAST and _facing_west
+
+	var lance: Sprite2D = get_node_or_null("lance") as Sprite2D
+	if lance:
+		lance.z_index = LANCE_Z_BEHIND_PLAYER if _facing_frame == FRAME_NORTH else LANCE_Z_IN_FRONT_OF_PLAYER
+
+func _ensure_direction_textures() -> void:
+	if _spritesheet_texture == null or not _direction_textures.is_empty():
+		return
+
+	for frame_index: int in range(3):
+		var texture: AtlasTexture = AtlasTexture.new()
+		texture.atlas = _spritesheet_texture
+		texture.region = Rect2(
+			Vector2(float(frame_index * SPRITESHEET_CELL_SIZE + SPRITESHEET_PADDING), float(SPRITESHEET_PADDING)),
+			SPRITESHEET_FRAME_SIZE
+		)
+		_direction_textures.append(texture)
 
 func _update_sprite_tint() -> void:
 	var color: Color = Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1)

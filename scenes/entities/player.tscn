@@ -14,7 +14,7 @@ sprite_offset = Vector2(0, -31.5)
 [node name="Sprite2D" type="Sprite2D" parent="."]
 position = Vector2(0, -31.5)
 texture = ExtResource("2_farmer")
-hframes = 2
+hframes = 3
 
 [node name="characterAnimation" type="Node" parent="."]
 script = ExtResource("3_anim")

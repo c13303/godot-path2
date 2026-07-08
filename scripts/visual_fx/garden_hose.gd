@@ -2,6 +2,8 @@ extends Node2D
 class_name GardenHose
 
 const RESERVOIR_GROUP: StringName = &"reservoirs"
+const HOSE_Z_ABOVE_PLAYER_OFFSET: int = 2
+const HOSE_Z_BELOW_PLAYER_OFFSET: int = -3
 
 @export var lance_path: NodePath
 @export var player_path: NodePath
@@ -54,6 +56,7 @@ func _process(delta: float) -> void:
 		_connect_building_object_manager()
 	if _reservoirs_dirty:
 		_refresh_reservoirs()
+	_update_z_order_from_lance()
 
 	var start: Vector2 = _hose_start()
 	var reservoir: Node2D = _closest_reservoir(start)
@@ -91,6 +94,18 @@ func _resolve_player() -> void:
 		if player != null and is_instance_valid(player):
 			_player = player
 			return
+
+func _update_z_order_from_lance() -> void:
+	_resolve_player()
+	if _player == null or not is_instance_valid(_player):
+		return
+
+	var player_z: int = _player.z_index
+	var lance_z: int = 1
+	if _lance != null and is_instance_valid(_lance):
+		lance_z = _lance.z_index
+
+	z_index = player_z + (HOSE_Z_BELOW_PLAYER_OFFSET if lance_z < 0 else HOSE_Z_ABOVE_PLAYER_OFFSET)
 
 func _configure_lines() -> void:
 	_left_border.width = border_width

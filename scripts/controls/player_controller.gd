@@ -577,8 +577,14 @@ func _update_player_input(delta: float) -> void:
 		if dir.length_squared() > 0.0:
 			_last_move_direction = dir.normalized()
 
+	_update_player_facing(dir)
 	_update_terrain_speed_state()
 	steering.call("set_agent_input", player_nav_id, dir)
+
+func _update_player_facing(direction: Vector2) -> void:
+	var player: Node2D = _get_player_node()
+	if player != null and player.has_method("set_facing_direction"):
+		player.call("set_facing_direction", direction)
 
 func _start_rush(direction: Vector2) -> void:
 	_rush_active = true
