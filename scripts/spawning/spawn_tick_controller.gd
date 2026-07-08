@@ -58,6 +58,79 @@ func clear_ready_queue() -> void:
 	_ready_spawner_queue_set.clear()
 
 
+func serialize_state() -> Dictionary:
+	var ready_queue: Array[Dictionary] = []
+	for raw_request: Variant in _ready_spawner_queue:
+		if raw_request is Dictionary:
+			var request: Dictionary = raw_request as Dictionary
+			var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
+			ready_queue.append({
+				"track_index": int(request.get("track_index", -1)),
+				"spawner_id": String(request.get("spawner_id", "")),
+				"spawner_cell": {"x": cell.x, "y": cell.y},
+				"monster_type": String(request.get("monster_type", "basic")),
+				"night_index": int(request.get("night_index", -1)),
+				"wave_index": int(request.get("wave_index", 0)),
+			})
+	var legacy_timers: Array[Dictionary] = []
+	for raw_cell: Variant in _legacy_spawn_timers.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		legacy_timers.append({
+			"x": cell.x,
+			"y": cell.y,
+			"time_left": float(_legacy_spawn_timers[cell]),
+		})
+	return {
+		"ready_queue": ready_queue,
+		"legacy_spawn_timers": legacy_timers,
+		"legacy_spawn_limit_this_night": _legacy_spawn_limit_this_night,
+		"legacy_spawned_this_night": _legacy_spawned_this_night,
+		"empty_night_elapsed": _empty_night_elapsed,
+	}
+
+
+func restore_state(data: Dictionary) -> void:
+	clear_ready_queue()
+	var raw_ready_queue: Variant = data.get("ready_queue", [])
+	if raw_ready_queue is Array:
+		for raw_request: Variant in raw_ready_queue as Array:
+			if not (raw_request is Dictionary):
+				continue
+			var request: Dictionary = raw_request as Dictionary
+			var cell: Vector2i = _cell_from_dict(request.get("spawner_cell", {}))
+			var track_index: int = int(request.get("track_index", -1))
+			if track_index < 0:
+				continue
+			_ready_spawner_queue.append({
+				"track_index": track_index,
+				"spawner_id": StringName(str(request.get("spawner_id", ""))),
+				"spawner_cell": cell,
+				"monster_type": StringName(str(request.get("monster_type", "basic"))),
+				"night_index": int(request.get("night_index", -1)),
+				"wave_index": int(request.get("wave_index", 0)),
+			})
+			_ready_spawner_queue_set[track_index] = true
+	_legacy_spawn_timers.clear()
+	var raw_legacy_timers: Variant = data.get("legacy_spawn_timers", [])
+	if raw_legacy_timers is Array:
+		for raw_entry: Variant in raw_legacy_timers as Array:
+			if not (raw_entry is Dictionary):
+				continue
+			var entry: Dictionary = raw_entry as Dictionary
+			var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
+			_legacy_spawn_timers[cell] = maxf(0.0, float(entry.get("time_left", 0.0)))
+	_legacy_spawn_limit_this_night = maxi(0, int(data.get("legacy_spawn_limit_this_night", 0)))
+	_legacy_spawned_this_night = maxi(0, int(data.get("legacy_spawned_this_night", 0)))
+	_empty_night_elapsed = maxf(0.0, float(data.get("empty_night_elapsed", 0.0)))
+
+
+func _cell_from_dict(raw_value: Variant) -> Vector2i:
+	if raw_value is Dictionary:
+		var data: Dictionary = raw_value as Dictionary
+		return Vector2i(int(data.get("x", 0)), int(data.get("y", 0)))
+	return INVALID_CELL
+
+
 func process(delta: float, playlist_enabled: bool) -> void:
 	# Reset the per-pass count summary consumed by the parent lag warning. Cheap;
 	# always done so the caller never reads a stale dictionary.
@@ -276,10 +349,7 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
 			_manager._report_playlist_spawn_result(request, true)
 		else:
-			# _last_spawn_failure lives on BuildingDebugTelemetry, not BuildingManager, so
-			# this manager .get() intentionally reads null today; keep it as-is to preserve
-			# the existing failure_reason value rather than silently changing behavior.
-			_manager.call("_report_playlist_spawn_result", request, false, _manager.get("_last_spawn_failure"))
+			_manager._report_playlist_spawn_result(request, false, _manager.last_spawn_failure())
 
 		# Whole spawner iteration. Build the (small) context only when over threshold.
 		var spawner_elapsed_us: int = Time.get_ticks_usec() - spawner_us

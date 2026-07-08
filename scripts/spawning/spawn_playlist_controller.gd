@@ -103,6 +103,81 @@ func abort_current_night() -> void:
 	_pending_emits.clear()
 
 
+func serialize_state() -> Dictionary:
+	var events: Array[String] = []
+	for raw_event: Variant in _events_emitted.keys():
+		events.append(String(raw_event))
+	var pending: Array[Dictionary] = []
+	for raw_pending: Variant in _pending_emits:
+		if raw_pending is Dictionary:
+			var pending_entry: Dictionary = raw_pending as Dictionary
+			pending.append({
+				"event": String(pending_entry.get("event", "")),
+				"time_left": float(pending_entry.get("time_left", 0.0)),
+			})
+	var tracks: Array[Dictionary] = []
+	for raw_track: Variant in _tracks:
+		if raw_track is Dictionary:
+			var track: Dictionary = raw_track as Dictionary
+			tracks.append({
+				"track_index": int(track.get("track_index", -1)),
+				"spawner_id": String(track.get("spawner_id", "")),
+				"wave_index": int(track.get("wave_index", 0)),
+				"spawned_count": int(track.get("spawned_count", 0)),
+				"time_until_next_spawn": float(track.get("time_until_next_spawn", 0.0)),
+				"pending": bool(track.get("pending", false)),
+				"complete": bool(track.get("complete", false)),
+			})
+	return {
+		"current_night_index": _current_night_index,
+		"tracks": tracks,
+		"events_emitted": events,
+		"pending_emits": pending,
+	}
+
+
+func restore_state(data: Dictionary) -> void:
+	var night_index: int = int(data.get("current_night_index", -1))
+	if night_index < 0:
+		abort_current_night()
+		return
+	if not begin_night(night_index):
+		return
+	var raw_events: Variant = data.get("events_emitted", [])
+	_events_emitted.clear()
+	if raw_events is Array:
+		for raw_event: Variant in raw_events as Array:
+			_events_emitted[StringName(str(raw_event))] = true
+	_pending_emits.clear()
+	var raw_pending: Variant = data.get("pending_emits", [])
+	if raw_pending is Array:
+		for raw_entry: Variant in raw_pending as Array:
+			if raw_entry is Dictionary:
+				var entry: Dictionary = raw_entry as Dictionary
+				_pending_emits.append({
+					"event": StringName(str(entry.get("event", ""))),
+					"time_left": maxf(0.0, float(entry.get("time_left", 0.0))),
+				})
+	var raw_tracks: Variant = data.get("tracks", [])
+	if not (raw_tracks is Array):
+		return
+	var saved_tracks: Array = raw_tracks as Array
+	for raw_saved: Variant in saved_tracks:
+		if not (raw_saved is Dictionary):
+			continue
+		var saved: Dictionary = raw_saved as Dictionary
+		var track_index: int = int(saved.get("track_index", -1))
+		if track_index < 0 or track_index >= _tracks.size():
+			continue
+		var track: Dictionary = _tracks[track_index] as Dictionary
+		track["wave_index"] = maxi(0, int(saved.get("wave_index", 0)))
+		track["spawned_count"] = maxi(0, int(saved.get("spawned_count", 0)))
+		track["time_until_next_spawn"] = maxf(0.0, float(saved.get("time_until_next_spawn", 0.0)))
+		track["pending"] = bool(saved.get("pending", false))
+		track["complete"] = bool(saved.get("complete", false))
+		_tracks[track_index] = track
+
+
 func advance(delta: float) -> Array[Dictionary]:
 	var requests: Array[Dictionary] = []
 	if _current_night == null:

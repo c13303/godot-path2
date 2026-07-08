@@ -20,6 +20,7 @@ const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_
 const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/agent_navigation_phase_controller.gd")
 const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_preparation_controller.gd")
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
+const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_service.gd")
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const EATING_COOLDOWN: float = 5.0
@@ -140,6 +141,7 @@ var _startup_ready: bool = false
 var _night_preparing: bool = false
 var _night_preparation_ready: bool = false
 var _night_preparation_token: int = 0
+var _suppress_next_restored_mode_signal: bool = false
 var _day_start_pending: bool = false
 var _client_preparing: bool = false
 var _garden_topology: Variant = GARDEN_TOPOLOGY_SERVICE_SCRIPT.new()
@@ -184,6 +186,7 @@ var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigatio
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
+var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
@@ -231,6 +234,7 @@ func _ready() -> void:
 	_spawner_garden_selection_service.setup(self)
 	_building_preparation_controller.setup(self)
 	_agent_spawn_service.setup(self)
+	_agent_save_service.setup(self)
 	_spawn_playlist_config.setup(self)
 	_runtime_tick_controller.setup(self)
 	_resolve_level_layers()
@@ -281,6 +285,9 @@ func _unregister_desire_agent(agent: Node2D) -> void:
 		_desire.call("unregister_agent", agent)
 
 func _on_game_mode_changed(is_night: bool) -> void:
+	if _suppress_next_restored_mode_signal:
+		_suppress_next_restored_mode_signal = false
+		return
 	_spawn_tick_controller.reset_empty_night()
 	_client_preparing = false
 	if is_night:
@@ -1025,6 +1032,13 @@ func has_grownup_roses_to_harvest() -> bool:
 
 
 func restore_day_phase(phase: String) -> void:
+	if phase == "night":
+		_morning_harvest.clear_active()
+		_reset_client_sale_state()
+		_night_preparing = false
+		_client_preparing = false
+		_night_preparation_ready = true
+		return
 	if GameState.is_night:
 		return
 	_morning_harvest.clear_active()
@@ -1218,6 +1232,10 @@ func get_spawn_tick_controller() -> SpawnTickController:
 	return _spawn_tick_controller
 
 
+func get_spawn_playlist_controller() -> SpawnPlaylistController:
+	return _spawn_playlist_controller
+
+
 func get_counter_stock_manager() -> CounterStockManager:
 	return _counter_stock_manager
 
@@ -1240,6 +1258,10 @@ func get_garden_retarget_controller() -> GardenRetargetController:
 
 func get_building_debug_telemetry() -> BuildingDebugTelemetry:
 	return _debug_telemetry
+
+
+func last_spawn_failure() -> String:
+	return _debug_telemetry.last_spawn_failure()
 
 
 func get_spawner_route_service() -> SpawnerRouteService:
@@ -1304,6 +1326,39 @@ func client_frequency_by_cell() -> Dictionary:
 
 func is_night_preparation_ready() -> bool:
 	return _night_preparation_ready
+
+
+func serialize_runtime_agents_for_save() -> Dictionary:
+	return _agent_save_service.serialize_state()
+
+
+func restore_runtime_agents_from_save(data: Dictionary) -> void:
+	_night_preparing = false
+	_client_preparing = false
+	if GameState.is_night:
+		_night_preparation_token += 1
+		_night_preparing = true
+		_night_preparation_ready = false
+		await _run_night_preparation(_night_preparation_token)
+		_agent_save_service.restore_state(data, true)
+		_notify_restored_phase()
+		return
+	if GameState.is_client_phase:
+		_night_preparation_token += 1
+		_client_preparing = true
+		_night_preparation_ready = false
+		await _run_client_preparation(_night_preparation_token)
+		_agent_save_service.restore_state(data, true)
+		_notify_restored_phase()
+		return
+	_night_preparation_ready = bool(data.get("night_preparation_ready", true))
+	_agent_save_service.restore_state(data, false)
+	_notify_restored_phase()
+
+
+func _notify_restored_phase() -> void:
+	_suppress_next_restored_mode_signal = true
+	GameState.emit_restored_phase_signals()
 
 
 func occupied_cells_for_spawning() -> Array[Vector2i]:

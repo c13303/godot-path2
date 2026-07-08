@@ -407,6 +407,29 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 		agent.call("start_eating", seconds)
 
 
+func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector2i, roses_eaten: int) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
+	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	var restored_roses_eaten: int = maxi(0, roses_eaten)
+	agent.set_meta("roses_eaten", restored_roses_eaten)
+	_eating_agents[nav_id] = {
+		"node": agent,
+		"timer": maxf(0.0, seconds_left),
+		"garden_id": garden_id,
+		"spawner_cell": spawner_cell,
+		"plant_cell": plant_cell,
+		"roses_eaten": restored_roses_eaten,
+	}
+	_manager.detach_agent_flow(nav_id)
+	_manager.detach_agent_path(nav_id)
+	_entry_path_agents.erase(nav_id)
+	erase_astar_in_agent(nav_id)
+	_escaping_agents.erase(nav_id)
+	if agent.has_method("start_eating"):
+		agent.call("start_eating", maxf(0.0, seconds_left))
+
+
 func assign_agent_to_escape(agent: Node2D) -> bool:
 	if not _manager.can_assign_agent_navigation():
 		return false

@@ -52,15 +52,21 @@ func reset_transient_run_state() -> void:
 	seed_merchant_purchase_made = false
 
 
-## Restore phase flags for an already loaded day scene without emitting mode_changed.
-## Save files only persist daytime phases; nights are reconstructed by normal play.
+## Restore phase flags for an already loaded scene without emitting mode_changed.
+## Runtime saves may restore night directly; callers rebuild navigation explicitly.
 func restore_day_phase_flags(phase: String) -> void:
-	is_night = false
+	is_night = phase == "night"
 	is_building_phase = false
 	is_morning_phase = false
 	is_client_phase = false
 	is_seed_merchant_phase = false
 	seed_merchant_purchase_made = false
+	if is_night:
+		building_phase_changed.emit(false)
+		morning_phase_changed.emit(false)
+		client_phase_changed.emit(false)
+		seed_merchant_phase_changed.emit(false)
+		return
 	match phase:
 		"morning":
 			is_morning_phase = true
@@ -70,6 +76,14 @@ func restore_day_phase_flags(phase: String) -> void:
 			is_seed_merchant_phase = true
 		_:
 			is_building_phase = true
+	building_phase_changed.emit(is_building_phase)
+	morning_phase_changed.emit(is_morning_phase)
+	client_phase_changed.emit(is_client_phase)
+	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
+
+
+func emit_restored_phase_signals() -> void:
+	mode_changed.emit(is_night)
 	building_phase_changed.emit(is_building_phase)
 	morning_phase_changed.emit(is_morning_phase)
 	client_phase_changed.emit(is_client_phase)

@@ -50,6 +50,57 @@ func process(delta: float) -> void:
 	_process_day(delta)
 
 
+func serialize_state() -> Dictionary:
+	if not is_instance_valid(_agent):
+		return {"spawned": false}
+	return {
+		"spawned": true,
+		"position": {"x": _agent.global_position.x, "y": _agent.global_position.y},
+		"idle_cell": _cell_to_dict(_idle_cell),
+		"target_cell": _cell_to_dict(_target_cell),
+		"state": String(_state),
+		"eat_timer": _eat_timer,
+	}
+
+
+func restore_state(data: Dictionary) -> void:
+	if not bool(data.get("spawned", false)):
+		return
+	if not _ensure_spawned():
+		return
+	var raw_position: Variant = data.get("position", {})
+	if raw_position is Dictionary:
+		var position_data: Dictionary = raw_position as Dictionary
+		_agent.global_position = Vector2(float(position_data.get("x", _agent.global_position.x)), float(position_data.get("y", _agent.global_position.y)))
+		_agent.z_index = int(_agent.global_position.y)
+	_idle_cell = _cell_from_dict(data.get("idle_cell", _cell_to_dict(_idle_cell)))
+	_target_cell = _cell_from_dict(data.get("target_cell", _cell_to_dict(INVALID_CELL)))
+	_state = StringName(str(data.get("state", "idle")))
+	_eat_timer = maxf(0.0, float(data.get("eat_timer", 0.0)))
+	_detach_path()
+	match _state:
+		&"eating":
+			_agent.start_eating(_eat_timer)
+		&"moving_to_debris", &"returning_idle":
+			if _target_cell != INVALID_CELL and _assign_path_to(_target_cell):
+				_agent.start_walking_to(_manager.cell_center(_target_cell) - _agent.global_position)
+			else:
+				_stop_at_idle()
+		_:
+			_stop_at_idle()
+
+
+func _cell_to_dict(cell: Vector2i) -> Dictionary:
+	return {"x": cell.x, "y": cell.y}
+
+
+func _cell_from_dict(raw_value: Variant) -> Vector2i:
+	if raw_value is Dictionary:
+		var data: Dictionary = raw_value as Dictionary
+		return Vector2i(int(data.get("x", INVALID_CELL.x)), int(data.get("y", INVALID_CELL.y)))
+	return INVALID_CELL
+
+
 func _ensure_spawned() -> bool:
 	if is_instance_valid(_agent):
 		return true

@@ -422,10 +422,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func save_progression(save_path: String = SAVE_PATH, day_phase_override: String = "") -> bool:
 	var scene: Node = get_tree().current_scene
-	if _reject_while_night_active("Save"):
-		return false
-	if _reject_while_clients_active(scene, "Save"):
-		return false
 	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
 	var layers: Dictionary = _get_layers(scene)
 	var player: Node2D = _get_player()
@@ -445,6 +441,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	var day_phase: String = day_phase_override if day_phase_override != "" else _get_day_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
+	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
@@ -454,6 +451,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
+		"runtime_agents": runtime_agents,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
@@ -488,9 +486,6 @@ func _game_ui_equipped_weapon_id(game_ui: Node) -> String:
 
 func load_progression() -> void:
 	# F9 reload is allowed anytime, including during night.
-	var scene: Node = get_tree().current_scene
-	if _reject_while_clients_active(scene, "Load"):
-		return
 	_log("Load started: %s" % ProjectSettings.globalize_path(SAVE_PATH))
 	var data: Dictionary = _read_save_data()
 	if data.is_empty():
@@ -608,7 +603,7 @@ func _unregister_scene_agents() -> void:
 		return
 
 	var seen_ids: Dictionary = {}
-	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters"]
+	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters", &"clients", &"merchants", &"sheep"]
 	for group_name: StringName in group_names:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			var nav_id: int = int(node.get("nav_id"))
@@ -685,42 +680,16 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_reindex_loaded_layers(scene)
 	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
-	_restore_day_phase(scene, str(data.get("day_phase", "")))
+	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
+	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
+	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
+	call_deferred("_restore_runtime_agents_deferred", raw_runtime_agents)
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
 	_log("Load complete: player=%s inventory_slots=%d" % [
 		str(player.global_position), (player_data["inventory"] as Array).size()
 	])
 	_notify("Game loaded")
-
-
-func _reject_while_night_active(operation: String) -> bool:
-	if not GameState.is_night:
-		return false
-	_log("%s rejected: night active" % operation)
-	_notify("%s unavailable at night" % operation)
-	return true
-
-
-func _reject_while_clients_active(scene: Node, operation: String) -> bool:
-	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if building_manager != null and building_manager.has_method("has_clients_for_save_load"):
-		if not bool(building_manager.call("has_clients_for_save_load")):
-			return false
-		var reason: String = ""
-		if building_manager.has_method("save_load_client_block_reason"):
-			reason = str(building_manager.call("save_load_client_block_reason"))
-		if reason == "":
-			reason = "clients active"
-		_log("%s rejected: %s" % [operation, reason])
-		_notify("%s unavailable while clients are active" % operation)
-		return true
-	var client_count: int = get_tree().get_nodes_in_group("clients").size()
-	if client_count <= 0:
-		return false
-	_log("%s rejected: clients on map (%d)" % [operation, client_count])
-	_notify("%s unavailable while clients are active" % operation)
-	return true
 
 
 func _get_layers(scene: Node) -> Dictionary:
@@ -779,6 +748,8 @@ func _get_counter_stock(scene: Node) -> Array[Dictionary]:
 
 
 func _get_day_phase() -> String:
+	if GameState.is_night:
+		return "night"
 	if GameState.is_morning_phase:
 		return "morning"
 	if GameState.is_client_phase:
@@ -800,6 +771,16 @@ func _get_plant_states(scene: Node) -> Array[Dictionary]:
 			if raw_entry is Dictionary:
 				states.append(raw_entry as Dictionary)
 	return states
+
+
+func _get_runtime_agents(scene: Node) -> Dictionary:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_runtime_agents_for_save"):
+		return {}
+	var raw_state: Variant = building_manager.call("serialize_runtime_agents_for_save")
+	if raw_state is Dictionary:
+		return raw_state as Dictionary
+	return {}
 
 
 func _serialize_layer(layer: TileMapLayer) -> Array[Dictionary]:
@@ -901,14 +882,40 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 	_log("Plant states restored: %d entries" % states.size())
 
 
-func _restore_day_phase(scene: Node, phase: String) -> void:
+func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = false) -> void:
 	if phase == "":
 		return
 	GameState.restore_day_phase_flags(phase)
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if has_runtime_agents and (phase == "night" or phase == "client"):
+		_log("Day phase restored from runtime snapshot: %s" % phase)
+		return
 	if building_manager != null and building_manager.has_method("restore_day_phase"):
 		building_manager.call("restore_day_phase", phase)
 		_log("Day phase restored: %s" % phase)
+
+
+func _restore_runtime_agents(scene: Node, raw_state: Variant) -> void:
+	if not (raw_state is Dictionary):
+		return
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_runtime_agents_from_save"):
+		return
+	building_manager.call("restore_runtime_agents_from_save", raw_state as Dictionary)
+	var agents: Array = []
+	var runtime_state: Dictionary = raw_state as Dictionary
+	var raw_agents: Variant = runtime_state.get("agents", [])
+	if raw_agents is Array:
+		agents = raw_agents as Array
+	_log("Runtime agents restored from save: %d" % agents.size())
+
+
+func _restore_runtime_agents_deferred(raw_state: Variant) -> void:
+	await get_tree().process_frame
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	_restore_runtime_agents(scene, raw_state)
 
 
 func _reindex_loaded_layers(scene: Node) -> void:
@@ -1007,8 +1014,10 @@ func _validate_save(data: Dictionary) -> String:
 				return "invalid plant state stage"
 	if data.has("day_phase"):
 		var phase: String = str(data["day_phase"])
-		if not ["building", "morning", "client", "seed_merchant"].has(phase):
+		if not ["building", "morning", "client", "seed_merchant", "night"].has(phase):
 			return "invalid day phase"
+	if data.has("runtime_agents") and not (data["runtime_agents"] is Dictionary):
+		return "invalid runtime agents"
 	return ""
 
 

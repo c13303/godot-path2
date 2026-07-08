@@ -100,6 +100,10 @@ func log_spawn_failure(message: String) -> void:
 	push_warning("BuildingManager: " + message)
 
 
+func last_spawn_failure() -> String:
+	return _last_spawn_failure
+
+
 func should_warn_spawn_failure_key(warning_key: String) -> bool:
 	var now_ms: int = Time.get_ticks_msec()
 	var last_ms: int = int(_last_spawn_failure_at_ms.get(warning_key, -SPAWN_FAILURE_WARN_INTERVAL_MS))

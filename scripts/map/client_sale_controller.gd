@@ -10,6 +10,8 @@ class_name ClientSaleController
 # It owns only the sale-local state; the night-preparation coupling
 # (_client_preparing and the phase gates) stays in the manager.
 
+const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+
 var _manager: BuildingManager
 
 var _client_sale_active: bool = false
@@ -34,6 +36,54 @@ func clear_spawns() -> void:
 
 func is_active() -> bool:
 	return _client_sale_active
+
+
+func serialize_state() -> Dictionary:
+	var pending_spawners: Array[Dictionary] = []
+	for spawner_cell: Vector2i in _client_sale_pending_spawners:
+		pending_spawners.append({"x": spawner_cell.x, "y": spawner_cell.y})
+	var spawn_timers: Array[Dictionary] = []
+	for raw_cell: Variant in _client_sale_spawn_timers.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		spawn_timers.append({
+			"x": cell.x,
+			"y": cell.y,
+			"time_left": float(_client_sale_spawn_timers[cell]),
+		})
+	return {
+		"active": _client_sale_active,
+		"pending_spawners": pending_spawners,
+		"spawn_timers": spawn_timers,
+	}
+
+
+func restore_state(data: Dictionary) -> void:
+	reset()
+	_client_sale_active = bool(data.get("active", false))
+	var raw_pending: Variant = data.get("pending_spawners", [])
+	if raw_pending is Array:
+		for raw_cell: Variant in raw_pending as Array:
+			var cell: Vector2i = _cell_from_dict(raw_cell)
+			if cell != INVALID_CELL:
+				_client_sale_pending_spawners.append(cell)
+	var raw_timers: Variant = data.get("spawn_timers", [])
+	if raw_timers is Array:
+		for raw_entry: Variant in raw_timers as Array:
+			if not (raw_entry is Dictionary):
+				continue
+			var entry: Dictionary = raw_entry as Dictionary
+			var cell: Vector2i = _cell_from_dict(entry)
+			if cell != INVALID_CELL:
+				_client_sale_spawn_timers[cell] = maxf(0.0, float(entry.get("time_left", 0.0)))
+	if _client_sale_active:
+		GameState.set_client_phase(true)
+
+
+func _cell_from_dict(raw_value: Variant) -> Vector2i:
+	if raw_value is Dictionary:
+		var data: Dictionary = raw_value as Dictionary
+		return Vector2i(int(data.get("x", INVALID_CELL.x)), int(data.get("y", INVALID_CELL.y)))
+	return INVALID_CELL
 
 
 func has_pending_spawners() -> bool:
