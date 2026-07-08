@@ -93,6 +93,8 @@ func _input(event: InputEvent) -> void:
 		elif joy_button_event.button_index == JOY_BUTTON_B:
 			if joy_button_event.pressed:
 				_handle_pad_cancel()
+			else:
+				_handle_pad_cancel_released()
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_Y:
 			if joy_button_event.pressed:
@@ -311,8 +313,15 @@ func _handle_pad_cancel() -> void:
 		return
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
 		return
-	if build_system.has_method("pad_unbuild_at_cursor"):
-		build_system.call("pad_unbuild_at_cursor")
+	# No placement preview to cancel: begin a bulk-unbuild rectangle at the cursor. Holding B
+	# and moving the cursor grows it; releasing B commits it (see _handle_pad_cancel_released).
+	if build_system.has_method("pad_start_remove_drag"):
+		build_system.call("pad_start_remove_drag")
+
+
+func _handle_pad_cancel_released() -> void:
+	if build_system != null and build_system.has_method("pad_finish_remove_drag"):
+		build_system.call("pad_finish_remove_drag")
 
 func _handle_pad_rotate_build() -> void:
 	if _paused or _is_inventory_open():

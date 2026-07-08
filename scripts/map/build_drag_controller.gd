@@ -20,8 +20,6 @@ var _remove_queue: Array[Dictionary] = []
 var _remove_drag_active: bool = false
 var _remove_drag_start_cell: Vector2i = Vector2i.ZERO
 var _remove_drag_end_cell: Vector2i = Vector2i.ZERO
-var _keyboard_unbuild_held: bool = false
-var _keyboard_unbuild_cell: Vector2i = Vector2i.ZERO
 
 
 func setup(manager: BuildSystem) -> void:
@@ -29,7 +27,6 @@ func setup(manager: BuildSystem) -> void:
 
 
 func process(delta: float) -> void:
-	update_keyboard_unbuild()
 	process_removal(delta)
 
 
@@ -39,10 +36,6 @@ func is_build_drag_active() -> bool:
 
 func is_remove_drag_active() -> bool:
 	return _remove_drag_active
-
-
-func set_keyboard_unbuild_held(held: bool) -> void:
-	_keyboard_unbuild_held = held
 
 
 func update_build_drag(placeable_def: Dictionary) -> void:
@@ -176,7 +169,10 @@ func finish_remove_drag() -> void:
 func process_removal(delta: float) -> void:
 	if not _remove_active:
 		return
-	if GameState.is_night or _is_inventory_open() or not _keyboard_unbuild_held:
+	# The committed queue drains one cell at a time while the build tool stays equipped;
+	# leaving build mode (or night / inventory) abandons the remaining removals. The X /
+	# pad button no longer needs to be held here - release already committed the queue.
+	if GameState.is_night or _is_inventory_open() or not _build_tool_selected():
 		cancel_removal()
 		return
 	if _remove_queue.is_empty():
@@ -217,42 +213,6 @@ func finish_removal() -> void:
 	_remove_elapsed = 0.0
 	if _remove_queue.is_empty():
 		cancel_removal()
-
-
-func update_keyboard_unbuild() -> void:
-	if not _keyboard_unbuild_held:
-		return
-	if GameState.is_night or _is_inventory_open() or _gui_hovered_control() != null:
-		cancel_removal()
-		return
-	var cell: Vector2i = _hovered_cell()
-	if _remove_active and cell == _keyboard_unbuild_cell:
-		return
-	if _remove_active:
-		cancel_removal()
-	_keyboard_unbuild_cell = cell
-	start_keyboard_unbuild_at_hover()
-
-
-func start_keyboard_unbuild_at_hover() -> void:
-	if GameState.is_night or _is_inventory_open() or _gui_hovered_control() != null:
-		return
-	if _placement_disabled():
-		return
-	cancel_drag_build_preserving_selection()
-	clear_preview_remove_progress_bars()
-	var cell: Vector2i = _hovered_cell()
-	var removal: Dictionary = _removable_at_cell(cell)
-	if removal.is_empty():
-		cancel_removal()
-		return
-	_keyboard_unbuild_cell = cell
-	_remove_queue.clear()
-	_remove_queue.append(removal)
-	_remove_elapsed = 0.0
-	_remove_active = true
-	_create_remove_progress(cell, 0.0)
-	_clear_hover()
 
 
 func cancel_removal() -> void:

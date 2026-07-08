@@ -142,9 +142,6 @@ func _update_build_drag(placeable_def: Dictionary) -> void:
 func _update_remove_drag() -> void:
 	_drag_controller.update_remove_drag()
 
-func _set_keyboard_unbuild_held(held: bool) -> void:
-	_drag_controller.set_keyboard_unbuild_held(held)
-
 func _preview_matches_hover(cell: Vector2i, atlas_coords: Vector2i, item_id: String) -> bool:
 	return _build_preview.matches_hover(cell, atlas_coords, item_id)
 
@@ -170,14 +167,6 @@ func _process_removal(delta: float) -> void:
 
 func _finish_removal() -> void:
 	_drag_controller.finish_removal()
-
-func _update_keyboard_unbuild() -> void:
-	_drag_controller.update_keyboard_unbuild()
-
-
-func _start_keyboard_unbuild_at_hover() -> void:
-	_drag_controller.start_keyboard_unbuild_at_hover()
-
 
 func pad_place_selected_at_cursor() -> void:
 	if _placement_disabled() or _is_inventory_open():
@@ -231,20 +220,21 @@ func pad_place_cursor_right_of_player() -> void:
 
 func pad_move_cursor(direction: Vector2i) -> void:
 	_build_preview.move_pad_cursor(direction)
+	# Keep an in-progress pad unbuild rectangle following the cursor as it steps.
+	if _is_remove_drag_active():
+		_update_remove_drag()
 
 
-func pad_unbuild_at_cursor() -> void:
-	if _placement_disabled() or _is_inventory_open():
-		return
-	_cancel_drag_build()
-	_cancel_removal()
-	var cell: Vector2i = _hovered_cell()
-	var removal: Dictionary = _removable_at_cell(cell)
-	if removal.is_empty():
-		return
-	if not _removal_service.commit_removal(removal):
-		return
-	_clear_hover()
+## Pad bulk-unbuild, mirroring the keyboard X hold. The pad unbuild button (B) press anchors a
+## removal rectangle at the cursor; moving the cursor grows it (see pad_move_cursor); releasing
+## commits the rectangle to the removal queue, which drains one cell at a time. A press+release
+## with no cursor movement just queues the single hovered cell.
+func pad_start_remove_drag() -> void:
+	_start_remove_drag()
+
+
+func pad_finish_remove_drag() -> void:
+	_finish_remove_drag()
 
 
 func pad_rotate_selected_at_cursor() -> bool:

@@ -66,14 +66,17 @@ func input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.physical_keycode == KEY_X:
+			# Hold X to bulk-unbuild: pressing anchors a removal rectangle at the hovered
+			# cell, mouse motion grows it (see the InputEventMouseMotion branch below), and
+			# releasing commits the whole rectangle to the removal queue. A quick tap with no
+			# drag just queues the one hovered cell. The queue then drains one cell at a time
+			# in BuildDragController.process_removal.
 			if key_event.pressed and not key_event.echo:
-				_set_keyboard_unbuild_held(true)
-				_start_keyboard_unbuild_at_hover()
+				_start_remove_drag()
 				_set_input_handled()
 				return
 			if not key_event.pressed:
-				_set_keyboard_unbuild_held(false)
-				_cancel_removal()
+				_finish_remove_drag()
 				_set_input_handled()
 				return
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_R:
@@ -165,16 +168,12 @@ func _update_remove_drag() -> void:
 	_drag_controller.update_remove_drag()
 
 
-func _set_keyboard_unbuild_held(held: bool) -> void:
-	_drag_controller.set_keyboard_unbuild_held(held)
+func _start_remove_drag() -> void:
+	_drag_controller.start_remove_drag()
 
 
-func _start_keyboard_unbuild_at_hover() -> void:
-	_drag_controller.start_keyboard_unbuild_at_hover()
-
-
-func _cancel_removal() -> void:
-	_drag_controller.cancel_removal()
+func _finish_remove_drag() -> void:
+	_drag_controller.finish_remove_drag()
 
 
 func _selected_placeable_def() -> Dictionary:

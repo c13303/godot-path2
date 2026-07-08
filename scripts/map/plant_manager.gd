@@ -238,7 +238,7 @@ func grow_imperial_plants(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SE
 		if not is_imperial_cell(cell):
 			continue
 		var plant_data: Dictionary = _plants[cell] as Dictionary
-		if not bool(plant_data.get("watered_once", false)):
+		if not _imperial_is_ready_to_grow(plant_data):
 			continue
 		if _grow_imperial_cell(cell, plant_data):
 			grown_count += 1
@@ -251,11 +251,15 @@ func _imperial_growth_cells() -> Array[Vector2i]:
 		if not is_imperial_cell(cell):
 			continue
 		var plant_data: Dictionary = _plants[cell] as Dictionary
-		if not bool(plant_data.get("watered_once", false)):
+		if not _imperial_is_ready_to_grow(plant_data):
 			continue
 		cells.append(cell)
 	cells.sort_custom(Callable(self, "_sort_cells_top_left"))
 	return cells
+
+func _imperial_is_ready_to_grow(plant_data: Dictionary) -> bool:
+	var stage: int = clampi(int(plant_data.get("stage", 0)), 0, IMPERIAL_MAX_STAGE)
+	return bool(plant_data.get("watered_once", false)) or stage == 0
 
 func _grow_imperial_cell(cell: Vector2i, plant_data: Dictionary) -> bool:
 	var stage: int = clampi(int(plant_data.get("stage", 0)), 0, IMPERIAL_MAX_STAGE)
@@ -309,7 +313,7 @@ func bloom_grownup_roses(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SEC
 			var imperial_cell: Vector2i = imperial_cells[index]
 			if is_imperial_cell(imperial_cell):
 				var plant_data: Dictionary = _plants[imperial_cell] as Dictionary
-				if bool(plant_data.get("watered_once", false)):
+				if _imperial_is_ready_to_grow(plant_data):
 					_grow_imperial_cell(imperial_cell, plant_data)
 	return bloomed_count
 
@@ -482,7 +486,7 @@ func add_plant(cell: Vector2i, plant_kind: String = PLANT_KIND_ROSE) -> void:
 		_capture_tile_metadata(cell)
 	_plants[cell] = {
 		"plant_kind": plant_kind,
-		"watered_once": false,
+		"watered_once": plant_kind == PLANT_KIND_IMPERIAL,
 		"grownup": false,
 		"stage": 0,
 	}
