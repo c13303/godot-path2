@@ -73,6 +73,7 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 20,
 		"price": 20,
 		"target_layer": "plantz",
+		"atlas": Vector2i(0, 3),
 		"occupies_cell": true,
 		"blocks_movement": false,
 		"blocks_projectiles": false,

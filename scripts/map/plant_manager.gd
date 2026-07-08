@@ -188,8 +188,7 @@ func wet_imperial(cell: Vector2i) -> bool:
 
 func grow_new_day_plants() -> int:
 	var rose_count_grown: int = grow_green_roses()
-	var imperial_count_grown: int = grow_imperial_plants()
-	return rose_count_grown + imperial_count_grown
+	return rose_count_grown
 
 func grow_green_roses() -> int:
 	if not plantz:
@@ -213,8 +212,30 @@ func grow_green_roses() -> int:
 		grown_count += 1
 	return grown_count
 
-func grow_imperial_plants() -> int:
+func has_pending_imperial_growth() -> bool:
+	return not _imperial_growth_cells().is_empty()
+
+func grow_imperial_plants(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SECONDS) -> int:
+	var cells: Array[Vector2i] = _imperial_growth_cells()
+	var grow_count: int = cells.size()
+	if grow_count <= 0:
+		return 0
+	var delay_seconds: float = maxf(0.0, total_duration_seconds) / float(grow_count)
 	var grown_count: int = 0
+	for cell: Vector2i in cells:
+		if delay_seconds > 0.0:
+			await get_tree().create_timer(delay_seconds).timeout
+		if not is_imperial_cell(cell):
+			continue
+		var plant_data: Dictionary = _plants[cell] as Dictionary
+		if not bool(plant_data.get("watered_once", false)):
+			continue
+		if _grow_imperial_cell(cell, plant_data):
+			grown_count += 1
+	return grown_count
+
+func _imperial_growth_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		if not is_imperial_cell(cell):
@@ -222,18 +243,22 @@ func grow_imperial_plants() -> int:
 		var plant_data: Dictionary = _plants[cell] as Dictionary
 		if not bool(plant_data.get("watered_once", false)):
 			continue
-		var stage: int = clampi(int(plant_data.get("stage", 0)), 0, IMPERIAL_MAX_STAGE)
-		if stage >= IMPERIAL_MAX_STAGE:
-			plant_data["watered_once"] = false
-			_plants[cell] = plant_data
-			_emit_visual_changed(cell)
-			continue
-		plant_data["stage"] = stage + 1
+		cells.append(cell)
+	cells.sort_custom(Callable(self, "_sort_cells_top_left"))
+	return cells
+
+func _grow_imperial_cell(cell: Vector2i, plant_data: Dictionary) -> bool:
+	var stage: int = clampi(int(plant_data.get("stage", 0)), 0, IMPERIAL_MAX_STAGE)
+	if stage >= IMPERIAL_MAX_STAGE:
 		plant_data["watered_once"] = false
 		_plants[cell] = plant_data
 		_emit_visual_changed(cell)
-		grown_count += 1
-	return grown_count
+		return false
+	plant_data["stage"] = stage + 1
+	plant_data["watered_once"] = false
+	_plants[cell] = plant_data
+	_emit_visual_changed(cell)
+	return true
 
 
 ## Opens every grown rose into its full-bloom "rose-rose" tile one by one. Called
@@ -245,7 +270,7 @@ func bloom_grownup_roses(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SEC
 	await get_tree().process_frame
 	if not plantz:
 		return 0
-	var cells: Array[Vector2i] = []
+	var rose_cells: Array[Vector2i] = []
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		if not is_rose_cell(cell):
@@ -254,22 +279,28 @@ func bloom_grownup_roses(total_duration_seconds: float = GROWNUP_BLOOM_TOTAL_SEC
 			continue
 		if plantz.get_cell_atlas_coords(cell) == ROSE_GROWNUP_ATLAS:
 			continue
-		cells.append(cell)
-	cells.sort_custom(Callable(self, "_sort_cells_top_left"))
-	var bloom_count: int = cells.size()
-	if bloom_count <= 0:
+		rose_cells.append(cell)
+	rose_cells.sort_custom(Callable(self, "_sort_cells_top_left"))
+	var imperial_cells: Array[Vector2i] = _imperial_growth_cells()
+	var step_count: int = maxi(rose_cells.size(), imperial_cells.size())
+	if step_count <= 0:
 		return 0
-	var delay_seconds: float = maxf(0.0, total_duration_seconds) / float(bloom_count)
+	var delay_seconds: float = maxf(0.0, total_duration_seconds) / float(step_count)
 	var bloomed_count: int = 0
-	for cell: Vector2i in cells:
+	for index: int in range(step_count):
 		if delay_seconds > 0.0:
 			await get_tree().create_timer(delay_seconds).timeout
-		if not plantz or not is_rose_grownup(cell):
-			continue
-		if plantz.get_cell_atlas_coords(cell) == ROSE_GROWNUP_ATLAS:
-			continue
-		_set_rose_atlas(cell, ROSE_GROWNUP_ATLAS)
-		bloomed_count += 1
+		if index < rose_cells.size():
+			var rose_cell: Vector2i = rose_cells[index]
+			if plantz and is_rose_grownup(rose_cell) and plantz.get_cell_atlas_coords(rose_cell) != ROSE_GROWNUP_ATLAS:
+				_set_rose_atlas(rose_cell, ROSE_GROWNUP_ATLAS)
+				bloomed_count += 1
+		if index < imperial_cells.size():
+			var imperial_cell: Vector2i = imperial_cells[index]
+			if is_imperial_cell(imperial_cell):
+				var plant_data: Dictionary = _plants[imperial_cell] as Dictionary
+				if bool(plant_data.get("watered_once", false)):
+					_grow_imperial_cell(imperial_cell, plant_data)
 	return bloomed_count
 
 func _sort_cells_top_left(a: Vector2i, b: Vector2i) -> bool:

@@ -23,12 +23,17 @@ func is_active() -> bool:
 func begin_phase() -> void:
 	_manager.reset_client_state_for_morning()
 	var has_grownup_roses: bool = _manager.grownup_rose_count() > 0
+	var plant_manager: Node = _plant_manager()
+	var has_pending_imperial_growth: bool = (
+		plant_manager != null
+		and plant_manager.has_method("has_pending_imperial_growth")
+		and bool(plant_manager.call("has_pending_imperial_growth"))
+	)
 	_active = false
-	if not has_grownup_roses:
+	if not has_grownup_roses and not has_pending_imperial_growth:
 		_manager.begin_client_sale_phase()
 		return
 	GameState.set_morning_phase(true)
-	var plant_manager: Node = _plant_manager()
 	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
 		await plant_manager.call("bloom_grownup_roses")
 	if GameState.is_night:
