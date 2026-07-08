@@ -91,6 +91,23 @@ static inline Vec2 terrain_scaled_step(const AgentData &a, FlowField *nav, const
     return velocity * delta * terrain_speed_multiplier_for_agent(a, nav);
 }
 
+static inline Vec2 propelled_move_velocity(const AgentData &a, const Vec2 &target_velocity, double control_factor)
+{
+    if (!a.is_propelled)
+        return a.velocity;
+
+    Vec2 controlled = a.velocity + target_velocity * control_factor;
+    double controlled_len = safe_len(controlled);
+    if (controlled_len <= 0.000001)
+        return controlled;
+
+    double cap = std::max(safe_len(a.velocity), safe_len(target_velocity) * std::clamp(control_factor, 0.0, 1.0));
+    if (cap <= 0.000001 || controlled_len <= cap)
+        return controlled;
+
+    return controlled * (cap / controlled_len);
+}
+
 static inline double agent_fight_query_padding(const AgentData &a)
 {
     return std::abs(a.profile.foot_offset_y - a.profile.fight_offset_y) + std::sqrt(a.profile.fight_half_w * a.profile.fight_half_w + a.profile.fight_half_h * a.profile.fight_half_h);
@@ -1960,7 +1977,7 @@ void SteeringSystem::update_all(double delta)
             }
 
             Vec2 old_pos = a.position;
-            Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+            Vec2 move_velocity = propelled_move_velocity(a, target_velocity, smash_control_factor);
             Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
             a.position = apply_walk_with_walls(a, step, nav);
             if (nav)
@@ -1994,7 +2011,7 @@ void SteeringSystem::update_all(double delta)
                 }
 
                 Vec2 old_pos = a.position;
-                Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+                Vec2 move_velocity = propelled_move_velocity(a, target_velocity, smash_control_factor);
                 Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
                 Vec2 new_pos = apply_walk_with_walls(a, step, nav);
                 a.position = new_pos;
@@ -2061,7 +2078,7 @@ void SteeringSystem::update_all(double delta)
             }
 
             Vec2 old_pos = a.position;
-            Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+            Vec2 move_velocity = propelled_move_velocity(a, target_velocity, smash_control_factor);
             Vec2 step = terrain_scaled_step(a, nav, move_velocity, delta);
             Vec2 new_pos = apply_walk_with_walls(a, step, nav);
             a.position = new_pos;
@@ -2392,7 +2409,7 @@ void SteeringSystem::update_all(double delta)
         }
 
         Vec2 old_pos = a.position;
-        Vec2 move_velocity = a.is_propelled ? a.velocity + target_velocity * smash_control_factor : a.velocity;
+        Vec2 move_velocity = propelled_move_velocity(a, target_velocity, smash_control_factor);
         Vec2 step = terrain_scaled_step(a, ff, move_velocity, delta);
         a.position = apply_walk_with_walls(a, step, ff);
 

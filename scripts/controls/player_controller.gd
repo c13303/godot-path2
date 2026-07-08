@@ -655,13 +655,7 @@ func _player_profile_speed(player: Node2D, rush_enabled: bool) -> float:
 	if base_speed <= 0.0:
 		return 0.0
 	var rush_multiplier: float = maxf(rush_speed_mult, 0.0) if rush_enabled else 1.0
-	var water_multiplier: float = _water_speed_multiplier() if _is_player_in_water(player) else 1.0
-	return base_speed * _speed_multiplier() * rush_multiplier * water_multiplier
-
-func _water_speed_multiplier() -> float:
-	if watersources == null:
-		return 1.0
-	return clampf(watersources.player_slowdown, 0.01, 1.0)
+	return base_speed * _speed_multiplier() * rush_multiplier
 
 func _is_any_key_pressed(keys: Array[int]) -> bool:
 	for key in keys:
