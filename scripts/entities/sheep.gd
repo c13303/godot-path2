@@ -11,12 +11,14 @@ const ROW_NORTH: int = 2
 const ROW_EAT: int = 4
 const WALK_FRAME_COUNT: int = 4
 const FRAME_SECONDS: float = 0.16
+const FACING_MOVEMENT_MIN_DISTANCE_SQUARED: float = 0.25
 
 var _agent_manager: Node
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
 var _velocity_len: float = 0.0
+var _last_global_position: Vector2 = Vector2.ZERO
 var _paused: bool = false
 var _status: StringName = &"idle"
 var _facing_row: int = ROW_SOUTH
@@ -37,13 +39,18 @@ var nav_id: int = -1:
 
 func _ready() -> void:
 	set_physics_process(false)
+	_last_global_position = global_position
 	_apply_sprite_frame()
 
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
+	var current_position: Vector2 = global_position
 	if _paused:
+		_last_global_position = current_position
 		return
+	_update_facing_from_movement(current_position)
+	_last_global_position = current_position
 	_update_animation(delta)
 
 
@@ -117,6 +124,15 @@ func _set_facing_direction(direction: Vector2) -> void:
 		_facing_row = ROW_NORTH if direction.y < 0.0 else ROW_SOUTH
 		_facing_west = false
 	_apply_sprite_frame()
+
+
+func _update_facing_from_movement(current_position: Vector2) -> void:
+	if _status != &"walking":
+		return
+	var movement: Vector2 = current_position - _last_global_position
+	if movement.length_squared() <= FACING_MOVEMENT_MIN_DISTANCE_SQUARED:
+		return
+	_set_facing_direction(movement)
 
 
 func _apply_sprite_frame() -> void:

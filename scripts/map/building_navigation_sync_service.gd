@@ -100,9 +100,6 @@ func blocking_building_item_id_at_cell(cell: Vector2i) -> String:
 
 
 func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
-	var flow: Node = _manager.flow
-	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
-		return
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if item_def.is_empty() or not item_def.has("speed_multiplier"):
 		return
@@ -111,6 +108,13 @@ func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 	# `fences` layer, so if we only inspected blocking_buildings we'd reset the cell to
 	# 1.0 and clobber the fence slow the buildsystem just applied. Recompute the
 	# effective multiplier across every speed-carrying layer instead.
+	refresh_cell_speed(cell)
+
+
+func refresh_cell_speed(cell: Vector2i) -> void:
+	var flow: Node = _manager.flow
+	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
+		return
 	flow.call("set_cell_speed_multiplier", cell, effective_cell_speed_multiplier(cell))
 
 

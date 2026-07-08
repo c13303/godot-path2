@@ -757,6 +757,9 @@ func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
 	return _building_navigation_sync.effective_cell_speed_multiplier(cell)
 
+func refresh_runtime_cell_speed(cell: Vector2i) -> void:
+	_building_navigation_sync.refresh_cell_speed(cell)
+
 func _on_plant_added(_cell: Vector2i) -> void:
 	if not GameState.is_night:
 		# Day/client placement only dirties the next prepared snapshot. Freshly planted

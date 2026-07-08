@@ -4,8 +4,10 @@ class_name BuildPlacementService
 # Owns placement validation and placement commits. BuildSystem keeps input,
 # preview, selection state, drag state, removal, and save/load coordination.
 
+const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
+const ALERT_NON_BUILDABLE_FLOOR_KEY: String = "alert.non_buildable_floor"
 const FENCE_ITEM_ID: String = "fence"
 
 var _manager: BuildSystem
@@ -44,6 +46,9 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		return
 
 	if not is_valid_placeable_cell(cell, target_layer, placeable_def):
+		if not is_buildable_floor_cell(cell):
+			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+			return
 		if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
 			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
 			return
@@ -94,7 +99,9 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 	if target_layer and (atlas_coords != Vector2i(-1, -1) or is_logical_plant(placeable_def)):
 		cells = drag_build_rectangle_cells(start_cell, end_cell, target_layer, placeable_def, available)
 	if cells.is_empty():
-		if placement_attempt_needs_grass_alert(start_cell, end_cell, placeable_def):
+		if placement_attempt_has_non_buildable_floor(start_cell, end_cell):
+			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+		elif placement_attempt_needs_grass_alert(start_cell, end_cell, placeable_def):
 			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
 		return false
 
@@ -256,6 +263,8 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 func is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
 	if is_water_source_cell(cell):
 		return false
+	if not is_buildable_floor_cell(cell):
+		return false
 	if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
 		return false
 	if bool(placeable_def.get("requires_walkable_floor", false)) and not is_free_walkable_cell(cell):
@@ -278,7 +287,11 @@ func is_grass_green_floor_cell(cell: Vector2i) -> bool:
 	var floorz: TileMapLayer = _floorz()
 	if floorz == null or floorz.get_cell_source_id(cell) < 0:
 		return false
-	return GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell))
+	return FLOOR_TILE_CATALOG.is_wet_grass_atlas(floorz.get_cell_atlas_coords(cell))
+
+
+func is_buildable_floor_cell(cell: Vector2i) -> bool:
+	return FLOOR_TILE_CATALOG.is_buildable_floor_cell(_floorz(), cell)
 
 
 func placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2i, placeable_def: Dictionary) -> bool:
@@ -292,6 +305,25 @@ func placement_attempt_needs_grass_alert(start_cell: Vector2i, end_cell: Vector2
 		while true:
 			var cell: Vector2i = Vector2i(x, y)
 			if not is_grass_green_floor_cell(cell):
+				return true
+			if x == end_cell.x:
+				break
+			x += x_step
+		if y == end_cell.y:
+			break
+		y += y_step
+	return false
+
+
+func placement_attempt_has_non_buildable_floor(start_cell: Vector2i, end_cell: Vector2i) -> bool:
+	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
+	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
+	var y: int = start_cell.y
+	while true:
+		var x: int = start_cell.x
+		while true:
+			var cell: Vector2i = Vector2i(x, y)
+			if not is_buildable_floor_cell(cell):
 				return true
 			if x == end_cell.x:
 				break

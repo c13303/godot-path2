@@ -15,6 +15,7 @@
 	"tutorial.pass_night": "Pass the night",
 	"tutorial.sun_rising": "The sun is rising",
 	"alert.needs_grass": "This plants needs grass!",
+	"alert.non_buildable_floor": "Non-buildable floor",
 	"alert.refill_water": "refill your water !",
 	"game_over.restart": "Restart",
 	"game_over.main_menu": "Main Menu",

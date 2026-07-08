@@ -13,6 +13,7 @@ const MAX_STOCK_PER_COUNTER: int = 10
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
+const ROSE_ITEM_ID: String = "rose"
 # Total duration of the nightfall "counters emptying" animation. The per-rose tick is
 # derived from this so the whole sequence always finishes in exactly this many seconds.
 const NIGHTFALL_DISSOLVE_SECONDS: float = 3.0
@@ -408,7 +409,21 @@ func _pop_pile_tops(piles: Array) -> void:
 			continue
 		var node: Node = nodes.pop_back() as Node
 		if node != null and is_instance_valid(node):
+			_refund_unsold_rose_seed(node as Node2D)
 			node.queue_free()
+
+
+func _refund_unsold_rose_seed(rose_node: Node2D) -> void:
+	if rose_node == null:
+		return
+	var scene: Node = get_tree().current_scene
+	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui != null and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", ROSE_ITEM_ID, rose_node.global_position, 1)
+		return
+	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
+	if progression_node != null and progression_node.has_method("update_seeds"):
+		progression_node.call("update_seeds", 1)
 
 
 func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:

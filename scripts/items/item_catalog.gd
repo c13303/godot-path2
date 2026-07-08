@@ -228,7 +228,6 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_agents": true,
 		"blocks_projectiles": false,
-		"requires_grass_green_floor": true,
 		"runtime_id": "fence",
 		"speed_multiplier": 0.3,
 		"max_stack": 999,

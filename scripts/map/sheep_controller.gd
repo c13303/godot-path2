@@ -176,6 +176,7 @@ func _finish_eating() -> void:
 			plantz.erase_cell(eaten_cell)
 			plantz.update_internals()
 			plantz.queue_redraw()
+		_manager.refresh_runtime_cell_speed(eaten_cell)
 		_debris_cells.erase(eaten_cell)
 		_unreachable_debris.erase(eaten_cell)
 		Sfx.play_sound(&"crunsh")

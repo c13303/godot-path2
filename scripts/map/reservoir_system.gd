@@ -146,7 +146,7 @@ func _irrigate_floor_cell(cell: Vector2i) -> bool:
 		return false
 	if watersources != null and watersources.get_cell_source_id(cell) >= 0:
 		return false
-	if GrassAutotile.is_grass_atlas(floorz.get_cell_atlas_coords(cell)):
+	if not FLOOR_TILE_CATALOG.is_dry_grass_atlas(floorz.get_cell_atlas_coords(cell)):
 		return false
 	var alternative_tile: int = floorz.get_cell_alternative_tile(cell)
 	# Paint the interior grass tile as a placeholder; GrassAutotile.beautify() then
