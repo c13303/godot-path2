@@ -278,6 +278,13 @@ func queue_escape_for_all_monsters_budgeted() -> void:
 func queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String, spawner_cell: Vector2i, garden_id: int) -> bool:
 	if nav_id < 0 or not is_instance_valid(agent):
 		return false
+	# Tantrum clients are in the "monsters" group but are steered by
+	# ClientTantrumController toward a reservoir. Garden retargeting must never
+	# grab them: it would detach their reservoir flow and reset their status and
+	# tantrum frame (e.g. when a wall built mid-tantrum stales a garden they still
+	# reference from their shopping phase).
+	if bool(agent.get_meta("hostile_client", false)):
+		return false
 	if _garden_retarget_queued.has(nav_id):
 		return false
 	_manager.detach_agent_path(nav_id)
