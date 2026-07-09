@@ -53,6 +53,7 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 	_manager.get_client_sale_controller().restore_state(_dict_from_value(data.get("client_sale", {})))
 	var restored_agents: Array[Dictionary] = []
 	var agents: Array[Dictionary] = _agent_data_array(data.get("agents", []))
+	agents = _discard_merchant_agent_data(agents, "load")
 	if not GameState.is_night:
 		agents = _discard_day_phase_monster_agent_data(agents, "load")
 	for agent_data: Dictionary in agents:
@@ -73,7 +74,7 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 func _serialize_live_agents() -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var seen_ids: Dictionary = {}
-	for group_name: StringName in [&"monsters", &"clients", &"merchants"]:
+	for group_name: StringName in [&"monsters", &"clients"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
 			if agent == null or not is_instance_valid(agent):
@@ -107,6 +108,19 @@ func _discard_day_phase_monster_agent_data(agents: Array[Dictionary], context: S
 	if removed > 0:
 		push_error("[%s GAME ERROR] Monster when its day." % context.to_upper())
 		CppDebugOptions.save_log("[SAVE] AgentSaveService: discarded %d day-phase monster agent(s) during %s" % [removed, context])
+	return result
+
+
+func _discard_merchant_agent_data(agents: Array[Dictionary], context: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var removed: int = 0
+	for agent_data: Dictionary in agents:
+		if _agent_data_kind(agent_data) == SPAWNER_KIND_MERCHANT:
+			removed += 1
+			continue
+		result.append(agent_data)
+	if removed > 0:
+		CppDebugOptions.save_log("[SAVE] AgentSaveService: skipped %d merchant agent(s) during %s" % [removed, context])
 	return result
 
 
@@ -287,10 +301,6 @@ func _restore_agent_node(data: Dictionary) -> Node2D:
 		agent.add_to_group("clients")
 		_manager._register_desire_agent(agent, &"clients")
 		_manager._apply_client_data(agent)
-	elif kind == SPAWNER_KIND_MERCHANT:
-		agent.add_to_group("merchants")
-		_manager._register_desire_agent(agent, &"merchants")
-		_manager.apply_merchant_data(agent)
 	else:
 		agent.add_to_group("monsters")
 		_manager._register_desire_agent(agent, &"monsters")
@@ -320,11 +330,6 @@ func _restore_agent_navigation(agent: Node2D, data: Dictionary) -> void:
 	var phase_kind: String = str(phase.get("kind", "retarget"))
 	var nav_id: int = int(agent.get("nav_id"))
 	var spawner_cell: Vector2i = _cell_from_dict(phase.get("spawner_cell", agent.get_meta("spawner_cell") if agent.has_meta("spawner_cell") else {}))
-	if _agent_data_kind(data) == SPAWNER_KIND_MERCHANT:
-		_restore_merchant_navigation(agent, phase_kind, spawner_cell)
-		if nav_id >= 0:
-			_manager.set_agent_never_rest(nav_id, true)
-		return
 	match phase_kind:
 		"eating":
 			_manager.get_agent_navigation_phase_controller().restore_agent_eating(
@@ -351,17 +356,6 @@ func _restore_agent_navigation(agent: Node2D, data: Dictionary) -> void:
 			_retarget_or_wait(agent, spawner_cell)
 	if nav_id >= 0:
 		_manager.set_agent_never_rest(nav_id, true)
-
-
-func _restore_merchant_navigation(agent: Node2D, phase_kind: String, spawner_cell: Vector2i) -> void:
-	var seed_merchant: SeedMerchantController = _manager.get_seed_merchant_controller()
-	seed_merchant.adopt_restored_agent(agent, phase_kind, spawner_cell)
-	if GameState.is_night:
-		if not _manager._assign_agent_to_escape(agent) and agent.has_method("start_waiting_new_status"):
-			agent.call("start_waiting_new_status")
-		return
-	if phase_kind == "astar":
-		seed_merchant.repath_for_walkability_change()
 
 
 func _retarget_or_wait(agent: Node2D, spawner_cell: Vector2i) -> void:
