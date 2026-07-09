@@ -1378,11 +1378,25 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 		_night_preparation_ready = false
 		await _run_client_preparation(_night_preparation_token)
 		_agent_save_service.restore_state(data, true)
+		_purge_day_phase_monsters_after_load()
 		_notify_restored_phase()
 		return
 	_night_preparation_ready = bool(data.get("night_preparation_ready", true))
 	_agent_save_service.restore_state(data, false)
+	_purge_day_phase_monsters_after_load()
 	_notify_restored_phase()
+
+
+# Save/load safety net: monsters only exist at night, so any monster present after a
+# day-phase restore is a corrupted/stale save. Log the error the design calls for and
+# despawn it cleanly instead of letting a phantom monster roam a peaceful day.
+func _purge_day_phase_monsters_after_load() -> void:
+	if GameState.is_night:
+		return
+	var removed: int = _agent_save_service.purge_day_phase_monsters()
+	if removed > 0:
+		push_error("[LOAD GAME ERROR] Monster when its day.")
+		CppDebugOptions.save_log("[SAVE] Progression: removed %d day-phase monster(s) on load" % removed)
 
 
 func _notify_restored_phase() -> void:

@@ -461,6 +461,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	}
 	_log("Save summary: %s" % _save_summary(data))
 	_log("Save live summary: %s" % _live_scene_summary(scene))
+	_warn_if_day_phase_has_monsters("SAVE GAME ERROR")
 
 	var json_text: String = JSON.stringify(data)
 	var file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
@@ -504,11 +505,22 @@ func load_progression() -> void:
 
 
 ## Write the auto-save slot (separate file from the F5/F9 manual slot).
+## Skipped entirely while the Enable Auto-Save option is OFF; returns true so callers
+## that gate progression on "the save happened" still proceed (no file is written).
 func auto_save() -> bool:
+	if not CppDebugOptions.auto_save_enabled:
+		_log("Auto-save skipped: auto-save disabled")
+		return true
 	return save_progression(AUTOSAVE_PATH)
 
 
 func auto_save_after_rose_growth() -> bool:
+	# When auto-save is off, don't touch the autosave slot, but still report success:
+	# plant_manager only advances the new day when this returns true, so the day must
+	# keep progressing even though nothing is written.
+	if not CppDebugOptions.auto_save_enabled:
+		_log("Rose-growth auto-save skipped: auto-save disabled; day still advances")
+		return true
 	_log("Rose-growth auto-save requested")
 	return save_progression(AUTOSAVE_PATH, "morning")
 
@@ -520,7 +532,14 @@ func auto_save_after_rose_growth() -> bool:
 func load_on_start() -> void:
 	if _save_applied:
 		return
-	if GameState.consume_skip_startup_autosave():
+	# Consume the one-shot skip flag regardless so it never leaks into a later launch.
+	var skip_requested: bool = GameState.consume_skip_startup_autosave()
+	# Auto-save off also means auto-load off: a fresh launch never restores the
+	# autosave slot, so a stale snapshot can't resurface (only manual F9 loads a save).
+	if not CppDebugOptions.auto_save_enabled:
+		_log("Startup auto-load skipped: auto-save disabled")
+		return
+	if skip_requested:
 		_log("Startup auto-load skipped for fresh selected level")
 		return
 	if not FileAccess.file_exists(AUTOSAVE_PATH):
@@ -1105,6 +1124,17 @@ func _live_scene_summary(scene: Node) -> String:
 		counter_buildings,
 		counter_total,
 	]
+
+
+## Save/load correctness guard: monsters only exist at night. Finding one while any
+## day phase is active means the run reached an illegal state, so log it loudly. This
+## is detection only (the load path in BuildingManager also despawns the monster).
+func _warn_if_day_phase_has_monsters(context: String) -> void:
+	if GameState.is_night:
+		return
+	if get_tree().get_first_node_in_group(&"monsters") != null:
+		push_error("[%s] Monster when its day." % context)
+		_log("%s: monster present during a day phase" % context)
 
 
 func _notify(message: String) -> void:

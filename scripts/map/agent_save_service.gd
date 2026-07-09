@@ -161,6 +161,25 @@ func _serialize_agent_phase(nav_id: int) -> Dictionary:
 	return {"kind": "retarget"}
 
 
+# Despawn every monster still on the map, reusing the same native/desire cleanup as
+# the normal agent teardown. Used by BuildingManager's day-phase load safety net;
+# monsters must never survive into a day. Returns how many were removed.
+func purge_day_phase_monsters() -> int:
+	var removed: int = 0
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group(&"monsters"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id >= 0:
+			_manager._clear_removed_agent_state(nav_id)
+			_manager._unregister_nav_agent(nav_id)
+		_manager._unregister_desire_agent(agent)
+		agent.queue_free()
+		removed += 1
+	return removed
+
+
 func _clear_existing_agents() -> void:
 	var seen_ids: Dictionary = {}
 	for group_name: StringName in [&"monsters", &"clients", &"merchants"]:
