@@ -464,6 +464,24 @@ String SteeringSystemNative::_agent_physics_label(const ffcore::AgentData *a) co
     if (!a)
         return "missing";
 
+    // Lazy flow fields: while the agent's routing field is queued/being recomputed it is
+    // frozen by the steering loop; surface that here so the label matches the freeze. The
+    // phase label (flow in / flow out) is left untouched, so the agent visibly resumes it.
+    if (auto *mgr = ffcore::get_global_agent_manager())
+    {
+        ffcore::GroupID wait_group = (a->waiting_flow_group != ffcore::INVALID_GROUP) ? a->waiting_flow_group : a->group;
+        bool flow_driven = (a->waiting_flow_group != ffcore::INVALID_GROUP)
+            || (!a->path_active && (a->phase == ffcore::AgentPhase::FlowIn || a->phase == ffcore::AgentPhase::FlowOut));
+        if (flow_driven && wait_group != ffcore::INVALID_GROUP)
+        {
+            int wait = mgr->get_group_flow_wait(wait_group);
+            if (wait == ffcore::GROUP_FLOW_WAIT_QUEUED)
+                return "ff wait";
+            if (wait == ffcore::GROUP_FLOW_WAIT_COMPUTING)
+                return "ff being computed";
+        }
+    }
+
     Vector2 vel(a->velocity.x, a->velocity.y);
     double velocity_len = vel.length();
 
@@ -641,6 +659,7 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["moving"] = a->moving;
     d["control_mode"] = static_cast<int>(a->control_mode);
     d["group"] = a->group;
+    d["waiting_flow_group"] = a->waiting_flow_group;
     d["has_flow"] = a->flow != nullptr;
     d["flow_ready"] = a->flow ? a->flow->is_ready() : false;
     d["path_active"] = a->path_active;

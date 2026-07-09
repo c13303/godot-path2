@@ -67,6 +67,7 @@ namespace godot
         void send_agent_event(const String &event_name, int agent_id, const Variant &payload);
         void set_agent_never_rest(int agent_id, bool value);
         void set_agent_paused(int agent_id, bool value);
+        void set_agent_waiting_flow_group(int agent_id, int group_id);
         void set_agent_phase(int agent_id, int phase, float eating_seconds);
         void detach_agent_flow(int agent_id);
 

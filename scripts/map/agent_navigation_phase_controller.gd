@@ -151,6 +151,10 @@ func process_waiting_entry_flows() -> void:
 		if not _attach_agent_to_entry_route(agent, spawner_cell, garden_id, route):
 			_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
 	for nav_id: int in finished:
+		# Leaving the waiting set: drop the freeze/label stamp. Attaching to a real group
+		# already clears it natively, but the retarget/garden-gone exits may not, so clear
+		# it here too so a dropped agent never stays frozen against a stale group.
+		_manager.set_agent_waiting_flow_group(nav_id, 0)
 		_waiting_entry_flow_agents.erase(nav_id)
 
 
@@ -580,6 +584,9 @@ func assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, ga
 			"garden_id": garden_id,
 			"entry_cell": entry_cell,
 		}
+		# Freeze + label the agent against its pending entry group ("ff wait" /
+		# "ff being computed") until process_waiting_entry_flows attaches it.
+		_manager.set_agent_waiting_flow_group(nav_id, pending_group)
 		agent.set_meta("spawner_cell", spawner_cell)
 		agent.set_meta("garden_id", garden_id)
 		agent.set_meta("garden_entry_cell", entry_cell)

@@ -98,6 +98,10 @@ namespace godot
         uint64_t next_request_serial = 1;
 
         bool debug_draw = false;
+        // Debug draw is per-agent now: nothing is drawn until GDScript picks a group to
+        // inspect (by clicking an agent) via set_debug_draw_group. INVALID_GROUP = draw
+        // nothing. When set, _draw renders that group's live flow field.
+        ffcore::GroupID debug_draw_group = ffcore::INVALID_GROUP;
         double debug_scale = 1;
         int32_t debug_stride = 1;
         Color debug_color_dir = Color(0, 1, 0);
@@ -152,6 +156,9 @@ namespace godot
 
         void set_debug_draw(bool enabled);
         bool get_debug_draw() const { return debug_draw; }
+        // Select which group's flow field the debug overlay draws (0 = none). Driven from
+        // GDScript by clicking an agent while Draw Flow Field is enabled.
+        void set_debug_draw_group(int group_id);
 
         void _ready() override;
         void _process(double delta) override;
@@ -179,6 +186,11 @@ namespace godot
         void clear_cell_speed_multipliers();
 
         bool rebuild_async(Vector2 goal);
+        // Lazy flow fields: GDScript calls this the moment it enqueues a group's rebuild,
+        // before it is submitted for computation, so agents waiting on that group show
+        // "ff wait" and freeze. request_flow_to_group / assign_flow_to_group then move the
+        // group to "computing", and applying the field clears it back to none.
+        void mark_group_flow_queued(int group_id);
         void request_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
         bool are_async_flows_idle() const;
         bool is_group_flow_request_ready(int group_id) const;

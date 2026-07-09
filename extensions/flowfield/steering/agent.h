@@ -74,6 +74,12 @@ namespace ffcore
 
         bool is_first = false;
         GroupID group = INVALID_GROUP;
+        // Lazy flow fields: while an agent has been spawned but not yet attached to its
+        // routing group (its flow field is still queued/computing), GDScript stamps the
+        // target group here so the agent can be frozen and labelled ("ff wait" /
+        // "ff being computed") against a group it is not a member of yet. INVALID_GROUP
+        // once attached; cleared automatically when set_agent_group assigns a real group.
+        GroupID waiting_flow_group = INVALID_GROUP;
         Vec2 smash_force{};
         bool is_propelled = false;
         double propelled_timer = 0.0;

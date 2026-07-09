@@ -10,12 +10,25 @@ namespace ffcore
 }
 namespace ffcore
 {
+    // Per-group flow-field compute state, used to freeze + label agents while their
+    // routing field is not yet usable. NONE = field is current; QUEUED = GDScript has
+    // enqueued a rebuild but not submitted it to the async worker yet; COMPUTING = the
+    // request has been submitted and is being computed / not yet applied.
+    enum GroupFlowWait
+    {
+        GROUP_FLOW_WAIT_NONE = 0,
+        GROUP_FLOW_WAIT_QUEUED = 1,
+        GROUP_FLOW_WAIT_COMPUTING = 2,
+    };
+
     struct AgentGroup
     {
         GroupID id = INVALID_GROUP;
         bool active = false;
         FlowField *flow = nullptr;
         bool has_order = false;
+        // See GroupFlowWait. Set by FlowFieldNative as a rebuild is queued/computed/applied.
+        int flow_wait = GROUP_FLOW_WAIT_NONE;
     };
 
     struct AgentEntry
@@ -36,6 +49,8 @@ namespace ffcore
         const AgentEntry *get(int id) const;
         FlowField *get_group_flow(GroupID group) const;
         void set_group_flow(GroupID group, FlowField *flow);
+        void set_group_flow_wait(GroupID group, int state);
+        int get_group_flow_wait(GroupID group) const;
         void create_agent_entry(int agent_id, const Vec2 &pos, GroupID group);
         static const GroupID GROUP_IDLE = 0;
         void dissolve_group(GroupID group);

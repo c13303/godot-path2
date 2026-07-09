@@ -42,8 +42,13 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	if telemetry.over_garden_threshold_us(route_us):
 		telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
 			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
-	if not bool(route.get("ready", false)):
-		telemetry.log_spawn_failure("spawner %s garden %d route not ready" % [spawner_cell, garden_id])
+	# Lazy flow fields: the route's plant group is allocated immediately, but its flow
+	# field may still be queued/computing. We no longer refuse the spawn here — as long
+	# as a group exists, _assign_agent_to_garden_entry_flow parks the agent in the
+	# waiting-entry-flow set (it freezes as "ff wait" / "ff being computed") and attaches
+	# once the field is ready. Only a missing group means the route is genuinely unusable.
+	if int(route.get("plant_group", -1)) <= IDLE_GROUP:
+		telemetry.log_spawn_failure("spawner %s garden %d has no flow group" % [spawner_cell, garden_id])
 		return false
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:

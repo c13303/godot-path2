@@ -28,15 +28,14 @@ func run_night_preparation(token: int) -> void:
 
 	_manager._rebuild_spawner_garden_route_cache()
 	var monster_kinds: Array[StringName] = [SPAWNER_KIND_MONSTER]
+	# Allocate spawner escape groups (does not wait for their flow fields). Entry/plant
+	# flow fields are no longer prewarmed here: routes are created lazily on first spawn
+	# and their fields drain one-per-frame while agents wait ("ff wait"/"ff being computed").
 	prep_result = await _manager._initialize_spawner_routes_for_kinds(monster_kinds, token)
 	if not prep_result:
 		return
 
-	prep_result = await _manager._prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_MONSTER, token)
-	if not prep_result:
-		return
-
-	# Exit fields also use the native worker during preparation.
+	# Allocate exit-wall escape groups (also lazy: enqueues fields, does not wait).
 	prep_result = await _manager._rebuild_exit_wall_escapes_budgeted(token)
 	if not prep_result:
 		return
@@ -48,24 +47,15 @@ func run_night_preparation(token: int) -> void:
 	if not prep_result:
 		return
 
-	# Do not open the spawn gate until async work has finished. Older exported
-	# native DLLs may not expose async status methods; in that case requests are
-	# assigned synchronously by _request_group_flow_rebuild().
+	# The spawn gate no longer waits for flow fields to finish computing. We only verify
+	# FlowFieldNative can assign group routes at all; older DLLs without async status use
+	# the synchronous assign path in _submit_group_flow_rebuild().
 	if not _manager._flow_uses_async_requests() and not _manager._flow_supports_sync_assign():
 		push_error("BuildingManager: FlowFieldNative cannot assign group routes; night preparation cannot spawn monsters.")
 		return
-	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
-	while _manager._night_preparation_is_current(token) and _flow_requests_are_busy(route_service):
-		route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
-		await _manager.get_tree().process_frame
-	if not _manager._night_preparation_is_current(token):
-		return
-	if not _manager._night_flow_fields_are_ready_for_kinds(monster_kinds, true):
-		push_error("BuildingManager: night flow-field preparation completed with an unusable route")
-		return
 
 	_manager.finish_night_preparation_success()
-	CppDebugOptions.dlog("ff & gardens computed, monster night starts now")
+	CppDebugOptions.dlog("gardens ready, monster night starts now (flow fields compute lazily)")
 
 
 func run_client_preparation(token: int) -> void:
@@ -80,12 +70,9 @@ func run_client_preparation(token: int) -> void:
 
 	_manager._rebuild_spawner_garden_route_cache()
 	var client_kinds: Array[StringName] = [SPAWNER_KIND_CLIENT, SPAWNER_KIND_MERCHANT]
+	# Allocate spawner escape groups only. Entry/plant flow fields are created lazily on
+	# first spawn and drain one-per-frame while agents wait; no precompute/gate here.
 	prep_result = await _manager._initialize_spawner_routes_for_kinds(client_kinds, token)
-	if not prep_result:
-		_manager._abort_client_preparation(token)
-		return
-
-	prep_result = await _manager._prewarm_spawner_entry_flows_for_kind(SPAWNER_KIND_CLIENT, token)
 	if not prep_result:
 		_manager._abort_client_preparation(token)
 		return
@@ -97,16 +84,6 @@ func run_client_preparation(token: int) -> void:
 
 	if not _manager._flow_uses_async_requests() and not _manager._flow_supports_sync_assign():
 		push_error("BuildingManager: FlowFieldNative cannot assign group routes; client preparation cannot spawn clients.")
-		_manager._abort_client_preparation(token)
-		return
-	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
-	while _manager._night_preparation_is_current(token) and _flow_requests_are_busy(route_service):
-		route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
-		await _manager.get_tree().process_frame
-	if not _manager._night_preparation_is_current(token):
-		return
-	if not _manager._night_flow_fields_are_ready_for_kinds(client_kinds, false):
-		push_error("BuildingManager: client flow-field preparation completed with an unusable route")
 		_manager._abort_client_preparation(token)
 		return
 
@@ -142,11 +119,3 @@ func _prepare_static_colliders() -> bool:
 	elif fight_system and fight_system.has_method("prepare_night_static_colliders"):
 		fight_system.call("prepare_night_static_colliders")
 	return true
-
-
-func _flow_requests_are_busy(route_service: SpawnerRouteService) -> bool:
-	if route_service.queued_flow_request_count() > 0:
-		return true
-	if _manager._flow_uses_async_requests():
-		return not bool(_manager.flow.call("are_async_flows_idle"))
-	return false

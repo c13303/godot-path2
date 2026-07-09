@@ -118,6 +118,10 @@ namespace ffcore
         std::vector<DamageEvent> take_damage_events();
         void set_agent_never_rest(int id, bool value);
         void set_agent_paused(int id, bool value);
+        // Lazy flow fields: stamp the group whose flow field this (not-yet-attached) agent
+        // is waiting on, so it freezes and shows "ff wait"/"ff being computed" until ready.
+        // INVALID_GROUP clears it. See AgentData::waiting_flow_group.
+        void set_agent_waiting_flow_group(int id, GroupID group);
         void set_agent_phase(int id, AgentPhase phase, float eating_seconds);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 

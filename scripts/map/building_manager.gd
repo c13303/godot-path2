@@ -438,6 +438,13 @@ func agent_path_arrived(nav_id: int) -> bool:
 func set_agent_never_rest(nav_id: int, value: bool) -> void:
 	_agent_manager_set_agent_never_rest(nav_id, value)
 
+# Lazy flow fields: stamp the group whose flow field this spawn-waiting agent depends on,
+# so native freezes it and shows "ff wait"/"ff being computed". Pass 0 to clear. Guarded so
+# older exported DLLs without the method simply keep the previous (moving) behavior.
+func set_agent_waiting_flow_group(nav_id: int, group_id: int) -> void:
+	if agent_manager != null and agent_manager.has_method("set_agent_waiting_flow_group"):
+		agent_manager.call("set_agent_waiting_flow_group", nav_id, group_id)
+
 func registered_spawner_count() -> int:
 	return _spawners.size()
 

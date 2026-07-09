@@ -240,13 +240,6 @@ func _process(_delta: float) -> void:
 		tile_hover_info.process()
 
 func _input(event: InputEvent) -> void:
-	# The click-log normally requires Debug Enabled, but it is also allowed while
-	# the game is paused so an agent can be inspected on a frozen frame even with
-	# debug off. When debug is off and the game is running, clicks are left alone.
-	if not click_log_agents:
-		return
-	if not debug_enabled and not _is_game_paused():
-		return
 	if not (event is InputEventMouseButton):
 		return
 	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
@@ -254,7 +247,37 @@ func _input(event: InputEvent) -> void:
 		return
 	if get_viewport().gui_get_hovered_control() != null:
 		return
-	_log_clicked_agent_debug_snapshot()
+	# Draw Flow Field is per-agent: clicking an agent selects its flow field to render
+	# (clicking empty space clears it). Only while Debug Enabled + Draw Flow Field are on.
+	if debug_enabled and draw_flow_field:
+		_select_flow_field_for_clicked_agent()
+	# The click-log normally requires Debug Enabled, but it is also allowed while the game
+	# is paused so an agent can be inspected on a frozen frame even with debug off.
+	if click_log_agents and (debug_enabled or _is_game_paused()):
+		_log_clicked_agent_debug_snapshot()
+
+
+## Point the flow-field debug overlay at the clicked agent's group (0 = clear). Falls back
+## to the group the agent is waiting on when it has not been attached to a routing group yet.
+func _select_flow_field_for_clicked_agent() -> void:
+	var flow: Node = get_node_or_null("FlowFieldNative")
+	if flow == null or not flow.has_method("set_debug_draw_group"):
+		return
+	var clicked_agent: Node2D = _nearest_clicked_agent()
+	if clicked_agent == null:
+		flow.call("set_debug_draw_group", 0)
+		return
+	var nav_id: int = int(clicked_agent.get("nav_id"))
+	if nav_id < 0:
+		return
+	var group_id: int = 0
+	var steering: Node = get_node_or_null("SteeringSystemNative")
+	if steering and steering.has_method("get_agent_debug_snapshot"):
+		var snapshot: Dictionary = steering.call("get_agent_debug_snapshot", nav_id) as Dictionary
+		group_id = int(snapshot.get("group", 0))
+		if group_id <= 0:
+			group_id = int(snapshot.get("waiting_flow_group", 0))
+	flow.call("set_debug_draw_group", group_id)
 
 
 ## True while the game is paused, resolved via the PlayerController. Used so the

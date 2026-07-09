@@ -259,6 +259,17 @@ void SteeringSystem::set_agent_group(int id, GroupID group)
     if (it == id_to_index.end())
         return;
     agents[it->second].group = group;
+    // Being assigned to a real routing group ends any spawn-time flow wait.
+    if (group != INVALID_GROUP)
+        agents[it->second].waiting_flow_group = INVALID_GROUP;
+}
+
+void SteeringSystem::set_agent_waiting_flow_group(int id, GroupID group)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].waiting_flow_group = group;
 }
 
 int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow)
@@ -1935,6 +1946,27 @@ void SteeringSystem::update_all(double delta)
             a.velocity = Vec2(0, 0);
             a.update_motion_state(delta, cfg);
             continue;
+        }
+
+        // Lazy flow-field wait: the agent's routing field is still queued or being
+        // recomputed. Freeze in place (like paused) so it neither drifts nor follows a
+        // stale field; the debug label reads "ff wait" / "ff being computed". Its phase
+        // (flow in / flow out) is untouched, so it resumes exactly where it left off once
+        // the field is applied. Only flow-driven agents freeze: spawn-waiting agents (no
+        // group/flow yet, stamped via waiting_flow_group) and agents actively on a flow.
+        // A*-path followers and eating agents (flow detached) are unaffected.
+        {
+            GroupID wait_group = (a.waiting_flow_group != INVALID_GROUP) ? a.waiting_flow_group : a.group;
+            bool flow_driven = (a.waiting_flow_group != INVALID_GROUP)
+                || (!a.path_active && (a.phase == AgentPhase::FlowIn || a.phase == AgentPhase::FlowOut));
+            AgentManager *wait_mgr = agent_manager ? agent_manager : ffcore::get_global_agent_manager();
+            if (flow_driven && wait_group != INVALID_GROUP && wait_mgr
+                && wait_mgr->get_group_flow_wait(wait_group) != GROUP_FLOW_WAIT_NONE)
+            {
+                a.velocity = Vec2(0, 0);
+                a.update_motion_state(delta, cfg);
+                continue;
+            }
         }
 
         const bool is_manual = a.control_mode == AgentControlMode::Manual;

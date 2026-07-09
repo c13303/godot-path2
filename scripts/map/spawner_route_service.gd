@@ -19,6 +19,14 @@ var _route_cache_misses: int = 0
 var _flow_request_queue: Array[Dictionary] = []
 var _queued_flow_group_ids: Dictionary = {}
 var _flow_group_labels: Dictionary = {}
+# Batched flow-field compute logging. Flow requests arrive in bursts and drain one
+# per frame; instead of one line per field, we log once when a drain batch starts
+# ("N flow field(s) will be computed.") and once when it empties ("... computed! Time").
+# Both lines are debug-gated via CppDebugOptions.dlog(). A batch spans from the first
+# drain on a non-empty queue until the queue empties again.
+var _batch_active: bool = false
+var _batch_start_us: int = 0
+var _batch_count: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -488,6 +496,12 @@ func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: Strin
 		return
 	if group_id <= IDLE_GROUP:
 		return
+	# Lazy flow fields: mark the group "queued" the moment it enters the drain queue, so
+	# agents on (or waiting for) it freeze and show "ff wait" until it is submitted for
+	# computation. Guarded so older DLLs without the method keep the old moving behavior.
+	var flow: Node = _flow()
+	if flow != null and flow.has_method("mark_group_flow_queued"):
+		flow.call("mark_group_flow_queued", group_id)
 	var resolved_label: String = label
 	if resolved_label == "":
 		resolved_label = str(_flow_group_labels.get(group_id, "group %d" % group_id))
@@ -512,6 +526,11 @@ func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> 
 		return 0
 	if not flow_uses_async_requests() and not flow_supports_sync_assign():
 		return 0
+	if not _batch_active:
+		_batch_active = true
+		_batch_start_us = Time.get_ticks_usec()
+		_batch_count = 0
+		CppDebugOptions.dlog("%d flow field(s) will be computed." % _flow_request_queue.size())
 	var started_us: int = Time.get_ticks_usec()
 	var processed: int = 0
 	while not _flow_request_queue.is_empty():
@@ -525,9 +544,13 @@ func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> 
 		_queued_flow_group_ids.erase(group_id)
 		var goal_world: Vector2 = request.get("goal_world", Vector2.ZERO) as Vector2
 		var block_fences: bool = bool(request.get("block_fences", false))
-		var label: String = str(request.get("label", "group %d" % group_id))
-		_submit_group_flow_rebuild(group_id, goal_world, block_fences, label)
+		_submit_group_flow_rebuild(group_id, goal_world, block_fences)
 		processed += 1
+		_batch_count += 1
+	if _flow_request_queue.is_empty():
+		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - _batch_start_us) / 1000.0))
+		CppDebugOptions.dlog("%d flow field(s) computed! Time: %dms" % [_batch_count, elapsed_ms])
+		_batch_active = false
 	return processed
 
 
@@ -546,13 +569,12 @@ func _reindex_queued_flow_groups() -> void:
 		_queued_flow_group_ids[int(request.get("group_id", IDLE_GROUP))] = index
 
 
-func _submit_group_flow_rebuild(group_id: int, goal_world: Vector2, block_fences: bool, label: String) -> void:
+func _submit_group_flow_rebuild(group_id: int, goal_world: Vector2, block_fences: bool) -> void:
 	var flow: Node = _flow()
 	if flow_uses_async_requests():
 		flow.call("request_flow_to_group", group_id, goal_world, block_fences)
 	elif flow_supports_sync_assign():
 		flow.call("assign_flow_to_group", group_id, goal_world, block_fences)
-	print("FF built : %s" % label)
 
 
 func rebuild_spawner_garden_route_cache() -> void:

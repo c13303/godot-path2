@@ -29,6 +29,7 @@ namespace ffcore
             groups[i].active = false;
             groups[i].flow = nullptr;
             groups[i].has_order = false;
+            groups[i].flow_wait = GROUP_FLOW_WAIT_NONE;
         }
 
         groups[GROUP_IDLE].id = GROUP_IDLE;
@@ -62,6 +63,7 @@ namespace ffcore
                 groups[i].active = true;
                 groups[i].flow = nullptr;
                 groups[i].has_order = false;
+                groups[i].flow_wait = GROUP_FLOW_WAIT_NONE;
 
                 return i;
             }
@@ -198,6 +200,21 @@ namespace ffcore
 
         groups[group].active = false;
         groups[group].has_order = false;
+        groups[group].flow_wait = GROUP_FLOW_WAIT_NONE;
+    }
+
+    void AgentManager::set_group_flow_wait(GroupID group, int state)
+    {
+        if (group == INVALID_GROUP || group >= MAX_GROUPS)
+            return;
+        groups[group].flow_wait = state;
+    }
+
+    int AgentManager::get_group_flow_wait(GroupID group) const
+    {
+        if (group == INVALID_GROUP || group >= MAX_GROUPS)
+            return GROUP_FLOW_WAIT_NONE;
+        return groups[group].flow_wait;
     }
 
     static GroupID current_selected_group = GROUP_IDLE;
