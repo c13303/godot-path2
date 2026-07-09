@@ -34,6 +34,10 @@ func process(delta: float) -> void:
 	# Keep scan and route drains before agent ticks so fresh topology is visible this frame.
 	_process_building_scan(debug_telemetry, delta)
 	_process_navigation_topology_rebuild(debug_telemetry, delta)
+	# A runtime walkability rebuild may have just started (budgeted, multi-frame):
+	# stop this tick immediately so no decision runs against half-rebuilt topology.
+	if _manager.should_skip_building_runtime_tick():
+		return
 	_process_dirty_routes(debug_telemetry)
 	_process_flow_request_queue(debug_telemetry)
 	_process_agent_runtime(debug_telemetry, delta)

@@ -19,6 +19,14 @@ var _debug_telemetry: BuildingDebugTelemetry
 var _navigation_topology_dirty: bool = true
 var _plant_layout_dirty: bool = false
 var _walkability_quiet_seconds_remaining: float = 0.0
+# Runtime (mid-gameplay) walkability rebuilds run as a budgeted coroutine so a wall
+# built with agents active never costs a full rebuild in one frame. While active,
+# BuildingManager.should_skip_building_runtime_tick() pauses the GDScript decision
+# ticks; native steering keeps moving agents on their current flow fields. The id
+# guards the active flag against a superseded (zombie) coroutine clearing it.
+var _runtime_rebuild_active: bool = false
+var _runtime_rebuild_id: int = 0
+var _runtime_rebuild_wants_gardens: bool = false
 
 const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
@@ -90,14 +98,81 @@ func after_plant_layout_changed(_reason: String = "") -> void:
 # and rebuilds the exit-wall escape fields (with the same telemetry span). No-op when
 # nothing is dirty. Preserves the exact order the sequence had inline.
 func apply_navigation_topology_rebuild(delta: float = -1.0) -> void:
+	if delta <= 0.0 and _runtime_rebuild_active:
+		# A synchronous caller (save/load, startup sync) needs consistent topology
+		# now. Cancel the in-flight budgeted rebuild (its token goes stale at the
+		# next slice) and force the synchronous rebuild below so the caller never
+		# observes half-built gardens.
+		_manager.advance_preparation_token()
+		_runtime_rebuild_id += 1
+		_runtime_rebuild_active = false
+		_navigation_topology_dirty = true
 	if _navigation_topology_dirty and delta > 0.0:
 		_walkability_quiet_seconds_remaining = maxf(0.0, _walkability_quiet_seconds_remaining - delta)
 		if _walkability_quiet_seconds_remaining > 0.0:
 			return
 	if _navigation_topology_dirty:
-		_apply_walkability_topology_rebuild()
+		if delta > 0.0:
+			_start_runtime_walkability_rebuild()
+		else:
+			_apply_walkability_topology_rebuild()
 	elif _plant_layout_dirty and delta <= 0.0:
 		_apply_plant_layout_rebuild()
+
+
+func runtime_rebuild_active() -> bool:
+	return _runtime_rebuild_active
+
+
+# Budgeted (multi-frame) mirror of _apply_walkability_topology_rebuild for live
+# gameplay: same step order, but the heavy passes (walkable cache, garden
+# clustering/validation, exit-wall escapes) are sliced across frames using the
+# night-preparation budget. Cancellation: the preparation token goes stale (night/
+# client prep start, sync rebuild, save/load) -> the budgeted passes return false
+# and the coroutine stops without touching further state.
+func _start_runtime_walkability_rebuild() -> void:
+	if _runtime_rebuild_active:
+		return
+	clear_navigation_topology_dirty()
+	clear_plant_layout_dirty()
+	_runtime_rebuild_active = true
+	_runtime_rebuild_id += 1
+	# Remember that gardens were built so an aborted run still rebuilds them on the
+	# next attempt (a partial run can leave plant_zone_built false).
+	_runtime_rebuild_wants_gardens = _runtime_rebuild_wants_gardens or _garden_topology.plant_zone_built()
+	_run_runtime_walkability_rebuild(_manager.advance_preparation_token(), _runtime_rebuild_id)
+
+
+func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
+	var started_us: int = Time.get_ticks_usec()
+	CppDebugOptions.dlog("walkability rebuild started (budgeted)")
+	_manager._sync_flow_extra_blocking_cells()
+	_manager._rebuild_waterpool_directional_field()
+	var ok: bool = bool(await _manager._rebuild_walkable_map_cache_budgeted(token))
+	if ok:
+		_manager.get_seed_merchant_controller().repath_for_walkability_change()
+		if _runtime_rebuild_wants_gardens:
+			ok = bool(await _manager._build_gardens_from_plants_budgeted(token))
+			if ok:
+				ok = bool(await _manager._validate_gardens_budgeted(token))
+			if ok:
+				_spawner_route_service.rebuild_spawner_garden_route_cache()
+				_manager._queue_agents_after_garden_rebuild()
+	if ok:
+		_manager._rebuild_spawner_garden_route_cache()
+		for raw_spawner_cell: Variant in _manager.get_spawners().keys():
+			var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+			_manager._rebuild_spawner_plant_ff(spawner_cell)
+			_spawner_route_service.mark_spawner_escape_dirty(spawner_cell)
+		ok = bool(await _manager._rebuild_exit_wall_escapes_budgeted(token))
+	if ok:
+		_runtime_rebuild_wants_gardens = false
+		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))
+		CppDebugOptions.dlog("walkability rebuild completed in %dms (budgeted)" % elapsed_ms)
+	else:
+		CppDebugOptions.dlog("walkability rebuild aborted (superseded)")
+	if rebuild_id == _runtime_rebuild_id:
+		_runtime_rebuild_active = false
 
 
 func _apply_walkability_topology_rebuild() -> void:

@@ -509,10 +509,21 @@ func _run_startup_after_flow_ready() -> void:
 func _night_preparation_is_current(token: int) -> bool:
 	if token != _night_preparation_token:
 		return false
+	# The runtime walkability rebuild (wall built mid-day/mid-night) reuses the
+	# budgeted preparation passes outside night/client preparation; while it is
+	# active its token is valid regardless of the game phase.
+	if _building_invalidation_controller != null and _building_invalidation_controller.runtime_rebuild_active():
+		return true
 	return GameState.is_night or (_client_preparing and not GameState.is_night)
 
 func _night_preparation_budget_us() -> int:
 	return maxi(500, int(night_preparation_budget_ms * 1000.0))
+
+# Claims a fresh preparation token, invalidating any in-flight budgeted pass
+# (night/client preparation or runtime walkability rebuild) at its next slice.
+func advance_preparation_token() -> int:
+	_night_preparation_token += 1
+	return _night_preparation_token
 
 func _flow_uses_async_requests() -> bool:
 	return _spawner_route_service.flow_uses_async_requests()
@@ -1203,6 +1214,11 @@ func is_runtime_ready_for_building_tick() -> bool:
 
 func should_skip_building_runtime_tick() -> bool:
 	if _paused:
+		return true
+	# The runtime walkability rebuild pauses decision ticks exactly like night
+	# preparation does: native steering keeps agents moving on their current flow
+	# fields while gardens/routes are rebuilt over several budgeted frames.
+	if _building_invalidation_controller != null and _building_invalidation_controller.runtime_rebuild_active():
 		return true
 	return _night_preparing or _client_preparing
 

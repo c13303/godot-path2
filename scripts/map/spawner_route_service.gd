@@ -257,7 +257,7 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 		if not _is_finite_world(escape_world):
 			release_exit_wall_escape(exit_cell)
 			continue
-			request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
+		request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
 		escape["escape_group"] = escape_group
 		escape["escape_target_cell"] = target_cell
 		escape["escape_world"] = escape_world
