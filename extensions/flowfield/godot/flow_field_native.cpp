@@ -362,6 +362,74 @@ bool FlowFieldNative::cell_reaches_navigation_blocking_coverage(const Vector2i &
     return false;
 }
 
+bool FlowFieldNative::snapshot_cell_is_coverage_blocked(const AsyncFlowSnapshot &snapshot,
+                                                        const std::unordered_set<Vector2i, Vector2iHash> &nav_cells,
+                                                        const Vector2i &cell)
+{
+    // Worker-thread replica of cell_reaches_navigation_blocking_coverage. TileMapLayer
+    // must not be touched off the main thread, so map_to_local/local_to_map are inlined
+    // with their square-tile formulas (this project only uses square atlases) and the
+    // layer transforms come from the snapshot copies.
+    const double radius = snapshot.coverage_radius;
+    const double threshold = snapshot.coverage_threshold;
+    if (radius <= 0.0 || threshold <= 0.0 || nav_cells.empty())
+        return false;
+
+    const double floor_tile = snapshot.tile_size;
+    const double nav_tile = snapshot.nav_tile_size;
+
+    const Vector2 local_center(((double)cell.x + 0.5) * floor_tile, ((double)cell.y + 0.5) * floor_tile);
+    const Vector2 world_center = snapshot.floor_to_world.xform(local_center);
+    const Rect2 world_rect(world_center - Vector2(radius, radius), Vector2(radius * 2.0, radius * 2.0));
+    const Vector2 p0 = snapshot.world_to_nav.xform(world_rect.position);
+    const Vector2 p1 = snapshot.world_to_nav.xform(world_rect.position + Vector2(world_rect.size.x, 0.0));
+    const Vector2 p2 = snapshot.world_to_nav.xform(world_rect.position + Vector2(0.0, world_rect.size.y));
+    const Vector2 p3 = snapshot.world_to_nav.xform(world_rect.position + world_rect.size);
+
+    const double min_x = std::min({(double)p0.x, (double)p1.x, (double)p2.x, (double)p3.x});
+    const double min_y = std::min({(double)p0.y, (double)p1.y, (double)p2.y, (double)p3.y});
+    const double max_x = std::max({(double)p0.x, (double)p1.x, (double)p2.x, (double)p3.x});
+    const double max_y = std::max({(double)p0.y, (double)p1.y, (double)p2.y, (double)p3.y});
+    const Rect2 local_rect(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y));
+    const double footprint_area = (double)local_rect.size.x * (double)local_rect.size.y;
+    if (footprint_area <= 0.0)
+        return false;
+
+    auto local_to_map = [nav_tile](const Vector2 &p) -> Vector2i
+    {
+        return Vector2i((int)std::floor((double)p.x / nav_tile), (int)std::floor((double)p.y / nav_tile));
+    };
+    const Vector2i first_cell = local_to_map(local_rect.position);
+    const Vector2i last_cell = local_to_map(local_rect.position + local_rect.size);
+    const int min_cell_x = std::min(first_cell.x, last_cell.x) - 1;
+    const int max_cell_x = std::max(first_cell.x, last_cell.x) + 1;
+    const int min_cell_y = std::min(first_cell.y, last_cell.y) - 1;
+    const int max_cell_y = std::max(first_cell.y, last_cell.y) + 1;
+    double covered_area = 0.0;
+
+    for (int y = min_cell_y; y <= max_cell_y; ++y)
+    {
+        for (int x = min_cell_x; x <= max_cell_x; ++x)
+        {
+            if (!nav_cells.count(Vector2i(x, y)))
+                continue;
+
+            const Vector2 blocker_center(((double)x + 0.5) * nav_tile, ((double)y + 0.5) * nav_tile);
+            const Rect2 blocker_rect(blocker_center - Vector2(nav_tile * 0.5, nav_tile * 0.5), Vector2(nav_tile, nav_tile));
+            const Rect2 overlap = local_rect.intersection(blocker_rect);
+            const double overlap_area = (double)overlap.size.x * (double)overlap.size.y;
+            if (overlap_area <= 0.0)
+                continue;
+
+            covered_area += overlap_area;
+            if (covered_area / footprint_area >= threshold)
+                return true;
+        }
+    }
+
+    return false;
+}
+
 void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
                                                 const Rect2i &used,
                                                 const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const
@@ -975,7 +1043,33 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
                 snapshot.walls.push_back(cell);
         }
     }
-    add_navigation_coverage_blockers(floors, navigation_blocked_set);
+    // The navigation-coverage scan (per floor cell, with tilemap queries) is far too
+    // heavy for the main thread and caused visible hitches on lazy flow rebuilds.
+    // Only its raw inputs are captured here; the worker filters the walkables itself
+    // in snapshot_cell_is_coverage_blocked. When the threshold is zero the blockers
+    // are plain used cells, which stays a cheap main-thread merge.
+    if (navigation_blocking_layer)
+    {
+        const double threshold = navigation_blocking_coverage_threshold(navigation_blocking_layer);
+        Array nav_cells = navigation_blocking_layer->get_used_cells();
+        if (threshold <= 0.0)
+        {
+            for (int i = 0; i < nav_cells.size(); i++)
+                navigation_blocked_set.insert((Vector2i)nav_cells[i]);
+        }
+        else
+        {
+            const auto &nav_cfg = ffcore::globalconfig();
+            snapshot.coverage_threshold = threshold;
+            snapshot.coverage_radius = std::max(1.0, nav_cfg.tile_size * nav_cfg.agent_world_diameter_ratio * 0.5);
+            snapshot.nav_tile_size = tile_size_from_layer(navigation_blocking_layer);
+            snapshot.floor_to_world = floor_layer->get_global_transform();
+            snapshot.world_to_nav = navigation_blocking_layer->get_global_transform().affine_inverse();
+            snapshot.nav_coverage_cells.reserve(nav_cells.size());
+            for (int i = 0; i < nav_cells.size(); i++)
+                snapshot.nav_coverage_cells.push_back((Vector2i)nav_cells[i]);
+        }
+    }
 
     snapshot.walkables.reserve(floors.size());
     bool goal_is_walkable = false;
@@ -1079,10 +1173,27 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
 
     apply_physics_passability(computed, used, wall_set);
 
+    // snapshot.walkables are pre-coverage candidates; the navigation-coverage filter
+    // runs here on the worker thread (see build_async_snapshot for why).
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
     walkable_set.reserve(snapshot.walkables.size());
-    for (const Vector2i &cell : snapshot.walkables)
-        walkable_set.insert(cell);
+    if (snapshot.coverage_threshold > 0.0 && !snapshot.nav_coverage_cells.empty())
+    {
+        std::unordered_set<Vector2i, Vector2iHash> nav_cells;
+        nav_cells.reserve(snapshot.nav_coverage_cells.size());
+        for (const Vector2i &cell : snapshot.nav_coverage_cells)
+            nav_cells.insert(cell);
+        for (const Vector2i &cell : snapshot.walkables)
+        {
+            if (!snapshot_cell_is_coverage_blocked(snapshot, nav_cells, cell))
+                walkable_set.insert(cell);
+        }
+    }
+    else
+    {
+        for (const Vector2i &cell : snapshot.walkables)
+            walkable_set.insert(cell);
+    }
 
     if (!walkable_set.count(snapshot.goal_cell))
         return result;
@@ -1487,14 +1598,21 @@ void FlowFieldNative::process_async_results()
 
 void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
 {
-    if (!result.ok)
-        return;
-
     {
         std::lock_guard<std::mutex> lock(async_mutex);
         auto it = latest_request_serial_by_group.find(result.group_id);
         if (it == latest_request_serial_by_group.end() || it->second != result.serial)
             return;
+    }
+
+    if (!result.ok)
+    {
+        // The worker rejected the request (e.g. the goal cell turned out to be
+        // coverage-blocked). The field will never build, so don't leave the group's
+        // agents frozen in "ff being computed"; mirrors the snapshot-failure path.
+        if (auto *mgr = ffcore::get_global_agent_manager())
+            mgr->set_group_flow_wait(result.group_id, ffcore::GROUP_FLOW_WAIT_NONE);
+        return;
     }
 
     ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();

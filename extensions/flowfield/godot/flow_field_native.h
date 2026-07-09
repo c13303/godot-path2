@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
 #include "../flow/flow_field.h"
 #include <cstdint>
 #include <unordered_set>
@@ -63,12 +64,24 @@ namespace godot
             Vector2i goal_cell;
             double tile_size = 1.0;
             std::vector<Vector2i> walls;
+            // Walkable candidates BEFORE the navigation-coverage filter. The coverage
+            // scan is per-floor-cell and far too heavy for the main thread (it caused
+            // visible hitches on lazy flow rebuilds), so the worker filters these using
+            // the raw coverage inputs below instead of the main thread pre-filtering.
             std::vector<Vector2i> walkables;
             bool debug_disable_bottlenecks = false;
             int bottleneck_zone_radius_tiles = 0;
             double flow_field_wall_clearance = 0.0;
             bool block_fences = false;
             std::vector<CellSpeedModifier> speed_modifiers;
+            // Raw inputs for the worker-side coverage filter. A zero threshold or an
+            // empty nav_coverage_cells list disables filtering.
+            double coverage_threshold = 0.0;
+            double coverage_radius = 0.0;
+            double nav_tile_size = 1.0;
+            Transform2D floor_to_world;
+            Transform2D world_to_nav;
+            std::vector<Vector2i> nav_coverage_cells;
         };
 
         struct AsyncFlowRequest
@@ -140,6 +153,9 @@ namespace godot
         std::vector<float> distance_field;
         int group_size_for_draw() const;
         bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences);
+        static bool snapshot_cell_is_coverage_blocked(const AsyncFlowSnapshot &snapshot,
+                                                      const std::unordered_set<Vector2i, Vector2iHash> &nav_cells,
+                                                      const Vector2i &cell);
         void start_worker();
         void stop_worker();
         void worker_loop();
