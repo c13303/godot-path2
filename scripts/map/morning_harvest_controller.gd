@@ -102,6 +102,7 @@ func _harvest_grownup_rose(plant_manager: Node, rose_cell: Vector2i) -> void:
 		return
 	_manager.add_counter_stock(target_counter, 1)
 	_manager.animate_harvested_rose_to_counter(rose_world, target_counter)
+	_manager.auto_save_after_rose_harvest()
 	check_finished()
 
 

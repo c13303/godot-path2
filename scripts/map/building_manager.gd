@@ -367,6 +367,15 @@ func _get_progression() -> Node:
 func get_progression() -> Node:
 	return _get_progression()
 
+
+func auto_save_after_rose_harvest() -> bool:
+	var progression_node: Node = _get_progression()
+	if progression_node == null or not progression_node.has_method("auto_save"):
+		CppDebugOptions.save_log("[SAVE] BuildingManager: rose-harvest auto-save blocked: progression node missing")
+		return false
+	return bool(progression_node.call("auto_save"))
+
+
 func get_plant_manager() -> Node:
 	return plant_manager
 

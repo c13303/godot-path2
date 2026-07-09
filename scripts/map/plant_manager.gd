@@ -474,8 +474,8 @@ func restore_plant_states(saved_states: Array) -> void:
 		var entry: Dictionary = raw_entry as Dictionary
 		var cell: Vector2i = Vector2i(int(entry.get("x", 0)), int(entry.get("y", 0)))
 		var plant_kind: String = str(entry.get("plant_kind", PLANT_KIND_ROSE))
-		if not _plants.has(cell) and plant_kind == PLANT_KIND_IMPERIAL:
-			add_plant(cell, PLANT_KIND_IMPERIAL)
+		if not _plants.has(cell):
+			_restore_missing_saved_plant_cell(cell, plant_kind, entry)
 		if not _plants.has(cell):
 			ignored_count += 1
 			continue
@@ -499,6 +499,42 @@ func restore_plant_states(saved_states: Array) -> void:
 		grown_count,
 		rose_count(),
 	])
+	_flush_plant_layer_now()
+	_queue_plant_layer_flush()
+
+
+func _restore_missing_saved_plant_cell(cell: Vector2i, plant_kind: String, entry: Dictionary) -> void:
+	if plant_kind == PLANT_KIND_IMPERIAL:
+		add_plant(cell, PLANT_KIND_IMPERIAL)
+		return
+	if plant_kind != PLANT_KIND_ROSE or plantz == null:
+		return
+	var source_id: int = _plant_layer_source_id()
+	if source_id < 0:
+		return
+	var plant_data: Dictionary = {
+		"plant_kind": PLANT_KIND_ROSE,
+		"watered_once": bool(entry.get("watered_once", false)),
+		"grownup": bool(entry.get("grownup", false)),
+		"stage": 0,
+	}
+	var atlas_coords: Vector2i = _rose_atlas_for_saved_state(plant_data)
+	plantz.set_cell(cell, source_id, atlas_coords, DEFAULT_ALTERNATIVE_TILE)
+	_plant_tiles[cell] = {
+		"source_id": source_id,
+		"atlas_coords": atlas_coords,
+		"alternative_tile": DEFAULT_ALTERNATIVE_TILE,
+	}
+	_plants[cell] = plant_data
+	_index_cell(cell)
+
+
+func _rose_atlas_for_saved_state(plant_data: Dictionary) -> Vector2i:
+	if bool(plant_data.get("grownup", false)):
+		return ROSE_GROWNUP_ATLAS
+	if bool(plant_data.get("watered_once", false)):
+		return ROSE_WET_ATLAS
+	return ROSE_DRY_ATLAS
 
 func add_plant(cell: Vector2i, plant_kind: String = PLANT_KIND_ROSE) -> void:
 	if _plants.has(cell):
