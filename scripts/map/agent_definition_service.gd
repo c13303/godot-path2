@@ -7,6 +7,7 @@ class_name AgentDefinitionService
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 1.5
 const BIG_MONSTER_WALK_SQUASH: float = 0.09
 
@@ -64,6 +65,14 @@ func apply_client_data(agent: Node) -> void:
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
 		sprite.hframes = 5
+
+
+func apply_merchant_data(agent: Node) -> void:
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = MERCHANT_TEXTURE
+		sprite.hframes = 4
+		sprite.frame = 0
 
 
 func _apply_bigmonster_animation(agent: Node) -> void:

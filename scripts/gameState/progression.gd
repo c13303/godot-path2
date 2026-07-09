@@ -701,7 +701,8 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_restore_counter_stock(scene, data.get("counter_stock", []))
 	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
 	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
-	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
+	var has_saved_merchant_agent: bool = _runtime_agents_has_kind(raw_runtime_agents, "merchant")
+	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents, has_saved_merchant_agent)
 	call_deferred("_restore_runtime_agents_deferred", raw_runtime_agents)
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
@@ -901,13 +902,16 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 	_log("Plant states restored: %d entries" % states.size())
 
 
-func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = false) -> void:
+func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = false, has_saved_merchant_agent: bool = false) -> void:
 	if phase == "":
 		return
 	GameState.restore_day_phase_flags(phase)
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if has_runtime_agents and (phase == "night" or phase == "client"):
 		_log("Day phase restored from runtime snapshot: %s" % phase)
+		return
+	if phase == "seed_merchant" and has_saved_merchant_agent:
+		_log("Seed merchant phase restored from saved merchant agent")
 		return
 	if building_manager != null and building_manager.has_method("restore_day_phase"):
 		building_manager.call("restore_day_phase", phase)
@@ -935,6 +939,27 @@ func _restore_runtime_agents_deferred(raw_state: Variant) -> void:
 	if scene == null:
 		return
 	_restore_runtime_agents(scene, raw_state)
+
+
+func _runtime_agents_has_kind(raw_state: Variant, kind: String) -> bool:
+	if not (raw_state is Dictionary):
+		return false
+	var state: Dictionary = raw_state as Dictionary
+	var raw_agents: Variant = state.get("agents", [])
+	if not (raw_agents is Array):
+		return false
+	for raw_agent: Variant in raw_agents as Array:
+		if not (raw_agent is Dictionary):
+			continue
+		var agent_data: Dictionary = raw_agent as Dictionary
+		if str(agent_data.get("kind", "")) == kind:
+			return true
+		var raw_metadata: Variant = agent_data.get("metadata", {})
+		if raw_metadata is Dictionary:
+			var metadata: Dictionary = raw_metadata as Dictionary
+			if str(metadata.get("agent_kind", "")) == kind:
+				return true
+	return false
 
 
 func _reindex_loaded_layers(scene: Node) -> void:

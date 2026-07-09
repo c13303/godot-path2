@@ -20,12 +20,21 @@ func setup(manager: BuildingManager) -> void:
 
 
 func serialize_state() -> Dictionary:
+	var agents: Array[Dictionary] = _serialize_live_agents()
+	var spawn_tick_state: Dictionary = _manager.get_spawn_tick_controller().serialize_state()
+	var spawn_playlist_state: Dictionary = _manager.get_spawn_playlist_controller().serialize_state()
+	if not GameState.is_night:
+		agents = _discard_day_phase_monster_agent_data(agents, "save")
+		if _has_active_day_phase_spawn_state(spawn_tick_state, spawn_playlist_state):
+			CppDebugOptions.save_log("[SAVE] AgentSaveService: discarded day-phase night spawn state during save")
+		spawn_tick_state = {}
+		spawn_playlist_state = {}
 	return {
-		"agents": _serialize_live_agents(),
+		"agents": agents,
 		"sheep": _manager.get_sheep_controller().serialize_state(),
 		"client_sale": _manager.get_client_sale_controller().serialize_state(),
-		"spawn_tick": _manager.get_spawn_tick_controller().serialize_state(),
-		"spawn_playlist": _manager.get_spawn_playlist_controller().serialize_state(),
+		"spawn_tick": spawn_tick_state,
+		"spawn_playlist": spawn_playlist_state,
 		"night_preparation_ready": _manager.is_night_preparation_ready(),
 	}
 
@@ -34,23 +43,26 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 	_clear_existing_agents()
 	if not navigation_prepared:
 		_prepare_navigation_for_restore()
-	_manager.get_spawn_playlist_controller().restore_state(_dict_from_value(data.get("spawn_playlist", {})))
-	_manager.get_spawn_tick_controller().restore_state(_dict_from_value(data.get("spawn_tick", {})))
+	var spawn_playlist_state: Dictionary = {}
+	var spawn_tick_state: Dictionary = {}
+	if GameState.is_night:
+		spawn_playlist_state = _dict_from_value(data.get("spawn_playlist", {}))
+		spawn_tick_state = _dict_from_value(data.get("spawn_tick", {}))
+	_manager.get_spawn_playlist_controller().restore_state(spawn_playlist_state)
+	_manager.get_spawn_tick_controller().restore_state(spawn_tick_state)
 	_manager.get_client_sale_controller().restore_state(_dict_from_value(data.get("client_sale", {})))
 	var restored_agents: Array[Dictionary] = []
-	var raw_agents: Variant = data.get("agents", [])
-	if raw_agents is Array:
-		for raw_agent_data: Variant in raw_agents as Array:
-			if not (raw_agent_data is Dictionary):
-				continue
-			var agent_data: Dictionary = raw_agent_data as Dictionary
-			var agent: Node2D = _restore_agent_node(agent_data)
-			if agent == null:
-				continue
-			restored_agents.append({
-				"node": agent,
-				"data": agent_data,
-			})
+	var agents: Array[Dictionary] = _agent_data_array(data.get("agents", []))
+	if not GameState.is_night:
+		agents = _discard_day_phase_monster_agent_data(agents, "load")
+	for agent_data: Dictionary in agents:
+		var agent: Node2D = _restore_agent_node(agent_data)
+		if agent == null:
+			continue
+		restored_agents.append({
+			"node": agent,
+			"data": agent_data,
+		})
 	_manager.get_sheep_controller().restore_state(_dict_from_value(data.get("sheep", {})))
 	for restored: Dictionary in restored_agents:
 		var agent: Node2D = restored["node"] as Node2D
@@ -72,6 +84,59 @@ func _serialize_live_agents() -> Array[Dictionary]:
 			seen_ids[nav_id] = true
 			result.append(_serialize_agent(agent, nav_id))
 	return result
+
+
+func _agent_data_array(raw_agents: Variant) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not (raw_agents is Array):
+		return result
+	for raw_agent_data: Variant in raw_agents as Array:
+		if raw_agent_data is Dictionary:
+			result.append(raw_agent_data as Dictionary)
+	return result
+
+
+func _discard_day_phase_monster_agent_data(agents: Array[Dictionary], context: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var removed: int = 0
+	for agent_data: Dictionary in agents:
+		if _agent_data_kind(agent_data) == SPAWNER_KIND_MONSTER:
+			removed += 1
+			continue
+		result.append(agent_data)
+	if removed > 0:
+		push_error("[%s GAME ERROR] Monster when its day." % context.to_upper())
+		CppDebugOptions.save_log("[SAVE] AgentSaveService: discarded %d day-phase monster agent(s) during %s" % [removed, context])
+	return result
+
+
+func _agent_data_kind(agent_data: Dictionary) -> StringName:
+	var kind: StringName = StringName(str(agent_data.get("kind", "")))
+	if kind != &"":
+		return kind
+	var metadata: Dictionary = _dict_from_value(agent_data.get("metadata", {}))
+	if metadata.has("agent_kind"):
+		return StringName(str(metadata["agent_kind"]))
+	return SPAWNER_KIND_MONSTER
+
+
+func _has_active_day_phase_spawn_state(spawn_tick_state: Dictionary, spawn_playlist_state: Dictionary) -> bool:
+	if int(spawn_playlist_state.get("current_night_index", -1)) >= 0:
+		return true
+	var raw_tracks: Variant = spawn_playlist_state.get("tracks", [])
+	if raw_tracks is Array and not (raw_tracks as Array).is_empty():
+		return true
+	var raw_ready_queue: Variant = spawn_tick_state.get("ready_queue", [])
+	if raw_ready_queue is Array and not (raw_ready_queue as Array).is_empty():
+		return true
+	var raw_legacy_timers: Variant = spawn_tick_state.get("legacy_spawn_timers", [])
+	if raw_legacy_timers is Array and not (raw_legacy_timers as Array).is_empty():
+		return true
+	if int(spawn_tick_state.get("legacy_spawn_limit_this_night", 0)) > 0:
+		return true
+	if int(spawn_tick_state.get("legacy_spawned_this_night", 0)) > 0:
+		return true
+	return false
 
 
 func _serialize_agent(agent: Node2D, nav_id: int) -> Dictionary:
@@ -225,6 +290,7 @@ func _restore_agent_node(data: Dictionary) -> Node2D:
 	elif kind == SPAWNER_KIND_MERCHANT:
 		agent.add_to_group("merchants")
 		_manager._register_desire_agent(agent, &"merchants")
+		_manager.apply_merchant_data(agent)
 	else:
 		agent.add_to_group("monsters")
 		_manager._register_desire_agent(agent, &"monsters")
@@ -254,6 +320,11 @@ func _restore_agent_navigation(agent: Node2D, data: Dictionary) -> void:
 	var phase_kind: String = str(phase.get("kind", "retarget"))
 	var nav_id: int = int(agent.get("nav_id"))
 	var spawner_cell: Vector2i = _cell_from_dict(phase.get("spawner_cell", agent.get_meta("spawner_cell") if agent.has_meta("spawner_cell") else {}))
+	if _agent_data_kind(data) == SPAWNER_KIND_MERCHANT:
+		_restore_merchant_navigation(agent, phase_kind, spawner_cell)
+		if nav_id >= 0:
+			_manager.set_agent_never_rest(nav_id, true)
+		return
 	match phase_kind:
 		"eating":
 			_manager.get_agent_navigation_phase_controller().restore_agent_eating(
@@ -280,6 +351,17 @@ func _restore_agent_navigation(agent: Node2D, data: Dictionary) -> void:
 			_retarget_or_wait(agent, spawner_cell)
 	if nav_id >= 0:
 		_manager.set_agent_never_rest(nav_id, true)
+
+
+func _restore_merchant_navigation(agent: Node2D, phase_kind: String, spawner_cell: Vector2i) -> void:
+	var seed_merchant: SeedMerchantController = _manager.get_seed_merchant_controller()
+	seed_merchant.adopt_restored_agent(agent, phase_kind, spawner_cell)
+	if GameState.is_night:
+		if not _manager._assign_agent_to_escape(agent) and agent.has_method("start_waiting_new_status"):
+			agent.call("start_waiting_new_status")
+		return
+	if phase_kind == "astar":
+		seed_merchant.repath_for_walkability_change()
 
 
 func _retarget_or_wait(agent: Node2D, spawner_cell: Vector2i) -> void:

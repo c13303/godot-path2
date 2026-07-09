@@ -2,7 +2,6 @@ extends RefCounted
 class_name SeedMerchantController
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
-const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
@@ -152,6 +151,13 @@ func _nearest_walkable_cell(start_cell: Vector2i, max_radius: int) -> Vector2i:
 	return INVALID_CELL
 
 
+func _agent_cell() -> Vector2i:
+	var floorz: TileMapLayer = _floorz()
+	if floorz == null or not is_instance_valid(_agent):
+		return INVALID_CELL
+	return floorz.local_to_map(floorz.to_local(_agent.global_position))
+
+
 func is_player_near() -> bool:
 	if not _active or not is_instance_valid(_agent):
 		return false
@@ -167,6 +173,23 @@ func is_player_near() -> bool:
 
 func is_paused_agent(agent: Node2D) -> bool:
 	return agent == _agent and _paused
+
+
+func adopt_restored_agent(agent: Node2D, phase_kind: String, spawner_cell: Vector2i) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
+	_active = true
+	_agent = agent
+	_nav_id = int(agent.get("nav_id"))
+	_target_cell = _manager.seed_merchant_spot_cell(spawner_cell)
+	if _target_cell == INVALID_CELL:
+		_target_cell = _agent_cell()
+	_waiting = phase_kind != "astar"
+	_leaving = phase_kind == "escape"
+	_leave_at_night_pending = false
+	_paused = false
+	if _waiting and agent.has_method("stop_astar_in"):
+		agent.call("stop_astar_in")
 
 
 func request_leave() -> void:
@@ -259,9 +282,7 @@ func _spawn_from(spawner_cell: Vector2i) -> bool:
 	_manager.register_desire_agent(agent, &"merchants")
 	agent.set_meta("agent_kind", SPAWNER_KIND_MERCHANT)
 	agent.set_meta("spawner_cell", spawner_cell)
-	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
-	if sprite != null:
-		sprite.texture = MERCHANT_TEXTURE
+	_manager.apply_merchant_data(agent)
 	var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
 	agent.set("nav_id", nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):

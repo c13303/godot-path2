@@ -700,6 +700,11 @@ func _apply_monster_data(agent: Node, monster_type: StringName) -> void:
 func _apply_client_data(agent: Node) -> void:
 	_agent_definition_service.apply_client_data(agent)
 
+
+func apply_merchant_data(agent: Node) -> void:
+	_agent_definition_service.apply_merchant_data(agent)
+
+
 func _setup_plant_manager() -> void:
 	if not plant_manager:
 		return
