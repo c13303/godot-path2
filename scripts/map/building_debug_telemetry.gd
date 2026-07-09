@@ -100,6 +100,19 @@ func log_spawn_failure(message: String) -> void:
 	push_warning("BuildingManager: " + message)
 
 
+# Expected gameplay states (e.g. every garden eaten out or deliberately walled off
+# from a spawner) are not anomalies: record them for spawn reporting like a failure,
+# but log them debug-gated instead of pushing an engine warning.
+func log_expected_spawn_skip(message: String) -> void:
+	var now_ms: int = Time.get_ticks_msec()
+	var last_ms: int = int(_last_spawn_failure_at_ms.get(message, -SPAWN_FAILURE_WARN_INTERVAL_MS))
+	_last_spawn_failure = message
+	if now_ms - last_ms < SPAWN_FAILURE_WARN_INTERVAL_MS:
+		return
+	_last_spawn_failure_at_ms[message] = now_ms
+	CppDebugOptions.dlog("BuildingManager: " + message)
+
+
 func last_spawn_failure() -> String:
 	return _last_spawn_failure
 

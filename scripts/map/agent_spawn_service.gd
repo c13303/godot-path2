@@ -31,7 +31,9 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
 			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager.get_garden_topology_service().gardens().size(), garden_id])
 	if garden_id <= 0:
-		telemetry.log_spawn_failure("spawner %s has no reachable garden" % spawner_cell)
+		# Not an anomaly: every garden is eaten out, sold out, or walled off from this
+		# spawner (a normal defensive state). Recorded for reporting, logged debug-gated.
+		telemetry.log_expected_spawn_skip("spawner %s has no reachable garden" % spawner_cell)
 		return false
 
 	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute

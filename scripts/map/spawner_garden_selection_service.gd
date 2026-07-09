@@ -9,13 +9,15 @@ class_name SpawnerGardenSelectionService
 # the same route-cache warming (_get_or_create_spawner_garden_route) and pending-empty
 # draining (_drain_pending_empty_gardens) the inline code already did.
 #
-# Behavior note: this is an extraction only. The iteration order, the targetable /
-# edible / target-for-kind gating, the route-ready checks, the distance scoring, the
-# empty-garden draining, and the stale-garden fall-through are preserved exactly as
-# they were inline in BuildingManager. BuildingManager keeps thin compatibility
-# wrappers so older dynamic callers can continue to work unchanged.
+# Behavior note: extraction of the inline BuildingManager selection logic. Lazy flow
+# fields changed one gate: routes are usable once their flow GROUP exists — the field
+# itself may still be queued/computing (spawned agents park as "ff wait" until it
+# applies). Requiring route.ready here would filter every garden during the lazy
+# window and misreport it as "no reachable garden". Genuine unreachability is caught
+# upstream by topology (targetable / nearest_garden_entry spawner-reachability).
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const IDLE_GROUP: int = 0
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
@@ -49,7 +51,7 @@ func select_garden_for_spawner(spawner_cell: Vector2i) -> int:
 		if entry_cell == INVALID_CELL:
 			continue
 		var route: Dictionary = _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
+		if int(route.get("plant_group", -1)) <= IDLE_GROUP:
 			continue
 		var delta: Vector2i = entry_cell - spawner_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
@@ -81,7 +83,7 @@ func select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 		if entry_cell == INVALID_CELL:
 			continue
 		var route: Dictionary = _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
+		if int(route.get("plant_group", -1)) <= IDLE_GROUP:
 			continue
 		var delta: Vector2i = entry_cell - spawner_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
@@ -124,7 +126,7 @@ func select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringName
 			if entry_cell == INVALID_CELL:
 				continue
 			var route: Dictionary = route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
-			if not bool(route.get("ready", false)):
+			if int(route.get("plant_group", -1)) <= IDLE_GROUP:
 				continue
 			var delta: Vector2i = entry_cell - from_cell
 			var manhattan: int = abs(delta.x) + abs(delta.y)
@@ -158,7 +160,7 @@ func select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fa
 		if entry_cell == INVALID_CELL:
 			continue
 		var route: Dictionary = route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
-		if not bool(route.get("ready", false)):
+		if int(route.get("plant_group", -1)) <= IDLE_GROUP:
 			continue
 		var delta: Vector2i = entry_cell - from_cell
 		var manhattan: int = abs(delta.x) + abs(delta.y)
@@ -169,7 +171,7 @@ func select_spawner_for_garden_from_cell(garden_id: int, from_cell: Vector2i, fa
 		if (spawner_kind_by_cell.get(fallback_spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
 			return INVALID_CELL
 		var fallback_route: Dictionary = route_service.get_or_create_spawner_garden_route(fallback_spawner_cell, garden_id)
-		if _garden_access_resolver.nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL and bool(fallback_route.get("ready", false)):
+		if _garden_access_resolver.nearest_garden_entry(garden_id, fallback_spawner_cell) != INVALID_CELL and int(fallback_route.get("plant_group", -1)) > IDLE_GROUP:
 			best_spawner_cell = fallback_spawner_cell
 	return best_spawner_cell
 

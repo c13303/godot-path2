@@ -1605,10 +1605,16 @@ func _report_playlist_spawn_result(request: Dictionary, success: bool, failure_r
 	if not success:
 		var warning_key: String = "playlist:%d" % track_index
 		if _debug_telemetry.should_warn_spawn_failure_key(warning_key):
-			push_warning("BuildingManager: playlist spawn failed: %s reason=%s" % [
+			var message: String = "BuildingManager: playlist spawn failed: %s reason=%s" % [
 				_spawn_playlist_controller.get_track_debug_context(track_index),
 				failure_reason,
-			])
+			]
+			# "No reachable garden" is an expected gameplay state (everything eaten,
+			# sold, or walled off), not an anomaly: log it debug-gated only.
+			if failure_reason.contains("has no reachable garden"):
+				CppDebugOptions.dlog(message)
+			else:
+				push_warning(message)
 
 
 func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:

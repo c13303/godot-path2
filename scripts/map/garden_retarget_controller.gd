@@ -792,11 +792,14 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 			"nav_id=%d garden=0" % nav_id_dbg)
 		return _escape_with_detector(agent, nav_id_dbg, "garden<=0")
 	var route: Dictionary = _manager._get_or_create_spawner_garden_route(spawner_cell, garden_id)
-	if not bool(route.get("ready", false)):
+	# Lazy flow fields: a route with a flow group is usable even while its field is
+	# still computing — the final assign below parks the agent as "ff wait" instead
+	# of escaping it. Only a missing group means the route is genuinely unusable.
+	if int(route.get("plant_group", -1)) <= IDLE_GROUP:
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
 		_debug_telemetry().warn_garden_task_lag_us("_retarget_agent_or_escape.target_resolve", int(_last_retarget_profile["resolve_us"]),
-			"nav_id=%d garden=%d route_not_ready" % [nav_id_dbg, garden_id])
-		return _escape_with_detector(agent, nav_id_dbg, "route_not_ready")
+			"nav_id=%d garden=%d no_flow_group" % [nav_id_dbg, garden_id])
+		return _escape_with_detector(agent, nav_id_dbg, "no_flow_group")
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
 		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
