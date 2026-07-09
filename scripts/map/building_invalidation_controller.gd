@@ -27,6 +27,9 @@ var _walkability_quiet_seconds_remaining: float = 0.0
 var _runtime_rebuild_active: bool = false
 var _runtime_rebuild_id: int = 0
 var _runtime_rebuild_wants_gardens: bool = false
+# Coarse 0..1 progress of the current runtime rebuild, advanced between the
+# budgeted passes. Read by BuildingConstructionOverlay for the progress bar.
+var _runtime_rebuild_progress: float = 0.0
 
 const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
@@ -124,6 +127,14 @@ func runtime_rebuild_active() -> bool:
 	return _runtime_rebuild_active
 
 
+func runtime_rebuild_progress() -> float:
+	return _runtime_rebuild_progress
+
+
+func navigation_topology_dirty() -> bool:
+	return _navigation_topology_dirty
+
+
 # Budgeted (multi-frame) mirror of _apply_walkability_topology_rebuild for live
 # gameplay: same step order, but the heavy passes (walkable cache, garden
 # clustering/validation, exit-wall escapes) are sliced across frames using the
@@ -146,9 +157,11 @@ func _start_runtime_walkability_rebuild() -> void:
 func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	var started_us: int = Time.get_ticks_usec()
 	CppDebugOptions.dlog("walkability rebuild started (budgeted)")
+	_runtime_rebuild_progress = 0.0
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
 	var ok: bool = bool(await _manager._rebuild_walkable_map_cache_budgeted(token))
+	_runtime_rebuild_progress = 0.3
 	if ok:
 		_manager.get_seed_merchant_controller().repath_for_walkability_change()
 		if _runtime_rebuild_wants_gardens:
@@ -158,6 +171,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 			if ok:
 				_spawner_route_service.rebuild_spawner_garden_route_cache()
 				_manager._queue_agents_after_garden_rebuild()
+	_runtime_rebuild_progress = 0.7
 	if ok:
 		_manager._rebuild_spawner_garden_route_cache()
 		for raw_spawner_cell: Variant in _manager.get_spawners().keys():
@@ -165,6 +179,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 			_manager._rebuild_spawner_plant_ff(spawner_cell)
 			_spawner_route_service.mark_spawner_escape_dirty(spawner_cell)
 		ok = bool(await _manager._rebuild_exit_wall_escapes_budgeted(token))
+	_runtime_rebuild_progress = 1.0
 	if ok:
 		_runtime_rebuild_wants_gardens = false
 		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))

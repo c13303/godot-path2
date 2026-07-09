@@ -129,95 +129,6 @@ func initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: 
 	return true
 
 
-func night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check_exit_wall_escapes: bool) -> bool:
-	var flow: Node = _flow()
-	if not flow or not flow.has_method("group_route_cost_at_world"):
-		return false
-	var spawners: Dictionary = _spawners()
-	for raw_spawner_cell: Variant in spawners.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
-			continue
-		if not _spawner_routes.has(spawner_cell):
-			return false
-		var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
-		if not bool(route.get("escape_ready", false)):
-			return false
-		var group_id: int = int(route.get("escape_group", -1))
-		var goal_world: Vector2 = route.get("escape_world", Vector2.ZERO) as Vector2
-		if not group_flow_is_ready_at_world(group_id, goal_world):
-			return false
-	if not check_exit_wall_escapes:
-		return true
-	for raw_escape: Variant in _exit_wall_escapes.values():
-		var escape: Dictionary = raw_escape as Dictionary
-		var exit_group_id: int = int(escape.get("escape_group", -1))
-		var exit_goal_world: Vector2 = escape.get("escape_world", Vector2.ZERO) as Vector2
-		if exit_group_id > IDLE_GROUP and not group_flow_is_ready_at_world(exit_group_id, exit_goal_world):
-			return false
-	return true
-
-
-func prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
-	if not _flow_is_ready() or _agent_manager() == null or _flow() == null:
-		return true
-	var flow: Node = _flow()
-	if not flow.has_method("group_route_cost_at_world"):
-		return false
-	var requested_groups: Dictionary = {}
-	var slice_started_us: int = Time.get_ticks_usec()
-	var spawners: Dictionary = _spawners()
-	var gardens: Dictionary = _gardens()
-	var spawner_kind_by_cell: Dictionary = _spawner_kind_by_cell()
-	for raw_spawner_cell: Variant in spawners.keys():
-		if not _night_preparation_is_current(token):
-			return false
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if (spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName) != agent_kind:
-			continue
-		for raw_garden_id: Variant in gardens.keys():
-			if not _night_preparation_is_current(token):
-				return false
-			var garden_id: int = int(raw_garden_id)
-			var garden: Dictionary = gardens[garden_id] as Dictionary
-			if not bool(garden.get("targetable", false)):
-				continue
-			if not _garden_topology().garden_has_target_for_kind(garden_id, agent_kind):
-				continue
-			var route: Dictionary = get_or_create_spawner_garden_route(spawner_cell, garden_id)
-			var group_id: int = int(route.get("plant_group", -1))
-			if group_id > IDLE_GROUP:
-				requested_groups[group_id] = true
-			if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
-				await _manager.get_tree().process_frame
-				slice_started_us = Time.get_ticks_usec()
-	while _night_preparation_is_current(token) and _flow_requests_are_busy(flow):
-		process_queued_flow_requests(1, _night_preparation_budget_us())
-		await _manager.get_tree().process_frame
-	if not _night_preparation_is_current(token):
-		return false
-	for raw_group_id: Variant in requested_groups.keys():
-		var group_id: int = int(raw_group_id)
-		if not group_flow_id_is_ready(group_id):
-			return false
-	mark_spawner_entry_routes_ready_for_groups(requested_groups)
-	return true
-
-
-func mark_spawner_entry_routes_ready_for_groups(group_ids: Dictionary) -> void:
-	for raw_spawner_cell: Variant in _spawner_garden_routes.keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-		for raw_garden_id: Variant in routes.keys():
-			var garden_id: int = int(raw_garden_id)
-			var route: Dictionary = routes[garden_id] as Dictionary
-			var group_id: int = int(route.get("plant_group", -1))
-			if group_ids.has(group_id) and garden_route_is_current(route, garden_id):
-				route["ready"] = spawner_garden_route_flow_ready(route, spawner_cell)
-				routes[garden_id] = route
-		_spawner_garden_routes[spawner_cell] = routes
-
-
 func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 	if not _flow_is_ready() or _agent_manager() == null or _flow() == null:
 		return true
@@ -398,15 +309,6 @@ func rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	_spawner_routes[spawner_cell] = route
 
 
-func rebuild_all_spawner_routes() -> void:
-	if not _flow_is_ready() or not _garden_topology().plant_zone_built():
-		return
-	var spawners: Dictionary = _spawners()
-	for raw_cell: Variant in spawners.keys():
-		var spawner_cell: Vector2i = raw_cell as Vector2i
-		initialize_spawner_route(spawner_cell)
-
-
 func rebuild_exit_wall_escapes(_use_async_requests: bool = false) -> void:
 	if not _flow_is_ready():
 		return
@@ -552,14 +454,6 @@ func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> 
 		CppDebugOptions.dlog("%d flow field(s) computed! Time: %dms" % [_batch_count, elapsed_ms])
 		_batch_active = false
 	return processed
-
-
-func _flow_requests_are_busy(flow: Node) -> bool:
-	if queued_flow_request_count() > 0:
-		return flow_uses_async_requests() or flow_supports_sync_assign()
-	if flow_uses_async_requests():
-		return not bool(flow.call("are_async_flows_idle"))
-	return false
 
 
 func _reindex_queued_flow_groups() -> void:

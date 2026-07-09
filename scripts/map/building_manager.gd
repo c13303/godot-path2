@@ -247,6 +247,7 @@ func _ready() -> void:
 	_setup_building_object_manager()
 	_setup_counter_stock_manager()
 	_setup_zone_overlay()
+	_setup_construction_overlay()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	_damage_number_drawer = DamageNumberDrawer.new()
@@ -568,21 +569,8 @@ func finish_client_preparation_success() -> void:
 	_client_preparing = false
 	_client_sale.activate()
 
-func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringName]) -> bool:
-	var spawner_kind: StringName = _spawner_kind_by_cell.get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
-	return agent_kinds.has(spawner_kind)
-
 func _initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: int) -> bool:
 	return bool(await _spawner_route_service.initialize_spawner_routes_for_kinds(agent_kinds, token))
-
-func _night_flow_fields_are_ready_for_kinds(agent_kinds: Array[StringName], check_exit_wall_escapes: bool) -> bool:
-	return _spawner_route_service.night_flow_fields_are_ready_for_kinds(agent_kinds, check_exit_wall_escapes)
-
-func _prewarm_spawner_entry_flows_for_kind(agent_kind: StringName, token: int) -> bool:
-	return bool(await _spawner_route_service.prewarm_spawner_entry_flows_for_kind(agent_kind, token))
-
-func _mark_spawner_entry_routes_ready_for_groups(group_ids: Dictionary) -> void:
-	_spawner_route_service.mark_spawner_entry_routes_ready_for_groups(group_ids)
 
 func _rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 	return bool(await _spawner_route_service.rebuild_exit_wall_escapes_budgeted(token))
@@ -615,6 +603,26 @@ func _setup_zone_overlay() -> void:
 	_zone_overlay.set("building_manager", self)
 	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(_zone_overlay)
+
+var _construction_overlay: BuildingConstructionOverlay = null
+
+func _setup_construction_overlay() -> void:
+	_construction_overlay = BuildingConstructionOverlay.new()
+	_construction_overlay.name = "BuildingConstructionOverlay"
+	_construction_overlay.building_manager = self
+	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
+	overlay_parent.add_child(_construction_overlay)
+
+# Called by BuildSystem when a navigation-blocking placeable (wall/fence/blocking
+# building) is placed or removed. With agents active, navigation catches up over
+# several budgeted frames: the cell is shown as under construction until then.
+func notify_blocking_placeable_placed(cell: Vector2i) -> void:
+	if _construction_overlay != null and _runtime_agents_active():
+		_construction_overlay.track_cell(cell)
+
+func notify_blocking_placeable_removed(cell: Vector2i) -> void:
+	if _construction_overlay != null:
+		_construction_overlay.untrack_cell(cell)
 
 func _plant_zone_debug_enabled() -> bool:
 	if global_config and global_config.has_method("get_debug_show_zones"):
@@ -745,6 +753,7 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
 		_building_invalidation_controller.mark_after_blocking_building_removed()
+		notify_blocking_placeable_removed(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 	_counter_stock_manager.clear_counter(cell)
@@ -935,9 +944,6 @@ func _rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 
 func _rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	_spawner_route_service.rebuild_spawner_escape_ff(spawner_cell)
-
-func _rebuild_all_spawner_routes() -> void:
-	_spawner_route_service.rebuild_all_spawner_routes()
 
 # Build/refresh one escape flow field per exit-wall tile. Each is a per-group FF
 # whose goal is the floor tile adjacent to that exit wall. Runs only on dirty

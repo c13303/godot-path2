@@ -312,7 +312,7 @@ func _refresh_cell_collision(cell: Vector2i) -> void:
 		blocked = true
 	ff.call("set_cell_blocked", cell, blocked)
 
-func _notify_navigation_topology_changed(_cell: Vector2i, reason: String) -> void:
+func _notify_navigation_topology_changed(cell: Vector2i, reason: String) -> void:
 	var building_manager: Object = _resolve_building_manager()
 	if building_manager == null or not building_manager.has_method("get_building_invalidation_controller"):
 		return
@@ -320,6 +320,14 @@ func _notify_navigation_topology_changed(_cell: Vector2i, reason: String) -> voi
 	if invalidation_controller == null or not invalidation_controller.has_method("after_walkability_changed"):
 		return
 	invalidation_controller.call("after_walkability_changed", reason)
+	# Under-construction visual: a placed navigation-blocking cell (wall/fence/turret)
+	# is ghosted at 50% with a progress bar until the budgeted rebuild and the lazy
+	# flow fields make it functional; a removal clears any pending ghost.
+	var placed: bool = reason == "placeable_placed" or reason == "drag_placeable_placed"
+	if placed and building_manager.has_method("notify_blocking_placeable_placed"):
+		building_manager.call("notify_blocking_placeable_placed", cell)
+	elif not placed and building_manager.has_method("notify_blocking_placeable_removed"):
+		building_manager.call("notify_blocking_placeable_removed", cell)
 
 func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
