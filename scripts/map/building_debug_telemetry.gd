@@ -15,6 +15,8 @@ var _cached_global_config: Node = null
 var _last_scan_summary: String = ""
 var _last_spawn_failure: String = ""
 var _last_spawn_failure_at_ms: Dictionary = {}
+var _garden_astar_batch: Dictionary = {}
+var _garden_astar_flush_queued: bool = false
 
 
 func setup(manager: BuildingManager) -> void:
@@ -83,6 +85,97 @@ func over_garden_threshold_us(elapsed_us: int) -> bool:
 	if threshold_ms <= 0.0:
 		return false
 	return (float(elapsed_us) / 1000.0) > threshold_ms
+
+
+# Garden A* queries are synchronous and can arrive in a burst when several agents reach
+# an entry together. Count every native computation, but emit one compact line per frame
+# so enabling diagnostics does not add one print call per agent.
+func record_garden_astar(
+	garden_id: int,
+	from_tile: Vector2i,
+	to_tile: Vector2i,
+	zone_tiles: int,
+	path_length: int,
+	total_us: int,
+	sync_us: int,
+	blocker_us: int,
+	find_us: int
+) -> void:
+	if _debug_master_disabled():
+		return
+	if _garden_astar_batch.is_empty():
+		_garden_astar_batch = {
+			"frame": Engine.get_process_frames(),
+			"count": 0,
+			"total_us": 0,
+			"sync_us": 0,
+			"blocker_us": 0,
+			"find_us": 0,
+			"empty_paths": 0,
+			"max_total_us": 0,
+			"max_garden_id": 0,
+			"max_from": Vector2i.ZERO,
+			"max_to": Vector2i.ZERO,
+			"max_path_length": 0,
+			"max_zone_tiles": 0,
+			"garden_counts": {},
+		}
+	var batch: Dictionary = _garden_astar_batch
+	batch["count"] = int(batch.get("count", 0)) + 1
+	batch["total_us"] = int(batch.get("total_us", 0)) + total_us
+	batch["sync_us"] = int(batch.get("sync_us", 0)) + sync_us
+	batch["blocker_us"] = int(batch.get("blocker_us", 0)) + blocker_us
+	batch["find_us"] = int(batch.get("find_us", 0)) + find_us
+	if path_length <= 0:
+		batch["empty_paths"] = int(batch.get("empty_paths", 0)) + 1
+	if total_us > int(batch.get("max_total_us", 0)):
+		batch["max_total_us"] = total_us
+		batch["max_garden_id"] = garden_id
+		batch["max_from"] = from_tile
+		batch["max_to"] = to_tile
+		batch["max_path_length"] = path_length
+	batch["max_zone_tiles"] = maxi(int(batch.get("max_zone_tiles", 0)), zone_tiles)
+	var garden_counts: Dictionary = batch.get("garden_counts", {}) as Dictionary
+	garden_counts[garden_id] = int(garden_counts.get(garden_id, 0)) + 1
+	batch["garden_counts"] = garden_counts
+	_garden_astar_batch = batch
+	_queue_garden_astar_flush()
+
+
+func _queue_garden_astar_flush() -> void:
+	if _garden_astar_flush_queued:
+		return
+	if _manager == null or not _manager.is_inside_tree():
+		_flush_garden_astar_batch()
+		return
+	_garden_astar_flush_queued = true
+	_manager.get_tree().process_frame.connect(Callable(self, "_flush_garden_astar_batch"), Object.CONNECT_ONE_SHOT)
+
+
+func _flush_garden_astar_batch() -> void:
+	_garden_astar_flush_queued = false
+	if _garden_astar_batch.is_empty():
+		return
+	var batch: Dictionary = _garden_astar_batch
+	_garden_astar_batch = {}
+	if _debug_master_disabled():
+		return
+	CppDebugOptions.dlog("%d garden A* path(s) computed in frame %d! Time: %.1fms (sync=%.1fms, blockers=%.1fms subset, native_astar=%.1fms, empty=%d, gardens=%s, max=%.1fms garden=%d from=%s to=%s path_len=%d, max_zone_tiles=%d)" % [
+		int(batch.get("count", 0)),
+		int(batch.get("frame", 0)),
+		float(batch.get("total_us", 0)) / 1000.0,
+		float(batch.get("sync_us", 0)) / 1000.0,
+		float(batch.get("blocker_us", 0)) / 1000.0,
+		float(batch.get("find_us", 0)) / 1000.0,
+		int(batch.get("empty_paths", 0)),
+		str(batch.get("garden_counts", {})),
+		float(batch.get("max_total_us", 0)) / 1000.0,
+		int(batch.get("max_garden_id", 0)),
+		str(batch.get("max_from", Vector2i.ZERO)),
+		str(batch.get("max_to", Vector2i.ZERO)),
+		int(batch.get("max_path_length", 0)),
+		int(batch.get("max_zone_tiles", 0)),
+	])
 
 
 func log(message: String) -> void:

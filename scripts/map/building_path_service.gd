@@ -123,6 +123,18 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 	var find_us: int = Time.get_ticks_usec()
 	var result: PackedVector2Array = pf.call("find_path", start_tile, end_tile) as PackedVector2Array
 	var find_elapsed: int = Time.get_ticks_usec() - find_us
+	var total_elapsed: int = Time.get_ticks_usec() - call_start_us
+	telemetry.record_garden_astar(
+		garden_id,
+		start_tile,
+		end_tile,
+		path_tiles.size(),
+		result.size(),
+		total_elapsed,
+		sync_elapsed,
+		_last_zone_blocker_us,
+		find_elapsed
+	)
 	if telemetry.over_garden_threshold_us(find_elapsed):
 		telemetry.warn_garden_task_lag_us("_find_path_in_zone.find_path", find_elapsed,
 			"garden=%d from=%s to=%s len=%d" % [garden_id, str(start_tile), str(end_tile), result.size()])

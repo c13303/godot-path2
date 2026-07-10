@@ -11,6 +11,10 @@ const COUNTER_PILE_OVERLAP: float = 0.66
 const COUNTER_PILE_BASE_Y: float = -8.0
 const MAX_STOCK_PER_COUNTER: int = 10
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
+# Early fetching only succeeds within 1.25 tile widths of the selected target. A
+# target farther than two cells from the client's current cell cannot pass that final
+# world-distance check, so only this fixed local neighborhood needs to be searched.
+const CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const ROSE_ITEM_ID: String = "rose"
@@ -218,19 +222,38 @@ func collect_access_cells(access_by_cell: Dictionary) -> Array[Vector2i]:
 func select_stocked_counter_target(from_cell: Vector2i) -> Dictionary:
 	var best: Dictionary = {}
 	var best_dist: int = 2147483647
-	for counter_cell: Vector2i in stocked_counter_cells():
-		var target_cell: Vector2i = nearest_counter_access_cell(counter_cell, from_cell)
-		if target_cell == INVALID_CELL:
-			continue
-		var delta: Vector2i = target_cell - from_cell
-		var manhattan: int = abs(delta.x) + abs(delta.y)
-		if manhattan < best_dist:
+	# This query runs once per approaching client per frame. Search target cells near
+	# the client, then use O(1) stock lookups for counters that could serve each cell.
+	# The previous implementation did the inverse: every client scanned every stocked
+	# counter and performed up to 13 TileMap walkability checks for each one.
+	for dy: int in range(-CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES, CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES + 1):
+		for dx: int in range(-CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES, CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES + 1):
+			var manhattan: int = abs(dx) + abs(dy)
+			if manhattan > CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES or manhattan >= best_dist:
+				continue
+			var target_cell: Vector2i = from_cell + Vector2i(dx, dy)
+			if not _call_bool(_is_walkable, target_cell):
+				continue
+			var counter_cell: Vector2i = _stocked_counter_serving_target(target_cell)
+			if counter_cell == INVALID_CELL:
+				continue
 			best_dist = manhattan
 			best = {
 				"counter_cell": counter_cell,
 				"target_cell": target_cell,
 			}
 	return best
+
+
+func _stocked_counter_serving_target(target_cell: Vector2i) -> Vector2i:
+	for dy: int in range(-CLIENT_COUNTER_RADIUS_TILES, CLIENT_COUNTER_RADIUS_TILES + 1):
+		for dx: int in range(-CLIENT_COUNTER_RADIUS_TILES, CLIENT_COUNTER_RADIUS_TILES + 1):
+			if abs(dx) + abs(dy) > CLIENT_COUNTER_RADIUS_TILES:
+				continue
+			var counter_cell: Vector2i = target_cell + Vector2i(dx, dy)
+			if stock(counter_cell) > 0:
+				return counter_cell
+	return INVALID_CELL
 
 
 func nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) -> Vector2i:

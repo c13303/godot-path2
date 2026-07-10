@@ -190,15 +190,24 @@ func _process_retarget_runtime(debug_telemetry: BuildingDebugTelemetry) -> void:
 func _process_phase_runtime(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
 	var t: int = Time.get_ticks_usec()
 	var spawn_playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
+	var spawn_started_us: int = Time.get_ticks_usec()
 	_manager.get_spawn_tick_controller().process(delta, spawn_playlist_config.playlist_spawning_enabled())
+	var spawn_elapsed_us: int = Time.get_ticks_usec() - spawn_started_us
+	var client_sale_started_us: int = Time.get_ticks_usec()
 	_manager.get_client_sale_controller().process(delta)
+	var client_sale_elapsed_us: int = Time.get_ticks_usec() - client_sale_started_us
+	var merchant_started_us: int = Time.get_ticks_usec()
 	_manager.get_seed_merchant_controller().process_phase()
+	var merchant_elapsed_us: int = Time.get_ticks_usec() - merchant_started_us
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.
 		var stats: Dictionary = _manager.get_spawn_tick_controller().spawn_pass_stats()
 		var spawner_route_service: SpawnerRouteService = _manager.get_spawner_route_service()
-		debug_telemetry.warn_garden_task_lag_us("_process_spawners", Time.get_ticks_usec() - t,
-			"spawners=%d processed=%d spawned=%d assigned=%d skipped=%d ready_remaining=%d budget_count=%d budget_ms=%.1f elapsed=%.1fms active_monsters=%d route_cache_hits=%d route_cache_misses=%d" % [
+		debug_telemetry.warn_garden_task_lag_us("_process_phase_runtime", Time.get_ticks_usec() - t,
+			"spawn=%.1fms client_sale=%.1fms merchant=%.1fms spawners=%d processed=%d spawned=%d assigned=%d skipped=%d ready_remaining=%d budget_count=%d budget_ms=%.1f elapsed=%.1fms active_monsters=%d route_cache_hits=%d route_cache_misses=%d" % [
+				float(spawn_elapsed_us) / 1000.0,
+				float(client_sale_elapsed_us) / 1000.0,
+				float(merchant_elapsed_us) / 1000.0,
 				_manager.get_spawners().size(),
 				int(stats.get("processed_spawners", 0)),
 				int(stats.get("spawned_count", 0)),
