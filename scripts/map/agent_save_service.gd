@@ -260,6 +260,9 @@ func purge_day_phase_monsters() -> int:
 
 
 func _clear_existing_agents() -> void:
+	# Reset the cell tracker up front so no stale index/queue/over-water state from the
+	# pre-load agents survives; the restored agents re-register as they are recreated.
+	_manager.get_agent_cell_tracker().clear()
 	var seen_ids: Dictionary = {}
 	for group_name: StringName in [&"monsters", &"clients", &"merchants"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):

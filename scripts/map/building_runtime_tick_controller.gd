@@ -99,23 +99,39 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	# (string-formatting) context is only built on a real spike, never every frame.
 	var t: int = Time.get_ticks_usec()
 	_manager._process_eating_agents(delta)
-	_manager._process_creature_rose_trampling()
-	_manager._process_pasteque_trampling()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_eating_agents", Time.get_ticks_usec() - t,
 			"eating=%d astar_in=%d escaping=%d" % [
 				_manager.eating_agent_count(), _manager.astar_in_agent_count(),
 				_manager.escaping_agent_count()])
 
+	# Turret-eating timeline first so the turret-eating set is fresh before the tile
+	# pass evaluates turret overlaps (preserves the old scan order).
 	t = Time.get_ticks_usec()
 	_manager.get_turret_eating_controller().process_turret_eating_agents(delta)
-	_manager.get_turret_eating_controller().process_turret_overlaps()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
 			"turret_eating=%d" % _manager.get_turret_eating_controller().turret_eating_count())
 
+	# One lightweight cell-transition pass replacing the four per-frame full-agent
+	# scans (drowning start + splash, turret overlap, rose/pasteque trampling).
 	t = Time.get_ticks_usec()
-	_manager.get_drowning_controller().process_drowning_agents(delta)
+	var tracker: AgentCellTracker = _manager.get_agent_cell_tracker()
+	tracker.process(delta)
+	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
+		var stats: Dictionary = tracker.debug_stats()
+		debug_telemetry.warn_garden_task_lag_us("_process_agent_tile_interactions", Time.get_ticks_usec() - t,
+			"registered=%d transitions=%d checked=%d invalidations=%d over_water=%d rose=%d pasteque=%d turret=%d drowning=%d" % [
+				int(stats.get("registered", 0)), int(stats.get("transitions", 0)),
+				int(stats.get("checked", 0)), int(stats.get("invalidations", 0)),
+				int(stats.get("over_water", 0)), int(stats.get("rose", 0)),
+				int(stats.get("pasteque", 0)), int(stats.get("turret", 0)),
+				int(stats.get("drowning", 0))])
+
+	# Drowning damage timeline after the tile pass so an agent that started drowning
+	# this frame still gets its first timeline tick this frame (matches old order).
+	t = Time.get_ticks_usec()
+	_manager.get_drowning_controller().process_drowning_timeline(delta)
 	_manager.get_sheep_controller().process(delta)
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,

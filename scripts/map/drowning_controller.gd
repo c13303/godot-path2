@@ -31,29 +31,45 @@ func drowning_count() -> int:
 	return _drowning_agents.size()
 
 
-func process_drowning_agents(delta: float) -> void:
+# Single-agent drowning-start check, invoked by AgentTileInteractionController when
+# an agent (re)enters a relevant cell. Same rule and guards as the old per-frame
+# scan: skip while turret-eating or already drowning, then start drowning when the
+# footprint coverage over deep water crosses the threshold and the agent can drown.
+func evaluate_agent(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
 	var watersources: WaterSources = _watersources()
 	if watersources == null:
 		return
-
+	var nav_id: int = int(agent.get("nav_id"))
+	if nav_id < 0:
+		return
 	var turret_eating: TurretEatingController = _manager._turret_eating_controller
-	for group_name: String in ["monsters", "clients", "merchants", "sheep"]:
-		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
-			var agent: Node2D = raw_node as Node2D
-			if agent == null or not is_instance_valid(agent):
-				continue
-			var nav_id: int = int(agent.get("nav_id"))
-			if nav_id < 0:
-				continue
-			_update_monster_splash(agent, delta)
-			if turret_eating.is_eating(nav_id):
-				continue
-			if _drowning_agents.has(nav_id):
-				continue
-			var water_coverage: float = _agent_water_coverage(agent)
-			var in_water: bool = _agent_over_drowning_water_with_coverage(agent, water_coverage)
-			if in_water and _agent_can_drown(agent):
-				_start_agent_drowning(nav_id, agent)
+	if turret_eating.is_eating(nav_id):
+		return
+	if _drowning_agents.has(nav_id):
+		return
+	var water_coverage: float = _agent_water_coverage(agent)
+	var in_water: bool = _agent_over_drowning_water_with_coverage(agent, water_coverage)
+	if in_water and _agent_can_drown(agent):
+		_start_agent_drowning(nav_id, agent)
+
+
+# True when the agent's foot position is over a water tile. Used by AgentCellTracker
+# to maintain the small "over water" set that drives the continuous splash.
+func is_over_water(agent: Node2D) -> bool:
+	var watersources: WaterSources = _watersources()
+	if watersources == null:
+		return false
+	return watersources.has_water_at_foot_position(agent.global_position)
+
+
+# Advances the per-agent damage timeline for agents already drowning. This part is
+# bounded by _drowning_agents (not a full-agent scan), so it stays per-frame.
+func process_drowning_timeline(delta: float) -> void:
+	var watersources: WaterSources = _watersources()
+	if watersources == null:
+		return
 
 	var dead_agents: Array[Node2D] = []
 	var drowning_ids: Array = _drowning_agents.keys()
@@ -94,7 +110,10 @@ func process_drowning_agents(delta: float) -> void:
 		_manager.remove_dead_monster(agent, false)
 
 
-func _update_monster_splash(agent: Node2D, delta: float) -> void:
+# Emits the throttled pooled splash for one agent standing over water. Driven each
+# frame by AgentCellTracker for the small "over water" set. Keeps its own foot-water
+# guard so a sub-cell move off water (no cell transition) stops splashing cleanly.
+func tick_splash(agent: Node2D, delta: float) -> void:
 	# Any monster over the water emits a pooled splash, throttled per-monster.
 	# The timer lives on the node itself (meta) so it is freed with the monster
 	# and never accumulates stale entries.

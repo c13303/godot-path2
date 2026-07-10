@@ -28,27 +28,27 @@ func turret_eating_count() -> int:
 	return _turret_eating_agents.size()
 
 
-func process_turret_overlaps() -> void:
+# Single-agent turret-overlap check, invoked by AgentTileInteractionController when
+# an agent (re)enters a relevant cell. Same rule and guards as the old per-frame
+# scan: skip while garden-eating, turret-eating or drowning, then consume the turret
+# when the agent's blocking-layer cell is a turret cell.
+func evaluate_agent(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	if blocking_buildings == null:
 		return
+	var nav_id: int = int(agent.get("nav_id"))
+	if nav_id < 0:
+		return
 	var eating_agents: Dictionary = _manager._eating_agents
 	var drowning: DrowningController = _manager._drowning_controller
-	var agent_groups: Array[String] = ["monsters", "clients", "merchants"]
-	var checked_nav_ids: Dictionary = {}
-	for group_name: String in agent_groups:
-		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
-			var agent: Node2D = raw_node as Node2D
-			if agent == null or not is_instance_valid(agent):
-				continue
-			var nav_id: int = int(agent.get("nav_id"))
-			if nav_id < 0 or checked_nav_ids.has(nav_id) or eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or drowning.is_drowning(nav_id):
-				continue
-			checked_nav_ids[nav_id] = true
-			var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
-			if not _manager._is_turret_cell(agent_cell):
-				continue
-			_consume_turret(agent, agent_cell)
+	if eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or drowning.is_drowning(nav_id):
+		return
+	var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
+	if not _manager._is_turret_cell(agent_cell):
+		return
+	_consume_turret(agent, agent_cell)
 
 
 func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:

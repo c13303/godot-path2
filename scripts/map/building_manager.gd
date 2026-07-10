@@ -171,6 +171,10 @@ var _client_sale: ClientSaleController = ClientSaleController.new()
 var _run_completion: RunCompletionController = RunCompletionController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
+# Detects agent cell transitions and dispatches tile-based interactions (drowning,
+# turret eating, rose/pasteque trampling) only on entry, replacing four per-frame
+# full-agent scans. Registration is embedded in _register_desire_agent (see below).
+var _agent_cell_tracker: AgentCellTracker = AgentCellTracker.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _building_scan: BuildingScanService = BuildingScanService.new()
 var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
@@ -217,6 +221,7 @@ func _ready() -> void:
 	_run_completion.setup(self)
 	_drowning_controller.setup(self)
 	_turret_eating_controller.setup(self)
+	_agent_cell_tracker.setup(self)
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
 	_spawner_route_service.setup(self)
@@ -276,14 +281,31 @@ func _resolve_desire() -> void:
 	_desire = get_node_or_null("../MonTilemap/Desire")
 
 
+# Authoritative Godot-side agent registration choke for monsters/clients/merchants:
+# every spawn (agent_spawn_service, agent_save_service) and removal path routes
+# through here, so besides the desire ground-marker it also (un)registers the agent
+# with the cell tracker. Sheep don't use desire; they register via the public
+# register_tracked_agent below.
 func _register_desire_agent(agent: Node2D, group_name: StringName) -> void:
 	if _desire != null and _desire.has_method("register_agent"):
 		_desire.call("register_agent", agent, group_name)
+	_agent_cell_tracker.register(agent, group_name)
 
 
 func _unregister_desire_agent(agent: Node2D) -> void:
 	if _desire != null and _desire.has_method("unregister_agent"):
 		_desire.call("unregister_agent", agent)
+	_agent_cell_tracker.unregister(agent)
+
+
+# Cell-tracker registration for agents that do not go through the desire system
+# (sheep). Kept separate so the desire wrapper's contract stays unchanged.
+func register_tracked_agent(agent: Node2D, category: StringName) -> void:
+	_agent_cell_tracker.register(agent, category)
+
+
+func unregister_tracked_agent(agent: Node2D) -> void:
+	_agent_cell_tracker.unregister(agent)
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if _suppress_next_restored_mode_signal:
@@ -757,6 +779,11 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	_sync_building_cell_speed(cell, item_id)
 	if _building_item_blocks_flow(item_id):
 		_building_invalidation_controller.mark_after_blocking_building_added()
+	# A turret or pasteque just appeared: re-check any agent already standing on the
+	# cell so a stationary agent still triggers the interaction (removal makes a cell
+	# non-interactive, so no invalidation is needed there).
+	if item_id == TURRET_ID or item_id == PASTEQUE_ITEM_ID:
+		_agent_cell_tracker.invalidate_cell(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 
@@ -809,6 +836,9 @@ func refresh_runtime_cell_speed(cell: Vector2i) -> void:
 	_building_navigation_sync.refresh_cell_speed(cell)
 
 func _on_plant_added(_cell: Vector2i) -> void:
+	# A rose just appeared: re-check any client/merchant already standing on the cell
+	# so a stationary agent still tramples it (agent-movement alone would miss this).
+	_agent_cell_tracker.invalidate_cell(_cell)
 	if not GameState.is_night:
 		# Day/client placement only dirties the next prepared snapshot. Freshly planted
 		# roses are not valid client targets, so client sale must not rebuild every
@@ -1026,43 +1056,35 @@ func _process_morning_harvest_walkover() -> void:
 # shop-bound creatures that cross the garden without ever targeting a plant. The
 # player is exempt (it harvests roses instead). consume_plant() swaps to debris and
 # fires plant_removed, so any monster targeting that cell retargets synchronously.
-func _process_creature_rose_trampling() -> void:
+# Called per-agent by AgentTileInteractionController when the agent enters a new cell
+# (was a per-frame full-agent scan over clients/merchants).
+func trample_rose_at_agent(agent: Node2D) -> void:
 	if plant_manager == null or floorz == null:
+		return
+	if not is_instance_valid(agent):
 		return
 	if not plant_manager.has_method("has_plant") or not plant_manager.has_method("consume_plant"):
 		return
-	for group_name: StringName in [&"clients", &"merchants"]:
-		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
-			var agent: Node2D = raw_agent as Node2D
-			if not is_instance_valid(agent):
-				continue
-			var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-			if bool(plant_manager.call("has_plant", cell)):
-				plant_manager.call("consume_plant", cell)
+	var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	if bool(plant_manager.call("has_plant", cell)):
+		plant_manager.call("consume_plant", cell)
 
 
-func _process_pasteque_trampling() -> void:
+# Called per-agent by AgentTileInteractionController when the agent enters a new cell
+# (was a per-frame full-agent scan over monsters/clients).
+func trample_pasteque_at_agent(agent: Node2D) -> void:
+	if traversable_buildings == null or not is_instance_valid(agent):
+		return
 	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
 	if not bool(pasteque_def.get("destroyed_by_creatures", false)):
-		return
-	if traversable_buildings == null:
 		return
 	var building_objects: BuildingObjectManager = _get_building_object_manager()
 	if building_objects == null or not building_objects.has_method("get_building"):
 		return
-	var checked_cells: Dictionary = {}
-	for group_name: StringName in [&"monsters", &"clients"]:
-		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
-			var agent: Node2D = raw_agent as Node2D
-			if not is_instance_valid(agent):
-				continue
-			var cell: Vector2i = traversable_buildings.local_to_map(traversable_buildings.to_local(agent.global_position))
-			if checked_cells.has(cell):
-				continue
-			checked_cells[cell] = true
-			var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
-			if str(building_data.get("item_id", "")) == PASTEQUE_ITEM_ID:
-				_destroy_pasteque_cell(cell)
+	var cell: Vector2i = traversable_buildings.local_to_map(traversable_buildings.to_local(agent.global_position))
+	var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
+	if str(building_data.get("item_id", "")) == PASTEQUE_ITEM_ID:
+		_destroy_pasteque_cell(cell)
 
 
 func has_grownup_roses_to_harvest() -> bool:
@@ -1269,6 +1291,10 @@ func get_drowning_controller() -> DrowningController:
 
 func get_turret_eating_controller() -> TurretEatingController:
 	return _turret_eating_controller
+
+
+func get_agent_cell_tracker() -> AgentCellTracker:
+	return _agent_cell_tracker
 
 
 func get_spawn_tick_controller() -> SpawnTickController:
