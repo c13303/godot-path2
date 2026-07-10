@@ -3,6 +3,7 @@ class_name FlowAgent
 
 const HEALTH_BAR_SIZE: Vector2 = Vector2(28.0, 4.0)
 const HEALTH_BAR_POSITION: Vector2 = Vector2(-14.0, -38.0)
+const HEALTH_BAR_SPRITE_GAP: float = 4.0
 const FLASH_DURATION: float = 0.09
 const FLASH_SHADER: Shader = preload("res://scripts/entities/enemy_flash.gdshader")
 
@@ -60,7 +61,7 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
-# New basic monster sheets use a 6-frame horizontal layout:
+# Directional monster sheets use a 6-frame horizontal layout:
 # south / east / north / eating / unused legacy slot / drowning.
 const MONSTER_DIRECTIONAL_FRAME_COUNT: int = 6
 const MONSTER_FRAME_SOUTH: int = 0
@@ -68,6 +69,7 @@ const MONSTER_FRAME_EAST: int = 1
 const MONSTER_FRAME_NORTH: int = 2
 const MONSTER_FRAME_ROSE_EATING: int = 3
 const MONSTER_FRAME_WATER_DROWNING: int = 5
+const MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL: StringName = &"directional_6_horizontal"
 const FACING_CHANGE_MIN_SECONDS: float = 0.14
 const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
@@ -122,11 +124,24 @@ func take_damage(amount: int) -> bool:
 func _draw() -> void:
 	if _is_damage_immune_agent():
 		return
-	var background_rect: Rect2 = Rect2(HEALTH_BAR_POSITION, HEALTH_BAR_SIZE)
+	var bar_position: Vector2 = _health_bar_position()
+	var background_rect: Rect2 = Rect2(bar_position, HEALTH_BAR_SIZE)
 	draw_rect(background_rect, Color.BLACK)
 	var health_ratio: float = float(health) / float(max(1, max_health))
 	var fill_size: Vector2 = Vector2((HEALTH_BAR_SIZE.x - 2.0) * health_ratio, HEALTH_BAR_SIZE.y - 2.0)
-	draw_rect(Rect2(HEALTH_BAR_POSITION + Vector2.ONE, fill_size), Color(0.9, 0.05, 0.05, 1.0))
+	draw_rect(Rect2(bar_position + Vector2.ONE, fill_size), Color(0.9, 0.05, 0.05, 1.0))
+
+
+func _health_bar_position() -> Vector2:
+	if not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
+		return HEALTH_BAR_POSITION
+	var frame_height: float = float(_monster_sprite.texture.get_height()) / float(maxi(1, _monster_sprite.vframes))
+	var sprite_top: float = _monster_sprite.position.y + _monster_sprite.offset.y
+	if _monster_sprite.centered:
+		sprite_top -= frame_height * absf(_monster_sprite.scale.y) * 0.5
+	var bar_x: float = _monster_sprite.position.x + _monster_sprite.offset.x - HEALTH_BAR_SIZE.x * 0.5
+	var bar_y: float = sprite_top - HEALTH_BAR_SPRITE_GAP - HEALTH_BAR_SIZE.y
+	return Vector2(bar_x, bar_y)
 
 func _setup_flash_material() -> void:
 	if not is_instance_valid(_monster_sprite):
@@ -189,7 +204,12 @@ func _directional_idle_frame() -> int:
 
 
 func _uses_directional_monster_frames() -> bool:
-	return _is_monster_agent() and is_instance_valid(_monster_sprite) and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+	if not _is_monster_agent() or not is_instance_valid(_monster_sprite):
+		return false
+	if not has_meta("monster_sprite_frame_layout"):
+		return false
+	var frame_layout: StringName = StringName(str(get_meta("monster_sprite_frame_layout")))
+	return frame_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
 
 
 func _is_monster_agent() -> bool:

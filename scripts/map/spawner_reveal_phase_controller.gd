@@ -3,6 +3,8 @@ class_name SpawnerRevealPhaseController
 
 const REVEAL_CONTEXT_NIGHT: StringName = &"night"
 const REVEAL_CONTEXT_CLIENTS: StringName = &"clients"
+const TUTORIAL_KEY_DEVILS_HUNGRY: String = "tutorial.devils_hungry"
+const TUTORIAL_KEY_CLIENTS_COMING: String = "tutorial.clients_coming"
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 
 var _manager: BuildingManager
@@ -24,7 +26,7 @@ func begin_night_reveal() -> bool:
 	var playlist: SpawnPlaylistController = _manager.get_spawn_playlist_controller()
 	var reveal_items: Array[Dictionary] = _night_reveal_items(playlist.get_initial_ready_spawn_requests())
 	_night_reveal_active = not reveal_items.is_empty()
-	if _cutscene.begin(REVEAL_CONTEXT_NIGHT, reveal_items):
+	if _cutscene.begin(REVEAL_CONTEXT_NIGHT, reveal_items, TUTORIAL_KEY_DEVILS_HUNGRY):
 		return true
 	_night_reveal_active = false
 	return false
@@ -34,7 +36,7 @@ func begin_client_reveal() -> bool:
 	var client_sale: ClientSaleController = _manager.get_client_sale_controller()
 	var reveal_items: Array[Dictionary] = _client_reveal_items(client_sale.get_initial_reveal_spawner_cells())
 	_client_reveal_active = not reveal_items.is_empty()
-	if _cutscene.begin(REVEAL_CONTEXT_CLIENTS, reveal_items):
+	if _cutscene.begin(REVEAL_CONTEXT_CLIENTS, reveal_items, TUTORIAL_KEY_CLIENTS_COMING):
 		return true
 	_client_reveal_active = false
 	return false

@@ -12,11 +12,15 @@ class_name MonsterData
 @export var display_name: String = ""
 
 @export_group("Sprite")
-## Horizontal spritesheet frame count. New basic monsters use 6 frames:
+## Horizontal spritesheet frame count. Directional monster sheets use 6 frames:
 ## south / east / north / eating / unused legacy slot / drowning.
 ## Legacy 4-frame monster sheets are still supported by character.gd.
 @export var texture: Texture2D
 @export var sprite_hframes: int = 4
+## How character.gd should interpret sprite frames for this monster agent. This is
+## explicit because clients, merchants, sheep, and player visuals use different
+## sprite systems even when they share some frame counts.
+@export var sprite_frame_layout: StringName = &"legacy_4_horizontal"
 @export var sprite_scale: Vector2 = Vector2(0.75, 0.75)
 ## Local position of MonsterSprite2D relative to the agent origin. Tune this so the
 ## sprite's feet sit on the agent's ground point (larger sprites need a lower offset).

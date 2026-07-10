@@ -52,6 +52,7 @@ var _glow_tween: Tween
 var _glow_active: bool = false
 var _waiting_for_seed_harvest: bool = false
 var _alert_key: String = ""
+var _alert_count: int = -1
 var _alert_remaining: float = 0.0
 # True during the sunrise transition: night has just ended but the first day phase
 # (the morning harvest) has not begun yet. Set when night turns off, cleared once
@@ -122,19 +123,20 @@ func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
 func _on_locale_changed(_locale: String) -> void:
 	# Same message, new language: re-translate in place without re-blanking.
 	if _alert_key != "":
-		text = Translations.t(_alert_key)
+		text = _alert_text()
 		return
 	if _displayed_key != "":
 		text = Translations.t(_displayed_key)
 
 
-func show_alert(key: String) -> void:
+func show_alert(key: String, count: int = -1) -> void:
 	if key == "":
 		return
 	_alert_key = key
+	_alert_count = count
 	_alert_remaining = ALERT_DURATION
 	visible = true
-	text = Translations.t(_alert_key)
+	text = _alert_text()
 	_set_glow(false)
 
 
@@ -146,6 +148,7 @@ func clear_alert(key: String = "") -> void:
 	if key != "" and _alert_key != key:
 		return
 	_alert_key = ""
+	_alert_count = -1
 	_alert_remaining = 0.0
 	modulate = Color.WHITE
 	_refresh()
@@ -158,12 +161,13 @@ func _refresh(delta: float = 0.0) -> void:
 		_alert_remaining -= delta
 		if _alert_remaining > 0.0:
 			visible = true
-			text = Translations.t(_alert_key)
+			text = _alert_text()
 			var pulse: float = (sin((ALERT_DURATION - _alert_remaining) * ALERT_FLASH_SPEED) + 1.0) * 0.5
 			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, pulse)
 			_set_glow(false)
 			return
 		_alert_key = ""
+		_alert_count = -1
 		_alert_remaining = 0.0
 		modulate = Color.WHITE
 	if _should_start_night_automatically():
@@ -260,6 +264,13 @@ func _current_message_key() -> String:
 	if _can_start_night_after_clients():
 		return KEY_PASS_NIGHT
 	return ""
+
+
+func _alert_text() -> String:
+	var translated: String = Translations.t(_alert_key)
+	if _alert_count >= 0:
+		return "%s (%d)" % [translated, _alert_count]
+	return translated
 
 
 func _should_start_night_automatically() -> bool:

@@ -9,6 +9,7 @@ id = &"basic"
 display_name = "Monster"
 texture = ExtResource("2_texture")
 sprite_hframes = 6
+sprite_frame_layout = &"directional_6_horizontal"
 sprite_scale = Vector2(0.75, 0.75)
 sprite_offset = Vector2(0, -16)
 max_health = 100

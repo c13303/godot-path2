@@ -8,7 +8,7 @@ const SKIP_PROMPT_SCRIPT: Script = preload("res://scripts/ui/cutscene_skip_promp
 const SCROLL_SECONDS: float = 2.0
 const SPAWNER_PAUSE_SECONDS: float = 1.0
 const RETURN_SECONDS: float = 1.0
-const SKIP_HOLD_SECONDS: float = 1.0
+const SKIP_HOLD_SECONDS: float = 0.5
 
 var _camera: CameraController
 var _player: Node2D
@@ -16,6 +16,7 @@ var _player_controller: PlayerController
 var _skip_prompt_layer: CanvasLayer
 var _skip_prompt: CutsceneSkipPrompt
 var _context: StringName = &""
+var _focus_tutorial_key: String = ""
 var _items: Array[Dictionary] = []
 var _revealed_indices: Dictionary = {}
 var _active: bool = false
@@ -30,7 +31,7 @@ func _ready() -> void:
 	set_process(false)
 
 
-func begin(context: StringName, items: Array[Dictionary]) -> bool:
+func begin(context: StringName, items: Array[Dictionary], focus_tutorial_key: String = "") -> bool:
 	if _active:
 		_skip_requested = true
 		return true
@@ -39,6 +40,7 @@ func begin(context: StringName, items: Array[Dictionary]) -> bool:
 	if not _resolve_scene_nodes():
 		return false
 	_context = context
+	_focus_tutorial_key = focus_tutorial_key
 	_items.clear()
 	for item: Dictionary in items:
 		_items.append(item.duplicate())
@@ -106,20 +108,24 @@ func _run_cutscene(run_id: int) -> void:
 			break
 		var item: Dictionary = _items[index]
 		var target_position: Vector2 = item.get("world_position", Vector2.ZERO) as Vector2
-		await _move_camera_to(target_position, SCROLL_SECONDS)
+		await _move_camera_to(target_position, SCROLL_SECONDS, true)
 		if run_id != _run_id:
 			return
 		if _skip_requested:
 			break
+		_show_focus_tutorial()
 		_reveal_item(index)
 		await _wait_or_skip(SPAWNER_PAUSE_SECONDS)
 		if run_id != _run_id:
 			return
 	if _skip_requested:
 		_reveal_remaining_items()
+		await _move_camera_to(_player.global_position, RETURN_SECONDS, false)
+		if run_id != _run_id:
+			return
 		_finish(true)
 		return
-	await _move_camera_to(_player.global_position, RETURN_SECONDS)
+	await _move_camera_to(_player.global_position, RETURN_SECONDS, false)
 	if run_id != _run_id:
 		return
 	_finish(true)
@@ -138,19 +144,19 @@ func _resolve_scene_nodes() -> bool:
 	return _camera != null and _player != null and _player_controller != null
 
 
-func _move_camera_to(target_position: Vector2, duration: float) -> void:
+func _move_camera_to(target_position: Vector2, duration: float, allow_skip_interrupt: bool) -> void:
 	if _camera == null:
 		return
 	var start_position: Vector2 = _camera.global_position
 	var elapsed: float = 0.0
 	var safe_duration: float = maxf(duration, 0.001)
-	while elapsed < safe_duration and not _skip_requested:
+	while elapsed < safe_duration and (not allow_skip_interrupt or not _skip_requested):
 		await get_tree().process_frame
 		elapsed += get_process_delta_time()
 		var amount: float = clampf(elapsed / safe_duration, 0.0, 1.0)
 		var eased_amount: float = amount * amount * (3.0 - 2.0 * amount)
 		_camera.global_position = start_position.lerp(target_position, eased_amount)
-	if not _skip_requested:
+	if not allow_skip_interrupt or not _skip_requested:
 		_camera.global_position = target_position
 
 
@@ -186,6 +192,7 @@ func _finish(release_spawning: bool) -> void:
 	_left_mouse_held = false
 	_skip_hold_elapsed = 0.0
 	_context = &""
+	_focus_tutorial_key = ""
 	_items.clear()
 	_revealed_indices.clear()
 	set_process_input(false)
@@ -222,3 +229,14 @@ func _hide_skip_prompt() -> void:
 func _update_skip_prompt_progress() -> void:
 	if _skip_prompt != null:
 		_skip_prompt.set_progress(_skip_hold_elapsed / SKIP_HOLD_SECONDS)
+
+
+func _show_focus_tutorial() -> void:
+	if _focus_tutorial_key == "":
+		return
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	if tutorial != null and tutorial.has_method("show_alert"):
+		tutorial.call("show_alert", _focus_tutorial_key)

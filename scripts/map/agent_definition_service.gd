@@ -44,6 +44,7 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 		sprite.hframes = data.sprite_hframes
 		sprite.scale = data.sprite_scale
 		sprite.position = data.sprite_offset
+	agent.set_meta("monster_sprite_frame_layout", data.sprite_frame_layout)
 	# _ready() already ran (add_child), so override both the exported cap and the
 	# live pool.
 	agent.set("max_health", data.max_health)
@@ -54,6 +55,9 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set_meta("agent_contact_push_resist", data.contact_push_resist)
 	agent.set_meta("agent_contact_push_cooldown", data.contact_push_cooldown)
 	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
+	if agent is CanvasItem:
+		var canvas_item: CanvasItem = agent as CanvasItem
+		canvas_item.queue_redraw()
 	if monster_type == MonsterCatalog.BIG_MONSTER_ID:
 		_apply_bigmonster_animation(agent)
 

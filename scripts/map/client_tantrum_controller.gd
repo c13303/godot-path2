@@ -26,8 +26,13 @@ func has_hostiles() -> bool:
 	return not _hostile_clients.is_empty()
 
 
+func hostile_count() -> int:
+	return _hostile_clients.size()
+
+
 func clear_hostile(nav_id: int) -> void:
 	_hostile_clients.erase(nav_id)
+	_finish_if_no_hostiles()
 
 
 func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
@@ -98,6 +103,7 @@ func process(delta: float) -> void:
 	if not _active:
 		return
 	var nav_ids: Array = _hostile_clients.keys()
+	var removed_hostile: bool = false
 	for raw_nav_id: Variant in nav_ids:
 		var nav_id: int = int(raw_nav_id)
 		if not _hostile_clients.has(nav_id):
@@ -106,10 +112,12 @@ func process(delta: float) -> void:
 		var raw_client: Variant = data.get("node", null)
 		if not is_instance_valid(raw_client):
 			_hostile_clients.erase(nav_id)
+			removed_hostile = true
 			continue
 		var client: Node2D = raw_client as Node2D
 		if client == null:
 			_hostile_clients.erase(nav_id)
+			removed_hostile = true
 			continue
 		var target: Node2D = data.get("target", null) as Node2D
 		if target == null or not is_instance_valid(target) or reservoir_is_destroyed(target):
@@ -136,6 +144,8 @@ func process(delta: float) -> void:
 		else:
 			data["attack_timer"] = attack_timer
 			_hostile_clients[nav_id] = data
+	if removed_hostile:
+		_finish_if_no_hostiles()
 
 
 func _make_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
@@ -242,7 +252,7 @@ func _show_alert() -> void:
 		return
 	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
 	if tutorial != null and tutorial.has_method("show_alert"):
-		tutorial.call("show_alert", "tutorial.tantrum")
+		tutorial.call("show_alert", "tutorial.tantrum", hostile_count())
 
 
 func _hide_alert() -> void:
@@ -252,6 +262,15 @@ func _hide_alert() -> void:
 	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
 	if tutorial != null and tutorial.has_method("clear_alert"):
 		tutorial.call("clear_alert", "tutorial.tantrum")
+
+
+func _finish_if_no_hostiles() -> void:
+	if not _active:
+		return
+	if has_hostiles():
+		_show_alert()
+		return
+	end()
 
 
 func _agent_manager() -> Node:
