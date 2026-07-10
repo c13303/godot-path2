@@ -8,7 +8,7 @@ const SKIP_PROMPT_SCRIPT: Script = preload("res://scripts/ui/cutscene_skip_promp
 const SCROLL_SECONDS: float = 2.0
 const SPAWNER_PAUSE_SECONDS: float = 1.0
 const RETURN_SECONDS: float = 1.0
-const SKIP_HOLD_SECONDS: float = 3.0
+const SKIP_HOLD_SECONDS: float = 1.0
 
 var _camera: CameraController
 var _player: Node2D
