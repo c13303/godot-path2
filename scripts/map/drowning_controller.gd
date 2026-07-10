@@ -1,6 +1,13 @@
 extends RefCounted
 class_name DrowningController
 
+enum WaterTrackResult {
+	INVALID = -1,
+	OUTSIDE_CANDIDATE = 0,
+	CANDIDATE = 1,
+	DROWNING = 2,
+}
+
 # Owns the "agent drowns in deep water" hazard: per-frame water sensing, pooled
 # splash playback, and the drowning damage timeline. Follows the same
 # manager-owned controller pattern as SeedMerchantController/MorningHarvestController:
@@ -31,32 +38,56 @@ func drowning_count() -> int:
 	return _drowning_agents.size()
 
 
-# Single-agent drowning-start check, invoked by AgentTileInteractionController when
-# an agent (re)enters a relevant cell. Same rule and guards as the old per-frame
-# scan: skip while turret-eating or already drowning, then start drowning when the
-# footprint coverage over deep water crosses the threshold and the agent can drown.
-func evaluate_agent(agent: Node2D) -> void:
+func classify_water_candidate(agent: Node2D, floor_cell: Vector2i = Vector2i(2147483647, 2147483647)) -> int:
 	if agent == null or not is_instance_valid(agent):
-		return
+		return WaterTrackResult.INVALID
 	var watersources: WaterSources = _watersources()
 	if watersources == null:
-		return
+		return WaterTrackResult.OUTSIDE_CANDIDATE
+	if is_over_water(agent):
+		return WaterTrackResult.CANDIDATE
+	if watersources.water_coverage_of_world_rect(_agent_candidate_water_rect(agent, floor_cell)) > 0.0:
+		return WaterTrackResult.CANDIDATE
+	if watersources.water_coverage_of_world_rect(_foot_candidate_rect(floor_cell, agent)) > 0.0:
+		return WaterTrackResult.CANDIDATE
+	return WaterTrackResult.OUTSIDE_CANDIDATE
+
+
+func reevaluate_water_candidate(agent: Node2D, delta: float, floor_cell: Vector2i = Vector2i(2147483647, 2147483647)) -> int:
+	if agent == null or not is_instance_valid(agent):
+		return WaterTrackResult.INVALID
+	var candidate_state: int = classify_water_candidate(agent, floor_cell)
+	if candidate_state == WaterTrackResult.INVALID or candidate_state == WaterTrackResult.OUTSIDE_CANDIDATE:
+		stop_splash(agent)
+		return candidate_state
+	if is_over_water(agent):
+		tick_splash(agent, delta)
+	else:
+		stop_splash(agent)
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
-		return
+		return WaterTrackResult.CANDIDATE
 	var turret_eating: TurretEatingController = _manager._turret_eating_controller
 	if turret_eating.is_eating(nav_id):
-		return
+		return WaterTrackResult.CANDIDATE
 	if _drowning_agents.has(nav_id):
-		return
+		return WaterTrackResult.DROWNING
 	var water_coverage: float = _agent_water_coverage(agent)
 	var in_water: bool = _agent_over_drowning_water_with_coverage(agent, water_coverage)
 	if in_water and _agent_can_drown(agent):
 		_start_agent_drowning(nav_id, agent)
+		return WaterTrackResult.DROWNING
+	return WaterTrackResult.CANDIDATE
 
 
-# True when the agent's foot position is over a water tile. Used by AgentCellTracker
-# to maintain the small "over water" set that drives the continuous splash.
+# Single-agent drowning-start check, invoked by AgentCellTracker after the other
+# tile interactions so the original priority/exclusivity order is preserved.
+func evaluate_agent(agent: Node2D, floor_cell: Vector2i = Vector2i(2147483647, 2147483647)) -> void:
+	reevaluate_water_candidate(agent, -1.0, floor_cell)
+
+
+# True when the agent's foot position is over a water tile. Used as the exact
+# current-water probe inside the tracker-managed water-candidate pass.
 func is_over_water(agent: Node2D) -> bool:
 	var watersources: WaterSources = _watersources()
 	if watersources == null:
@@ -111,8 +142,8 @@ func process_drowning_timeline(delta: float) -> void:
 
 
 # Emits the throttled pooled splash for one agent standing over water. Driven each
-# frame by AgentCellTracker for the small "over water" set. Keeps its own foot-water
-# guard so a sub-cell move off water (no cell transition) stops splashing cleanly.
+# frame by AgentCellTracker only for the active water-candidate subset. Keeps its
+# own foot-water guard so a sub-cell move off water stops splashing cleanly.
 func tick_splash(agent: Node2D, delta: float) -> void:
 	# Any monster over the water emits a pooled splash, throttled per-monster.
 	# The timer lives on the node itself (meta) so it is freed with the monster
@@ -129,6 +160,11 @@ func tick_splash(agent: Node2D, delta: float) -> void:
 		watersources.play_splash_at(agent.global_position)
 		time_left = maxf(watersources.splash_repeat_seconds, 0.0)
 	agent.set_meta(&"water_splash_timer", time_left)
+
+
+func stop_splash(agent: Node2D) -> void:
+	if agent != null and is_instance_valid(agent) and agent.has_meta(&"water_splash_timer"):
+		agent.remove_meta(&"water_splash_timer")
 
 
 func _agent_can_drown(agent: Node2D) -> bool:
@@ -168,11 +204,48 @@ func _agent_water_footprint_rect(agent: Node2D) -> Rect2:
 	return Rect2(agent.global_position - size * 0.5, size)
 
 
+func _agent_candidate_water_rect(agent: Node2D, floor_cell: Vector2i) -> Rect2:
+	var footprint: Rect2 = _agent_water_footprint_rect(agent)
+	var candidate_size: Vector2 = footprint.size + _tile_size()
+	var center: Vector2 = _floor_cell_center(floor_cell, agent)
+	return Rect2(center - candidate_size * 0.5, candidate_size)
+
+
+func _foot_candidate_rect(floor_cell: Vector2i, agent: Node2D) -> Rect2:
+	var center: Vector2 = _floor_cell_center(floor_cell, agent) + _foot_sample_offset()
+	var size: Vector2 = _tile_size()
+	return Rect2(center - size * 0.5, size)
+
+
 func _agent_world_radius() -> float:
 	var global_config: Node = _manager.global_config
 	if global_config and global_config.has_method("get_agent_world_radius"):
 		return float(global_config.call("get_agent_world_radius"))
 	return DEFAULT_AGENT_WORLD_RADIUS
+
+
+func _tile_size() -> Vector2:
+	if _manager == null:
+		return Vector2(32.0, 32.0)
+	return _manager.tile_size()
+
+
+func _floor_cell_center(floor_cell: Vector2i, agent: Node2D) -> Vector2:
+	if _manager == null or _manager.floorz == null:
+		return agent.global_position if agent != null else Vector2.ZERO
+	var resolved_cell: Vector2i = floor_cell
+	if resolved_cell == Vector2i(2147483647, 2147483647):
+		if agent == null:
+			return Vector2.ZERO
+		resolved_cell = _manager.floorz.local_to_map(_manager.floorz.to_local(agent.global_position))
+	return _manager.cell_center(resolved_cell)
+
+
+func _foot_sample_offset() -> Vector2:
+	var watersources: WaterSources = _watersources()
+	if watersources == null:
+		return Vector2.ZERO
+	return watersources.foot_sample_offset
 
 
 func _start_agent_drowning(nav_id: int, agent: Node2D) -> void:
@@ -200,6 +273,7 @@ func _stop_agent_drowning(nav_id: int, agent: Node2D) -> void:
 	_drowning_agents.erase(nav_id)
 	if agent.has_method("stop_drowning"):
 		agent.call("stop_drowning")
+	_manager.get_agent_cell_tracker().request_recheck(agent)
 	var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
 	_manager._resume_agent_after_drowning(nav_id, agent, resume_state)
 

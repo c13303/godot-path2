@@ -2060,6 +2060,7 @@ func _clear_removed_agent_state(nav_id: int) -> void:
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
 	_drowning_controller.clear_agent(nav_id)
+	_turret_eating_controller.clear_agent(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_tantrum.clear_hostile(nav_id)

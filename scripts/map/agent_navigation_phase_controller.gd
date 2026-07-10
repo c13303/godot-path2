@@ -371,6 +371,7 @@ func process_eating_agents(delta: float) -> void:
 				continue
 			if agent.has_method("stop_eating"):
 				agent.call("stop_eating")
+			_manager.get_agent_cell_tracker().request_recheck(agent)
 			decide_after_eating(nav_id, agent, data)
 
 
@@ -532,6 +533,7 @@ func attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell
 	}
 	if agent.has_method("stop_eating"):
 		agent.call("stop_eating")
+	_manager.get_agent_cell_tracker().request_recheck(agent)
 	if agent.has_method("start_escape"):
 		agent.call("start_escape")
 	return true

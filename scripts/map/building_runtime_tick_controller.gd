@@ -121,10 +121,12 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		var stats: Dictionary = tracker.debug_stats()
 		debug_telemetry.warn_garden_task_lag_us("_process_agent_tile_interactions", Time.get_ticks_usec() - t,
-			"registered=%d transitions=%d checked=%d invalidations=%d over_water=%d rose=%d pasteque=%d turret=%d drowning=%d" % [
-				int(stats.get("registered", 0)), int(stats.get("transitions", 0)),
-				int(stats.get("checked", 0)), int(stats.get("invalidations", 0)),
-				int(stats.get("over_water", 0)), int(stats.get("rose", 0)),
+			"registered=%d pending_general=%d transitions=%d checked=%d invalidations=%d water_candidates=%d continuous_water=%d state_exit_rechecks=%d stale_water_removed=%d rose=%d pasteque=%d turret=%d drowning=%d" % [
+				int(stats.get("registered", 0)), int(stats.get("pending_general_checks", 0)),
+				int(stats.get("transitions", 0)), int(stats.get("checked", 0)),
+				int(stats.get("invalidations", 0)), int(stats.get("water_candidates", 0)),
+				int(stats.get("continuous_water_checks", 0)), int(stats.get("state_exit_rechecks", 0)),
+				int(stats.get("stale_water_candidates_removed", 0)), int(stats.get("rose", 0)),
 				int(stats.get("pasteque", 0)), int(stats.get("turret", 0)),
 				int(stats.get("drowning", 0))])
 

@@ -28,6 +28,10 @@ func turret_eating_count() -> int:
 	return _turret_eating_agents.size()
 
 
+func clear_agent(nav_id: int) -> void:
+	_turret_eating_agents.erase(nav_id)
+
+
 # Single-agent turret-overlap check, invoked by AgentTileInteractionController when
 # an agent (re)enters a relevant cell. Same rule and guards as the old per-frame
 # scan: skip while garden-eating, turret-eating or drowning, then consume the turret
@@ -100,5 +104,6 @@ func process_turret_eating_agents(delta: float) -> void:
 			continue
 		if agent.has_method("stop_eating"):
 			agent.call("stop_eating")
+		_manager.get_agent_cell_tracker().request_recheck(agent)
 		var resume_state: Dictionary = data.get("resume_state", {}) as Dictionary
 		_manager._resume_agent_after_turret_eating(nav_id, agent, resume_state)

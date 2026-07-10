@@ -296,6 +296,7 @@ func queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String,
 		_agent_navigation_phases.erase_eating_agent(nav_id)
 		if agent.has_method("stop_eating"):
 			agent.call("stop_eating")
+		_manager.get_agent_cell_tracker().request_recheck(agent)
 	if agent.has_method("start_waiting_new_status"):
 		agent.call("start_waiting_new_status")
 	_garden_retarget_queue.append({

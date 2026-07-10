@@ -73,6 +73,7 @@ func restore_state(data: Dictionary) -> void:
 		var position_data: Dictionary = raw_position as Dictionary
 		_agent.global_position = Vector2(float(position_data.get("x", _agent.global_position.x)), float(position_data.get("y", _agent.global_position.y)))
 		_agent.z_index = int(_agent.global_position.y)
+		_manager.get_agent_cell_tracker().refresh_agent(_agent)
 	_idle_cell = _cell_from_dict(data.get("idle_cell", _cell_to_dict(_idle_cell)))
 	_target_cell = _cell_from_dict(data.get("target_cell", _cell_to_dict(INVALID_CELL)))
 	_state = StringName(str(data.get("state", "idle")))

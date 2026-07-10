@@ -323,6 +323,7 @@ func _restore_agent_node(data: Dictionary) -> Node2D:
 		agent.set("max_health", int(data.get("max_health", 0)))
 	if int(data.get("health", 0)) > 0:
 		agent.set("health", int(data.get("health", 0)))
+	_manager.get_agent_cell_tracker().refresh_agent(agent)
 	return agent
 
 

@@ -1,27 +1,14 @@
 extends RefCounted
 class_name AgentCellTracker
 
-# Detects when a tracked agent enters a different map cell and queues one tile-based
-# environment check for it, replacing four independent per-frame full-agent scans
-# (drowning start + splash, turret overlap, rose trampling, pasteque trampling).
-#
-# One lightweight pass per frame:
-#   1. poll every registered agent once, compute its floorz cell, and enqueue it only
-#      when that cell changed since last frame (or on its first check after spawn);
-#   2. drain the dedup queue, dispatching each agent through
-#      AgentTileInteractionController (which delegates to the owning controllers);
-#   3. tick the continuous water splash for the small set of agents currently over
-#      water (the only genuinely continuous part of the old drowning scan).
-#
-# A cell->agent index lets a world change (turret/pasteque/rose appearing) re-queue
-# only the agents standing on the affected cell, so stationary agents stay correct
-# without restoring a global scan.
-#
-# Agents are keyed by instance_id (stable and available at registration time; nav_id
-# is assigned slightly later during spawn) and held via WeakRef so a freed node is
-# never kept alive and is discarded safely.
+# Centralized tracked-agent owner for tile interactions. The general interaction pass
+# remains transition-driven and deduplicated, while drowning/splash continuity is
+# restricted to the small subset of tracked agents whose footprint can change water
+# coverage without crossing into another floor cell.
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const INVALID_WATER_STATE: int = DrowningController.WaterTrackResult.INVALID
+const OUTSIDE_WATER_STATE: int = DrowningController.WaterTrackResult.OUTSIDE_CANDIDATE
 
 var _manager: BuildingManager = null
 var _interactions: AgentTileInteractionController = AgentTileInteractionController.new()
@@ -30,16 +17,23 @@ var _interactions: AgentTileInteractionController = AgentTileInteractionControll
 var _agents: Dictionary = {}
 # Vector2i cell -> Dictionary(instance_id -> true). Only agents with a known cell.
 var _cell_to_agents: Dictionary = {}
-# instance_id -> true for agents currently over water (splash ticked every frame).
-var _over_water: Dictionary = {}
+# instance_id -> true for agents that need continuous water reevaluation.
+var _water_candidates: Dictionary = {}
 # FIFO dedup queue of instance_ids pending an interaction check.
 var _queue: Array[int] = []
 var _queued: Dictionary = {}
+var _general_checked_this_frame: Dictionary = {}
 
 # Per-frame debug counters, only maintained when debug logs are enabled.
 var _debug_transitions: int = 0
-var _debug_checked: int = 0
+var _debug_general_checks: int = 0
+var _debug_drowning_checks: int = 0
 var _debug_invalidations: int = 0
+var _debug_continuous_water_checks: int = 0
+var _debug_state_exit_rechecks: int = 0
+var _debug_removed_water_candidates: int = 0
+var _pending_debug_invalidations: int = 0
+var _pending_debug_state_exit_rechecks: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -47,9 +41,6 @@ func setup(manager: BuildingManager) -> void:
 	_interactions.setup(manager)
 
 
-# Registration is idempotent (dedup on instance_id). The sentinel cell forces the
-# first poll to enqueue the agent, guaranteeing an initial interaction check even if
-# the agent never moves (e.g. spawned directly on an interactive tile).
 func register(agent: Node2D, category: StringName) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
@@ -61,6 +52,7 @@ func register(agent: Node2D, category: StringName) -> void:
 		"category": category,
 		"cell": INVALID_CELL,
 	}
+	refresh_agent(agent)
 
 
 func unregister(agent: Node2D) -> void:
@@ -69,27 +61,60 @@ func unregister(agent: Node2D) -> void:
 	_remove_id(agent.get_instance_id())
 
 
+func request_recheck(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
+	var id: int = agent.get_instance_id()
+	if not _agents.has(id):
+		return
+	_enqueue(id)
+	if CppDebugOptions.logs_enabled:
+		_pending_debug_state_exit_rechecks += 1
+
+
+func refresh_agent(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
+	var id: int = agent.get_instance_id()
+	if not _agents.has(id):
+		return
+	var record: Dictionary = _agents[id] as Dictionary
+	var cell: Vector2i = _current_floor_cell(agent)
+	var last_cell: Vector2i = record["cell"] as Vector2i
+	if cell != last_cell:
+		_reindex(id, last_cell, cell)
+		record["cell"] = cell
+	_enqueue(id)
+	_refresh_water_candidate_membership(id, agent, cell)
+
+
 func registered_count() -> int:
 	return _agents.size()
 
 
-# The single per-frame pass that replaces the four full-agent scans.
 func process(delta: float) -> void:
 	if _manager == null:
 		return
+	_interactions.reset_debug_counters()
 	if CppDebugOptions.logs_enabled:
 		_debug_transitions = 0
-		_debug_checked = 0
-		_debug_invalidations = 0
-		_interactions.reset_debug_counters()
+		_debug_general_checks = 0
+		_debug_drowning_checks = 0
+		_debug_invalidations = _pending_debug_invalidations
+		_debug_continuous_water_checks = 0
+		_debug_state_exit_rechecks = _pending_debug_state_exit_rechecks
+		_debug_removed_water_candidates = 0
+		_pending_debug_invalidations = 0
+		_pending_debug_state_exit_rechecks = 0
+	else:
+		_pending_debug_invalidations = 0
+		_pending_debug_state_exit_rechecks = 0
+	_general_checked_this_frame.clear()
 	_poll_transitions()
-	_drain_queue()
-	_tick_water_splash(delta)
+	_drain_queue(delta)
+	_tick_water_candidates(delta)
 
 
-# Re-queue every registered agent standing on a cell that just became interactive
-# (turret/pasteque placed, rose planted), so a stationary agent is re-evaluated
-# without a global scan. Enqueued agents are processed on the next process() pass.
 func invalidate_cell(cell: Vector2i) -> void:
 	if not _cell_to_agents.has(cell):
 		return
@@ -97,7 +122,7 @@ func invalidate_cell(cell: Vector2i) -> void:
 	for raw_id: Variant in bucket.keys():
 		_enqueue(int(raw_id))
 		if CppDebugOptions.logs_enabled:
-			_debug_invalidations += 1
+			_pending_debug_invalidations += 1
 
 
 func invalidate_cells(cells: Array[Vector2i]) -> void:
@@ -109,18 +134,26 @@ func invalidate_cells(cells: Array[Vector2i]) -> void:
 func clear() -> void:
 	_agents.clear()
 	_cell_to_agents.clear()
-	_over_water.clear()
+	_water_candidates.clear()
 	_queue.clear()
 	_queued.clear()
+	_general_checked_this_frame.clear()
+	_pending_debug_invalidations = 0
+	_pending_debug_state_exit_rechecks = 0
 
 
 func debug_stats() -> Dictionary:
 	var stats: Dictionary = {
 		"registered": _agents.size(),
+		"pending_general_checks": _queue.size(),
 		"transitions": _debug_transitions,
-		"checked": _debug_checked,
+		"checked": _debug_general_checks,
 		"invalidations": _debug_invalidations,
-		"over_water": _over_water.size(),
+		"water_candidates": _water_candidates.size(),
+		"continuous_water_checks": _debug_continuous_water_checks,
+		"state_exit_rechecks": _debug_state_exit_rechecks,
+		"stale_water_candidates_removed": _debug_removed_water_candidates,
+		"drowning": _debug_drowning_checks,
 	}
 	var by_type: Dictionary = _interactions.debug_stats()
 	for key: Variant in by_type.keys():
@@ -132,14 +165,8 @@ func debug_stats() -> Dictionary:
 
 
 func _poll_transitions() -> void:
-	var floor_layer: TileMapLayer = _manager.floorz
-	if floor_layer == null:
-		return
 	var debug: bool = CppDebugOptions.logs_enabled
 	var dead: Array[int] = []
-	# Safe to iterate _agents directly: the body never adds/removes its keys (dead
-	# ids are collected and removed after the loop); only value dicts and the sibling
-	# index/queue dictionaries are mutated.
 	for raw_id: Variant in _agents:
 		var id: int = int(raw_id)
 		var record: Dictionary = _agents[id] as Dictionary
@@ -147,22 +174,21 @@ func _poll_transitions() -> void:
 		if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():
 			dead.append(id)
 			continue
-		var cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(agent.global_position))
+		var cell: Vector2i = _current_floor_cell(agent)
 		var last_cell: Vector2i = record["cell"] as Vector2i
 		if cell != last_cell:
 			_reindex(id, last_cell, cell)
 			record["cell"] = cell
 			_enqueue(id)
+			_refresh_water_candidate_membership(id, agent, cell)
 			if debug:
 				_debug_transitions += 1
 	for id: int in dead:
 		_remove_id(id)
 
 
-func _drain_queue() -> void:
+func _drain_queue(delta: float) -> void:
 	var debug: bool = CppDebugOptions.logs_enabled
-	# Snapshot the length: interactions never enqueue new work (agents don't move
-	# here), so a single index pass over the current queue is deterministic (FIFO).
 	var count: int = _queue.size()
 	for i: int in range(count):
 		var id: int = _queue[i]
@@ -178,43 +204,75 @@ func _drain_queue() -> void:
 		var category: StringName = record["category"] as StringName
 		var cell: Vector2i = record["cell"] as Vector2i
 		_interactions.evaluate(agent, category, cell)
-		_update_over_water(id, agent)
+		_general_checked_this_frame[id] = true
+		_apply_water_result(id, agent, _evaluate_water_state(agent, cell, delta))
 		if debug:
-			_debug_checked += 1
+			_debug_general_checks += 1
 	_queue.clear()
 	_queued.clear()
 
 
-func _tick_water_splash(delta: float) -> void:
-	if _over_water.is_empty():
-		return
-	var drowning: DrowningController = _manager.get_drowning_controller()
-	if drowning == null:
+func _tick_water_candidates(delta: float) -> void:
+	if _water_candidates.is_empty():
 		return
 	var dead: Array[int] = []
-	for raw_id: Variant in _over_water:
+	var invalid_seen: bool = false
+	for raw_id: Variant in _water_candidates.keys():
 		var id: int = int(raw_id)
+		if _general_checked_this_frame.has(id):
+			continue
 		var record: Dictionary = _agents.get(id, {}) as Dictionary
 		if record.is_empty():
 			dead.append(id)
 			continue
 		var agent: Node2D = (record["ref"] as WeakRef).get_ref() as Node2D
-		if agent == null or not is_instance_valid(agent):
+		if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():
 			dead.append(id)
+			invalid_seen = true
 			continue
-		# tick_splash keeps its own foot-position water guard, so a sub-cell move off
-		# water without a transition still stops splashing (and cleans its meta timer).
-		drowning.tick_splash(agent, delta)
+		var record_cell: Vector2i = record["cell"] as Vector2i
+		var result: int = _evaluate_water_state(agent, record_cell, delta)
+		_apply_water_result(id, agent, result)
+		if CppDebugOptions.logs_enabled:
+			_debug_continuous_water_checks += 1
 	for id: int in dead:
-		_over_water.erase(id)
+		_water_candidates.erase(id)
+		if CppDebugOptions.logs_enabled:
+			_debug_removed_water_candidates += 1
+	if invalid_seen and CppDebugOptions.logs_enabled and not dead.is_empty():
+		push_error("AgentCellTracker: invalid agent found in water-candidate set; removed during cleanup pass.")
 
 
-func _update_over_water(id: int, agent: Node2D) -> void:
+func _refresh_water_candidate_membership(id: int, agent: Node2D, cell: Vector2i) -> void:
 	var drowning: DrowningController = _manager.get_drowning_controller()
-	if drowning != null and drowning.is_over_water(agent):
-		_over_water[id] = true
-	else:
-		_over_water.erase(id)
+	if drowning == null:
+		_water_candidates.erase(id)
+		return
+	var result: int = drowning.classify_water_candidate(agent, cell)
+	_apply_water_result(id, agent, result)
+
+
+func _evaluate_water_state(agent: Node2D, cell: Vector2i, delta: float) -> int:
+	var drowning: DrowningController = _manager.get_drowning_controller()
+	if drowning == null:
+		return OUTSIDE_WATER_STATE
+	if CppDebugOptions.logs_enabled:
+		_debug_drowning_checks += 1
+	return drowning.reevaluate_water_candidate(agent, delta, cell)
+
+
+func _apply_water_result(id: int, agent: Node2D, result: int) -> void:
+	if result == INVALID_WATER_STATE or result == OUTSIDE_WATER_STATE:
+		var was_candidate: bool = _water_candidates.has(id)
+		_water_candidates.erase(id)
+		if agent != null and is_instance_valid(agent):
+			var drowning: DrowningController = _manager.get_drowning_controller()
+			if drowning != null:
+				drowning.stop_splash(agent)
+		if was_candidate and CppDebugOptions.logs_enabled:
+			_debug_removed_water_candidates += 1
+		return
+	_water_candidates[id] = true
 
 
 func _reindex(id: int, old_cell: Vector2i, new_cell: Vector2i) -> void:
@@ -246,5 +304,20 @@ func _remove_id(id: int) -> void:
 			if bucket.is_empty():
 				_cell_to_agents.erase(cell)
 	_agents.erase(id)
-	_over_water.erase(id)
+	_water_candidates.erase(id)
 	_queued.erase(id)
+	_general_checked_this_frame.erase(id)
+	_erase_from_queue(id)
+
+
+func _erase_from_queue(id: int) -> void:
+	for index: int in range(_queue.size() - 1, -1, -1):
+		if _queue[index] == id:
+			_queue.remove_at(index)
+
+
+func _current_floor_cell(agent: Node2D) -> Vector2i:
+	var floor_layer: TileMapLayer = _manager.floorz
+	if floor_layer == null:
+		return INVALID_CELL
+	return floor_layer.local_to_map(floor_layer.to_local(agent.global_position))
