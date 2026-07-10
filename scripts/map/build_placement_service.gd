@@ -222,20 +222,34 @@ func target_layer_affects_collision(target_layer: TileMapLayer) -> bool:
 	return target_layer == _wallz() or target_layer == _blocking_buildings()
 
 
+# True only when placing this tile is a genuine hard-topology change that must rebuild
+# walkability / gardens / Flow Fields. Turrets and other speed-only placeables return
+# false (their slowdown is applied live via _refresh_cell_terrain_speed instead). Fences
+# resolve by the current phase through the authoritative PlaceableNavImpact classifier.
 func target_layer_affects_navigation(target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
-	if target_layer == _wallz():
-		return true
-	if target_layer == _fences():
-		return true
-	if target_layer != _blocking_buildings():
-		return false
+	var layer_role: String = _nav_layer_role(target_layer)
+	# Classify against the full catalog def (the build selection def can omit the
+	# blocks_movement / isWall / speed_multiplier semantics the classifier reads).
 	var item_id: String = str(placeable_def.get("id", ""))
-	if item_id == "":
-		return true
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if bool(item_def.get("blocks_agents", false)):
-		return true
-	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id) if item_id != "" else placeable_def
+	var impact: PlaceableNavImpact.Impact = PlaceableNavImpact.classify_for_layer(layer_role, item_def)
+	return PlaceableNavImpact.requires_hard_topology(impact, _fences_block_navigation())
+
+
+func _nav_layer_role(target_layer: TileMapLayer) -> String:
+	if target_layer == _wallz():
+		return PlaceableNavImpact.LAYER_WALLZ
+	if target_layer == _fences():
+		return PlaceableNavImpact.LAYER_FENCES
+	if target_layer == _blocking_buildings():
+		return PlaceableNavImpact.LAYER_BLOCKING
+	return "other"
+
+
+func _fences_block_navigation() -> bool:
+	if _manager != null and _manager.has_method("fences_currently_block_navigation"):
+		return bool(_manager.call("fences_currently_block_navigation"))
+	return true
 
 
 func is_free_walkable_cell(cell: Vector2i) -> bool:

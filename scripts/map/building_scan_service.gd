@@ -12,10 +12,14 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 
 var _manager: BuildingManager
 var _tile_defs_by_atlas: Dictionary = {}
+# Hard-navigation-topology baselines. These track only mutations that change which floor
+# cells can be routed through (walls, water, and genuinely blocking buildings). Turrets
+# and other SPEED_ONLY placeables on blocking_buildings, plus fences (handled by the
+# authoritative placement/removal event path), are deliberately excluded so a turret or a
+# fence autotile never reads as a topology change here. See PlaceableNavImpact.
 var _last_wall_signature: int = 0
 var _last_water_signature: int = 0
-var _last_blocking_signature: int = 0
-var _last_fence_signature: int = 0
+var _last_blocking_hard_signature: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -59,28 +63,27 @@ func scan_buildings() -> void:
 	var wallz: TileMapLayer = _wallz()
 	var watersources: TileMapLayer = _watersources()
 	var blocking_buildings: TileMapLayer = _blocking_buildings()
-	var fences: TileMapLayer = _fences()
 	var wall_signature: int = tile_layer_signature(wallz)
 	var water_signature: int = tile_layer_signature(watersources)
-	var blocking_signature: int = tile_layer_signature(blocking_buildings)
-	var fence_signature: int = tile_layer_signature(fences)
+	# Semantic (not raw) signature: only cells whose item is HARD_TOPOLOGY contribute, so
+	# adding/removing a turret or any SPEED_ONLY placeable never changes it. Fences are not
+	# scanned here at all (their phase-dependent routing is driven by the placement/removal
+	# event path); this also stops fence autotiling from reading as a topology change.
+	var blocking_hard_signature: int = _hard_topology_signature(blocking_buildings)
 	debug_telemetry.warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
-		"wall_cells=%d water_cells=%d fence_cells=%d" % [
+		"wall_cells=%d water_cells=%d" % [
 			wallz.get_used_cells().size() if wallz else 0,
 			watersources.get_used_cells().size() if watersources else 0,
-			fences.get_used_cells().size() if fences else 0,
 		])
-	var walls_changed: bool = (
+	var hard_topology_changed: bool = (
 		wall_signature != _last_wall_signature
 		or water_signature != _last_water_signature
-		or blocking_signature != _last_blocking_signature
-		or fence_signature != _last_fence_signature
+		or blocking_hard_signature != _last_blocking_hard_signature
 		or migrated
 	)
 	_last_wall_signature = wall_signature
 	_last_water_signature = water_signature
-	_last_blocking_signature = blocking_signature
-	_last_fence_signature = fence_signature
+	_last_blocking_hard_signature = blocking_hard_signature
 
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
@@ -91,7 +94,7 @@ func scan_buildings() -> void:
 	scan_special_layer(wallz, seen_spawners)
 	debug_telemetry.warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
 		"seen_spawners=%d" % seen_spawners.size())
-	debug_telemetry.log_scan_summary(seen_spawners, migrated, walls_changed)
+	debug_telemetry.log_scan_summary(seen_spawners, migrated, hard_topology_changed)
 
 	var spawners: Dictionary = _spawners()
 	for raw_spawner_cell: Variant in spawners.keys():
@@ -99,8 +102,12 @@ func scan_buildings() -> void:
 		if not seen_spawners.has(cell):
 			_manager._remove_missing_scanned_spawner(cell)
 
-	if walls_changed:
+	if hard_topology_changed:
+		# Fallback path only: authoritative placement/removal already marks topology on the
+		# event. resync_topology_signatures() (called at rebuild start) keeps this baseline
+		# current so one authoritative wall mutation cannot rebuild a second time here.
 		_manager.get_building_invalidation_controller().mark_after_building_scan_changed()
+		CppDebugOptions.dlog("[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=building_scan")
 
 
 func scan_special_layer(layer: TileMapLayer, _seen_spawners: Dictionary) -> void:
@@ -208,6 +215,56 @@ func tile_layer_signature(layer: TileMapLayer) -> int:
 		signature += int(cell.x * 73856093 + cell.y * 19349663)
 		signature += int(atlas.x * 83492791 + atlas.y * 2654435761)
 	return signature
+
+
+# Signature over only the HARD_TOPOLOGY cells of a placeable layer (blocking_buildings).
+# SPEED_ONLY / NONE cells (turrets, ronce, ...) are skipped, so their addition/removal
+# leaves this value unchanged and never triggers a walkability rebuild.
+func _hard_topology_signature(layer: TileMapLayer) -> int:
+	if not layer:
+		return 0
+	var building_objects: BuildingObjectManager = _building_object_manager()
+	var signature: int = 17
+	for raw_cell: Variant in layer.get_used_cells():
+		var cell: Vector2i = raw_cell as Vector2i
+		if not _cell_is_hard_topology(layer, cell, building_objects):
+			continue
+		var atlas: Vector2i = layer.get_cell_atlas_coords(cell)
+		signature += int(cell.x * 73856093 + cell.y * 19349663)
+		signature += int(atlas.x * 83492791 + atlas.y * 2654435761)
+	return signature
+
+
+func _cell_is_hard_topology(layer: TileMapLayer, cell: Vector2i, building_objects: BuildingObjectManager) -> bool:
+	var item_id: String = _blocking_cell_item_id(layer, cell, building_objects)
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id) if item_id != "" else {}
+	var impact: PlaceableNavImpact.Impact = PlaceableNavImpact.classify_for_layer(PlaceableNavImpact.LAYER_BLOCKING, item_def)
+	PlaceableNavImpact.debug_assert_not_hard(item_id, impact)
+	return impact == PlaceableNavImpact.Impact.HARD_TOPOLOGY
+
+
+# Prefer the authoritative BuildingObjectManager record (several item types can share an
+# atlas tile); fall back to atlas-based resolution for tiles it has not indexed.
+func _blocking_cell_item_id(layer: TileMapLayer, cell: Vector2i, building_objects: BuildingObjectManager) -> String:
+	if building_objects != null and building_objects.has_building(cell):
+		var building: Dictionary = building_objects.get_building(cell)
+		var recorded_id: String = str(building.get("item_id", ""))
+		if recorded_id != "":
+			return recorded_id
+	return ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+
+
+# Recompute and store the hard-topology baselines from the current tile state. Called at
+# the start of an authoritative topology rebuild so the next periodic scan sees no change
+# and cannot rebuild a second time for a mutation already handled by the event path.
+func resync_topology_signatures() -> void:
+	_last_wall_signature = tile_layer_signature(_wallz())
+	_last_water_signature = tile_layer_signature(_watersources())
+	_last_blocking_hard_signature = _hard_topology_signature(_blocking_buildings())
+
+
+func _building_object_manager() -> BuildingObjectManager:
+	return _manager.get_building_object_manager()
 
 
 func _atlas_key(atlas: Vector2i) -> String:

@@ -132,6 +132,9 @@ namespace godot
                                        const Rect2i &used,
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
         void apply_cell_speed_multipliers(ffcore::FlowField &target_field, const Rect2i &used) const;
+        // Reconcile the shared steering terrain-speed map (the single source of truth agents
+        // read) from this node's absolute-cell record. Order-independent seeding.
+        void seed_terrain_speed_to_steering() const;
         void apply_cell_speed_modifiers(ffcore::FlowField &target_field,
                                         const Rect2i &used,
                                         const std::vector<CellSpeedModifier> &modifiers) const;

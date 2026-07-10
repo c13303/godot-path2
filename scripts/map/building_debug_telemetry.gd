@@ -126,15 +126,15 @@ func should_warn_spawn_failure_key(warning_key: String) -> bool:
 	return true
 
 
-func log_scan_summary(seen_spawners: Dictionary, migrated: bool, walls_changed: bool) -> void:
+func log_scan_summary(seen_spawners: Dictionary, migrated: bool, hard_topology_changed: bool) -> void:
 	var plant_manager: Node = _manager.get_plant_manager()
 	var plant_count: int = int(plant_manager.call("size")) if plant_manager and plant_manager.has_method("size") else 0
-	var summary: String = "scan indexed_plants=%d spawners=%d registered_spawners=%d migrated=%s walls_changed=%s" % [
+	var summary: String = "scan indexed_plants=%d spawners=%d registered_spawners=%d migrated=%s hard_topology_changed=%s" % [
 		plant_count,
 		seen_spawners.size(),
 		_manager.registered_spawner_count(),
 		migrated,
-		walls_changed
+		hard_topology_changed
 	]
 	if summary == _last_scan_summary:
 		return

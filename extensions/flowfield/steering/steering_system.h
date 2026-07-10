@@ -91,6 +91,17 @@ namespace ffcore
         void set_grid(SpatialGrid *g);
         void set_default_flowfield(FlowField *f);
 
+        // Shared per-cell terrain speed modifiers (single source of truth for movement
+        // speed). Keyed by ABSOLUTE tilemap cell. The core knows nothing about what slows a
+        // cell (turret, ronce, fence, debris, ...): it only stores a generic 0.01..1.0
+        // multiplier and applies it to every agent, independent of which Flow Field the
+        // agent steers on. A live edit is therefore visible immediately to all active,
+        // queued and future fields, and a reset to 1.0 clears the slowdown at once. Missing
+        // key == 1.0 (full speed).
+        void set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier);
+        void clear_terrain_speed_multipliers();
+        double terrain_speed_multiplier_at(const Vec2i &abs_cell) const;
+
         void set_agent_manager(AgentManager *m) { agent_manager = m; }
 
         const AgentData *get_agent(int id) const;
@@ -268,6 +279,16 @@ namespace ffcore
 
         std::unordered_map<int, DirectionalCellField> directional_cell_fields;
         std::unordered_map<int, int> phase_directional_cell_fields;
+
+        struct Vec2iKeyHash
+        {
+            size_t operator()(const Vec2i &v) const noexcept
+            {
+                return (size_t(v.x) * 73856093u) ^ (size_t(v.y) * 19349663u);
+            }
+        };
+        // Absolute-cell -> speed multiplier (<1.0). Only slowed cells are stored.
+        std::unordered_map<Vec2i, double, Vec2iKeyHash> terrain_speed_by_cell;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;

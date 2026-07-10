@@ -312,6 +312,15 @@ func _refresh_cell_collision(cell: Vector2i) -> void:
 		blocked = true
 	ff.call("set_cell_blocked", cell, blocked)
 
+# Fences are hard navigation blockers only while they block client / merchant routing
+# (day, no active tantrum); at night monsters route through them and are merely slowed.
+# Placement / removal services query this to pick the right navigation impact for a fence.
+func fences_currently_block_navigation() -> bool:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("_fences_block_navigation"):
+		return bool(building_manager.call("_fences_block_navigation"))
+	return true
+
 func _notify_navigation_topology_changed(cell: Vector2i, reason: String) -> void:
 	var building_manager: Object = _resolve_building_manager()
 	if building_manager == null or not building_manager.has_method("get_building_invalidation_controller"):

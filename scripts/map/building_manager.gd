@@ -777,8 +777,13 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	if _building_item_blocks_player(item_id):
 		_set_player_cell_blocked(cell, true)
 	_sync_building_cell_speed(cell, item_id)
-	if _building_item_blocks_flow(item_id):
+	var impact: PlaceableNavImpact.Impact = _building_item_nav_impact(item_id)
+	var fences_block: bool = _fences_block_navigation()
+	if PlaceableNavImpact.requires_hard_topology(impact, fences_block):
 		_building_invalidation_controller.mark_after_blocking_building_added()
+		_log_nav_invalidation("building_added:%s" % item_id, cell)
+	elif PlaceableNavImpact.is_speed_only(impact, fences_block):
+		_log_nav_speed("building_added:%s" % item_id, cell)
 	# A turret or pasteque just appeared: re-check any agent already standing on the
 	# cell so a stationary agent still triggers the interaction (removal makes a cell
 	# non-interactive, so no invalidation is needed there).
@@ -792,9 +797,14 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 	if _building_item_blocks_player(item_id):
 		_set_player_cell_blocked(cell, false)
 	_sync_building_cell_speed(cell, item_id)
-	if _building_item_blocks_flow(item_id):
+	var impact: PlaceableNavImpact.Impact = _building_item_nav_impact(item_id)
+	var fences_block: bool = _fences_block_navigation()
+	if PlaceableNavImpact.requires_hard_topology(impact, fences_block):
 		_building_invalidation_controller.mark_after_blocking_building_removed()
 		notify_blocking_placeable_removed(cell)
+		_log_nav_invalidation("building_removed:%s" % item_id, cell)
+	elif PlaceableNavImpact.is_speed_only(impact, fences_block):
+		_log_nav_speed("building_removed:%s" % item_id, cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
 	_counter_stock_manager.clear_counter(cell)
@@ -811,8 +821,22 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 					_retarget_agent_or_escape(agent, spawner_cell)
 
 
-func _building_item_blocks_flow(item_id: String) -> bool:
-	return _building_navigation_sync.building_item_blocks_flow(item_id)
+# Authoritative navigation impact for a building item. Turrets and other speed-only items
+# classify as SPEED_ONLY (slowdown applied live, no rebuild); fences resolve by the current
+# phase at the call site via requires_hard_topology / is_speed_only.
+func _building_item_nav_impact(item_id: String) -> PlaceableNavImpact.Impact:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var impact: PlaceableNavImpact.Impact = PlaceableNavImpact.classify_item(item_def)
+	PlaceableNavImpact.debug_assert_not_hard(item_id, impact)
+	return impact
+
+
+func _log_nav_invalidation(source: String, cell: Vector2i) -> void:
+	CppDebugOptions.dlog("[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=%s cell=%s" % [source, str(cell)])
+
+
+func _log_nav_speed(source: String, cell: Vector2i) -> void:
+	CppDebugOptions.dlog("[NAV_SPEED] source=%s cell=%s new=%.2f" % [source, str(cell), _effective_cell_speed_multiplier(cell)])
 
 func _building_item_blocks_player(item_id: String) -> bool:
 	return _building_navigation_sync.building_item_blocks_player(item_id)
@@ -1315,6 +1339,14 @@ func get_spawn_playlist_config() -> SpawnPlaylistConfigService:
 
 func get_building_invalidation_controller() -> BuildingInvalidationController:
 	return _building_invalidation_controller
+
+
+func get_building_scan_service() -> BuildingScanService:
+	return _building_scan
+
+
+func get_building_object_manager() -> BuildingObjectManager:
+	return _get_building_object_manager()
 
 
 func get_agent_navigation_phase_controller() -> AgentNavigationPhaseController:

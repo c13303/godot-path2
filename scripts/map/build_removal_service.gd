@@ -104,19 +104,30 @@ func remove_tile(layer: TileMapLayer, cell: Vector2i, item_id: String = "") -> v
 		_notify_navigation_topology_changed(cell, "wall_removed")
 
 
+# True only when removing this tile is a genuine hard-topology change. Turrets and other
+# speed-only placeables return false: their slowdown is cleared live via
+# _refresh_cell_terrain_speed. Fences resolve by the current phase.
 func removed_tile_affects_navigation(layer: TileMapLayer, item_id: String) -> bool:
+	var layer_role: String = _nav_layer_role(layer)
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id) if item_id != "" else {}
+	var impact: PlaceableNavImpact.Impact = PlaceableNavImpact.classify_for_layer(layer_role, item_def)
+	return PlaceableNavImpact.requires_hard_topology(impact, _fences_block_navigation())
+
+
+func _nav_layer_role(layer: TileMapLayer) -> String:
 	if layer == _wallz():
-		return true
+		return PlaceableNavImpact.LAYER_WALLZ
 	if layer == _fences():
-		return true
-	if layer != _blocking_buildings():
-		return false
-	if item_id == "":
-		return true
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if bool(item_def.get("blocks_agents", false)):
-		return true
-	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
+		return PlaceableNavImpact.LAYER_FENCES
+	if layer == _blocking_buildings():
+		return PlaceableNavImpact.LAYER_BLOCKING
+	return "other"
+
+
+func _fences_block_navigation() -> bool:
+	if _manager != null and _manager.has_method("fences_currently_block_navigation"):
+		return bool(_manager.call("fences_currently_block_navigation"))
+	return true
 
 
 func clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2i) -> void:

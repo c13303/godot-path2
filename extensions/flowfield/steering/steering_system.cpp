@@ -82,8 +82,16 @@ static inline double terrain_speed_multiplier_for_agent(const AgentData &a, Flow
 {
     if (!nav)
         return 1.0;
-    Vec2i cell = nav->world_to_cell(agent_foot_point(a));
-    return nav->cell_speed_multiplier(cell);
+    SteeringSystem *sys = g_steering;
+    if (!sys)
+        return 1.0;
+    // Read the shared per-cell modifier by ABSOLUTE tilemap cell (field-relative cell plus
+    // the field's origin). This is the single source of truth, so a live speed edit reaches
+    // agents regardless of which (active/queued/newly-built) Flow Field they steer on, and
+    // stale multipliers baked into an in-flight field are never observed.
+    Vec2i rel = nav->world_to_cell(agent_foot_point(a));
+    const Vec2i &origin = nav->get_cell_origin();
+    return sys->terrain_speed_multiplier_at(Vec2i(rel.x + origin.x, rel.y + origin.y));
 }
 
 static inline Vec2 terrain_scaled_step(const AgentData &a, FlowField *nav, const Vec2 &velocity, double delta)
@@ -261,6 +269,24 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }                    // Définit la grille spatiale
+
+void SteeringSystem::set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier)
+{
+    // Store only genuine slowdowns; anything at (or above) full speed clears the entry so
+    // a reset to 1.0 removes the modifier immediately for every agent.
+    if (!std::isfinite(multiplier) || multiplier >= 0.999)
+        terrain_speed_by_cell.erase(abs_cell);
+    else
+        terrain_speed_by_cell[abs_cell] = std::clamp(multiplier, 0.01, 1.0);
+}
+
+void SteeringSystem::clear_terrain_speed_multipliers() { terrain_speed_by_cell.clear(); }
+
+double SteeringSystem::terrain_speed_multiplier_at(const Vec2i &abs_cell) const
+{
+    auto it = terrain_speed_by_cell.find(abs_cell);
+    return it == terrain_speed_by_cell.end() ? 1.0 : it->second;
+}
 
 void SteeringSystem::set_agent_group(int id, GroupID group)
 {

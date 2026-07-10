@@ -146,6 +146,9 @@ func _start_runtime_walkability_rebuild() -> void:
 		return
 	clear_navigation_topology_dirty()
 	clear_plant_layout_dirty()
+	# Capture the tile state we are about to rebuild for, so the next periodic scan sees a
+	# matching baseline and does not re-trigger a second rebuild for this same mutation.
+	_manager.get_building_scan_service().resync_topology_signatures()
 	_runtime_rebuild_active = true
 	_runtime_rebuild_id += 1
 	# Remember that gardens were built so an aborted run still rebuilds them on the
@@ -195,6 +198,9 @@ func _apply_walkability_topology_rebuild() -> void:
 		return
 	clear_navigation_topology_dirty()
 	clear_plant_layout_dirty()
+	# Keep the periodic scan's baseline in sync with the tiles we rebuild for so it does
+	# not re-detect this mutation and rebuild again (see resync_topology_signatures).
+	_manager.get_building_scan_service().resync_topology_signatures()
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
 	_manager._rebuild_walkable_map_cache()

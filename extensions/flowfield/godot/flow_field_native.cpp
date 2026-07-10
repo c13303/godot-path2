@@ -145,6 +145,13 @@ void FlowFieldNative::set_cell_speed_multiplier(Vector2i map_cell, double multip
     else
         cell_speed_multipliers[map_cell] = std::clamp(multiplier, 0.01, 1.0);
 
+    // Authoritative live speed: the shared steering map (keyed by absolute cell) is what
+    // every agent reads, so this edit is felt immediately on all active group flow fields
+    // and cannot be overwritten by a stale in-flight async field. The per-field bake below
+    // is kept only for legacy field-local queries; steering no longer reads it.
+    if (ffcore::SteeringSystem *sys = ffcore::get_global_steering_system())
+        sys->set_terrain_speed_multiplier(ffcore::Vec2i(map_cell.x, map_cell.y), multiplier);
+
     ffcore::Vec2i rel(map_cell.x - field.get_cell_origin().x, map_cell.y - field.get_cell_origin().y);
     if (field.width() > 0 && field.height() > 0)
         field.set_cell_speed_multiplier(rel, multiplier);
@@ -152,6 +159,8 @@ void FlowFieldNative::set_cell_speed_multiplier(Vector2i map_cell, double multip
 void FlowFieldNative::clear_cell_speed_multipliers()
 {
     cell_speed_multipliers.clear();
+    if (ffcore::SteeringSystem *sys = ffcore::get_global_steering_system())
+        sys->clear_terrain_speed_multipliers();
     if (field.width() <= 0 || field.height() <= 0)
         return;
     for (int y = 0; y < field.height(); ++y)
@@ -205,6 +214,7 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     field.first_is_arrived = false;
     field.arrived_count = 0;
     apply_cell_speed_multipliers(field, used);
+    seed_terrain_speed_to_steering();
 
     Vector2 goal_local = floor_layer->to_local(goal_world);
     goal_cell = floor_layer->local_to_map(goal_local);
@@ -222,6 +232,19 @@ void FlowFieldNative::apply_cell_speed_multipliers(ffcore::FlowField &target_fie
         ffcore::Vec2i rel(cell.x - used.position.x, cell.y - used.position.y);
         target_field.set_cell_speed_multiplier(rel, entry.second);
     }
+}
+
+void FlowFieldNative::seed_terrain_speed_to_steering() const
+{
+    ffcore::SteeringSystem *sys = ffcore::get_global_steering_system();
+    if (!sys)
+        return;
+    // Rebuild the shared map from this node's absolute-cell record. Covers the case where
+    // the initial bulk speed sync ran before the steering system existed; live edits keep
+    // both in sync afterwards. Main-thread only, so no agent reads mid-reconcile.
+    sys->clear_terrain_speed_multipliers();
+    for (const auto &entry : cell_speed_multipliers)
+        sys->set_terrain_speed_multiplier(ffcore::Vec2i(entry.first.x, entry.first.y), entry.second);
 }
 
 void FlowFieldNative::apply_cell_speed_modifiers(ffcore::FlowField &target_field,
@@ -513,6 +536,7 @@ void FlowFieldNative::compute_distance_field_global()
     field.set_tile_size(tile_size);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
     apply_cell_speed_multipliers(field, used);
+    seed_terrain_speed_to_steering();
 
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;

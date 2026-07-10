@@ -50,17 +50,6 @@ func sync_flow_extra_blocking_cells() -> void:
 		flow.call("set_fence_blocking_cells", fence_cells)
 
 
-func building_item_blocks_flow(item_id: String) -> bool:
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if item_def.is_empty():
-		return false
-	if bool(item_def.get("blocks_agents", false)):
-		return true
-	if str(item_def.get("target_layer", "")) != "blocking_buildings":
-		return false
-	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
-
-
 func building_item_blocks_player(item_id: String) -> bool:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if item_def.is_empty():
