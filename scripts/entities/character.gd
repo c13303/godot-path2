@@ -60,19 +60,35 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
-# monster.png is a 4-frame horizontal spritesheet. Live monsters use frame 0
-# (idle), frame 1 (eating), and frame 3 (drowning); the separate corpse scene
-# uses frame 2.
+# New basic monster sheets use a 6-frame horizontal layout:
+# south / east / north / eating / unused legacy slot / drowning.
+const MONSTER_DIRECTIONAL_FRAME_COUNT: int = 6
+const MONSTER_FRAME_SOUTH: int = 0
+const MONSTER_FRAME_EAST: int = 1
+const MONSTER_FRAME_NORTH: int = 2
+const MONSTER_FRAME_ROSE_EATING: int = 3
+const MONSTER_FRAME_WATER_DROWNING: int = 5
+const FACING_CHANGE_MIN_SECONDS: float = 0.14
+const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
+
+# Legacy 4-frame sheets are kept for older monster/client/merchant textures.
 const MONSTER_FRAME_IDLE: int = 0
 const MONSTER_FRAME_EATING: int = 1
 const MONSTER_FRAME_DROWNING: int = 3
 const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
+var _facing_frame: int = MONSTER_FRAME_SOUTH
+var _facing_west: bool = false
+var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
+var _last_facing_position: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
 	health = max(1, max_health)
 	_setup_flash_material()
+	_facing_state.min_change_interval = FACING_CHANGE_MIN_SECONDS
+	_facing_state.diagonal_hysteresis_ratio = FACING_DIAGONAL_HYSTERESIS_RATIO
+	_last_facing_position = global_position
 	queue_redraw()
 	if use_native_steering:
 		set_physics_process(false)
@@ -83,7 +99,9 @@ func _process(delta: float) -> void:
 		return
 	_process_damage_flash(delta)
 	_process_eating_status(delta)
+	_update_directional_facing(delta)
 	_update_monster_frame()
+	_last_facing_position = global_position
 
 func take_damage(amount: int) -> bool:
 	if _dead or amount <= 0:
@@ -130,19 +148,52 @@ func _process_damage_flash(delta: float) -> void:
 func _update_monster_frame() -> void:
 	if not is_instance_valid(_monster_sprite):
 		return
-	var frame: int = MONSTER_FRAME_IDLE
+	var frame: int = _directional_idle_frame() if _uses_directional_monster_frames() else MONSTER_FRAME_IDLE
+	var flip_h: bool = _uses_directional_monster_frames() and _facing_west
 	if status == "angry":
 		frame = CLIENT_FRAME_ANGRY
+		flip_h = false
 	elif status == "eating":
-		frame = MONSTER_FRAME_EATING
+		frame = MONSTER_FRAME_ROSE_EATING if _uses_directional_monster_frames() else MONSTER_FRAME_EATING
+		flip_h = false
 	elif status == "flow_out" and _is_client_agent() and bool(get_meta("client_rose_visible", false)):
 		# The carry-rose frame waits until the rose flown from the counter pile has
 		# actually reached the client (building_manager sets client_rose_visible on arrival).
 		frame = MONSTER_FRAME_EATING
+		flip_h = false
 	elif status == "drowning":
-		frame = MONSTER_FRAME_DROWNING
+		frame = MONSTER_FRAME_WATER_DROWNING if _uses_directional_monster_frames() else MONSTER_FRAME_DROWNING
+		flip_h = false
 	if _monster_sprite.frame != frame:
 		_monster_sprite.frame = frame
+	if _monster_sprite.flip_h != flip_h:
+		_monster_sprite.flip_h = flip_h
+
+
+func _update_directional_facing(delta: float) -> void:
+	if not _uses_directional_monster_frames():
+		return
+	var direction: Vector2 = global_position - _last_facing_position
+	if not _facing_state.face_direction(direction, delta):
+		return
+	if _facing_state.get_axis() == DirectionalFacingState.AXIS_X:
+		_facing_frame = MONSTER_FRAME_EAST
+		_facing_west = _facing_state.get_sign() == DirectionalFacingState.SIGN_NEGATIVE
+	else:
+		_facing_frame = MONSTER_FRAME_NORTH if _facing_state.get_sign() == DirectionalFacingState.SIGN_NEGATIVE else MONSTER_FRAME_SOUTH
+		_facing_west = false
+
+
+func _directional_idle_frame() -> int:
+	return _facing_frame
+
+
+func _uses_directional_monster_frames() -> bool:
+	return _is_monster_agent() and is_instance_valid(_monster_sprite) and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+
+
+func _is_monster_agent() -> bool:
+	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"monster"
 
 
 func _is_client_agent() -> bool:

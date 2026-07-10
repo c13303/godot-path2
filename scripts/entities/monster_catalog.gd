@@ -40,7 +40,7 @@ static func _make_basic() -> MonsterData:
 	data.id = BASIC_ID
 	data.display_name = "Monster"
 	data.texture = BASIC_TEXTURE
-	data.sprite_hframes = 4
+	data.sprite_hframes = 6
 	data.sprite_scale = Vector2(0.75, 0.75)
 	data.sprite_offset = Vector2(0.0, -16.0)
 	data.max_health = 100

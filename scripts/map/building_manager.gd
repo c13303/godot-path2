@@ -2044,11 +2044,12 @@ func skip_current_night_for_dev() -> bool:
 	return true
 
 
-# Monster death uses the same authoritative owner that created and routed monsters.
+# Monster removal uses the same authoritative owner that created and routed agents.
 # Clear every phase/index before unregistering the native agent so no deferred
-# garden work can retain or later re-route a dead nav_id.
-func remove_dead_monster(agent: Node2D, spawn_corpse: bool = true) -> void:
-	_monster_death.remove_dead_monster(agent, spawn_corpse)
+# garden work can retain or later re-route a dead nav_id. The second argument is
+# retained for old positional calls and is ignored.
+func remove_dead_monster(agent: Node2D, _legacy_spawn_visual: bool = true) -> void:
+	_monster_death.remove_dead_monster(agent, false)
 
 
 func _clear_removed_agent_state(nav_id: int) -> void:

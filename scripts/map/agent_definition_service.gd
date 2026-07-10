@@ -31,8 +31,7 @@ func resolve_monster_scene(monster_type: StringName) -> PackedScene:
 
 # Apply a MonsterData bible entry to a freshly instantiated monster agent: swaps the
 # sprite, sets health, and stashes the per-agent stat overrides as metadata that the
-# native agent manager reads in spawn_agent (speed/crowd/smash scales). The
-# "monster_type" meta is also kept so the corpse can reuse the same sprite.
+# native agent manager reads in spawn_agent (speed/crowd/smash scales).
 func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set_meta("monster_type", monster_type)
 	var data: MonsterData = MonsterCatalog.get_monster(monster_type)

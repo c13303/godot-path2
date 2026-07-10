@@ -84,7 +84,7 @@ func restore_state(data: Dictionary) -> void:
 			_agent.start_eating(_eat_timer)
 		&"moving_to_debris", &"returning_idle":
 			if _target_cell != INVALID_CELL and _assign_path_to(_target_cell):
-				_agent.start_walking_to(_manager.cell_center(_target_cell) - _agent.global_position)
+				_start_agent_walking_to_target()
 			else:
 				_stop_at_idle()
 		_:
@@ -161,10 +161,12 @@ func _process_day(delta: float) -> void:
 		if not _is_debris_cell(_target_cell):
 			_pick_next_day_target()
 			return
+		_sync_agent_walk_direction_to_target()
 		if _agent_path_arrived():
 			_start_eating_target()
 		return
 	if _state == &"returning_idle":
+		_sync_agent_walk_direction_to_target()
 		if _agent_path_arrived():
 			_stop_at_idle()
 		return
@@ -173,6 +175,7 @@ func _process_day(delta: float) -> void:
 
 func _process_night() -> void:
 	if _state == &"returning_idle":
+		_sync_agent_walk_direction_to_target()
 		if _agent_path_arrived():
 			_stop_at_idle()
 		return
@@ -190,7 +193,7 @@ func _pick_next_day_target() -> void:
 		if _assign_path_to(debris_cell):
 			_target_cell = debris_cell
 			_state = &"moving_to_debris"
-			_agent.start_walking_to(_manager.cell_center(debris_cell) - _agent.global_position)
+			_start_agent_walking_to_target()
 			return
 		_unreachable_debris[debris_cell] = true
 	_send_to_idle()
@@ -205,7 +208,7 @@ func _send_to_idle() -> void:
 	if _assign_path_to(_idle_cell):
 		_target_cell = _idle_cell
 		_state = &"returning_idle"
-		_agent.start_walking_to(_manager.cell_center(_idle_cell) - _agent.global_position)
+		_start_agent_walking_to_target()
 
 
 func _stop_at_idle() -> void:
@@ -240,6 +243,18 @@ func _finish_eating() -> void:
 		Sfx.play_sound(&"crunsh")
 		_spawn_debris_reward_gems(reward_position)
 	_pick_next_day_target()
+
+
+func _start_agent_walking_to_target() -> void:
+	if not is_instance_valid(_agent) or _target_cell == INVALID_CELL:
+		return
+	_agent.start_walking_to(_manager.cell_center(_target_cell) - _agent.global_position)
+
+
+func _sync_agent_walk_direction_to_target() -> void:
+	if not is_instance_valid(_agent) or _target_cell == INVALID_CELL:
+		return
+	_agent.set_walk_direction(_manager.cell_center(_target_cell) - _agent.global_position)
 
 
 func _spawn_debris_reward_gems(world_position: Vector2) -> void:

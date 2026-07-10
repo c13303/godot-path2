@@ -12,8 +12,9 @@ class_name MonsterData
 @export var display_name: String = ""
 
 @export_group("Sprite")
-## Horizontal spritesheet, same 4-frame layout as monster.png
-## (idle / eating / corpse / drowning). See character.gd MONSTER_FRAME_* consts.
+## Horizontal spritesheet frame count. New basic monsters use 6 frames:
+## south / east / north / eating / unused legacy slot / drowning.
+## Legacy 4-frame monster sheets are still supported by character.gd.
 @export var texture: Texture2D
 @export var sprite_hframes: int = 4
 @export var sprite_scale: Vector2 = Vector2(0.75, 0.75)

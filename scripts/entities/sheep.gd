@@ -11,20 +11,22 @@ const ROW_NORTH: int = 2
 const ROW_EAT: int = 4
 const WALK_FRAME_COUNT: int = 4
 const FRAME_SECONDS: float = 0.16
-const FACING_MOVEMENT_MIN_DISTANCE_SQUARED: float = 0.25
+const FACING_CHANGE_MIN_SECONDS: float = 0.14
+const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
 var _agent_manager: Node
 var _nav_id: int = -1
 var _is_propelled: bool = false
 var _controls_impaired: bool = false
 var _velocity_len: float = 0.0
-var _last_global_position: Vector2 = Vector2.ZERO
 var _paused: bool = false
 var _status: StringName = &"idle"
 var _facing_row: int = ROW_SOUTH
 var _facing_west: bool = false
 var _frame_time: float = 0.0
 var _anim_frame: int = 0
+var _walk_direction: Vector2 = Vector2.ZERO
+var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
 
 @export var max_speed: float = 100.0
 @export var drownable: bool = false
@@ -39,18 +41,16 @@ var nav_id: int = -1:
 
 func _ready() -> void:
 	set_physics_process(false)
-	_last_global_position = global_position
+	_facing_state.min_change_interval = FACING_CHANGE_MIN_SECONDS
+	_facing_state.diagonal_hysteresis_ratio = FACING_DIAGONAL_HYSTERESIS_RATIO
 	_apply_sprite_frame()
 
 
 func _process(delta: float) -> void:
 	z_index = int(position.y)
-	var current_position: Vector2 = global_position
 	if _paused:
-		_last_global_position = current_position
 		return
-	_update_facing_from_movement(current_position)
-	_last_global_position = current_position
+	_update_facing_from_walk_intent(delta)
 	_update_animation(delta)
 
 
@@ -72,6 +72,7 @@ func set_velocity_len(value: float) -> void:
 
 func start_idle() -> void:
 	_status = &"idle"
+	_walk_direction = Vector2.ZERO
 	_anim_frame = 0
 	_set_phase(PHASE_NONE)
 	_apply_sprite_frame()
@@ -79,8 +80,14 @@ func start_idle() -> void:
 
 func start_walking_to(direction: Vector2) -> void:
 	_status = &"walking"
-	_set_facing_direction(direction)
+	set_walk_direction(direction, true)
 	_set_phase(PHASE_ASTAR_IN)
+
+
+func set_walk_direction(direction: Vector2, immediate: bool = false) -> void:
+	_walk_direction = direction
+	if immediate:
+		_apply_facing_direction(direction, 0.0, true)
 
 
 func start_eating(seconds: float) -> void:
@@ -114,25 +121,22 @@ func _update_animation(delta: float) -> void:
 	_apply_sprite_frame()
 
 
-func _set_facing_direction(direction: Vector2) -> void:
-	if direction.length_squared() <= 0.000001:
+func _apply_facing_direction(direction: Vector2, delta: float, immediate: bool = false) -> void:
+	if not _facing_state.face_direction(direction, delta, immediate):
 		return
-	if absf(direction.x) >= absf(direction.y):
+	if _facing_state.get_axis() == DirectionalFacingState.AXIS_X:
 		_facing_row = ROW_EAST
-		_facing_west = direction.x < 0.0
+		_facing_west = _facing_state.get_sign() == DirectionalFacingState.SIGN_NEGATIVE
 	else:
-		_facing_row = ROW_NORTH if direction.y < 0.0 else ROW_SOUTH
+		_facing_row = ROW_NORTH if _facing_state.get_sign() == DirectionalFacingState.SIGN_NEGATIVE else ROW_SOUTH
 		_facing_west = false
 	_apply_sprite_frame()
 
 
-func _update_facing_from_movement(current_position: Vector2) -> void:
+func _update_facing_from_walk_intent(delta: float) -> void:
 	if _status != &"walking":
 		return
-	var movement: Vector2 = current_position - _last_global_position
-	if movement.length_squared() <= FACING_MOVEMENT_MIN_DISTANCE_SQUARED:
-		return
-	_set_facing_direction(movement)
+	_apply_facing_direction(_walk_direction, delta)
 
 
 func _apply_sprite_frame() -> void:

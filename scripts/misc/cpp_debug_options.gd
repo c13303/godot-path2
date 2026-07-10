@@ -393,7 +393,7 @@ func _refill_dev_water_reserve() -> void:
 		progression.call("update_value", &"water_reserve", maximum - current, 0, maximum)
 
 
-## When night is active, removes every monster (no corpse/drop) and flips back to
+## When night is active, removes every monster (no death drop) and flips back to
 ## day. No-op during daytime. Uses the same authoritative despawn path as combat
 ## deaths so native agents are unregistered cleanly.
 func _end_dev_night() -> void:
