@@ -59,20 +59,30 @@ var _atlas_source_id: int = -1
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
 var _building_manager: Object = null
-var _build_preview: BuildPreviewController = BuildPreviewController.new()
-var _placement_service: BuildPlacementService = BuildPlacementService.new()
-var _removal_service: BuildRemovalService = BuildRemovalService.new()
-var _drag_controller: BuildDragController = BuildDragController.new()
-var _input_controller: BuildInputController = BuildInputController.new()
-var _build_mode_state: BuildModeStateController = BuildModeStateController.new()
+var _build_preview: BuildPreviewController = null
+var _placement_service: BuildPlacementService = null
+var _removal_service: BuildRemovalService = null
+var _drag_controller: BuildDragController = null
+var _input_controller: BuildInputController = null
+var _build_mode_state: BuildModeStateController = null
+var _controllers_ready: bool = false
 
 var _plant_layer_flush_queued: bool = false
 var _build_fx_pool: Array[Node2D] = []
 var _build_fx_pool_cursor: int = 0
 
+func _enter_tree() -> void:
+	set_process(false)
+	set_process_input(false)
+
 func _ready() -> void:
+	set_process(false)
+	set_process_input(false)
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
+	if not _create_controllers():
+		push_error("BuildSystem failed to create build controllers; build input is disabled.")
+		return
 	_placement_service.setup(self)
 	_removal_service.setup(self)
 	_build_preview.setup(self)
@@ -89,9 +99,32 @@ func _ready() -> void:
 	_configure_preview_layer()
 	_sync_terrain_speed_cells()
 	_preload_build_fx_pool()
+	_controllers_ready = true
 	set_process(true)
 	set_process_input(true)
 	GameState.mode_changed.connect(_on_game_mode_changed)
+
+func _create_controllers() -> bool:
+	if _build_preview == null:
+		_build_preview = BuildPreviewController.new()
+	if _placement_service == null:
+		_placement_service = BuildPlacementService.new()
+	if _removal_service == null:
+		_removal_service = BuildRemovalService.new()
+	if _drag_controller == null:
+		_drag_controller = BuildDragController.new()
+	if _input_controller == null:
+		_input_controller = BuildInputController.new()
+	if _build_mode_state == null:
+		_build_mode_state = BuildModeStateController.new()
+	return (
+		_build_preview != null
+		and _placement_service != null
+		and _removal_service != null
+		and _drag_controller != null
+		and _input_controller != null
+		and _build_mode_state != null
+	)
 
 # floor/watersources/wallz belong to the loaded level (see LevelLoader) and are
 # injected into MonTilemap before any _ready runs, so they are resolved by path
@@ -120,9 +153,13 @@ func _on_game_mode_changed(is_night: bool) -> void:
 # input routing (mouse/keyboard press/release/motion/wheel, hover preview dispatch,
 # and the per-frame drag tick).
 func _process(delta: float) -> void:
+	if not _controllers_ready or _input_controller == null:
+		return
 	_input_controller.process(delta)
 
 func _input(event: InputEvent) -> void:
+	if not _controllers_ready or _input_controller == null:
+		return
 	_input_controller.input(event)
 
 # Narrow wrappers exposed to BuildInputController so it can route input without owning

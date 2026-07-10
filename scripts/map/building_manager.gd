@@ -1345,10 +1345,6 @@ func get_building_scan_service() -> BuildingScanService:
 	return _building_scan
 
 
-func get_building_object_manager() -> BuildingObjectManager:
-	return _get_building_object_manager()
-
-
 func get_agent_navigation_phase_controller() -> AgentNavigationPhaseController:
 	return _agent_navigation_phases as AgentNavigationPhaseController
 
