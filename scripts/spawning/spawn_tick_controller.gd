@@ -150,6 +150,8 @@ func process(delta: float, playlist_enabled: bool) -> void:
 		return
 	if not _manager._night_preparation_ready:
 		return
+	if _manager.is_night_start_cutscene_active():
+		return
 	var t_mc: int = Time.get_ticks_usec()
 	var mc: int = _manager._monster_count()
 	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)

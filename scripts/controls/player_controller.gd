@@ -44,6 +44,7 @@ const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 var global_config_node: Node = null
 var _paused: bool = false
 var _pause_hold_count: int = 0
+var _cutscene_input_locked: bool = false
 var _mouse_was_locked_before_pause: bool = false
 var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
@@ -79,6 +80,8 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if _startup_loading_active():
 		get_viewport().set_input_as_handled()
+		return
+	if _cutscene_input_locked:
 		return
 
 	if event is InputEventJoypadButton:
@@ -166,6 +169,11 @@ func _input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	if _startup_loading_active():
+		return
+	if _cutscene_input_locked:
+		_update_player_input(delta)
+		_update_gun_fire(delta)
+		_update_lance_sprite()
 		return
 
 	_update_toolbuild_equip_cursor()
@@ -305,7 +313,7 @@ func _step_pad_shop_selection(direction: int) -> void:
 		toolbuild.call("step_pad_selection", direction)
 
 func _handle_pad_accept() -> void:
-	if _paused or _is_inventory_open():
+	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
 	if toolbuild != null and toolbuild.has_method("activate_pad_selection") and bool(toolbuild.call("activate_pad_selection")):
 		return
@@ -313,7 +321,7 @@ func _handle_pad_accept() -> void:
 		build_system.call("pad_place_selected_at_cursor")
 
 func _handle_pad_cancel() -> void:
-	if _paused or _is_inventory_open():
+	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
 	if not _build_controls_active() or build_system == null:
 		return
@@ -330,7 +338,7 @@ func _handle_pad_cancel_released() -> void:
 		build_system.call("pad_finish_remove_drag")
 
 func _handle_pad_rotate_build() -> void:
-	if _paused or _is_inventory_open():
+	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
 	if not _build_controls_active() or build_system == null:
 		return
@@ -367,7 +375,7 @@ func _update_gun_fire(delta: float) -> void:
 	var pad_aim: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	var direction: Vector2 = pad_aim if _control_mode == INPUT_MODE_PAD else get_global_mouse_position() - origin
 	var weapon_id: String = ""
-	var trigger_allowed: bool = not _paused and not _is_inventory_open()
+	var trigger_allowed: bool = not _paused and not _cutscene_input_locked and not _is_inventory_open()
 	if _control_mode == INPUT_MODE_PAD:
 		trigger_allowed = trigger_allowed and pad_aim != Vector2.ZERO
 	else:
@@ -547,7 +555,7 @@ func _update_player_input(delta: float) -> void:
 		return
 
 	var dir: Vector2 = Vector2.ZERO
-	if not _paused:
+	if not _paused and not _cutscene_input_locked:
 		if _is_any_key_pressed([KEY_Z, KEY_W, KEY_UP]):
 			dir.y -= 1.0
 		if _is_any_key_pressed([KEY_S, KEY_DOWN]):
@@ -564,7 +572,7 @@ func _update_player_input(delta: float) -> void:
 
 	var shift_pressed: bool = _is_any_key_pressed([KEY_SHIFT])
 	var rush_started: bool = false
-	if _paused:
+	if _paused or _cutscene_input_locked:
 		_stop_rush()
 	elif shift_pressed and not _rush_shift_was_pressed and not _rush_active:
 		var start_direction: Vector2 = dir if dir.length_squared() > 0.0 else _last_move_direction
@@ -772,6 +780,14 @@ func set_paused(paused: bool) -> void:
 	_toggle_units_visible(not _paused)
 	if pause_overlay:
 		pause_overlay.set_paused(_paused)
+
+func set_cutscene_input_locked(locked: bool) -> void:
+	if _cutscene_input_locked == locked:
+		return
+	_cutscene_input_locked = locked
+	if locked:
+		_stop_rush()
+		_right_stick_weapon_active = false
 
 func is_paused() -> bool:
 	return _paused

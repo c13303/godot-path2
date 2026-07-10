@@ -1,6 +1,6 @@
 # AGENTS.md
 
-For every task: do not guess. Ask if unsure.
+For every task: do not guess. Ask if unsure.  Dedicated ownership for files.
 
 Prefer simple, readable, production-oriented code.
 

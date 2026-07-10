@@ -90,6 +90,35 @@ func has_pending_spawners() -> bool:
 	return not _client_sale_pending_spawners.is_empty()
 
 
+func get_initial_reveal_spawner_cells() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	var seen: Dictionary = {}
+	for spawner_cell: Vector2i in _client_sale_pending_spawners:
+		if seen.has(spawner_cell):
+			continue
+		if float(_client_sale_spawn_timers.get(spawner_cell, 0.0)) > 0.0:
+			continue
+		seen[spawner_cell] = true
+		cells.append(spawner_cell)
+	return cells
+
+
+func spawn_revealed_client_from_spawner(spawner_cell: Vector2i) -> bool:
+	if not _client_sale_active:
+		return false
+	for index: int in range(_client_sale_pending_spawners.size() - 1, -1, -1):
+		if _client_sale_pending_spawners[index] != spawner_cell:
+			continue
+		if not _manager.spawn_client_from_spawner(spawner_cell):
+			_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+			return false
+		_client_sale_pending_spawners.remove_at(index)
+		var client_frequency_by_cell: Dictionary = _manager.client_frequency_by_cell()
+		_client_sale_spawn_timers[spawner_cell] = maxf(0.0, float(client_frequency_by_cell.get(spawner_cell, 1.0)))
+		return true
+	return false
+
+
 func activate() -> void:
 	if GameState.is_night:
 		return
@@ -118,6 +147,8 @@ func activate() -> void:
 
 func process(delta: float) -> void:
 	if GameState.is_night or not _client_sale_active:
+		return
+	if _manager.is_client_reveal_cutscene_active():
 		return
 	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
 	var client_counter_agents: Dictionary = _manager.client_counter_agents()

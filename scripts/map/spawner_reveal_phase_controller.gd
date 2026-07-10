@@ -1,0 +1,128 @@
+extends RefCounted
+class_name SpawnerRevealPhaseController
+
+const REVEAL_CONTEXT_NIGHT: StringName = &"night"
+const REVEAL_CONTEXT_CLIENTS: StringName = &"clients"
+const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+
+var _manager: BuildingManager
+var _cutscene: SpawnerRevealCutsceneController
+var _night_reveal_active: bool = false
+var _client_reveal_active: bool = false
+
+
+func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) -> void:
+	_manager = manager
+	_cutscene = cutscene
+	if not _cutscene.reveal_item.is_connected(_on_cutscene_reveal_item):
+		_cutscene.reveal_item.connect(_on_cutscene_reveal_item)
+	if not _cutscene.completed.is_connected(_on_cutscene_completed):
+		_cutscene.completed.connect(_on_cutscene_completed)
+
+
+func begin_night_reveal() -> bool:
+	var playlist: SpawnPlaylistController = _manager.get_spawn_playlist_controller()
+	var reveal_items: Array[Dictionary] = _night_reveal_items(playlist.get_initial_ready_spawn_requests())
+	_night_reveal_active = not reveal_items.is_empty()
+	if _cutscene.begin(REVEAL_CONTEXT_NIGHT, reveal_items):
+		return true
+	_night_reveal_active = false
+	return false
+
+
+func begin_client_reveal() -> bool:
+	var client_sale: ClientSaleController = _manager.get_client_sale_controller()
+	var reveal_items: Array[Dictionary] = _client_reveal_items(client_sale.get_initial_reveal_spawner_cells())
+	_client_reveal_active = not reveal_items.is_empty()
+	if _cutscene.begin(REVEAL_CONTEXT_CLIENTS, reveal_items):
+		return true
+	_client_reveal_active = false
+	return false
+
+
+func abort_night_reveal() -> void:
+	if _cutscene.is_active_context(REVEAL_CONTEXT_NIGHT):
+		_cutscene.abort()
+	_night_reveal_active = false
+
+
+func abort_client_reveal() -> void:
+	if _cutscene.is_active_context(REVEAL_CONTEXT_CLIENTS):
+		_cutscene.abort()
+	_client_reveal_active = false
+
+
+func night_reveal_active() -> bool:
+	return _night_reveal_active
+
+
+func client_reveal_active() -> bool:
+	return _client_reveal_active
+
+
+func _on_cutscene_reveal_item(context: StringName, _item_index: int, item: Dictionary) -> void:
+	match context:
+		REVEAL_CONTEXT_NIGHT:
+			_spawn_night_reveal_item(item)
+		REVEAL_CONTEXT_CLIENTS:
+			_spawn_client_reveal_item(item)
+
+
+func _on_cutscene_completed(context: StringName, release_spawning: bool) -> void:
+	if not release_spawning:
+		return
+	match context:
+		REVEAL_CONTEXT_NIGHT:
+			_night_reveal_active = false
+			_manager.on_night_reveal_finished()
+		REVEAL_CONTEXT_CLIENTS:
+			_client_reveal_active = false
+
+
+func _night_reveal_items(requests: Array[Dictionary]) -> Array[Dictionary]:
+	var items: Array[Dictionary] = []
+	for request: Dictionary in requests:
+		var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
+		if cell == INVALID_CELL:
+			continue
+		var item: Dictionary = request.duplicate()
+		item["world_position"] = _manager.cell_center(cell)
+		items.append(item)
+	return items
+
+
+func _client_reveal_items(spawner_cells: Array[Vector2i]) -> Array[Dictionary]:
+	var items: Array[Dictionary] = []
+	for cell: Vector2i in spawner_cells:
+		if cell == INVALID_CELL:
+			continue
+		items.append({
+			"spawner_cell": cell,
+			"world_position": _manager.cell_center(cell),
+		})
+	return items
+
+
+func _spawn_night_reveal_item(item: Dictionary) -> bool:
+	if not GameState.is_night:
+		return false
+	var cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
+	if cell == INVALID_CELL or not _manager.get_spawners().has(cell):
+		_manager.report_playlist_spawn_result(item, false, "physical spawner cell is missing")
+		return false
+	var monster_type: StringName = StringName(str(item.get("monster_type", "basic")))
+	var spawned: bool = _manager.spawn_monster_from_spawner(cell, monster_type)
+	if spawned:
+		_manager.report_playlist_spawn_result(item, true)
+	else:
+		_manager.report_playlist_spawn_result(item, false, _manager.last_spawn_failure())
+	return spawned
+
+
+func _spawn_client_reveal_item(item: Dictionary) -> bool:
+	if GameState.is_night:
+		return false
+	var cell: Vector2i = item.get("spawner_cell", INVALID_CELL) as Vector2i
+	if cell == INVALID_CELL:
+		return false
+	return _manager.get_client_sale_controller().spawn_revealed_client_from_spawner(cell)

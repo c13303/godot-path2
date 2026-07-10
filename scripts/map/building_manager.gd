@@ -24,6 +24,8 @@ const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
 const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_drop_manager.gd")
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
+const SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_cutscene_controller.gd")
+const SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_phase_controller.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -198,6 +200,8 @@ var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
 var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
+var _spawner_reveal_cutscene: SpawnerRevealCutsceneController = SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT.new()
+var _spawner_reveal_phase: SpawnerRevealPhaseController = SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -248,6 +252,8 @@ func _ready() -> void:
 	_agent_save_service.setup(self)
 	_spawn_playlist_config.setup(self)
 	_runtime_tick_controller.setup(self)
+	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
+	add_child(_spawner_reveal_cutscene)
 	_resolve_level_layers()
 	_resolve_desire()
 	_load_level_spawn_config()
@@ -321,6 +327,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_spawn_tick_controller.reset_empty_night()
 	_client_preparing = false
 	if is_night:
+		_spawner_reveal_phase.abort_client_reveal()
 		_day_start_pending = false
 		_sheep_controller.on_game_mode_changed(true)
 		_client_tantrum.end()
@@ -335,6 +342,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		# when the piles are already gone, so it never double-animates.
 		_counter_stock_manager.dissolve_all_piles()
 	if not is_night:
+		_spawner_reveal_phase.abort_night_reveal()
 		_sheep_controller.on_game_mode_changed(false)
 		_day_start_pending = true
 		_night_preparation_token += 1
@@ -604,12 +612,23 @@ func _abort_client_preparation(token: int) -> void:
 func finish_night_preparation_success() -> void:
 	_night_preparing = false
 	_night_preparation_ready = true
+	if _spawn_playlist_config.playlist_spawning_enabled() and _spawner_reveal_phase.begin_night_reveal():
+		return
+	on_night_reveal_finished()
+
+
+func on_night_reveal_finished() -> void:
+	if not GameState.is_night:
+		return
 	_seed_merchant.start_pending_leave_if_needed()
 
 
 func finish_client_preparation_success() -> void:
 	_client_preparing = false
 	_client_sale.activate()
+	if not _client_sale.is_active():
+		return
+	_spawner_reveal_phase.begin_client_reveal()
 
 func _initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: int) -> bool:
 	return bool(await _spawner_route_service.initialize_spawner_routes_for_kinds(agent_kinds, token))
@@ -1175,6 +1194,7 @@ func reset_client_state_for_morning() -> void:
 # alongside the controller's own sale-local reset. Kept here (not in the controller)
 # because both pieces are owned by the manager per the client-sale boundary rules.
 func _reset_client_sale_state() -> void:
+	_spawner_reveal_phase.abort_client_reveal()
 	_client_preparing = false
 	_client_sale.reset()
 	clear_client_counter_agents()
@@ -1454,6 +1474,14 @@ func client_frequency_by_cell() -> Dictionary:
 
 func is_night_preparation_ready() -> bool:
 	return _night_preparation_ready
+
+
+func is_night_start_cutscene_active() -> bool:
+	return _spawner_reveal_phase.night_reveal_active()
+
+
+func is_client_reveal_cutscene_active() -> bool:
+	return _spawner_reveal_phase.client_reveal_active()
 
 
 func serialize_runtime_agents_for_save() -> Dictionary:
@@ -1742,8 +1770,16 @@ func _report_playlist_spawn_result(request: Dictionary, success: bool, failure_r
 				push_warning(message)
 
 
+func report_playlist_spawn_result(request: Dictionary, success: bool, failure_reason: String = "") -> void:
+	_report_playlist_spawn_result(request, success, failure_reason)
+
+
 func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
 	return _spawn_agent_from(spawner_cell, monster_type, SPAWNER_KIND_MONSTER)
+
+
+func spawn_monster_from_spawner(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
+	return _spawn_monster_from(spawner_cell, monster_type)
 
 
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:

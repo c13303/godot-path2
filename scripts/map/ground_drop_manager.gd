@@ -101,9 +101,9 @@ func restore_state(saved_items: Array) -> void:
 			continue
 		var item_data: Dictionary = raw_item as Dictionary
 		var currency: StringName = StringName(str(item_data.get("currency", "gem")))
-		var position: Vector2 = Vector2(float(item_data.get("x", 0.0)), float(item_data.get("y", 0.0)))
+		var drop_position: Vector2 = Vector2(float(item_data.get("x", 0.0)), float(item_data.get("y", 0.0)))
 		var record: Dictionary = _acquire_record()
-		_configure_record_base(record, KIND_COLLECTIBLE, position)
+		_configure_record_base(record, KIND_COLLECTIBLE, drop_position)
 		record["currency"] = currency
 		record["state"] = StringName(str(item_data.get("state", "ready")))
 		record["velocity"] = Vector2(float(item_data.get("vx", 0.0)), float(item_data.get("vy", 0.0)))
@@ -184,13 +184,13 @@ func _process_falling(record: Dictionary, delta: float) -> void:
 		velocity *= FLOOR_FRICTION
 	else:
 		velocity *= pow(0.985, delta * 60.0)
-	var rotation: float = float(record.get("rotation", 0.0))
+	var spin: float = float(record.get("rotation", 0.0))
 	var rotation_velocity: float = float(record.get("rotation_velocity", 0.0))
 	record["ground_position"] = ground_position
 	record["velocity"] = velocity
 	record["height"] = height
 	record["vertical_velocity"] = vertical_velocity
-	record["rotation"] = rotation + rotation_velocity * delta
+	record["rotation"] = spin + rotation_velocity * delta
 	if height <= REST_HEIGHT_EPSILON and velocity.length() <= REST_HORIZONTAL_SPEED and absf(vertical_velocity) <= REST_VERTICAL_SPEED:
 		_rest_record(record, _resolve_landing_position(ground_position))
 

@@ -69,6 +69,38 @@ func get_current_night_debug_lines() -> Array[String]:
 	return lines
 
 
+func get_initial_ready_spawn_requests() -> Array[Dictionary]:
+	var requests: Array[Dictionary] = []
+	if _current_night == null:
+		return requests
+	for raw_track_state: Variant in _tracks:
+		if not (raw_track_state is Dictionary):
+			continue
+		var track_state: Dictionary = raw_track_state as Dictionary
+		if bool(track_state.get("complete", false)) or bool(track_state.get("pending", false)):
+			continue
+		if int(track_state.get("wave_index", 0)) != 0:
+			continue
+		if int(track_state.get("spawned_count", 0)) != 0:
+			continue
+		if float(track_state.get("time_until_next_spawn", 0.0)) > 0.0:
+			continue
+		var wave: SpawnWave = _get_current_wave(track_state)
+		if wave == null or wave.monster_count <= 0 or wave.wait_for_event != &"":
+			continue
+		var spawner_id: StringName = StringName(str(track_state.get("spawner_id", "")))
+		var cell: Vector2i = _spawner_bindings_by_id.get(spawner_id, Vector2i.ZERO) as Vector2i
+		requests.append({
+			"track_index": int(track_state.get("track_index", -1)),
+			"spawner_id": spawner_id,
+			"spawner_cell": cell,
+			"monster_type": wave.monster_type,
+			"night_index": _current_night_index,
+			"wave_index": 0,
+		})
+	return requests
+
+
 func begin_night(night_index: int) -> bool:
 	_current_night_index = night_index
 	_current_night = null
