@@ -22,6 +22,7 @@ const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/ma
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
 const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_service.gd")
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
+const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_drop_manager.gd")
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
@@ -103,6 +104,10 @@ const _SANE_CELL_LIMIT: int = 100000
 # Optional time budget for draining the ready-spawner queue. We always process at
 # least one request per frame, then stop once this budget is spent.
 @export_range(0.0, 100.0, 0.5, "or_greater") var spawner_budget_ms: float = 4.0
+@export_group("Ground Drops")
+@export_range(0, 16, 1, "or_greater") var corpse_part_count: int = 3
+@export_range(0.0, 3.0, 0.05, "or_greater") var corpse_impulse_randomness: float = 1.0
+@export_group("")
 @export var debug_show_plantzone: bool = true:
 	set(value):
 		debug_show_plantzone = value
@@ -192,6 +197,7 @@ var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
+var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -253,6 +259,7 @@ func _ready() -> void:
 	_setup_counter_stock_manager()
 	_setup_zone_overlay()
 	_setup_construction_overlay()
+	_setup_ground_drop_manager()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	_damage_number_drawer = DamageNumberDrawer.new()
@@ -415,6 +422,10 @@ func get_flow() -> Node:
 
 func get_agent_manager() -> Node:
 	return agent_manager
+
+
+func get_ground_drop_manager() -> GroundDropManager:
+	return _ground_drop_manager
 
 
 func get_building_object_manager() -> BuildingObjectManager:
@@ -643,6 +654,19 @@ func _setup_construction_overlay() -> void:
 	_construction_overlay.building_manager = self
 	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(_construction_overlay)
+
+
+func _setup_ground_drop_manager() -> void:
+	if _ground_drop_manager == null:
+		return
+	_ground_drop_manager.name = "GroundDropManager"
+	_ground_drop_manager.corpse_part_count = corpse_part_count
+	_ground_drop_manager.impulse_randomness = corpse_impulse_randomness
+	_ground_drop_manager.setup(self)
+	var drop_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
+	if _ground_drop_manager.get_parent() == null:
+		drop_parent.add_child(_ground_drop_manager)
+
 
 # Called by BuildSystem when a navigation-blocking placeable (wall/fence/blocking
 # building) is placed or removed. With agents active, navigation catches up over
@@ -1240,8 +1264,15 @@ func is_player_near_seed_merchant() -> bool:
 	return _seed_merchant.is_player_near()
 
 
+## World position of the live seed merchant, used to anchor the interaction prompt above it.
+## Returns Vector2.ZERO when no merchant is present.
+func get_seed_merchant_world_position() -> Vector2:
+	return _seed_merchant.get_agent_world_position()
+
+
 # Freezes the merchant while the player is close and lets it resume the moment they
-# leave, so getting near always stops it (and opens the shop, via is_player_near_...).
+# leave, so getting near always stops it. Getting near also shows the shop prompt; the
+# player opens the shop itself with the interact button (see toolbuild.toggle_merchant_shop).
 func _process_seed_merchant_proximity() -> void:
 	_seed_merchant.process_proximity()
 
@@ -1427,6 +1458,18 @@ func is_night_preparation_ready() -> bool:
 
 func serialize_runtime_agents_for_save() -> Dictionary:
 	return _agent_save_service.serialize_state()
+
+
+func serialize_ground_collectibles_for_save() -> Array[Dictionary]:
+	if _ground_drop_manager == null:
+		return []
+	return _ground_drop_manager.serialize_state()
+
+
+func restore_ground_collectibles_from_save(saved_items: Array) -> void:
+	if _ground_drop_manager == null:
+		return
+	_ground_drop_manager.restore_state(saved_items)
 
 
 func restore_runtime_agents_from_save(data: Dictionary) -> void:
@@ -1865,6 +1908,22 @@ func show_damage_number(world_position: Vector2, damage: int) -> void:
 func tile_size() -> Vector2:
 	return _tile_size()
 
+
+func is_ground_drop_blocked_world(world_position: Vector2) -> bool:
+	if floorz == null:
+		return false
+	var cell: Vector2i = floorz.local_to_map(floorz.to_local(world_position))
+	return is_ground_drop_blocked_cell(cell)
+
+
+func is_ground_drop_blocked_cell(cell: Vector2i) -> bool:
+	if not _has_floor(cell):
+		return true
+	if wallz != null and wallz.get_cell_tile_data(cell) != null:
+		return true
+	return _building_cell_blocks_movement(cell)
+
+
 func _suspend_agent_for_drowning(nav_id: int) -> void:
 	_agent_suspend.suspend_agent_for_drowning(nav_id)
 
@@ -2046,10 +2105,19 @@ func skip_current_night_for_dev() -> bool:
 
 # Monster removal uses the same authoritative owner that created and routed agents.
 # Clear every phase/index before unregistering the native agent so no deferred
-# garden work can retain or later re-route a dead nav_id. The second argument is
-# retained for old positional calls and is ignored.
-func remove_dead_monster(agent: Node2D, _legacy_spawn_visual: bool = true) -> void:
-	_monster_death.remove_dead_monster(agent, false)
+# garden work can retain or later re-route a dead nav_id.
+func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> void:
+	_monster_death.remove_dead_monster(agent, spawn_death_effects)
+
+
+func spawn_agent_death_burst(world_position: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_agent_death_burst(world_position)
+
+
+func spawn_collectible_currency(currency: StringName, world_position: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_collectible_currency(currency, world_position)
 
 
 func _clear_removed_agent_state(nav_id: int) -> void:

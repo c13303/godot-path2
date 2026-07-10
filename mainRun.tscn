@@ -31,6 +31,7 @@
 [ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
 [ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
+[ext_resource type="Script" uid="uid://bmrchprompthint" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
 [ext_resource type="Script" uid="uid://b4mvldtd7kft4" path="res://scripts/map/desire.gd" id="31_desire"]
@@ -1304,6 +1305,12 @@ script = ExtResource("11_62xsw")
 
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
+
+[node name="MerchantPrompt" type="Control" parent="GameUI" unique_id=700000030]
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+script = ExtResource("46_mprompt")
 
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3

@@ -441,6 +441,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	var day_phase: String = day_phase_override if day_phase_override != "" else _get_day_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
+	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
@@ -451,6 +452,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
+		"ground_collectibles": ground_collectibles,
 		"runtime_agents": runtime_agents,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
@@ -699,6 +701,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_reindex_loaded_layers(scene)
 	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
+	_restore_ground_collectibles(scene, data.get("ground_collectibles", []))
 	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
 	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
 	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
@@ -764,6 +767,20 @@ func _get_counter_stock(scene: Node) -> Array[Dictionary]:
 			if raw_entry is Dictionary:
 				stock.append(raw_entry as Dictionary)
 	return stock
+
+
+func _get_ground_collectibles(scene: Node) -> Array[Dictionary]:
+	var collectibles: Array[Dictionary] = []
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_ground_collectibles_for_save"):
+		return collectibles
+	var raw_items: Variant = building_manager.call("serialize_ground_collectibles_for_save")
+	if raw_items is Array:
+		var item_data: Array = raw_items as Array
+		for raw_entry: Variant in item_data:
+			if raw_entry is Dictionary:
+				collectibles.append(raw_entry as Dictionary)
+	return collectibles
 
 
 func _get_day_phase() -> String:
@@ -888,6 +905,17 @@ func _restore_counter_stock(scene: Node, raw_stock: Variant) -> void:
 		counter_buildings,
 		restored_total,
 	])
+
+
+func _restore_ground_collectibles(scene: Node, raw_items: Variant) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_ground_collectibles_from_save"):
+		return
+	var items: Array = []
+	if raw_items is Array:
+		items = raw_items as Array
+	building_manager.call("restore_ground_collectibles_from_save", items)
+	_log("Ground collectibles restored: %d" % items.size())
 
 
 func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
@@ -1031,6 +1059,23 @@ func _validate_save(data: Dictionary) -> String:
 				return "invalid plant state kind"
 			if entry.has("stage") and int(entry["stage"]) < 0:
 				return "invalid plant state stage"
+	if data.has("ground_collectibles"):
+		if not (data["ground_collectibles"] is Array):
+			return "invalid ground collectibles"
+		var ground_collectibles: Array = data["ground_collectibles"] as Array
+		for raw_entry: Variant in ground_collectibles:
+			if not (raw_entry is Dictionary):
+				return "invalid ground collectible entry"
+			var item: Dictionary = raw_entry as Dictionary
+			for field: String in ["currency", "state", "x", "y"]:
+				if not item.has(field):
+					return "invalid ground collectible entry"
+			var currency: String = str(item["currency"])
+			if not ["seed", "gem", "money"].has(currency):
+				return "invalid ground collectible currency"
+			var state: String = str(item["state"])
+			if not ["falling", "ready"].has(state):
+				return "invalid ground collectible state"
 	if data.has("day_phase"):
 		var phase: String = str(data["day_phase"])
 		if not ["building", "morning", "client", "seed_merchant", "night"].has(phase):

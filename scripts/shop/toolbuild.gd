@@ -4,8 +4,9 @@ extends Control
 ## tool (gardening or hammer) is the selected quick slot (see game_ui.get_selected_build_tool_id)
 ## and during the day; selecting any other quick slot closes it. The active tool decides which
 ## buildables it lists: gardening offers rose/ronce/pasteque/turrets, hammer offers
-## counter/wall/fence. The seed merchant column still takes over while the player is near the
-## merchant without a build tool selected.
+## counter/wall/fence. The seed merchant column is opt-in: standing at the merchant shows a
+## prompt (merchant_prompt.gd) and the player opens/closes the column with the interact button
+## (see toggle_merchant_shop); while it is open it takes over from the build/weapon columns.
 ## It renders as a vertical column
 ## rising up out of the active tool's quick slot, like a dropdown that opens upward:
 ## one icon per buildable, with the build price overlaid where the quantity badge would
@@ -61,6 +62,10 @@ var _last_picked_by_tool: Dictionary = {}
 # the picker stays open re-runs the open/default-selection logic for the new tool.
 var _shown_build_tool_id: String = ""
 var _selected_merchant_item_id: String = ""
+# True while the player has actively opened the merchant shop with the interact button
+# (E / pad Y). Standing next to the merchant only shows the prompt; the column stays hidden
+# until this is set. Cleared when the shop is closed or the player leaves the merchant.
+var _merchant_shop_open_requested: bool = false
 # The level must open with the toolbuild showing rose. Consumed on the first toolbuild picker
 # open so the counter-preference / last-picked logic resumes on every later open.
 var _level_start_default_pending: bool = true
@@ -80,6 +85,11 @@ var _weapon_icons: Dictionary = {}
 var _weapon_names: Dictionary = {}
 var _weapon_signature: String = ""
 var _merchant_column: VBoxContainer
+# The merchant column's background panel, tracked so the floating close cross can be pinned to
+# its bottom-right corner each frame.
+var _merchant_panel: PanelContainer
+# The close (X) button pinned to the merchant modal's bottom-right corner; closes the shop.
+var _merchant_close_button: Button
 # A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
 # vertical stack for the toolbuild picker, horizontal bar for the seed-merchant sale.
 var _items_list: BoxContainer
@@ -152,7 +162,13 @@ func _ready() -> void:
 ## Toolbuild picker visibility is derived from the quick-bar selection: open only while the
 ## Build tool is the selected quick slot and building is currently allowed.
 func _process(_delta: float) -> void:
-	var merchant_should_show: bool = _is_seed_merchant_shop_active()
+	# Standing at the merchant during its phase only arms the shop; the column itself opens once
+	# the player presses the interact button (see toggle_merchant_shop). Leaving the merchant
+	# disarms it so re-approaching shows the prompt again instead of re-opening the shop.
+	var merchant_active: bool = _is_seed_merchant_shop_active()
+	if not merchant_active and _merchant_shop_open_requested:
+		_merchant_shop_open_requested = false
+	var merchant_should_show: bool = merchant_active and _merchant_shop_open_requested
 	var menu_kind: String = _active_menu_kind()
 	var build_tool_id: String = _selected_build_tool_id()
 	var build_should_show: bool = (
@@ -196,6 +212,7 @@ func _process(_delta: float) -> void:
 		_apply_merchant_layout()
 		_refresh_merchant_slots()
 		_update_hover_label()
+		_update_merchant_close_button()
 
 
 ## The kind of quickbar menu game_ui currently has open ("weapon"/gardening/hammer), or "".
@@ -379,6 +396,7 @@ func _build_merchant_ui() -> void:
 	add_child(column)
 
 	var panel: PanelContainer = PanelContainer.new()
+	_merchant_panel = panel
 	panel.name = "MerchantBarPanel"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -405,6 +423,39 @@ func _build_merchant_ui() -> void:
 	for item_id: String in _merchant_item_ids():
 		_build_merchant_item_cells(grid, item_id)
 	column.visible = false
+	_build_merchant_close_button()
+
+
+## The floating close (X) button pinned to the merchant modal's bottom-right corner. It lives on
+## the toolbuild root (a non-container, mouse-pass-through Control) so it can be positioned freely
+## over the auto-sized merchant panel without the panel's container stretching it.
+func _build_merchant_close_button() -> void:
+	var button: Button = Button.new()
+	_merchant_close_button = button
+	button.name = "MerchantCloseButton"
+	button.text = "X"
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(28.0, 28.0)
+	button.add_theme_font_size_override("font_size", 16)
+	button.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
+	button.pressed.connect(_on_merchant_close_pressed)
+	_apply_slot_style(button, false, false)
+	button.visible = false
+	add_child(button)
+
+
+func _on_merchant_close_pressed() -> void:
+	_merchant_shop_open_requested = false
+
+
+## Pins the close cross to the merchant panel's bottom-right corner (inset a few pixels).
+func _update_merchant_close_button() -> void:
+	if _merchant_close_button == null or _merchant_panel == null:
+		return
+	const INSET: float = 6.0
+	_merchant_close_button.visible = true
+	var corner: Vector2 = _merchant_panel.global_position + _merchant_panel.size
+	_merchant_close_button.global_position = corner - _merchant_close_button.size - Vector2(INSET, INSET)
 
 
 func _special_reward_label() -> String:
@@ -770,6 +821,9 @@ func _open_merchant_shop() -> void:
 func _close_merchant_shop() -> void:
 	if _merchant_column != null:
 		_merchant_column.visible = false
+	if _merchant_close_button != null:
+		_merchant_close_button.visible = false
+	_merchant_shop_open_requested = false
 	_selected_merchant_item_id = ""
 	_reset_hover_label()
 	visible = (_toolbuild_column != null and _toolbuild_column.visible) or (_weapon_column != null and _weapon_column.visible)
@@ -858,6 +912,20 @@ func activate_pad_selection() -> bool:
 
 func is_merchant_shop_open() -> bool:
 	return _merchant_column != null and _merchant_column.visible
+
+
+## Interact-button entry point (E / pad Y). Opens the merchant shop when the player is standing
+## at the merchant during its day phase, or closes it when already open. Returns true when the
+## press was consumed (at the merchant, or shop open) so the caller can fall back to another
+## action otherwise (e.g. pad Y rotating a build preview when not at the merchant).
+func toggle_merchant_shop() -> bool:
+	if is_merchant_shop_open():
+		_merchant_shop_open_requested = false
+		return true
+	if GameState.is_night or not _is_seed_merchant_shop_active():
+		return false
+	_merchant_shop_open_requested = true
+	return true
 
 
 func _tool_blocked_by_night(tool_id: String) -> bool:

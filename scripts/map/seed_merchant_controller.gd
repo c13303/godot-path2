@@ -168,6 +168,14 @@ func is_paused_agent(agent: Node2D) -> bool:
 	return agent == _agent and _paused
 
 
+## World position of the merchant sprite, or Vector2.ZERO when none is spawned. The
+## interaction prompt anchors above this point.
+func get_agent_world_position() -> Vector2:
+	if is_instance_valid(_agent):
+		return _agent.global_position
+	return Vector2.ZERO
+
+
 func request_leave() -> void:
 	if not _active or not is_instance_valid(_agent):
 		end_phase()

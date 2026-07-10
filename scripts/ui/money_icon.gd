@@ -6,7 +6,12 @@ extends TextureRect
 @export_range(0.0, 5.0, 0.05, "or_greater", "suffix:x") var curve_strength: float = 1.0
 
 
-func animate_money_harvest(world_position: Vector2, sequence_index: int = 0, stagger_seconds: float = -1.0) -> bool:
+func animate_money_harvest(
+	world_position: Vector2,
+	sequence_index: int = 0,
+	stagger_seconds: float = -1.0,
+	finished_callback: Callable = Callable()
+) -> bool:
 	return CurrencyHarvestAnimation.animate_harvest(
 		self,
 		world_position,
@@ -17,7 +22,8 @@ func animate_money_harvest(world_position: Vector2, sequence_index: int = 0, sta
 		Callable(self, "_credit_money"),
 		Callable(),
 		true,
-		stagger_seconds
+		stagger_seconds,
+		finished_callback
 	)
 
 

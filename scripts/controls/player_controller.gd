@@ -98,7 +98,9 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_Y:
 			if joy_button_event.pressed:
-				_handle_pad_rotate_build()
+				# At the merchant, Y opens/closes the shop; else it rotates the build preview.
+				if not _try_toggle_merchant_shop():
+					_handle_pad_rotate_build()
 			get_viewport().set_input_as_handled()
 		return
 
@@ -110,6 +112,10 @@ func _input(event: InputEvent) -> void:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
 			return
+		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_E:
+			if _try_toggle_merchant_shop():
+				get_viewport().set_input_as_handled()
+				return
 
 	if event is InputEventJoypadMotion:
 		var joy_motion_event: InputEventJoypadMotion = event
@@ -681,6 +687,17 @@ func _active_quickbar_menu_kind() -> String:
 	if not game_ui or not game_ui.has_method("get_active_menu_kind"):
 		return ""
 	return String(game_ui.call("get_active_menu_kind"))
+
+## Opens/closes the seed-merchant shop when the player stands at the merchant. Returns true when
+## the press was consumed (at the merchant, or the shop was open), so callers can fall back to
+## another action otherwise. Suppressed while paused or the inventory is open.
+func _try_toggle_merchant_shop() -> bool:
+	if _paused or _is_inventory_open():
+		return false
+	if toolbuild == null or not toolbuild.has_method("toggle_merchant_shop"):
+		return false
+	return bool(toolbuild.call("toggle_merchant_shop"))
+
 
 func _deactivate_quickbar() -> void:
 	if game_ui and game_ui.has_method("deactivate_quickbar"):

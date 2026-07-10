@@ -14,7 +14,8 @@ func animate_seed_harvest(
 	sequence_index: int = 0,
 	on_launch: Callable = Callable(),
 	credit_on_finish: bool = true,
-	stagger_seconds: float = -1.0
+	stagger_seconds: float = -1.0,
+	finished_callback: Callable = Callable()
 ) -> bool:
 	_active_harvest_animation_count += 1
 	var started: bool = CurrencyHarvestAnimation.animate_harvest(
@@ -28,7 +29,7 @@ func animate_seed_harvest(
 		Callable(self, "_launch_seed_harvest").bind(on_launch),
 		credit_on_finish,
 		stagger_seconds,
-		Callable(self, "_complete_harvest_animation")
+		Callable(self, "_complete_harvest_animation").bind(finished_callback)
 	)
 	if not started:
 		_complete_harvest_animation()
@@ -44,10 +45,12 @@ func _launch_seed_harvest(on_launch: Callable = Callable()) -> void:
 func has_active_harvest_animations() -> bool:
 	return _active_harvest_animation_count > 0
 
-func _complete_harvest_animation() -> void:
+func _complete_harvest_animation(finished_callback: Callable = Callable()) -> void:
 	_active_harvest_animation_count = maxi(0, _active_harvest_animation_count - 1)
 	if _active_harvest_animation_count == 0:
 		harvest_animations_finished.emit()
+	if finished_callback.is_valid():
+		finished_callback.call()
 
 func _credit_seed() -> void:
 	var scene: Node = get_tree().current_scene

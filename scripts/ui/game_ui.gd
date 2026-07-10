@@ -447,6 +447,39 @@ func collect_inventory_item_from_world(item_id: String, world_position: Vector2,
 	return true
 
 
+func collect_currency_from_world(
+	currency: StringName,
+	world_position: Vector2,
+	count: int = 1,
+	finished_callback: Callable = Callable()
+) -> bool:
+	if count <= 0:
+		return false
+	var icon: Node = null
+	var animate_method: String = ""
+	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
+	if currency == &"seed":
+		icon = get_node_or_null("currenciesUI/seedIcon")
+		animate_method = "animate_seed_harvest"
+	elif currency == &"gem":
+		icon = get_node_or_null("currenciesUI/gemIcon")
+		animate_method = "animate_gem_harvest"
+	elif currency == &"money":
+		icon = get_node_or_null("currenciesUI/moneyIcon")
+		animate_method = "animate_money_harvest"
+	if icon == null or not icon.has_method(animate_method):
+		return false
+	var started_any: bool = false
+	for i: int in range(count):
+		var started: bool = false
+		if currency == &"seed":
+			started = bool(icon.call(animate_method, world_position, i, Callable(), true, stagger, finished_callback))
+		else:
+			started = bool(icon.call(animate_method, world_position, i, stagger, finished_callback))
+		started_any = started_any or started
+	return started_any
+
+
 func _animate_inventory_item_to_position(
 	item_id: String,
 	start_global_position: Vector2,
