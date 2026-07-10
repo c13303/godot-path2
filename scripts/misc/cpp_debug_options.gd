@@ -228,6 +228,18 @@ func _ready() -> void:
 		debug_enabled = true
 	_apply_debug_settings()
 	_setup_tile_hover_info()
+	_setup_registration_watcher()
+
+
+## Creates the single agent-registration consistency watcher as a child beside
+## the native nodes. All consistency logic lives in the watcher; it self-gates on
+## CppDebugOptions.logs_enabled, so nothing extra is wired here.
+func _setup_registration_watcher() -> void:
+	if get_node_or_null("AgentRegistrationConsistencyWatcher") != null:
+		return
+	var watcher: AgentRegistrationConsistencyWatcher = AgentRegistrationConsistencyWatcher.new()
+	watcher.name = "AgentRegistrationConsistencyWatcher"
+	add_child(watcher)
 
 
 func _setup_tile_hover_info() -> void:

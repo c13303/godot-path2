@@ -12,6 +12,8 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../agent_manager/agent_manager.h"
 #include <cstdlib>
+#include <vector>
+#include <algorithm>
 #include "../godot/steering_system_native.h"
 #include <godot_cpp/classes/engine.hpp>
 
@@ -81,6 +83,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("update_godot_agent", "node", "agent_id"), &AgentManagerNative::update_godot_agent);
     ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
     ClassDB::bind_method(D_METHOD("unregister_agent", "agent_id"), &AgentManagerNative::unregister_agent);
+    ClassDB::bind_method(D_METHOD("get_registration_debug_snapshot"), &AgentManagerNative::get_registration_debug_snapshot);
     ClassDB::bind_method(D_METHOD("send_agent_event", "event_name", "agent_id", "payload"), &AgentManagerNative::send_agent_event);
     ClassDB::bind_method(D_METHOD("set_agent_never_rest", "agent_id", "value"), &AgentManagerNative::set_agent_never_rest);
     ClassDB::bind_method(D_METHOD("set_agent_paused", "agent_id", "value"), &AgentManagerNative::set_agent_paused);
@@ -152,6 +155,46 @@ void AgentManagerNative::unregister_agent(int agent_id)
     if (steering_native)
         steering_native->unregister_node_mapping(agent_id);
     id_to_node.erase(agent_id);
+}
+
+// Builds a sorted PackedInt32Array from a scratch id vector (moves through sort
+// in place). Local helper for the read-only registration snapshot only.
+static PackedInt32Array sorted_packed_from_ids(std::vector<int> &ids)
+{
+    std::sort(ids.begin(), ids.end());
+    PackedInt32Array out;
+    out.resize((int)ids.size());
+    for (int i = 0; i < (int)ids.size(); ++i)
+        out.set(i, ids[i]);
+    return out;
+}
+
+Dictionary AgentManagerNative::get_registration_debug_snapshot() const
+{
+    Dictionary snapshot;
+
+    std::vector<int> core_ids;
+    if (core_mgr)
+        core_mgr->debug_collect_agent_ids(core_ids);
+    snapshot["core_agent_ids"] = sorted_packed_from_ids(core_ids);
+
+    std::vector<int> steering_ids;
+    if (steering)
+        steering->debug_collect_agent_ids(steering_ids);
+    snapshot["steering_agent_ids"] = sorted_packed_from_ids(steering_ids);
+
+    std::vector<int> node_ids;
+    node_ids.reserve(id_to_node.size());
+    for (const auto &entry : id_to_node)
+        node_ids.push_back(entry.first);
+    snapshot["agent_node_mapping_ids"] = sorted_packed_from_ids(node_ids);
+
+    PackedInt32Array steering_node_ids;
+    if (steering_native)
+        steering_node_ids = steering_native->debug_get_node_mapping_ids();
+    snapshot["steering_node_mapping_ids"] = steering_node_ids;
+
+    return snapshot;
 }
 
 void AgentManagerNative::send_agent_event(const String &event_name, int agent_id, const Variant &payload)

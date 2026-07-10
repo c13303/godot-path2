@@ -239,6 +239,15 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     recompute_hitbox_query_extents();
 }
 
+void SteeringSystem::debug_collect_agent_ids(std::vector<int> &out) const
+{
+    out.clear();
+    out.reserve(id_to_index.size());
+    for (const auto &entry : id_to_index)
+        out.push_back(entry.first);
+    std::sort(out.begin(), out.end());
+}
+
 void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 {
     bottleneck_reservations.erase(field);

@@ -63,6 +63,12 @@ namespace ffcore
         int count_group_members(GroupID g) const;
         FormationFootprint compute_group_footprint(GroupID g) const;
 
+        // Read-only debug introspection. Fills `out` with every currently
+        // registered agent id (the keys of id_to_index), sorted ascending.
+        // No state mutation, no cleanup. Used only by the debug registration
+        // consistency watcher; nothing calls it on the hot path.
+        void debug_collect_agent_ids(std::vector<int> &out) const;
+
     private:
         std::vector<AgentEntry> agents;
         std::unordered_map<int, int> id_to_index;

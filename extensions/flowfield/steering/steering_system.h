@@ -96,6 +96,12 @@ namespace ffcore
         const AgentData *get_agent(int id) const;
         void reactivate_agents_for_field(FlowField *field);
 
+        // Read-only debug introspection. Fills `out` with every currently
+        // registered agent id (the keys of id_to_index), sorted ascending.
+        // No state mutation, no cleanup. Used only by the debug registration
+        // consistency watcher; nothing calls it on the hot path.
+        void debug_collect_agent_ids(std::vector<int> &out) const;
+
         void smooth_stop(int id);
         void update_all(double delta);
         void set_agent_group(int id, GroupID group);

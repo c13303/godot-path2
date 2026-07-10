@@ -139,6 +139,21 @@ void SteeringSystemNative::register_node_mapping(Node2D *node, int agent_id)
     agent_map[node] = agent_id;
 }
 
+PackedInt32Array SteeringSystemNative::debug_get_node_mapping_ids() const
+{
+    std::vector<int> ids;
+    ids.reserve(agent_map.size());
+    for (const auto &entry : agent_map)
+        ids.push_back(entry.second);
+    std::sort(ids.begin(), ids.end());
+
+    PackedInt32Array out;
+    out.resize((int)ids.size());
+    for (int i = 0; i < (int)ids.size(); ++i)
+        out.set(i, ids[i]);
+    return out;
+}
+
 void SteeringSystemNative::unregister_node_mapping(int agent_id)
 {
     for (auto it = agent_map.begin(); it != agent_map.end();)

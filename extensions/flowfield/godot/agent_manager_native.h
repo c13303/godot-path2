@@ -9,6 +9,8 @@
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 
 #include <unordered_map>
 
@@ -64,6 +66,15 @@ namespace godot
         void update_godot_agent(Node2D *node, int agent_id);
         Node2D *find_node_by_agent(int agent_id);
         void unregister_agent(int agent_id);
+
+        // Read-only, gameplay-agnostic registration snapshot for the debug
+        // consistency watcher. Returns the registered agent ids of the four
+        // native ownership structures this node drives, each as a sorted
+        // PackedInt32Array: "core_agent_ids", "steering_agent_ids",
+        // "agent_node_mapping_ids", "steering_node_mapping_ids". No mutation,
+        // no cleanup, no node-pointer dereferencing.
+        Dictionary get_registration_debug_snapshot() const;
+
         void send_agent_event(const String &event_name, int agent_id, const Variant &payload);
         void set_agent_never_rest(int agent_id, bool value);
         void set_agent_paused(int agent_id, bool value);

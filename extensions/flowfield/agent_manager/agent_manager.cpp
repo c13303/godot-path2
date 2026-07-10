@@ -114,6 +114,15 @@ namespace ffcore
         id_to_index.erase(it);
     }
 
+    void AgentManager::debug_collect_agent_ids(std::vector<int> &out) const
+    {
+        out.clear();
+        out.reserve(id_to_index.size());
+        for (const auto &entry : id_to_index)
+            out.push_back(entry.first);
+        std::sort(out.begin(), out.end());
+    }
+
     AgentEntry *AgentManager::get(int id)
     {
         auto it = id_to_index.find(id);

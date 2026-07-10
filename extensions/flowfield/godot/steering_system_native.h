@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <unordered_map>
 
 #include "../steering/steering_system.h"
@@ -67,6 +68,12 @@ namespace godot
 
         void register_node_mapping(Node2D *node, int agent_id);
         void unregister_node_mapping(int agent_id);
+
+        // Read-only debug introspection: the agent ids currently held in the
+        // node->id mapping (agent_map values), sorted ascending. No mutation.
+        // Consumed by AgentManagerNative::get_registration_debug_snapshot() for
+        // the debug registration consistency watcher.
+        PackedInt32Array debug_get_node_mapping_ids() const;
 
         int get_agent_id(Node2D *node);
         void set_agent_control_mode(int agent_id, int mode);
