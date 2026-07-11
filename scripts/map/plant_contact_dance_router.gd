@@ -6,6 +6,10 @@ class_name PlantContactDanceRouter
 # BuildingManager.plant_contact_dance_requested and decide how to animate.
 
 const CONTACT_DANCE_DURATION: float = 0.16
+const CATEGORY_CLIENTS: StringName = &"clients"
+const CATEGORY_MERCHANTS: StringName = &"merchants"
+const RONCE_ITEM_ID: String = "ronce"
+const CATEGORY_TURRET: String = "turret"
 
 var _manager: BuildingManager
 
@@ -43,9 +47,9 @@ func _request_live_plant_contact(cell: Vector2i, category: StringName, nav_id: i
 		return false
 	if not plant_manager.has_method("has_plant") or not bool(plant_manager.call("has_plant", cell)):
 		return false
-	if nav_id >= 0 and _manager.is_agent_eating_plant(nav_id):
+	if nav_id >= 0 and _manager.is_agent_destroying_plant_at_cell(nav_id, cell):
 		return true
-	if category == &"clients" or category == &"merchants":
+	if category == CATEGORY_CLIENTS or category == CATEGORY_MERCHANTS:
 		return true
 	var item_id: String = ""
 	if plant_manager.has_method("get_plant_item_id"):
@@ -62,11 +66,11 @@ func _request_building_contact(cell: Vector2i) -> bool:
 	if building_data.is_empty():
 		return false
 	var item_id: String = str(building_data.get("item_id", ""))
-	if item_id == "ronce":
+	if item_id == RONCE_ITEM_ID:
 		_manager.plant_contact_dance_requested.emit(&"traversable_buildings", cell, item_id, CONTACT_DANCE_DURATION)
 		return true
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	if str(item_def.get("category", "")) != "turret":
+	if str(item_def.get("category", "")) != CATEGORY_TURRET:
 		return false
 	_manager.plant_contact_dance_requested.emit(&"blocking_buildings", cell, item_id, CONTACT_DANCE_DURATION)
 	if building_objects.has_method("request_contact_dance"):

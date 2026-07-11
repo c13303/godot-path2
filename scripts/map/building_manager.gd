@@ -54,6 +54,8 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 # means the counter is genuinely reachable.
 const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
+const RONCE_ITEM_ID: String = "ronce"
+const ITEM_CATEGORY_TURRET: String = "turret"
 # Garden access-cell scoring penalties (ACCESS_*) now live in GardenAccessResolver,
 # which owns the garden access scoring / entry selection extracted from this manager.
 const PASTEQUE_ITEM_ID: String = "pasteque"
@@ -434,6 +436,17 @@ func request_player_plant_contact_dance() -> void:
 
 func is_agent_eating_plant(nav_id: int) -> bool:
 	return _eating_agents.has(nav_id)
+
+func is_agent_destroying_plant_at_cell(nav_id: int, cell: Vector2i) -> bool:
+	if nav_id < 0:
+		return false
+	if _eating_agents.has(nav_id):
+		var eating_data: Dictionary = _eating_agents[nav_id] as Dictionary
+		return (eating_data.get("plant_cell", INVALID_CELL) as Vector2i) == cell
+	if _astar_in_agents.has(nav_id):
+		var astar_data: Dictionary = _astar_in_agents[nav_id] as Dictionary
+		return (astar_data.get("plant_cell", INVALID_CELL) as Vector2i) == cell
+	return false
 
 func _plant_manager_can_check_plants() -> bool:
 	return plant_manager != null and plant_manager.has_method("has_plant")
@@ -846,10 +859,10 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_log_nav_invalidation("building_added:%s" % item_id, cell)
 	elif PlaceableNavImpact.is_speed_only(impact, fences_block):
 		_log_nav_speed("building_added:%s" % item_id, cell)
-	# A turret or pasteque just appeared: re-check any agent already standing on the
-	# cell so a stationary agent still triggers the interaction (removal makes a cell
-	# non-interactive, so no invalidation is needed there).
-	if item_id == TURRET_ID or item_id == PASTEQUE_ITEM_ID:
+	# A plant-like contact tile or pasteque just appeared: re-check any agent already
+	# standing on the cell so a stationary agent still triggers the interaction
+	# (removal makes a cell non-interactive, so no invalidation is needed there).
+	if _building_item_requests_agent_recheck(item_id):
 		_agent_cell_tracker.invalidate_cell(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
@@ -911,6 +924,12 @@ func _set_player_cell_blocked(cell: Vector2i, blocked: bool) -> void:
 
 func _blocking_building_item_id_at_cell(cell: Vector2i) -> String:
 	return _building_navigation_sync.blocking_building_item_id_at_cell(cell)
+
+func _building_item_requests_agent_recheck(item_id: String) -> bool:
+	if item_id == PASTEQUE_ITEM_ID or item_id == RONCE_ITEM_ID:
+		return true
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	return str(item_def.get("category", "")) == ITEM_CATEGORY_TURRET
 
 func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 	_building_navigation_sync.sync_building_cell_speed(cell, item_id)
