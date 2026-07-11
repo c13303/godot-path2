@@ -529,6 +529,10 @@ func after_placeable_placed(cell: Vector2i, placeable_def: Dictionary, play_plac
 		reservoir_system.call("request_reservoir_irrigation_from_cell", cell)
 	if placeable_id == "pasteque" and reservoir_system != null and reservoir_system.has_method("request_pasteque_irrigation_from_cell"):
 		reservoir_system.call("request_pasteque_irrigation_from_cell", cell)
+	# Central player-built provenance hook: register the freshly placed placeable so it
+	# becomes a destructible tantrum target (only player-built tiles are registered).
+	if _manager != null and _manager.has_method("register_player_placeable"):
+		_manager.call("register_player_placeable", cell, placeable_id, str(placeable_def.get("target_layer", "wallz")))
 
 
 func _clear_build_selection() -> void:

@@ -135,6 +135,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": true,
 		"blocks_projectiles": true,
 		"runtime_id": "",
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	"rose": {
@@ -184,6 +185,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "lamp",
 		"light_source": 3,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	"ronce": {
@@ -201,6 +203,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "ronce",
 		"speed_multiplier": 0.3,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	"fence": {
@@ -236,6 +239,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "fence",
 		"speed_multiplier": 0.3,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	"reservoir": {
@@ -254,6 +258,7 @@ const ITEM_DEFS: Dictionary = {
 		"requires_walkable_floor": true,
 		"runtime_id": "reservoir",
 		"drag_buildable": false,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	# A player-buildable watermelon/pasteque that paints grass around itself when placed. It is
@@ -282,6 +287,7 @@ const ITEM_DEFS: Dictionary = {
 		# Paid for at the seed merchant into the inventory; placing consumes one unit
 		# from the inventory rather than charging currency again.
 		"inventory_backed": true,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 	"turret_epine": {
@@ -305,6 +311,7 @@ const ITEM_DEFS: Dictionary = {
 		"pad_skip_preview": true,
 		"directional": true,
 		"runtime_id": "turret_epine",
+		"max_health": 100,
 		"turret_data": TURRET_EPINE_DATA,
 		"turret_sprite_visual": {
 			"texture": TURRET_EPINE_TEXTURE,
@@ -348,6 +355,7 @@ const ITEM_DEFS: Dictionary = {
 		# Bought at the seed merchant into the inventory (like pasteque) and then placed
 		# from the hammer picker, which consumes one unit instead of charging currency again.
 		"inventory_backed": true,
+		"max_health": 100,
 		"max_stack": 999,
 	},
 }
@@ -397,6 +405,29 @@ static func is_placeable(item_id: String) -> bool:
 ## placement. See pasteque.
 static func is_inventory_backed(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("inventory_backed", false))
+
+## Data-driven maximum health for a destructible player-built placeable. 0 means the
+## item has no repeated-damage health (plants use the instant-destroy path instead).
+static func get_max_health(item_id: String) -> int:
+	return maxi(0, int(get_item_def(item_id).get("max_health", 0)))
+
+## True for catalog entries the generic durability system tracks as destructible targets
+## when player-built. Any normal placeable qualifies automatically, so new building types
+## become destructible without editing the tantrum/durability code.
+static func is_destructible_placeable(item_id: String) -> bool:
+	return is_placeable(item_id)
+
+## True for placeables that live on the plant layer and are destroyed instantly on contact
+## (roses, imperial plants, future plant-layer placeables) rather than taking repeated hits.
+static func is_instant_destroy_placeable(item_id: String) -> bool:
+	var item_def: Dictionary = get_item_def(item_id)
+	if not is_placeable(item_id):
+		return false
+	if bool(item_def.get("logical_plant", false)):
+		return true
+	if str(item_def.get("category", "")) == "plant":
+		return true
+	return str(item_def.get("target_layer", "")) == "plantz"
 
 ## Catalog types that count as combat weapons (fired by the fight system) rather
 ## than tools/placeables. Quick-bar disabling and night auto-arming key off this.

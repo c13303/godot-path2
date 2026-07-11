@@ -156,23 +156,24 @@ func process(delta: float) -> void:
 		return
 	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
 	var client_counter_agents: Dictionary = _manager.client_counter_agents()
-	if client_tantrum.is_active():
-		if client_count() == 0 and not client_tantrum.has_hostiles():
-			# Clear the tantrum flag/group first: can_start_night_after_clients()
-			# gates on clients_finished_for_day(), which requires the tantrum to be
-			# over. Leaving it active here deadlocks the day — night never starts.
-			client_tantrum.end()
-			_complete_client_sale()
-		return
+	# No rose targets remain: cancel any pending future client spawns. Existing clients
+	# are NOT globally converted — rose-holders keep escaping, rose-less clients keep
+	# their current navigation, and only an individual empty-counter arrival can trigger
+	# its own tantrum. Do not return early merely because a hostile exists.
 	if not _manager.has_client_targets_remaining():
 		_client_sale_pending_spawners.clear()
-		if _has_clients_without_rose():
-			client_tantrum.begin()
-			return
 	var spawned_this_frame: bool = _process_client_spawns(delta)
 	if spawned_this_frame:
 		return
-	if _client_sale_pending_spawners.is_empty() and client_count() == 0 and client_counter_agents.is_empty() and not client_tantrum.has_hostiles():
+	# Sale completion still requires no pending spawns, no normal clients, no
+	# counter-bound clients, and no hostile clients (hostiles remain in the "clients"
+	# group, so client_count() also covers them; has_hostiles() is the explicit gate).
+	if (
+		_client_sale_pending_spawners.is_empty()
+		and client_count() == 0
+		and client_counter_agents.is_empty()
+		and not client_tantrum.has_hostiles()
+	):
 		_complete_client_sale()
 
 

@@ -302,9 +302,22 @@ func process_client_counter_arrivals() -> void:
 		if agent.has_method("stop_astar_in"):
 			agent.call("stop_astar_in")
 		if _counter_stock(counter_cell) <= 0:
-			_manager._begin_client_tantrum()
+			_handle_empty_counter_arrival(agent)
 			continue
 		start_client_counter_payment(agent, counter_cell)
+
+
+# The single authoritative call site for the tantrum transition: a client that just
+# finished walking to a counter and found it empty. Checks the authoritative rose
+# sources (total counter stock + grown-up normal roses) rather than cached garden
+# availability. If any rose remains obtainable, retarget this client; only when no
+# rose can be obtained does this specific client — and no other — enter tantrum.
+func _handle_empty_counter_arrival(agent: Node2D) -> void:
+	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+	if _manager._total_counter_stock() > 0 or _manager.grownup_rose_count() > 0:
+		_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
+		return
+	_manager.get_client_tantrum_controller().start_for_client(agent)
 
 
 func start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:

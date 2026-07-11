@@ -8,7 +8,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 ## Auto-save slot, written on each new day / on quit and restored on launch.
 ## Kept separate from SAVE_PATH so auto-saving never clobbers a manual F5 save.
 const AUTOSAVE_PATH: String = "user://progression_autosave.json"
-const SAVE_VERSION: int = 2
+# v3 adds the "player_placeable_durability" section (player-built provenance + health).
+const SAVE_VERSION: int = 3
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -422,6 +423,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func save_progression(save_path: String = SAVE_PATH, day_phase_override: String = "") -> bool:
 	var scene: Node = get_tree().current_scene
+	# Reject saving while any client tantrum is active, before touching either save
+	# slot. Hostile combat state is intentionally never serialized, so a mid-tantrum
+	# save could not be restored consistently. Applies to manual and automatic calls.
+	if _tantrum_blocks_save(scene):
+		_notify("NO SAVE DURING TANTRUM")
+		_log("Save rejected: client tantrum active")
+		return false
 	_log("Save started: %s" % ProjectSettings.globalize_path(save_path))
 	var layers: Dictionary = _get_layers(scene)
 	var player: Node2D = _get_player()
@@ -443,6 +451,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
+	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
@@ -453,6 +462,7 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
 		"ground_collectibles": ground_collectibles,
+		"player_placeable_durability": player_placeable_durability,
 		"runtime_agents": runtime_agents,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
@@ -702,6 +712,11 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
 	_restore_ground_collectibles(scene, data.get("ground_collectibles", []))
+	# Restore player-built durability/provenance after layers + PlantManager +
+	# BuildingObjectManager are reindexed, so every saved record can be validated
+	# against the live item at its layer/cell. Older saves have no section (no
+	# provenance is inferred for them).
+	_restore_player_placeable_durability(scene, data.get("player_placeable_durability", []))
 	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
 	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
 	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
@@ -914,6 +929,41 @@ func _restore_counter_stock(scene: Node, raw_stock: Variant) -> void:
 	])
 
 
+func _get_player_placeable_durability(scene: Node) -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_player_placeable_durability"):
+		return records
+	var raw_records: Array = building_manager.call("serialize_player_placeable_durability") as Array
+	for raw_record: Variant in raw_records:
+		if raw_record is Dictionary:
+			records.append(raw_record as Dictionary)
+	return records
+
+
+func _restore_player_placeable_durability(scene: Node, raw_records: Variant) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_player_placeable_durability"):
+		return
+	var records: Array = []
+	if raw_records is Array:
+		records = raw_records as Array
+	building_manager.call("restore_player_placeable_durability", records)
+	_log("Player-built durability restored: %d records" % records.size())
+
+
+func _tantrum_blocks_save(scene: Node) -> bool:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("get_client_tantrum_controller"):
+		return false
+	var tantrum: Object = building_manager.call("get_client_tantrum_controller")
+	if tantrum == null:
+		return false
+	var active: bool = tantrum.has_method("is_active") and bool(tantrum.call("is_active"))
+	var has_hostiles: bool = tantrum.has_method("has_hostiles") and bool(tantrum.call("has_hostiles"))
+	return active or has_hostiles
+
+
 func _restore_ground_collectibles(scene: Node, raw_items: Variant) -> void:
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if building_manager == null or not building_manager.has_method("restore_ground_collectibles_from_save"):
@@ -995,7 +1045,7 @@ func _reindex_loaded_layers(scene: Node) -> void:
 
 func _validate_save(data: Dictionary) -> String:
 	var save_version: int = int(data.get("version", -1))
-	if save_version != 1 and save_version != SAVE_VERSION:
+	if save_version != 1 and save_version != 2 and save_version != 3:
 		return "unsupported save version"
 	if not (data.get("layers") is Dictionary) or not (data.get("player") is Dictionary):
 		return "missing save sections"
@@ -1053,6 +1103,19 @@ func _validate_save(data: Dictionary) -> String:
 					return "invalid counter stock entry"
 			if int(entry["count"]) < 0:
 				return "invalid counter stock count"
+	if data.has("player_placeable_durability"):
+		if not (data["player_placeable_durability"] is Array):
+			return "invalid player placeable durability"
+		var durability_records: Array = data["player_placeable_durability"] as Array
+		for raw_entry: Variant in durability_records:
+			if not (raw_entry is Dictionary):
+				return "invalid player placeable durability entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "layer", "item_id", "health", "max_health"]:
+				if not entry.has(field):
+					return "invalid player placeable durability entry"
+			if int(entry["max_health"]) <= 0 or int(entry["health"]) < 0:
+				return "invalid player placeable durability health"
 	if data.has("plant_states"):
 		if not (data["plant_states"] is Array):
 			return "invalid plant states"
@@ -1133,7 +1196,11 @@ func _save_summary(data: Dictionary) -> String:
 	if raw_inventory is Array:
 		var inventory: Array = raw_inventory as Array
 		inventory_count = inventory.size()
-	return "phase=%s day=%d seeds=%d gems=%d money=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d" % [
+	var durability_count: int = 0
+	var raw_durability: Variant = data.get("player_placeable_durability", [])
+	if raw_durability is Array:
+		durability_count = (raw_durability as Array).size()
+	return "phase=%s day=%d seeds=%d gems=%d money=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d" % [
 		str(data.get("day_phase", "<missing>")),
 		int(progression_data.get("nDays", 0)),
 		int(progression_data.get("seeds", 0)),
@@ -1146,6 +1213,7 @@ func _save_summary(data: Dictionary) -> String:
 		counter_stock.size(),
 		counter_total,
 		inventory_count,
+		durability_count,
 	]
 
 

@@ -408,6 +408,15 @@ func start_angry() -> void:
 	_set_phase(PHASE_FLOW_IN)
 
 
+# Lock facing to SOUTH for the tantrum wind-up. The hostile is native-hard-paused
+# while this runs, so it does not move and _update_directional_facing cannot pull
+# the facing away; combined with status == "angry" this renders the SOUTH tantrum
+# frame. Purely a facing/frame choice, owned here with the rest of the sprite state.
+func face_south() -> void:
+	_facing_frame = MONSTER_FRAME_SOUTH
+	_facing_west = false
+
+
 func _clear_monster_held_rose() -> void:
 	if has_meta("monster_rose_visible"):
 		set_meta("monster_rose_visible", false)

@@ -66,6 +66,11 @@ func refund_world_position(cell: Vector2i) -> Vector2:
 
 
 func remove_tile(layer: TileMapLayer, cell: Vector2i, item_id: String = "") -> void:
+	# Central removal path (normal unbuild AND hostile no-refund destruction): drop any
+	# player-built provenance for this cell before the tile is erased. Idempotent, so a
+	# hostile destruction that already removed the durability record is a no-op here.
+	if _manager != null and _manager.has_method("unregister_player_placeable"):
+		_manager.call("unregister_player_placeable", cell)
 	var plantz: TileMapLayer = _plantz()
 	if layer == plantz:
 		var plant_manager: Node = _plant_manager()

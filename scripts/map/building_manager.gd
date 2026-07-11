@@ -176,6 +176,11 @@ var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
 var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
+# Generic player-built destructible system: provenance, health, target selection,
+# damage, instant plant destruction, and durability save/load. The tantrum
+# controller consumes it; BuildSystem/placement/removal feed provenance into it.
+var _durability: PlayerPlaceableDurabilityService = PlayerPlaceableDurabilityService.new()
+var _health_overlay: BuildingHealthOverlay
 var _client_sale: ClientSaleController = ClientSaleController.new()
 # Owns run-length + victory decisioning (finite runs, final client day, win latch).
 # See RunCompletionController.
@@ -232,6 +237,11 @@ func _ready() -> void:
 	_seed_merchant.setup(self)
 	_morning_harvest.setup(self)
 	_client_tantrum.setup(self)
+	_durability.setup(self)
+	_health_overlay = BuildingHealthOverlay.new()
+	add_child(_health_overlay)
+	_health_overlay.setup(self, _durability)
+	_durability.set_overlay(_health_overlay)
 	_client_sale.setup(self)
 	_run_completion.setup(self)
 	_drowning_controller.setup(self)
@@ -1616,7 +1626,8 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 		await _run_client_preparation(_night_preparation_token)
 		_agent_save_service.restore_state(data, true)
 		_purge_day_phase_monsters_after_load()
-		_client_tantrum.restore_live_hostiles()
+		# Tantrum state is never saved (saving is blocked during tantrum), so there are
+		# no live hostiles to restore here.
 		_notify_restored_phase()
 		return
 	_night_preparation_ready = bool(data.get("night_preparation_ready", true))
@@ -1955,8 +1966,25 @@ func _process_client_counter_arrivals() -> void:
 	_agent_navigation_phases.process_client_counter_arrivals()
 
 
-func _begin_client_tantrum() -> void:
-	_client_tantrum.begin()
+# --- Generic player-built destructible system (thin accessors) ---------------
+func get_player_placeable_durability_service() -> PlayerPlaceableDurabilityService:
+	return _durability
+
+
+func register_player_placeable(cell: Vector2i, item_id: String, layer_name: String) -> void:
+	_durability.register_player_placeable(cell, item_id, layer_name)
+
+
+func unregister_player_placeable(cell: Vector2i) -> void:
+	_durability.unregister_player_placeable(cell)
+
+
+func serialize_player_placeable_durability() -> Array[Dictionary]:
+	return _durability.serialize()
+
+
+func restore_player_placeable_durability(saved: Array) -> void:
+	_durability.restore(saved)
 
 
 func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:
@@ -2006,22 +2034,6 @@ func _finish_client_purchase(agent: Node2D) -> void:
 # and clients only run the nearest-counter lookup while some counter actually holds stock.
 func _try_client_early_counter_fetch(agent: Node2D) -> bool:
 	return _agent_navigation_phases.try_client_early_counter_fetch(agent)
-
-
-func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
-	return _client_tantrum.nearest_live_reservoir(from_world, use_distance)
-
-
-func _nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
-	return nearest_live_reservoir(from_world, use_distance)
-
-
-func reservoir_is_destroyed(reservoir: Node) -> bool:
-	return _client_tantrum.reservoir_is_destroyed(reservoir)
-
-
-func _reservoir_is_destroyed(reservoir: Node) -> bool:
-	return reservoir_is_destroyed(reservoir)
 
 
 func clear_client_sale_spawns() -> void:

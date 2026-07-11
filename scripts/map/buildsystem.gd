@@ -378,6 +378,37 @@ func _notify_navigation_topology_changed(cell: Vector2i, reason: String) -> void
 	elif not placed and building_manager.has_method("notify_blocking_placeable_removed"):
 		building_manager.call("notify_blocking_placeable_removed", cell)
 
+# Player-built provenance registration, forwarded to the BuildingManager-owned
+# PlayerPlaceableDurabilityService. Called from the central placement/removal hooks
+# so only genuinely player-built placeables become destructible tantrum targets.
+func register_player_placeable(cell: Vector2i, item_id: String, layer_name: String) -> void:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("register_player_placeable"):
+		building_manager.call("register_player_placeable", cell, item_id, layer_name)
+
+func unregister_player_placeable(cell: Vector2i) -> void:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("unregister_player_placeable"):
+		building_manager.call("unregister_player_placeable", cell)
+
+# Hostile destruction: identical low-level removal + cleanup as a normal unbuild, but
+# without the currency/inventory refund. Reuses BuildRemovalService.remove_tile (which
+# commit_removal also calls before it refunds), so wall topology, turret runtime,
+# counter-stock clearing, fence autotiling and navigation are updated exactly as a
+# normal removal requires.
+func destroy_placeable_no_refund(cell: Vector2i) -> bool:
+	if _removal_service == null:
+		return false
+	var removal: Dictionary = _removal_service.removable_at_cell(cell)
+	if removal.is_empty():
+		return false
+	var layer: TileMapLayer = removal.get("layer") as TileMapLayer
+	var item_id: String = str(removal.get("item_id", ""))
+	if layer == null or item_id == "":
+		return false
+	_removal_service.remove_tile(layer, cell, item_id)
+	return true
+
 func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
 		return false
