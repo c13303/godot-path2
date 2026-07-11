@@ -3,7 +3,7 @@ class_name CameraController
 
 @export var min_zoom: float = 0.25
 @export var max_zoom: float = 4.0
-@export var default_zoom: float = 1.125
+@export var default_zoom: float = 1.25
 var follow_smoothing: float = 8.0
 var zoom_snap_step: float = 0.125
 var position_snap_step: float = 0.5
