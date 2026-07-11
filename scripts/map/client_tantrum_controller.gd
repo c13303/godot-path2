@@ -1,7 +1,10 @@
 extends RefCounted
 class_name ClientTantrumController
 
-const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
+const CLIENT_SPRITE_HFRAMES: int = 7
+const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
+const CLIENT_FRAME_TANTRUM_SOUTH: int = 4
 const IDLE_GROUP: int = 0
 const ATTACK_INTERVAL_SECONDS: float = 3.0
 const ATTACK_DAMAGE: int = 1
@@ -173,8 +176,10 @@ func _make_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
 	var sprite: Sprite2D = client.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
-		sprite.hframes = 5
-		sprite.frame = 4
+		sprite.hframes = CLIENT_SPRITE_HFRAMES
+		sprite.frame = CLIENT_FRAME_TANTRUM_SOUTH
+		sprite.flip_h = false
+	client.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 	if client.has_method("start_angry"):
 		client.call("start_angry")
 	_hostile_clients[nav_id] = {

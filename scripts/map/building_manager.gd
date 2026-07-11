@@ -1718,7 +1718,7 @@ func _animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, cl
 
 
 # Called when the rose that left the counter pile reaches the buying client: only now
-# does the client show the carry-rose frame (character.gd gates flow_out on this meta).
+# does the client show the pinned rose sprite (character.gd gates it on this meta).
 func _on_client_rose_arrived(client: Node2D) -> void:
 	if client != null and is_instance_valid(client):
 		client.set_meta("client_rose_visible", true)
@@ -1840,7 +1840,7 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 	agent.set_meta("client_has_rose", true)
-	# Garden plant purchase has no counter-pile flight, so the carry frame shows at once.
+	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
 	agent.set_meta("client_rose_visible", true)
 	_spawn_client_payment_money(agent.global_position)
 	if plant_manager and plant_manager.has_method("remove_plant"):
@@ -1869,8 +1869,8 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 	var pile_index: int = _counter_stock(counter_cell) - 1
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
 	# Logical purchase is complete immediately (night-start gating, tantrum eligibility),
-	# but the visible "carrying a rose" frame is withheld until the flown rose reaches the
-	# client — _on_client_rose_arrived flips client_rose_visible on arrival.
+	# but the pinned rose sprite is withheld until the flown rose reaches the client:
+	# _on_client_rose_arrived flips client_rose_visible on arrival.
 	agent.set_meta("client_has_rose", true)
 	_animate_counter_rose_to_client(counter_cell, pile_index, agent)
 	_spawn_client_payment_money(agent.global_position)
@@ -1890,10 +1890,10 @@ func _spawn_client_payment_money(world_position: Vector2) -> void:
 
 
 # A client that has taken its rose (from a counter or a garden plant) leaves the map
-# immediately — there is no eating/paying delay. The money pickup and the "carrying a
-# rose" look are already set up by the caller; start_escape's flow_out status drives the
-# carry sprite frame. _assign_agent_to_escape detaches the current path/flow and clears
-# the entry/astar/eating bookkeeping, so we only need to drop the counter-walk entry.
+# immediately — there is no eating/paying delay. The money pickup and pinned rose are
+# already set up by the caller. _assign_agent_to_escape detaches the current path/flow
+# and clears the entry/astar/eating bookkeeping, so we only need to drop the
+# counter-walk entry.
 func _finish_client_purchase(agent: Node2D) -> void:
 	_agent_navigation_phases.finish_client_purchase(agent)
 

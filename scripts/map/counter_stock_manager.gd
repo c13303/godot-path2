@@ -313,7 +313,7 @@ func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> voi
 # occupied in the pile BEFORE it was removed (i.e. stock - 1 at purchase time), so the
 # sprite launches from exactly where the popped pile rose sat. The client is walking
 # away, so the flight endpoint tracks its live position every tick; `on_arrival` fires
-# once the rose catches up (the caller uses this to flip the carry-rose frame on).
+# once the rose catches up (the caller uses this to show the pinned rose sprite).
 func animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, target: Node2D, on_arrival: Callable) -> void:
 	if target == null or not is_instance_valid(target):
 		if not on_arrival.is_null():

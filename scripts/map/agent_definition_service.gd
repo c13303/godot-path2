@@ -6,8 +6,10 @@ class_name AgentDefinitionService
 # assigns, or frees agents (BuildingManager's spawn orchestration keeps that).
 
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
-const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/client.png")
+const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
+const CLIENT_SPRITE_HFRAMES: int = 7
+const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 1.5
 const BIG_MONSTER_WALK_SQUASH: float = 0.09
 
@@ -67,7 +69,10 @@ func apply_client_data(agent: Node) -> void:
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
 		sprite.texture = CLIENT_TEXTURE
-		sprite.hframes = 5
+		sprite.hframes = CLIENT_SPRITE_HFRAMES
+		sprite.frame = 0
+		sprite.flip_h = false
+	agent.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 
 
 func apply_merchant_data(agent: Node) -> void:

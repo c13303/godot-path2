@@ -70,6 +70,18 @@ const MONSTER_FRAME_NORTH: int = 2
 const MONSTER_FRAME_ROSE_EATING: int = 3
 const MONSTER_FRAME_WATER_DROWNING: int = 5
 const MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL: StringName = &"directional_6_horizontal"
+const CLIENT_DIRECTIONAL_FRAME_COUNT: int = 7
+const CLIENT_FRAME_WATER_DROWNING: int = 3
+const CLIENT_FRAME_TANTRUM_SOUTH: int = 4
+const CLIENT_FRAME_TANTRUM_EAST: int = 5
+const CLIENT_FRAME_TANTRUM_NORTH: int = 6
+const CLIENT_FRAME_LAYOUT_DIRECTIONAL_7_HORIZONTAL: StringName = &"client_directional_7_horizontal"
+const CLIENT_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
+const CLIENT_ROSE_TEXTURE_FRAME_COUNT: int = 3
+const CLIENT_ROSE_TEXTURE_FRAME: int = 0
+const CLIENT_ROSE_SCALE: Vector2 = Vector2(0.56, 0.56)
+const CLIENT_ROSE_Z_ABOVE: int = 1
+const CLIENT_ROSE_Z_BELOW: int = -1
 const FACING_CHANGE_MIN_SECONDS: float = 0.14
 const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
@@ -79,6 +91,7 @@ const MONSTER_FRAME_EATING: int = 1
 const MONSTER_FRAME_DROWNING: int = 3
 const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
+var _client_rose_sprite: Sprite2D
 var _facing_frame: int = MONSTER_FRAME_SOUTH
 var _facing_west: bool = false
 var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
@@ -103,6 +116,7 @@ func _process(delta: float) -> void:
 	_process_eating_status(delta)
 	_update_directional_facing(delta)
 	_update_monster_frame()
+	_update_client_rose_pin()
 	_last_facing_position = global_position
 
 func take_damage(amount: int) -> bool:
@@ -165,19 +179,24 @@ func _update_monster_frame() -> void:
 		return
 	var frame: int = _directional_idle_frame() if _uses_directional_monster_frames() else MONSTER_FRAME_IDLE
 	var flip_h: bool = _uses_directional_monster_frames() and _facing_west
+	if _uses_directional_client_frames():
+		frame = _directional_idle_frame()
+		flip_h = _facing_west
 	if status == "angry":
-		frame = CLIENT_FRAME_ANGRY
-		flip_h = false
+		if _uses_directional_client_frames():
+			frame = _directional_client_tantrum_frame()
+			flip_h = _facing_west
+		else:
+			frame = CLIENT_FRAME_ANGRY
+			flip_h = false
 	elif status == "eating":
 		frame = MONSTER_FRAME_ROSE_EATING if _uses_directional_monster_frames() else MONSTER_FRAME_EATING
 		flip_h = false
-	elif status == "flow_out" and _is_client_agent() and bool(get_meta("client_rose_visible", false)):
-		# The carry-rose frame waits until the rose flown from the counter pile has
-		# actually reached the client (building_manager sets client_rose_visible on arrival).
-		frame = MONSTER_FRAME_EATING
-		flip_h = false
 	elif status == "drowning":
-		frame = MONSTER_FRAME_WATER_DROWNING if _uses_directional_monster_frames() else MONSTER_FRAME_DROWNING
+		if _uses_directional_client_frames():
+			frame = CLIENT_FRAME_WATER_DROWNING
+		else:
+			frame = MONSTER_FRAME_WATER_DROWNING if _uses_directional_monster_frames() else MONSTER_FRAME_DROWNING
 		flip_h = false
 	if _monster_sprite.frame != frame:
 		_monster_sprite.frame = frame
@@ -186,7 +205,7 @@ func _update_monster_frame() -> void:
 
 
 func _update_directional_facing(delta: float) -> void:
-	if not _uses_directional_monster_frames():
+	if not _uses_directional_monster_frames() and not _uses_directional_client_frames():
 		return
 	var direction: Vector2 = global_position - _last_facing_position
 	if not _facing_state.face_direction(direction, delta):
@@ -210,6 +229,68 @@ func _uses_directional_monster_frames() -> bool:
 		return false
 	var frame_layout: StringName = StringName(str(get_meta("monster_sprite_frame_layout")))
 	return frame_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+
+
+func _uses_directional_client_frames() -> bool:
+	if not _is_client_agent() or not is_instance_valid(_monster_sprite):
+		return false
+	if not has_meta("client_sprite_frame_layout"):
+		return false
+	var frame_layout: StringName = StringName(str(get_meta("client_sprite_frame_layout")))
+	return frame_layout == CLIENT_FRAME_LAYOUT_DIRECTIONAL_7_HORIZONTAL and _monster_sprite.hframes >= CLIENT_DIRECTIONAL_FRAME_COUNT
+
+
+func _directional_client_tantrum_frame() -> int:
+	if _facing_frame == MONSTER_FRAME_EAST:
+		return CLIENT_FRAME_TANTRUM_EAST
+	if _facing_frame == MONSTER_FRAME_NORTH:
+		return CLIENT_FRAME_TANTRUM_NORTH
+	return CLIENT_FRAME_TANTRUM_SOUTH
+
+
+func _update_client_rose_pin() -> void:
+	var visible: bool = _is_client_agent() and bool(get_meta("client_rose_visible", false))
+	if not visible:
+		if is_instance_valid(_client_rose_sprite):
+			_client_rose_sprite.visible = false
+		return
+	var rose_sprite: Sprite2D = _ensure_client_rose_sprite()
+	if rose_sprite == null or not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
+		return
+	rose_sprite.visible = true
+	rose_sprite.position = _client_rose_pin_position()
+	rose_sprite.z_index = CLIENT_ROSE_Z_BELOW if _facing_frame == MONSTER_FRAME_NORTH else CLIENT_ROSE_Z_ABOVE
+
+
+func _ensure_client_rose_sprite() -> Sprite2D:
+	if is_instance_valid(_client_rose_sprite):
+		return _client_rose_sprite
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "ClientRoseSprite2D"
+	sprite.texture = CLIENT_ROSE_TEXTURE
+	sprite.hframes = CLIENT_ROSE_TEXTURE_FRAME_COUNT
+	sprite.frame = CLIENT_ROSE_TEXTURE_FRAME
+	sprite.centered = true
+	sprite.scale = CLIENT_ROSE_SCALE
+	sprite.visible = false
+	add_child(sprite)
+	_client_rose_sprite = sprite
+	return _client_rose_sprite
+
+
+func _client_rose_pin_position() -> Vector2:
+	var frame_width: float = float(_monster_sprite.texture.get_width()) / float(maxi(1, _monster_sprite.hframes))
+	var frame_height: float = float(_monster_sprite.texture.get_height()) / float(maxi(1, _monster_sprite.vframes))
+	var half_width: float = frame_width * absf(_monster_sprite.scale.x) * 0.5
+	var half_height: float = frame_height * absf(_monster_sprite.scale.y) * 0.5
+	var center: Vector2 = _monster_sprite.position + _monster_sprite.offset
+	if not _monster_sprite.centered:
+		center += Vector2(half_width, half_height)
+	var low_half_y: float = center.y + half_height * 0.5
+	if _facing_frame == MONSTER_FRAME_EAST:
+		var x_sign: float = -1.0 if _facing_west else 1.0
+		return Vector2(center.x + half_width * 0.5 * x_sign, low_half_y)
+	return Vector2(center.x, low_half_y)
 
 
 func _is_monster_agent() -> bool:
