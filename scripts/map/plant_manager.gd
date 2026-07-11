@@ -37,15 +37,8 @@ var _last_build_phase_rose_dry_day: int = -1
 func _ready() -> void:
 	initialize_from_layer()
 	_connect_day_started()
-	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
-		GameState.building_phase_changed.connect(_on_building_phase_changed)
 	if GameState.is_building_phase:
 		_last_build_phase_rose_dry_day = _current_day_number()
-
-func _on_building_phase_changed(is_building_phase: bool) -> void:
-	# A fresh build phase resets roses; imperial plants dry during morning growth.
-	if is_building_phase:
-		_dry_roses_once_for_build_phase()
 
 func _connect_day_started() -> void:
 	var scene: Node = get_tree().current_scene
@@ -94,13 +87,16 @@ func _current_day_number() -> int:
 		return -1
 	return int(progression_node.call("get_value", &"nDays"))
 
-func _dry_roses_once_for_build_phase() -> void:
+func _dry_roses_once_for_current_day() -> void:
 	var current_day: int = _current_day_number()
 	if current_day >= 0:
 		if _last_build_phase_rose_dry_day == current_day:
 			return
 		_last_build_phase_rose_dry_day = current_day
 	dry_all_roses()
+
+func dry_roses_once_after_clients_finished() -> void:
+	_dry_roses_once_for_current_day()
 
 func mark_build_phase_rose_dry_handled_for_current_day() -> void:
 	var current_day: int = _current_day_number()
@@ -237,9 +233,9 @@ func grow_green_roses() -> int:
 		_plants[cell] = plant_data
 		# Grown roses keep their watered (green) look through the night and morning;
 		# they only open into the full-bloom "rose-rose" tile once the harvest phase
-		# begins (see bloom_grownup_roses), and revert to the dry tile at the next
-		# build phase (see dry_all_roses), so a watered rose never appears to dry out
-		# overnight.
+		# begins (see bloom_grownup_roses), and revert to the dry tile after the
+		# client sale finishes (see dry_all_roses), so a watered rose never appears
+		# to dry out overnight or before clients have visited.
 		_set_rose_atlas(cell, ROSE_WET_ATLAS)
 		grown_count += 1
 	return grown_count

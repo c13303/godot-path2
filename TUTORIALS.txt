@@ -49,6 +49,10 @@ placing on a floor you can't build on
 night spawner-reveal cutscene begins (camera pans to devil spawners)
     = "les diables ont faim !" / "devils are hungry !"      [tutorial.devils_hungry]
 
+night starts with no roses/counter stock for monsters
+    = "La nuit est calme sans roses ..." / "The night is calm without roses ..."
+                                                            [tutorial.calm_night_no_roses]
+
 
 ========================================================================
  BIG BUCKET 2 — "NIGHT AFTER" (dawn -> the following day)
@@ -61,6 +65,11 @@ sunrise transition, no phase started yet
     -> no hint shown (label stays blank until the morning phase begins)
 
 --- MORNING harvest phase ---
+
+no grown-up roses to sell
+    = "Pas de roses, pas de clients aujourd'hui" / "No roses, No clients today"
+                                                            [tutorial.no_roses_no_clients]
+    (client sale is skipped automatically; no hold-to-start-clients prompt)
 
 grown-up roses ready + counter has room
     = "Cueillez vos roses" / "Harvest your roses"           [tutorial.harvest_rose]

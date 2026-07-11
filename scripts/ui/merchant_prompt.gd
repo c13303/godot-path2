@@ -76,6 +76,10 @@ func _should_show() -> bool:
 		return false
 	if not bool(manager.call("is_player_near_seed_merchant")):
 		return false
+	# Only show the hint once the merchant has parked at its spot. While it is still
+	# walking in, the player can press interact but no prompt is drawn.
+	if manager.has_method("has_seed_merchant_reached_spot") and not bool(manager.call("has_seed_merchant_reached_spot")):
+		return false
 	var toolbuild: Node = _resolve_toolbuild()
 	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
 		return false

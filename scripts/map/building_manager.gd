@@ -653,6 +653,10 @@ func _abort_client_preparation(token: int) -> void:
 func finish_night_preparation_success() -> void:
 	_night_preparing = false
 	_night_preparation_ready = true
+	if _no_plants_remaining():
+		_show_tutorial_alert("tutorial.calm_night_no_roses")
+		on_night_reveal_finished()
+		return
 	if _spawn_playlist_config.playlist_spawning_enabled() and _spawner_reveal_phase.begin_night_reveal():
 		return
 	on_night_reveal_finished()
@@ -1321,6 +1325,21 @@ func on_client_sale_skipped() -> void:
 	_run_completion.on_client_sale_skipped()
 
 
+func skip_client_sale_without_roses() -> void:
+	_client_sale_start_requested = false
+	_show_tutorial_alert("tutorial.no_roses_no_clients")
+	on_client_sale_skipped()
+
+
+func _show_tutorial_alert(key: String) -> void:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	if tutorial != null and tutorial.has_method("show_alert"):
+		tutorial.call("show_alert", key)
+
+
 func try_finish_final_day() -> bool:
 	return _run_completion.try_finish_final_day()
 
@@ -1377,6 +1396,12 @@ func _process_seed_merchant_phase() -> void:
 # drives both the toolbuild picker visibility (toolbuild.gd) and the movement pause below.
 func is_player_near_seed_merchant() -> bool:
 	return _seed_merchant.is_player_near()
+
+
+# True once the merchant has parked at its authored idle spot. The interaction prompt
+# waits for this so no hint is shown while the merchant is still walking in.
+func has_seed_merchant_reached_spot() -> bool:
+	return _seed_merchant.has_reached_idle_spot()
 
 
 ## World position of the live seed merchant, used to anchor the interaction prompt above it.
@@ -1730,6 +1755,10 @@ func _total_counter_stock() -> int:
 ## Public accessor: total number of harvested roses waiting on shop counters.
 func total_counter_stock() -> int:
 	return _total_counter_stock()
+
+
+func has_roses_to_sell_today() -> bool:
+	return _client_sale.has_roses_available()
 
 
 func serialize_counter_stock() -> Array[Dictionary]:

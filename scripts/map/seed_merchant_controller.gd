@@ -104,6 +104,11 @@ func process_proximity() -> void:
 	if near and not GameState.is_night and not GameState.is_seed_merchant_phase:
 		GameState.set_building_phase(false)
 		GameState.set_seed_merchant_phase(true)
+	# Keep walking to the authored spot even when the player is close; the merchant only
+	# freezes for the player once it has parked (_waiting). The player can still open the
+	# shop with the interact button during the walk-in.
+	if not _waiting:
+		return
 	if near == _paused:
 		return
 	_set_paused(near)
@@ -166,6 +171,13 @@ func is_player_near() -> bool:
 
 func is_paused_agent(agent: Node2D) -> bool:
 	return agent == _agent and _paused
+
+
+## True once the merchant has finished walking in and is parked at its authored idle spot.
+## The interaction prompt only appears after this point; before it, the merchant keeps
+## moving (and can still be interacted with via the interact button).
+func has_reached_idle_spot() -> bool:
+	return _active and _waiting and is_instance_valid(_agent)
 
 
 ## World position of the merchant sprite, or Vector2.ZERO when none is spawned. The

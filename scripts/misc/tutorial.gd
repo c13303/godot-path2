@@ -30,6 +30,7 @@ const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
+const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -299,6 +300,8 @@ func _current_message_key() -> String:
 	# persistent tantrum alert may show, so suppress every economy hint here.
 	if GameState.is_client_phase:
 		return ""
+	if _client_sale_requested_without_roses():
+		return KEY_NO_ROSES_NO_CLIENTS
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
@@ -349,9 +352,17 @@ func _is_spawner_reveal_cutscene_active() -> bool:
 
 
 func _can_start_night_after_clients() -> bool:
+	if not _has_planted_roses_on_floor():
+		return false
 	if _building_manager == null or not _building_manager.has_method("can_start_night_after_clients"):
 		return false
 	return bool(_building_manager.call("can_start_night_after_clients"))
+
+
+func _has_planted_roses_on_floor() -> bool:
+	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
+		return false
+	return int(_plant_manager.call("rose_count")) > 0
 
 
 func _request_start_night_prompt() -> void:
@@ -368,6 +379,8 @@ func _current_hold_action() -> StringName:
 	if _building_manager == null:
 		return HOLD_ACTION_NONE
 	if _building_manager.has_method("is_client_sale_start_requested") and bool(_building_manager.call("is_client_sale_start_requested")):
+		if not _has_roses_to_sell_today():
+			return HOLD_ACTION_NONE
 		return HOLD_ACTION_START_CLIENTS
 	if _building_manager.has_method("is_night_start_requested") and bool(_building_manager.call("is_night_start_requested")):
 		if not _can_start_night_after_clients():
@@ -417,6 +430,21 @@ func _morning_client_skip_available() -> bool:
 	if _building_manager == null or not _building_manager.has_method("grownup_rose_count"):
 		return false
 	return int(_building_manager.call("grownup_rose_count")) > 0
+
+
+func _client_sale_requested_without_roses() -> bool:
+	return (
+		_building_manager != null
+		and _building_manager.has_method("is_client_sale_start_requested")
+		and bool(_building_manager.call("is_client_sale_start_requested"))
+		and not _has_roses_to_sell_today()
+	)
+
+
+func _has_roses_to_sell_today() -> bool:
+	if _building_manager != null and _building_manager.has_method("has_roses_to_sell_today"):
+		return bool(_building_manager.call("has_roses_to_sell_today"))
+	return false
 
 
 func _trigger_hold_action(action: StringName) -> void:

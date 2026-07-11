@@ -230,6 +230,7 @@ func _complete_client_sale() -> void:
 	# before the roses-watered night gate below (there is no next night).
 	if _manager.try_finish_final_day():
 		return
+	_dry_planted_roses_after_clients()
 	if _manager.can_start_night_after_clients():
 		_manager.request_night_after_clients()
 		return
@@ -243,6 +244,16 @@ func client_count() -> int:
 
 func _roses_available() -> bool:
 	return _manager.total_counter_stock() > 0 or _manager.grownup_rose_count() > 0
+
+
+func has_roses_available() -> bool:
+	return _roses_available()
+
+
+func _dry_planted_roses_after_clients() -> void:
+	var plant_manager: Node = _manager.get_plant_manager()
+	if plant_manager != null and plant_manager.has_method("dry_roses_once_after_clients_finished"):
+		plant_manager.call("dry_roses_once_after_clients_finished")
 
 
 func current_night_client_count() -> int:
