@@ -10,4 +10,6 @@ weapon = ExtResource("2_weapon")
 shooting_range = 400.0
 directional = true
 straight_line_detection = true
+shot_release_delay = 1.7
+shot_cycle_duration = 2.1
 build_in_range = true

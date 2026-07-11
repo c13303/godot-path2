@@ -335,6 +335,11 @@ const ITEM_DEFS: Dictionary = {
 			"base_frame": 0,
 			"head_frame": 1,
 			"head_offset": Vector2(0.0, -16.0),
+			"shot_frames": [
+				{"frame": 2, "duration": 1.5},
+				{"frame": 3, "duration": 0.2},
+				{"frame": 4, "duration": 0.4},
+			],
 		},
 		"max_stack": 999,
 	},

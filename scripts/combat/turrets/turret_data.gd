@@ -10,6 +10,8 @@ class_name TurretData
 @export_range(0.0, 10000.0, 1.0, "or_greater") var shooting_range: float = 200.0
 @export var directional: bool = false
 @export var straight_line_detection: bool = false
+@export_range(0.0, 60.0, 0.001, "or_greater") var shot_release_delay: float = 0.0
+@export_range(0.0, 60.0, 0.001, "or_greater") var shot_cycle_duration: float = 0.0
 
 @export_group("Building")
 @export var build_in_range: bool = false

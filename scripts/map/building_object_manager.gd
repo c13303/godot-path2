@@ -129,6 +129,14 @@ func request_contact_dance(cell: Vector2i, duration: float) -> void:
 		runtime_node.call("request_contact_dance", duration)
 
 
+func play_turret_shot_animation(cell: Vector2i) -> void:
+	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return
+	if runtime_node.has_method("play_shot_animation"):
+		runtime_node.call("play_shot_animation")
+
+
 func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	for raw_cell: Variant in _buildings_by_cell.keys():

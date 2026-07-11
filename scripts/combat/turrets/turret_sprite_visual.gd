@@ -10,6 +10,7 @@ const DEFAULT_FRAME_STRIDE_X: int = 36
 const DEFAULT_BASE_FRAME: int = 0
 const DEFAULT_HEAD_FRAME: int = 1
 const DEFAULT_HEAD_OFFSET: Vector2 = Vector2(0.0, -16.0)
+const DEFAULT_SHOT_FRAMES: Array[Dictionary] = []
 const CONTACT_SWAY_DEGREES: float = 5.0
 const CONTACT_SWAY_SPEED: float = 1.1
 const CONTACT_BREATHE_AMOUNT: float = 0.05
@@ -23,28 +24,37 @@ var _contact_until: float = 0.0
 var _sway_phase: float = 0.0
 var _breathe_phase: float = 0.0
 var _base_position: Vector2 = Vector2.ZERO
+var _texture: Texture2D
+var _frame_size: Vector2i = DEFAULT_FRAME_SIZE
+var _frame_padding: Vector2i = DEFAULT_FRAME_PADDING
+var _frame_stride_x: int = DEFAULT_FRAME_STRIDE_X
+var _head_idle_frame: int = DEFAULT_HEAD_FRAME
+var _shot_frames: Array[Dictionary] = []
+var _shot_time_left: float = 0.0
+var _shot_frame_index: int = 0
 
 
 func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 	_clear_sprites()
 	_base_position = position
-	var texture: Texture2D = visual_def.get("texture", null) as Texture2D
-	if texture == null:
+	_texture = visual_def.get("texture", null) as Texture2D
+	if _texture == null:
 		return
 
-	var frame_size: Vector2i = _vector2i_from_variant(visual_def.get("frame_size", DEFAULT_FRAME_SIZE), DEFAULT_FRAME_SIZE)
-	var frame_padding: Vector2i = _vector2i_from_variant(visual_def.get("frame_padding", DEFAULT_FRAME_PADDING), DEFAULT_FRAME_PADDING)
-	var frame_stride_x: int = int(visual_def.get("frame_stride_x", DEFAULT_FRAME_STRIDE_X))
+	_frame_size = _vector2i_from_variant(visual_def.get("frame_size", DEFAULT_FRAME_SIZE), DEFAULT_FRAME_SIZE)
+	_frame_padding = _vector2i_from_variant(visual_def.get("frame_padding", DEFAULT_FRAME_PADDING), DEFAULT_FRAME_PADDING)
+	_frame_stride_x = int(visual_def.get("frame_stride_x", DEFAULT_FRAME_STRIDE_X))
 	var base_frame: int = int(visual_def.get("base_frame", DEFAULT_BASE_FRAME))
-	var head_frame: int = int(visual_def.get("head_frame", DEFAULT_HEAD_FRAME))
+	_head_idle_frame = int(visual_def.get("head_frame", DEFAULT_HEAD_FRAME))
 	var head_offset: Vector2 = _vector2_from_variant(visual_def.get("head_offset", DEFAULT_HEAD_OFFSET), DEFAULT_HEAD_OFFSET)
+	_shot_frames = _shot_frames_from_variant(visual_def.get("shot_frames", DEFAULT_SHOT_FRAMES))
 
-	_base_sprite = _create_frame_sprite(texture, _frame_region(base_frame, frame_padding, frame_size, frame_stride_x))
+	_base_sprite = _create_frame_sprite(_texture, _frame_region(base_frame))
 	_base_sprite.name = "Base"
 	_base_sprite.z_index = 0
 	add_child(_base_sprite)
 
-	_head_sprite = _create_frame_sprite(texture, _frame_region(head_frame, frame_padding, frame_size, frame_stride_x))
+	_head_sprite = _create_frame_sprite(_texture, _frame_region(_head_idle_frame))
 	_head_sprite.name = "Head"
 	_head_sprite.position = head_offset
 	_head_sprite.z_index = 1
@@ -60,8 +70,16 @@ func request_contact_dance(duration: float) -> void:
 		_breathe_phase = randf() * TAU
 
 
+func play_shot_animation() -> void:
+	if _head_sprite == null or _shot_frames.is_empty():
+		return
+	_shot_frame_index = 0
+	_apply_shot_frame(_shot_frame_index)
+
+
 func _process(delta: float) -> void:
 	_time += delta
+	_process_shot_animation(delta)
 	if _time >= _contact_until:
 		position = _base_position
 		scale = Vector2.ONE
@@ -97,12 +115,45 @@ func _clear_sprites() -> void:
 		child.queue_free()
 	_base_sprite = null
 	_head_sprite = null
+	_texture = null
+	_shot_frames.clear()
+	_shot_time_left = 0.0
+	_shot_frame_index = 0
 
 
-func _frame_region(frame: int, padding: Vector2i, frame_size: Vector2i, frame_stride_x: int) -> Rect2:
-	var x: float = float(padding.x + frame * frame_stride_x)
-	var y: float = float(padding.y)
-	return Rect2(Vector2(x, y), Vector2(frame_size))
+func _frame_region(frame: int) -> Rect2:
+	var x: float = float(_frame_padding.x + frame * _frame_stride_x)
+	var y: float = float(_frame_padding.y)
+	return Rect2(Vector2(x, y), Vector2(_frame_size))
+
+
+func _process_shot_animation(delta: float) -> void:
+	if _head_sprite == null or _shot_time_left <= 0.0:
+		return
+	_shot_time_left -= delta
+	while _shot_time_left <= 0.0:
+		_shot_frame_index += 1
+		if _shot_frame_index >= _shot_frames.size():
+			_set_head_frame(_head_idle_frame)
+			_shot_time_left = 0.0
+			return
+		var carry: float = _shot_time_left
+		_apply_shot_frame(_shot_frame_index)
+		_shot_time_left += carry
+
+
+func _apply_shot_frame(frame_index: int) -> void:
+	var frame_data: Dictionary = _shot_frames[frame_index]
+	_set_head_frame(int(frame_data.get("frame", _head_idle_frame)))
+	_shot_time_left = maxf(0.0, float(frame_data.get("duration", 0.0)))
+	if _shot_time_left <= 0.0:
+		_shot_time_left = 0.001
+
+
+func _set_head_frame(frame: int) -> void:
+	if _head_sprite == null:
+		return
+	_head_sprite.region_rect = _frame_region(frame)
 
 
 func _rotation_for_direction(direction: Vector2i) -> float:
@@ -137,3 +188,19 @@ func _vector2_from_variant(value: Variant, fallback: Vector2) -> Vector2:
 		var array_value: Array = value as Array
 		return Vector2(float(array_value[0]), float(array_value[1]))
 	return fallback
+
+
+func _shot_frames_from_variant(value: Variant) -> Array[Dictionary]:
+	var frames: Array[Dictionary] = []
+	if not (value is Array):
+		return frames
+	var raw_frames: Array = value as Array
+	for raw_frame: Variant in raw_frames:
+		if not (raw_frame is Dictionary):
+			continue
+		var frame_data: Dictionary = raw_frame as Dictionary
+		frames.append({
+			"frame": int(frame_data.get("frame", _head_idle_frame)),
+			"duration": maxf(0.0, float(frame_data.get("duration", 0.0))),
+		})
+	return frames

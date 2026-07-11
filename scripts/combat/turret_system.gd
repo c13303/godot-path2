@@ -56,6 +56,9 @@ func _process(delta: float) -> void:
 		var state: Dictionary = _turrets[cell] as Dictionary
 		var origin: Vector2 = _turret_world_position(cell)
 		var activation_range: float = float(state.get("shooting_range", 0.0))
+		if bool(state.get("shot_active", false)):
+			_advance_turret_shot(cell, state, origin, activation_range, delta)
+			continue
 		# A spray burst is in progress: keep aiming at (and damaging) the nearest enemy
 		# until the duration elapses. `elapsed` keeps counting so the next burst starts
 		# exactly shoot_frequency seconds after this one began.
@@ -75,20 +78,61 @@ func _process(delta: float) -> void:
 		var direction: Vector2 = _fire_direction_for_target(state, origin, target)
 		state["last_direction"] = direction
 		state["elapsed"] = elapsed - shoot_frequency
-		var weapon_id: String = str(state.get("weapon", "spray"))
-		if _fight_system.is_gun(weapon_id):
-			_fight_system.fire_gun_once(weapon_id, origin, direction, -1)
-			continue
-		state["spraying"] = true
-		state["spray_time_left"] = float(state.get("shoot_duration", 1.0))
-		_fight_system.update_turret_spray(cell, weapon_id, origin, direction, delta)
+		_start_turret_shot(cell, state, origin, direction, delta)
 
-func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float, delta: float) -> void:
+func _start_turret_shot(cell: Vector2i, state: Dictionary, origin: Vector2, direction: Vector2, delta: float) -> void:
+	var release_delay: float = maxf(0.0, float(state.get("shot_release_delay", 0.0)))
+	var cycle_duration: float = maxf(release_delay, float(state.get("shot_cycle_duration", 0.0)))
+	if cycle_duration <= 0.0:
+		_fire_turret_weapon(cell, state, origin, direction, delta)
+		return
+	state["shot_active"] = true
+	state["shot_time"] = 0.0
+	state["shot_fired"] = false
+	_building_objects.play_turret_shot_animation(cell)
+	if release_delay <= 0.0:
+		_fire_turret_weapon(cell, state, origin, direction, delta)
+		state["shot_fired"] = true
+	if cycle_duration <= 0.0:
+		state["shot_active"] = false
+
+
+func _advance_turret_shot(cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float, delta: float) -> void:
+	var shot_time: float = float(state.get("shot_time", 0.0)) + delta
+	state["shot_time"] = shot_time
+	state["elapsed"] = float(state.get("elapsed", 0.0)) + delta
+	var fired_this_frame: bool = false
+	var release_delay: float = maxf(0.0, float(state.get("shot_release_delay", 0.0)))
+	if not bool(state.get("shot_fired", false)) and shot_time >= release_delay:
+		var target: Node2D = _target_for_turret(cell, state, origin, activation_range)
+		var direction: Vector2 = _fire_direction_for_target(state, origin, target) if target != null else (state.get("last_direction", Vector2.RIGHT) as Vector2)
+		state["last_direction"] = direction
+		_fire_turret_weapon(cell, state, origin, direction, delta)
+		state["shot_fired"] = true
+		fired_this_frame = true
+	if bool(state.get("spraying", false)) and not fired_this_frame:
+		_advance_turret_spray(cell, state, origin, activation_range, delta, false)
+	var cycle_duration: float = maxf(release_delay, float(state.get("shot_cycle_duration", 0.0)))
+	if shot_time >= cycle_duration:
+		state["shot_active"] = false
+
+
+func _fire_turret_weapon(cell: Vector2i, state: Dictionary, origin: Vector2, direction: Vector2, delta: float) -> void:
+	var weapon_id: String = str(state.get("weapon", "spray"))
+	if _fight_system.is_gun(weapon_id):
+		_fight_system.fire_gun_once(weapon_id, origin, direction, -1)
+		return
+	state["spraying"] = true
+	state["spray_time_left"] = float(state.get("shoot_duration", 1.0))
+	_fight_system.update_turret_spray(cell, weapon_id, origin, direction, delta)
+
+func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float, delta: float, count_elapsed: bool = true) -> void:
 	var target: Node2D = _target_for_turret(cell, state, origin, activation_range)
 	var direction: Vector2 = _fire_direction_for_target(state, origin, target) if target != null else (state.get("last_direction", Vector2.RIGHT) as Vector2)
 	state["last_direction"] = direction
 	_fight_system.update_turret_spray(cell, str(state.get("weapon", "spray")), origin, direction, delta)
-	state["elapsed"] = float(state.get("elapsed", 0.0)) + delta
+	if count_elapsed:
+		state["elapsed"] = float(state.get("elapsed", 0.0)) + delta
 	var time_left: float = float(state.get("spray_time_left", 0.0)) - delta
 	if time_left <= 0.0:
 		state["spraying"] = false
@@ -224,6 +268,11 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"direction": direction,
 		"directional": turret_data.directional,
 		"straight_line_detection": turret_data.straight_line_detection,
+		"shot_release_delay": maxf(0.0, turret_data.shot_release_delay),
+		"shot_cycle_duration": maxf(0.0, turret_data.shot_cycle_duration),
+		"shot_active": false,
+		"shot_time": 0.0,
+		"shot_fired": false,
 		"spraying": false,
 		"spray_time_left": 0.0,
 		"last_direction": Vector2(float(direction.x), float(direction.y)),
