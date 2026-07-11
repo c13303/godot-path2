@@ -156,12 +156,11 @@ func process(delta: float) -> void:
 		return
 	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
 	var client_counter_agents: Dictionary = _manager.client_counter_agents()
-	# No rose targets remain: cancel any pending future client spawns. Existing clients
-	# are NOT globally converted — rose-holders keep escaping, rose-less clients keep
-	# their current navigation, and only an individual empty-counter arrival can trigger
-	# its own tantrum. Do not return early merely because a hostile exists.
-	if not _manager.has_client_targets_remaining():
+	# No rose targets remain: cancel pending future client spawns and immediately
+	# turn every current rose-less client hostile. Rose-holders keep escaping.
+	if not _roses_available():
 		_client_sale_pending_spawners.clear()
+		client_tantrum.start_all_clients_without_rose()
 	var spawned_this_frame: bool = _process_client_spawns(delta)
 	if spawned_this_frame:
 		return
@@ -242,6 +241,10 @@ func client_count() -> int:
 	return _manager.get_tree().get_nodes_in_group("clients").size()
 
 
+func _roses_available() -> bool:
+	return _manager.total_counter_stock() > 0 or _manager.grownup_rose_count() > 0
+
+
 func current_night_client_count() -> int:
 	var playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
 	var playlist: LevelSpawnPlaylist = playlist_config.level_spawn_playlist()
@@ -255,14 +258,6 @@ func current_night_client_count() -> int:
 	if night == null:
 		return 20
 	return maxi(0, night.clients)
-
-
-func _has_clients_without_rose() -> bool:
-	for raw_node: Node in _manager.get_tree().get_nodes_in_group("clients"):
-		var client: Node2D = raw_node as Node2D
-		if client != null and is_instance_valid(client) and not bool(client.get_meta("client_has_rose", false)):
-			return true
-	return false
 
 
 func clients_finished_for_day() -> bool:

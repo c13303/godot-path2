@@ -1,16 +1,17 @@
 extends RefCounted
 class_name PlayerPlaceableDurabilityService
 
-# Owns the generic player-built destructible system: provenance (which live
-# placeables were actually built by the player), current/max health, target
+# Owns the generic destructible target system: registered build provenance, live
+# map/runtime target discovery for tantrum fallback, current/max health, target
 # validity, cheap nearest-target selection, damage application, instant plant
-# destruction, and save serialization/restoration.
+# destruction, and save serialization/restoration for registered tile targets.
 #
-# BuildingManager owns this service and exposes thin wrappers. Provenance is
+# BuildingManager owns this service and exposes thin wrappers. Provenance is still
 # registered on placement (BuildPlacementService.after_placeable_placed) and
-# removed on the central removal path (BuildRemovalService.remove_tile), so
-# level-authored tiles discovered by BuildingObjectManager.initialize_from_layer
-# are never registered unless a save restores them.
+# removed on the central removal path (BuildRemovalService.remove_tile). Tantrum
+# can also ask the service to discover current live destructible targets so old
+# saves and level-authored reservoirs do not leave hostile clients with nothing
+# to attack.
 #
 # BuildRemovalService remains the owner of the actual tile removal + cleanup:
 # structure destruction routes through BuildSystem.destroy_placeable_no_refund
@@ -19,6 +20,8 @@ class_name PlayerPlaceableDurabilityService
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const RESERVOIR_ITEM_ID: String = "reservoir"
+const RUNTIME_RESERVOIR_LAYER: String = "runtime_reservoir"
+const RESERVOIR_GROUP: StringName = &"reservoirs"
 
 var _manager: BuildingManager = null
 var _overlay: Node = null
@@ -99,6 +102,22 @@ func is_player_built_cell(cell: Vector2i) -> bool:
 	return _keys_by_cell.has(cell) and not (_keys_by_cell[cell] as Dictionary).is_empty()
 
 
+func register_live_destructible_targets() -> int:
+	var added: int = 0
+	for layer_name: String in ["wallz", "plantz", "traversable_buildings", "blocking_buildings", "fences"]:
+		var layer: TileMapLayer = _layer_for_name(layer_name)
+		if layer == null:
+			continue
+		for raw_cell: Variant in layer.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
+			if _register_live_destructible_target(layer, layer_name, cell):
+				added += 1
+	added += _register_live_reservoir_nodes()
+	if added > 0:
+		_bump_and_redraw()
+	return added
+
+
 # ---------------------------------------------------------------------------
 # Target queries / selection.
 # ---------------------------------------------------------------------------
@@ -114,6 +133,10 @@ func target_world_position(key: String) -> Vector2:
 	if not _targets_by_key.has(key):
 		return Vector2.ZERO
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
+	if str(rec.get("layer_name", "")) == RUNTIME_RESERVOIR_LAYER:
+		var reservoir: Node2D = rec.get("node", null) as Node2D
+		if reservoir != null and is_instance_valid(reservoir):
+			return reservoir.global_position
 	return _manager.cell_center(rec.get("cell", INVALID_CELL) as Vector2i)
 
 
@@ -123,6 +146,13 @@ func is_target_valid(key: String) -> bool:
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	var layer_name: String = str(rec.get("layer_name", ""))
+	if layer_name == RUNTIME_RESERVOIR_LAYER:
+		var reservoir: Node = rec.get("node", null) as Node
+		if reservoir == null or not is_instance_valid(reservoir):
+			return false
+		if reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed")):
+			return false
+		return true
 	var layer: TileMapLayer = _layer_for_name(layer_name)
 	if layer == null or layer.get_cell_source_id(cell) < 0:
 		return false
@@ -204,6 +234,8 @@ func destroy_target(key: String) -> void:
 	_erase_record_by_key(key)
 	if instant_destroy:
 		_destroy_plant_cell(cell)
+	elif str(rec.get("layer_name", "")) == RUNTIME_RESERVOIR_LAYER:
+		_destroy_runtime_reservoir(rec)
 	else:
 		if item_id == RESERVOIR_ITEM_ID:
 			# Authoritative reservoir-destroyed game-state path; the existing
@@ -230,6 +262,14 @@ func _destroy_structure_cell(cell: Vector2i, layer_name: String, item_id: String
 		build_system.call("destroy_placeable_no_refund", cell, layer_name, item_id)
 
 
+func _destroy_runtime_reservoir(record: Dictionary) -> void:
+	var reservoir: Node = record.get("node", null) as Node
+	if reservoir != null and is_instance_valid(reservoir) and reservoir.has_method("take_damage"):
+		reservoir.call("take_damage", int(record.get("max_health", 100)))
+	else:
+		GameState.set_reservoir_destroyed(true)
+
+
 # ---------------------------------------------------------------------------
 # Save / load.
 # ---------------------------------------------------------------------------
@@ -240,6 +280,8 @@ func serialize() -> Array[Dictionary]:
 		if not is_target_valid(key):
 			continue
 		var rec: Dictionary = _targets_by_key[key] as Dictionary
+		if str(rec.get("layer_name", "")) == RUNTIME_RESERVOIR_LAYER:
+			continue
 		var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 		out.append({
 			"x": cell.x,
@@ -304,6 +346,61 @@ func _add_cell_key(cell: Vector2i, key: String) -> void:
 	var keys: Dictionary = _keys_by_cell.get(cell, {}) as Dictionary
 	keys[key] = true
 	_keys_by_cell[cell] = keys
+
+
+func _register_live_destructible_target(layer: TileMapLayer, layer_name: String, cell: Vector2i) -> bool:
+	if layer.get_cell_source_id(cell) < 0:
+		return false
+	var item_id: String = _live_item_id_at(layer, layer_name, cell)
+	if item_id == "" or not ItemCatalog.is_destructible_placeable(item_id):
+		return false
+	var normalized_layer: String = _normalize_layer_name(layer_name)
+	var key: String = _make_key(normalized_layer, cell)
+	if _targets_by_key.has(key):
+		return false
+	var instant_destroy: bool = ItemCatalog.is_instant_destroy_placeable(item_id)
+	var max_health: int = 1 if instant_destroy else maxi(1, ItemCatalog.get_max_health(item_id))
+	_targets_by_key[key] = {
+		"key": key,
+		"cell": cell,
+		"item_id": item_id,
+		"layer_name": normalized_layer,
+		"health": max_health,
+		"max_health": max_health,
+		"instant_destroy": instant_destroy,
+	}
+	_add_cell_key(cell, key)
+	return true
+
+
+func _register_live_reservoir_nodes() -> int:
+	if _manager.floorz == null:
+		return 0
+	var added: int = 0
+	for reservoir_node: Node in _manager.get_tree().get_nodes_in_group(RESERVOIR_GROUP):
+		var reservoir: Node2D = reservoir_node as Node2D
+		if reservoir == null or not is_instance_valid(reservoir):
+			continue
+		if reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed")):
+			continue
+		var cell: Vector2i = _manager.floorz.local_to_map(_manager.floorz.to_local(reservoir.global_position))
+		var key: String = _make_key(RUNTIME_RESERVOIR_LAYER, cell)
+		if _targets_by_key.has(key):
+			continue
+		var max_health: int = maxi(1, ItemCatalog.get_max_health(RESERVOIR_ITEM_ID))
+		_targets_by_key[key] = {
+			"key": key,
+			"cell": cell,
+			"item_id": RESERVOIR_ITEM_ID,
+			"layer_name": RUNTIME_RESERVOIR_LAYER,
+			"health": max_health,
+			"max_health": max_health,
+			"instant_destroy": false,
+			"node": reservoir,
+		}
+		_add_cell_key(cell, key)
+		added += 1
+	return added
 
 
 func _erase_records_at_cell(cell: Vector2i) -> bool:

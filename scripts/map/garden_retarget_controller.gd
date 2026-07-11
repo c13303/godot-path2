@@ -129,8 +129,6 @@ func retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
 		if not _entry_path_agents().has(nav_id):
 			continue
 		var entry_data: Dictionary = _entry_path_agents()[nav_id] as Dictionary
-		if entry_data.has("counter_cell") and entry_data.has("counter_access_cell"):
-			continue
 		var garden_id: int = int(entry_data.get("garden_id", 0))
 		if not _garden_target_is_stale(garden_id):
 			continue
@@ -757,6 +755,11 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 		"nav_id=%d no_plants=%s" % [nav_id_dbg, str(no_plants)])
 	if no_plants:
 		_last_retarget_profile["reason"] = "no_plants"
+		if agent_kind == SPAWNER_KIND_CLIENT:
+			if _manager.total_counter_stock() <= 0 and _manager.grownup_rose_count() <= 0:
+				if not bool(agent.get_meta("client_has_rose", false)):
+					_manager.get_client_tantrum_controller().start_all_clients_without_rose()
+					return bool(agent.get_meta("hostile_client", false))
 		var t_esc0: int = Time.get_ticks_usec()
 		var esc0: bool = bool(_agent_navigation_phases.assign_agent_to_escape(agent))
 		var esc0_us: int = Time.get_ticks_usec() - t_esc0

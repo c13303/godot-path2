@@ -1,13 +1,11 @@
 extends RefCounted
 class_name ClientTantrumController
 
-# Owns per-agent hostile-client behavior. A client turns hostile only when it
-# arrives at an empty rose-shop counter and no rose is obtainable anywhere (see
-# AgentNavigationPhaseController.process_client_counter_arrivals -> start_for_client).
+# Owns per-agent hostile-client behavior. When no roses are obtainable anywhere,
+# every current client without a rose turns hostile immediately.
 #
 # Tantrum is per agent: entering it changes only that client. Each hostile runs an
 # explicit stage machine:
-#   windup             -> 3s native-hard-paused wind-up (forced SOUTH frame + shake)
 #   waiting_for_target -> paused; queued for a budgeted target/path attempt
 #   moving             -> native steering follows an assigned A* path to an attack cell
 #   attacking          -> native-hard-paused; 1 dmg every 3s with a visual lunge
@@ -23,21 +21,17 @@ const CLIENT_FRAME_TANTRUM_SOUTH: int = 4
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 
-const STAGE_WINDUP: StringName = &"windup"
 const STAGE_WAITING: StringName = &"waiting_for_target"
 const STAGE_MOVING: StringName = &"moving"
 const STAGE_ATTACKING: StringName = &"attacking"
 
 const TANTRUM_CLIENT_HEALTH: int = 100
-const WINDUP_SECONDS: float = 3.0
 const ATTACK_INTERVAL_SECONDS: float = 3.0
 const ATTACK_DAMAGE: int = 1
 const ATTACK_RANGE_TILES: float = 1.5
 const ATTACK_LUNGE_SECONDS: float = 0.09
 const ATTACK_RETURN_SECONDS: float = 0.12
 const LUNGE_PIXELS: float = 10.0
-const SHAKE_AMPLITUDE: float = 1.6
-const SHAKE_FREQUENCY: float = 42.0
 
 const NEIGHBOR_OFFSETS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
@@ -71,6 +65,20 @@ func hostile_count() -> int:
 	return _hostile_clients.size()
 
 
+func start_all_clients_without_rose() -> int:
+	_manager.get_player_placeable_durability_service().register_live_destructible_targets()
+	var started: int = 0
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group("clients"):
+		var client: Node2D = raw_node as Node2D
+		if client == null or not is_instance_valid(client):
+			continue
+		if bool(client.get_meta("client_has_rose", false)):
+			continue
+		if start_for_client(client):
+			started += 1
+	return started
+
+
 # ---------------------------------------------------------------------------
 # Per-client transition.
 # ---------------------------------------------------------------------------
@@ -86,8 +94,8 @@ func start_for_client(client: Node2D) -> bool:
 	_manager.detach_agent_path(nav_id)
 	_manager.detach_agent_flow(nav_id)
 	_manager.clear_agent_navigation_records(nav_id)
-	# Hard-pause native steering: native owns movement, so FlowAgent.set_paused alone
-	# would not stop it.
+	# Pause while target/path selection is queued. Native owns movement, so
+	# FlowAgent.set_paused alone would not stop it.
 	_set_native_paused(nav_id, true)
 	if not client.is_in_group("monsters"):
 		client.add_to_group("monsters")
@@ -109,14 +117,11 @@ func start_for_client(client: Node2D) -> bool:
 	# Angry state makes the client damageable (character._is_damage_immune_agent).
 	if client.has_method("start_angry"):
 		client.call("start_angry")
-	if client.has_method("face_south"):
-		client.call("face_south")
 	if client.has_method("queue_redraw"):
 		client.queue_redraw()
 	_hostile_clients[nav_id] = {
 		"node": client,
-		"stage": STAGE_WINDUP,
-		"windup_timer": WINDUP_SECONDS,
+		"stage": STAGE_WAITING,
 		"target_key": "",
 		"attack_timer": 0.0,
 		"attacking_visual": false,
@@ -125,6 +130,7 @@ func start_for_client(client: Node2D) -> bool:
 		"rejected_keys": {},
 		"idle_revision": -1,
 	}
+	_enqueue(nav_id)
 	_refresh_alert()
 	return true
 
@@ -144,9 +150,7 @@ func process(delta: float) -> void:
 		if not _hostile_clients.has(nav_id):
 			continue
 		var data: Dictionary = _hostile_clients[nav_id] as Dictionary
-		match StringName(str(data.get("stage", STAGE_WINDUP))):
-			STAGE_WINDUP:
-				_process_windup(nav_id, data, delta)
+		match StringName(str(data.get("stage", STAGE_WAITING))):
 			STAGE_WAITING:
 				_process_waiting(nav_id, data)
 			STAGE_MOVING:
@@ -154,32 +158,6 @@ func process(delta: float) -> void:
 			STAGE_ATTACKING:
 				_process_attacking(nav_id, data, delta)
 	_process_retarget_budget()
-
-
-func _process_windup(nav_id: int, data: Dictionary, delta: float) -> void:
-	var client: Node2D = data.get("node", null) as Node2D
-	if client == null:
-		return
-	var timer: float = float(data.get("windup_timer", 0.0)) - delta
-	var sprite: Sprite2D = _client_sprite(client)
-	if sprite != null:
-		var base_offset: Vector2 = data.get("sprite_offset", Vector2.ZERO) as Vector2
-		if timer > 0.0:
-			var elapsed: float = WINDUP_SECONDS - timer
-			sprite.offset = base_offset + Vector2(sin(elapsed * SHAKE_FREQUENCY) * SHAKE_AMPLITUDE, 0.0)
-		else:
-			sprite.offset = base_offset
-	# Re-assert the forced SOUTH frame each tick (cheap; the agent is paused so this
-	# never fights a real movement-driven facing update).
-	if client.has_method("face_south"):
-		client.call("face_south")
-	if timer <= 0.0:
-		data["windup_timer"] = 0.0
-		_hostile_clients[nav_id] = data
-		_enter_waiting(nav_id, true)
-		return
-	data["windup_timer"] = timer
-	_hostile_clients[nav_id] = data
 
 
 func _process_waiting(nav_id: int, data: Dictionary) -> void:
@@ -265,6 +243,9 @@ func _attempt_target_assignment(nav_id: int, data: Dictionary) -> void:
 	var durability: PlayerPlaceableDurabilityService = _manager.get_player_placeable_durability_service()
 	var rejected: Dictionary = data.get("rejected_keys", {}) as Dictionary
 	var key: String = durability.nearest_target_key(client.global_position, rejected)
+	if key == "" and not durability.has_targets():
+		durability.register_live_destructible_targets()
+		key = durability.nearest_target_key(client.global_position, rejected)
 	if key == "":
 		# Nothing selectable this attempt. Park until the world (target/topology)
 		# revision changes so we do not retry every frame.
