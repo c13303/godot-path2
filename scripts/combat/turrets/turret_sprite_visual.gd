@@ -12,11 +12,21 @@ const DEFAULT_HEAD_FRAME: int = 1
 const DEFAULT_REFRACTORY_FRAME: int = -1
 const DEFAULT_HEAD_OFFSET: Vector2 = Vector2(0.0, -16.0)
 const DEFAULT_SHOT_FRAMES: Array[Dictionary] = []
+const IDLE_SWAY_DEGREES: float = 1.5
+const IDLE_SWAY_SPEED: float = 0.8
+const IDLE_BREATHE_AMOUNT: float = 0.015
+const IDLE_BREATHE_SPEED: float = 0.9
+const IDLE_BOB_PIXELS: float = 0.3
 const CONTACT_SWAY_DEGREES: float = 5.0
 const CONTACT_SWAY_SPEED: float = 1.1
 const CONTACT_BREATHE_AMOUNT: float = 0.05
 const CONTACT_BREATHE_SPEED: float = 1.4
 const CONTACT_BOB_PIXELS: float = 1.0
+const SHOT_SWAY_DEGREES: float = CONTACT_SWAY_DEGREES * 1.2
+const SHOT_SWAY_SPEED: float = CONTACT_SWAY_SPEED * 1.2
+const SHOT_BREATHE_AMOUNT: float = CONTACT_BREATHE_AMOUNT * 1.2
+const SHOT_BREATHE_SPEED: float = CONTACT_BREATHE_SPEED * 1.2
+const SHOT_BOB_PIXELS: float = CONTACT_BOB_PIXELS * 1.2
 
 var _base_sprite: Sprite2D
 var _head_sprite: Sprite2D
@@ -52,6 +62,8 @@ func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 	_refractory_frame = int(visual_def.get("refractory_frame", DEFAULT_REFRACTORY_FRAME))
 	var head_offset: Vector2 = _vector2_from_variant(visual_def.get("head_offset", DEFAULT_HEAD_OFFSET), DEFAULT_HEAD_OFFSET)
 	_shot_frames = _shot_frames_from_variant(visual_def.get("shot_frames", DEFAULT_SHOT_FRAMES))
+	_sway_phase = randf() * TAU
+	_breathe_phase = randf() * TAU
 
 	_base_sprite = _create_frame_sprite(_texture, _frame_region(base_frame))
 	_base_sprite.name = "Base"
@@ -93,15 +105,44 @@ func set_refractory_active(active: bool) -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_process_shot_animation(delta)
-	if _time >= _contact_until:
-		position = _base_position
-		scale = Vector2.ONE
-		rotation = 0.0
+	if _shot_time_left > 0.0:
+		_apply_dance_transform(
+			SHOT_SWAY_DEGREES,
+			SHOT_SWAY_SPEED,
+			SHOT_BREATHE_AMOUNT,
+			SHOT_BREATHE_SPEED,
+			SHOT_BOB_PIXELS
+		)
 		return
-	var sway: float = deg_to_rad(CONTACT_SWAY_DEGREES) * sin(_time * CONTACT_SWAY_SPEED * TAU + _sway_phase)
-	var sy: float = 1.0 + CONTACT_BREATHE_AMOUNT * sin(_time * CONTACT_BREATHE_SPEED * TAU + _breathe_phase)
+	if _time >= _contact_until:
+		_apply_dance_transform(
+			IDLE_SWAY_DEGREES,
+			IDLE_SWAY_SPEED,
+			IDLE_BREATHE_AMOUNT,
+			IDLE_BREATHE_SPEED,
+			IDLE_BOB_PIXELS
+		)
+		return
+	_apply_dance_transform(
+		CONTACT_SWAY_DEGREES,
+		CONTACT_SWAY_SPEED,
+		CONTACT_BREATHE_AMOUNT,
+		CONTACT_BREATHE_SPEED,
+		CONTACT_BOB_PIXELS
+	)
+
+
+func _apply_dance_transform(
+	sway_degrees: float,
+	sway_speed: float,
+	breathe_amount: float,
+	breathe_speed: float,
+	bob_pixels: float
+) -> void:
+	var sway: float = deg_to_rad(sway_degrees) * sin(_time * sway_speed * TAU + _sway_phase)
+	var sy: float = 1.0 + breathe_amount * sin(_time * breathe_speed * TAU + _breathe_phase)
 	var sx: float = 1.0 / sy
-	var bob: float = -CONTACT_BOB_PIXELS * absf(sin(_time * CONTACT_BREATHE_SPEED * TAU * 0.5 + _sway_phase))
+	var bob: float = -bob_pixels * absf(sin(_time * breathe_speed * TAU * 0.5 + _sway_phase))
 	position = _base_position + Vector2(0.0, bob)
 	scale = Vector2(sx, sy)
 	rotation = sway

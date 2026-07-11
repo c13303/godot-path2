@@ -1591,6 +1591,8 @@ func step_selected_quick_slot(direction: int) -> void:
 			return
 
 func _quick_slot_index_from_event(event: InputEventKey) -> int:
+	if _is_numpad_number_key(event):
+		return -1
 	if event.physical_keycode >= KEY_1 and event.physical_keycode <= KEY_8:
 		return int(event.physical_keycode - KEY_1)
 	if event.keycode >= KEY_1 and event.keycode <= KEY_8:
@@ -1604,3 +1606,13 @@ func _quick_slot_index_from_event(event: InputEventKey) -> int:
 			return i
 
 	return -1
+
+
+func _is_numpad_number_key(event: InputEventKey) -> bool:
+	match event.physical_keycode:
+		KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9:
+			return true
+	match event.keycode:
+		KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9:
+			return true
+	return false

@@ -221,7 +221,10 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 
 
 func _rotate_selected_build_direction(reverse: bool = false) -> bool:
-	return _build_mode_state.rotate_selected_build_direction(reverse)
+	var rotated: bool = _build_mode_state.rotate_selected_build_direction(reverse)
+	if rotated and _is_build_drag_active():
+		_drag_controller.refresh_build_drag_preview(_selected_placeable_def())
+	return rotated
 
 
 func _finish_drag_build() -> void:

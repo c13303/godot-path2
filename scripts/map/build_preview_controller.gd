@@ -21,6 +21,10 @@ const FENCE_NEIGHBOR_EAST: int = 2
 const FENCE_NEIGHBOR_SOUTH: int = 4
 const FENCE_NEIGHBOR_WEST: int = 8
 const TURRET_SPRITE_VISUAL_SCRIPT: Script = preload("res://scripts/combat/turrets/turret_sprite_visual.gd")
+const IMPERIAL_PREVIEW_TEXTURE: Texture2D = preload("res://assets/sprites/legval/imperial_wet.png")
+const IMPERIAL_PREVIEW_FRAME_COUNT: int = 6
+const IMPERIAL_PREVIEW_FRAME: int = 0
+const IMPERIAL_PREVIEW_OFFSET: Vector2 = Vector2(0.0, -18.0)
 
 var _manager: BuildSystem
 var _hover_active: bool = false
@@ -34,6 +38,7 @@ var _cursor_hidden_for_preview: bool = false
 var _drag_selection_rect: Panel = null
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _preview_visual: Node2D = null
+var _preview_visuals: Array[Node2D] = []
 
 
 func setup(manager: BuildSystem) -> void:
@@ -56,7 +61,12 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 		return
 
 	if _has_turret_sprite_visual(placeable_def):
-		_draw_turret_sprite_preview(previewbuild, cell, placeable_def)
+		var turret_cells: Array[Vector2i] = [cell]
+		_draw_turret_sprite_preview_cells(previewbuild, turret_cells, placeable_def)
+		_preview_cells.append(cell)
+	elif _has_logical_plant_visual(placeable_def):
+		var plant_cells: Array[Vector2i] = [cell]
+		_draw_logical_plant_preview_cells(previewbuild, plant_cells, placeable_def)
 		_preview_cells.append(cell)
 	elif item_id == FENCE_ITEM_ID:
 		var fence_cells: Array[Vector2i] = [cell]
@@ -100,6 +110,12 @@ func draw_drag_build_preview(
 	)
 	if str(placeable_def.get("id", "")) == FENCE_ITEM_ID:
 		_preview_cells = _draw_fence_preview_cells(valid_cells)
+	elif _has_turret_sprite_visual(placeable_def):
+		_draw_turret_sprite_preview_cells(previewbuild, valid_cells, placeable_def)
+		_preview_cells = valid_cells
+	elif _has_logical_plant_visual(placeable_def):
+		_draw_logical_plant_preview_cells(previewbuild, valid_cells, placeable_def)
+		_preview_cells = valid_cells
 	else:
 		for cell: Vector2i in valid_cells:
 			previewbuild.set_cell(cell, _atlas_source_id(), atlas_coords, _alternative_from_placeable(placeable_def))
@@ -348,30 +364,72 @@ func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector
 
 
 func _draw_turret_sprite_preview(previewbuild: TileMapLayer, cell: Vector2i, placeable_def: Dictionary) -> void:
+	var cells: Array[Vector2i] = [cell]
+	_draw_turret_sprite_preview_cells(previewbuild, cells, placeable_def)
+
+
+func _draw_turret_sprite_preview_cells(previewbuild: TileMapLayer, cells: Array[Vector2i], placeable_def: Dictionary) -> void:
 	_clear_preview_visual()
 	var visual_def: Dictionary = placeable_def.get("turret_sprite_visual", {}) as Dictionary
 	if visual_def.is_empty():
 		return
 	var direction: Vector2i = placeable_def.get("direction", BuildDirectionRules.DIRECTION_RIGHT) as Vector2i
+	for cell: Vector2i in cells:
+		var preview_visual: Node2D = Node2D.new()
+		preview_visual.name = "TurretSpritePreview_%d_%d" % [cell.x, cell.y]
+		preview_visual.script = TURRET_SPRITE_VISUAL_SCRIPT
+		preview_visual.position = previewbuild.map_to_local(cell)
+		preview_visual.z_index = 100
+		previewbuild.add_child(preview_visual)
+		preview_visual.call("setup", visual_def, direction)
+		_preview_visuals.append(preview_visual)
+
+
+func _draw_logical_plant_preview_cells(previewbuild: TileMapLayer, cells: Array[Vector2i], placeable_def: Dictionary) -> void:
+	_clear_preview_visual()
+	if str(placeable_def.get("plant_kind", "")) != PlantManager.PLANT_KIND_IMPERIAL:
+		return
+	for cell: Vector2i in cells:
+		var preview_visual: Node2D = _create_imperial_plant_preview(previewbuild, cell)
+		previewbuild.add_child(preview_visual)
+		_preview_visuals.append(preview_visual)
+
+
+func _create_imperial_plant_preview(previewbuild: TileMapLayer, cell: Vector2i) -> Node2D:
 	var preview_visual: Node2D = Node2D.new()
-	preview_visual.name = "TurretSpritePreview"
-	preview_visual.script = TURRET_SPRITE_VISUAL_SCRIPT
+	preview_visual.name = "ImperialPlantPreview_%d_%d" % [cell.x, cell.y]
 	preview_visual.position = previewbuild.map_to_local(cell)
 	preview_visual.z_index = 100
-	previewbuild.add_child(preview_visual)
-	preview_visual.call("setup", visual_def, direction)
-	_preview_visual = preview_visual
+
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "Sprite2D"
+	sprite.texture = IMPERIAL_PREVIEW_TEXTURE
+	sprite.hframes = IMPERIAL_PREVIEW_FRAME_COUNT
+	sprite.vframes = 1
+	sprite.frame = IMPERIAL_PREVIEW_FRAME
+	sprite.centered = true
+	sprite.offset = IMPERIAL_PREVIEW_OFFSET
+	preview_visual.add_child(sprite)
+	return preview_visual
 
 
 func _clear_preview_visual() -> void:
 	if _preview_visual != null and is_instance_valid(_preview_visual):
 		_preview_visual.queue_free()
 	_preview_visual = null
+	for preview_visual: Node2D in _preview_visuals:
+		if preview_visual != null and is_instance_valid(preview_visual):
+			preview_visual.queue_free()
+	_preview_visuals.clear()
 
 
 func _has_turret_sprite_visual(placeable_def: Dictionary) -> bool:
 	var visual_def: Dictionary = placeable_def.get("turret_sprite_visual", {}) as Dictionary
 	return not visual_def.is_empty()
+
+
+func _has_logical_plant_visual(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("logical_plant", false))
 
 
 func _fence_preview_atlas(cell: Vector2i, candidate_set: Dictionary) -> Vector2i:

@@ -27,6 +27,8 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
+const ENEMY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/spawner.png"
+const FRIENDLY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/clientspawner.png"
 const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"imperial_seed", &"spray", &"beam", &"sword", &"bomb"]
 const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
@@ -465,7 +467,7 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		var spawner_id: StringName = StringName(spawner_node.name)
 		if spawner_id == &"":
 			continue
-		var kind: StringName = _spawner_kind_from_name(String(spawner_id))
+		var kind: StringName = _spawner_kind_from_node(spawner_node)
 		if kind == &"":
 			continue
 		var local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
@@ -491,13 +493,25 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		_loaded_spawner_bindings.append(binding)
 
 
+func _spawner_kind_from_node(spawner_node: Node2D) -> StringName:
+	var spawner_name: String = String(spawner_node.name)
+	if spawner_name.begins_with("seedmerchant") or spawner_name.begins_with("seedmerchent"):
+		return SPAWNER_KIND_MERCHANT
+	var sprite: Sprite2D = spawner_node as Sprite2D
+	if sprite != null and sprite.texture != null:
+		var texture_path: String = sprite.texture.resource_path
+		if texture_path == ENEMY_SPAWNER_TEXTURE_PATH:
+			return SPAWNER_KIND_MONSTER
+		if texture_path == FRIENDLY_SPAWNER_TEXTURE_PATH:
+			return SPAWNER_KIND_CLIENT
+	return _spawner_kind_from_name(spawner_name)
+
+
 func _spawner_kind_from_name(spawner_name: String) -> StringName:
 	if spawner_name.begins_with("monster"):
 		return SPAWNER_KIND_MONSTER
 	if spawner_name.begins_with("client"):
 		return SPAWNER_KIND_CLIENT
-	if spawner_name.begins_with("seedmerchant") or spawner_name.begins_with("seedmerchent"):
-		return SPAWNER_KIND_MERCHANT
 	return &""
 
 

@@ -72,6 +72,14 @@ func draw_drag_build_preview(placeable_def: Dictionary, available: int) -> void:
 	)
 
 
+func refresh_build_drag_preview(placeable_def: Dictionary) -> void:
+	if not _drag_build_active:
+		return
+	if str(placeable_def.get("id", "")) != _drag_build_item_id:
+		return
+	draw_drag_build_preview(placeable_def, _affordable_quantity(_drag_build_item_id))
+
+
 func finish_drag_build() -> void:
 	var placeable_def: Dictionary = _selected_placeable_def()
 	var item_id: String = _drag_build_item_id

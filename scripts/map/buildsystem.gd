@@ -274,7 +274,10 @@ func pad_rotate_selected_at_cursor() -> bool:
 
 
 func rotate_selected_build_direction(reverse: bool = false) -> bool:
-	return _build_mode_state.rotate_selected_build_direction(reverse)
+	var rotated: bool = _build_mode_state.rotate_selected_build_direction(reverse)
+	if rotated and _is_build_drag_active():
+		_drag_controller.refresh_build_drag_preview(_selected_placeable_def())
+	return rotated
 
 func _remove_tile(layer: TileMapLayer, cell: Vector2i) -> void:
 	_removal_service.remove_tile(layer, cell)

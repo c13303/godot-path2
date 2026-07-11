@@ -320,7 +320,8 @@ func _is_game_paused() -> bool:
 
 ## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds/gems/money,
 ## fully refills the water reserve, and (if it is currently night) removes every
-## monster and ends the night.
+## monster and ends the night. Numpad 1/2/0 force-spawn one agent from each
+## registered enemy/client spawner.
 ## F1 advances the current day, but only while daytime is active.
 ## ² (top-left key) restarts the level with debug forced ON.
 func _unhandled_input(event: InputEvent) -> void:
@@ -334,6 +335,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_grant_dev_currency()
 		_refill_dev_water_reserve()
 		_end_dev_night()
+	elif _is_key(key_event, KEY_KP_1):
+		get_viewport().set_input_as_handled()
+		_spawn_dev_agents_from_spawners(&"monster", &"basic")
+	elif _is_key(key_event, KEY_KP_2):
+		get_viewport().set_input_as_handled()
+		_spawn_dev_agents_from_spawners(&"monster", &"bigmonster")
+	elif _is_key(key_event, KEY_KP_0):
+		get_viewport().set_input_as_handled()
+		_spawn_dev_agents_from_spawners(&"client", &"basic")
 	elif key_event.keycode == KEY_F1 and not GameState.is_night:
 		get_viewport().set_input_as_handled()
 		_advance_dev_day()
@@ -349,6 +359,10 @@ func _is_restart_debug_key(key_event: InputEventKey) -> bool:
 	return key_event.physical_keycode == KEY_QUOTELEFT \
 		or key_event.keycode == KEY_QUOTELEFT \
 		or key_event.unicode == 0xB2
+
+
+func _is_key(key_event: InputEventKey, key: Key) -> bool:
+	return key_event.physical_keycode == key or key_event.keycode == key
 
 
 ## Reloads the current scene with debug_enabled forced ON in the reloaded scene.
@@ -378,6 +392,52 @@ func _advance_dev_day() -> void:
 		progression.call("advance_day")
 
 
+func _spawn_dev_agents_from_spawners(spawner_kind: StringName, monster_type: StringName) -> void:
+	var manager: Node = _get_building_manager()
+	if manager == null:
+		push_warning("dev_keys: BuildingManager node not found")
+		return
+	if not manager.has_method("get_spawners") or not manager.has_method("spawner_kind_by_cell"):
+		push_warning("dev_keys: BuildingManager spawner query methods not found")
+		return
+	var spawners: Dictionary = manager.call("get_spawners") as Dictionary
+	var spawner_kind_by_cell: Dictionary = manager.call("spawner_kind_by_cell") as Dictionary
+	var attempted: int = 0
+	var spawned: int = 0
+	for raw_cell: Variant in spawners.keys():
+		var spawner_cell: Vector2i = raw_cell as Vector2i
+		var kind: StringName = spawner_kind_by_cell.get(spawner_cell, &"monster") as StringName
+		if kind != spawner_kind:
+			continue
+		attempted += 1
+		if _spawn_dev_agent_from_spawner(manager, spawner_cell, spawner_kind, monster_type):
+			spawned += 1
+	CppDebugOptions.dlog("dev_keys: spawned %d/%d %s agents from registered spawners" % [
+		spawned,
+		attempted,
+		String(spawner_kind)
+	])
+
+
+func _spawn_dev_agent_from_spawner(manager: Node, spawner_cell: Vector2i, spawner_kind: StringName, monster_type: StringName) -> bool:
+	if spawner_kind == &"client":
+		if manager.has_method("spawn_client_from_spawner"):
+			return bool(manager.call("spawn_client_from_spawner", spawner_cell))
+		return false
+	if manager.has_method("spawn_monster_from_spawner"):
+		return bool(manager.call("spawn_monster_from_spawner", spawner_cell, monster_type))
+	return false
+
+
+func _get_building_manager() -> Node:
+	if _building_manager != null and is_instance_valid(_building_manager):
+		return _building_manager
+	var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
+	if scene:
+		_building_manager = scene.get_node_or_null("Map/BuildingManager")
+	return _building_manager
+
+
 ## Tops the player's water reserve back up to its current maximum.
 func _refill_dev_water_reserve() -> void:
 	var scene: Node = get_tree().current_scene if is_inside_tree() else null
@@ -399,12 +459,7 @@ func _refill_dev_water_reserve() -> void:
 func _end_dev_night() -> void:
 	if not GameState.is_night:
 		return
-	var manager: Node = _building_manager
-	if manager == null or not is_instance_valid(manager):
-		var scene: Node = get_tree().get_current_scene() if is_inside_tree() else null
-		if scene:
-			manager = scene.get_node_or_null("Map/BuildingManager")
-			_building_manager = manager
+	var manager: Node = _get_building_manager()
 	if manager and manager.has_method("skip_current_night_for_dev"):
 		manager.call("skip_current_night_for_dev")
 		return
