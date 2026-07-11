@@ -452,6 +452,7 @@ func _plant_manager_can_check_plants() -> bool:
 func _plant_manager_consume_plant_cell(plant_cell: Vector2i) -> bool:
 	if plant_manager == null or not plant_manager.has_method("consume_plant"):
 		return false
+	spawn_plant_parts_burst(cell_center(plant_cell))
 	plant_manager.call("consume_plant", plant_cell)
 	return true
 
@@ -1170,6 +1171,7 @@ func trample_rose_at_agent(agent: Node2D) -> void:
 		return
 	var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
 	if bool(plant_manager.call("has_plant", cell)):
+		spawn_plant_parts_burst(cell_center(cell))
 		plant_manager.call("consume_plant", cell)
 
 
@@ -1940,6 +1942,7 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
 	agent.set_meta("client_rose_visible", true)
 	_spawn_client_payment_money(agent.global_position)
+	spawn_plant_parts_burst(cell_center(plant_cell))
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
@@ -2080,6 +2083,7 @@ func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state:
 func _leave_turret_debris(turret_cell: Vector2i) -> void:
 	if plantz == null or blocking_buildings == null:
 		return
+	spawn_plant_parts_burst(cell_center(turret_cell))
 	# Don't stomp an existing rose/debris occupant on the plant layer.
 	if plantz.get_cell_source_id(turret_cell) >= 0:
 		return
@@ -2097,6 +2101,7 @@ func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
 	var source_id: int = traversable_buildings.get_cell_source_id(pasteque_cell)
 	var alternative_tile: int = traversable_buildings.get_cell_alternative_tile(pasteque_cell)
 	_clear_pasteque_irrigation(pasteque_cell)
+	spawn_plant_parts_burst(cell_center(pasteque_cell))
 	_leave_pasteque_debris(pasteque_cell, source_id, alternative_tile)
 	var building_objects: BuildingObjectManager = _get_building_object_manager()
 	if building_objects != null and building_objects.has_method("remove_building"):
@@ -2250,6 +2255,11 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 func spawn_agent_death_burst(world_position: Vector2) -> void:
 	if _ground_drop_manager != null:
 		_ground_drop_manager.spawn_agent_death_burst(world_position)
+
+
+func spawn_plant_parts_burst(world_position: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_plant_parts_burst(world_position)
 
 
 func spawn_collectible_currency(currency: StringName, world_position: Vector2) -> void:

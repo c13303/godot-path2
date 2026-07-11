@@ -265,6 +265,7 @@ func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i)
 	else:
 		var plantz: TileMapLayer = _plantz()
 		if plantz:
+			_manager.spawn_plant_parts_burst(_manager.cell_center(plant_cell))
 			var source_id: int = plantz.get_cell_source_id(plant_cell)
 			var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
 			plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)

@@ -6,9 +6,10 @@ class_name GroundDropManager
 # used to keep final resting positions out of walls.
 
 const BLOOD_PARTS_TEXTURE: Texture2D = preload("res://assets/sprites/fx/blood_parts.png")
+const PLANT_PARTS_TEXTURE: Texture2D = preload("res://assets/sprites/fx/plant_parts.png")
 const TINY_SHADOW_TEXTURE: Texture2D = preload("res://assets/sprites/fx/tiny_shadow.png")
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
-const BLOOD_FRAME_SIZE: Vector2 = Vector2(16.0, 16.0)
+const PART_FRAME_SIZE: Vector2 = Vector2(16.0, 16.0)
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const KIND_CORPSE: StringName = &"corpse"
 const KIND_COLLECTIBLE: StringName = &"collectible"
@@ -62,6 +63,12 @@ func spawn_agent_death_burst(world_position: Vector2) -> void:
 	var count: int = maxi(0, corpse_part_count)
 	for i: int in range(count):
 		_spawn_corpse_part(world_position, i)
+
+
+func spawn_plant_parts_burst(world_position: Vector2) -> void:
+	var count: int = maxi(0, corpse_part_count)
+	for i: int in range(count):
+		_spawn_plant_part(world_position, i)
 
 
 func spawn_collectible_currency(currency: StringName, world_position: Vector2) -> void:
@@ -152,6 +159,14 @@ func _process(delta: float) -> void:
 
 
 func _spawn_corpse_part(world_position: Vector2, frame_index: int) -> void:
+	_spawn_temporary_part(world_position, _part_texture(BLOOD_PARTS_TEXTURE, frame_index % 3))
+
+
+func _spawn_plant_part(world_position: Vector2, frame_index: int) -> void:
+	_spawn_temporary_part(world_position, _part_texture(PLANT_PARTS_TEXTURE, frame_index % 3))
+
+
+func _spawn_temporary_part(world_position: Vector2, texture: Texture2D) -> void:
 	var record: Dictionary = _acquire_record()
 	_configure_record_base(record, KIND_CORPSE, world_position)
 	record["state"] = STATE_FALLING
@@ -161,7 +176,7 @@ func _spawn_corpse_part(world_position: Vector2, frame_index: int) -> void:
 	record["rotation_velocity"] = randf_range(-3.8, 3.8)
 	record["fade_timer"] = CORPSE_FADE_SECONDS
 	var sprite: Sprite2D = record["sprite"] as Sprite2D
-	sprite.texture = _blood_part_texture(frame_index % 3)
+	sprite.texture = texture
 	sprite.centered = true
 	sprite.scale = Vector2.ONE
 	_activate_record(record)
@@ -440,10 +455,10 @@ func _is_blocked_world(world_position: Vector2) -> bool:
 	return bool(_manager.call("is_ground_drop_blocked_world", world_position))
 
 
-func _blood_part_texture(frame_index: int) -> AtlasTexture:
+func _part_texture(atlas: Texture2D, frame_index: int) -> AtlasTexture:
 	var texture: AtlasTexture = AtlasTexture.new()
-	texture.atlas = BLOOD_PARTS_TEXTURE
-	texture.region = Rect2(Vector2(float(frame_index) * BLOOD_FRAME_SIZE.x, 0.0), BLOOD_FRAME_SIZE)
+	texture.atlas = atlas
+	texture.region = Rect2(Vector2(float(frame_index) * PART_FRAME_SIZE.x, 0.0), PART_FRAME_SIZE)
 	return texture
 
 
