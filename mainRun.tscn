@@ -31,7 +31,6 @@
 [ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
 [ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
-[ext_resource type="Script" uid="uid://bmrcp0pth1nt7" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
 [ext_resource type="Script" uid="uid://b4mvldtd7kft4" path="res://scripts/map/desire.gd" id="31_desire"]
@@ -50,6 +49,7 @@
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
+[ext_resource type="Script" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
@@ -901,6 +901,15 @@ text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
 
+[node name="dayButton" type="Button" parent="GameUI/top anchor" unique_id=1539751188]
+visible = false
+layout_mode = 0
+offset_left = -74.0
+offset_top = 155.0
+offset_right = 131.0
+offset_bottom = 208.0
+text = "START THE NIGHT"
+
 [node name="currenciesUI" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
 anchors_preset = 2
@@ -1321,6 +1330,7 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("28_shop")
+metadata/_edit_lock_ = true
 
 [node name="BuildFrame" type="Control" parent="GameUI" unique_id=632591766]
 visible = false

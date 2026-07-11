@@ -61,15 +61,14 @@ var nav_id: int = -1:
 var _is_selected: bool = false
 var _is_previewed: bool = false
 
-# Directional monster sheets use a 6-frame horizontal layout:
-# south / east / north / eating / unused legacy slot / drowning.
-const MONSTER_DIRECTIONAL_FRAME_COUNT: int = 6
+# Directional monster sheets use a 4-frame horizontal layout:
+# south / east / north / drowning. Eating reuses the south frame.
+const MONSTER_DIRECTIONAL_FRAME_COUNT: int = 4
 const MONSTER_FRAME_SOUTH: int = 0
 const MONSTER_FRAME_EAST: int = 1
 const MONSTER_FRAME_NORTH: int = 2
-const MONSTER_FRAME_ROSE_EATING: int = 3
-const MONSTER_FRAME_WATER_DROWNING: int = 5
-const MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL: StringName = &"directional_6_horizontal"
+const MONSTER_FRAME_WATER_DROWNING: int = 3
+const MONSTER_FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL: StringName = &"directional_4_horizontal"
 const CLIENT_DIRECTIONAL_FRAME_COUNT: int = 7
 const CLIENT_FRAME_WATER_DROWNING: int = 3
 const CLIENT_FRAME_TANTRUM_SOUTH: int = 4
@@ -190,8 +189,12 @@ func _update_monster_frame() -> void:
 			frame = CLIENT_FRAME_ANGRY
 			flip_h = false
 	elif status == "eating":
-		frame = MONSTER_FRAME_ROSE_EATING if _uses_directional_monster_frames() else MONSTER_FRAME_EATING
-		flip_h = false
+		if _uses_directional_monster_frames():
+			frame = MONSTER_FRAME_SOUTH
+			flip_h = false
+		else:
+			frame = MONSTER_FRAME_EATING
+			flip_h = false
 	elif status == "drowning":
 		if _uses_directional_client_frames():
 			frame = CLIENT_FRAME_WATER_DROWNING
@@ -228,7 +231,7 @@ func _uses_directional_monster_frames() -> bool:
 	if not has_meta("monster_sprite_frame_layout"):
 		return false
 	var frame_layout: StringName = StringName(str(get_meta("monster_sprite_frame_layout")))
-	return frame_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_6_HORIZONTAL and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+	return frame_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
 
 
 func _uses_directional_client_frames() -> bool:

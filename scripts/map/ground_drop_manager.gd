@@ -24,8 +24,12 @@ const FLOOR_FRICTION: float = 0.64
 const REST_HEIGHT_EPSILON: float = 0.75
 const REST_VERTICAL_SPEED: float = 26.0
 const REST_HORIZONTAL_SPEED: float = 8.0
+const COLLECTIBLE_REST_VERTICAL_SPEED: float = 42.0
+const COLLECTIBLE_REST_HORIZONTAL_SPEED: float = 14.0
 const CORPSE_FADE_SECONDS: float = 0.55
-const PICKUP_RADIUS: float = 18.0
+const PICKUP_RADIUS_FALLBACK: float = 36.0
+const PICKUP_RADIUS_TILE_MULTIPLIER: float = 1.15
+const PICKUP_CHECK_INTERVAL: float = 0.06
 const FLOAT_AMPLITUDE: float = 3.0
 const FLOAT_SPEED: float = 1.65
 const LANDING_SEARCH_RADIUS_CELLS: int = 2
@@ -37,12 +41,19 @@ const DEFAULT_POOL_SIZE: int = 36
 var _manager: BuildingManager
 var _pool: Array[Dictionary] = []
 var _active: Array[Dictionary] = []
+var _cached_player: Node2D = null
+var _pickup_scan_player: Node2D = null
+var _pickup_radius: float = PICKUP_RADIUS_FALLBACK
+var _pickup_radius_squared: float = PICKUP_RADIUS_FALLBACK * PICKUP_RADIUS_FALLBACK
+var _pickup_check_elapsed: float = PICKUP_CHECK_INTERVAL
+var _should_check_pickups: bool = false
 
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
 	z_as_relative = false
 	z_index = 0
+	_refresh_pickup_radius()
 	_preload_pool(DEFAULT_POOL_SIZE)
 	set_process(true)
 
@@ -131,6 +142,7 @@ func clear_collectibles() -> void:
 func _process(delta: float) -> void:
 	if _active.is_empty():
 		return
+	_update_pickup_scan_timer(delta)
 	var records: Array = _active.duplicate()
 	for raw_record: Variant in records:
 		var record: Dictionary = raw_record as Dictionary
@@ -171,13 +183,19 @@ func _process_falling(record: Dictionary, delta: float) -> void:
 	var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
 	var height: float = float(record.get("height", 0.0))
 	var vertical_velocity: float = float(record.get("vertical_velocity", 0.0))
+	var kind: StringName = StringName(record.get("kind", KIND_CORPSE))
+	var rest_vertical_speed: float = REST_VERTICAL_SPEED
+	var rest_horizontal_speed: float = REST_HORIZONTAL_SPEED
+	if kind == KIND_COLLECTIBLE:
+		rest_vertical_speed = COLLECTIBLE_REST_VERTICAL_SPEED
+		rest_horizontal_speed = COLLECTIBLE_REST_HORIZONTAL_SPEED
 	ground_position += velocity * delta
 	vertical_velocity -= GRAVITY * delta
 	height += vertical_velocity * delta
 	if height <= 0.0:
 		height = 0.0
 		ground_position = _resolve_landing_position(ground_position)
-		if absf(vertical_velocity) <= REST_VERTICAL_SPEED and velocity.length() <= REST_HORIZONTAL_SPEED:
+		if absf(vertical_velocity) <= rest_vertical_speed and velocity.length() <= rest_horizontal_speed:
 			_rest_record(record, ground_position)
 			return
 		vertical_velocity = absf(vertical_velocity) * FLOOR_BOUNCE
@@ -191,7 +209,7 @@ func _process_falling(record: Dictionary, delta: float) -> void:
 	record["height"] = height
 	record["vertical_velocity"] = vertical_velocity
 	record["rotation"] = spin + rotation_velocity * delta
-	if height <= REST_HEIGHT_EPSILON and velocity.length() <= REST_HORIZONTAL_SPEED and absf(vertical_velocity) <= REST_VERTICAL_SPEED:
+	if height <= REST_HEIGHT_EPSILON and velocity.length() <= rest_horizontal_speed and absf(vertical_velocity) <= rest_vertical_speed:
 		_rest_record(record, _resolve_landing_position(ground_position))
 
 
@@ -214,11 +232,13 @@ func _process_ready_collectible(record: Dictionary, delta: float) -> void:
 	record["float_phase"] = float(record.get("float_phase", 0.0)) + delta * FLOAT_SPEED
 	if bool(record.get("pickup_pending", false)):
 		return
-	var player: Node2D = get_tree().get_first_node_in_group("player") as Node2D
+	if not _should_check_pickups:
+		return
+	var player: Node2D = _pickup_scan_player
 	if player == null or not is_instance_valid(player):
 		return
 	var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
-	if player.global_position.distance_squared_to(ground_position) > PICKUP_RADIUS * PICKUP_RADIUS:
+	if player.global_position.distance_squared_to(ground_position) > _pickup_radius_squared:
 		return
 	var currency: StringName = StringName(record.get("currency", CURRENCY_GEM))
 	if _start_currency_pickup(currency, ground_position, record):
@@ -276,6 +296,32 @@ func _start_currency_pickup(currency: StringName, world_position: Vector2, recor
 		return false
 	var finished: Callable = Callable(self, "_finish_currency_pickup").bind(record)
 	return bool(game_ui.call("collect_currency_from_world", currency, world_position, 1, finished))
+
+
+func _refresh_pickup_radius() -> void:
+	_pickup_radius = PICKUP_RADIUS_FALLBACK
+	if _manager != null and _manager.floorz != null and _manager.floorz.tile_set != null:
+		var tile_size: Vector2i = _manager.floorz.tile_set.tile_size
+		var tile_radius: float = float(maxi(tile_size.x, tile_size.y)) * PICKUP_RADIUS_TILE_MULTIPLIER
+		_pickup_radius = maxf(PICKUP_RADIUS_FALLBACK, tile_radius)
+	_pickup_radius_squared = _pickup_radius * _pickup_radius
+
+
+func _update_pickup_scan_timer(delta: float) -> void:
+	_pickup_check_elapsed += delta
+	_should_check_pickups = _pickup_check_elapsed >= PICKUP_CHECK_INTERVAL
+	if _should_check_pickups:
+		_pickup_check_elapsed = 0.0
+		_pickup_scan_player = _get_player_node()
+	else:
+		_pickup_scan_player = null
+
+
+func _get_player_node() -> Node2D:
+	if _cached_player != null and is_instance_valid(_cached_player):
+		return _cached_player
+	_cached_player = get_tree().get_first_node_in_group("player") as Node2D
+	return _cached_player
 
 
 func _configure_record_base(record: Dictionary, kind: StringName, world_position: Vector2) -> void:

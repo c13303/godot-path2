@@ -12,8 +12,8 @@ class_name MonsterData
 @export var display_name: String = ""
 
 @export_group("Sprite")
-## Horizontal spritesheet frame count. Directional monster sheets use 6 frames:
-## south / east / north / eating / unused legacy slot / drowning.
+## Horizontal spritesheet frame count. Directional monster sheets use 4 frames:
+## south / east / north / drowning.
 ## Legacy 4-frame monster sheets are still supported by character.gd.
 @export var texture: Texture2D
 @export var sprite_hframes: int = 4

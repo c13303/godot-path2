@@ -26,10 +26,12 @@ func is_active() -> bool:
 
 
 func has_hostiles() -> bool:
+	_prune_invalid_hostiles()
 	return not _hostile_clients.is_empty()
 
 
 func hostile_count() -> int:
+	_prune_invalid_hostiles()
 	return _hostile_clients.size()
 
 
@@ -120,6 +122,10 @@ func end() -> void:
 func process(delta: float) -> void:
 	if not _active:
 		return
+	if _prune_invalid_hostiles():
+		_finish_if_no_hostiles()
+		if not _active:
+			return
 	var nav_ids: Array = _hostile_clients.keys()
 	var removed_hostile: bool = false
 	for raw_nav_id: Variant in nav_ids:
@@ -343,6 +349,38 @@ func _finish_if_no_hostiles() -> void:
 		_show_alert()
 		return
 	end()
+
+
+func _prune_invalid_hostiles() -> bool:
+	var removed: bool = false
+	var nav_ids: Array = _hostile_clients.keys()
+	for raw_nav_id: Variant in nav_ids:
+		var nav_id: int = int(raw_nav_id)
+		var data: Dictionary = _hostile_clients.get(nav_id, {}) as Dictionary
+		if not _is_live_hostile_client(nav_id, data):
+			_hostile_clients.erase(nav_id)
+			removed = true
+	return removed
+
+
+func _is_live_hostile_client(nav_id: int, data: Dictionary) -> bool:
+	var raw_client: Variant = data.get("node", null)
+	if not is_instance_valid(raw_client):
+		return false
+	var client: Node2D = raw_client as Node2D
+	if client == null:
+		return false
+	if client.is_queued_for_deletion() or not client.is_inside_tree():
+		return false
+	if int(client.get("nav_id")) != nav_id:
+		return false
+	if not client.is_in_group("clients"):
+		return false
+	if not bool(client.get_meta("hostile_client", false)):
+		return false
+	if int(client.get("health")) <= 0:
+		return false
+	return true
 
 
 func _agent_manager() -> Node:
