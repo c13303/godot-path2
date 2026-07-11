@@ -69,7 +69,9 @@ func _process(delta: float) -> void:
 		var shoot_frequency: float = float(state.get("shoot_frequency", 3.0))
 		if elapsed < shoot_frequency:
 			state["elapsed"] = elapsed
+			_set_turret_refractory_visual(cell, state, true)
 			continue
+		_set_turret_refractory_visual(cell, state, false)
 		var target: Node2D = _target_for_turret(cell, state, origin, activation_range)
 		if target == null:
 			# Ready to fire but nothing in range; stay primed and retry next frame.
@@ -89,6 +91,7 @@ func _start_turret_shot(cell: Vector2i, state: Dictionary, origin: Vector2, dire
 	state["shot_active"] = true
 	state["shot_time"] = 0.0
 	state["shot_fired"] = false
+	_set_turret_refractory_visual(cell, state, false)
 	_building_objects.play_turret_shot_animation(cell)
 	if release_delay <= 0.0:
 		_fire_turret_weapon(cell, state, origin, direction, delta)
@@ -115,6 +118,7 @@ func _advance_turret_shot(cell: Vector2i, state: Dictionary, origin: Vector2, ac
 	var cycle_duration: float = maxf(release_delay, float(state.get("shot_cycle_duration", 0.0)))
 	if shot_time >= cycle_duration:
 		state["shot_active"] = false
+		_set_turret_refractory_visual(cell, state, float(state.get("elapsed", 0.0)) < float(state.get("shoot_frequency", 3.0)))
 
 
 func _fire_turret_weapon(cell: Vector2i, state: Dictionary, origin: Vector2, direction: Vector2, delta: float) -> void:
@@ -138,8 +142,17 @@ func _advance_turret_spray(cell: Vector2i, state: Dictionary, origin: Vector2, a
 		state["spraying"] = false
 		state["spray_time_left"] = 0.0
 		_fight_system.stop_turret_spray(cell)
+		_set_turret_refractory_visual(cell, state, float(state.get("elapsed", 0.0)) < float(state.get("shoot_frequency", 3.0)))
 	else:
 		state["spray_time_left"] = time_left
+
+
+func _set_turret_refractory_visual(cell: Vector2i, state: Dictionary, active: bool) -> void:
+	# refractory: visual cooldown state after firing, before the turret can shoot again.
+	if bool(state.get("refractory_visual", false)) == active:
+		return
+	state["refractory_visual"] = active
+	_building_objects.set_turret_refractory_active(cell, active)
 
 # Two mutually exclusive overlays:
 #  - While placing a turret, the whole no-build zone (union of every existing turret's
@@ -283,6 +296,7 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"shot_fired": false,
 		"spraying": false,
 		"spray_time_left": 0.0,
+		"refractory_visual": false,
 		"last_direction": Vector2(float(direction.x), float(direction.y)),
 		"los_status": LOS_PENDING,
 		"visible_cells": {},

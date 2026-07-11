@@ -9,6 +9,7 @@ const DEFAULT_FRAME_PADDING: Vector2i = Vector2i(2, 2)
 const DEFAULT_FRAME_STRIDE_X: int = 36
 const DEFAULT_BASE_FRAME: int = 0
 const DEFAULT_HEAD_FRAME: int = 1
+const DEFAULT_REFRACTORY_FRAME: int = -1
 const DEFAULT_HEAD_OFFSET: Vector2 = Vector2(0.0, -16.0)
 const DEFAULT_SHOT_FRAMES: Array[Dictionary] = []
 const CONTACT_SWAY_DEGREES: float = 5.0
@@ -29,6 +30,8 @@ var _frame_size: Vector2i = DEFAULT_FRAME_SIZE
 var _frame_padding: Vector2i = DEFAULT_FRAME_PADDING
 var _frame_stride_x: int = DEFAULT_FRAME_STRIDE_X
 var _head_idle_frame: int = DEFAULT_HEAD_FRAME
+var _refractory_frame: int = DEFAULT_REFRACTORY_FRAME
+var _refractory_active: bool = false
 var _shot_frames: Array[Dictionary] = []
 var _shot_time_left: float = 0.0
 var _shot_frame_index: int = 0
@@ -46,6 +49,7 @@ func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 	_frame_stride_x = int(visual_def.get("frame_stride_x", DEFAULT_FRAME_STRIDE_X))
 	var base_frame: int = int(visual_def.get("base_frame", DEFAULT_BASE_FRAME))
 	_head_idle_frame = int(visual_def.get("head_frame", DEFAULT_HEAD_FRAME))
+	_refractory_frame = int(visual_def.get("refractory_frame", DEFAULT_REFRACTORY_FRAME))
 	var head_offset: Vector2 = _vector2_from_variant(visual_def.get("head_offset", DEFAULT_HEAD_OFFSET), DEFAULT_HEAD_OFFSET)
 	_shot_frames = _shot_frames_from_variant(visual_def.get("shot_frames", DEFAULT_SHOT_FRAMES))
 
@@ -73,8 +77,17 @@ func request_contact_dance(duration: float) -> void:
 func play_shot_animation() -> void:
 	if _head_sprite == null or _shot_frames.is_empty():
 		return
+	_refractory_active = false
 	_shot_frame_index = 0
 	_apply_shot_frame(_shot_frame_index)
+
+
+func set_refractory_active(active: bool) -> void:
+	# refractory: cooldown frame shown before the turret can shoot again.
+	_refractory_active = active and _refractory_frame >= 0
+	if _head_sprite == null or _shot_time_left > 0.0:
+		return
+	_set_head_frame(_refractory_frame if _refractory_active else _head_idle_frame)
 
 
 func _process(delta: float) -> void:
@@ -119,6 +132,8 @@ func _clear_sprites() -> void:
 	_shot_frames.clear()
 	_shot_time_left = 0.0
 	_shot_frame_index = 0
+	_refractory_frame = DEFAULT_REFRACTORY_FRAME
+	_refractory_active = false
 
 
 func _frame_region(frame: int) -> Rect2:
@@ -134,7 +149,7 @@ func _process_shot_animation(delta: float) -> void:
 	while _shot_time_left <= 0.0:
 		_shot_frame_index += 1
 		if _shot_frame_index >= _shot_frames.size():
-			_set_head_frame(_head_idle_frame)
+			_set_head_frame(_refractory_frame if _refractory_active else _head_idle_frame)
 			_shot_time_left = 0.0
 			return
 		var carry: float = _shot_time_left

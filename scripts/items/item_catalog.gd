@@ -334,11 +334,13 @@ const ITEM_DEFS: Dictionary = {
 			"frame_stride_x": 36,
 			"base_frame": 0,
 			"head_frame": 1,
+			# refractory: shown while turret_epine is cooling down before it can shoot again.
+			"refractory_frame": 5,
 			"head_offset": Vector2(0.0, -16.0),
 			"shot_frames": [
-				{"frame": 2, "duration": 0.2},
-				{"frame": 3, "duration": 0.2},
-				{"frame": 4, "duration": 0.2},
+				{"frame": 2, "duration": 0.1},
+				{"frame": 3, "duration": 0.1},
+				{"frame": 4, "duration": 0.1},
 			],
 		},
 		"max_stack": 999,

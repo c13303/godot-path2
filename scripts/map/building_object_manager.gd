@@ -137,6 +137,14 @@ func play_turret_shot_animation(cell: Vector2i) -> void:
 		runtime_node.call("play_shot_animation")
 
 
+func set_turret_refractory_active(cell: Vector2i, active: bool) -> void:
+	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return
+	if runtime_node.has_method("set_refractory_active"):
+		runtime_node.call("set_refractory_active", active)
+
+
 func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	for raw_cell: Variant in _buildings_by_cell.keys():

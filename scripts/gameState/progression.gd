@@ -792,7 +792,14 @@ func _get_day_phase() -> String:
 		return "client"
 	if GameState.is_seed_merchant_phase:
 		return "seed_merchant"
-	return "building"
+	if GameState.is_building_phase:
+		return "building"
+	# No phase flag is set: this is the post-night day-start window (roses growing before
+	# the morning harvest begins). It shares the "building" fallback with the end-of-day
+	# build phase, but the two must not be conflated on load: restoring it as "building"
+	# leaves the client sale looking already-finished, letting the player skip that day's
+	# clients. Persist it as "morning" so a reload resumes the harvest -> client sale.
+	return "morning"
 
 
 func _get_plant_states(scene: Node) -> Array[Dictionary]:

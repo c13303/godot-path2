@@ -1316,6 +1316,12 @@ func try_finish_final_day() -> bool:
 
 
 func can_start_night_after_clients() -> bool:
+	# The night is already running: there is nothing to "start". Without this guard a
+	# stale _night_start_requested (e.g. one set during a load transition before the
+	# night was restored) would keep the tutorial's "hold to start night" prompt alive
+	# on top of an ongoing night.
+	if GameState.is_night:
+		return false
 	# Gate on "no client sale is still pending" rather than "a client actually
 	# visited": on days with no counter stock the sale is skipped and no client ever
 	# spawns, yet the player must still be able to water their roses and end the day.
@@ -1582,6 +1588,11 @@ func restore_ground_collectibles_from_save(saved_items: Array) -> void:
 func restore_runtime_agents_from_save(data: Dictionary) -> void:
 	_night_preparing = false
 	_client_preparing = false
+	# This restore suppresses _on_game_mode_changed (see _notify_restored_phase), which
+	# is where these transient prompt requests are normally cleared. Clear them here so a
+	# request set during the pre-restore load transition can't leak into the restored phase.
+	_night_start_requested = false
+	_client_sale_start_requested = false
 	if GameState.is_night:
 		_night_preparation_token += 1
 		_night_preparing = true
