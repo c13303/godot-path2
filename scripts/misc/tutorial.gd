@@ -174,6 +174,10 @@ func clear_alert(key: String = "") -> void:
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
+	if _water_refill_needed():
+		_reset_hold_progress()
+		_show_key_immediately(KEY_REFILL_WATER)
+		return
 	if _alert_key != "":
 		_reset_hold_progress()
 		if _alert_persistent:
@@ -325,6 +329,22 @@ func _alert_text() -> String:
 	if _alert_count >= 0:
 		return "%s (%d)" % [translated, _alert_count]
 	return translated
+
+
+func _water_refill_needed() -> bool:
+	if _progression == null or not _progression.has_method("get_value"):
+		return false
+	return int(_progression.call("get_value", WATER_RESERVE_KEY)) <= 0
+
+
+func _show_key_immediately(key: String) -> void:
+	_displayed_key = key
+	_pending_key = key
+	_pending_remaining = 0.0
+	text = Translations.t(key)
+	visible = true
+	modulate = Color.WHITE
+	_set_glow(false)
 
 
 func _should_request_start_night_prompt() -> bool:
