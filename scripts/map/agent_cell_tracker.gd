@@ -176,6 +176,8 @@ func _poll_transitions() -> void:
 			continue
 		var cell: Vector2i = _current_floor_cell(agent)
 		var last_cell: Vector2i = record["cell"] as Vector2i
+		var category: StringName = record["category"] as StringName
+		_interactions.refresh_contact_dance(agent, category)
 		if cell != last_cell:
 			_reindex(id, last_cell, cell)
 			record["cell"] = cell

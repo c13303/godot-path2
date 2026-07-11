@@ -13,6 +13,11 @@ const POP_JUMP_PIXELS: float = 8.0
 const POP_START_SCALE: Vector2 = Vector2(0.45, 1.30)
 const POP_OVERSHOOT_SCALE: Vector2 = Vector2(1.22, 0.84)
 const POP_TWIST_DEGREES: float = 10.0
+const CONTACT_SWAY_DEGREES: float = 5.0
+const CONTACT_SWAY_SPEED: float = 1.1
+const CONTACT_BREATHE_AMOUNT: float = 0.05
+const CONTACT_BREATHE_SPEED: float = 1.4
+const CONTACT_BOB_PIXELS: float = 1.0
 
 @export var plant_manager_path: NodePath
 @export var plantz_path: NodePath
@@ -22,6 +27,9 @@ var _plantz: TileMapLayer
 var _sprites_by_cell: Dictionary = {}
 var _stages_by_cell: Dictionary = {}
 var _pop_tweens_by_cell: Dictionary = {}
+var _contact_until_by_cell: Dictionary = {}
+var _contact_phases_by_cell: Dictionary = {}
+var _time: float = 0.0
 
 
 func _ready() -> void:
@@ -40,6 +48,7 @@ func _finish_ready() -> void:
 		set_process(false)
 		return
 	_connect_plant_manager()
+	_connect_contact_source()
 	_rebuild_from_manager()
 
 
@@ -68,6 +77,15 @@ func _connect_plant_manager() -> void:
 		var plant_removed_callback: Callable = Callable(self, "_on_plant_removed")
 		if not _plant_manager.is_connected("plant_removed", plant_removed_callback):
 			_plant_manager.connect("plant_removed", plant_removed_callback)
+
+
+func _connect_contact_source() -> void:
+	var source: Node = get_parent().get_node_or_null("BuildingManager") if get_parent() != null else null
+	if source == null or not source.has_signal("plant_contact_dance_requested"):
+		return
+	var callback: Callable = Callable(self, "_on_plant_contact_dance_requested")
+	if not source.is_connected("plant_contact_dance_requested", callback):
+		source.connect("plant_contact_dance_requested", callback)
 
 
 func _rebuild_from_manager() -> void:
@@ -103,6 +121,19 @@ func _on_plant_added(cell: Vector2i) -> void:
 
 func _on_plant_removed(cell: Vector2i) -> void:
 	_remove_visual(cell)
+
+
+func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float) -> void:
+	if layer_name != &"plantz" or item_id != "imperial_seed":
+		return
+	if not _sprites_by_cell.has(cell):
+		return
+	_contact_until_by_cell[cell] = maxf(float(_contact_until_by_cell.get(cell, 0.0)), _time + maxf(0.0, duration))
+	if not _contact_phases_by_cell.has(cell):
+		_contact_phases_by_cell[cell] = {
+			"sway_phase": randf() * TAU,
+			"breathe_phase": randf() * TAU,
+		}
 
 
 func _sync_cell_from_manager(cell: Vector2i) -> void:
@@ -181,10 +212,47 @@ func _on_pop_finished(cell: Vector2i, sprite: Sprite2D, base_position: Vector2) 
 func _remove_visual(cell: Vector2i) -> void:
 	_kill_pop_tween(cell)
 	_stages_by_cell.erase(cell)
+	_contact_until_by_cell.erase(cell)
+	_contact_phases_by_cell.erase(cell)
 	var sprite: Sprite2D = _sprites_by_cell.get(cell, null) as Sprite2D
 	_sprites_by_cell.erase(cell)
 	if is_instance_valid(sprite):
 		sprite.queue_free()
+
+
+func _process(delta: float) -> void:
+	_time += delta
+	if _contact_until_by_cell.is_empty():
+		return
+	var expired: Array[Vector2i] = []
+	for raw_cell: Variant in _contact_until_by_cell.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var sprite: Sprite2D = _sprites_by_cell.get(cell, null) as Sprite2D
+		if sprite == null or not is_instance_valid(sprite):
+			expired.append(cell)
+			continue
+		if _pop_tweens_by_cell.has(cell):
+			continue
+		var base_position: Vector2 = _plantz.to_global(_plantz.map_to_local(cell))
+		if _time >= float(_contact_until_by_cell.get(cell, 0.0)):
+			sprite.scale = Vector2.ONE
+			sprite.rotation = 0.0
+			sprite.global_position = base_position
+			expired.append(cell)
+			continue
+		var phases: Dictionary = _contact_phases_by_cell.get(cell, {}) as Dictionary
+		var sway_phase: float = float(phases.get("sway_phase", 0.0))
+		var breathe_phase: float = float(phases.get("breathe_phase", 0.0))
+		var sway: float = deg_to_rad(CONTACT_SWAY_DEGREES) * sin(_time * CONTACT_SWAY_SPEED * TAU + sway_phase)
+		var sy: float = 1.0 + CONTACT_BREATHE_AMOUNT * sin(_time * CONTACT_BREATHE_SPEED * TAU + breathe_phase)
+		var sx: float = 1.0 / sy
+		var bob: float = -CONTACT_BOB_PIXELS * absf(sin(_time * CONTACT_BREATHE_SPEED * TAU * 0.5 + sway_phase))
+		sprite.rotation = sway
+		sprite.scale = Vector2(sx, sy)
+		sprite.global_position = base_position + Vector2(0.0, bob)
+	for cell: Vector2i in expired:
+		_contact_until_by_cell.erase(cell)
+		_contact_phases_by_cell.erase(cell)
 
 
 func _kill_pop_tween(cell: Vector2i) -> void:

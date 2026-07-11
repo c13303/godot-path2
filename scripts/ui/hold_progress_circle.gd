@@ -10,6 +10,9 @@ var _progress: float = 0.0
 var progress: float = 0.0:
 	set(value):
 		_progress = clampf(value, 0.0, 1.0)
+		# The circle owns its own visibility: it is never shown while empty, only while
+		# a hold is actually in progress.
+		visible = _progress > 0.0
 		queue_redraw()
 	get:
 		return _progress
@@ -18,6 +21,7 @@ var progress: float = 0.0:
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = Vector2(radius * 2.0 + stroke_width, radius * 2.0 + stroke_width)
+	visible = _progress > 0.0
 
 
 func _draw() -> void:

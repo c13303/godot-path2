@@ -21,6 +21,7 @@ const RESERVOIR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reserv
 const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/reservoir_water.png")
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
 const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_runtime.gd")
+const TURRET_SPRITE_VISUAL_SCRIPT: Script = preload("res://scripts/combat/turrets/turret_sprite_visual.gd")
 const RESERVOIR_Z_INDEX: int = 510
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation", "fence"]
 
@@ -81,6 +82,8 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	if item_def.has("light_source"):
 		building_data["light_source"] = light_source
 	_buildings_by_cell[cell] = building_data
+	if item_def.has("turret_sprite_visual"):
+		_register_turret_sprite_runtime(cell, runtime_id, item_def)
 	if runtime_id == "reservoir":
 		_register_reservoir_runtime(cell, runtime_id)
 	if light_source > 0.0:
@@ -116,6 +119,14 @@ func get_building_cells() -> Array[Vector2i]:
 	for raw_cell: Variant in _buildings_by_cell.keys():
 		cells.append(raw_cell as Vector2i)
 	return cells
+
+
+func request_contact_dance(cell: Vector2i, duration: float) -> void:
+	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return
+	if runtime_node.has_method("request_contact_dance"):
+		runtime_node.call("request_contact_dance", duration)
 
 
 func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
@@ -262,6 +273,24 @@ func _add_reservoir_water_fill(reservoir_sprite: Sprite2D) -> void:
 	water.script = RESERVOIR_WATER_FILL_SCRIPT
 	reservoir_sprite.add_child(water)
 
+func _register_turret_sprite_runtime(cell: Vector2i, runtime_id: String, item_def: Dictionary) -> void:
+	var parent: Node2D = _runtime_parent()
+	if not parent:
+		return
+	var visual_def: Dictionary = item_def.get("turret_sprite_visual", {}) as Dictionary
+	if visual_def.is_empty():
+		return
+	var direction: Vector2i = item_def.get("direction", BuildDirectionRules.DIRECTION_RIGHT) as Vector2i
+	var runtime_node: Node2D = Node2D.new()
+	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.script = TURRET_SPRITE_VISUAL_SCRIPT
+	runtime_node.z_as_relative = false
+	runtime_node.global_position = _cell_center(cell)
+	runtime_node.z_index = int(runtime_node.global_position.y)
+	parent.add_child(runtime_node)
+	runtime_node.call("setup", visual_def, direction)
+	_runtime_nodes_by_cell[cell] = runtime_node
+
 func _runtime_parent() -> Node2D:
 	if runtime_parent:
 		return runtime_parent
@@ -392,4 +421,3 @@ func _atlas_coords_from_item_def(item_def: Dictionary) -> Vector2i:
 	if raw is Array and raw.size() == 2:
 		return Vector2i(int(raw[0]), int(raw[1]))
 	return Vector2i(-1, -1)
-

@@ -14,6 +14,7 @@ class_name BuildingManager
 
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
+signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float)
 
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
 const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_access_resolver.gd")
@@ -26,6 +27,7 @@ const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_dro
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_cutscene_controller.gd")
 const SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_phase_controller.gd")
+const PLANT_CONTACT_DANCE_ROUTER_SCRIPT: Script = preload("res://scripts/map/plant_contact_dance_router.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -204,6 +206,7 @@ var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.
 var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
 var _spawner_reveal_cutscene: SpawnerRevealCutsceneController = SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT.new()
 var _spawner_reveal_phase: SpawnerRevealPhaseController = SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT.new()
+var _plant_contact_dance_router: PlantContactDanceRouter = PLANT_CONTACT_DANCE_ROUTER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
 var _desire: Node
@@ -255,6 +258,7 @@ func _ready() -> void:
 	_spawn_playlist_config.setup(self)
 	_runtime_tick_controller.setup(self)
 	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
+	_plant_contact_dance_router.setup(self)
 	add_child(_spawner_reveal_cutscene)
 	_resolve_level_layers()
 	_resolve_desire()
@@ -419,6 +423,17 @@ func auto_save_after_rose_harvest() -> bool:
 
 func get_plant_manager() -> Node:
 	return plant_manager
+
+func request_agent_plant_contact_dance(agent: Node2D, category: StringName) -> void:
+	_plant_contact_dance_router.request_agent_contact(agent, category)
+
+
+func request_player_plant_contact_dance() -> void:
+	_plant_contact_dance_router.request_player_contact()
+
+
+func is_agent_eating_plant(nav_id: int) -> bool:
+	return _eating_agents.has(nav_id)
 
 func _plant_manager_can_check_plants() -> bool:
 	return plant_manager != null and plant_manager.has_method("has_plant")
@@ -1208,6 +1223,9 @@ func _reset_client_sale_state() -> void:
 
 func begin_client_sale_phase() -> void:
 	_client_sale_start_requested = false
+	# The player may trigger clients before finishing (or even starting) the morning
+	# harvest, so end the harvest here; the client sale itself is unchanged.
+	_morning_harvest.clear_active()
 	_begin_client_sale_phase()
 
 
@@ -1220,10 +1238,6 @@ func request_client_sale_start() -> void:
 
 func is_client_sale_start_requested() -> bool:
 	return _client_sale_start_requested
-
-
-func clear_client_sale_start_request() -> void:
-	_client_sale_start_requested = false
 
 
 func _begin_client_sale_phase() -> void:

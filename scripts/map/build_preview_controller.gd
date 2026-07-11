@@ -20,6 +20,7 @@ const FENCE_NEIGHBOR_NORTH: int = 1
 const FENCE_NEIGHBOR_EAST: int = 2
 const FENCE_NEIGHBOR_SOUTH: int = 4
 const FENCE_NEIGHBOR_WEST: int = 8
+const TURRET_SPRITE_VISUAL_SCRIPT: Script = preload("res://scripts/combat/turrets/turret_sprite_visual.gd")
 
 var _manager: BuildSystem
 var _hover_active: bool = false
@@ -32,6 +33,7 @@ var _pad_cursor_offset: Vector2i = Vector2i.ZERO
 var _cursor_hidden_for_preview: bool = false
 var _drag_selection_rect: Panel = null
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
+var _preview_visual: Node2D = null
 
 
 func setup(manager: BuildSystem) -> void:
@@ -53,7 +55,10 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 	if previewbuild == null:
 		return
 
-	if item_id == FENCE_ITEM_ID:
+	if _has_turret_sprite_visual(placeable_def):
+		_draw_turret_sprite_preview(previewbuild, cell, placeable_def)
+		_preview_cells.append(cell)
+	elif item_id == FENCE_ITEM_ID:
 		var fence_cells: Array[Vector2i] = [cell]
 		_preview_cells = _draw_fence_preview_cells(fence_cells)
 	else:
@@ -124,6 +129,7 @@ func clear_hover() -> void:
 	if previewbuild == null:
 		return
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
+	_clear_preview_visual()
 	if not _hover_active and _preview_cells.is_empty():
 		_hover_item_id = ""
 		return
@@ -339,6 +345,33 @@ func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector
 		previewbuild.set_cell(preview_cell, _atlas_source_id(), atlas_coords)
 		preview_cells.append(preview_cell)
 	return preview_cells
+
+
+func _draw_turret_sprite_preview(previewbuild: TileMapLayer, cell: Vector2i, placeable_def: Dictionary) -> void:
+	_clear_preview_visual()
+	var visual_def: Dictionary = placeable_def.get("turret_sprite_visual", {}) as Dictionary
+	if visual_def.is_empty():
+		return
+	var direction: Vector2i = placeable_def.get("direction", BuildDirectionRules.DIRECTION_RIGHT) as Vector2i
+	var preview_visual: Node2D = Node2D.new()
+	preview_visual.name = "TurretSpritePreview"
+	preview_visual.script = TURRET_SPRITE_VISUAL_SCRIPT
+	preview_visual.position = previewbuild.map_to_local(cell)
+	preview_visual.z_index = 100
+	previewbuild.add_child(preview_visual)
+	preview_visual.call("setup", visual_def, direction)
+	_preview_visual = preview_visual
+
+
+func _clear_preview_visual() -> void:
+	if _preview_visual != null and is_instance_valid(_preview_visual):
+		_preview_visual.queue_free()
+	_preview_visual = null
+
+
+func _has_turret_sprite_visual(placeable_def: Dictionary) -> bool:
+	var visual_def: Dictionary = placeable_def.get("turret_sprite_visual", {}) as Dictionary
+	return not visual_def.is_empty()
 
 
 func _fence_preview_atlas(cell: Vector2i, candidate_set: Dictionary) -> Vector2i:

@@ -118,6 +118,7 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	t = Time.get_ticks_usec()
 	var tracker: AgentCellTracker = _manager.get_agent_cell_tracker()
 	tracker.process(delta)
+	_manager.request_player_plant_contact_dance()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		var stats: Dictionary = tracker.debug_stats()
 		debug_telemetry.warn_garden_task_lag_us("_process_agent_tile_interactions", Time.get_ticks_usec() - t,

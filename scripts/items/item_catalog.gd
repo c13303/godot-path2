@@ -3,7 +3,9 @@ class_name ItemCatalog
 
 const TURRET1_DATA: TurretData = preload("res://scripts/combat/turrets/turret1.tres")
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
+const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_epine.png")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
+const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
 const ITEM_DEFS: Dictionary = {
 	"sword": {
@@ -312,7 +314,7 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 6,
 		"price": 10,
 		"target_layer": "blocking_buildings",
-		"atlas": Vector2i(2, 0),
+		"atlas": INVISIBLE_BUILDING_MARKER_ATLAS,
 		"occupies_cell": true,
 		"isWall": false,
 		"blocks_movement": false,
@@ -325,6 +327,15 @@ const ITEM_DEFS: Dictionary = {
 		"directional": true,
 		"runtime_id": "turret_epine",
 		"turret_data": TURRET_EPINE_DATA,
+		"turret_sprite_visual": {
+			"texture": TURRET_EPINE_TEXTURE,
+			"frame_size": Vector2i(32, 32),
+			"frame_padding": Vector2i(2, 2),
+			"frame_stride_x": 36,
+			"base_frame": 0,
+			"head_frame": 1,
+			"head_offset": Vector2(0.0, -16.0),
+		},
 		"max_stack": 999,
 	},
 	"rose_shop_counter": {

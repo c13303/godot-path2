@@ -215,7 +215,13 @@ func _refresh(delta: float = 0.0) -> void:
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
 		return
-	_reset_hold_progress()
+	# The morning harvest can be skipped straight to the client sale by holding space once
+	# the roses are grown up. The hold runs in the background so the harvest hint stays on
+	# screen; the progress circle only appears while the key is actually held.
+	if _morning_client_skip_available():
+		_advance_hold(HOLD_ACTION_START_CLIENTS, delta)
+	else:
+		_reset_hold_progress()
 	var key: String = _current_message_key()
 	if key == KEY_PASS_NIGHT and not GameState.is_night:
 		_request_start_night_prompt()
@@ -231,13 +237,11 @@ func _refresh(delta: float = 0.0) -> void:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
-		_set_hold_progress_visible(false)
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
-		_set_hold_progress_visible(false)
 		return
 	visible = true
 	modulate = Color.WHITE
@@ -373,10 +377,9 @@ func _current_hold_action() -> StringName:
 	return HOLD_ACTION_NONE
 
 
+## Shows the hold prompt as the on-screen hint and advances its progress. Used when the
+## phase change is the natural next step, so the label itself is the "hold to..." prompt.
 func _show_hold_action(action: StringName, delta: float) -> void:
-	if action != _hold_action:
-		_hold_action = action
-		_hold_elapsed = 0.0
 	_displayed_key = ""
 	_pending_key = ""
 	_pending_remaining = 0.0
@@ -384,7 +387,16 @@ func _show_hold_action(action: StringName, delta: float) -> void:
 	modulate = Color.WHITE
 	text = Translations.t(_hold_translation_key(action))
 	_set_glow(false)
-	_set_hold_progress_visible(true)
+	_advance_hold(action, delta)
+
+
+## Advances a hold without touching the hint label, so it can run in the background while a
+## different contextual message stays on screen (e.g. skipping the harvest to start clients).
+## The progress circle owns its own visibility and only appears once the key is held.
+func _advance_hold(action: StringName, delta: float) -> void:
+	if action != _hold_action:
+		_hold_action = action
+		_hold_elapsed = 0.0
 	if _hold_input_pressed():
 		_hold_elapsed = minf(HOLD_CONFIRM_SECONDS, _hold_elapsed + delta)
 	else:
@@ -394,6 +406,16 @@ func _show_hold_action(action: StringName, delta: float) -> void:
 		return
 	_trigger_hold_action(action)
 	_reset_hold_progress()
+
+
+## True while the day is awake, the morning harvest is running and at least one rose has
+## grown up: the player may start the client sale early, before harvesting.
+func _morning_client_skip_available() -> bool:
+	if not GameState.is_morning_phase:
+		return false
+	if _building_manager == null or not _building_manager.has_method("grownup_rose_count"):
+		return false
+	return int(_building_manager.call("grownup_rose_count")) > 0
 
 
 func _trigger_hold_action(action: StringName) -> void:
@@ -437,17 +459,11 @@ func _set_hold_progress(value: float) -> void:
 	_hold_progress_circle.set("progress", value)
 
 
-func _set_hold_progress_visible(value: bool) -> void:
-	if _hold_progress_circle == null:
-		return
-	_hold_progress_circle.visible = value
-
-
 func _reset_hold_progress() -> void:
 	_hold_action = HOLD_ACTION_NONE
 	_hold_elapsed = 0.0
+	# Setting progress to 0 hides the circle: it owns its own "never show while empty" rule.
 	_set_hold_progress(0.0)
-	_set_hold_progress_visible(false)
 
 
 ## True while the player stands next to the seed merchant, i.e. while its merchant bar is

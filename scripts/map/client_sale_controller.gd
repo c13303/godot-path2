@@ -276,6 +276,8 @@ func all_planted_roses_are_wet() -> bool:
 		return false
 	var planted: int = int(plant_manager.call("rose_count"))
 	if planted <= 0:
-		return false
+		# Nothing planted (all harvested/sold, or lost to a tantrum): the watering gate is
+		# vacuously satisfied, so the night can still be started once the clients are done.
+		return true
 	var unwatered: int = int(plant_manager.call("unwatered_rose_count"))
 	return unwatered <= 0

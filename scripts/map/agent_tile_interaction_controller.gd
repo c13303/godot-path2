@@ -45,6 +45,14 @@ func evaluate(agent: Node2D, category: StringName, _cell: Vector2i) -> void:
 		_manager.get_turret_eating_controller().evaluate_agent(agent)
 		if debug:
 			_debug_turret += 1
+	refresh_contact_dance(agent, category)
+
+
+func refresh_contact_dance(agent: Node2D, category: StringName) -> void:
+	if _manager == null or agent == null or not is_instance_valid(agent):
+		return
+	if _manager.has_method("request_agent_plant_contact_dance"):
+		_manager.call("request_agent_plant_contact_dance", agent, category)
 
 
 func reset_debug_counters() -> void:
