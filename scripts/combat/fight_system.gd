@@ -7,8 +7,6 @@ const STATIC_IMPACT_KIND: int = 0
 const WATER_RESERVE_ID: StringName = &"water"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
-const ALERT_REFILL_WATER_KEY: String = "alert.refill_water"
-const RESERVE_ALERT_COOLDOWN_SECONDS: float = 3.0
 const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
 const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
 
@@ -65,7 +63,6 @@ var _turret_sprays: Dictionary = {}
 var _static_colliders_dirty: bool = true
 var _static_collider_prepare_generation: int = 0
 var _paused: bool = false
-var _reserve_alert_cooldown: float = 0.0
 
 func _ready() -> void:
 	_steering = get_node_or_null("../CPP/SteeringSystemNative")
@@ -117,7 +114,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 func _process(_delta: float) -> void:
 	if _paused:
 		return
-	_reserve_alert_cooldown = maxf(_reserve_alert_cooldown - _delta, 0.0)
 	_drain_projectile_impacts()
 	_drain_damage_events()
 	_water_roses_under_spray_projectiles()
@@ -562,7 +558,7 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 
 	var spawn_origin: Vector2 = origin + facing * weapon.throw_offset
 	if _held_spray_weapon_id == "":
-		if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
+		if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
 			if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
 				_end_hose_shooting_flow()
 				if not _hose_has_shooting_fluid_at_lance():
@@ -575,7 +571,7 @@ func _update_spray_projectile_weapon(weapon: WeaponData, origin: Vector2, direct
 	else:
 		_held_spray_cost_time_left -= delta
 		while _held_spray_cost_time_left <= 0.0:
-			if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost, true):
+			if not ignore_water_cost and not _spend_reserve(weapon.spray_reserve_id, weapon.spray_reserve_cost):
 				if source_agent_id >= 0 and weapon.spray_reserve_id == WATER_RESERVE_ID:
 					_end_hose_shooting_flow()
 					if _hose_has_shooting_fluid_at_lance():
@@ -721,15 +717,12 @@ func stop_turret_spray(cell: Vector2i) -> void:
 	inst["cost_time_left"] = 0.0
 	inst["fire_time_left"] = 0.0
 
-func _spend_reserve(reserve_id: StringName, amount: int, alert_on_failure: bool = false) -> bool:
+func _spend_reserve(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id == &"" or amount <= 0:
 		return true
 	if reserve_id != WATER_RESERVE_ID or not _progression or not _progression.has_method("spend"):
 		return false
-	var spent: bool = bool(_progression.call("spend", WATER_RESERVE_KEY, amount))
-	if not spent and alert_on_failure:
-		_show_reserve_alert()
-	return spent
+	return bool(_progression.call("spend", WATER_RESERVE_KEY, amount))
 
 func _reserve_has_amount(reserve_id: StringName, amount: int) -> bool:
 	if reserve_id == &"" or amount <= 0:
@@ -748,17 +741,6 @@ func _player_water_reserve_cost_is_ignored(source_agent_id: int, reserve_id: Str
 	var current: int = int(_progression.call("get_value", WATER_RESERVE_KEY))
 	var maximum: int = int(_progression.call("get_value", WATER_RESERVE_MAX_KEY))
 	return current < maximum
-
-func _show_reserve_alert() -> void:
-	if _reserve_alert_cooldown > 0.0:
-		return
-	_reserve_alert_cooldown = RESERVE_ALERT_COOLDOWN_SECONDS
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return
-	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
-	if tutorial != null and tutorial.has_method("show_alert"):
-		tutorial.call("show_alert", ALERT_REFILL_WATER_KEY)
 
 func _refill_water_reserve(delta: float) -> void:
 	if not _progression or not _progression.has_method("get_value"):
@@ -830,7 +812,7 @@ func fire_gun_held(gun_id: String, origin: Vector2, direction: Vector2, source_a
 				if not _hose_has_shooting_fluid_at_lance():
 					_gun_fire_timers[gun_id] = 0.0
 					return
-			if ignore_water_cost or _spend_reserve(gun.reserve_id, gun.reserve_cost, true):
+			if ignore_water_cost or _spend_reserve(gun.reserve_id, gun.reserve_cost):
 				var facing: Vector2 = direction.normalized()
 				var spawn_pos: Vector2 = origin
 				if source_agent_id >= 0:

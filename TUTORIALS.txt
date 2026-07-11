@@ -2,34 +2,26 @@
 water reserve empty
     = "Rechargez votre eau !" / "Refill your water !"      [tutorial.refill_water]
     (only hint allowed to stay visible during the NIGHT)
-	==========================================> OK
-
-standing on water source, reserve not full (contextual refill nudge, 3s alert)
-    = "rechargez votre eau !" / "refill your water !"       [alert.refill_water]
-	==========================================> DELETE THIS ONE
 
 
 seeds > 0  +  gardening tool NOT equipped
     = "Equipez la pelle pour planter des roses" / "Buy roses with the GARDENING tool"
                                                             [tutorial.buy_roses]
-==========================================> OK
 
 seeds > 0  +  gardening tool equipped
     = "Plantez des roses" / "Plant roses"                   [tutorial.plant_roses]
-==========================================> OK
 
 planted roses still dry (unwatered > 0)
     = "Arrosez vos roses" / "Water your roses"              [tutorial.water_roses]
-==========================================> OK
 
 no rose_shop_counter placed yet
     = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
-==========================================> OK
 
-everything done (all watered, nothing to plant/buy) + clients already served + occasional tantrum clients must have vanished 
+everything done (all watered, nothing to plant/buy) + clients already served + any tantrum clients have vanished
     = "Passez la nuit" / "Pass the night"                   [tutorial.pass_night]
     -> turns into the hold-to-confirm prompt below
-==========================================> CONDITION TO CHECK
+    (gated by can_start_night_after_clients() -> clients_finished_for_day(),
+     which already requires the tantrum to be inactive with no hostiles left)
 
 --- end-of-day HOLD prompt (replaces "pass the night") ---
 
@@ -66,18 +58,17 @@ night spawner-reveal cutscene begins (camera pans to devil spawners)
 --- DAWN transition (night just ended, new day still growing) ---
 
 sunrise transition, no phase started yet
-    = "Le soleil se lève" / "The sun is rising"             [tutorial.sun_rising]
-	==========================================> DELETE THIS ONE
+    -> no hint shown (label stays blank until the morning phase begins)
 
 --- MORNING harvest phase ---
 
 grown-up roses ready + counter has room
     = "Cueillez vos roses" / "Harvest your roses"           [tutorial.harvest_rose]
 
-grown-up roses ready + counters all full + already have one counter built 
+grown-up roses ready + counters all full + at least one counter already built
     = "Comptoirs remplis ! Ajoutez des comptoirs pour vendre vos roses"
       / "Add counters to sell your roses"                   [tutorial.add_counters_to_sell_roses]
-	  ==========================================> NEW CONDITION : 
+    (counters full but NONE built yet -> "Place the Shop" instead)
 
 grown-up roses exist -> can skip harvest straight to clients (HOLD), keyboard
     = "Maintenir ESPACE pour faire entrer les clients" / "Hold Space to let clients come in"
@@ -85,8 +76,6 @@ grown-up roses exist -> can skip harvest straight to clients (HOLD), keyboard
 same, gamepad
     = "Maintenir X pour faire entrer les clients" / "Hold X to let clients come in"
                                                             [tutorial.hold_start_clients_pad]
-															
- ==========================================> OK
 
 --- CLIENT sale phase ---
 
@@ -95,35 +84,19 @@ client reveal cutscene begins (camera pans to client entrances)
                                                             [tutorial.clients_coming]
 
 clients are actively buying
-    = "Laissez les clients acheter vos roses" / "client time"   [tutorial.client_time]
- ==========================================> DELETE THIS ONE
+    -> no hint shown (only water-empty and the tantrum alert may appear)
 
 rose shortage -> clients turn hostile (PERSISTENT red alert, shows count)
     = "Pénurie de rose : des clients sont enragés" / "Rose shortage: clients are enraged"
                                                             [tutorial.tantrum]
- ==========================================> OK
- 
+
 --- SEED MERCHANT phase ---
 
 merchant present + you have an unclaimed night reward
     = "Le marchand a une récompense pour vous" / "Merchent has a reward for you"
                                                             [tutorial.seed_merchant_reward]
- ======================================== OK
 
 
 
 game over reached (shown by game_over modal, not the hint label)
     = "Game Over" / "Game Over"                             [tutorial.game_over]
-
-
-========================================================================
- DEFINED IN TRANSLATIONS BUT CURRENTLY UNUSED IN CODE
- (kept for reference; no code path shows them right now)
-========================================================================
-
-    "Le Marchant est là" / "the seed merchent is here"      [tutorial.seed_merchant]
-    "terminez la transaction en cliquant" / "close the transaction by clicking"
-                                                            [tutorial.close_transaction]
-
-
-DELETE THIS DEAD CODE

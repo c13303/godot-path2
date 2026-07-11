@@ -9,10 +9,13 @@ extends RichTextLabel
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
-##   2. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
-##   3. seeds left, shop tool equipped .............. Plant roses
-##   4. planted roses still dry ..................... Water your roses
-##   5. all roses watered, nothing left ............. Hold to start night
+##   2. morning harvest (grown roses) ............... Harvest / add counters / place shop
+##   3. client sale phase ........................... nothing (only the tantrum alert)
+##   4. seed merchant reward waiting ................ Merchant has a reward
+##   5. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
+##   6. seeds left, shop tool equipped .............. Plant roses
+##   7. planted roses still dry ..................... Water your roses
+##   8. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -21,9 +24,7 @@ const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
-const KEY_SUN_RISING: String = "tutorial.sun_rising"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
-const KEY_CLIENT_TIME: String = "tutorial.client_time"
 const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
@@ -64,7 +65,6 @@ var _pending_key: String = ""    # key we are waiting to reveal
 var _pending_remaining: float = 0.0
 var _glow_tween: Tween
 var _glow_active: bool = false
-var _waiting_for_seed_harvest: bool = false
 var _alert_key: String = ""
 var _alert_count: int = -1
 var _alert_remaining: float = 0.0
@@ -114,7 +114,6 @@ func _process(delta: float) -> void:
 
 
 func _on_mode_changed(is_night: bool) -> void:
-	_waiting_for_seed_harvest = not is_night
 	# Night just ended: we are in the sunrise transition until the new day finishes.
 	_sun_rising = not is_night
 	_refresh()
@@ -127,13 +126,11 @@ func _on_new_day_finished() -> void:
 	_refresh()
 
 
-func _on_building_phase_changed(is_building_phase: bool) -> void:
-	_waiting_for_seed_harvest = not is_building_phase
+func _on_building_phase_changed(_is_building_phase: bool) -> void:
 	_refresh()
 
 
-func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
-	_waiting_for_seed_harvest = is_seed_merchant_phase
+func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
 	_refresh()
 
 
@@ -227,8 +224,6 @@ func _refresh(delta: float = 0.0) -> void:
 		_request_start_night_prompt()
 		_show_hold_action(HOLD_ACTION_START_NIGHT, delta)
 		return
-	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
-		key = KEY_CLIENT_TIME
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
 		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
@@ -284,20 +279,26 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
-	# Sunrise transition after a night: no day phase has begun yet, so fall through
-	# would wrongly show "pass the night". Announce the rising sun instead.
+	# Sunrise transition after a night: no day phase has begun yet, so falling through
+	# would wrongly show "pass the night". Stay blank until the morning phase starts.
 	if _sun_rising and not GameState.is_night:
-		return KEY_SUN_RISING
+		return ""
 	if GameState.is_morning_phase:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
-			if not _has_counter_room_for_harvest():
+			if _has_counter_room_for_harvest():
+				return KEY_HARVEST_ROSE
+			# Counters all full: nudge to add more, but only once at least one counter
+			# exists. With no counter built yet the real next step is to place the shop.
+			if _rose_shop_counter_count() > 0:
 				return KEY_ADD_COUNTERS_TO_SELL_ROSES
-			return KEY_HARVEST_ROSE
+			return KEY_PLACE_SHOP
 		if _rose_shop_counter_count() <= 0:
 			return KEY_PLACE_SHOP
 		return ""
+	# Client sale in progress: only the water-empty hint (handled above) and the
+	# persistent tantrum alert may show, so suppress every economy hint here.
 	if GameState.is_client_phase:
-		return KEY_CLIENT_TIME
+		return ""
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
 	# Seeds buy (and directly place) roses; that outranks watering. The player must

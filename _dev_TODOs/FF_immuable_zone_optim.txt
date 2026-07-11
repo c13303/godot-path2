@@ -1,0 +1,886 @@
+# Task: Implement an Immutable Navigation Zone with separate spawn and despawn routes
+
+Implement an **Immutable Navigation Zone** system to reduce runtime Flow Field recomputation.
+
+A large part of each level never changes during gameplay. This region must be excluded entirely from runtime Flow Field rebuilding.
+
+The system must split navigation into:
+
+* an immutable route used when agents spawn;
+* the existing mutable garden navigation;
+* a mutable route used when agents escape;
+* an immutable route leading to the final despawn point.
+
+Gameplay behaviour must remain unchanged. Only navigation ownership and computation domains change.
+
+Do not run Godot, tests, compilation, export, or build commands.
+
+---
+
+# Authoring contract
+
+## Immutable TileMap layer
+
+A level may contain a `TileMapLayer` named:
+
+```text
+immutable
+```
+
+Every used cell in this layer belongs to the Immutable Navigation Zone.
+
+The tile source, terrain and atlas coordinates are irrelevant. Only the presence of a tile matters.
+
+The authored layer is the sole source of truth for the Immutable Zone.
+
+Do not infer the zone from:
+
+* floor appearance;
+* grass type;
+* buildability;
+* garden positions;
+* automatically generated rectangles or polygons.
+
+The Immutable Zone:
+
+* contains no gardens;
+* contains no player-buildable area;
+* never receives runtime navigation changes;
+* forms one connected region;
+* contains no disconnected islands.
+
+## Spawner hierarchy
+
+Each spawner using the Immutable Zone has exactly these authored child nodes:
+
+```text
+spawner_name
+├── exit
+├── normal_zone_entry
+└── normal_zone_exit
+```
+
+Their responsibilities are:
+
+* The spawner node is the agent spawn point.
+* `normal_zone_entry` is the intended route from the Immutable Zone into the normal mutable gameplay zone.
+* `normal_zone_exit` is the intended route from the normal mutable gameplay zone back into the Immutable Zone.
+* `exit` is the existing final despawn point.
+
+The final `exit` node must remain the point where agents disappear.
+
+Reaching `normal_zone_exit` must never despawn an agent.
+
+Do not hardcode `level_demo` or any specific spawner name.
+
+The system must work for any compatible level.
+
+---
+
+# Navigation model
+
+There are two separate one-way routes.
+
+## Spawn route
+
+```text
+Spawner
+    ↓
+Immutable spawn Flow Field
+    ↓
+normal_zone_entry
+    ↓
+Mutable garden Flow Field
+    ↓
+Garden / target
+```
+
+## Despawn route
+
+```text
+Garden / current position
+    ↓
+Mutable escape Flow Field
+    ↓
+normal_zone_exit
+    ↓
+Immutable exit Flow Field
+    ↓
+exit
+    ↓
+Despawn
+```
+
+These are two independent routes.
+
+Do not describe or implement them as a bidirectional Flow Field.
+
+Each spawner receives exactly two new static Flow Fields:
+
+1. Immutable spawn Flow Field.
+2. Immutable exit Flow Field.
+
+The additional preload cost is acceptable.
+
+---
+
+# Gateway cells
+
+Resolve the closest floor cell to each authored node:
+
+```text
+spawner_cell
+normal_zone_entry_cell
+normal_zone_exit_cell
+final_exit_cell
+```
+
+Use explicit terminology throughout the implementation. Avoid ambiguous names such as only `entry_cell` or `exit_cell`.
+
+`normal_zone_entry_cell` and `normal_zone_exit_cell` are authored cells in the normal mutable zone, directly adjacent to the Immutable Zone.
+
+They are route anchors, not mandatory checkpoints.
+
+Do not require an agent to touch the exact node position or enter a proximity radius before switching Flow Fields.
+
+Zone membership must control the transition.
+
+For example:
+
+* if an inbound agent is pushed directly into the normal zone, it must immediately switch to its mutable garden Flow Field;
+* if an escaping agent is pushed directly into the Immutable Zone, it must immediately switch to its immutable exit Flow Field.
+
+The authored gateway nodes define the intended route, but they do not restrict where a physical zone crossing may occur.
+
+Do not assume that `normal_zone_entry` and `normal_zone_exit` use the same cell. Keep their routes and ownership separate even if a level author places them together.
+
+---
+
+# Zone representation
+
+During level preparation:
+
+1. Read the used cells from the `immutable` TileMap layer.
+2. Convert them into the coordinate system used by the authoritative floor layer.
+3. Validate that every immutable cell corresponds to valid navigable floor.
+4. Validate that the Immutable Zone is connected.
+5. Build an efficient immutable-domain mask.
+6. Build the complementary mutable-domain mask from navigable floor cells that are not immutable.
+7. Compute tight bounds for both domains.
+
+Use a compact dense mask suitable for both GDScript and the native plugin.
+
+A representation based on:
+
+```text
+origin
+dimensions
+PackedByteArray mask
+```
+
+is appropriate.
+
+Do not represent the zone as:
+
+* a dictionary containing every tile;
+* a list of individual tile objects;
+* a collection of rectangles;
+* runtime scene nodes.
+
+Zone membership checks must be O(1).
+
+The masks and their bounds are computed once for the level and never rebuilt during gameplay.
+
+---
+
+# Immutable spawn Flow Field
+
+Each spawner owns one static Flow Field for:
+
+```text
+spawner_cell → normal_zone_entry_cell
+```
+
+This Flow Field:
+
+* is computed during level preparation;
+* uses only the Immutable Navigation Zone;
+* may include `normal_zone_entry_cell` as a terminal goal immediately outside the immutable domain;
+* is never invalidated;
+* is never recomputed during gameplay.
+
+The native computation must not include the rest of the normal mutable zone.
+
+The field must be valid from the physical spawner cell.
+
+---
+
+# Mutable garden Flow Fields
+
+The existing dynamic garden routing remains conceptually unchanged, except that its mutable route now begins at:
+
+```text
+normal_zone_entry_cell
+```
+
+instead of:
+
+```text
+spawner_cell
+```
+
+Existing per-spawner/per-garden Flow Fields may remain per-spawner/per-garden where required by the current architecture.
+
+However:
+
+* route reachability checks must use `normal_zone_entry_cell`;
+* garden selection must evaluate accessibility from `normal_zone_entry_cell`;
+* route readiness checks must sample from `normal_zone_entry_cell`;
+* mutable garden Flow Fields must process only the Mutable Zone;
+* mutable garden Flow Fields must never contain or process Immutable Zone cells.
+
+The immutable spawn route is the common immutable prefix before all garden routes for that spawner.
+
+Do not include this prefix in dynamic garden recomputation.
+
+---
+
+# Mutable escape Flow Field
+
+Each spawner must have a dynamic escape Flow Field targeting:
+
+```text
+normal_zone_exit_cell
+```
+
+This field replaces any runtime-recomputed route that currently leads directly through the Immutable Zone to the final `exit`.
+
+The mutable escape Flow Field:
+
+* uses only the Mutable Zone;
+* may be rebuilt when mutable topology changes;
+* routes escaping agents toward `normal_zone_exit_cell`;
+* never includes the final despawn `exit`;
+* never processes Immutable Zone cells.
+
+Audit all current escape paths and fallbacks, including:
+
+* normal night escape;
+* forced night-end escape;
+* garden retarget fallback to escape;
+* lost-target fallback;
+* spawner-bound escape selection;
+* nearest-exit selection;
+* exit-wall escape routes.
+
+When Immutable Zone mode is active, no dynamic runtime Flow Field may route directly to a final `exit` located in the Immutable Zone.
+
+---
+
+# Immutable exit Flow Field
+
+Each spawner owns one static Flow Field for:
+
+```text
+Immutable Zone → final exit
+```
+
+Its goal is:
+
+```text
+final_exit_cell
+```
+
+The field must be valid from the immutable cells adjacent to `normal_zone_exit_cell`.
+
+This Flow Field:
+
+* is computed during level preparation;
+* uses only the Immutable Navigation Zone;
+* is never invalidated;
+* is never recomputed during gameplay.
+
+Once an escaping agent crosses from the Mutable Zone into the Immutable Zone, it switches to this field and follows it to the existing final `exit`.
+
+The agent despawns only through the existing final-exit behaviour and arrival tolerance.
+
+---
+
+# Agent navigation intent
+
+The transition system must distinguish between two navigation intents:
+
+```text
+INBOUND
+OUTBOUND
+```
+
+It must also retain the spawner route associated with the agent.
+
+Conceptually, the system needs access to:
+
+```text
+navigation intent
+linked spawner
+immutable spawn group
+pending mutable garden group
+mutable escape group
+immutable exit group
+current navigation zone
+```
+
+The exact data representation may differ, but the ownership must remain explicit and centralized.
+
+Do not add this state management to individual monster scripts.
+
+Do not add a new `_process()` callback to every agent.
+
+---
+
+# Zone-driven Flow Field switching
+
+Flow Field selection must be based on:
+
+```text
+navigation intent
++
+current cell zone membership
+```
+
+Use this invariant:
+
+```text
+INBOUND + Immutable Zone
+    → immutable spawn Flow Field
+
+INBOUND + Mutable Zone
+    → assigned mutable garden Flow Field
+
+OUTBOUND + Mutable Zone
+    → mutable escape Flow Field
+
+OUTBOUND + Immutable Zone
+    → immutable exit Flow Field
+```
+
+The exact gateway node is not the switching condition.
+
+This must correctly handle:
+
+* normal movement through the authored gateways;
+* knockback;
+* separation forces;
+* teleportation;
+* save restoration;
+* external displacement;
+* entering the other zone through a non-authored boundary cell;
+* being pushed back across the boundary.
+
+If an agent crosses back into the previous zone, restore the appropriate field according to its navigation intent.
+
+Avoid rapid switching caused by invalid or temporarily unclassifiable positions. If the current floor cell cannot be classified safely, retain the last valid field and use the existing lost-agent safeguards.
+
+---
+
+# Spawn behaviour
+
+When an agent spawns:
+
+1. Resolve its linked spawner.
+2. Select its target garden using the existing selection rules.
+3. Use `normal_zone_entry_cell` as the mutable route origin for selection and reachability.
+4. Request or retrieve the corresponding mutable garden Flow Field.
+5. Store that mutable group as the pending inbound destination.
+6. Assign the immutable spawn Flow Field immediately.
+7. Allow the agent to travel through the Immutable Zone.
+8. As soon as the agent enters the Mutable Zone, switch to the pending mutable garden Flow Field.
+9. Continue the existing garden-entry, targeting and eating behaviour.
+
+If the mutable garden Flow Field is still computing while the agent is inside the Immutable Zone, the agent should continue using the already-ready immutable spawn field.
+
+Do not unnecessarily freeze the agent at its spawner.
+
+If the mutable garden field is still unavailable when the agent enters the Mutable Zone, preserve the existing waiting or freeze behaviour until it becomes ready.
+
+---
+
+# Escape behaviour
+
+When an agent begins escaping:
+
+1. Resolve or preserve its linked spawner and final exit.
+2. Set its navigation intent to `OUTBOUND`.
+3. If the agent is currently in the Mutable Zone, assign the mutable escape Flow Field targeting `normal_zone_exit_cell`.
+4. When it enters the Immutable Zone, assign the immutable exit Flow Field.
+5. Continue toward the existing final `exit`.
+6. Despawn only when the existing final-exit condition is met.
+
+If an agent begins escaping while already in the Immutable Zone, assign the immutable exit Flow Field directly.
+
+If an escaping agent is pushed back into the Mutable Zone, restore the mutable escape Flow Field.
+
+---
+
+# Garden retargeting
+
+Preserve current retargeting behaviour.
+
+When an inbound agent receives a new target garden:
+
+* if it is still in the Immutable Zone, keep it on the immutable spawn Flow Field and replace only its pending mutable garden group;
+* if it is already in the Mutable Zone, switch directly to the new mutable garden group.
+
+Garden retargeting must never trigger rebuilding of immutable Flow Fields.
+
+---
+
+# Save/load and lifecycle handling
+
+## Save restoration
+
+When restoring an agent:
+
+1. Restore or resolve its linked spawner.
+2. Restore its navigation intent.
+3. Classify its current cell using the zone mask.
+4. Assign the appropriate Flow Field using the zone/intention invariant.
+
+Do not assume that restored agents begin at the spawner.
+
+## Teleportation
+
+Any system that significantly changes an agent position must cause zone membership to be reevaluated immediately or on the next authoritative centralized navigation update.
+
+## Removal
+
+Clear all pending mutable-group and zone-transition state through the authoritative agent removal path.
+
+Do not retain references to freed agents.
+
+Preserve native unregistration behaviour.
+
+---
+
+# Spawner authoring and bindings
+
+Extend the existing spawner-authoring pipeline rather than introducing an independent scene-tree scan.
+
+Audit and reuse the current flow involving:
+
+```text
+level_loader.gd
+spawner_binding.gd
+spawn_playlist_config_service.gd
+building_scan_service.gd
+```
+
+Extend the authored spawner binding with:
+
+```text
+normal_zone_entry_cell
+normal_zone_exit_cell
+```
+
+Keep the existing final exit information.
+
+Capture all three authored child nodes during the existing level-loading/spawner-binding phase:
+
+```text
+exit
+normal_zone_entry
+normal_zone_exit
+```
+
+Do not rescan the spawner scene hierarchy later during gameplay.
+
+Do not store runtime Flow Field group IDs inside an authored resource unless that already matches the codebase ownership model.
+
+Authored data and runtime route state should remain separate.
+
+---
+
+# Native plugin
+
+Keep the C++ implementation fully generic.
+
+The native plugin must not contain concepts such as:
+
+* immutable gameplay zone;
+* normal gameplay zone;
+* monster;
+* garden;
+* spawner;
+* entry;
+* exit;
+* despawner.
+
+Introduce a generic **Flow Field computation domain** concept.
+
+A computation domain should define:
+
+```text
+domain bounds
+cell inclusion mask
+```
+
+Each Flow Field request must be able to specify the computation domain it uses.
+
+The existing full-map behaviour must remain available for levels that do not use this feature.
+
+## Generic domain requirements
+
+* Domains are created once and reused by multiple Flow Field requests.
+* Domains are safe to use with asynchronous Flow Field computation.
+* Each Flow Field uses the tight bounds of its selected domain.
+* Cells outside the selected domain do not participate in:
+
+  * route propagation;
+  * direction generation;
+  * distance fields;
+  * route-cost fields;
+  * bottleneck calculations;
+  * per-field result arrays.
+* Existing wall, fence, blocker and navigability rules continue to apply inside the selected domain.
+* Excluding a cell from a computation domain does not automatically make it a physical collision wall.
+
+## Terminal goal support
+
+The native API must generically support a goal cell directly adjacent to, but outside, the selected domain.
+
+Only that terminal goal cell may be included for the request.
+
+This is needed for the immutable spawn Flow Field:
+
+```text
+immutable domain → normal_zone_entry_cell
+```
+
+Keep this generic. Do not expose gameplay gateway terminology in C++.
+
+## Per-field bounds
+
+Audit native code for hidden assumptions that every Flow Field uses the complete floor-layer used rectangle.
+
+Direction sampling, route-cost lookup, navigability lookup, result application and debug drawing must use each Flow Field’s own origin and dimensions.
+
+---
+
+# Runtime invalidation
+
+Immutable route data must never enter the normal runtime invalidation pipeline.
+
+Runtime topology changes may rebuild:
+
+* mutable garden Flow Fields;
+* mutable escape Flow Fields;
+* garden topology;
+* mutable route caches;
+* affected-agent routing.
+
+They must never rebuild:
+
+* immutable spawn Flow Fields;
+* immutable exit Flow Fields;
+* immutable masks;
+* mutable masks;
+* computation-domain bounds.
+
+The invalidation system must not mark static route groups dirty.
+
+When Immutable Zone mode is active, remove or replace any fallback that submits a full-map runtime Flow Field covering the Immutable Zone.
+
+---
+
+# Immutable-zone enforcement
+
+The optimization depends on the zone remaining genuinely immutable.
+
+When the feature is active:
+
+* building placement must reject immutable cells;
+* garden or plant systems must not create mutable gameplay content there;
+* runtime navigation blockers must not be added there;
+* mutable topology invalidation originating from an immutable cell is an invariant violation.
+
+Use the central zone service for all these checks.
+
+Do not duplicate the immutable mask in multiple gameplay systems.
+
+The authored immutable layer is authoritative even if the underlying floor tile would normally be buildable.
+
+---
+
+# Architecture
+
+This feature introduces a distinct navigation subsystem.
+
+Do not grow existing large managers.
+
+Create dedicated owners where responsibilities deserve them.
+
+A clean separation could include:
+
+## Navigation zone service
+
+Responsible for:
+
+* reading and validating the authored immutable layer;
+* owning immutable and mutable masks;
+* answering zone-membership queries;
+* owning generic native computation-domain handles;
+* exposing immutable and mutable bounds.
+
+## Spawner zone route service
+
+Responsible for:
+
+* authored gateway cells;
+* final exit cells;
+* immutable spawn groups;
+* immutable exit groups;
+* static route preparation and validation.
+
+## Agent zone transition controller
+
+Responsible for:
+
+* navigation intent;
+* pending mutable garden assignment;
+* Flow Field switching based on zone membership;
+* spawn, escape, retarget, save/load and displacement transitions.
+
+Names may be adjusted to match existing conventions, but responsibilities must remain isolated.
+
+Do not add the subsystem wholesale to:
+
+* `BuildingManager`;
+* `SpawnerRouteService`;
+* `AgentNavigationPhaseController`;
+* individual monster files.
+
+Use thin integration methods where existing controllers must call the new owners.
+
+If an existing file would gain more than approximately 150 lines or acquire a new responsibility, create a dedicated file.
+
+---
+
+# Existing code to audit
+
+Audit at minimum:
+
+```text
+agent_spawn_service.gd
+agent_navigation_phase_controller.gd
+garden_retarget_controller.gd
+spawner_route_service.gd
+spawner_garden_selection_service.gd
+building_invalidation_controller.gd
+level_loader.gd
+spawner_binding.gd
+spawn_playlist_config_service.gd
+building_scan_service.gd
+```
+
+Also search for:
+
+* all Flow Field requests using a physical spawner cell as the garden-route origin;
+* all route-readiness checks sampled from a spawner;
+* all Flow Fields targeting a final despawn exit;
+* all escape fallback selection;
+* all forced-escape paths;
+* all save/load route restoration;
+* all debug drawing assuming full-map Flow Field bounds.
+
+Do not change unrelated gameplay systems.
+
+---
+
+# Validation and fallback
+
+The feature must be optional per level.
+
+## Level without an `immutable` layer
+
+Preserve the existing full-map navigation behaviour exactly.
+
+No migration should be required for existing levels.
+
+## Level with an `immutable` layer
+
+Validate the complete configuration before activating the feature.
+
+Validate:
+
+* the immutable mask is non-empty;
+* all immutable cells correspond to valid floor cells;
+* the Immutable Zone is one connected region;
+* every participating spawner is in the Immutable Zone;
+* every final `exit` is in the Immutable Zone;
+* every spawner contains all three required child nodes;
+* every `normal_zone_entry_cell` is in the Mutable Zone and adjacent to the Immutable Zone;
+* every `normal_zone_exit_cell` is in the Mutable Zone and adjacent to the Immutable Zone;
+* every spawner can reach its `normal_zone_entry` through the Immutable Zone;
+* immutable cells adjacent to `normal_zone_exit` can reach that spawner’s final `exit`;
+* no garden exists in the Immutable Zone;
+* no buildable runtime object is placed in the Immutable Zone.
+
+Do not activate the system for only some spawners.
+
+If validation fails:
+
+* emit clear errors identifying the level, spawner, node and relevant cells;
+* disable Immutable Zone mode for the entire level;
+* use the existing full-map navigation system.
+
+Never leave the level in a mixture of legacy routing and zone-split routing.
+
+---
+
+# Performance requirements
+
+The purpose is to reduce runtime work, not preload work.
+
+Additional preload work is acceptable for:
+
+* mask construction;
+* connectivity validation;
+* domain creation;
+* two static Flow Fields per spawner;
+* route validation.
+
+During gameplay:
+
+* mutable Flow Field requests must not scan immutable floor cells;
+* mutable Flow Field arrays must use mutable-domain bounds;
+* immutable Flow Fields must never be recomputed;
+* zone membership checks must be O(1);
+* no per-agent scene-tree lookup may be added;
+* no new per-agent processing node may be added.
+
+---
+
+# Debugging
+
+Integrate with the existing debug-option system.
+
+When debugging is enabled, expose concise information for:
+
+```text
+immutable cell count
+mutable cell count
+immutable bounds
+mutable bounds
+spawner cell
+normal-zone entry cell
+normal-zone exit cell
+final exit cell
+immutable spawn group
+immutable exit group
+selected computation domain
+zone-transition errors
+```
+
+Do not print routine per-frame or per-agent success messages.
+
+Errors should be reserved for:
+
+* invalid level authoring;
+* impossible static routes;
+* an immutable Flow Field entering runtime invalidation;
+* a mutable Flow Field using the wrong computation domain;
+* mutable gameplay changes inside the Immutable Zone.
+
+Flow Field debug drawing must respect each field’s own bounds and origin.
+
+---
+
+# Behaviour that must remain unchanged
+
+Preserve:
+
+* garden selection semantics;
+* garden accessibility rules;
+* garden-entry routing;
+* lazy Flow Field loading;
+* eating and retargeting;
+* forced escape;
+* final exit arrival tolerance;
+* save/load;
+* night preparation;
+* agent removal;
+* native agent registration and unregistration;
+* steering, separation and bottleneck behaviour;
+* agent-type-specific routing rules.
+
+Do not alter movement tuning as part of this task.
+
+---
+
+# Code-quality requirements
+
+Production-quality implementation is required.
+
+* Strict GDScript typing.
+* Generic native API.
+* Dedicated ownership.
+* No duplicated masks.
+* No duplicated spawner discovery.
+* No large manager growth.
+* No growth of individual monster files.
+* No new per-agent `_process()` callbacks.
+* Preserve existing public APIs through thin wrappers where practical.
+* Remove obsolete full-map routing paths only when the zone-aware replacement is active.
+* Preserve complete legacy behaviour for levels without the authored layer.
+* Do not optimize preload time at the expense of runtime performance.
+* Do not run Godot or compile the C++ extension.
+
+If an architectural ambiguity remains after inspecting the relevant code, stop and ask rather than guessing.
+
+---
+
+# Acceptance criteria
+
+The implementation is complete when:
+
+1. A level without an `immutable` layer behaves exactly as before.
+2. A valid authored level creates one immutable spawn Flow Field per spawner.
+3. A valid authored level creates one immutable exit Flow Field per spawner.
+4. The spawn route is:
+   `spawner → normal_zone_entry → garden`.
+5. The despawn route is:
+   `garden/current position → normal_zone_exit → exit`.
+6. `exit` remains the only final despawn point.
+7. Static Flow Fields are computed once and never rebuilt.
+8. Mutable garden Flow Fields process only the Mutable Zone.
+9. Mutable escape Flow Fields process only the Mutable Zone.
+10. Flow Field switching is based on navigation intent and zone membership.
+11. Crossing a zone boundary through displacement triggers the correct immediate switch.
+12. Crossing back restores the appropriate field.
+13. Runtime topology rebuilding never processes Immutable Zone cells.
+14. Invalid authoring causes a complete legacy fallback rather than partial activation.
+15. The new subsystem does not enlarge monster files or existing large managers.
+
+---
+
+# Final report
+
+Provide:
+
+1. Files created and modified.
+2. Dedicated services/controllers and their responsibilities.
+3. Changes to level loading and spawner bindings.
+4. Generic native computation-domain API.
+5. Exact ownership of:
+
+   * immutable spawn Flow Fields;
+   * mutable garden Flow Fields;
+   * mutable escape Flow Fields;
+   * immutable exit Flow Fields.
+6. Zone-transition rules.
+7. Changes to garden selection and route-readiness origins.
+8. Changes to every escape path and fallback.
+9. Authoring validation and fallback behaviour.
+10. Confirmation that final despawning still occurs only at `exit`.
+11. Confirmation that static Flow Fields never enter runtime invalidation.
+12. Confirmation that mutable Flow Fields never process Immutable Zone cells.
+13. Any remaining concern requiring manual review.
