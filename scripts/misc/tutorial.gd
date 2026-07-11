@@ -54,6 +54,7 @@ var _waiting_for_seed_harvest: bool = false
 var _alert_key: String = ""
 var _alert_count: int = -1
 var _alert_remaining: float = 0.0
+var _alert_persistent: bool = false
 # True during the sunrise transition: night has just ended but the first day phase
 # (the morning harvest) has not begun yet. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -129,12 +130,13 @@ func _on_locale_changed(_locale: String) -> void:
 		text = Translations.t(_displayed_key)
 
 
-func show_alert(key: String, count: int = -1) -> void:
+func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 	if key == "":
 		return
 	_alert_key = key
 	_alert_count = count
-	_alert_remaining = ALERT_DURATION
+	_alert_persistent = persistent
+	_alert_remaining = ALERT_DURATION if not persistent else 0.0
 	visible = true
 	text = _alert_text()
 	_set_glow(false)
@@ -150,6 +152,7 @@ func clear_alert(key: String = "") -> void:
 	_alert_key = ""
 	_alert_count = -1
 	_alert_remaining = 0.0
+	_alert_persistent = false
 	modulate = Color.WHITE
 	_refresh()
 
@@ -158,6 +161,12 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	if _alert_key != "":
+		if _alert_persistent:
+			visible = true
+			text = _alert_text()
+			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, 0.5)
+			_set_glow(false)
+			return
 		_alert_remaining -= delta
 		if _alert_remaining > 0.0:
 			visible = true
@@ -169,6 +178,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_alert_key = ""
 		_alert_count = -1
 		_alert_remaining = 0.0
+		_alert_persistent = false
 		modulate = Color.WHITE
 	if _should_start_night_automatically():
 		_start_night_automatically()

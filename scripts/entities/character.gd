@@ -249,8 +249,8 @@ func _directional_client_tantrum_frame() -> int:
 
 
 func _update_client_rose_pin() -> void:
-	var visible: bool = _is_client_agent() and bool(get_meta("client_rose_visible", false))
-	if not visible:
+	var rose_visible: bool = _is_client_agent() and bool(get_meta("client_rose_visible", false))
+	if not rose_visible:
 		if is_instance_valid(_client_rose_sprite):
 			_client_rose_sprite.visible = false
 		return

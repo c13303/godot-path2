@@ -146,7 +146,10 @@ func activate() -> void:
 
 
 func process(delta: float) -> void:
-	if GameState.is_night or not _client_sale_active:
+	if GameState.is_night:
+		return
+	if not _client_sale_active:
+		_finish_client_phase_if_empty()
 		return
 	if _manager.is_client_reveal_cutscene_active():
 		return
@@ -158,18 +161,7 @@ func process(delta: float) -> void:
 			# gates on clients_finished_for_day(), which requires the tantrum to be
 			# over. Leaving it active here deadlocks the day — night never starts.
 			client_tantrum.end()
-			_client_sale_active = false
-			GameState.set_client_phase(false)
-			_dissolve_counter_piles_after_clients()
-			# On the final client day the last client leaving wins the run outright,
-			# before the roses-watered night gate below (there is no next night).
-			if _manager.try_finish_final_day():
-				return
-			if _manager.can_start_night_after_clients():
-				GameState.start_night()
-				return
-			if not GameState.is_seed_merchant_phase:
-				GameState.set_building_phase(true)
+			_complete_client_sale()
 		return
 	if not _manager.has_client_targets_remaining():
 		_client_sale_pending_spawners.clear()
@@ -195,18 +187,7 @@ func process(delta: float) -> void:
 	if spawned_this_frame:
 		return
 	if _client_sale_pending_spawners.is_empty() and client_count() == 0 and client_counter_agents.is_empty() and not client_tantrum.has_hostiles():
-		_client_sale_active = false
-		GameState.set_client_phase(false)
-		_dissolve_counter_piles_after_clients()
-		# On the final client day the last client leaving wins the run outright,
-		# before the roses-watered night gate below (there is no next night).
-		if _manager.try_finish_final_day():
-			return
-		if _manager.can_start_night_after_clients():
-			GameState.start_night()
-			return
-		if not GameState.is_seed_merchant_phase:
-			GameState.set_building_phase(true)
+		_complete_client_sale()
 
 
 # Empty every counter the moment the last client of the sale has left the map. Previously
@@ -216,6 +197,36 @@ func process(delta: float) -> void:
 # never run a client sale at all.
 func _dissolve_counter_piles_after_clients() -> void:
 	_manager.get_counter_stock_manager().dissolve_all_piles()
+
+
+func _finish_client_phase_if_empty() -> void:
+	if not GameState.is_client_phase:
+		return
+	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
+	var client_counter_agents: Dictionary = _manager.client_counter_agents()
+	if (
+		_client_sale_pending_spawners.is_empty()
+		and client_count() == 0
+		and client_counter_agents.is_empty()
+		and not client_tantrum.is_active()
+		and not client_tantrum.has_hostiles()
+	):
+		_complete_client_sale()
+
+
+func _complete_client_sale() -> void:
+	_client_sale_active = false
+	GameState.set_client_phase(false)
+	_dissolve_counter_piles_after_clients()
+	# On the final client day the last client leaving wins the run outright,
+	# before the roses-watered night gate below (there is no next night).
+	if _manager.try_finish_final_day():
+		return
+	if _manager.can_start_night_after_clients():
+		GameState.start_night()
+		return
+	if not GameState.is_seed_merchant_phase:
+		GameState.set_building_phase(true)
 
 
 func client_count() -> int:

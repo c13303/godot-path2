@@ -38,6 +38,21 @@ func clear_hostile(nav_id: int) -> void:
 	_finish_if_no_hostiles()
 
 
+func restore_live_hostiles() -> void:
+	var target_reservoir: Node2D = nearest_live_reservoir(Vector2.ZERO, false)
+	if target_reservoir == null:
+		return
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group("clients"):
+		var client: Node2D = raw_node as Node2D
+		if client == null or not is_instance_valid(client):
+			continue
+		if not bool(client.get_meta("hostile_client", false)):
+			continue
+		_restore_hostile(client, target_reservoir)
+	if has_hostiles():
+		_show_alert()
+
+
 func nearest_live_reservoir(from_world: Vector2, use_distance: bool) -> Node2D:
 	var best: Node2D = null
 	var best_distance: float = INF
@@ -77,7 +92,7 @@ func begin() -> void:
 		_active = false
 		return
 	_rebuild_flow(target_reservoir.global_position)
-	var hostile_count: int = 0
+	var made_hostile_count: int = 0
 	for raw_node: Node in _manager.get_tree().get_nodes_in_group("clients"):
 		var client: Node2D = raw_node as Node2D
 		if client == null or not is_instance_valid(client):
@@ -85,8 +100,8 @@ func begin() -> void:
 		if bool(client.get_meta("client_has_rose", false)):
 			continue
 		if _make_hostile(client, target_reservoir):
-			hostile_count += 1
-	if hostile_count <= 0:
+			made_hostile_count += 1
+	if made_hostile_count <= 0:
 		end()
 		return
 	_show_alert()
@@ -193,6 +208,58 @@ func _make_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
 	return true
 
 
+func _restore_hostile(client: Node2D, target_reservoir: Node2D) -> bool:
+	if target_reservoir == null:
+		return false
+	var nav_id: int = int(client.get("nav_id"))
+	if nav_id < 0:
+		return false
+	var agent_manager: Node = _agent_manager()
+	if not _active:
+		if (
+			agent_manager == null
+			or not agent_manager.has_method("create_group")
+			or not agent_manager.has_method("assign_agent")
+		):
+			push_warning("BuildingManager: restored client tantrum cannot start because AgentManagerNative is missing group APIs.")
+			return false
+		_active = true
+		GameState.set_client_phase(true)
+		_group = int(agent_manager.call("create_group"))
+		if _group <= IDLE_GROUP:
+			push_warning("BuildingManager: restored client tantrum cannot allocate a flow group.")
+			_active = false
+			_group = -1
+			return false
+		_rebuild_flow(target_reservoir.global_position)
+	if not client.is_in_group("monsters"):
+		client.add_to_group("monsters")
+	if client.has_method("stop_eating"):
+		client.call("stop_eating")
+	client.set_meta("agent_kind", &"client")
+	client.set_meta("hostile_client", true)
+	if client.has_method("queue_redraw"):
+		client.queue_redraw()
+	var sprite: Sprite2D = client.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = CLIENT_TEXTURE
+		sprite.hframes = CLIENT_SPRITE_HFRAMES
+		sprite.frame = CLIENT_FRAME_TANTRUM_SOUTH
+		sprite.flip_h = false
+	client.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
+	if client.has_method("start_angry"):
+		client.call("start_angry")
+	_hostile_clients[nav_id] = {
+		"node": client,
+		"target": target_reservoir,
+		"attack_timer": randf_range(0.0, ATTACK_INTERVAL_SECONDS),
+		"attacking": false,
+	}
+	if _group > IDLE_GROUP and agent_manager != null:
+		agent_manager.call("assign_agent", client, _group)
+	return true
+
+
 func _start_attack(nav_id: int, client: Node2D, target: Node2D) -> void:
 	var agent_manager: Node = _agent_manager()
 	if agent_manager != null and agent_manager.has_method("detach_agent_flow"):
@@ -257,7 +324,7 @@ func _show_alert() -> void:
 		return
 	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
 	if tutorial != null and tutorial.has_method("show_alert"):
-		tutorial.call("show_alert", "tutorial.tantrum", hostile_count())
+		tutorial.call("show_alert", "tutorial.tantrum", hostile_count(), true)
 
 
 func _hide_alert() -> void:

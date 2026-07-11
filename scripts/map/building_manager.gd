@@ -1196,6 +1196,7 @@ func reset_client_state_for_morning() -> void:
 func _reset_client_sale_state() -> void:
 	_spawner_reveal_phase.abort_client_reveal()
 	_client_preparing = false
+	_client_tantrum.end()
 	_client_sale.reset()
 	clear_client_counter_agents()
 
@@ -1518,6 +1519,7 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 		await _run_client_preparation(_night_preparation_token)
 		_agent_save_service.restore_state(data, true)
 		_purge_day_phase_monsters_after_load()
+		_client_tantrum.restore_live_hostiles()
 		_notify_restored_phase()
 		return
 	_night_preparation_ready = bool(data.get("night_preparation_ready", true))
