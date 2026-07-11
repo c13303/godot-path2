@@ -1,12 +1,12 @@
 extends RefCounted
 class_name TurretEatingController
 
-# Owns the "monster devours a turret then chews for a beat" hazard: detecting an
-# agent overlapping a turret cell, consuming the turret (debris + tile removal +
-# sfx), and running the per-agent eating timer. Mirrors DrowningController: holds a
-# back-reference to BuildingManager and delegates the shared agent suspend/capture/
-# resume machinery (also used by drowning) plus the turret tile edits back to the
-# manager rather than duplicating them.
+# Owns the "monster devours an eatable turret then chews for a beat" hazard:
+# detecting an agent overlapping a turret cell, consuming the turret (debris + tile
+# removal + sfx), and running the per-agent eating timer. Mirrors DrowningController:
+# holds a back-reference to BuildingManager and delegates the shared agent suspend/
+# capture/resume machinery (also used by drowning) plus the turret tile edits back
+# to the manager rather than duplicating them.
 
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
@@ -33,9 +33,8 @@ func clear_agent(nav_id: int) -> void:
 
 
 # Single-agent turret-overlap check, invoked by AgentTileInteractionController when
-# an agent (re)enters a relevant cell. Same rule and guards as the old per-frame
-# scan: skip while garden-eating, turret-eating or drowning, then consume the turret
-# when the agent's blocking-layer cell is a turret cell.
+# an agent (re)enters a relevant cell. Skip while garden-eating, turret-eating or
+# drowning, then consume only turrets whose TurretData allows monster eating.
 func evaluate_agent(agent: Node2D) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
@@ -50,16 +49,19 @@ func evaluate_agent(agent: Node2D) -> void:
 	if eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or drowning.is_drowning(nav_id):
 		return
 	var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
-	if not _manager._is_turret_cell(agent_cell):
+	var turret_data: TurretData = _turret_data_at_cell(agent_cell)
+	if turret_data == null:
 		return
-	_consume_turret(agent, agent_cell)
+	var agent_kind: StringName = _manager._agent_kind(agent)
+	if agent_kind != SPAWNER_KIND_CLIENT and agent_kind != SPAWNER_KIND_MERCHANT and not turret_data.eatable_by_monsters:
+		return
+	_consume_turret(agent, agent_cell, agent_kind)
 
 
-func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
+func _consume_turret(agent: Node2D, turret_cell: Vector2i, agent_kind: StringName) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
 		return
-	var agent_kind: StringName = _manager._agent_kind(agent)
 	if agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT:
 		_manager._leave_turret_debris(turret_cell)
 		_manager._remove_turret_cell(turret_cell)
@@ -78,6 +80,21 @@ func _consume_turret(agent: Node2D, turret_cell: Vector2i) -> void:
 	Sfx.play_sound(&"crunsh")
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", eating_time)
+
+
+func _turret_data_at_cell(cell: Vector2i) -> TurretData:
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects != null and building_objects.has_method("get_building"):
+		var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
+		var item_id: String = str(building_data.get("item_id", ""))
+		var turret_data: TurretData = ItemCatalog.get_turret_data(item_id)
+		if turret_data != null:
+			return turret_data
+	if _manager.blocking_buildings == null or _manager.blocking_buildings.get_cell_source_id(cell) < 0:
+		return null
+	var atlas: Vector2i = _manager.blocking_buildings.get_cell_atlas_coords(cell)
+	var fallback_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(_manager.blocking_buildings.name), atlas)
+	return ItemCatalog.get_turret_data(fallback_item_id)
 
 
 func process_turret_eating_agents(delta: float) -> void:

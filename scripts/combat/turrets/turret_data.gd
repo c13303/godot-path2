@@ -16,3 +16,4 @@ class_name TurretData
 @export_group("Building")
 @export var build_in_range: bool = false
 @export_range(0.0, 10000.0, 1.0, "or_greater") var build_range: float = 200.0
+@export var eatable_by_monsters: bool = false

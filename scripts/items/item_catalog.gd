@@ -291,13 +291,13 @@ const ITEM_DEFS: Dictionary = {
 		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(2, 0),
 		"occupies_cell": true,
-		# Walkable breakable object. Monsters can step on it, briefly eat it, and
-		# then continue their previous route.
+		# Walkable turret object. TurretData decides whether monsters can devour it;
+		# otherwise the generic terrain slowdown applies while they cross the cell.
 		"isWall": false,
 		"blocks_movement": false,
 		"blocks_player_movement": false,
 		"blocks_projectiles": false,
-		"speed_multiplier": 0.3,
+		"speed_multiplier": 0.5,
 		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
 		"requires_walkable_floor": true,
 		"pad_skip_preview": true,
@@ -320,7 +320,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_player_movement": false,
 		"blocks_projectiles": false,
-		"speed_multiplier": 0.3,
+		"speed_multiplier": 0.5,
 		"requires_walkable_floor": true,
 		"requires_grass_green_floor": true,
 		"pad_skip_preview": true,

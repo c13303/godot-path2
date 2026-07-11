@@ -33,7 +33,6 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const PLANT_ZONE_MARGIN: int = 2
-const TURRET_ID: String = "turret1"
 # Max walkable path length (in cells) allowed between two plants for them to share
 # a garden, measured through walkable cells so walls split gardens. BFS from a
 # seed plant is bounded by this radius and re-seeded from each plant it absorbs,
@@ -68,9 +67,8 @@ const _SANE_CELL_LIMIT: int = 100000
 # Decorative / passive / walkable placeables (lamps, spawners). Spawner and other
 # special tiles are scanned here. Does NOT block agents or affect flowfields.
 @export var traversable_buildings: TileMapLayer
-# Breakable / obstructing / non-walkable placeables (turret1). These are navigation
-# blockers like walls. Their flow-field topology is applied once when night starts,
-# never while the player is building during the day.
+# Walkable turret/placeable markers. Hard blockers still declare that explicitly in
+# their item definition; speed-only turrets are handled through terrain speed.
 @export var blocking_buildings: TileMapLayer
 # Player-walkable fences. Clients treat them as non-walkable (routing walls); monsters
 # ignore them entirely and are only slowed by their 0.3 speed multiplier. Never block
@@ -2137,12 +2135,16 @@ func _get_building_object_manager() -> BuildingObjectManager:
 	return manager
 
 func _is_turret_cell(cell: Vector2i) -> bool:
+	var building_objects: BuildingObjectManager = _get_building_object_manager()
+	if building_objects != null and building_objects.has_method("get_building"):
+		var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
+		var item_id: String = str(building_data.get("item_id", ""))
+		return ItemCatalog.get_turret_data(item_id) != null
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
 		return false
-	var turret_def: Dictionary = ItemCatalog.get_item_def(TURRET_ID)
-	var raw_atlas: Variant = turret_def.get("atlas", Vector2i(-1, -1))
-	var turret_atlas: Vector2i = raw_atlas as Vector2i
-	return blocking_buildings.get_cell_atlas_coords(cell) == turret_atlas
+	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
+	var fallback_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), atlas)
+	return ItemCatalog.get_turret_data(fallback_item_id) != null
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
