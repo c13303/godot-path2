@@ -256,6 +256,14 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 	var shoot_frequency: float = maxf(0.001, turret_data.shoot_frequency)
 	var building: Dictionary = _building_objects.get_building(cell)
 	var direction: Vector2i = building.get("direction", Vector2i(1, 0)) as Vector2i
+	# Prefer timing derived from the shot animation so the projectile releases when the
+	# last frame begins; fall back to the TurretData fields for turrets with no frames.
+	var release_delay: float = maxf(0.0, turret_data.shot_release_delay)
+	var cycle_duration: float = maxf(0.0, turret_data.shot_cycle_duration)
+	var animation_timing: Dictionary = ItemCatalog.get_turret_shot_animation_timing(item_id)
+	if not animation_timing.is_empty():
+		release_delay = float(animation_timing.get("release_delay", release_delay))
+		cycle_duration = float(animation_timing.get("cycle_duration", cycle_duration))
 	_turrets[cell] = {
 		"item_id": item_id,
 		"data": turret_data,
@@ -268,8 +276,8 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"direction": direction,
 		"directional": turret_data.directional,
 		"straight_line_detection": turret_data.straight_line_detection,
-		"shot_release_delay": maxf(0.0, turret_data.shot_release_delay),
-		"shot_cycle_duration": maxf(0.0, turret_data.shot_cycle_duration),
+		"shot_release_delay": release_delay,
+		"shot_cycle_duration": cycle_duration,
 		"shot_active": false,
 		"shot_time": 0.0,
 		"shot_fired": false,

@@ -336,9 +336,9 @@ const ITEM_DEFS: Dictionary = {
 			"head_frame": 1,
 			"head_offset": Vector2(0.0, -16.0),
 			"shot_frames": [
-				{"frame": 2, "duration": 1.5},
+				{"frame": 2, "duration": 0.2},
 				{"frame": 3, "duration": 0.2},
-				{"frame": 4, "duration": 0.4},
+				{"frame": 4, "duration": 0.2},
 			],
 		},
 		"max_stack": 999,
@@ -380,6 +380,27 @@ static func get_turret_data(item_id: String) -> TurretData:
 	var item_def: Dictionary = get_item_def(item_id)
 	var raw_data: Variant = item_def.get("turret_data", null)
 	return raw_data as TurretData
+
+# Derives turret shot timing from the visual shot_frames so the projectile releases
+# when the last (fire) frame begins, keeping firing in sync with the animation instead
+# of a hardcoded delay. Returns {} when the item has no shot_frames (caller then falls
+# back to the TurretData timing fields).
+static func get_turret_shot_animation_timing(item_id: String) -> Dictionary:
+	var item_def: Dictionary = get_item_def(item_id)
+	var visual_def: Dictionary = item_def.get("turret_sprite_visual", {}) as Dictionary
+	var raw_frames: Variant = visual_def.get("shot_frames", [])
+	if not (raw_frames is Array) or (raw_frames as Array).is_empty():
+		return {}
+	var frames: Array = raw_frames as Array
+	var release_delay: float = 0.0
+	var cycle_duration: float = 0.0
+	for i: int in range(frames.size()):
+		var frame_data: Dictionary = frames[i] as Dictionary
+		var duration: float = maxf(0.0, float(frame_data.get("duration", 0.0)))
+		cycle_duration += duration
+		if i < frames.size() - 1:
+			release_delay += duration
+	return {"release_delay": release_delay, "cycle_duration": cycle_duration}
 
 static func item_places_tile(item_id: String) -> bool:
 	return is_placeable(item_id)
