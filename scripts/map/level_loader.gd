@@ -29,9 +29,9 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const ENEMY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/spawner.png"
 const FRIENDLY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/clientspawner.png"
-const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"wall", &"ronce", &"fence"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"imperial_seed", &"spray", &"beam", &"sword", &"bomb"]
-const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const RESERVOIR_CONTAINER_NAME: String = "reservoirs"
 const RESERVOIR_Z_INDEX: int = 510
 ## Wall tile stamped on wallz under the reservoir base so its cell is non-walkable
@@ -55,10 +55,9 @@ var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_starting_items: Dictionary = {}
 var _loaded_starting_item_toolbuild_hidden: Array[StringName] = []
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"imperial_seed", &"turret1", &"turret_epine", &"wall", &"ronce", &"fence"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"wall", &"ronce", &"fence"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
-	&"turret1": 10,
 	&"turret_epine": 10,
 	&"wall": 100,
 	&"ronce": 1,

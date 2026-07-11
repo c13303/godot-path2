@@ -17,7 +17,7 @@ vframes = 5
 
 [node name="characterAnimation" type="Node" parent="."]
 script = ExtResource("3_anim")
-bounce_height = 1.125
+bounce_height = 0.5625
 bounce_speed = 3.0
 walk_squash = 0.0675
 breathe_amount = 0.025

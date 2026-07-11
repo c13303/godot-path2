@@ -9,7 +9,7 @@ class_name PlaceableNavImpact
 # so atlas coordinates alone do not express navigation behaviour).
 #
 #   NONE            no movement or speed effect (lamp, furniture, reservoir).
-#   SPEED_ONLY      only a per-cell speed_multiplier (turret1, turret_epine, ronce,
+#   SPEED_ONLY      only a per-cell speed_multiplier (turret_epine, ronce,
 #                   debris). Requires a live speed update, never a Flow Field rebuild.
 #   FENCE_DEPENDENT fence: phase-dependent. A hard navigation blocker for clients /
 #                   merchants (day), a speed-only slowdown for monsters (night). See
@@ -32,7 +32,7 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 
 # Speed-only placeables that must never reach the hard-topology invalidation path.
 # Used only by the debug assertion in debug_assert_not_hard().
-const SPEED_ONLY_GUARD_IDS: Array[String] = ["turret1", "turret_epine"]
+const SPEED_ONLY_GUARD_IDS: Array[String] = ["turret_epine"]
 
 
 # Classify from item semantics alone, when the caller has an item def but not a layer
@@ -95,7 +95,7 @@ static func impact_name(impact: Impact) -> String:
 	return "UNKNOWN"
 
 
-# Debug guard: a speed-only placeable (turret1 / turret_epine) must never be classified
+# Debug guard: a speed-only placeable (turret_epine) must never be classified
 # as hard topology. Returns true (and errors) when the invariant is violated.
 static func debug_assert_not_hard(item_id: String, impact: Impact) -> bool:
 	if impact == Impact.HARD_TOPOLOGY and SPEED_ONLY_GUARD_IDS.has(item_id):

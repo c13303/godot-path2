@@ -1,7 +1,6 @@
 extends RefCounted
 class_name ItemCatalog
 
-const TURRET1_DATA: TurretData = preload("res://scripts/combat/turrets/turret1.tres")
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
 const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_epine.png")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
@@ -285,31 +284,6 @@ const ITEM_DEFS: Dictionary = {
 		"inventory_backed": true,
 		"max_stack": 999,
 	},
-	"turret1": {
-		"id": "turret1",
-		"name": "Spitter",
-		"currency": &"gem",
-		"type": "placeable",
-		"category": "turret",
-		"frame": 6,
-		"price": 10,
-		"target_layer": "blocking_buildings",
-		"atlas": Vector2i(2, 0),
-		"occupies_cell": true,
-		# Walkable turret object. TurretData decides whether monsters can devour it;
-		# otherwise the generic terrain slowdown applies while they cross the cell.
-		"isWall": false,
-		"blocks_movement": false,
-		"blocks_player_movement": false,
-		"blocks_projectiles": false,
-		"speed_multiplier": 0.5,
-		# turret1 may only be built on a free, walkable floor tile (not on walls / void).
-		"requires_walkable_floor": true,
-		"pad_skip_preview": true,
-		"runtime_id": "turret1",
-		"turret_data": TURRET1_DATA,
-		"max_stack": 999,
-	},
 	"turret_epine": {
 		"id": "turret_epine",
 		"name": "Epine Turret",
@@ -460,7 +434,7 @@ static func get_gardening_shop_item_ids() -> Array[StringName]:
 		var category: String = str(item_def.get("category", ""))
 		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret1", &"turret_epine"])
+	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine"])
 
 static func get_hammer_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []

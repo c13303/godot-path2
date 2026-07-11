@@ -602,7 +602,7 @@ func _clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> voi
 	_placement_service.clear_other_build_layer(target_layer, cell)
 
 # True only when `cell` is a real floor tile with no blocking wall on it. Used by
-# placeables (e.g. turret1) that may only be built on free walkable ground. This is
+# placeables (e.g. turret_epine) that may only be built on free walkable ground. This is
 # a placement-time guard; it does not affect navigation/flowfields.
 func _is_free_walkable_cell(cell: Vector2i) -> bool:
 	return _placement_service.is_free_walkable_cell(cell)

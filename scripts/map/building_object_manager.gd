@@ -180,7 +180,7 @@ func _blocking_obstacle_id_for_cell(cell: Vector2i) -> int:
 	return _STATIC_OBSTACLE_ID_BASE + gy * _STATIC_OBSTACLE_ID_STRIDE + gx
 
 func _def_blocks_movement(item_def: Dictionary) -> bool:
-	# Only tiles that explicitly block movement (turret1-style) become obstacles.
+	# Only tiles that explicitly block movement (isWall / blocks_movement) become obstacles.
 	if bool(item_def.get("blocks_movement", false)):
 		return true
 	return bool(item_def.get("isWall", false))

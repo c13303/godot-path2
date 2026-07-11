@@ -1014,7 +1014,7 @@ func _definition_for_cell(cell: Vector2i) -> Dictionary:
 	return _building_scan.definition_for_cell(cell)
 
 # Cheap local-obstacle query for later monster local movement / combat. Returns true
-# when `cell` holds a breakable blocking building (e.g. turret1). This is intentionally
+# when `cell` holds a breakable blocking building (e.g. turret_epine). This is intentionally
 # decoupled from walls and flowfields: global pathfinding still routes through these
 # cells; only local agent movement should treat them as soft round blockers. Placement
 # of a blocking building never triggers a wall/FF topology rebuild.

@@ -314,7 +314,7 @@ func is_logical_plant(placeable_def: Dictionary) -> bool:
 
 func requires_grass_green_floor(placeable_def: Dictionary) -> bool:
 	var item_id: String = str(placeable_def.get("id", ""))
-	return item_id == "rose" or item_id == "turret1" or bool(placeable_def.get("requires_grass_green_floor", false))
+	return item_id == "rose" or bool(placeable_def.get("requires_grass_green_floor", false))
 
 
 func is_grass_green_floor_cell(cell: Vector2i) -> bool:

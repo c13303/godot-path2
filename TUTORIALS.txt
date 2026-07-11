@@ -1,0 +1,147 @@
+========================================================================
+ TUTORIALS.txt  —  All in-game tutorial / hint strings + when they appear
+========================================================================
+
+Source of truth:
+  - Logic .............. scripts/misc/tutorial.gd  (the on-screen day hint label)
+  - Alerts ............. buildsystem / fight_system / client_tantrum /
+                         spawner_reveal_cutscene (call tutorial.show_alert)
+  - Strings ............ translations/fr.json + translations/en.json
+
+Format of each line:
+  SUMMARIZED CONDITION  =  "FR"  /  "EN"     [translation key]
+
+Notes:
+  - The hint label shows ONE message at a time, highest priority wins.
+  - "water empty" ALWAYS wins, even at night. Every other hint is hidden
+    while it is night.
+  - The full loop runs: DAY-PREP (plant for tonight) -> hold to pass night
+    -> NIGHT (monsters) -> DAWN -> MORNING harvest + MERCHANT -> CLIENTS
+    -> back to DAY-PREP for the next night.
+
+
+========================================================================
+ GLOBAL / ALWAYS-ON (any phase, top priority)
+========================================================================
+
+water reserve empty
+    = "Rechargez votre eau !" / "Refill your water !"      [tutorial.refill_water]
+    (only hint allowed to stay visible during the NIGHT)
+
+standing on water source, reserve not full (contextual refill nudge, 3s alert)
+    = "rechargez votre eau !" / "refill your water !"       [alert.refill_water]
+
+
+========================================================================
+ BIG BUCKET 1 — "DAY BEFORE" (day-prep phase, before starting the night)
+ Building phase: you plant/water/build so roses grow overnight.
+ Priority order top-to-bottom.
+========================================================================
+
+--- chronological, highest priority first ---
+
+seeds > 0  +  gardening tool NOT equipped
+    = "Equipez la pelle pour planter des roses" / "Buy roses with the GARDENING tool"
+                                                            [tutorial.buy_roses]
+
+seeds > 0  +  gardening tool equipped
+    = "Plantez des roses" / "Plant roses"                   [tutorial.plant_roses]
+
+planted roses still dry (unwatered > 0)
+    = "Arrosez vos roses" / "Water your roses"              [tutorial.water_roses]
+
+no rose_shop_counter placed yet
+    = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
+
+everything done (all watered, nothing to plant/buy) + clients already served
+    = "Passez la nuit" / "Pass the night"                   [tutorial.pass_night]
+    -> turns into the hold-to-confirm prompt below
+
+--- end-of-day HOLD prompt (replaces "pass the night") ---
+
+ready to end day, keyboard
+    = "Maintenir ESPACE pour démarrer la nuit" / "Hold Space to start the night"
+                                                            [tutorial.hold_start_night_space]
+ready to end day, gamepad
+    = "Maintenir X pour démarrer la nuit" / "Hold X to start the night"
+                                                            [tutorial.hold_start_night_pad]
+
+--- contextual BUILD alerts (3s, while placing a building anywhere in day) ---
+
+placing a plant/turret on non-grass tile
+    = "cette plante a besoin d'herbe !" / "This plants needs grass!"
+                                                            [alert.needs_grass]
+placing on a floor you can't build on
+    = "Sol non constructible" / "Non-buildable floor"       [alert.non_buildable_floor]
+
+
+========================================================================
+ NIGHT (monsters attack)  —  most hints hidden, only water-empty shows
+========================================================================
+
+night spawner-reveal cutscene begins (camera pans to devil spawners)
+    = "les diables ont faim !" / "devils are hungry !"      [tutorial.devils_hungry]
+
+
+========================================================================
+ BIG BUCKET 2 — "NIGHT AFTER" (dawn -> the following day)
+ After the night: sun rises, roses grew, you harvest + sell.
+========================================================================
+
+--- DAWN transition (night just ended, new day still growing) ---
+
+sunrise transition, no phase started yet
+    = "Le soleil se lève" / "The sun is rising"             [tutorial.sun_rising]
+
+--- MORNING harvest phase ---
+
+grown-up roses ready + counter has room
+    = "Cueillez vos roses" / "Harvest your roses"           [tutorial.harvest_rose]
+
+grown-up roses ready + counters all full
+    = "Comptoirs remplis ! Ajoutez des comptoirs pour vendre vos roses"
+      / "Add counters to sell your roses"                   [tutorial.add_counters_to_sell_roses]
+
+grown-up roses exist -> can skip harvest straight to clients (HOLD), keyboard
+    = "Maintenir ESPACE pour faire entrer les clients" / "Hold Space to let clients come in"
+                                                            [tutorial.hold_start_clients_space]
+same, gamepad
+    = "Maintenir X pour faire entrer les clients" / "Hold X to let clients come in"
+                                                            [tutorial.hold_start_clients_pad]
+
+--- CLIENT sale phase ---
+
+client reveal cutscene begins (camera pans to client entrances)
+    = "les clients viennent acheter des roses" / "clients are coming to buy roses"
+                                                            [tutorial.clients_coming]
+
+clients are actively buying
+    = "Laissez les clients acheter vos roses" / "client time"   [tutorial.client_time]
+
+rose shortage -> clients turn hostile (PERSISTENT red alert, shows count)
+    = "Pénurie de rose : des clients sont enragés" / "Rose shortage: clients are enraged"
+                                                            [tutorial.tantrum]
+
+--- SEED MERCHANT phase ---
+
+merchant present + you have an unclaimed night reward
+    = "Le marchand a une récompense pour vous" / "Merchent has a reward for you"
+                                                            [tutorial.seed_merchant_reward]
+
+
+========================================================================
+ GAME OVER / END
+========================================================================
+
+game over reached (shown by game_over modal, not the hint label)
+    = "Game Over" / "Game Over"                             [tutorial.game_over]
+
+
+========================================================================
+ DEFINED IN TRANSLATIONS BUT CURRENTLY UNUSED IN CODE
+ (kept for reference; no code path shows them right now)
+========================================================================
+
+    "Le Marchant est là" / "the seed merchent is here"      [tutorial.seed_merchant]
+    "terminez la transaction en cliquant" / "close the transaction by clicking"
+                                                            [tutorial.close_transaction]

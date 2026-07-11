@@ -203,9 +203,9 @@ func _is_parent_paused() -> bool:
 func _apply_preset() -> void:
 	match preset:
 		Preset.PLAYER:
-			bounce_height = 3.0
-			bounce_speed = 4.5
-			walk_squash = 0.09
+			bounce_height = 1.5
+			bounce_speed = 4
+			walk_squash = 0.07
 			breathe_amount = 0.03
 			breathe_speed = 0.8
 			velocity_threshold = 5.0
@@ -216,9 +216,9 @@ func _apply_preset() -> void:
 			speed_scales_with_velocity = true
 			randomize_phase = false
 		Preset.MONSTER:
-			bounce_height = 2.25
+			bounce_height = 1.125
 			bounce_speed = 3.5
-			walk_squash = 0.135
+			walk_squash = 0.07
 			breathe_amount = 0.05
 			breathe_speed = 1.1
 			velocity_threshold = 5.0
