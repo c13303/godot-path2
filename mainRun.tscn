@@ -20,6 +20,7 @@
 [ext_resource type="Script" uid="uid://b1e22fwbyfhns" path="res://scripts/combat/turret_system.gd" id="19_turret"]
 [ext_resource type="Script" uid="uid://y5eghj2cqur0" path="res://scripts/misc/tutorial.gd" id="20_7xko8"]
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
+[ext_resource type="Script" uid="uid://ctxmkiji884l3" path="res://scripts/ui/hold_progress_circle.gd" id="20_hold_circle"]
 [ext_resource type="Script" uid="uid://pvmuyc76wd7k" path="res://scripts/misc/notif.gd" id="21_v8oxv"]
 [ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
@@ -49,7 +50,7 @@
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
-[ext_resource type="Script" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
+[ext_resource type="Script" uid="uid://bmrcp0pth1nt7" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
@@ -900,6 +901,21 @@ offset_bottom = 223.0
 text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
+
+[node name="holdProgressCircle" type="Control" parent="GameUI" unique_id=253945861]
+visible = false
+layout_mode = 3
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -20.0
+offset_top = 247.0
+offset_right = 20.0
+offset_bottom = 287.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("20_hold_circle")
 
 [node name="currenciesUI" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3

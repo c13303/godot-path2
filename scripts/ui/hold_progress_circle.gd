@@ -18,7 +18,6 @@ var progress: float = 0.0:
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	custom_minimum_size = Vector2(radius * 2.0 + stroke_width, radius * 2.0 + stroke_width)
-	size = custom_minimum_size
 
 
 func _draw() -> void:

@@ -39,7 +39,6 @@ const HOLD_ACTION_START_CLIENTS: StringName = &"start_clients"
 const HOLD_ACTION_START_NIGHT: StringName = &"start_night"
 const INPUT_MODE_PAD: String = "pad"
 const HOLD_CONFIRM_SECONDS: float = 1.0
-const HoldProgressCircleScript: Script = preload("res://scripts/ui/hold_progress_circle.gd")
 
 const ALERT_DURATION: float = 3.0
 const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)
@@ -102,12 +101,12 @@ func _resolve_nodes() -> void:
 		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
+		_hold_progress_circle = scene.get_node_or_null("GameUI/holdProgressCircle") as Control
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 			GameState.building_phase_changed.connect(_on_building_phase_changed)
 		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_day_toggle = get_node_or_null("../dayToggle") as Control
-	_ensure_hold_progress_circle()
 
 
 func _process(delta: float) -> void:
@@ -198,6 +197,18 @@ func _refresh(delta: float = 0.0) -> void:
 		_alert_remaining = 0.0
 		_alert_persistent = false
 		modulate = Color.WHITE
+	# While a spawner-reveal cutscene is scrolling the camera the player has no control,
+	# so the contextual hint is hidden. The cutscene shows its own focus alert (handled by
+	# the alert branch above), which is why this check sits after it.
+	if _is_spawner_reveal_cutscene_active():
+		_reset_hold_progress()
+		_displayed_key = ""
+		_pending_key = ""
+		text = ""
+		visible = false
+		modulate = Color.WHITE
+		_set_glow(false)
+		return
 	if _should_request_start_night_prompt():
 		_request_start_night_prompt()
 	var hold_action: StringName = _current_hold_action()
@@ -320,6 +331,18 @@ func _should_request_start_night_prompt() -> bool:
 	return _can_start_night_after_clients()
 
 
+## True while the night or client spawner-reveal cutscene is playing (camera scrolling
+## around the spawners with player input locked).
+func _is_spawner_reveal_cutscene_active() -> bool:
+	if _building_manager == null:
+		return false
+	if _building_manager.has_method("is_night_start_cutscene_active") and bool(_building_manager.call("is_night_start_cutscene_active")):
+		return true
+	if _building_manager.has_method("is_client_reveal_cutscene_active") and bool(_building_manager.call("is_client_reveal_cutscene_active")):
+		return true
+	return false
+
+
 func _can_start_night_after_clients() -> bool:
 	if _building_manager == null or not _building_manager.has_method("can_start_night_after_clients"):
 		return false
@@ -406,15 +429,6 @@ func _is_pad_mode() -> bool:
 		and _player_controller.has_method("get_control_mode")
 		and str(_player_controller.call("get_control_mode")) == INPUT_MODE_PAD
 	)
-
-
-func _ensure_hold_progress_circle() -> void:
-	if _hold_progress_circle != null and is_instance_valid(_hold_progress_circle):
-		return
-	_hold_progress_circle = HoldProgressCircleScript.new() as Control
-	_hold_progress_circle.visible = false
-	_hold_progress_circle.position = Vector2(-26.0, 40.0)
-	add_child(_hold_progress_circle)
 
 
 func _set_hold_progress(value: float) -> void:
