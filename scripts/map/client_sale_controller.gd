@@ -152,6 +152,7 @@ func process(delta: float) -> void:
 		_finish_client_phase_if_empty()
 		return
 	if _manager.is_client_reveal_cutscene_active():
+		_process_client_spawns(delta, _manager.released_client_reveal_spawner_cells(), true)
 		return
 	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
 	var client_counter_agents: Dictionary = _manager.client_counter_agents()
@@ -168,22 +169,7 @@ func process(delta: float) -> void:
 		if _has_clients_without_rose():
 			client_tantrum.begin()
 			return
-	for raw_cell: Variant in _client_sale_spawn_timers.keys():
-		var cell: Vector2i = raw_cell as Vector2i
-		var time_left: float = maxf(0.0, float(_client_sale_spawn_timers[cell]) - delta)
-		_client_sale_spawn_timers[cell] = time_left
-	var spawned_this_frame: bool = false
-	var client_frequency_by_cell: Dictionary = _manager.client_frequency_by_cell()
-	for index: int in range(_client_sale_pending_spawners.size() - 1, -1, -1):
-		var spawner_cell: Vector2i = _client_sale_pending_spawners[index]
-		if float(_client_sale_spawn_timers.get(spawner_cell, 0.0)) > 0.0:
-			continue
-		if _manager.spawn_client_from_spawner(spawner_cell):
-			_client_sale_pending_spawners.remove_at(index)
-			_client_sale_spawn_timers[spawner_cell] = maxf(0.0, float(client_frequency_by_cell.get(spawner_cell, 1.0)))
-			spawned_this_frame = true
-			break
-		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+	var spawned_this_frame: bool = _process_client_spawns(delta)
 	if spawned_this_frame:
 		return
 	if _client_sale_pending_spawners.is_empty() and client_count() == 0 and client_counter_agents.is_empty() and not client_tantrum.has_hostiles():
@@ -197,6 +183,28 @@ func process(delta: float) -> void:
 # never run a client sale at all.
 func _dissolve_counter_piles_after_clients() -> void:
 	_manager.get_counter_stock_manager().dissolve_all_piles()
+
+
+func _process_client_spawns(delta: float, allowed_spawners: Dictionary = {}, restrict_to_allowed: bool = false) -> bool:
+	for raw_cell: Variant in _client_sale_spawn_timers.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		if restrict_to_allowed and not allowed_spawners.has(cell):
+			continue
+		var time_left: float = maxf(0.0, float(_client_sale_spawn_timers[cell]) - delta)
+		_client_sale_spawn_timers[cell] = time_left
+	var client_frequency_by_cell: Dictionary = _manager.client_frequency_by_cell()
+	for index: int in range(_client_sale_pending_spawners.size() - 1, -1, -1):
+		var spawner_cell: Vector2i = _client_sale_pending_spawners[index]
+		if restrict_to_allowed and not allowed_spawners.has(spawner_cell):
+			continue
+		if float(_client_sale_spawn_timers.get(spawner_cell, 0.0)) > 0.0:
+			continue
+		if _manager.spawn_client_from_spawner(spawner_cell):
+			_client_sale_pending_spawners.remove_at(index)
+			_client_sale_spawn_timers[spawner_cell] = maxf(0.0, float(client_frequency_by_cell.get(spawner_cell, 1.0)))
+			return true
+		_client_sale_spawn_timers[spawner_cell] = SpawnPlaylistController.RETRY_DELAY_SECONDS
+	return false
 
 
 func _finish_client_phase_if_empty() -> void:

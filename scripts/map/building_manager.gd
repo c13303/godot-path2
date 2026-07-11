@@ -1569,6 +1569,14 @@ func is_client_reveal_cutscene_active() -> bool:
 	return _spawner_reveal_phase.client_reveal_active()
 
 
+func released_night_reveal_track_indices() -> Dictionary:
+	return _spawner_reveal_phase.released_night_track_indices()
+
+
+func released_client_reveal_spawner_cells() -> Dictionary:
+	return _spawner_reveal_phase.released_client_spawner_cells()
+
+
 func serialize_runtime_agents_for_save() -> Dictionary:
 	return _agent_save_service.serialize_state()
 

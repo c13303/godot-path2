@@ -151,6 +151,8 @@ func process(delta: float, playlist_enabled: bool) -> void:
 	if not _manager._night_preparation_ready:
 		return
 	if _manager.is_night_start_cutscene_active():
+		if playlist_enabled:
+			_process_revealed_playlist_spawners(delta)
 		return
 	var t_mc: int = Time.get_ticks_usec()
 	var mc: int = _manager._monster_count()
@@ -186,6 +188,23 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 	_empty_night_elapsed = 0.0
 	_enqueue_playlist_spawn_requests(delta)
 	_drain_ready_spawner_queue_budgeted()
+
+
+func _process_revealed_playlist_spawners(delta: float) -> void:
+	var released_track_indices: Dictionary = _manager.released_night_reveal_track_indices()
+	if released_track_indices.is_empty():
+		return
+	var t_mc: int = Time.get_ticks_usec()
+	var mc: int = _manager._monster_count()
+	_warn_garden_task_lag_us("_process_spawners.monster_count", Time.get_ticks_usec() - t_mc)
+	_spawn_pass_stats["active_monsters"] = mc
+	var t_np: int = Time.get_ticks_usec()
+	var no_plants: bool = _manager._no_plants_remaining()
+	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
+	if no_plants:
+		return
+	_enqueue_playlist_spawn_requests(delta, released_track_indices, true)
+	_drain_ready_spawner_queue_budgeted(released_track_indices, true)
 
 
 func begin_legacy_fallback_night() -> void:
@@ -300,9 +319,9 @@ func _drain_legacy_spawners_budgeted(delta: float) -> void:
 	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
 
 
-func _enqueue_playlist_spawn_requests(delta: float) -> void:
+func _enqueue_playlist_spawn_requests(delta: float, allowed_track_indices: Dictionary = {}, restrict_to_allowed: bool = false) -> void:
 	var playlist: SpawnPlaylistController = _manager._spawn_playlist_controller
-	var requests: Array[Dictionary] = playlist.advance(delta)
+	var requests: Array[Dictionary] = playlist.advance(delta, allowed_track_indices, restrict_to_allowed)
 	for request: Dictionary in requests:
 		var track_index: int = int(request.get("track_index", -1))
 		if track_index < 0:
@@ -316,12 +335,13 @@ func _enqueue_playlist_spawn_requests(delta: float) -> void:
 # Spawn from at most spawner_budget_per_frame ready playlist requests (and, if a
 # time budget is set, stop early once we exceed it — but always do at least one so
 # the queue drains). Remaining ready spawners are processed on following frames.
-func _drain_ready_spawner_queue_budgeted() -> void:
+func _drain_ready_spawner_queue_budgeted(allowed_track_indices: Dictionary = {}, restrict_to_allowed: bool = false) -> void:
 	var start_us: int = Time.get_ticks_usec()
 	var budget_us: int = int(_manager.spawner_budget_ms * 1000.0)
 	var budget_per_frame: int = _manager.spawner_budget_per_frame
 	var spawners: Dictionary = _manager._spawners
 	var processed: int = 0
+	var blocked_requests: Array[Dictionary] = []
 
 	while not _ready_spawner_queue.is_empty():
 		if processed >= budget_per_frame:
@@ -333,8 +353,12 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 				break
 
 		var request: Dictionary = _ready_spawner_queue.pop_front()
+		var track_index: int = int(request.get("track_index", -1))
+		if restrict_to_allowed and not allowed_track_indices.has(track_index):
+			blocked_requests.append(request)
+			continue
 		var cell: Vector2i = request.get("spawner_cell", INVALID_CELL) as Vector2i
-		_ready_spawner_queue_set.erase(int(request.get("track_index", -1)))
+		_ready_spawner_queue_set.erase(track_index)
 		# A spawner may have been removed (rescan) while queued; skip stale entries
 		# without counting them against the budget.
 		if not spawners.has(cell):
@@ -359,6 +383,8 @@ func _drain_ready_spawner_queue_budgeted() -> void:
 			_warn_garden_task_lag_us("_process_spawners.spawner_total", spawner_elapsed_us,
 				"spawner_cell=%s spawned=%s" % [str(cell), str(spawned)])
 
+	for index: int in range(blocked_requests.size() - 1, -1, -1):
+		_ready_spawner_queue.push_front(blocked_requests[index])
 	_spawn_pass_stats["ready_queue_remaining"] = _ready_spawner_queue.size()
 	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
 

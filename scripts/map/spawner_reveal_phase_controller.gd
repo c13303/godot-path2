@@ -11,6 +11,7 @@ var _manager: BuildingManager
 var _cutscene: SpawnerRevealCutsceneController
 var _night_reveal_active: bool = false
 var _client_reveal_active: bool = false
+var _released_keys_by_context: Dictionary = {}
 
 
 func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) -> void:
@@ -23,6 +24,7 @@ func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) 
 
 
 func begin_night_reveal() -> bool:
+	_clear_released_keys(REVEAL_CONTEXT_NIGHT)
 	var playlist: SpawnPlaylistController = _manager.get_spawn_playlist_controller()
 	var reveal_items: Array[Dictionary] = _night_reveal_items(playlist.get_initial_ready_spawn_requests())
 	_night_reveal_active = not reveal_items.is_empty()
@@ -33,6 +35,7 @@ func begin_night_reveal() -> bool:
 
 
 func begin_client_reveal() -> bool:
+	_clear_released_keys(REVEAL_CONTEXT_CLIENTS)
 	var client_sale: ClientSaleController = _manager.get_client_sale_controller()
 	var reveal_items: Array[Dictionary] = _client_reveal_items(client_sale.get_initial_reveal_spawner_cells())
 	_client_reveal_active = not reveal_items.is_empty()
@@ -46,12 +49,14 @@ func abort_night_reveal() -> void:
 	if _cutscene.is_active_context(REVEAL_CONTEXT_NIGHT):
 		_cutscene.abort()
 	_night_reveal_active = false
+	_clear_released_keys(REVEAL_CONTEXT_NIGHT)
 
 
 func abort_client_reveal() -> void:
 	if _cutscene.is_active_context(REVEAL_CONTEXT_CLIENTS):
 		_cutscene.abort()
 	_client_reveal_active = false
+	_clear_released_keys(REVEAL_CONTEXT_CLIENTS)
 
 
 func night_reveal_active() -> bool:
@@ -62,12 +67,22 @@ func client_reveal_active() -> bool:
 	return _client_reveal_active
 
 
+func released_night_track_indices() -> Dictionary:
+	return _released_keys(REVEAL_CONTEXT_NIGHT)
+
+
+func released_client_spawner_cells() -> Dictionary:
+	return _released_keys(REVEAL_CONTEXT_CLIENTS)
+
+
 func _on_cutscene_reveal_item(context: StringName, _item_index: int, item: Dictionary) -> void:
 	match context:
 		REVEAL_CONTEXT_NIGHT:
-			_spawn_night_reveal_item(item)
+			if _spawn_night_reveal_item(item):
+				_mark_released_key(context, int(item.get("track_index", -1)))
 		REVEAL_CONTEXT_CLIENTS:
-			_spawn_client_reveal_item(item)
+			if _spawn_client_reveal_item(item):
+				_mark_released_key(context, item.get("spawner_cell", INVALID_CELL))
 
 
 func _on_cutscene_completed(context: StringName, release_spawning: bool) -> void:
@@ -76,9 +91,11 @@ func _on_cutscene_completed(context: StringName, release_spawning: bool) -> void
 	match context:
 		REVEAL_CONTEXT_NIGHT:
 			_night_reveal_active = false
+			_clear_released_keys(REVEAL_CONTEXT_NIGHT)
 			_manager.on_night_reveal_finished()
 		REVEAL_CONTEXT_CLIENTS:
 			_client_reveal_active = false
+			_clear_released_keys(REVEAL_CONTEXT_CLIENTS)
 
 
 func _night_reveal_items(requests: Array[Dictionary]) -> Array[Dictionary]:
@@ -128,3 +145,24 @@ func _spawn_client_reveal_item(item: Dictionary) -> bool:
 	if cell == INVALID_CELL:
 		return false
 	return _manager.get_client_sale_controller().spawn_revealed_client_from_spawner(cell)
+
+
+func _mark_released_key(context: StringName, key: Variant) -> void:
+	if key == null:
+		return
+	if key is int and int(key) < 0:
+		return
+	if key is Vector2i and (key as Vector2i) == INVALID_CELL:
+		return
+	var released_keys: Dictionary = _released_keys_by_context.get(context, {}) as Dictionary
+	released_keys[key] = true
+	_released_keys_by_context[context] = released_keys
+
+
+func _released_keys(context: StringName) -> Dictionary:
+	var released_keys: Dictionary = _released_keys_by_context.get(context, {}) as Dictionary
+	return released_keys.duplicate()
+
+
+func _clear_released_keys(context: StringName) -> void:
+	_released_keys_by_context.erase(context)

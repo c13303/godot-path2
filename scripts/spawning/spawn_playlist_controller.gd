@@ -210,7 +210,7 @@ func restore_state(data: Dictionary) -> void:
 		_tracks[track_index] = track
 
 
-func advance(delta: float) -> Array[Dictionary]:
+func advance(delta: float, allowed_track_indices: Dictionary = {}, restrict_to_allowed: bool = false) -> Array[Dictionary]:
 	var requests: Array[Dictionary] = []
 	if _current_night == null:
 		return requests
@@ -218,6 +218,9 @@ func advance(delta: float) -> Array[Dictionary]:
 	# so a wave waiting on the event can react on the same tick it becomes ready.
 	_advance_pending_emits(delta)
 	for track_state: Dictionary in _tracks:
+		var track_index: int = int(track_state.get("track_index", -1))
+		if restrict_to_allowed and not allowed_track_indices.has(track_index):
+			continue
 		_advance_track_past_completed_zero_waves(track_state)
 		if bool(track_state.get("complete", false)) or bool(track_state.get("pending", false)):
 			continue
@@ -237,7 +240,7 @@ func advance(delta: float) -> Array[Dictionary]:
 		var cell: Vector2i = _spawner_bindings_by_id.get(spawner_id, Vector2i.ZERO) as Vector2i
 		track_state["pending"] = true
 		requests.append({
-			"track_index": int(track_state.get("track_index", -1)),
+			"track_index": track_index,
 			"spawner_id": spawner_id,
 			"spawner_cell": cell,
 			"monster_type": wave.monster_type,
