@@ -53,5 +53,9 @@
 	"planificator.tonight": "Tonight : ",
 	"planificator.tomorrow": "Tomorrow : ",
 	"merchant.special_reward": "Special reward",
-	"merchant.free": "free"
+	"merchant.free": "free",
+	"tutorial.hold_start_night_space": "Hold Space to start the night",
+	"tutorial.hold_start_night_pad": "Hold X to start the night",
+	"tutorial.hold_start_clients_space": "Hold Space to let clients come in",
+	"tutorial.hold_start_clients_pad": "Hold X to let clients come in"
 }

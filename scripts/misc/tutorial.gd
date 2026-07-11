@@ -5,14 +5,14 @@ extends RichTextLabel
 ## rose/seed economy and shows the single most relevant next step, translated
 ## through the Translations singleton. Empty water stays visible at night; other
 ## hints are hidden at night. When every planted rose is watered and the player
-## has nothing left to plant or buy, night starts automatically.
+## has nothing left to plant or buy, a hold-to-confirm prompt is shown.
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
 ##   2. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
 ##   3. seeds left, shop tool equipped .............. Plant roses
 ##   4. planted roses still dry ..................... Water your roses
-##   5. all roses watered, nothing left ............. Start night automatically
+##   5. all roses watered, nothing left ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -29,6 +29,17 @@ const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
+const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
+const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
+const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
+const KEY_START_CLIENTS_PAD: String = "tutorial.hold_start_clients_pad"
+
+const HOLD_ACTION_NONE: StringName = &""
+const HOLD_ACTION_START_CLIENTS: StringName = &"start_clients"
+const HOLD_ACTION_START_NIGHT: StringName = &"start_night"
+const INPUT_MODE_PAD: String = "pad"
+const HOLD_CONFIRM_SECONDS: float = 1.0
+const HoldProgressCircleScript: Script = preload("res://scripts/ui/hold_progress_circle.gd")
 
 const ALERT_DURATION: float = 3.0
 const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)
@@ -45,6 +56,10 @@ var _game_ui: Node
 var _building_manager: Node
 var _building_object_manager: Node
 var _day_toggle: Control
+var _player_controller: Node
+var _hold_progress_circle: Control
+var _hold_action: StringName = HOLD_ACTION_NONE
+var _hold_elapsed: float = 0.0
 var _displayed_key: String = ""  # key currently shown ("" while blank)
 var _pending_key: String = ""    # key we are waiting to reveal
 var _pending_remaining: float = 0.0
@@ -84,6 +99,7 @@ func _resolve_nodes() -> void:
 			_plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 		_building_manager = scene.get_node_or_null("Map/BuildingManager")
 		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
+		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
@@ -91,6 +107,7 @@ func _resolve_nodes() -> void:
 		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_day_toggle = get_node_or_null("../dayToggle") as Control
+	_ensure_hold_progress_circle()
 
 
 func _process(delta: float) -> void:
@@ -161,6 +178,7 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	if _alert_key != "":
+		_reset_hold_progress()
 		if _alert_persistent:
 			visible = true
 			text = _alert_text()
@@ -180,12 +198,17 @@ func _refresh(delta: float = 0.0) -> void:
 		_alert_remaining = 0.0
 		_alert_persistent = false
 		modulate = Color.WHITE
-	if _should_start_night_automatically():
-		_start_night_automatically()
+	if _should_request_start_night_prompt():
+		_request_start_night_prompt()
+	var hold_action: StringName = _current_hold_action()
+	if hold_action != HOLD_ACTION_NONE:
+		_show_hold_action(hold_action, delta)
 		return
+	_reset_hold_progress()
 	var key: String = _current_message_key()
 	if key == KEY_PASS_NIGHT and not GameState.is_night:
-		_start_night_automatically()
+		_request_start_night_prompt()
+		_show_hold_action(HOLD_ACTION_START_NIGHT, delta)
 		return
 	if _waiting_for_seed_harvest and GameState.is_client_phase and key != KEY_REFILL_WATER:
 		key = KEY_CLIENT_TIME
@@ -197,11 +220,13 @@ func _refresh(delta: float = 0.0) -> void:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
+		_set_hold_progress_visible(false)
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
+		_set_hold_progress_visible(false)
 		return
 	visible = true
 	modulate = Color.WHITE
@@ -283,13 +308,13 @@ func _alert_text() -> String:
 	return translated
 
 
-func _should_start_night_automatically() -> bool:
+func _should_request_start_night_prompt() -> bool:
 	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase or GameState.is_seed_merchant_phase:
 		return false
 	# During the sunrise transition the new day has not begun yet: no phase flag is set
 	# and the roses are still wet from overnight (they only dry when the build phase
-	# starts). Without this guard the just-ended night would immediately restart, looping
-	# the night forever. Auto-night may only begin once the real day is under way.
+	# starts). Without this guard the just-ended night would immediately request the
+	# start-night prompt. That request may only happen once the real day is under way.
 	if _sun_rising:
 		return false
 	return _can_start_night_after_clients()
@@ -301,18 +326,114 @@ func _can_start_night_after_clients() -> bool:
 	return bool(_building_manager.call("can_start_night_after_clients"))
 
 
-func _start_night_automatically() -> void:
+func _request_start_night_prompt() -> void:
 	_displayed_key = ""
 	_pending_key = ""
 	text = ""
 	visible = false
 	_set_glow(false)
-	# Route through the manager so the final client day wins instead of starting a
-	# night that no longer exists; falls back to a direct start when unavailable.
-	if _building_manager != null and _building_manager.has_method("start_night_after_clients"):
-		_building_manager.call("start_night_after_clients")
+	if _building_manager != null and _building_manager.has_method("request_night_after_clients"):
+		_building_manager.call("request_night_after_clients")
+
+
+func _current_hold_action() -> StringName:
+	if _building_manager == null:
+		return HOLD_ACTION_NONE
+	if _building_manager.has_method("is_client_sale_start_requested") and bool(_building_manager.call("is_client_sale_start_requested")):
+		return HOLD_ACTION_START_CLIENTS
+	if _building_manager.has_method("is_night_start_requested") and bool(_building_manager.call("is_night_start_requested")):
+		if not _can_start_night_after_clients():
+			if _building_manager.has_method("clear_night_start_request"):
+				_building_manager.call("clear_night_start_request")
+			return HOLD_ACTION_NONE
+		return HOLD_ACTION_START_NIGHT
+	return HOLD_ACTION_NONE
+
+
+func _show_hold_action(action: StringName, delta: float) -> void:
+	if action != _hold_action:
+		_hold_action = action
+		_hold_elapsed = 0.0
+	_displayed_key = ""
+	_pending_key = ""
+	_pending_remaining = 0.0
+	visible = true
+	modulate = Color.WHITE
+	text = Translations.t(_hold_translation_key(action))
+	_set_glow(false)
+	_set_hold_progress_visible(true)
+	if _hold_input_pressed():
+		_hold_elapsed = minf(HOLD_CONFIRM_SECONDS, _hold_elapsed + delta)
 	else:
-		GameState.start_night()
+		_hold_elapsed = 0.0
+	_set_hold_progress(_hold_elapsed / HOLD_CONFIRM_SECONDS)
+	if _hold_elapsed < HOLD_CONFIRM_SECONDS:
+		return
+	_trigger_hold_action(action)
+	_reset_hold_progress()
+
+
+func _trigger_hold_action(action: StringName) -> void:
+	if _building_manager == null:
+		return
+	if action == HOLD_ACTION_START_CLIENTS and _building_manager.has_method("begin_client_sale_phase"):
+		_building_manager.call("begin_client_sale_phase")
+	elif action == HOLD_ACTION_START_NIGHT and _building_manager.has_method("try_start_night_after_clients"):
+		_building_manager.call("try_start_night_after_clients")
+
+
+func _hold_translation_key(action: StringName) -> String:
+	var pad_mode: bool = _is_pad_mode()
+	if action == HOLD_ACTION_START_CLIENTS:
+		return KEY_START_CLIENTS_PAD if pad_mode else KEY_START_CLIENTS_SPACE
+	if action == HOLD_ACTION_START_NIGHT:
+		return KEY_START_NIGHT_PAD if pad_mode else KEY_START_NIGHT_SPACE
+	return ""
+
+
+func _hold_input_pressed() -> bool:
+	if _is_pad_mode():
+		for device: int in Input.get_connected_joypads():
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_X):
+				return true
+		return false
+	return Input.is_physical_key_pressed(KEY_SPACE)
+
+
+func _is_pad_mode() -> bool:
+	return (
+		_player_controller != null
+		and _player_controller.has_method("get_control_mode")
+		and str(_player_controller.call("get_control_mode")) == INPUT_MODE_PAD
+	)
+
+
+func _ensure_hold_progress_circle() -> void:
+	if _hold_progress_circle != null and is_instance_valid(_hold_progress_circle):
+		return
+	_hold_progress_circle = HoldProgressCircleScript.new() as Control
+	_hold_progress_circle.visible = false
+	_hold_progress_circle.position = Vector2(-26.0, 40.0)
+	add_child(_hold_progress_circle)
+
+
+func _set_hold_progress(value: float) -> void:
+	if _hold_progress_circle == null:
+		return
+	_hold_progress_circle.set("progress", value)
+
+
+func _set_hold_progress_visible(value: bool) -> void:
+	if _hold_progress_circle == null:
+		return
+	_hold_progress_circle.visible = value
+
+
+func _reset_hold_progress() -> void:
+	_hold_action = HOLD_ACTION_NONE
+	_hold_elapsed = 0.0
+	_set_hold_progress(0.0)
+	_set_hold_progress_visible(false)
 
 
 ## True while the player stands next to the seed merchant, i.e. while its merchant bar is
@@ -354,7 +475,7 @@ func _has_active_night_reward() -> bool:
 	return not reward_info.is_empty()
 
 
-## Pulses the day/night button so the player notices they can end the day.
+## Pulses the day/night icon so the player notices they can end the day.
 func _set_glow(active: bool) -> void:
 	if active == _glow_active:
 		return

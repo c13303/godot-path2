@@ -151,6 +151,8 @@ var _night_preparation_token: int = 0
 var _suppress_next_restored_mode_signal: bool = false
 var _day_start_pending: bool = false
 var _client_preparing: bool = false
+var _client_sale_start_requested: bool = false
+var _night_start_requested: bool = false
 var _garden_topology: Variant = GARDEN_TOPOLOGY_SERVICE_SCRIPT.new()
 # Eat-exit transition counters: monsters finishing eating attach directly to the
 # existing per-exit-wall escape FF (no garden-exit selection, no per-agent A* out).
@@ -327,6 +329,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	_spawn_tick_controller.reset_empty_night()
 	_client_preparing = false
 	if is_night:
+		_client_sale_start_requested = false
+		_night_start_requested = false
 		_spawner_reveal_phase.abort_client_reveal()
 		_day_start_pending = false
 		_sheep_controller.on_game_mode_changed(true)
@@ -1196,13 +1200,30 @@ func reset_client_state_for_morning() -> void:
 func _reset_client_sale_state() -> void:
 	_spawner_reveal_phase.abort_client_reveal()
 	_client_preparing = false
+	_client_sale_start_requested = false
 	_client_tantrum.end()
 	_client_sale.reset()
 	clear_client_counter_agents()
 
 
 func begin_client_sale_phase() -> void:
+	_client_sale_start_requested = false
 	_begin_client_sale_phase()
+
+
+func request_client_sale_start() -> void:
+	if GameState.is_night:
+		return
+	GameState.set_building_phase(true)
+	_client_sale_start_requested = true
+
+
+func is_client_sale_start_requested() -> bool:
+	return _client_sale_start_requested
+
+
+func clear_client_sale_start_request() -> void:
+	_client_sale_start_requested = false
 
 
 func _begin_client_sale_phase() -> void:
@@ -1226,7 +1247,31 @@ func total_run_days() -> int:
 
 
 func start_night_after_clients() -> void:
+	_night_start_requested = false
 	_run_completion.start_night_after_clients()
+
+
+func request_night_after_clients() -> void:
+	if not can_start_night_after_clients():
+		_night_start_requested = false
+		return
+	GameState.set_building_phase(true)
+	_night_start_requested = true
+
+
+func is_night_start_requested() -> bool:
+	return _night_start_requested
+
+
+func clear_night_start_request() -> void:
+	_night_start_requested = false
+
+
+func try_start_night_after_clients() -> void:
+	if can_start_night_after_clients():
+		start_night_after_clients()
+	else:
+		_night_start_requested = false
 
 
 func on_client_sale_skipped() -> void:

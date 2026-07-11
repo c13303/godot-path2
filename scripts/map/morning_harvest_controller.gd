@@ -33,7 +33,7 @@ func begin_phase() -> void:
 	var has_harvestable_imperials: bool = _harvestable_imperial_count() > 0
 	_active = false
 	if not has_grownup_roses and not has_pending_imperial_growth and not has_harvestable_imperials:
-		_manager.begin_client_sale_phase()
+		_manager.request_client_sale_start()
 		return
 	GameState.set_morning_phase(true)
 	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
@@ -43,13 +43,13 @@ func begin_phase() -> void:
 	var harvestable_imperials: int = _harvestable_imperial_count()
 	if _manager.grownup_rose_count() <= 0 and harvestable_imperials <= 0:
 		GameState.set_morning_phase(false)
-		_manager.begin_client_sale_phase()
+		_manager.request_client_sale_start()
 		return
 	_active = true
 	if _manager.grownup_rose_count() > 0 and harvestable_imperials <= 0 and not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
 		_active = false
 		GameState.set_morning_phase(false)
-		_manager.begin_client_sale_phase()
+		_manager.request_client_sale_start()
 		return
 	if _manager.grownup_rose_count() > 0 and not _manager.has_counter_room_for_harvest():
 		_manager.auto_select_hammer()
@@ -81,13 +81,13 @@ func check_finished() -> void:
 				return
 			_active = false
 			GameState.set_morning_phase(false)
-			_manager.begin_client_sale_phase()
+			_manager.request_client_sale_start()
 		return
 	if _harvestable_imperial_count() > 0:
 		return
 	_active = false
 	GameState.set_morning_phase(false)
-	_manager.begin_client_sale_phase()
+	_manager.request_client_sale_start()
 
 
 func _harvest_grownup_rose(plant_manager: Node, rose_cell: Vector2i) -> void:

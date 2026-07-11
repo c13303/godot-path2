@@ -223,7 +223,7 @@ func _complete_client_sale() -> void:
 	if _manager.try_finish_final_day():
 		return
 	if _manager.can_start_night_after_clients():
-		GameState.start_night()
+		_manager.request_night_after_clients()
 		return
 	if not GameState.is_seed_merchant_phase:
 		GameState.set_building_phase(true)

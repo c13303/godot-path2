@@ -87,7 +87,7 @@ func process_phase() -> void:
 	# happens client sale does NOT start the night and the merchant lingers. Re-check
 	# here so finishing the watering afterwards still ends the day.
 	if not GameState.is_night and not GameState.is_morning_phase and _manager.can_start_night_after_clients():
-		_manager.start_night_after_clients()
+		_manager.request_night_after_clients()
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near():
 		GameState.set_seed_merchant_phase(false)

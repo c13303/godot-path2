@@ -901,15 +901,6 @@ text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
 
-[node name="dayButton" type="Button" parent="GameUI/top anchor" unique_id=1539751188]
-visible = false
-layout_mode = 0
-offset_left = -74.0
-offset_top = 155.0
-offset_right = 131.0
-offset_bottom = 208.0
-text = "START THE NIGHT"
-
 [node name="currenciesUI" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
 anchors_preset = 2
