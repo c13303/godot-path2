@@ -129,6 +129,8 @@ func retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
 		if not _entry_path_agents().has(nav_id):
 			continue
 		var entry_data: Dictionary = _entry_path_agents()[nav_id] as Dictionary
+		if entry_data.has("counter_cell") and entry_data.has("counter_access_cell"):
+			continue
 		var garden_id: int = int(entry_data.get("garden_id", 0))
 		if not _garden_target_is_stale(garden_id):
 			continue

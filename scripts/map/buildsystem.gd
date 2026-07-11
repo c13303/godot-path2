@@ -386,19 +386,30 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 	if building_manager != null and building_manager.has_method("register_player_placeable"):
 		building_manager.call("register_player_placeable", cell, item_id, layer_name)
 
-func unregister_player_placeable(cell: Vector2i) -> void:
+func unregister_player_placeable(cell: Vector2i, layer_name: String = "") -> void:
 	var building_manager: Object = _resolve_building_manager()
 	if building_manager != null and building_manager.has_method("unregister_player_placeable"):
-		building_manager.call("unregister_player_placeable", cell)
+		building_manager.call("unregister_player_placeable", cell, layer_name)
 
 # Hostile destruction: identical low-level removal + cleanup as a normal unbuild, but
 # without the currency/inventory refund. Reuses BuildRemovalService.remove_tile (which
 # commit_removal also calls before it refunds), so wall topology, turret runtime,
 # counter-stock clearing, fence autotiling and navigation are updated exactly as a
 # normal removal requires.
-func destroy_placeable_no_refund(cell: Vector2i) -> bool:
+func destroy_placeable_no_refund(cell: Vector2i, layer_name: String = "", target_item_id: String = "") -> bool:
 	if _removal_service == null:
 		return false
+	if layer_name != "":
+		var target_layer: TileMapLayer = _placeable_layer_for_name(layer_name)
+		if target_layer == null or target_layer.get_cell_source_id(cell) < 0:
+			return false
+		var resolved_item_id: String = target_item_id
+		if resolved_item_id == "":
+			resolved_item_id = ItemCatalog.get_placeable_id_for_tile(str(target_layer.name), target_layer.get_cell_atlas_coords(cell))
+		if resolved_item_id == "":
+			return false
+		_removal_service.remove_tile(target_layer, cell, resolved_item_id)
+		return true
 	var removal: Dictionary = _removal_service.removable_at_cell(cell)
 	if removal.is_empty():
 		return false
@@ -408,6 +419,21 @@ func destroy_placeable_no_refund(cell: Vector2i) -> bool:
 		return false
 	_removal_service.remove_tile(layer, cell, item_id)
 	return true
+
+
+func _placeable_layer_for_name(layer_name: String) -> TileMapLayer:
+	match layer_name:
+		"wallz":
+			return wallz
+		"plantz":
+			return plantz
+		"traversable_buildings", "buildings":
+			return traversable_buildings
+		"blocking_buildings":
+			return blocking_buildings
+		"fences":
+			return fences
+	return null
 
 func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:

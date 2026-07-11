@@ -1975,8 +1975,11 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 	_durability.register_player_placeable(cell, item_id, layer_name)
 
 
-func unregister_player_placeable(cell: Vector2i) -> void:
-	_durability.unregister_player_placeable(cell)
+func unregister_player_placeable(cell: Vector2i, layer_name: String = "") -> void:
+	if layer_name == "":
+		_durability.unregister_player_placeable(cell)
+		return
+	_durability.unregister_player_placeable_at(cell, layer_name)
 
 
 func serialize_player_placeable_durability() -> Array[Dictionary]:
@@ -1989,8 +1992,7 @@ func restore_player_placeable_durability(saved: Array) -> void:
 
 func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:
 	if _counter_stock(counter_cell) <= 0:
-		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-		_retarget_agent_or_escape(agent, spawner_cell)
+		_agent_navigation_phases.handle_empty_counter_arrival(agent)
 		return
 	# Index of the pile rose about to be popped (top == stock - 1); the flying rose
 	# launches from exactly that pile position before the stock decrement rebuilds it.

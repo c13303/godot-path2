@@ -30,8 +30,10 @@ var _build_system: Node = null
 #   { "key": String, "cell": Vector2i, "item_id": String, "layer_name": String,
 #     "health": int, "max_health": int, "instant_destroy": bool }
 var _targets_by_key: Dictionary = {}
-# cell(Vector2i) -> key(String), so removal/lookup by cell is O(1).
-var _key_by_cell: Dictionary = {}
+# cell(Vector2i) -> Dictionary[key(String) -> true]. Multiple target layers may
+# legally share one cell (for example a plant-layer target and a structure), so
+# provenance removal must be keyed by layer + cell when the caller knows the layer.
+var _keys_by_cell: Dictionary = {}
 # Bumped on any registration/health/destruction change so idle hostiles can retry
 # target selection when the world changed instead of scanning every frame.
 var _revision: int = 0
@@ -51,7 +53,7 @@ func revision() -> int:
 
 func clear() -> void:
 	_targets_by_key.clear()
-	_key_by_cell.clear()
+	_keys_by_cell.clear()
 	_bump_and_redraw()
 
 
@@ -62,11 +64,12 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 	if item_id == "" or not ItemCatalog.is_destructible_placeable(item_id):
 		return
 	var normalized_layer: String = _normalize_layer_name(layer_name)
-	# Overbuild replaces any prior provenance at this cell.
-	_erase_record_at_cell(cell)
+	var key: String = _make_key(normalized_layer, cell)
+	# Overbuild replaces prior provenance for the same layer/cell, but does not
+	# discard another layer's target that happens to share the same map cell.
+	_erase_record_by_key(key)
 	var instant_destroy: bool = ItemCatalog.is_instant_destroy_placeable(item_id)
 	var max_health: int = 1 if instant_destroy else maxi(1, ItemCatalog.get_max_health(item_id))
-	var key: String = _make_key(normalized_layer, cell)
 	_targets_by_key[key] = {
 		"key": key,
 		"cell": cell,
@@ -76,17 +79,24 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 		"max_health": max_health,
 		"instant_destroy": instant_destroy,
 	}
-	_key_by_cell[cell] = key
+	_add_cell_key(cell, key)
 	_bump_and_redraw()
 
 
 func unregister_player_placeable(cell: Vector2i) -> void:
-	if _erase_record_at_cell(cell):
+	if _erase_records_at_cell(cell):
+		_bump_and_redraw()
+
+
+func unregister_player_placeable_at(cell: Vector2i, layer_name: String) -> void:
+	var key: String = _make_key(_normalize_layer_name(layer_name), cell)
+	if _targets_by_key.has(key):
+		_erase_record_by_key(key)
 		_bump_and_redraw()
 
 
 func is_player_built_cell(cell: Vector2i) -> bool:
-	return _key_by_cell.has(cell)
+	return _keys_by_cell.has(cell) and not (_keys_by_cell[cell] as Dictionary).is_empty()
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +209,7 @@ func destroy_target(key: String) -> void:
 			# Authoritative reservoir-destroyed game-state path; the existing
 			# game-over UI polls GameState.is_reservoir_destroyed.
 			GameState.set_reservoir_destroyed(true)
-		_destroy_structure_cell(cell)
+		_destroy_structure_cell(cell, str(rec.get("layer_name", "")), item_id)
 	_bump_and_redraw()
 
 
@@ -214,10 +224,10 @@ func _destroy_plant_cell(cell: Vector2i) -> void:
 		plant_manager.call("remove_plant", cell, true)
 
 
-func _destroy_structure_cell(cell: Vector2i) -> void:
+func _destroy_structure_cell(cell: Vector2i, layer_name: String, item_id: String) -> void:
 	var build_system: Node = _resolve_build_system()
 	if build_system != null and build_system.has_method("destroy_placeable_no_refund"):
-		build_system.call("destroy_placeable_no_refund", cell)
+		build_system.call("destroy_placeable_no_refund", cell, layer_name, item_id)
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +254,7 @@ func serialize() -> Array[Dictionary]:
 
 func restore(saved: Array) -> void:
 	_targets_by_key.clear()
-	_key_by_cell.clear()
+	_keys_by_cell.clear()
 	var ignored: int = 0
 	for raw_entry: Variant in saved:
 		if not (raw_entry is Dictionary):
@@ -275,7 +285,7 @@ func restore(saved: Array) -> void:
 			"max_health": max_health,
 			"instant_destroy": instant_destroy,
 		}
-		_key_by_cell[cell] = key
+		_add_cell_key(cell, key)
 	if ignored > 0:
 		push_warning("PlayerPlaceableDurabilityService: ignored %d stale/invalid durability records on load." % ignored)
 	_bump_and_redraw()
@@ -290,12 +300,19 @@ func _bump_and_redraw() -> void:
 		_overlay.call("refresh")
 
 
-func _erase_record_at_cell(cell: Vector2i) -> bool:
-	if not _key_by_cell.has(cell):
+func _add_cell_key(cell: Vector2i, key: String) -> void:
+	var keys: Dictionary = _keys_by_cell.get(cell, {}) as Dictionary
+	keys[key] = true
+	_keys_by_cell[cell] = keys
+
+
+func _erase_records_at_cell(cell: Vector2i) -> bool:
+	if not _keys_by_cell.has(cell):
 		return false
-	var key: String = str(_key_by_cell[cell])
-	_key_by_cell.erase(cell)
-	_targets_by_key.erase(key)
+	var keys: Dictionary = _keys_by_cell[cell] as Dictionary
+	for raw_key: Variant in keys.keys():
+		_targets_by_key.erase(str(raw_key))
+	_keys_by_cell.erase(cell)
 	return true
 
 
@@ -305,8 +322,13 @@ func _erase_record_by_key(key: String) -> void:
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	_targets_by_key.erase(key)
-	if _key_by_cell.get(cell, "") == key:
-		_key_by_cell.erase(cell)
+	if _keys_by_cell.has(cell):
+		var keys: Dictionary = _keys_by_cell[cell] as Dictionary
+		keys.erase(key)
+		if keys.is_empty():
+			_keys_by_cell.erase(cell)
+		else:
+			_keys_by_cell[cell] = keys
 
 
 func _make_key(layer_name: String, cell: Vector2i) -> String:
