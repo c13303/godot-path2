@@ -75,12 +75,12 @@ const CLIENT_FRAME_TANTRUM_SOUTH: int = 4
 const CLIENT_FRAME_TANTRUM_EAST: int = 5
 const CLIENT_FRAME_TANTRUM_NORTH: int = 6
 const CLIENT_FRAME_LAYOUT_DIRECTIONAL_7_HORIZONTAL: StringName = &"client_directional_7_horizontal"
-const CLIENT_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
-const CLIENT_ROSE_TEXTURE_FRAME_COUNT: int = 3
-const CLIENT_ROSE_TEXTURE_FRAME: int = 0
-const CLIENT_ROSE_SCALE: Vector2 = Vector2(0.56, 0.56)
-const CLIENT_ROSE_Z_ABOVE: int = 1
-const CLIENT_ROSE_Z_BELOW: int = -1
+const HELD_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
+const HELD_ROSE_TEXTURE_FRAME_COUNT: int = 3
+const HELD_ROSE_TEXTURE_FRAME: int = 0
+const HELD_ROSE_SCALE: Vector2 = Vector2(0.56, 0.56)
+const HELD_ROSE_Z_ABOVE: int = 1
+const HELD_ROSE_Z_BELOW: int = -1
 const FACING_CHANGE_MIN_SECONDS: float = 0.14
 const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
@@ -90,7 +90,7 @@ const MONSTER_FRAME_EATING: int = 1
 const MONSTER_FRAME_DROWNING: int = 3
 const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
-var _client_rose_sprite: Sprite2D
+var _held_rose_sprite: Sprite2D
 var _facing_frame: int = MONSTER_FRAME_SOUTH
 var _facing_west: bool = false
 var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
@@ -115,7 +115,7 @@ func _process(delta: float) -> void:
 	_process_eating_status(delta)
 	_update_directional_facing(delta)
 	_update_monster_frame()
-	_update_client_rose_pin()
+	_update_held_rose_pin()
 	_last_facing_position = global_position
 
 func take_damage(amount: int) -> bool:
@@ -251,37 +251,47 @@ func _directional_client_tantrum_frame() -> int:
 	return CLIENT_FRAME_TANTRUM_SOUTH
 
 
-func _update_client_rose_pin() -> void:
-	var rose_visible: bool = _is_client_agent() and bool(get_meta("client_rose_visible", false))
+func _update_held_rose_pin() -> void:
+	var rose_visible: bool = (
+		(_is_client_agent() and bool(get_meta("client_rose_visible", false)))
+		or (_is_monster_agent() and bool(get_meta("monster_rose_visible", false)))
+	)
 	if not rose_visible:
-		if is_instance_valid(_client_rose_sprite):
-			_client_rose_sprite.visible = false
+		if is_instance_valid(_held_rose_sprite):
+			_held_rose_sprite.visible = false
 		return
-	var rose_sprite: Sprite2D = _ensure_client_rose_sprite()
+	var rose_sprite: Sprite2D = _ensure_held_rose_sprite()
 	if rose_sprite == null or not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
 		return
 	rose_sprite.visible = true
-	rose_sprite.position = _client_rose_pin_position()
-	rose_sprite.z_index = CLIENT_ROSE_Z_BELOW if _facing_frame == MONSTER_FRAME_NORTH else CLIENT_ROSE_Z_ABOVE
+	rose_sprite.frame = _held_rose_frame()
+	rose_sprite.position = _held_rose_pin_position()
+	rose_sprite.z_index = HELD_ROSE_Z_BELOW if _facing_frame == MONSTER_FRAME_NORTH else HELD_ROSE_Z_ABOVE
 
 
-func _ensure_client_rose_sprite() -> Sprite2D:
-	if is_instance_valid(_client_rose_sprite):
-		return _client_rose_sprite
+func _held_rose_frame() -> int:
+	if _is_monster_agent() and has_meta("monster_rose_frame"):
+		return clampi(int(get_meta("monster_rose_frame")), 0, HELD_ROSE_TEXTURE_FRAME_COUNT - 1)
+	return HELD_ROSE_TEXTURE_FRAME
+
+
+func _ensure_held_rose_sprite() -> Sprite2D:
+	if is_instance_valid(_held_rose_sprite):
+		return _held_rose_sprite
 	var sprite: Sprite2D = Sprite2D.new()
-	sprite.name = "ClientRoseSprite2D"
-	sprite.texture = CLIENT_ROSE_TEXTURE
-	sprite.hframes = CLIENT_ROSE_TEXTURE_FRAME_COUNT
-	sprite.frame = CLIENT_ROSE_TEXTURE_FRAME
+	sprite.name = "HeldRoseSprite2D"
+	sprite.texture = HELD_ROSE_TEXTURE
+	sprite.hframes = HELD_ROSE_TEXTURE_FRAME_COUNT
+	sprite.frame = HELD_ROSE_TEXTURE_FRAME
 	sprite.centered = true
-	sprite.scale = CLIENT_ROSE_SCALE
+	sprite.scale = HELD_ROSE_SCALE
 	sprite.visible = false
 	add_child(sprite)
-	_client_rose_sprite = sprite
-	return _client_rose_sprite
+	_held_rose_sprite = sprite
+	return _held_rose_sprite
 
 
-func _client_rose_pin_position() -> Vector2:
+func _held_rose_pin_position() -> Vector2:
 	var frame_width: float = float(_monster_sprite.texture.get_width()) / float(maxi(1, _monster_sprite.hframes))
 	var frame_height: float = float(_monster_sprite.texture.get_height()) / float(maxi(1, _monster_sprite.vframes))
 	var half_width: float = frame_width * absf(_monster_sprite.scale.x) * 0.5
@@ -329,11 +339,13 @@ func stop_eating() -> void:
 	if status == "eating":
 		status = ""
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_NONE)
 
 func start_drowning(seconds: float) -> void:
 	status = "drowning"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_DROWNING, ceil(maxf(seconds, 0.0)))
 
 func stop_drowning() -> void:
@@ -344,6 +356,7 @@ func stop_drowning() -> void:
 func start_flow_in() -> void:
 	status = "flow_in"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_FLOW_IN)
 
 func stop_flow_in() -> void:
@@ -354,6 +367,7 @@ func stop_flow_in() -> void:
 func start_escape() -> void:
 	status = "flow_out"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_FLOW_OUT)
 
 func stop_escape() -> void:
@@ -364,6 +378,7 @@ func stop_escape() -> void:
 func start_astar_in() -> void:
 	status = "astar_in"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_ASTAR_IN)
 
 func stop_astar_in() -> void:
@@ -378,6 +393,7 @@ func stop_astar_in() -> void:
 func start_waiting_new_status() -> void:
 	status = "waiting_new_status"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_WAITING_NEW_STATUS)
 
 func stop_waiting_new_status() -> void:
@@ -388,7 +404,15 @@ func stop_waiting_new_status() -> void:
 func start_angry() -> void:
 	status = "angry"
 	_eating_timer = 0.0
+	_clear_monster_held_rose()
 	_set_phase(PHASE_FLOW_IN)
+
+
+func _clear_monster_held_rose() -> void:
+	if has_meta("monster_rose_visible"):
+		set_meta("monster_rose_visible", false)
+	if has_meta("monster_rose_frame"):
+		remove_meta("monster_rose_frame")
 
 func _process_eating_status(delta: float) -> void:
 	if status != "eating" or _eating_timer <= 0.0:

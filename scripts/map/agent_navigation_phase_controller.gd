@@ -8,6 +8,9 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EATING_COOLDOWN: float = 5.0
 const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
+const HELD_ROSE_DEFAULT_FRAME: int = 0
+const HELD_ROSE_WET_FRAME: int = 1
+const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
 var _manager: BuildingManager
@@ -434,14 +437,17 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 	var roses_eaten: int = int(agent.get_meta("roses_eaten")) if agent.has_meta("roses_eaten") else 0
 	roses_eaten += 1
 	agent.set_meta("roses_eaten", roses_eaten)
+	var held_rose_frame: int = _held_rose_frame_for_cell(plant_cell)
 	_eating_agents[nav_id] = {
 		"node": agent,
 		"timer": seconds,
 		"garden_id": garden_id,
 		"spawner_cell": spawner_cell,
 		"plant_cell": plant_cell,
-		"roses_eaten": roses_eaten
+		"roses_eaten": roses_eaten,
+		"held_rose_frame": held_rose_frame,
 	}
+	_show_monster_held_rose(agent, seconds, held_rose_frame)
 	_manager.detach_agent_flow(nav_id)
 	_manager.detach_agent_path(nav_id)
 	_entry_path_agents.erase(nav_id)
@@ -450,11 +456,12 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 		agent.call("start_eating", seconds)
 
 
-func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector2i, roses_eaten: int) -> void:
+func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector2i, roses_eaten: int, held_rose_frame: int = HELD_ROSE_DEFAULT_FRAME) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	var garden_id: int = int(agent.get_meta("garden_id")) if agent.has_meta("garden_id") else 0
 	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
 	var restored_roses_eaten: int = maxi(0, roses_eaten)
+	var restored_held_rose_frame: int = maxi(HELD_ROSE_DEFAULT_FRAME, held_rose_frame)
 	agent.set_meta("roses_eaten", restored_roses_eaten)
 	_eating_agents[nav_id] = {
 		"node": agent,
@@ -463,7 +470,9 @@ func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector
 		"spawner_cell": spawner_cell,
 		"plant_cell": plant_cell,
 		"roses_eaten": restored_roses_eaten,
+		"held_rose_frame": restored_held_rose_frame,
 	}
+	_show_monster_held_rose(agent, seconds_left, restored_held_rose_frame)
 	_manager.detach_agent_flow(nav_id)
 	_manager.detach_agent_path(nav_id)
 	_entry_path_agents.erase(nav_id)
@@ -471,6 +480,23 @@ func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector
 	_escaping_agents.erase(nav_id)
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", maxf(0.0, seconds_left))
+
+
+func _show_monster_held_rose(agent: Node2D, seconds: float, held_rose_frame: int) -> void:
+	if _agent_kind(agent) != SPAWNER_KIND_MONSTER or seconds <= 0.0:
+		return
+	agent.set_meta("monster_rose_frame", held_rose_frame)
+	agent.set_meta("monster_rose_visible", true)
+
+
+func _held_rose_frame_for_cell(cell: Vector2i) -> int:
+	var plantz: TileMapLayer = _plantz()
+	if plantz == null or cell == INVALID_CELL or plantz.get_cell_source_id(cell) < 0:
+		return HELD_ROSE_DEFAULT_FRAME
+	var atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
+	if atlas_coords == PlantManager.ROSE_WET_ATLAS:
+		return HELD_ROSE_WET_FRAME
+	return HELD_ROSE_DEFAULT_FRAME
 
 
 func assign_agent_to_escape(agent: Node2D) -> bool:

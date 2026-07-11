@@ -207,6 +207,7 @@ func _serialize_agent_phase(nav_id: int) -> Dictionary:
 			"timer": float(eating.get("timer", 0.0)),
 			"plant_cell": _cell_to_dict(eating.get("plant_cell", INVALID_CELL) as Vector2i),
 			"roses_eaten": int(eating.get("roses_eaten", 0)),
+			"held_rose_frame": int(eating.get("held_rose_frame", 0)),
 		}
 	if _manager._escaping_agents.has(nav_id):
 		var escaping: Dictionary = _manager._escaping_agents[nav_id] as Dictionary
@@ -340,7 +341,8 @@ func _restore_agent_navigation(agent: Node2D, data: Dictionary) -> void:
 				agent,
 				float(phase.get("timer", 0.0)),
 				_cell_from_dict(phase.get("plant_cell", {})),
-				int(phase.get("roses_eaten", agent.get_meta("roses_eaten") if agent.has_meta("roses_eaten") else 0))
+				int(phase.get("roses_eaten", agent.get_meta("roses_eaten") if agent.has_meta("roses_eaten") else 0)),
+				int(phase.get("held_rose_frame", 0))
 			)
 		"escape":
 			if not _manager._assign_agent_to_escape(agent) and agent.has_method("start_waiting_new_status"):
