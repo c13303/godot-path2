@@ -32,17 +32,20 @@ var _buckets: Dictionary = {}
 var _hidden_visual_cells: Dictionary = {}
 var _initialized: bool = false
 var _plant_layer_flush_queued: bool = false
+var _last_build_phase_rose_dry_day: int = -1
 
 func _ready() -> void:
 	initialize_from_layer()
 	_connect_day_started()
 	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 		GameState.building_phase_changed.connect(_on_building_phase_changed)
+	if GameState.is_building_phase:
+		_last_build_phase_rose_dry_day = _current_day_number()
 
 func _on_building_phase_changed(is_building_phase: bool) -> void:
 	# A fresh build phase resets roses; imperial plants dry during morning growth.
 	if is_building_phase:
-		dry_all_roses()
+		_dry_roses_once_for_build_phase()
 
 func _connect_day_started() -> void:
 	var scene: Node = get_tree().current_scene
@@ -84,6 +87,25 @@ func _get_progression_node() -> Node:
 	if scene == null:
 		return null
 	return scene.get_node_or_null("progression")
+
+func _current_day_number() -> int:
+	var progression_node: Node = _get_progression_node()
+	if progression_node == null or not progression_node.has_method("get_value"):
+		return -1
+	return int(progression_node.call("get_value", &"nDays"))
+
+func _dry_roses_once_for_build_phase() -> void:
+	var current_day: int = _current_day_number()
+	if current_day >= 0:
+		if _last_build_phase_rose_dry_day == current_day:
+			return
+		_last_build_phase_rose_dry_day = current_day
+	dry_all_roses()
+
+func mark_build_phase_rose_dry_handled_for_current_day() -> void:
+	var current_day: int = _current_day_number()
+	if current_day >= 0:
+		_last_build_phase_rose_dry_day = current_day
 
 func initialize_from_layer() -> void:
 	_plants.clear()

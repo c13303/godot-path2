@@ -932,6 +932,10 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = false) -> void:
 	if phase == "":
 		return
+	if phase == "building":
+		var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
+		if plant_manager != null and plant_manager.has_method("mark_build_phase_rose_dry_handled_for_current_day"):
+			plant_manager.call("mark_build_phase_rose_dry_handled_for_current_day")
 	GameState.restore_day_phase_flags(phase)
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if has_runtime_agents and (phase == "night" or phase == "client"):
