@@ -27,11 +27,11 @@ const STAGE_ATTACKING: StringName = &"attacking"
 
 const TANTRUM_CLIENT_HEALTH: int = 100
 const ATTACK_INTERVAL_SECONDS: float = 3.0
-const ATTACK_DAMAGE: int = 1
+const ATTACK_DAMAGE: int = 5
 const ATTACK_RANGE_TILES: float = 1.5
 const ATTACK_LUNGE_SECONDS: float = 0.09
-const ATTACK_RETURN_SECONDS: float = 0.12
-const LUNGE_PIXELS: float = 10.0
+const ATTACK_RETURN_SECONDS: float = 0.22
+const ATTACK_OVERLAP_PIXELS: float = 8.0
 
 const NEIGHBOR_OFFSETS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
@@ -340,7 +340,10 @@ func _start_attack(nav_id: int, client: Node2D, key: String) -> void:
 	var direction: Vector2 = target_world - client.global_position
 	var lunge_offset: Vector2 = base_offset
 	if direction.length_squared() > 0.0001:
-		lunge_offset = base_offset + direction.normalized() * LUNGE_PIXELS
+		var tile_size: Vector2 = _manager.tile_size()
+		var stop_short_distance: float = maxf(tile_size.x, tile_size.y) * 0.5
+		var lunge_distance: float = maxf(0.0, direction.length() - stop_short_distance + ATTACK_OVERLAP_PIXELS)
+		lunge_offset = base_offset + direction.normalized() * lunge_distance
 	# Visual only: native steering owns the body position (which is hard-paused).
 	var tween: Tween = _manager.create_tween()
 	data["attack_tween"] = tween
