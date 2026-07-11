@@ -33,7 +33,7 @@ var _time: float = 0.0
 
 
 func _ready() -> void:
-	if not _resolve_dependencies():
+	if 	not _resolve_dependencies():
 		call_deferred("_finish_ready")
 		return
 	_finish_ready()
