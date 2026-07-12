@@ -31,6 +31,7 @@ func _ready() -> void:
 		ff.call("set_navigation_blocking_layer", water_layer)
 	elif ff.has_method("set_water_layer"):
 		ff.call("set_water_layer", water_layer)
+	_apply_authored_map_bounds()
 	loading_progress.emit(0.15, "Reading map layers")
 
 	#print("floor_layer:", floor_layer)
@@ -50,6 +51,22 @@ func _ready() -> void:
 	loading_progress.emit(0.45, "Flow field ready")
 	flow_field_ready.emit()
 	CppDebugOptions.dlog("FlowFieldCode: initialization complete--------------------------------")
+
+
+# The authored map extent (mapBounds) defines the native field's size/origin, replacing
+# the floor layer's used-rect. Must run before compute_distance_field_global(). Guarded so
+# levels without a mapBounds node, or older DLLs without set_map_bounds, keep the previous
+# floor-derived extent.
+func _apply_authored_map_bounds() -> void:
+	if not ff.has_method("set_map_bounds"):
+		return
+	var loader: Node = get_tree().current_scene.get_node_or_null("LevelLoader") if get_tree().current_scene else null
+	if loader == null or not loader.has_method("get_loaded_map_bounds_cells"):
+		return
+	var bounds: Rect2i = loader.call("get_loaded_map_bounds_cells")
+	if bounds.size.x <= 0 or bounds.size.y <= 0:
+		return
+	ff.set_map_bounds(bounds)
 
 
 func _on_mouse_goal(world_pos: Vector2) -> void:

@@ -48,6 +48,12 @@ const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_ru
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []
+# Authored map extent, captured from the level's mapBounds node before the shell is
+# freed. Cells drive the native flow field's size/origin; world drives the camera
+# scroll limits. Empty (zero size) when the level has no mapBounds node, in which case
+# native falls back to the floor used-rect and the camera stays unclamped.
+var _loaded_map_bounds_cells: Rect2i = Rect2i()
+var _loaded_map_bounds_world: Rect2 = Rect2()
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
@@ -97,6 +103,7 @@ func _load_level() -> void:
 	var level_root: Node = scene_to_load.instantiate()
 	_capture_level_spawn_config(level_root, scene_to_load.resource_path)
 	_capture_level_spawner_bindings(level_root)
+	_capture_level_map_bounds(level_root)
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
 		if layer == null:
@@ -153,6 +160,18 @@ func get_loaded_spawner_bindings() -> Array[SpawnerBinding]:
 	for binding: SpawnerBinding in _loaded_spawner_bindings:
 		bindings.append(binding)
 	return bindings
+
+
+## Authored map extent in tilemap cells (position = min cell, size = cell count).
+## Zero size when the level has no mapBounds node.
+func get_loaded_map_bounds_cells() -> Rect2i:
+	return _loaded_map_bounds_cells
+
+
+## Authored map extent in world coordinates. Zero size when the level has no
+## mapBounds node.
+func get_loaded_map_bounds_world() -> Rect2:
+	return _loaded_map_bounds_world
 
 
 func get_loaded_starting_seeds() -> int:
@@ -260,6 +279,8 @@ func _resolve_level_scene() -> PackedScene:
 func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> void:
 	_loaded_spawn_playlist = null
 	_loaded_spawner_bindings.clear()
+	_loaded_map_bounds_cells = Rect2i()
+	_loaded_map_bounds_world = Rect2()
 	_loaded_starting_seeds = 20
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
@@ -490,6 +511,45 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		if kind == SPAWNER_KIND_CLIENT:
 			binding.frequency_client = maxf(0.0, float(spawner_node.get_meta(CLIENT_FREQUENCY_META, 1.0)))
 		_loaded_spawner_bindings.append(binding)
+
+
+# Reads the level's mapBounds rectangle (a CollisionShape2D + RectangleShape2D used
+# purely as an editor-draggable region) into world + cell extents, then the shell node
+# itself is discarded with the rest of level_root. Runs before the layers are reparented
+# so the level's own floor layer resolves the cell coordinates the native field uses.
+func _capture_level_map_bounds(level_root: Node) -> void:
+	var bounds_node: Node = level_root.get_node_or_null("mapBounds")
+	if bounds_node == null:
+		return
+	var shape_node: CollisionShape2D = bounds_node.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if shape_node == null:
+		push_warning("LevelLoader: level '%s' mapBounds has no CollisionShape2D; map extent not captured." % _level_path_for_log())
+		return
+	var rect_shape: RectangleShape2D = shape_node.shape as RectangleShape2D
+	if rect_shape == null:
+		push_warning("LevelLoader: level '%s' mapBounds shape is not a RectangleShape2D; map extent not captured." % _level_path_for_log())
+		return
+
+	var center: Vector2 = shape_node.global_position
+	var half: Vector2 = rect_shape.size * 0.5
+	var top_left: Vector2 = center - half
+	var bottom_right: Vector2 = center + half
+	_loaded_map_bounds_world = Rect2(top_left, rect_shape.size)
+
+	var floor_layer: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
+	if floor_layer == null:
+		push_warning("LevelLoader: level '%s' has no floor layer; map extent cells not derived." % _level_path_for_log())
+		return
+
+	var min_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(top_left))
+	# Nudge the far corner inward by a pixel so an edge sitting exactly on a cell seam
+	# does not pull in an extra row/column the rectangle only touches at its boundary.
+	var max_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(bottom_right - Vector2(1.0, 1.0)))
+	var size_cells: Vector2i = (max_cell - min_cell) + Vector2i.ONE
+	if size_cells.x <= 0 or size_cells.y <= 0:
+		push_warning("LevelLoader: level '%s' mapBounds produced a non-positive cell extent." % _level_path_for_log())
+		return
+	_loaded_map_bounds_cells = Rect2i(min_cell, size_cells)
 
 
 func _spawner_kind_from_node(spawner_node: Node2D) -> StringName:

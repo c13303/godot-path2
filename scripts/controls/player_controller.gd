@@ -447,6 +447,19 @@ func _setup_player() -> void:
 
 	if player:
 		camera_controller.set_follow_target(player, true)
+	_apply_camera_map_bounds()
+
+## Clamp the camera to the level's authored map bounds (mapBounds). No-op when the level
+## has no mapBounds node or the loader is unavailable.
+func _apply_camera_map_bounds() -> void:
+	if camera_controller == null or not camera_controller.has_method("set_world_bounds"):
+		return
+	var scene: Node = get_tree().current_scene
+	var loader: Node = scene.get_node_or_null("LevelLoader") if scene else null
+	if loader == null or not loader.has_method("get_loaded_map_bounds_world"):
+		return
+	var world_rect: Rect2 = loader.call("get_loaded_map_bounds_world")
+	camera_controller.set_world_bounds(world_rect)
 
 func _agent_world_radius() -> float:
 	if global_config_node and global_config_node.has_method("get_agent_world_radius"):

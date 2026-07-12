@@ -30,6 +30,17 @@ func set_follow_target(target: Node2D, snap: bool = false) -> void:
 	if snap and is_instance_valid(_follow_target):
 		global_position = _follow_target.global_position
 
+## Clamp the camera so its view cannot scroll past the authored map bounds. Called once
+## at level start with the mapBounds world rectangle. A zero-size rect leaves the camera
+## unclamped (levels without a mapBounds node).
+func set_world_bounds(world_rect: Rect2) -> void:
+	if world_rect.size.x <= 0.0 or world_rect.size.y <= 0.0:
+		return
+	limit_left = int(floor(world_rect.position.x))
+	limit_top = int(floor(world_rect.position.y))
+	limit_right = int(ceil(world_rect.position.x + world_rect.size.x))
+	limit_bottom = int(ceil(world_rect.position.y + world_rect.size.y))
+
 func handle_mouse_wheel(amount: float) -> void:
 	_zoom_towards_mouse(amount)
 

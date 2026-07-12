@@ -41,6 +41,13 @@ namespace godot
 
         TileMapLayer *floor_layer = nullptr;
         TileMapLayer *wall_layer = nullptr;
+        // Authored map extent in tilemap cells, pushed from GDScript at level start
+        // (see LevelLoader / mapBounds). When set (positive size) this replaces the
+        // floor layer's used-rect as the field's size/origin. Zero-size means "unset",
+        // and map_extent() falls back to floor_layer->get_used_rect() so levels without
+        // an authored bounds keep the previous behavior. Walkability seeding is
+        // unaffected — only the field's dimensions/origin come from here.
+        Rect2i map_bounds_cells = Rect2i();
         TileMapLayer *navigation_blocking_layer = nullptr;
         TileMapLayer *blocking_layer = nullptr;
         std::unordered_set<Vector2i, Vector2iHash> extra_blocking_cells;
@@ -120,6 +127,10 @@ namespace godot
         Color debug_color_dir = Color(0, 1, 0);
         Color debug_color_cell = Color(1, 1, 1);
 
+        // Field size/origin source: the authored map bounds when set, else the floor
+        // layer's used-rect. All extent reads (build + read-back) route through this so
+        // the field dimensions and every relative<->absolute cell mapping stay consistent.
+        Rect2i map_extent() const;
         bool prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_cell);
         void build_sets(std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set,
                         std::unordered_set<Vector2i, Vector2iHash> &walkable_set);
@@ -195,6 +206,9 @@ namespace godot
 
         void set_blocking_layer(Object *node);
         Object *get_blocking_layer() const;
+        // Authored map extent (tilemap cells). Pushed once at level start before the
+        // first compute; persists so later async rebuilds use the same extent.
+        void set_map_bounds(Rect2i bounds_cells);
         void set_extra_blocking_cells(const PackedVector2Array &cells);
         void clear_extra_blocking_cells();
         // Fence cells act as walls only for flow builds requested with block_fences = true

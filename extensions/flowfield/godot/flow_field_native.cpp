@@ -94,6 +94,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_navigation_blocking_layer", "node"), &FlowFieldNative::set_navigation_blocking_layer);
     ClassDB::bind_method(D_METHOD("set_water_layer", "node"), &FlowFieldNative::set_water_layer);
     ClassDB::bind_method(D_METHOD("set_blocking_layer", "node"), &FlowFieldNative::set_blocking_layer);
+    ClassDB::bind_method(D_METHOD("set_map_bounds", "bounds_cells"), &FlowFieldNative::set_map_bounds);
     ClassDB::bind_method(D_METHOD("set_extra_blocking_cells", "cells"), &FlowFieldNative::set_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("clear_extra_blocking_cells"), &FlowFieldNative::clear_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("set_fence_blocking_cells", "cells"), &FlowFieldNative::set_fence_blocking_cells);
@@ -116,6 +117,16 @@ void FlowFieldNative::set_wall_layer(Object *node) { wall_layer = Object::cast_t
 void FlowFieldNative::set_navigation_blocking_layer(Object *node) { navigation_blocking_layer = Object::cast_to<TileMapLayer>(node); }
 void FlowFieldNative::set_water_layer(Object *node) { set_navigation_blocking_layer(node); }
 void FlowFieldNative::set_blocking_layer(Object *node) { blocking_layer = Object::cast_to<TileMapLayer>(node); }
+void FlowFieldNative::set_map_bounds(Rect2i bounds_cells) { map_bounds_cells = bounds_cells; }
+
+Rect2i FlowFieldNative::map_extent() const
+{
+    if (map_bounds_cells.size.x > 0 && map_bounds_cells.size.y > 0)
+        return map_bounds_cells;
+    if (floor_layer)
+        return floor_layer->get_used_rect();
+    return Rect2i();
+}
 void FlowFieldNative::set_extra_blocking_cells(const PackedVector2Array &cells)
 {
     extra_blocking_cells.clear();
@@ -201,7 +212,7 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
         sys->reactivate_agents_for_field(&field);
 
     goal_world = goal;
-    used = floor_layer->get_used_rect();
+    used = map_extent();
     if (used.size.x <= 0 || used.size.y <= 0)
         return false;
 
@@ -525,7 +536,7 @@ void FlowFieldNative::compute_distance_field_global()
     if (!floor_layer || !wall_layer)
         return;
 
-    Rect2i used = floor_layer->get_used_rect();
+    Rect2i used = map_extent();
     if (used.size.x <= 0 || used.size.y <= 0)
         return;
 
@@ -1016,7 +1027,7 @@ bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snap
     if (!floor_layer || !wall_layer)
         return false;
 
-    Rect2i used = floor_layer->get_used_rect();
+    Rect2i used = map_extent();
     if (used.size.x <= 0 || used.size.y <= 0)
         return false;
 
@@ -1701,7 +1712,7 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
     Vector2 frac = Vector2((float)clamp01(delta.x / tile_size + 0.5),
                            (float)clamp01(delta.y / tile_size + 0.5));
 
-    Rect2i used = floor_layer->get_used_rect();
+    Rect2i used = map_extent();
 
     auto dir_cell = [&](int cx, int cy)
     {
@@ -1745,7 +1756,7 @@ void FlowFieldNative::_draw()
     if (draw_flow && draw_field)
     {
         Vector2 cell_size = floor_layer->get_tile_set()->get_tile_size();
-        Rect2i used = floor_layer->get_used_rect();
+        Rect2i used = map_extent();
         int skip = Math::max(1, debug_stride);
 
         for (int y = 0; y < draw_field->height(); y += skip)
