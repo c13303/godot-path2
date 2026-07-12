@@ -1,3 +1,13 @@
+
+
+OVERKILL. REQUIRES 2 MANY PATH NODES FOR A SINGLE AGENT TYPE.
+
+
+
+
+
+
+
 # Task: Implement an Immutable Navigation Zone with separate spawn and despawn routes
 
 Implement an **Immutable Navigation Zone** system to reduce runtime Flow Field recomputation.
