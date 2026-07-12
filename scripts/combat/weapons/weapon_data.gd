@@ -33,7 +33,7 @@ class_name WeaponData
 @export var spray_projectile_radius: float = 5.25
 @export var spray_projectile_damage: int = 4
 @export var spray_projectile_spread_jitter_degrees: float = 4.0
-@export_flags("Terrain", "Reactive Plant") var spray_projectile_static_collision_mask: int = 1
+@export_flags("Terrain", "Reactive Plant", "Turret") var spray_projectile_static_collision_mask: int = 1
 @export var spray_projectile_pool_size: int = 128
 @export var spray_waters_reactive_plants: bool = false
 @export var spray_visual_radius: float = 13.0

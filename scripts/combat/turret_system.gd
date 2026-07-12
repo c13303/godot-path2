@@ -124,7 +124,7 @@ func _advance_turret_shot(cell: Vector2i, state: Dictionary, origin: Vector2, ac
 func _fire_turret_weapon(cell: Vector2i, state: Dictionary, origin: Vector2, direction: Vector2, delta: float) -> void:
 	var weapon_id: String = str(state.get("weapon", "spray"))
 	if _fight_system.is_gun(weapon_id):
-		_fight_system.fire_gun_once(weapon_id, origin, direction, -1)
+		_fight_system.fire_turret_gun_once(cell, weapon_id, origin, direction)
 		return
 	state["spraying"] = true
 	state["spray_time_left"] = float(state.get("shoot_duration", 1.0))

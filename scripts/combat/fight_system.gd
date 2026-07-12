@@ -3,6 +3,7 @@ class_name FightSystem
 
 const STATIC_COLLISION_TERRAIN: int = 1 << 0
 const STATIC_COLLISION_REACTIVE_PLANT: int = 1 << 1
+const STATIC_COLLISION_TURRET: int = 1 << 2
 const STATIC_IMPACT_KIND: int = 0
 const WATER_RESERVE_ID: StringName = &"water"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -33,6 +34,7 @@ var _building_manager: Node
 var _plant_manager: Node
 var _plant_layer: TileMapLayer
 var _wall_layer: TileMapLayer
+var _blocking_buildings_layer: TileMapLayer
 var _floor_layer: TileMapLayer
 var _water_sources: WaterSources
 var _garden_hose_fluid: Node
@@ -72,6 +74,7 @@ func _ready() -> void:
 	_plant_manager = get_node_or_null("../Map/PlantManager")
 	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
 	_wall_layer = get_node_or_null("../Map/MonTilemap/wallz") as TileMapLayer
+	_blocking_buildings_layer = get_node_or_null("../Map/MonTilemap/blocking_buildings") as TileMapLayer
 	_floor_layer = get_node_or_null("../Map/MonTilemap/floor") as TileMapLayer
 	_water_sources = get_node_or_null("../Map/MonTilemap/watersources") as WaterSources
 	_garden_hose_fluid = get_node_or_null("../visualFX/GardenHose/GardenHoseFluid")
@@ -204,6 +207,7 @@ func _drain_projectile_impacts() -> void:
 			_handle_static_projectile_impact(impact, gun.id == "water")
 		elif spray_weapon != null:
 			_handle_static_projectile_impact(impact, spray_weapon.spray_waters_reactive_plants)
+		_handle_turret_projectile_impact(impact)
 		if not gun or not gun.impact_visual_enabled:
 			continue
 		var pos: Vector2 = impact.get("pos", Vector2.ZERO) as Vector2
@@ -236,6 +240,17 @@ func _handle_static_projectile_impact(impact: Dictionary, waters_plants: bool) -
 	if _plant_manager.has_method("wet_plant"):
 		_plant_manager.call("wet_plant", rose_cell)
 
+func _handle_turret_projectile_impact(impact: Dictionary) -> void:
+	if _splash_controller == null:
+		return
+	if int(impact.get("kind", -1)) != STATIC_IMPACT_KIND:
+		return
+	var collider_mask: int = int(impact.get("collider_mask", 0))
+	if (collider_mask & STATIC_COLLISION_TURRET) == 0:
+		return
+	var pos: Vector2 = impact.get("pos", Vector2.ZERO) as Vector2
+	_splash_controller.call("play_at", pos)
+
 func _static_grid_cell_to_layer_cell(collision_cell: Vector2i, layer: TileMapLayer) -> Vector2i:
 	var tile_size: float = 1.0
 	if layer.tile_set:
@@ -251,14 +266,27 @@ func _static_grid_cell_to_layer_cell(collision_cell: Vector2i, layer: TileMapLay
 func _upload_static_projectile_colliders() -> void:
 	if not _projectiles or not _projectiles.has_method("set_static_collision_layers"):
 		return
-	if not _wall_layer:
-		return
-	var collider_configs: Array[Dictionary] = [
-		{
+	var collider_configs: Array[Dictionary] = []
+	if _wall_layer:
+		collider_configs.append({
 			"layer": _wall_layer,
 			"channel": STATIC_COLLISION_TERRAIN,
-		},
-	]
+		})
+	if _blocking_buildings_layer:
+		var blocking_terrain_atlas_coords: Array[Vector2i] = _projectile_collider_atlas_coords_for_layer(_blocking_buildings_layer, false)
+		if not blocking_terrain_atlas_coords.is_empty():
+			collider_configs.append({
+				"layer": _blocking_buildings_layer,
+				"channel": STATIC_COLLISION_TERRAIN,
+				"atlas_coords": blocking_terrain_atlas_coords,
+			})
+		var turret_atlas_coords: Array[Vector2i] = _projectile_collider_atlas_coords_for_layer(_blocking_buildings_layer, true)
+		if not turret_atlas_coords.is_empty():
+			collider_configs.append({
+				"layer": _blocking_buildings_layer,
+				"channel": STATIC_COLLISION_TURRET,
+				"atlas_coords": turret_atlas_coords,
+			})
 	if _plant_layer:
 		collider_configs.append({
 			"layer": _plant_layer,
@@ -273,18 +301,29 @@ func _ensure_static_projectile_colliders_ready() -> void:
 		_static_colliders_dirty = false
 
 func _connect_static_collider_updates() -> void:
-	if not _plant_manager:
-		return
-	var refresh_callback: Callable = Callable(self, "_on_plant_collision_cells_changed")
-	if _plant_manager.has_signal("plant_added") and not _plant_manager.is_connected("plant_added", refresh_callback):
-		_plant_manager.connect("plant_added", refresh_callback)
-	if _plant_manager.has_signal("plant_removed") and not _plant_manager.is_connected("plant_removed", refresh_callback):
-		_plant_manager.connect("plant_removed", refresh_callback)
+	if _plant_manager:
+		var plant_refresh_callback: Callable = Callable(self, "_on_plant_collision_cells_changed")
+		if _plant_manager.has_signal("plant_added") and not _plant_manager.is_connected("plant_added", plant_refresh_callback):
+			_plant_manager.connect("plant_added", plant_refresh_callback)
+		if _plant_manager.has_signal("plant_removed") and not _plant_manager.is_connected("plant_removed", plant_refresh_callback):
+			_plant_manager.connect("plant_removed", plant_refresh_callback)
+	var building_objects: Node = get_node_or_null("../Map/BuildingObjectManager")
+	if building_objects != null:
+		var building_refresh_callback: Callable = Callable(self, "_on_building_collision_cells_changed")
+		if building_objects.has_signal("building_added") and not building_objects.is_connected("building_added", building_refresh_callback):
+			building_objects.connect("building_added", building_refresh_callback)
+		if building_objects.has_signal("building_removed") and not building_objects.is_connected("building_removed", building_refresh_callback):
+			building_objects.connect("building_removed", building_refresh_callback)
 
 func _on_plant_collision_cells_changed(_cell: Vector2i) -> void:
 	# Daytime edits are accumulated. BuildingManager uploads the final snapshot
 	# once during capped night preparation instead of once per placed rose.
 	_static_colliders_dirty = true
+
+func _on_building_collision_cells_changed(_cell: Vector2i, _item_id: String) -> void:
+	_static_colliders_dirty = true
+	if GameState.is_night:
+		prepare_night_static_colliders()
 
 func prepare_night_static_colliders() -> void:
 	if not _static_colliders_dirty:
@@ -319,6 +358,27 @@ func prepare_night_static_colliders_budgeted(budget_ms: float) -> bool:
 				await get_tree().process_frame
 				slice_started_us = Time.get_ticks_usec()
 
+	if _blocking_buildings_layer:
+		var blocking_terrain_atlas_coords: Array[Vector2i] = _projectile_collider_atlas_coords_for_layer(_blocking_buildings_layer, false)
+		var turret_atlas_coords: Array[Vector2i] = _projectile_collider_atlas_coords_for_layer(_blocking_buildings_layer, true)
+		for building_cell: Vector2i in _blocking_buildings_layer.get_used_cells():
+			if generation != _static_collider_prepare_generation:
+				return false
+			var atlas: Vector2i = _blocking_buildings_layer.get_cell_atlas_coords(building_cell)
+			var channel: int = 0
+			if blocking_terrain_atlas_coords.has(atlas):
+				channel |= STATIC_COLLISION_TERRAIN
+			if turret_atlas_coords.has(atlas):
+				channel |= STATIC_COLLISION_TURRET
+			if channel == 0:
+				continue
+			var building_world: Vector2 = _blocking_buildings_layer.to_global(_blocking_buildings_layer.map_to_local(building_cell))
+			cells.append(Vector2(floorf(building_world.x / tile_size), floorf(building_world.y / tile_size)))
+			channels.append(channel)
+			if Time.get_ticks_usec() - slice_started_us >= budget_us:
+				await get_tree().process_frame
+				slice_started_us = Time.get_ticks_usec()
+
 	if _plant_layer:
 		for plant_cell: Vector2i in _plant_layer.get_used_cells():
 			if generation != _static_collider_prepare_generation:
@@ -336,6 +396,27 @@ func prepare_night_static_colliders_budgeted(budget_ms: float) -> bool:
 	_projectiles.call("set_static_collision_cells", cells, channels, tile_size)
 	_static_colliders_dirty = false
 	return true
+
+func _projectile_collider_atlas_coords_for_layer(layer: TileMapLayer, turrets_only: bool) -> Array[Vector2i]:
+	var atlas_coords: Array[Vector2i] = []
+	for raw_item_def: Variant in ItemCatalog.ITEM_DEFS.values():
+		var item_def: Dictionary = raw_item_def as Dictionary
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		if str(item_def.get("target_layer", "")) != str(layer.name):
+			continue
+		var is_turret: bool = str(item_def.get("category", "")) == "turret"
+		if turrets_only != is_turret:
+			continue
+		if not is_turret and not bool(item_def.get("blocks_projectiles", false)):
+			continue
+		var raw_atlas: Variant = item_def.get("atlas", Vector2i(-1, -1))
+		if not raw_atlas is Vector2i:
+			continue
+		var atlas: Vector2i = raw_atlas as Vector2i
+		if not atlas_coords.has(atlas):
+			atlas_coords.append(atlas)
+	return atlas_coords
 
 # Public hook: re-upload walls after the build system adds/removes wall tiles.
 func refresh_projectile_walls() -> void:
@@ -937,6 +1018,43 @@ func fire_gun_once(gun_id: String, origin: Vector2, direction: Vector2, source_a
 	if fired and gun.id == "water":
 		Sfx.play_sound(&"bubble1")
 	return fired
+
+func fire_turret_gun_once(turret_cell: Vector2i, gun_id: String, origin: Vector2, direction: Vector2) -> bool:
+	var gun: GunData = _guns_by_id.get(gun_id) as GunData
+	if gun == null or not _projectiles or direction.length_squared() <= 0.000001:
+		return false
+	var type_id: int = int(_gun_type_ids.get(gun_id, -1))
+	if type_id < 0:
+		return false
+	var facing: Vector2 = direction.normalized()
+	var spawn_offset: float = maxf(gun.throw_offset, _turret_projectile_clearance_offset(turret_cell, facing))
+	var spawn_position: Vector2 = origin + facing * spawn_offset
+	return fire_gun_projectile_direct(gun_id, spawn_position, facing, -1)
+
+func _turret_projectile_clearance_offset(turret_cell: Vector2i, facing: Vector2) -> float:
+	if _blocking_buildings_layer == null or facing.length_squared() <= 0.000001:
+		return 0.0
+	var tile_size: float = 1.0
+	if _blocking_buildings_layer.tile_set:
+		tile_size = maxf(1.0, float(_blocking_buildings_layer.tile_set.tile_size.x))
+	var center: Vector2 = _blocking_buildings_layer.to_global(_blocking_buildings_layer.map_to_local(turret_cell))
+	var half_size: float = tile_size * 0.5
+	var normalized_facing: Vector2 = facing.normalized()
+	var edge_distance_x: float = INF
+	if absf(normalized_facing.x) > 0.000001:
+		edge_distance_x = half_size / absf(normalized_facing.x)
+	var edge_distance_y: float = INF
+	if absf(normalized_facing.y) > 0.000001:
+		edge_distance_y = half_size / absf(normalized_facing.y)
+	var edge_distance: float = minf(edge_distance_x, edge_distance_y)
+	if edge_distance == INF:
+		return 0.0
+	var clearance: float = maxf(0.5, tile_size * 0.05)
+	var clear_position: Vector2 = center + normalized_facing * (edge_distance + clearance)
+	while _blocking_buildings_layer.local_to_map(_blocking_buildings_layer.to_local(clear_position)) == turret_cell:
+		clearance += 0.5
+		clear_position = center + normalized_facing * (edge_distance + clearance)
+	return edge_distance + clearance
 
 func reset_gun_cooldown(gun_id: String) -> void:
 	if _gun_fire_timers.has(gun_id):

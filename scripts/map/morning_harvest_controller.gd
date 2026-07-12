@@ -47,6 +47,9 @@ func begin_phase() -> void:
 		return
 	_active = true
 	if _manager.grownup_rose_count() > 0 and harvestable_imperials <= 0 and not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
+		if _manager.rose_shop_counter_count() <= 0:
+			_manager.auto_select_hammer()
+			return
 		_active = false
 		GameState.set_morning_phase(false)
 		_manager.request_client_sale_start()
@@ -77,6 +80,8 @@ func has_grownup_roses_to_harvest() -> bool:
 func check_finished() -> void:
 	if _manager.grownup_rose_count() > 0:
 		if not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
+			if _manager.rose_shop_counter_count() <= 0:
+				return
 			if _harvestable_imperial_count() > 0:
 				return
 			_active = false

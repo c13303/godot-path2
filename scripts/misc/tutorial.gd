@@ -85,6 +85,7 @@ var _alert_count: int = -1
 var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
+var _has_planted_turret_epine: bool = false
 # True during the sunrise transition: night has just ended but the first day phase
 # (the morning harvest) has not begun yet. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -114,6 +115,13 @@ func _resolve_nodes() -> void:
 			_plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 		_building_manager = scene.get_node_or_null("Map/BuildingManager")
 		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
+		if _building_object_manager != null:
+			if _building_object_manager.has_method("count_buildings_by_item_id") \
+					and int(_building_object_manager.call("count_buildings_by_item_id", TURRET_EPINE_ITEM_ID)) > 0:
+				_has_planted_turret_epine = true
+			if _building_object_manager.has_signal("building_added") \
+					and not _building_object_manager.is_connected("building_added", Callable(self, "_on_building_added")):
+				_building_object_manager.connect("building_added", Callable(self, "_on_building_added"))
 		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
@@ -150,6 +158,12 @@ func _on_building_phase_changed(_is_building_phase: bool) -> void:
 
 func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
 	_refresh()
+
+
+func _on_building_added(_cell: Vector2i, item_id: String) -> void:
+	if item_id == TURRET_EPINE_ITEM_ID:
+		_has_planted_turret_epine = true
+		_refresh()
 
 
 func _on_locale_changed(_locale: String) -> void:
@@ -353,7 +367,7 @@ func _current_message_key() -> String:
 	if _can_start_night_after_clients() and _has_day_one_build_prompt_remaining():
 		if _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0:
 			return KEY_PLANT_PASTEQUE
-		if _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0:
+		if _should_prompt_plant_turret_epine():
 			return KEY_PLANT_TURRET_EPINE
 	if _should_prompt_place_shop():
 		return KEY_PLACE_SHOP
@@ -662,9 +676,13 @@ func _has_day_one_build_prompt_remaining() -> bool:
 		_is_day_one()
 		and (
 			_build_affordable_quantity(PASTEQUE_ITEM_ID) > 0
-			or _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
+			or _should_prompt_plant_turret_epine()
 		)
 	)
+
+
+func _should_prompt_plant_turret_epine() -> bool:
+	return not _has_planted_turret_epine and _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
 
 
 func _tutorial_item_for_key(key: String) -> String:

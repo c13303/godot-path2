@@ -22,4 +22,5 @@ smash_force = 400.0
 smash_detach_flow = true
 smash_control_suppression = 1.0
 smash_control_suppression_duration = 0.2
+static_collision_mask = 5
 impact_visual_enabled = false
