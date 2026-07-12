@@ -7,7 +7,7 @@ class_name AgentNavigationPhaseController
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EATING_COOLDOWN: float = 5.0
-const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
+const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.0
 const HELD_ROSE_DEFAULT_FRAME: int = 0
 const HELD_ROSE_WET_FRAME: int = 1
 const SPAWNER_KIND_MONSTER: StringName = &"monster"

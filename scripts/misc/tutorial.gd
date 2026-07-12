@@ -35,6 +35,7 @@ const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_ro
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
 const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
+const KEY_PLANT_MORE_ROSES: String = "tutorial.plant_more_roses"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -69,6 +70,7 @@ var _toolbuild: Control
 var _building_manager: Node
 var _building_object_manager: Node
 var _day_toggle: Control
+var _planificator: Control
 var _player_controller: Node
 var _hold_progress_circle: Control
 var _hold_action: StringName = HOLD_ACTION_NONE
@@ -116,6 +118,7 @@ func _resolve_nodes() -> void:
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
 		_toolbuild = scene.get_node_or_null("GameUI/Toolbuild") as Control
+		_planificator = scene.get_node_or_null("GameUI/planificator") as Control
 		_hold_progress_circle = scene.get_node_or_null("GameUI/holdProgressCircle") as Control
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 			GameState.building_phase_changed.connect(_on_building_phase_changed)
@@ -228,6 +231,15 @@ func _refresh(delta: float = 0.0) -> void:
 		modulate = Color.WHITE
 		_set_glow(false)
 		_update_tutorial_arrow("")
+		return
+	# Day-1 guard: before offering to start the night, make sure the player has planted
+	# enough roses to satisfy tomorrow's clients. If not, nudge them toward the planificator
+	# (which previews that demand) instead of showing the start-night prompt.
+	if _should_warn_plant_more_roses():
+		_reset_hold_progress()
+		if _building_manager != null and _building_manager.has_method("clear_night_start_request"):
+			_building_manager.call("clear_night_start_request")
+		_show_plant_more_roses_warning()
 		return
 	if _should_request_start_night_prompt():
 		_request_start_night_prompt()
@@ -386,6 +398,40 @@ func _should_request_start_night_prompt() -> bool:
 	if _has_day_one_build_prompt_remaining():
 		return false
 	return _can_start_night_after_clients()
+
+
+## Day-1 only: the player is ready to end the day but has not planted enough roses to
+## satisfy the clients the planificator previews for tomorrow. When true the start-night
+## prompt is withheld in favour of the "plant more roses" nudge.
+func _should_warn_plant_more_roses() -> bool:
+	if not _is_day_one():
+		return false
+	if not _should_request_start_night_prompt():
+		return false
+	return _planted_rose_count() < _next_day_client_demand()
+
+
+func _planted_rose_count() -> int:
+	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
+		return 0
+	return int(_plant_manager.call("rose_count"))
+
+
+func _next_day_client_demand() -> int:
+	if _planificator == null or not _planificator.has_method("previewed_client_count"):
+		return 0
+	return int(_planificator.call("previewed_client_count"))
+
+
+func _show_plant_more_roses_warning() -> void:
+	visible = true
+	modulate = Color.WHITE
+	_displayed_key = KEY_PLANT_MORE_ROSES
+	_pending_key = KEY_PLANT_MORE_ROSES
+	_pending_remaining = 0.0
+	text = Translations.t(KEY_PLANT_MORE_ROSES)
+	_set_glow(false)
+	_update_tutorial_arrow(KEY_PLANT_MORE_ROSES)
 
 
 ## True while the night or client spawner-reveal cutscene is playing (camera scrolling
@@ -628,6 +674,13 @@ func _update_tutorial_arrow(key: String) -> void:
 	_ensure_tutorial_arrow()
 	if _tutorial_arrow == null:
 		return
+	if key == KEY_PLANT_MORE_ROSES:
+		var planner_rect: Rect2 = _planificator_rect()
+		if planner_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_right_at(planner_rect, get_process_delta_time())
+			return
+		_hide_tutorial_arrow()
+		return
 	if key == KEY_WATER_ROSES and _is_day_one():
 		var weapon_rect: Rect2 = _quick_slot_rect(WEAPON_TOOL_ID)
 		if weapon_rect.size != Vector2.ZERO:
@@ -695,6 +748,12 @@ func _visible_build_item_rect(item_id: String) -> Rect2:
 	if _toolbuild == null or not _toolbuild.has_method("get_visible_build_item_global_rect"):
 		return Rect2()
 	return _toolbuild.call("get_visible_build_item_global_rect", item_id) as Rect2
+
+
+func _planificator_rect() -> Rect2:
+	if _planificator == null or not _planificator.visible:
+		return Rect2()
+	return _planificator.get_global_rect()
 
 
 func _gardening_tool_rect() -> Rect2:

@@ -25,6 +25,12 @@ day 1 + all roses watered + turret_epine remaining
 no rose_shop_counter placed yet
     = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
 
+day 1 + ready to end day + fewer planted roses than the clients the planificator previews for tomorrow
+    = "Plantez suffisament de roses pour satisfaire vos clients du lendemain"
+      / "Plant enough roses to satisfy tomorrow's clients"   [tutorial.plant_more_roses]
+    -> arrow points right at the planificator; withholds the "pass the night" prompt
+       until enough roses are planted
+
 everything done (all watered, no day 1 pasteque/turret prompt remaining) + clients already served + any tantrum clients have vanished
     = "Passez la nuit" / "Pass the night"                   [tutorial.pass_night]
     -> turns into the hold-to-confirm prompt below

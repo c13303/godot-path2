@@ -53,7 +53,7 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 # access tile grabs its rose right there and leaves, instead of finishing the walk to
 # the garden entrance / counter. Keyed off the walkable access tile, so a proximity hit
 # means the counter is genuinely reachable.
-const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.25
+const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.0
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const RONCE_ITEM_ID: String = "ronce"
 const ITEM_CATEGORY_TURRET: String = "turret"

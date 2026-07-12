@@ -9,6 +9,7 @@ const QUICKBAR_OVERLAP: float = 9.0
 const OSCILLATION_PIXELS: float = 5.0
 const OSCILLATION_SPEED: float = 5.0
 const POINT_LEFT_ROTATION: float = 0.0
+const POINT_RIGHT_ROTATION: float = PI
 const POINT_DOWN_ROTATION: float = PI * 1.5
 
 var _arrow: TextureRect
@@ -34,6 +35,14 @@ func point_left_at(target_rect: Rect2, delta: float) -> void:
 		target_rect.position.y + target_rect.size.y * 0.5 - ARROW_SIZE.y * 0.5
 	)
 	_apply_transform(POINT_LEFT_ROTATION, delta)
+
+
+func point_right_at(target_rect: Rect2, delta: float) -> void:
+	_base_position = Vector2(
+		target_rect.position.x - ICON_GAP - ARROW_SIZE.x,
+		target_rect.position.y + target_rect.size.y * 0.5 - ARROW_SIZE.y * 0.5
+	)
+	_apply_transform(POINT_RIGHT_ROTATION, delta)
 
 
 func point_down_at(target_rect: Rect2, delta: float) -> void:

@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://dmcu20lgk3mr1"
+path="res://.godot/imported/college quest.mp3-44198b835794af28f64eaef9c6f63cb5.mp3str"
+
+[deps]
+
+source_file="res://assets/music/college quest.mp3"
+dest_files=["res://.godot/imported/college quest.mp3-44198b835794af28f64eaef9c6f63cb5.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

@@ -6,11 +6,15 @@ const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
+const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
+const KEY_TODAY: String = "planificator.today"
 const KEY_NIGHT: String = "planificator.tonight"
 const KEY_DAY: String = "planificator.tomorrow"
 
+var _today_label: Label
 var _night_label: Label
 var _day_label: Label
+var _today_rows: VBoxContainer
 var _night_rows: VBoxContainer
 var _day_rows: VBoxContainer
 var _icon_cache: Dictionary = {}
@@ -55,6 +59,13 @@ func _build_ui() -> void:
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_theme_constant_override("separation", 6)
 	margin.add_child(content)
+
+	_today_label = _make_section_label()
+	content.add_child(_today_label)
+	_today_rows = VBoxContainer.new()
+	_today_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_today_rows.add_theme_constant_override("separation", 3)
+	content.add_child(_today_rows)
 
 	_night_label = _make_section_label()
 	content.add_child(_night_label)
@@ -109,6 +120,8 @@ func _on_locale_changed(_locale: String) -> void:
 
 
 func _apply_translations() -> void:
+	if _today_label != null:
+		_today_label.text = Translations.t(KEY_TODAY)
 	if _night_label != null:
 		_night_label.text = Translations.t(KEY_NIGHT)
 	if _day_label != null:
@@ -116,8 +129,9 @@ func _apply_translations() -> void:
 
 
 func _refresh() -> void:
-	if _night_rows == null or _day_rows == null:
+	if _today_rows == null or _night_rows == null or _day_rows == null:
 		return
+	_clear_rows(_today_rows)
 	_clear_rows(_night_rows)
 	_clear_rows(_day_rows)
 
@@ -141,11 +155,28 @@ func _refresh() -> void:
 	if night == null:
 		return
 
+	_add_row(_today_rows, &"rose", _current_rose_count())
+
 	var monster_counts: Dictionary = _get_monster_counts(night)
 	_add_monster_rows(monster_counts)
 	_add_row(_day_rows, &"client", maxi(0, night.clients))
 	_add_row(_day_rows, &"merchant", 1)
 	_set_mouse_filter_recursive(self)
+
+
+## Number of clients previewed for the coming day (the "tomorrow" section). Used by the
+## day-1 tutorial to check whether the player has planted enough roses to satisfy them.
+func previewed_client_count() -> int:
+	var playlist: LevelSpawnPlaylist = _get_playlist()
+	if playlist == null or playlist.nights.is_empty():
+		return 0
+	var night_index: int = _get_preview_night_index(playlist)
+	if night_index < 0 or night_index >= playlist.nights.size():
+		return 0
+	var night: NightSpawnPlaylist = playlist.nights[night_index]
+	if night == null:
+		return 0
+	return maxi(0, night.clients)
 
 
 func _clear_rows(container: VBoxContainer) -> void:
@@ -158,6 +189,21 @@ func _day_clients_gone() -> bool:
 	if building_manager == null or not building_manager.has_method("day_clients_gone"):
 		return false
 	return bool(building_manager.call("day_clients_gone"))
+
+
+## Roses currently planted, counting every state (dry, watered, grownup) together.
+func _current_rose_count() -> int:
+	var plant_manager: Node = _get_plant_manager()
+	if plant_manager == null or not plant_manager.has_method("rose_count"):
+		return 0
+	return int(plant_manager.call("rose_count"))
+
+
+func _get_plant_manager() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("Map/PlantManager")
 
 
 func _get_building_manager() -> Node:
@@ -262,6 +308,9 @@ func _get_icon(agent_type: StringName) -> Texture2D:
 			frame_size = Vector2i(64, 64)
 		&"merchant":
 			texture = MERCHANT_TEXTURE
+			frame_size = Vector2i(64, 64)
+		&"rose":
+			texture = ROSE_TEXTURE
 			frame_size = Vector2i(64, 64)
 		_:
 			texture = MONSTER_TEXTURE

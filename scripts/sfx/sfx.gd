@@ -28,7 +28,7 @@ const SOUNDS: Dictionary = {
 
 const POP_SOUNDS: Array[StringName] = [&"pop1", &"pop2", &"pop3", &"pop4"]
 const SCREAM_SOUNDS: Array[StringName] = [&"scream1", &"scream2", &"scream3", &"scream4"]
-const THEME: AudioStream = preload("res://assets/music/theme1.wav")
+const THEME: AudioStream = preload("res://assets/music/college quest.mp3")
 
 ## If false, music is never played.
 @export var music_enable: bool = false:
