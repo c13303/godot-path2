@@ -15,7 +15,7 @@ planted roses still dry (unwatered > 0)
     = "Arrosez vos roses" / "Water your roses"              [tutorial.water_roses]
 
 day 1 + all roses watered + pasteque remaining
-    = "Plantez une pastèque pour irriguer le sol"
+    = "Plantez une pastèque pour irriguer davantage de terre sèche"
       / "Plant a watermelon to irrigate the soil"            [tutorial.plant_pasteque]
 
 day 1 + all roses watered + turret_epine remaining

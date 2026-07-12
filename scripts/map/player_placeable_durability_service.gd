@@ -37,9 +37,11 @@ var _targets_by_key: Dictionary = {}
 # legally share one cell (for example a plant-layer target and a structure), so
 # provenance removal must be keyed by layer + cell when the caller knows the layer.
 var _keys_by_cell: Dictionary = {}
-# Bumped on any registration/health/destruction change so idle hostiles can retry
-# target selection when the world changed instead of scanning every frame.
-var _revision: int = 0
+# Structural target revision: bumped only when the set of selectable targets
+# changes (register / unregister / destroy / clear / restore / live discovery /
+# stale prune). It must NOT change when an existing target only loses health, so
+# idle hostiles are not woken by every normal hit. See target_revision().
+var _target_revision: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -50,14 +52,21 @@ func set_overlay(overlay: Node) -> void:
 	_overlay = overlay
 
 
+# Structural revision (target set changed). Prefer this in new code.
+func target_revision() -> int:
+	return _target_revision
+
+
+# Compatibility wrapper: kept for any dynamic/public callers that predate the
+# structural/health split. Structurally identical to target_revision().
 func revision() -> int:
-	return _revision
+	return target_revision()
 
 
 func clear() -> void:
 	_targets_by_key.clear()
 	_keys_by_cell.clear()
-	_bump_and_redraw()
+	_bump_target_revision_and_refresh()
 
 
 # ---------------------------------------------------------------------------
@@ -83,19 +92,19 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 		"instant_destroy": instant_destroy,
 	}
 	_add_cell_key(cell, key)
-	_bump_and_redraw()
+	_bump_target_revision_and_refresh()
 
 
 func unregister_player_placeable(cell: Vector2i) -> void:
 	if _erase_records_at_cell(cell):
-		_bump_and_redraw()
+		_bump_target_revision_and_refresh()
 
 
 func unregister_player_placeable_at(cell: Vector2i, layer_name: String) -> void:
 	var key: String = _make_key(_normalize_layer_name(layer_name), cell)
 	if _targets_by_key.has(key):
 		_erase_record_by_key(key)
-		_bump_and_redraw()
+		_bump_target_revision_and_refresh()
 
 
 func is_player_built_cell(cell: Vector2i) -> bool:
@@ -114,7 +123,7 @@ func register_live_destructible_targets() -> int:
 				added += 1
 	added += _register_live_reservoir_nodes()
 	if added > 0:
-		_bump_and_redraw()
+		_bump_target_revision_and_refresh()
 	return added
 
 
@@ -123,6 +132,19 @@ func register_live_destructible_targets() -> int:
 # ---------------------------------------------------------------------------
 func has_targets() -> bool:
 	return not _targets_by_key.is_empty()
+
+
+# Deterministic (sorted) copy of the currently-valid target keys. Lets the assault
+# planner enumerate targets without reaching into the private registry. Pure: no
+# pruning side effects, so it is safe to call from read-only planner queries.
+func target_keys() -> Array[String]:
+	var out: Array[String] = []
+	for raw_key: Variant in _targets_by_key.keys():
+		var key: String = str(raw_key)
+		if is_target_valid(key):
+			out.append(key)
+	out.sort()
+	return out
 
 
 func target_record(key: String) -> Dictionary:
@@ -184,7 +206,7 @@ func nearest_target_key(from_world: Vector2, rejected: Dictionary = {}) -> Strin
 	if not invalid_keys.is_empty():
 		for key: String in invalid_keys:
 			_erase_record_by_key(key)
-		_bump_and_redraw()
+		_bump_target_revision_and_refresh()
 	return best_key
 
 
@@ -218,7 +240,9 @@ func apply_damage(key: String, amount: int) -> bool:
 	if health <= 0:
 		destroy_target(key)
 		return true
-	_bump_and_redraw()
+	# Non-lethal hit: health only. Refresh the overlay but do NOT bump the structural
+	# revision, or every hit would wake idle/unreachable hostiles for no reason.
+	_refresh_overlay()
 	return false
 
 
@@ -242,7 +266,7 @@ func destroy_target(key: String) -> void:
 			# game-over UI polls GameState.is_reservoir_destroyed.
 			GameState.set_reservoir_destroyed(true)
 		_destroy_structure_cell(cell, str(rec.get("layer_name", "")), item_id)
-	_bump_and_redraw()
+	_bump_target_revision_and_refresh()
 
 
 func _destroy_plant_cell(cell: Vector2i) -> void:
@@ -330,14 +354,21 @@ func restore(saved: Array) -> void:
 		_add_cell_key(cell, key)
 	if ignored > 0:
 		push_warning("PlayerPlaceableDurabilityService: ignored %d stale/invalid durability records on load." % ignored)
-	_bump_and_redraw()
+	_bump_target_revision_and_refresh()
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers.
 # ---------------------------------------------------------------------------
-func _bump_and_redraw() -> void:
-	_revision += 1
+# Structural change: the selectable target set changed. Bump the revision so idle
+# hostiles retry, then refresh the health overlay.
+func _bump_target_revision_and_refresh() -> void:
+	_target_revision += 1
+	_refresh_overlay()
+
+
+# Overlay-only refresh, used when health changed but the target set did not.
+func _refresh_overlay() -> void:
 	if _overlay != null and is_instance_valid(_overlay) and _overlay.has_method("refresh"):
 		_overlay.call("refresh")
 

@@ -5,14 +5,18 @@ class_name ClientTantrumController
 # every current client without a rose turns hostile immediately.
 #
 # Tantrum is per agent: entering it changes only that client. Each hostile runs an
-# explicit stage machine:
-#   waiting_for_target -> paused; queued for a budgeted target/path attempt
-#   moving             -> native steering follows an assigned A* path to an attack cell
-#   attacking          -> native-hard-paused; 1 dmg every 3s with a visual lunge
+# explicit stage machine, and hostiles stay natively UNPAUSED throughout so local
+# separation/overlap keeps working (an RTS-style front, not a wall of statues):
+#   waiting_for_target -> no path/flow; queued for a budgeted target/slot attempt
+#   moving             -> native steering follows an A* path to a RESERVED attack cell
+#   attacking          -> path detached, still unpaused; staggered lunges apply damage
 #
-# Targets come from the generic PlayerPlaceableDurabilityService (walls, fences,
-# counters, turrets, lamps, reservoirs, plants, ...). The reservoir has no special
-# priority. Nothing here creates a shared flow-field group or routes to a reservoir.
+# Which client attacks where is decided by ClientTantrumAssaultPlanner (owned here):
+# it hands out one logical attack slot per client, spread across nearby targets and
+# capped per world attack cell. Targets/health/destruction stay in the generic
+# PlayerPlaceableDurabilityService (walls, fences, counters, turrets, lamps,
+# reservoirs, plants, ...). The reservoir has no special priority; nothing here
+# creates a shared flow-field group or routes to a reservoir.
 
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const CLIENT_SPRITE_HFRAMES: int = 7
@@ -26,27 +30,36 @@ const STAGE_MOVING: StringName = &"moving"
 const STAGE_ATTACKING: StringName = &"attacking"
 
 const TANTRUM_CLIENT_HEALTH: int = 100
-const ATTACK_INTERVAL_SECONDS: float = 3.0
-const ATTACK_DAMAGE: int = 5
-const ATTACK_RANGE_TILES: float = 1.5
+# Staggered cadence: each client gets a deterministic per-nav interval in this band
+# plus a deterministic initial phase, so the assault reads as continuous instead of
+# army-wide 3s bursts. DPS is kept ~= the old 5 dmg / (3.0 + 0.31) ~= 1.51/s:
+#   3 dmg / (~1.65 avg cooldown + 0.31 animation) ~= 1.53/s.
+const ATTACK_DAMAGE: int = 3
+const ATTACK_INTERVAL_MIN_SECONDS: float = 1.45
+const ATTACK_INTERVAL_MAX_SECONDS: float = 1.85
+# 1.75 (not 1.5) so a diagonal reserved cell plus endpoint dispersion (~1.69 tiles)
+# still counts as in-range; otherwise dispersed diagonal slots could never attack.
+const ATTACK_RANGE_TILES: float = 1.75
 const ATTACK_LUNGE_SECONDS: float = 0.09
 const ATTACK_RETURN_SECONDS: float = 0.22
 const ATTACK_OVERLAP_PIXELS: float = 8.0
 
-const NEIGHBOR_OFFSETS: Array[Vector2i] = [
-	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
-	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1),
-]
+# Small fixed A* budget so a big crowd redistributes over a few frames instead of
+# freezing, without unbounded per-frame pathfinding.
+const MAX_RETARGET_PATH_ATTEMPTS_PER_FRAME: int = 4
 
 var _manager: BuildingManager
+var _planner: ClientTantrumAssaultPlanner
 var _hostile_clients: Dictionary = {}  # nav_id -> Dictionary
-# Budgeted retarget queue: at most one expensive path attempt is processed per frame.
+# Budgeted retarget queue: at most MAX_RETARGET_PATH_ATTEMPTS_PER_FRAME per frame.
 var _pending: Array[int] = []
 var _queued: Dictionary = {}  # nav_id -> true
 
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
+	_planner = ClientTantrumAssaultPlanner.new()
+	_planner.setup(manager, manager.get_player_placeable_durability_service())
 
 
 func is_active() -> bool:
@@ -98,13 +111,12 @@ func start_for_client(client: Node2D) -> bool:
 		return false
 	if bool(client.get_meta("client_has_rose", false)):
 		return false
-	# Detach this agent's native path/flow and clear only its nav records.
+	# Detach this agent's native path/flow and clear only its nav records. It stays
+	# unpaused: with no path/flow the native addon applies only local separation.
 	_manager.detach_agent_path(nav_id)
 	_manager.detach_agent_flow(nav_id)
 	_manager.clear_agent_navigation_records(nav_id)
-	# Pause while target/path selection is queued. Native owns movement, so
-	# FlowAgent.set_paused alone would not stop it.
-	_set_native_paused(nav_id, true)
+	_set_native_paused(nav_id, false)
 	if not client.is_in_group("monsters"):
 		client.add_to_group("monsters")
 	if client.has_method("stop_eating"):
@@ -127,16 +139,20 @@ func start_for_client(client: Node2D) -> bool:
 		client.call("start_angry")
 	if client.has_method("queue_redraw"):
 		client.queue_redraw()
+	var interval: float = _attack_interval_for(nav_id)
 	_hostile_clients[nav_id] = {
 		"node": client,
 		"stage": STAGE_WAITING,
 		"target_key": "",
-		"attack_timer": 0.0,
+		"attack_cell": INVALID_CELL,
+		"attack_timer": _initial_phase_for(nav_id, interval),
+		"attack_interval": interval,
 		"attacking_visual": false,
 		"attack_tween": null,
 		"sprite_offset": base_offset,
-		"rejected_keys": {},
-		"idle_revision": -1,
+		"rejected_slot_ids": {},
+		"idle_target_revision": -1,
+		"idle_availability_revision": -1,
 	}
 	_enqueue(nav_id)
 	_refresh_alert()
@@ -153,6 +169,8 @@ func process(delta: float) -> void:
 		_refresh_alert()
 		if _hostile_clients.is_empty():
 			return
+	# Rebuild the planner's slot cache once per frame iff the target set changed.
+	_planner.sync()
 	for raw_nav_id: Variant in _hostile_clients.keys():
 		var nav_id: int = int(raw_nav_id)
 		if not _hostile_clients.has(nav_id):
@@ -169,11 +187,25 @@ func process(delta: float) -> void:
 
 
 func _process_waiting(nav_id: int, data: Dictionary) -> void:
-	# Parked because every target was unreachable: only retry when the world changed.
-	var idle_revision: int = int(data.get("idle_revision", -1))
-	if idle_revision >= 0 and _manager.get_player_placeable_durability_service().revision() != idle_revision:
-		data["idle_revision"] = -1
-		data["rejected_keys"] = {}
+	# Parked clients store why they parked; unparked WAITING clients (e.g. a return
+	# queued after being pushed out of range) carry -1 and are handled by the budget.
+	var target_rev: int = int(data.get("idle_target_revision", -1))
+	var avail_rev: int = int(data.get("idle_availability_revision", -1))
+	if target_rev < 0 and avail_rev < 0:
+		return
+	var durability: PlayerPlaceableDurabilityService = _manager.get_player_placeable_durability_service()
+	if target_rev >= 0 and durability.target_revision() != target_rev:
+		# Target structure changed: topology/targets may differ, so clear rejects.
+		data["rejected_slot_ids"] = {}
+		data["idle_target_revision"] = -1
+		data["idle_availability_revision"] = -1
+		_hostile_clients[nav_id] = data
+		_enqueue(nav_id)
+		return
+	if avail_rev >= 0 and _planner.availability_revision() != avail_rev:
+		# A previously occupied slot freed: retry, but preserve rejects (topology same).
+		data["idle_target_revision"] = -1
+		data["idle_availability_revision"] = -1
 		_hostile_clients[nav_id] = data
 		_enqueue(nav_id)
 
@@ -185,39 +217,43 @@ func _process_moving(nav_id: int, data: Dictionary) -> void:
 	var durability: PlayerPlaceableDurabilityService = _manager.get_player_placeable_durability_service()
 	var key: String = str(data.get("target_key", ""))
 	if not durability.is_target_valid(key):
-		_begin_retarget(nav_id)
+		_begin_retarget(nav_id, true)
 		return
-	var record: Dictionary = durability.target_record(key)
-	var target_cell: Vector2i = record.get("cell", INVALID_CELL) as Vector2i
+	var target_cell: Vector2i = _target_cell(durability, key)
 	if _in_attack_range(client, target_cell):
-		if bool(record.get("instant_destroy", false)):
+		if bool(durability.target_record(key).get("instant_destroy", false)):
 			durability.apply_damage(key, ATTACK_DAMAGE)
-			_begin_retarget(nav_id)
+			_begin_retarget(nav_id, true)
 			return
-		_set_native_paused(nav_id, true)
-		data["stage"] = STAGE_ATTACKING
-		data["attack_timer"] = 0.0
-		_hostile_clients[nav_id] = data
+		_enter_attacking(nav_id)
 		return
-	# Path exhausted without arriving in range: the target became unreachable.
+	# Arrived at the reserved cell but still out of range: that slot is unusable.
 	if _manager.agent_path_arrived(nav_id):
-		_begin_retarget(nav_id)
+		_reject_reserved_slot(nav_id, data)
 
 
 func _process_attacking(nav_id: int, data: Dictionary, delta: float) -> void:
 	if bool(data.get("attacking_visual", false)):
-		return
+		return  # a lunge tween is playing; never interrupt it (knockback rule)
 	var client: Node2D = data.get("node", null) as Node2D
 	if client == null:
 		return
 	var durability: PlayerPlaceableDurabilityService = _manager.get_player_placeable_durability_service()
 	var key: String = str(data.get("target_key", ""))
 	if not durability.is_target_valid(key):
-		_begin_retarget(nav_id)
+		_begin_retarget(nav_id, true)
+		return
+	var target_cell: Vector2i = _target_cell(durability, key)
+	if not _in_attack_range(client, target_cell):
+		# Separation pushed this attacker out of range. Keep the reservation and queue
+		# a budgeted return to the reserved attack cell.
+		data["stage"] = STAGE_WAITING
+		_hostile_clients[nav_id] = data
+		_enqueue(nav_id)
 		return
 	var timer: float = float(data.get("attack_timer", 0.0)) - delta
 	if timer <= 0.0:
-		data["attack_timer"] = ATTACK_INTERVAL_SECONDS
+		data["attack_timer"] = float(data.get("attack_interval", ATTACK_INTERVAL_MAX_SECONDS))
 		data["attacking_visual"] = true
 		_hostile_clients[nav_id] = data
 		_start_attack(nav_id, client, key)
@@ -227,10 +263,11 @@ func _process_attacking(nav_id: int, data: Dictionary, delta: float) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Budgeted target / path assignment.
+# Budgeted target / slot assignment.
 # ---------------------------------------------------------------------------
 func _process_retarget_budget() -> void:
-	while not _pending.is_empty():
+	var attempts: int = 0
+	while not _pending.is_empty() and attempts < MAX_RETARGET_PATH_ATTEMPTS_PER_FRAME:
 		var nav_id: int = int(_pending.pop_front())
 		_queued.erase(nav_id)
 		if not _hostile_clients.has(nav_id):
@@ -238,99 +275,103 @@ func _process_retarget_budget() -> void:
 		var data: Dictionary = _hostile_clients[nav_id] as Dictionary
 		if StringName(str(data.get("stage", ""))) != STAGE_WAITING:
 			continue
-		if int(data.get("idle_revision", -1)) >= 0:
-			continue
-		_attempt_target_assignment(nav_id, data)
-		return  # one expensive attempt per frame
+		if int(data.get("idle_target_revision", -1)) >= 0 or int(data.get("idle_availability_revision", -1)) >= 0:
+			continue  # parked; will be re-enqueued when it wakes
+		_attempt_assignment(nav_id, data)
+		attempts += 1
 
 
-func _attempt_target_assignment(nav_id: int, data: Dictionary) -> void:
+func _attempt_assignment(nav_id: int, data: Dictionary) -> void:
 	var client: Node2D = data.get("node", null) as Node2D
 	if client == null:
 		return
 	var durability: PlayerPlaceableDurabilityService = _manager.get_player_placeable_durability_service()
-	var rejected: Dictionary = data.get("rejected_keys", {}) as Dictionary
-	var key: String = durability.nearest_target_key(client.global_position, rejected)
-	if key == "" and not durability.has_targets():
-		durability.register_live_destructible_targets()
-		key = durability.nearest_target_key(client.global_position, rejected)
-	if key == "":
-		# Nothing selectable this attempt. Park until the world (target/topology)
-		# revision changes so we do not retry every frame.
-		if not durability.has_targets() and not GameState.is_reservoir_destroyed:
-			push_warning("ClientTantrumController: hostile has no target and the reservoir is not destroyed (level invariant).")
-		data["idle_revision"] = durability.revision()
-		_hostile_clients[nav_id] = data
+	var assignment: Dictionary
+	if _planner.has_valid_reservation(nav_id):
+		# Return to the slot this client already holds (pushed out / interrupted).
+		assignment = _planner.reservation(nav_id)
+	else:
+		assignment = _reserve_fresh(nav_id, data, durability)
+		if assignment.is_empty():
+			return  # parked or nothing available; _reserve_fresh recorded idle state
+	var target_key: String = str(assignment.get("target_key", ""))
+	if target_key == "" or not durability.is_target_valid(target_key):
+		# Reserved target vanished between frames: drop it and re-select fresh.
+		_begin_retarget(nav_id, true)
 		return
-	var record: Dictionary = durability.target_record(key)
-	var target_cell: Vector2i = record.get("cell", INVALID_CELL) as Vector2i
-	var instant_destroy: bool = bool(record.get("instant_destroy", false))
-	# Already within reach: skip pathing entirely.
+	var attack_cell: Vector2i = assignment.get("attack_cell", INVALID_CELL) as Vector2i
+	var instant_destroy: bool = bool(assignment.get("instant_destroy", false))
+	data["target_key"] = target_key
+	data["attack_cell"] = attack_cell
+	data["idle_target_revision"] = -1
+	data["idle_availability_revision"] = -1
+	_hostile_clients[nav_id] = data
+	var target_cell: Vector2i = _target_cell(durability, target_key)
 	if _in_attack_range(client, target_cell):
-		data["rejected_keys"] = {}
-		data["idle_revision"] = -1
-		data["target_key"] = key
 		if instant_destroy:
-			durability.apply_damage(key, ATTACK_DAMAGE)
-			_hostile_clients[nav_id] = data
-			_begin_retarget(nav_id)
+			durability.apply_damage(target_key, ATTACK_DAMAGE)
+			_begin_retarget(nav_id, true)
 		else:
-			_set_native_paused(nav_id, true)
-			data["stage"] = STAGE_ATTACKING
-			data["attack_timer"] = 0.0
-			_hostile_clients[nav_id] = data
+			_enter_attacking(nav_id)
 		return
-	var path_world: PackedVector2Array = _compute_attack_path(client, target_cell, instant_destroy)
+	var path_world: PackedVector2Array = _compute_path_to_cell(client, attack_cell)
 	if path_world.is_empty():
-		# No attack cell or no path: reject this target for this selection and try the
-		# next closest on a later budgeted tick (no unbounded A* burst this frame).
-		rejected[key] = true
-		data["rejected_keys"] = rejected
-		_hostile_clients[nav_id] = data
-		_enqueue(nav_id)
+		_reject_reserved_slot(nav_id, data)
 		return
 	_manager.detach_agent_flow(nav_id)
 	_manager.assign_agent_path(nav_id, path_world)
 	_set_native_paused(nav_id, false)
 	data["stage"] = STAGE_MOVING
-	data["target_key"] = key
-	data["rejected_keys"] = {}
-	data["idle_revision"] = -1
 	_hostile_clients[nav_id] = data
 
 
-func _compute_attack_path(client: Node2D, target_cell: Vector2i, instant_destroy: bool) -> PackedVector2Array:
+# Reserves the best available slot for a client with no current reservation. Returns
+# {} and parks the client (recording idle revisions) when nothing is available.
+func _reserve_fresh(nav_id: int, data: Dictionary, durability: PlayerPlaceableDurabilityService) -> Dictionary:
+	var client: Node2D = data.get("node", null) as Node2D
+	if client == null:
+		return {}
+	var rejected: Dictionary = data.get("rejected_slot_ids", {}) as Dictionary
+	var assignment: Dictionary = _planner.reserve_best_assignment(nav_id, client.global_position, rejected)
+	if assignment.is_empty() and not durability.has_targets():
+		# Old saves / level-authored reservoirs may have never registered provenance.
+		durability.register_live_destructible_targets()
+		assignment = _planner.reserve_best_assignment(nav_id, client.global_position, rejected)
+	if assignment.is_empty():
+		# Park until the target structure or planner availability changes, so we do
+		# not rescan every frame.
+		if not durability.has_targets() and not GameState.is_reservoir_destroyed:
+			push_warning("ClientTantrumController: hostile has no target and the reservoir is not destroyed (level invariant).")
+		data["idle_target_revision"] = durability.target_revision()
+		data["idle_availability_revision"] = _planner.availability_revision()
+		_hostile_clients[nav_id] = data
+	return assignment
+
+
+func _compute_path_to_cell(client: Node2D, attack_cell: Vector2i) -> PackedVector2Array:
+	if attack_cell == INVALID_CELL:
+		return PackedVector2Array()
 	var floorz: TileMapLayer = _manager.floorz
 	if floorz == null:
 		return PackedVector2Array()
 	var client_cell: Vector2i = floorz.local_to_map(floorz.to_local(client.global_position))
-	var endpoint_cell: Vector2i = target_cell
-	if not instant_destroy:
-		endpoint_cell = _best_attack_cell(client, target_cell)
-		if endpoint_cell == INVALID_CELL:
-			return PackedVector2Array()
 	var path_service: BuildingPathService = _manager.get_building_path_service()
-	var path_cells: PackedVector2Array = path_service.find_path_on_walkable_map(client_cell, endpoint_cell)
+	var path_cells: PackedVector2Array = path_service.find_path_on_walkable_map(client_cell, attack_cell)
 	if path_cells.is_empty():
 		return PackedVector2Array()
-	return path_service.path_cells_to_world(path_cells, int(client.get("nav_id")), false)
+	# Endpoint dispersion ON so two clients sharing a tile settle at distinct spots.
+	return path_service.path_cells_to_world(path_cells, int(client.get("nav_id")), true)
 
 
-# Cheapest valid adjacent attack cell (walkable 8-neighbor), chosen by squared
-# distance from the client with a deterministic tie-break. A diagonal is acceptable
-# because attack range is 1.5 tiles.
-func _best_attack_cell(client: Node2D, target_cell: Vector2i) -> Vector2i:
-	var best_cell: Vector2i = INVALID_CELL
-	var best_distance: float = INF
-	for offset: Vector2i in NEIGHBOR_OFFSETS:
-		var candidate: Vector2i = target_cell + offset
-		if not _manager.is_walkable_cell(candidate):
-			continue
-		var distance: float = client.global_position.distance_squared_to(_manager.cell_center(candidate))
-		if best_cell == INVALID_CELL or distance < best_distance or (distance == best_distance and _cell_precedes(candidate, best_cell)):
-			best_distance = distance
-			best_cell = candidate
-	return best_cell
+func _enter_attacking(nav_id: int) -> void:
+	if not _hostile_clients.has(nav_id):
+		return
+	var data: Dictionary = _hostile_clients[nav_id] as Dictionary
+	# Detach the completed A* path but keep the agent natively UNPAUSED, so local
+	# separation/overlap still applies while it attacks. Reservation is retained.
+	_manager.detach_agent_path(nav_id)
+	data["stage"] = STAGE_ATTACKING
+	_hostile_clients[nav_id] = data
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +393,7 @@ func _start_attack(nav_id: int, client: Node2D, key: String) -> void:
 		var stop_short_distance: float = maxf(tile_size.x, tile_size.y) * 0.5
 		var lunge_distance: float = maxf(0.0, direction.length() - stop_short_distance + ATTACK_OVERLAP_PIXELS)
 		lunge_offset = base_offset + direction.normalized() * lunge_distance
-	# Visual only: native steering owns the body position (which is hard-paused).
+	# Visual only: native steering owns the body position; we never move it directly.
 	var tween: Tween = _manager.create_tween()
 	data["attack_tween"] = tween
 	_hostile_clients[nav_id] = data
@@ -390,22 +431,41 @@ func _enter_waiting(nav_id: int, reset_rejected: bool) -> void:
 	var data: Dictionary = _hostile_clients[nav_id] as Dictionary
 	data["stage"] = STAGE_WAITING
 	data["target_key"] = ""
-	data["idle_revision"] = -1
+	data["attack_cell"] = INVALID_CELL
+	data["idle_target_revision"] = -1
+	data["idle_availability_revision"] = -1
 	if reset_rejected:
-		data["rejected_keys"] = {}
+		data["rejected_slot_ids"] = {}
 	_hostile_clients[nav_id] = data
-	_set_native_paused(nav_id, true)
+	# Stay unpaused while waiting so native local avoidance keeps working.
+	_set_native_paused(nav_id, false)
 	_enqueue(nav_id)
 
 
-func _begin_retarget(nav_id: int) -> void:
+# Full retarget: release the reservation, detach path/visual, wait for a new slot.
+func _begin_retarget(nav_id: int, reset_rejected: bool) -> void:
 	if not _hostile_clients.has(nav_id):
 		return
+	_planner.release(nav_id)
 	var data: Dictionary = _hostile_clients[nav_id] as Dictionary
 	_manager.detach_agent_path(nav_id)
 	_clear_attack_visual(data)
 	_hostile_clients[nav_id] = data
-	_enter_waiting(nav_id, true)
+	_enter_waiting(nav_id, reset_rejected)
+
+
+# Reject the exact slot this client holds (path failed / arrived out of range) and
+# wait for a different slot. Rejected slots persist until the target structure changes.
+func _reject_reserved_slot(nav_id: int, data: Dictionary) -> void:
+	var slot_id: String = str(_planner.reservation(nav_id).get("slot_id", ""))
+	_planner.release(nav_id)
+	_manager.detach_agent_path(nav_id)
+	if slot_id != "":
+		var rejected: Dictionary = data.get("rejected_slot_ids", {}) as Dictionary
+		rejected[slot_id] = true
+		data["rejected_slot_ids"] = rejected
+		_hostile_clients[nav_id] = data
+	_enter_waiting(nav_id, false)
 
 
 func clear_hostile(nav_id: int) -> void:
@@ -413,6 +473,7 @@ func clear_hostile(nav_id: int) -> void:
 		return
 	var data: Dictionary = _hostile_clients[nav_id] as Dictionary
 	_clear_attack_visual(data)
+	_planner.release(nav_id)
 	# Unpause the native agent before it is unregistered.
 	_set_native_paused(nav_id, false)
 	_hostile_clients.erase(nav_id)
@@ -429,6 +490,7 @@ func end() -> void:
 	_hostile_clients.clear()
 	_pending.clear()
 	_queued.clear()
+	_planner.clear()
 	_hide_alert()
 
 
@@ -450,6 +512,7 @@ func _prune_invalid_hostiles() -> bool:
 	for raw_nav_id: Variant in _hostile_clients.keys():
 		var nav_id: int = int(raw_nav_id)
 		if not _is_live_hostile_client(nav_id, _hostile_clients[nav_id] as Dictionary):
+			_planner.release(nav_id)
 			_hostile_clients.erase(nav_id)
 			_dequeue(nav_id)
 			removed = true
@@ -489,12 +552,34 @@ func _dequeue(nav_id: int) -> void:
 			_pending.remove_at(index)
 
 
+func _target_cell(durability: PlayerPlaceableDurabilityService, key: String) -> Vector2i:
+	return durability.target_record(key).get("cell", INVALID_CELL) as Vector2i
+
+
 func _in_attack_range(client: Node2D, target_cell: Vector2i) -> bool:
 	if target_cell == INVALID_CELL:
 		return false
 	var tile_size: Vector2 = _manager.tile_size()
 	var reach: float = maxf(tile_size.x, tile_size.y) * ATTACK_RANGE_TILES
 	return client.global_position.distance_to(_manager.cell_center(target_cell)) <= reach
+
+
+# Deterministic per-nav interval, stable for a run. No global RNG.
+func _attack_interval_for(nav_id: int) -> float:
+	var unit: float = _deterministic_unit(nav_id, 0)
+	return ATTACK_INTERVAL_MIN_SECONDS + unit * (ATTACK_INTERVAL_MAX_SECONDS - ATTACK_INTERVAL_MIN_SECONDS)
+
+
+# Deterministic initial phase in [0, interval), so attackers do not all fire at t=0.
+func _initial_phase_for(nav_id: int, interval: float) -> float:
+	return _deterministic_unit(nav_id, 1) * interval
+
+
+# Cheap deterministic hash -> unit float in [0, 1). Salt separates the two draws.
+func _deterministic_unit(nav_id: int, salt: int) -> float:
+	var h: int = (nav_id * 73856093) ^ ((salt + 1) * 19349663)
+	h = h & 0x7fffffff
+	return float(h % 100000) / 100000.0
 
 
 func _set_native_paused(nav_id: int, paused: bool) -> void:
@@ -507,14 +592,6 @@ func _client_sprite(client: Node2D) -> Sprite2D:
 	if client == null:
 		return null
 	return client.get_node_or_null("MonsterSprite2D") as Sprite2D
-
-
-func _cell_precedes(a: Vector2i, b: Vector2i) -> bool:
-	if b == INVALID_CELL:
-		return true
-	if a.y != b.y:
-		return a.y < b.y
-	return a.x < b.x
 
 
 func _refresh_alert() -> void:
