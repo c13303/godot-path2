@@ -66,14 +66,22 @@ func hostile_count() -> int:
 
 
 func start_all_clients_without_rose() -> int:
-	_manager.get_player_placeable_durability_service().register_live_destructible_targets()
-	var started: int = 0
+	var candidates: Array[Node2D] = []
 	for raw_node: Node in _manager.get_tree().get_nodes_in_group("clients"):
 		var client: Node2D = raw_node as Node2D
 		if client == null or not is_instance_valid(client):
 			continue
 		if bool(client.get_meta("client_has_rose", false)):
 			continue
+		var nav_id: int = int(client.get("nav_id"))
+		if nav_id < 0 or _hostile_clients.has(nav_id):
+			continue
+		candidates.append(client)
+	if candidates.is_empty():
+		return 0
+	_manager.get_player_placeable_durability_service().register_live_destructible_targets()
+	var started: int = 0
+	for client: Node2D in candidates:
 		if start_for_client(client):
 			started += 1
 	return started
