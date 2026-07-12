@@ -1445,8 +1445,9 @@ func _refresh_special_reward_row() -> void:
 	var signature: String = ""
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
-		signature += "%s:%s:%d|" % [
-			str(reward.get("key", "")), str(reward.get("currency", "")), int(reward.get("amount", 0))
+		signature += "%s:%s:%s:%d|" % [
+			str(reward.get("key", "")), str(reward.get("currency", "")),
+			str(reward.get("item_id", "")), int(reward.get("amount", 0))
 		]
 	if signature == _special_reward_signature:
 		return
@@ -1459,7 +1460,8 @@ func _refresh_special_reward_row() -> void:
 	for raw_reward: Variant in rewards:
 		var reward: Dictionary = raw_reward as Dictionary
 		var reward_cells: Array[Control] = _build_reward_row_cells(
-			str(reward.get("currency", "")), int(reward.get("amount", 0)), str(reward.get("key", ""))
+			str(reward.get("currency", "")), str(reward.get("item_id", "")),
+			int(reward.get("amount", 0)), str(reward.get("key", ""))
 		)
 		for cell: Control in reward_cells:
 			_merchant_items_list.add_child(cell)
@@ -1468,10 +1470,10 @@ func _refresh_special_reward_row() -> void:
 			_reward_cells.append(cell)
 
 
-## The three cells for one free-reward currency payout: the currency icon (a claim button)
-## with the granted amount overlaid as a count badge, the reward name, and an empty price
-## column.
-func _build_reward_row_cells(currency: String, amount: int, reward_key: String) -> Array[Control]:
+## The three cells for one free-reward payout: the reward icon (a claim button) with the
+## granted amount overlaid as a count badge, the reward name, and an empty price column. An
+## item reward (item_id set) shows the item's own sprite and name; otherwise a currency icon.
+func _build_reward_row_cells(currency: String, item_id: String, amount: int, reward_key: String) -> Array[Control]:
 	var button: Button = Button.new()
 	button.custom_minimum_size = SLOT_SIZE
 	button.focus_mode = Control.FOCUS_NONE
@@ -1482,7 +1484,10 @@ func _build_reward_row_cells(currency: String, amount: int, reward_key: String) 
 	_apply_slot_style(button, false, false)
 
 	var icon: TextureRect = TextureRect.new()
-	icon.texture = _currency_icon_for(currency)
+	icon.texture = (
+		_item_frame_texture(ItemCatalog.get_item_def(item_id)) if item_id != ""
+		else _currency_icon_for(currency)
+	)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1496,7 +1501,7 @@ func _build_reward_row_cells(currency: String, amount: int, reward_key: String) 
 
 	var name_label: Label = _make_row_label(18)
 	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	name_label.text = _special_reward_label()
+	name_label.text = _display_name(item_id) if item_id != "" else _special_reward_label()
 
 	var free_label: Label = _make_row_label(18)
 	free_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)

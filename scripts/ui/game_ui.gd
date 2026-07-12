@@ -955,8 +955,9 @@ func try_purchase_seed_merchant_item(item_id: String, count: int = 1) -> bool:
 
 ## Describes the special reward the merchant should offer right now, or {} when the
 ## row must stay hidden (no survived-night reward, or already collected). Returned dict:
-## { "rewards": [{ "currency": String, "amount": int, "key": String }, ...], "night_index": int,
-##   "day": int, "one_time": bool }. Drives the merchant's top "special reward" row.
+## { "rewards": [{ "currency": String, "item_id": String, "amount": int, "key": String }, ...],
+##   "night_index": int, "day": int, "one_time": bool }. Drives the merchant's top "special
+##   reward" row. A reward with a non-empty "item_id" grants that item; otherwise "currency".
 func get_active_night_reward() -> Dictionary:
 	var scene: Node = get_tree().current_scene
 	if scene == null or _progression_node == null:
@@ -988,9 +989,18 @@ func get_active_night_reward() -> Dictionary:
 		reward_index += 1
 		if reward == null or reward.amount <= 0:
 			continue
+		# Item rewards grant a catalog item instead of a currency; skip unknown item ids.
+		var reward_item_id: String = str(reward.item_id)
+		if reward_item_id != "" and ItemCatalog.get_item_def(reward_item_id).is_empty():
+			continue
 		if not GameState.is_special_reward_available(night_index, day, one_time, reward_key):
 			continue
-		rewards.append({"currency": String(reward.currency), "amount": int(reward.amount), "key": reward_key})
+		rewards.append({
+			"currency": String(reward.currency),
+			"item_id": reward_item_id,
+			"amount": int(reward.amount),
+			"key": reward_key,
+		})
 	if rewards.is_empty():
 		return {}
 	return {"rewards": rewards, "night_index": night_index, "day": day, "one_time": one_time}
@@ -1008,10 +1018,18 @@ func claim_active_night_reward(start_global_position: Vector2, reward_key: Strin
 		var current_key: String = str(reward.get("key", ""))
 		if reward_key != "" and current_key != reward_key:
 			continue
+		var amount: int = int(reward["amount"])
+		var reward_item_id: String = str(reward.get("item_id", ""))
+		# Item rewards can fail to grant when the inventory is full; leave the row unclaimed
+		# in that case so the player can retry after freeing space. Currency always grants.
+		if reward_item_id != "":
+			if not _award_reward_item(reward_item_id, amount, start_global_position):
+				return false
+		else:
+			_award_reward_currency(String(reward["currency"]), amount, start_global_position)
 		GameState.record_special_reward_claim(
 			int(info["night_index"]), int(info["day"]), bool(info["one_time"]), current_key
 		)
-		_award_reward_currency(String(reward["currency"]), int(reward["amount"]), start_global_position)
 		return true
 	return false
 
@@ -1037,6 +1055,21 @@ func _award_reward_currency(currency: String, amount: int, start_global_position
 				icon.call("animate_gem_harvest", world_position, i)
 			"money":
 				icon.call("animate_money_harvest", world_position, i)
+
+
+## Grant an item reward into the inventory, flying one item sprite per unit (capped) to the
+## inventory as feedback. Returns false without granting when the inventory can't hold it, so
+## the caller leaves the reward unclaimed.
+func _award_reward_item(item_id: String, quantity: int, start_global_position: Vector2) -> bool:
+	if item_id == "" or quantity <= 0:
+		return false
+	if not add_inventory(item_id, quantity):
+		return false
+	var animated: int = mini(quantity, REWARD_ANIM_CAP)
+	var stagger: float = minf(0.06, 1.0 / float(maxi(animated - 1, 1)))
+	for i: int in range(animated):
+		animate_inventory_item_to_slot(item_id, start_global_position, i, stagger)
+	return true
 
 
 func _credit_reward_currency(currency: String, amount: int) -> void:

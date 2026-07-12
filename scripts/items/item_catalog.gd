@@ -135,6 +135,10 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": true,
 		"blocks_projectiles": true,
 		"runtime_id": "",
+		# Owned as a stock count (shows in the currency HUD like the rest of the inventory):
+		# placing a wall consumes one from the stock instead of charging currency. Walls are
+		# granted as starting stock or merchant rewards, not bought (currency/price unused).
+		"inventory_backed": true,
 		"max_health": 100,
 		"max_stack": 999,
 	},

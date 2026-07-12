@@ -698,7 +698,9 @@ func _rebuild_reward_controls() -> void:
 func _reward_amount_for_currency(night: NightSpawnPlaylist, currency: String) -> int:
 	var total: int = 0
 	for reward: NightReward in night.special_rewards:
-		if reward != null and String(reward.currency) == currency:
+		# Only currency rewards (empty item_id) are edited here; item rewards are authored
+		# via the Inspector and must be left untouched by the currency spinboxes.
+		if reward != null and reward.item_id == "" and String(reward.currency) == currency:
 			total += reward.amount
 	return total
 
@@ -742,7 +744,7 @@ func _set_reward_amount(night: NightSpawnPlaylist, currency: String, amount: int
 	var index: int = rewards.size() - 1
 	while index >= 0:
 		var reward: NightReward = rewards[index]
-		if reward != null and String(reward.currency) == currency:
+		if reward != null and reward.item_id == "" and String(reward.currency) == currency:
 			if existing == null:
 				existing = reward
 			else:
