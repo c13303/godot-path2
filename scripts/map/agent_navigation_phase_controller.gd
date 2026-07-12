@@ -332,6 +332,8 @@ func finish_client_purchase(agent: Node2D) -> void:
 	assign_agent_to_escape(agent)
 
 
+# Opportunistic counter grab: a client walking toward a garden entrance or counter
+# access tile can take from a stocked reachable counter once it passes close enough.
 func try_client_early_counter_fetch(agent: Node2D) -> bool:
 	if _agent_kind(agent) != SPAWNER_KIND_CLIENT:
 		return false

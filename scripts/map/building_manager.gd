@@ -49,11 +49,6 @@ const GARDEN_LINK_DISTANCE: int = PLANT_ZONE_MARGIN * 2 + 1
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
-# A client that has passed within this many tiles of a stocked counter's (walkable)
-# access tile grabs its rose right there and leaves, instead of finishing the walk to
-# the garden entrance / counter. Keyed off the walkable access tile, so a proximity hit
-# means the counter is genuinely reachable.
-const EARLY_COUNTER_FETCH_TILE_FACTOR: float = 1.0
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 const RONCE_ITEM_ID: String = "ronce"
 const ITEM_CATEGORY_TURRET: String = "turret"
@@ -2059,12 +2054,7 @@ func _finish_client_purchase(agent: Node2D) -> void:
 	_agent_navigation_phases.finish_client_purchase(agent)
 
 
-# Opportunistic counter grab: a client still walking toward the garden entrance (flow-in)
-# or toward a counter access tile (A*-in) that passes within EARLY_COUNTER_FETCH_TILE_FACTOR
-# tiles of a stocked counter's access tile grabs its rose there and leaves — no need to
-# finish the walk. Returns true when the client fetched (and is now escaping) so the caller
-# skips its normal arrival handling for this agent. Cheap: monsters bail on the kind check,
-# and clients only run the nearest-counter lookup while some counter actually holds stock.
+# Compatibility wrapper for agent navigation phase logic.
 func _try_client_early_counter_fetch(agent: Node2D) -> bool:
 	return _agent_navigation_phases.try_client_early_counter_fetch(agent)
 

@@ -1372,6 +1372,7 @@ script = ExtResource("28_g12xc")
 
 [node name="sfx" type="Node" parent="." unique_id=1937632267]
 script = ExtResource("27_vhv61")
+music_enable = true
 
 [node name="menus" type="Node" parent="." unique_id=586165781]
 script = ExtResource("35_ikr28")

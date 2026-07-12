@@ -5,15 +5,16 @@ const PANEL_WIDTH: float = 190.0
 const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
-const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const KEY_TODAY: String = "planificator.today"
 const KEY_NIGHT: String = "planificator.tonight"
 const KEY_DAY: String = "planificator.tomorrow"
+const KEY_VICTORY: String = "planificator.victory"
 
 var _today_label: Label
 var _night_label: Label
 var _day_label: Label
+var _victory_label: Label
 var _today_rows: VBoxContainer
 var _night_rows: VBoxContainer
 var _day_rows: VBoxContainer
@@ -81,6 +82,10 @@ func _build_ui() -> void:
 	_day_rows.add_theme_constant_override("separation", 3)
 	content.add_child(_day_rows)
 
+	_victory_label = _make_section_label()
+	_victory_label.visible = false
+	content.add_child(_victory_label)
+
 	_set_mouse_filter_recursive(self)
 
 
@@ -126,6 +131,8 @@ func _apply_translations() -> void:
 		_night_label.text = Translations.t(KEY_NIGHT)
 	if _day_label != null:
 		_day_label.text = Translations.t(KEY_DAY)
+	if _victory_label != null:
+		_victory_label.text = Translations.t(KEY_VICTORY)
 
 
 func _refresh() -> void:
@@ -160,7 +167,8 @@ func _refresh() -> void:
 	var monster_counts: Dictionary = _get_monster_counts(night)
 	_add_monster_rows(monster_counts)
 	_add_row(_day_rows, &"client", maxi(0, night.clients))
-	_add_row(_day_rows, &"merchant", 1)
+	if _victory_label != null:
+		_victory_label.visible = _tomorrow_is_victory_day()
 	_set_mouse_filter_recursive(self)
 
 
@@ -236,6 +244,24 @@ func _get_preview_night_index(playlist: LevelSpawnPlaylist) -> int:
 	return mini(day_index, total_nights - 1)
 
 
+## True when surviving tonight's fight leads straight into the run's trailing client-only
+## day (the victory day). Runs are finite: N authored nights fought on days 1..N, then the
+## win is claimed on day N+1. So the day *after* tonight is that victory day exactly when
+## the current day equals the authored night count.
+func _tomorrow_is_victory_day() -> bool:
+	var playlist: LevelSpawnPlaylist = _get_playlist()
+	if playlist == null:
+		return false
+	var total_nights: int = playlist.get_night_count()
+	if total_nights <= 0:
+		return false
+	var progression: Node = _get_progression()
+	if progression == null or not progression.has_method("get_value"):
+		return false
+	var day_number: int = int(progression.call("get_value", &"nDays"))
+	return day_number == total_nights
+
+
 func _get_progression() -> Node:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
@@ -305,9 +331,6 @@ func _get_icon(agent_type: StringName) -> Texture2D:
 			frame_size = Vector2i(96, 96)
 		&"client":
 			texture = CLIENT_TEXTURE
-			frame_size = Vector2i(64, 64)
-		&"merchant":
-			texture = MERCHANT_TEXTURE
 			frame_size = Vector2i(64, 64)
 		&"rose":
 			texture = ROSE_TEXTURE
