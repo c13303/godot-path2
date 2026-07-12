@@ -1237,12 +1237,11 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 [node name="level_demo" type="Node2D" unique_id=584686861]
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
-starting_gems = 10
+starting_gems = 20
 starting_items = {
-&"pasteque": 1,
-&"rose_shop_counter": 2
+&"pasteque": 1
 }
-tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence"])
+tool_shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence"])
 tool_shop_prices = {
 &"fence": 1,
 &"imperial_seed": 20,
@@ -1251,23 +1250,22 @@ tool_shop_prices = {
 &"reservoir": 100,
 &"ronce": 1,
 &"rose": 1,
-&"rose_shop_counter": 20,
+&"rose_shop_counter": 10,
 &"turret_epine": 3,
 &"wall": 10
 }
 tool_shop_growth_price_factors = {}
-merchant_available_items = Array[StringName]([&"imperial_seed", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+merchant_available_items = Array[StringName]([&"imperial_seed", &"spray", &"beam", &"pasteque"])
 merchant_prices = {
 &"beam": 30,
 &"bomb": 100,
 &"imperial_seed": 20,
 &"pasteque": 10,
-&"rose_shop_counter": 10,
 &"seed": 2,
 &"spray": 10,
 &"sword": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"wall", &"fence", &"imperial_seed", &"spray", &"beam", &"pasteque", &"rose_shop_counter"])
+shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence", &"spray", &"beam"])
 shop_prices = {
 &"beam": 30,
 &"bomb": 100,

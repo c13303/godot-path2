@@ -9,7 +9,7 @@ class_name SpawnWave
 ## Number of monsters this wave must successfully spawn before it completes.
 @export_range(0, 100000, 1, "or_greater") var monster_count: int = 1
 ## Delay after a successful spawn before the next monster in this wave is requested.
-@export_range(0.0, 3600.0, 0.1, "or_greater") var spawn_interval_seconds: float = 3.0
+@export_range(0.0, 3600.0, 0.1, "or_greater") var spawn_interval_seconds: float = 0.2
 
 @export_group("Playlist Events")
 ## Optional playlist event that must already be emitted during this night.

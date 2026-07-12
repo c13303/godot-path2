@@ -335,11 +335,11 @@ const ITEM_DEFS: Dictionary = {
 	"rose_shop_counter": {
 		"id": "rose_shop_counter",
 		"name": "Rose Shop Counter",
-		"currency": &"money",
+		"currency": &"gem",
 		"type": "placeable",
 		"category": "shop_counter",
 		"frame": 12,
-		"price": 20,
+		"price": 10,
 		# Solid like a wall: placed on the blocking layer so the player's hard
 		# collision (driven by _refresh_cell_collision) and the monster steering
 		# obstacle both treat the counter cell as impassable. Clients still buy from
@@ -353,9 +353,8 @@ const ITEM_DEFS: Dictionary = {
 		"requires_grass_green_floor": true,
 		"pad_skip_preview": true,
 		"runtime_id": "rose_shop_counter",
-		# Bought at the seed merchant into the inventory (like pasteque) and then placed
-		# from the hammer picker, which consumes one unit instead of charging currency again.
-		"inventory_backed": true,
+		# Bought directly from the hammer build picker for gems, paid on placement (like
+		# walls/turrets). Not inventory-backed and not sold at the seed merchant.
 		"max_health": 100,
 		"max_stack": 999,
 	},

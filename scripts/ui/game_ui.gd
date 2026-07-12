@@ -1076,14 +1076,11 @@ func _build_limit_remaining(item_id: String) -> int:
 	return maxi(0, limit - built_count)
 
 
-func _build_limit_for_item(item_id: String) -> int:
-	if item_id != "rose_shop_counter":
-		return -1
-	var scene: Node = get_tree().current_scene
-	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
-	if loader != null and loader.has_method("get_loaded_rose_shop_counter_limit"):
-		return clampi(int(loader.call("get_loaded_rose_shop_counter_limit")), 1, 99)
-	return 2
+func _build_limit_for_item(_item_id: String) -> int:
+	# No buildable is currently capped: the rose shop counter is bought with gems from the
+	# hammer picker and placed without a per-world limit, like walls/turrets. The legacy
+	# rose_shop_counter_limit config/loader plumbing is now unused.
+	return -1
 
 
 func _placed_build_count(item_id: String) -> int:
