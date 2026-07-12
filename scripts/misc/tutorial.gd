@@ -355,6 +355,8 @@ func _current_message_key() -> String:
 			return KEY_PLANT_PASTEQUE
 		if _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0:
 			return KEY_PLANT_TURRET_EPINE
+	if _should_prompt_place_shop():
+		return KEY_PLACE_SHOP
 	# Every planted rose is watered, and the client sale has actually completed:
 	# end the day.
 	if _can_start_night_after_clients():
@@ -647,6 +649,12 @@ func _build_affordable_quantity(item_id: String) -> int:
 	if _game_ui == null or not _game_ui.has_method("get_build_affordable_quantity"):
 		return 0
 	return int(_game_ui.call("get_build_affordable_quantity", item_id))
+
+
+func _should_prompt_place_shop() -> bool:
+	if _rose_shop_counter_count() > 0:
+		return false
+	return true
 
 
 func _has_day_one_build_prompt_remaining() -> bool:

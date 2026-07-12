@@ -348,6 +348,9 @@ func can_install_new_counter() -> bool:
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
 	if game_ui == null:
 		return false
+	if game_ui.has_method("can_afford_build"):
+		if bool(game_ui.call("can_afford_build", ROSE_SHOP_COUNTER_ID, 1)):
+			return true
 	if game_ui.has_method("get_inventory_item_quantity"):
 		var owned_counters: int = int(game_ui.call("get_inventory_item_quantity", ROSE_SHOP_COUNTER_ID))
 		if owned_counters > 0:
