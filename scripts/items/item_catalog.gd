@@ -311,7 +311,8 @@ const ITEM_DEFS: Dictionary = {
 		"pad_skip_preview": true,
 		"directional": true,
 		"runtime_id": "turret_epine",
-		"max_health": 100,
+		# One hit point: destroyed in a single hit by tantrum clients.
+		"max_health": 1,
 		"turret_data": TURRET_EPINE_DATA,
 		"turret_sprite_visual": {
 			"texture": TURRET_EPINE_TEXTURE,

@@ -213,7 +213,13 @@ func nearest_target_key(from_world: Vector2, rejected: Dictionary = {}) -> Strin
 func damaged_records() -> Array:
 	var out: Array = []
 	for raw_key: Variant in _targets_by_key.keys():
-		var rec: Dictionary = _targets_by_key[raw_key] as Dictionary
+		var key: String = str(raw_key)
+		# Skip records whose underlying structure no longer exists, so the health
+		# overlay never draws a bar above a destroyed/removed building. Pure check:
+		# no pruning side effects here (that stays on the selection paths).
+		if not is_target_valid(key):
+			continue
+		var rec: Dictionary = _targets_by_key[key] as Dictionary
 		if bool(rec.get("instant_destroy", false)):
 			continue
 		var health: int = int(rec.get("health", 0))
