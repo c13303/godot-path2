@@ -14,6 +14,8 @@ class_name BuildingManager
 
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
+# Emitted from plant_contact_dance_router.gd; ignore the false unused-signal warning.
+@warning_ignore("unused_signal")
 signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float)
 
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")

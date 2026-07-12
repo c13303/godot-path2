@@ -672,7 +672,7 @@ func _ensure_tutorial_arrow() -> void:
 		return
 	_tutorial_arrow = TutorialArrowScript.new() as TutorialArrow
 	_tutorial_arrow.name = "TutorialArrow"
-	_game_ui.add_child(_tutorial_arrow)
+	_game_ui.call_deferred("add_child", _tutorial_arrow)
 
 
 func _is_gardening_menu_open() -> bool:
