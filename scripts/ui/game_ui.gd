@@ -416,6 +416,14 @@ func get_quick_slot_left_x(index: int) -> float:
 	return _toolbar_slot_nodes[index].get_global_rect().position.x
 
 
+## Global-space rect for a quick slot kind ("weapon", "gardening", "hammer").
+func get_quick_slot_global_rect_for_kind(kind: String) -> Rect2:
+	var index: int = QUICK_SLOT_KINDS.find(kind)
+	if index < 0 or index >= _toolbar_slot_nodes.size():
+		return Rect2()
+	return _toolbar_slot_nodes[index].get_global_rect()
+
+
 func animate_inventory_item_to_slot(
 	item_id: String,
 	start_global_position: Vector2,

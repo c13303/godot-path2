@@ -914,6 +914,16 @@ func is_merchant_shop_open() -> bool:
 	return _merchant_column != null and _merchant_column.visible
 
 
+## Global-space rect for a visible build-picker item slot. Used by tutorial pointers only.
+func get_visible_build_item_global_rect(item_id: String) -> Rect2:
+	if _toolbuild_column == null or not _toolbuild_column.visible:
+		return Rect2()
+	var button: Button = _slot_buttons.get(item_id) as Button
+	if button == null or not button.visible:
+		return Rect2()
+	return button.get_global_rect()
+
+
 ## Interact-button entry point (E / pad Y). Opens the merchant shop when the player is standing
 ## at the merchant during its day phase, or closes it when already open. Returns true when the
 ## press was consumed (at the merchant, or shop open) so the caller can fall back to another

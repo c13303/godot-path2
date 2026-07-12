@@ -14,10 +14,18 @@ seeds > 0  +  gardening tool equipped
 planted roses still dry (unwatered > 0)
     = "Arrosez vos roses" / "Water your roses"              [tutorial.water_roses]
 
+day 1 + all roses watered + pasteque remaining
+    = "Plantez une pastèque pour irriguer le sol"
+      / "Plant a watermelon to irrigate the soil"            [tutorial.plant_pasteque]
+
+day 1 + all roses watered + turret_epine remaining
+    = "Plantez des cracheuses pour défendre le jardin"
+      / "Plant spitters to defend the garden"                [tutorial.plant_turret_epine]
+
 no rose_shop_counter placed yet
     = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
 
-everything done (all watered, nothing to plant/buy) + clients already served + any tantrum clients have vanished
+everything done (all watered, no day 1 pasteque/turret prompt remaining) + clients already served + any tantrum clients have vanished
     = "Passez la nuit" / "Pass the night"                   [tutorial.pass_night]
     -> turns into the hold-to-confirm prompt below
     (gated by can_start_night_after_clients() -> clients_finished_for_day(),

@@ -1373,23 +1373,23 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="seedmerchent" type="Sprite2D" parent="spawners" unique_id=655819204]
-position = Vector2(821, 3060)
+position = Vector2(2049, 3795)
 texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="exit" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1151164943]
-position = Vector2(2640, 26)
+position = Vector2(58, 0)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="spot" type="Sprite2D" parent="spawners/seedmerchent" unique_id=1455932304]
-position = Vector2(1639, -311)
+position = Vector2(433, -1054)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="sheep" type="Sprite2D" parent="spawners/seedmerchent" unique_id=17673017]
-position = Vector2(1639, -247)
+position = Vector2(433, -990)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 

@@ -15,14 +15,18 @@ extends RichTextLabel
 ##   5. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
 ##   6. seeds left, shop tool equipped .............. Plant roses
 ##   7. planted roses still dry ..................... Water your roses
-##   8. all roses watered, clients done ............. Hold to start night
+##   8. day 1 pasteque/turret still placeable ....... Plant pasteque / turret
+##   9. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
+const TutorialArrowScript: Script = preload("res://scripts/misc/tutorial_arrow.gd")
 
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
+const KEY_PLANT_PASTEQUE: String = "tutorial.plant_pasteque"
+const KEY_PLANT_TURRET_EPINE: String = "tutorial.plant_turret_epine"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
@@ -46,6 +50,13 @@ const ALERT_DURATION: float = 3.0
 const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)
 const ALERT_DARK_RED: Color = Color(0.55, 0.0, 0.0)
 const ALERT_FLASH_SPEED: float = 8.0
+const GARDENING_TOOL_ID: String = "gardening"
+const HAMMER_TOOL_ID: String = "hammer"
+const WEAPON_TOOL_ID: String = "weapon"
+const ROSE_ITEM_ID: String = "rose"
+const PASTEQUE_ITEM_ID: String = "pasteque"
+const TURRET_EPINE_ITEM_ID: String = "turret_epine"
+const COUNTER_ITEM_ID: String = "rose_shop_counter"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -54,6 +65,7 @@ const CHANGE_DELAY: float = 0.5
 var _plant_manager: Node
 var _progression: Node
 var _game_ui: Node
+var _toolbuild: Control
 var _building_manager: Node
 var _building_object_manager: Node
 var _day_toggle: Control
@@ -70,6 +82,7 @@ var _alert_key: String = ""
 var _alert_count: int = -1
 var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
+var _tutorial_arrow: TutorialArrow
 # True during the sunrise transition: night has just ended but the first day phase
 # (the morning harvest) has not begun yet. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -102,6 +115,7 @@ func _resolve_nodes() -> void:
 		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
+		_toolbuild = scene.get_node_or_null("GameUI/Toolbuild") as Control
 		_hold_progress_circle = scene.get_node_or_null("GameUI/holdProgressCircle") as Control
 		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
 			GameState.building_phase_changed.connect(_on_building_phase_changed)
@@ -154,6 +168,7 @@ func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 	visible = true
 	text = _alert_text()
 	_set_glow(false)
+	_update_tutorial_arrow("")
 
 
 ## Dismiss an active alert early. When key is non-empty only the matching alert is
@@ -185,6 +200,7 @@ func _refresh(delta: float = 0.0) -> void:
 			text = _alert_text()
 			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, 0.5)
 			_set_glow(false)
+			_update_tutorial_arrow("")
 			return
 		_alert_remaining -= delta
 		if _alert_remaining > 0.0:
@@ -193,6 +209,7 @@ func _refresh(delta: float = 0.0) -> void:
 			var pulse: float = (sin((ALERT_DURATION - _alert_remaining) * ALERT_FLASH_SPEED) + 1.0) * 0.5
 			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, pulse)
 			_set_glow(false)
+			_update_tutorial_arrow("")
 			return
 		_alert_key = ""
 		_alert_count = -1
@@ -210,6 +227,7 @@ func _refresh(delta: float = 0.0) -> void:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
+		_update_tutorial_arrow("")
 		return
 	if _should_request_start_night_prompt():
 		_request_start_night_prompt()
@@ -237,11 +255,13 @@ func _refresh(delta: float = 0.0) -> void:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
+		_update_tutorial_arrow("")
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
+		_update_tutorial_arrow("")
 		return
 	visible = true
 	modulate = Color.WHITE
@@ -270,6 +290,7 @@ func _refresh(delta: float = 0.0) -> void:
 
 	# Glow tracks the message actually on screen, so it stays in step with the text.
 	_set_glow(false)
+	_update_tutorial_arrow(_displayed_key)
 
 
 func _current_message_key() -> String:
@@ -317,6 +338,11 @@ func _current_message_key() -> String:
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES
+	if _can_start_night_after_clients() and _has_day_one_build_prompt_remaining():
+		if _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0:
+			return KEY_PLANT_PASTEQUE
+		if _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0:
+			return KEY_PLANT_TURRET_EPINE
 	# Every planted rose is watered, and the client sale has actually completed:
 	# end the day.
 	if _can_start_night_after_clients():
@@ -345,6 +371,7 @@ func _show_key_immediately(key: String) -> void:
 	visible = true
 	modulate = Color.WHITE
 	_set_glow(false)
+	_update_tutorial_arrow(key)
 
 
 func _should_request_start_night_prompt() -> bool:
@@ -355,6 +382,8 @@ func _should_request_start_night_prompt() -> bool:
 	# starts). Without this guard the just-ended night would immediately request the
 	# start-night prompt. That request may only happen once the real day is under way.
 	if _sun_rising:
+		return false
+	if _has_day_one_build_prompt_remaining():
 		return false
 	return _can_start_night_after_clients()
 
@@ -391,6 +420,7 @@ func _request_start_night_prompt() -> void:
 	text = ""
 	visible = false
 	_set_glow(false)
+	_update_tutorial_arrow("")
 	if _building_manager != null and _building_manager.has_method("request_night_after_clients"):
 		_building_manager.call("request_night_after_clients")
 
@@ -421,6 +451,7 @@ func _show_hold_action(action: StringName, delta: float) -> void:
 	modulate = Color.WHITE
 	text = Translations.t(_hold_translation_key(action))
 	_set_glow(false)
+	_update_tutorial_arrow("")
 	_advance_hold(action, delta)
 
 
@@ -552,6 +583,133 @@ func _has_active_night_reward() -> bool:
 		return false
 	var reward_info: Dictionary = _game_ui.call("get_active_night_reward") as Dictionary
 	return not reward_info.is_empty()
+
+
+func _is_day_one() -> bool:
+	if _progression == null or not _progression.has_method("get_value"):
+		return false
+	return int(_progression.call("get_value", &"nDays")) == 1
+
+
+func _is_day_two() -> bool:
+	if _progression == null or not _progression.has_method("get_value"):
+		return false
+	return int(_progression.call("get_value", &"nDays")) == 2
+
+
+func _build_affordable_quantity(item_id: String) -> int:
+	if _game_ui == null or not _game_ui.has_method("get_build_affordable_quantity"):
+		return 0
+	return int(_game_ui.call("get_build_affordable_quantity", item_id))
+
+
+func _has_day_one_build_prompt_remaining() -> bool:
+	return (
+		_is_day_one()
+		and (
+			_build_affordable_quantity(PASTEQUE_ITEM_ID) > 0
+			or _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
+		)
+	)
+
+
+func _tutorial_item_for_key(key: String) -> String:
+	match key:
+		KEY_BUY_ROSES, KEY_PLANT_ROSES:
+			return ROSE_ITEM_ID
+		KEY_PLANT_PASTEQUE:
+			return PASTEQUE_ITEM_ID
+		KEY_PLANT_TURRET_EPINE:
+			return TURRET_EPINE_ITEM_ID
+	return ""
+
+
+func _update_tutorial_arrow(key: String) -> void:
+	_ensure_tutorial_arrow()
+	if _tutorial_arrow == null:
+		return
+	if key == KEY_WATER_ROSES and _is_day_one():
+		var weapon_rect: Rect2 = _quick_slot_rect(WEAPON_TOOL_ID)
+		if weapon_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_down_at(weapon_rect, get_process_delta_time())
+			return
+		_hide_tutorial_arrow()
+		return
+	if key == KEY_PLACE_SHOP and _is_day_two():
+		if _is_hammer_menu_open():
+			var counter_rect: Rect2 = _visible_build_item_rect(COUNTER_ITEM_ID)
+			if counter_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_left_at(counter_rect, get_process_delta_time())
+				return
+		else:
+			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
+			if hammer_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
+				return
+		_hide_tutorial_arrow()
+		return
+	var item_id: String = _tutorial_item_for_key(key)
+	if item_id == "":
+		_hide_tutorial_arrow()
+		return
+	if _is_gardening_menu_open():
+		var item_rect: Rect2 = _visible_build_item_rect(item_id)
+		if item_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_left_at(item_rect, get_process_delta_time())
+			return
+	elif not _gardening_equipped():
+		var tool_rect: Rect2 = _gardening_tool_rect()
+		if tool_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_down_at(tool_rect, get_process_delta_time())
+			return
+	_hide_tutorial_arrow()
+
+
+func _ensure_tutorial_arrow() -> void:
+	if _tutorial_arrow != null and is_instance_valid(_tutorial_arrow):
+		return
+	if _game_ui == null:
+		return
+	_tutorial_arrow = TutorialArrowScript.new() as TutorialArrow
+	_tutorial_arrow.name = "TutorialArrow"
+	_game_ui.add_child(_tutorial_arrow)
+
+
+func _is_gardening_menu_open() -> bool:
+	return (
+		_game_ui != null
+		and _game_ui.has_method("get_selected_build_tool_id")
+		and str(_game_ui.call("get_selected_build_tool_id")) == GARDENING_TOOL_ID
+	)
+
+
+func _is_hammer_menu_open() -> bool:
+	return (
+		_game_ui != null
+		and _game_ui.has_method("get_selected_build_tool_id")
+		and str(_game_ui.call("get_selected_build_tool_id")) == HAMMER_TOOL_ID
+	)
+
+
+func _visible_build_item_rect(item_id: String) -> Rect2:
+	if _toolbuild == null or not _toolbuild.has_method("get_visible_build_item_global_rect"):
+		return Rect2()
+	return _toolbuild.call("get_visible_build_item_global_rect", item_id) as Rect2
+
+
+func _gardening_tool_rect() -> Rect2:
+	return _quick_slot_rect(GARDENING_TOOL_ID)
+
+
+func _quick_slot_rect(slot_kind: String) -> Rect2:
+	if _game_ui == null or not _game_ui.has_method("get_quick_slot_global_rect_for_kind"):
+		return Rect2()
+	return _game_ui.call("get_quick_slot_global_rect_for_kind", slot_kind) as Rect2
+
+
+func _hide_tutorial_arrow() -> void:
+	if _tutorial_arrow != null:
+		_tutorial_arrow.hide_arrow()
 
 
 ## Pulses the day/night icon so the player notices they can end the day.
