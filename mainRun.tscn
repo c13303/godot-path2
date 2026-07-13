@@ -875,8 +875,20 @@ texture = SubResource("AtlasTexture_sun")
 expand_mode = 1
 stretch_mode = 5
 
+[node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
+layout_mode = 0
+offset_left = -225.0
+offset_top = 95.0
+offset_right = 304.0
+offset_bottom = 223.0
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+text = "Achetez des roses avec l'outil MAGASIN"
+horizontal_alignment = 1
+script = ExtResource("20_7xko8")
+
 [node name="dayLabel" type="RichTextLabel" parent="GameUI" unique_id=2071789186]
-layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -891,19 +903,6 @@ bbcode_enabled = true
 fit_content = true
 scroll_active = false
 vertical_alignment = 1
-
-[node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
-layout_mode = 0
-offset_left = -225.0
-offset_top = 95.0
-offset_right = 304.0
-offset_bottom = 223.0
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
-theme_override_constants/shadow_offset_x = 1
-theme_override_constants/shadow_offset_y = 1
-text = "Achetez des roses avec l'outil MAGASIN"
-horizontal_alignment = 1
-script = ExtResource("20_7xko8")
 
 [node name="holdProgressCircle" type="Control" parent="GameUI" unique_id=253945861]
 visible = false

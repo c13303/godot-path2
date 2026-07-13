@@ -24,6 +24,7 @@ const WAVE_COUNT_WIDTH: float = 84.0
 const WAVE_TIME_WIDTH: float = 96.0
 const WAVE_EVENT_WIDTH: float = 124.0
 const WAVE_DELETE_WIDTH: float = 74.0
+const WAVE_COPY_WIDTH: float = 64.0
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const WATER_POND_ATLAS_ORIGIN: Vector2i = Vector2i(4, 3)
 const WATER_OCEAN_HOLE_ATLAS_CENTER: Vector2i = Vector2i(8, 4)
@@ -63,6 +64,7 @@ var _selected_night_index: int = 0
 var _dirty: bool = false
 var _loading_ui: bool = false
 var _status_hide_token: int = 0
+var _copied_wave: SpawnWave
 
 var _level_option: OptionButton
 var _save_button: Button
@@ -171,6 +173,17 @@ func delete_wave(spawner_id: StringName, wave_index: int) -> void:
 	waves.remove_at(wave_index)
 	track.waves = waves
 	mark_dirty()
+	_rebuild_tracks()
+
+
+func copy_wave(spawner_id: StringName, wave_index: int) -> void:
+	var track: SpawnerWaveTrack = _get_track(spawner_id)
+	if track == null or wave_index < 0 or wave_index >= track.waves.size():
+		return
+	var source: SpawnWave = track.waves[wave_index]
+	if source == null:
+		return
+	_copied_wave = source.duplicate(true) as SpawnWave
 	_rebuild_tracks()
 
 
@@ -1165,6 +1178,13 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	add_wave_button.pressed.connect(_add_wave.bind(spawner_id))
 	header.add_child(add_wave_button)
 
+	var paste_wave_button: Button = Button.new()
+	paste_wave_button.text = "Paste"
+	paste_wave_button.tooltip_text = "Paste the last copied wave into this track."
+	paste_wave_button.disabled = _copied_wave == null
+	paste_wave_button.pressed.connect(_paste_wave.bind(spawner_id))
+	header.add_child(paste_wave_button)
+
 	var disable_button: Button = Button.new()
 	disable_button.text = "Disable Track"
 	disable_button.pressed.connect(_disable_track.bind(spawner_id))
@@ -1181,6 +1201,7 @@ func _build_spawner_panel(spawner_id: StringName, event_names: Array[StringName]
 	_add_wave_header_label(labels, "Wait Event", WAVE_EVENT_WIDTH, true)
 	_add_wave_header_label(labels, "Emit Event", WAVE_EVENT_WIDTH, true)
 	_add_wave_header_label(labels, "Emit Delay", WAVE_TIME_WIDTH, false)
+	_add_wave_header_label(labels, "", WAVE_COPY_WIDTH, false)
 	_add_wave_header_label(labels, "", WAVE_DELETE_WIDTH, false)
 
 	var wave_index: int = 0
@@ -1948,6 +1969,23 @@ func _add_wave(spawner_id: StringName) -> void:
 		return
 	var wave: SpawnWave = SpawnWave.new()
 	wave.monster_type = _monster_types()[0]
+	var waves: Array[SpawnWave] = _copy_waves(track)
+	waves.append(wave)
+	track.waves = waves
+	mark_dirty()
+	_rebuild_tracks()
+
+
+func _paste_wave(spawner_id: StringName) -> void:
+	if _copied_wave == null:
+		return
+	var track: SpawnerWaveTrack = _get_track(spawner_id)
+	if track == null:
+		_enable_track(spawner_id)
+		track = _get_track(spawner_id)
+	if track == null:
+		return
+	var wave: SpawnWave = _copied_wave.duplicate(true) as SpawnWave
 	var waves: Array[SpawnWave] = _copy_waves(track)
 	waves.append(wave)
 	track.waves = waves

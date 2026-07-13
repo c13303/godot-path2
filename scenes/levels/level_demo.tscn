@@ -1358,27 +1358,6 @@ position = Vector2(18, -241)
 texture = ExtResource("6_5dxts")
 metadata/id = ""
 
-[node name="monster2" type="Sprite2D" parent="spawners" unique_id=1155345194]
-position = Vector2(1777, 1211)
-scale = Vector2(0.70312417, 0.6796846)
-texture = ExtResource("4_drkbx")
-metadata/id = ""
-
-[node name="exit" type="Sprite2D" parent="spawners/monster2" unique_id=1311384222]
-position = Vector2(871.82324, 4040.1094)
-texture = ExtResource("5_drkbx")
-metadata/id = ""
-
-[node name="monster1" type="Sprite2D" parent="spawners" unique_id=1274841071]
-position = Vector2(2023, 1225)
-texture = ExtResource("4_drkbx")
-metadata/id = ""
-
-[node name="exit" type="Sprite2D" parent="spawners/monster1" unique_id=389270062]
-position = Vector2(51, 2739)
-texture = ExtResource("5_drkbx")
-metadata/id = ""
-
 [node name="client2" type="Sprite2D" parent="spawners" unique_id=1169622304]
 position = Vector2(3436, 2241)
 texture = ExtResource("5_u8kq7")
@@ -1411,23 +1390,44 @@ position = Vector2(433, -990)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
+[node name="monster1" type="Sprite2D" parent="spawners" unique_id=1274841071]
+position = Vector2(2237, 1217)
+texture = ExtResource("4_drkbx")
+metadata/id = ""
+
+[node name="exit" type="Sprite2D" parent="spawners/monster1" unique_id=389270062]
+position = Vector2(51, 2739)
+texture = ExtResource("5_drkbx")
+metadata/id = ""
+
+[node name="monster2" type="Sprite2D" parent="spawners" unique_id=1155345194]
+position = Vector2(1857.0001, 1201)
+scale = Vector2(0.70312417, 0.6796846)
+texture = ExtResource("4_drkbx")
+metadata/id = ""
+
+[node name="exit" type="Sprite2D" parent="spawners/monster2" unique_id=1311384222]
+position = Vector2(-76.80011, 3604.6133)
+texture = ExtResource("5_drkbx")
+metadata/id = ""
+
 [node name="monster3" type="Sprite2D" parent="spawners" unique_id=2123954901]
-position = Vector2(1498, 1207)
+position = Vector2(949, 2346)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster3" unique_id=452574762]
-position = Vector2(277, 2750)
+position = Vector2(2491, 47)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="monster4" type="Sprite2D" parent="spawners" unique_id=501834689]
-position = Vector2(2515, 1224)
+position = Vector2(3439, 2633)
 texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="exit" type="Sprite2D" parent="spawners/monster4" unique_id=1545341588]
-position = Vector2(-269, 2745)
+position = Vector2(-2433, -345)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 

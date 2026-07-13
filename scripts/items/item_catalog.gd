@@ -214,6 +214,7 @@ const ITEM_DEFS: Dictionary = {
 		"occupies_cell": true,
 		"blocks_movement": false,
 		"blocks_projectiles": false,
+		"requires_grass_green_floor": true,
 		"runtime_id": "ronce",
 		"speed_multiplier": 0.3,
 		"max_health": 100,

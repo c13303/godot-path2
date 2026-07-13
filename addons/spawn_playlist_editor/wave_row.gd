@@ -8,6 +8,7 @@ const COUNT_WIDTH: float = 84.0
 const TIME_WIDTH: float = 96.0
 const EVENT_WIDTH: float = 124.0
 const DELETE_WIDTH: float = 74.0
+const COPY_WIDTH: float = 64.0
 
 var dock: Control
 var spawner_id: StringName = &""
@@ -122,6 +123,13 @@ func _build(monster_types: Array[StringName], event_names: Array[StringName]) ->
 	_emit_delay.value_changed.connect(_on_emit_delay_changed)
 	add_child(_emit_delay)
 
+	var copy_button: Button = Button.new()
+	copy_button.text = "Copy"
+	copy_button.custom_minimum_size = Vector2(COPY_WIDTH, 0.0)
+	copy_button.tooltip_text = "Copy this wave so it can be pasted into any active track."
+	copy_button.pressed.connect(_on_copy_pressed)
+	add_child(copy_button)
+
 	var delete_button: Button = Button.new()
 	delete_button.text = "Delete"
 	delete_button.custom_minimum_size = Vector2(DELETE_WIDTH, 0.0)
@@ -183,6 +191,11 @@ func _on_emit_delay_changed(value: float) -> void:
 func _on_delete_pressed() -> void:
 	if dock != null and dock.has_method("delete_wave"):
 		dock.call("delete_wave", spawner_id, wave_index)
+
+
+func _on_copy_pressed() -> void:
+	if dock != null and dock.has_method("copy_wave"):
+		dock.call("copy_wave", spawner_id, wave_index)
 
 
 func _on_move_up_pressed() -> void:
