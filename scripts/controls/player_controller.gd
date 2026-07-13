@@ -234,7 +234,7 @@ func _update_pad_cursor(delta: float) -> void:
 		_deactivate_pad_build_cursor()
 		return
 	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
-	if _pad_build_preview_active():
+	if _pad_build_cursor_mode_active():
 		var left_stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
 		if left_stick != Vector2.ZERO:
 			stick = left_stick
@@ -333,7 +333,7 @@ func _update_pad_navigation_input() -> void:
 		_dpad_up_pressed = up_pressed
 		_dpad_down_pressed = down_pressed
 		return
-	if _pad_build_preview_active():
+	if _pad_build_cursor_mode_active():
 		_dpad_left_pressed = left_pressed
 		_dpad_right_pressed = right_pressed
 		_dpad_up_pressed = up_pressed
@@ -407,6 +407,12 @@ func _handle_pad_cancel() -> void:
 		return
 	if build_system == null:
 		return
+	# While a committed buildable is previewing, B returns to default play mode. It must not
+	# fall through to the unbuild toggle, because the same button also equips unbuild in play.
+	if _in_build_mode():
+		_clear_build_selection()
+		_deactivate_quickbar()
+		return
 	# Cancel an in-progress placement preview first.
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
 		return
@@ -431,6 +437,9 @@ func _handle_pad_rotate_build() -> void:
 
 func _pad_build_preview_active() -> bool:
 	return build_system != null and build_system.has_method("pad_is_build_preview_active") and bool(build_system.call("pad_is_build_preview_active"))
+
+func _pad_build_cursor_mode_active() -> bool:
+	return _in_build_mode() or _pad_build_preview_active()
 
 func _gamepad_stick_vector(x_axis: JoyAxis, y_axis: JoyAxis) -> Vector2:
 	if _active_gamepad_device < 0:
