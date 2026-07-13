@@ -1518,7 +1518,11 @@ func day_clients_gone() -> bool:
 
 
 func remaining_planificator_client_count() -> int:
-	if _client_sale.current_day_client_step_pending_or_active():
+	# While the day's client step is latched but the sale has not started spawning yet
+	# (the pre-sale morning gap), show the full planned count. Once the sale is active,
+	# report the live remaining count (pending spawns + clients still on the map) so the
+	# NOW slot ticks down as clients leave or die.
+	if _client_sale.current_day_client_step_pending_or_active() and not _client_sale.is_active():
 		return _client_sale.planned_client_count_for_current_step()
 	return _client_sale.remaining_client_count_for_today()
 
