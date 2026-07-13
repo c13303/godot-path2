@@ -28,8 +28,8 @@
 [ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/gameplay_phase_colors.gd" id="25_gameplay_phase_colors"]
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
+[ext_resource type="Script" uid="uid://tkaa4x04kq78" path="res://scripts/sfx/music_autostart.gd" id="27_music_autostart"]
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
-[ext_resource type="Script" uid="uid://d0pugx2tb6mno" path="res://scripts/sfx/sfx.gd" id="27_vhv61"]
 [ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
@@ -1371,9 +1371,8 @@ starting_gems = 1000
 [node name="difficulty" type="Node" parent="." unique_id=922878044]
 script = ExtResource("28_g12xc")
 
-[node name="sfx" type="Node" parent="." unique_id=1937632267]
-script = ExtResource("27_vhv61")
-music_enable = true
+[node name="musicAutostart" type="Node" parent="." unique_id=1937632267]
+script = ExtResource("27_music_autostart")
 
 [node name="menus" type="Node" parent="." unique_id=586165781]
 script = ExtResource("35_ikr28")

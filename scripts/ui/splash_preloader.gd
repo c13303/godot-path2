@@ -3,8 +3,8 @@ extends Control
 # ---------------------------------------------------------------------------
 # Startup splash shown while the heavy mainRun scene loads in the background.
 #
-# The image and music are prewired in splash_preloader.tscn (no hot loading);
-# this script only covers the disk load and the transition into the game:
+# The image is prewired in splash_preloader.tscn (no hot loading). Music is
+# started through the persistent Sfx autoload. This script also covers:
 #   * mainRun is loaded on a worker thread as soon as the splash appears (this
 #     only overlaps the disk read/parse with the splash; the scene's own
 #     instantiation and _ready init still run on the main thread on entry).
@@ -23,6 +23,9 @@ var _advancing: bool = false
 
 
 func _ready() -> void:
+	# Music belongs to the Sfx autoload so it survives the scene handoff to
+	# mainRun without starting the track again.
+	Sfx.start_music()
 	var request_error: Error = ResourceLoader.load_threaded_request(MAIN_RUN_SCENE)
 	if request_error == OK:
 		_load_requested = true

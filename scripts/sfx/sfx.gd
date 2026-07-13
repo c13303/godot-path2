@@ -60,7 +60,13 @@ var _music_player: AudioStreamPlayer
 
 func _ready() -> void:
 	_build_player_pools()
-	_start_music()
+	_build_music_player()
+
+
+## Starts the persistent theme player if it is not already playing.
+## The Sfx autoload owns music playback so scene changes do not restart it.
+func start_music() -> void:
+	music_enable = true
 
 
 func play_sound(sound_id: StringName) -> bool:
@@ -125,7 +131,7 @@ func _build_player_pools() -> void:
 		_next_player[sound_id] = 0
 
 
-func _start_music() -> void:
+func _build_music_player() -> void:
 	_music_player = AudioStreamPlayer.new()
 	_music_player.name = "Theme1"
 	_music_player.stream = THEME

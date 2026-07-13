@@ -670,8 +670,15 @@ func is_build_item_available(item_id: String) -> bool:
 	if item_id == "rose_shop_counter":
 		return true
 	# Inventory-backed buildables are always offered in the toolbuild picker; their
-	# affordability is the owned count, so an empty stack simply greys the slot.
+	# affordability is the owned count, so an empty stack simply greys the slot. The
+	# level author can still hide one by unchecking its "Available" box in the Gardening
+	# Tool / Hammer shop list: an explicit exclusion from the tool shop list wins over
+	# the always-offered rule (otherwise the checkbox would do nothing for these items).
 	if ItemCatalog.is_inventory_backed(item_id):
+		if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
+			var raw_inventory_tool_ids: Variant = loader.call("get_loaded_tool_shop_available_items")
+			if raw_inventory_tool_ids is Array and not _string_array_contains(raw_inventory_tool_ids, item_id):
+				return false
 		return true
 	if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
 		var raw_tool_item_ids: Variant = loader.call("get_loaded_tool_shop_available_items")
@@ -688,6 +695,13 @@ func is_build_item_available(item_id: String) -> bool:
 					return true
 			return false
 	return item_id == "rose" or item_id == "wall" or item_id == "ronce" or item_id == "fence"
+
+
+func _string_array_contains(values: Array, item_id: String) -> bool:
+	for raw_value: Variant in values:
+		if str(raw_value) == item_id:
+			return true
+	return false
 
 
 func get_build_price(item_id: String) -> int:
