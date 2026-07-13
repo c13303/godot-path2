@@ -1254,6 +1254,7 @@ func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_
 		"morning":
 			_client_sale.begin_client_step()
 			GameState.set_client_phase(true)
+			_dawn_harvest.on_client_sale_started()
 			if not has_runtime_agents:
 				call_deferred("_begin_client_sale_phase")
 		_:
@@ -1315,9 +1316,10 @@ func _reset_client_sale_state() -> void:
 
 func begin_client_sale_phase() -> void:
 	_client_sale_start_requested = false
-	# The player may trigger clients before finishing (or even starting) the dawn
-	# harvest, so end the harvest here; the client sale itself is unchanged.
-	_dawn_harvest.clear_active()
+	# The player may trigger clients before finishing the dawn harvest. Keep grown
+	# roses collectable so existing or newly built counters can receive them during
+	# the sale, including after clients free capacity from a previously full counter.
+	_dawn_harvest.on_client_sale_started()
 	_begin_client_sale_phase()
 
 

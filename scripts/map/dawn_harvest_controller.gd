@@ -24,13 +24,22 @@ func is_active() -> bool:
 func on_counter_capacity_added() -> void:
 	if _active:
 		return
-	if not GameState.is_dawn_phase:
+	if not GameState.is_dawn_phase and not GameState.is_client_phase:
 		return
 	if _manager.grownup_rose_count() <= 0:
 		return
 	if not _manager.has_counter_room_for_harvest():
 		return
 	_active = true
+
+
+## Keep grown roses collectable after the player starts the client sale early. The
+## controller must stay awake even while every counter is full: clients can free a
+## slot later, and walkover harvesting should resume without another lifecycle event.
+func on_client_sale_started() -> void:
+	if GameState.is_night:
+		return
+	_active = _manager.grownup_rose_count() > 0
 
 
 func begin_phase() -> void:
@@ -73,7 +82,7 @@ func process_walkover() -> void:
 	var plant_manager: Node = _plant_manager()
 	if plant_manager == null:
 		return
-	var harvest_cell: Vector2i = _player_harvestable_plant_cell()
+	var harvest_cell: Vector2i = _player_harvestable_plant_cell(GameState.is_client_phase)
 	if harvest_cell == INVALID_CELL:
 		return
 	if plant_manager.has_method("is_imperial_harvestable") and bool(plant_manager.call("is_imperial_harvestable", harvest_cell)):
@@ -88,6 +97,11 @@ func has_grownup_roses_to_harvest() -> bool:
 
 func check_finished() -> void:
 	if _manager.grownup_rose_count() > 0:
+		# During the sale, full counters are temporary capacity rather than the end of
+		# the harvest window. A client may consume stock on any later frame.
+		if GameState.is_client_phase:
+			_active = true
+			return
 		if not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
 			if _manager.rose_shop_counter_count() <= 0:
 				return
@@ -95,6 +109,11 @@ func check_finished() -> void:
 				return
 			_active = false
 			_manager.request_client_sale_start()
+		return
+	if GameState.is_client_phase:
+		# Starting clients early still ends imperial-rose collection, as before this
+		# controller learned to keep only regular grown roses active during the sale.
+		_active = false
 		return
 	if _harvestable_imperial_count() > 0:
 		return
@@ -133,7 +152,7 @@ func _harvest_imperial_rose(plant_manager: Node, imperial_cell: Vector2i) -> voi
 	check_finished()
 
 
-func _player_harvestable_plant_cell() -> Vector2i:
+func _player_harvestable_plant_cell(roses_only: bool = false) -> Vector2i:
 	var floorz: TileMapLayer = _floorz()
 	var player: Node2D = _manager.get_tree().get_first_node_in_group("player") as Node2D
 	if player == null or floorz == null:
@@ -142,21 +161,23 @@ func _player_harvestable_plant_cell() -> Vector2i:
 	if plant_manager == null:
 		return INVALID_CELL
 	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
-	if _is_harvestable_plant_cell(plant_manager, player_cell):
+	if _is_harvestable_plant_cell(plant_manager, player_cell, roses_only):
 		return player_cell
 	for dy: int in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
 		for dx: int in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
 			if dx == 0 and dy == 0:
 				continue
 			var cell: Vector2i = player_cell + Vector2i(dx, dy)
-			if _is_harvestable_plant_cell(plant_manager, cell):
+			if _is_harvestable_plant_cell(plant_manager, cell, roses_only):
 				return cell
 	return INVALID_CELL
 
 
-func _is_harvestable_plant_cell(plant_manager: Node, cell: Vector2i) -> bool:
+func _is_harvestable_plant_cell(plant_manager: Node, cell: Vector2i, roses_only: bool = false) -> bool:
 	if plant_manager.has_method("is_rose_grownup") and bool(plant_manager.call("is_rose_grownup", cell)):
 		return _manager.has_counter_room_for_harvest()
+	if roses_only:
+		return false
 	if plant_manager.has_method("is_imperial_harvestable") and bool(plant_manager.call("is_imperial_harvestable", cell)):
 		return true
 	return false
