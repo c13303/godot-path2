@@ -11,12 +11,12 @@ const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const DEFAULT_STARTING_SEEDS: int = 20
 const DEFAULT_STARTING_GEMS: int = 1000
 const DEFAULT_STARTING_MONEY: int = 0
+const DEFAULT_STARTING_BAMBOO: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 const DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT: int = 0
 const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"wall", &"ronce", &"fence"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
 const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
-const REWARD_CURRENCIES: Array[String] = ["seed", "money", "gem"]
 const WAVE_MOVE_WIDTH: float = 94.0
 const WAVE_NUMBER_WIDTH: float = 28.0
 const WAVE_TYPE_WIDTH: float = 112.0
@@ -76,6 +76,7 @@ var _client_frequency_box: VBoxContainer
 var _starting_seeds: SpinBox
 var _starting_gems: SpinBox
 var _starting_money: SpinBox
+var _starting_bamboo: SpinBox
 var _monster_drop_seed_chance: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
@@ -437,6 +438,18 @@ func _build_starting_controls() -> void:
 	_starting_money.value_changed.connect(_on_starting_money_changed)
 	currency_row.add_child(_starting_money)
 
+	var bamboo_label: Label = Label.new()
+	bamboo_label.text = "Bamboo"
+	currency_row.add_child(bamboo_label)
+
+	_starting_bamboo = SpinBox.new()
+	_starting_bamboo.min_value = 0.0
+	_starting_bamboo.max_value = 1000000.0
+	_starting_bamboo.step = 1.0
+	_starting_bamboo.custom_minimum_size = Vector2(86.0, 0.0)
+	_starting_bamboo.value_changed.connect(_on_starting_bamboo_changed)
+	currency_row.add_child(_starting_bamboo)
+
 	var weapons_label: Label = Label.new()
 	weapons_label.text = "Starting weapons"
 	_starting_controls.add_child(weapons_label)
@@ -638,14 +651,16 @@ func _build_reward_controls() -> void:
 	_reward_box.add_child(_reward_one_time_check)
 
 	var amount_grid: GridContainer = GridContainer.new()
-	amount_grid.columns = REWARD_CURRENCIES.size()
+	var reward_currencies: Array[StringName] = CurrencyCatalog.get_currency_ids()
+	amount_grid.columns = reward_currencies.size()
 	amount_grid.add_theme_constant_override("h_separation", 12)
 	amount_grid.add_theme_constant_override("v_separation", 4)
 	_reward_box.add_child(amount_grid)
 
 	# One fixed field per currency. Leave a currency at 0 to grant nothing of it.
 	_reward_amount_spins.clear()
-	for currency: String in REWARD_CURRENCIES:
+	for currency_id: StringName in reward_currencies:
+		var currency: String = String(currency_id)
 		var field: VBoxContainer = VBoxContainer.new()
 		field.custom_minimum_size = Vector2(130.0, 0.0)
 		amount_grid.add_child(field)
@@ -912,18 +927,30 @@ func _refresh_starting_controls() -> void:
 	_starting_seeds.editable = has_level
 	_starting_gems.editable = has_level
 	_starting_money.editable = has_level
+	_starting_bamboo.editable = has_level
 	var seeds: int = DEFAULT_STARTING_SEEDS
 	var gems: int = DEFAULT_STARTING_GEMS
 	var money: int = DEFAULT_STARTING_MONEY
+	var bamboo: int = DEFAULT_STARTING_BAMBOO
 	var weapons: Array[StringName] = _default_starting_weapons()
 	if config != null:
 		seeds = config.starting_seeds
 		gems = config.starting_gems
 		money = config.starting_money
+		bamboo = config.starting_bamboo
+		if config.starting_currencies.has(&"seed"):
+			seeds = int(config.starting_currencies[&"seed"])
+		if config.starting_currencies.has(&"gem"):
+			gems = int(config.starting_currencies[&"gem"])
+		if config.starting_currencies.has(&"money"):
+			money = int(config.starting_currencies[&"money"])
+		if config.starting_currencies.has(&"bamboo"):
+			bamboo = int(config.starting_currencies[&"bamboo"])
 		weapons = _valid_weapon_ids(config.starting_weapons)
 	_starting_seeds.value = float(seeds)
 	_starting_gems.value = float(gems)
 	_starting_money.value = float(money)
+	_starting_bamboo.value = float(bamboo)
 	for raw_weapon_id: Variant in _weapon_checkboxes.keys():
 		var weapon_id: StringName = raw_weapon_id as StringName
 		var checkbox: CheckBox = _weapon_checkboxes[weapon_id] as CheckBox
@@ -1654,6 +1681,7 @@ func _on_starting_seeds_changed(value: float) -> void:
 	if config == null:
 		return
 	config.starting_seeds = int(value)
+	config.starting_currencies = _selected_starting_currencies()
 	mark_dirty()
 
 
@@ -1664,6 +1692,7 @@ func _on_starting_gems_changed(value: float) -> void:
 	if config == null:
 		return
 	config.starting_gems = int(value)
+	config.starting_currencies = _selected_starting_currencies()
 	mark_dirty()
 
 
@@ -1674,6 +1703,18 @@ func _on_starting_money_changed(value: float) -> void:
 	if config == null:
 		return
 	config.starting_money = int(value)
+	config.starting_currencies = _selected_starting_currencies()
+	mark_dirty()
+
+
+func _on_starting_bamboo_changed(value: float) -> void:
+	if _loading_ui:
+		return
+	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
+	if config == null:
+		return
+	config.starting_bamboo = int(value)
+	config.starting_currencies = _selected_starting_currencies()
 	mark_dirty()
 
 
@@ -2000,6 +2041,8 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_seeds", int(_starting_seeds.value))
 		root.set("starting_gems", int(_starting_gems.value))
 		root.set("starting_money", int(_starting_money.value))
+		root.set("starting_bamboo", int(_starting_bamboo.value))
+		root.set("starting_currencies", _selected_starting_currencies())
 		root.set("starting_weapons", _selected_starting_weapons())
 		root.set("starting_items", _selected_starting_items())
 		root.set("starting_item_toolbuild_hidden", _selected_starting_item_hidden())
@@ -2032,6 +2075,8 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_seeds = int(_starting_seeds.value)
 	config.starting_gems = int(_starting_gems.value)
 	config.starting_money = int(_starting_money.value)
+	config.starting_bamboo = int(_starting_bamboo.value)
+	config.starting_currencies = _selected_starting_currencies()
 	config.starting_weapons = _selected_starting_weapons()
 	config.starting_items = _selected_starting_items()
 	config.starting_item_toolbuild_hidden = _selected_starting_item_hidden()
@@ -2182,6 +2227,8 @@ func _get_or_create_loaded_level_config() -> LevelSpawnConfig:
 		config.starting_seeds = DEFAULT_STARTING_SEEDS
 		config.starting_gems = DEFAULT_STARTING_GEMS
 		config.starting_money = DEFAULT_STARTING_MONEY
+		config.starting_bamboo = DEFAULT_STARTING_BAMBOO
+		config.starting_currencies = _selected_starting_currencies()
 		config.starting_weapons = _default_starting_weapons()
 		config.starting_items = {}
 		config.starting_item_toolbuild_hidden = []
@@ -2257,6 +2304,15 @@ func _selected_starting_items() -> Dictionary:
 		if quantity > 0:
 			items[item_id] = quantity
 	return items
+
+
+func _selected_starting_currencies() -> Dictionary:
+	return {
+		&"seed": int(_starting_seeds.value),
+		&"gem": int(_starting_gems.value),
+		&"money": int(_starting_money.value),
+		&"bamboo": int(_starting_bamboo.value),
+	}
 
 
 ## Item ids whose "Available" box is unchecked: they are hidden from the toolbuild vertical

@@ -8,6 +8,10 @@ class_name LevelSpawnConfig
 @export var starting_seeds: int = 20
 @export var starting_gems: int = 1000
 @export var starting_money: int = 0
+@export var starting_bamboo: int = 0
+# Generic currency starts. Keys are CurrencyCatalog ids (StringName) and values are int >= 0.
+# Legacy fields above remain for existing levels and inspector readability.
+@export var starting_currencies: Dictionary = {}
 @export var starting_weapons: Array[StringName] = [&"spray"]
 # Any non-weapon item granted to the player at the start of a fresh run, as
 # item_id (StringName) -> quantity (int > 0). Placed into the inventory alongside the

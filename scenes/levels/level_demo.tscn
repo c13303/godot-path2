@@ -1238,6 +1238,13 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
 starting_gems = 20
+starting_bamboo = 20
+starting_currencies = {
+&"bamboo": 20,
+&"gem": 20,
+&"money": 0,
+&"seed": 20
+}
 starting_items = {
 &"pasteque": 1,
 &"wall": 2
@@ -1264,7 +1271,8 @@ merchant_prices = {
 &"pasteque": 10,
 &"seed": 2,
 &"spray": 10,
-&"sword": 100
+&"sword": 100,
+&"wall": 100
 }
 shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence", &"spray", &"beam"])
 shop_prices = {
@@ -1282,7 +1290,7 @@ shop_prices = {
 &"spray": 10,
 &"sword": 100,
 &"turret_epine": 3,
-&"wall": 10
+&"wall": 100
 }
 
 [node name="mapBounds" type="StaticBody2D" parent="." unique_id=1027574517]

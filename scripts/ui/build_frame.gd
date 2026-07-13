@@ -28,6 +28,7 @@ extends Control
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_connect_build_system()
 	_connect_game_ui()
 	_refresh_visibility()
 
@@ -54,25 +55,42 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
-func _connect_game_ui() -> void:
+func _connect_build_system() -> void:
 	var build_system: Node = _build_system()
 	if build_system == null or not build_system.has_signal(&"build_preview_changed"):
 		return
-	var callback: Callable = Callable(self, "_on_build_mode_changed")
+	var callback: Callable = Callable(self, "_on_build_state_changed")
 	if not build_system.is_connected(&"build_preview_changed", callback):
 		build_system.connect(&"build_preview_changed", callback)
 
 
-func _refresh_visibility() -> void:
-	var build_system: Node = _build_system()
-	if build_system == null or not build_system.has_method("pad_is_build_preview_active"):
-		visible = false
+func _connect_game_ui() -> void:
+	var game_ui: Node = _game_ui()
+	if game_ui == null or not game_ui.has_signal(&"unbuild_selection_changed"):
 		return
-	visible = bool(build_system.call("pad_is_build_preview_active"))
+	var callback: Callable = Callable(self, "_on_build_state_changed")
+	if not game_ui.is_connected(&"unbuild_selection_changed", callback):
+		game_ui.connect(&"unbuild_selection_changed", callback)
 
 
-func _on_build_mode_changed(is_active: bool) -> void:
-	visible = is_active
+# The frame shows while a placement drag is previewing OR the unbuild tool is equipped, so it
+# reads both sources rather than trusting a single signal's bool payload.
+func _refresh_visibility() -> void:
+	visible = _build_preview_active() or _unbuild_selected()
+
+
+func _build_preview_active() -> bool:
+	var build_system: Node = _build_system()
+	return build_system != null and build_system.has_method("pad_is_build_preview_active") and bool(build_system.call("pad_is_build_preview_active"))
+
+
+func _unbuild_selected() -> bool:
+	var game_ui: Node = _game_ui()
+	return game_ui != null and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
+
+
+func _on_build_state_changed(_is_active: bool) -> void:
+	_refresh_visibility()
 
 
 func _build_system() -> Node:
@@ -80,6 +98,13 @@ func _build_system() -> Node:
 	if scene == null:
 		return null
 	return scene.get_node_or_null("Map/BuildSystem")
+
+
+func _game_ui() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI")
 
 
 func _draw_horizontal_bands(y: float, width: float, frame_width: float) -> void:

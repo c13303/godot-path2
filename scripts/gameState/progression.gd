@@ -13,6 +13,7 @@ const SAVE_VERSION: int = 3
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
+const BAMBOO_KEY: StringName = &"bamboo"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
@@ -34,6 +35,7 @@ const LAYER_NAMES: Array[String] = [
 @export var starting_seeds: int = 20
 @export var starting_gems: int = 100
 @export var starting_money: int = 0
+@export var starting_bamboo: int = 0
 @export var starting_water_reserve: int = 100
 @export var starting_water_reserve_max: int = 100
 @export_group("")
@@ -69,6 +71,7 @@ class Progression:
 		ProgressionProp.new(&"seeds", "Seeds", 20),
 		ProgressionProp.new(&"gems", "Gems", 100),
 		ProgressionProp.new(&"money", "Money", 0),
+		ProgressionProp.new(&"bamboo", "Bamboo", 0),
 		ProgressionProp.new(&"water_reserve", "Water reserve", 100),
 		ProgressionProp.new(&"water_reserve_max", "Water reserve max", 100),
 	]
@@ -123,7 +126,7 @@ func spend(key: StringName, amount: int) -> bool:
 	if amount <= 0 or progression.get_value(key) < amount:
 		return false
 	progression.add(key, -amount)
-	_update_progression_ui(key == SEED_KEY, key == GEM_KEY, key == MONEY_KEY)
+	_update_progression_ui(key)
 	return true
 
 
@@ -137,7 +140,7 @@ func update_value(key: StringName, delta: int, minimum: int = -2147483648, maxim
 	if next_value == prop.value:
 		return false
 	prop.value = next_value
-	_update_progression_ui(key == SEED_KEY, key == GEM_KEY, key == MONEY_KEY)
+	_update_progression_ui(key)
 	return true
 
 
@@ -163,7 +166,7 @@ func update_seeds(delta: int) -> bool:
 		return false
 	if delta != 0:
 		progression.add(SEED_KEY, delta)
-		_update_progression_ui(true)
+		_update_progression_ui(SEED_KEY)
 	return true
 
 
@@ -174,7 +177,7 @@ func update_gems(delta: int) -> bool:
 		return false
 	if delta != 0:
 		progression.add(GEM_KEY, delta)
-		_update_progression_ui(false, true)
+		_update_progression_ui(GEM_KEY)
 	return true
 
 
@@ -185,7 +188,23 @@ func update_money(delta: int) -> bool:
 		return false
 	if delta != 0:
 		progression.add(MONEY_KEY, delta)
-		_update_progression_ui(false, false, true)
+		_update_progression_ui(MONEY_KEY)
+	return true
+
+
+func update_bamboo(delta: int) -> bool:
+	return update_currency(&"bamboo", delta)
+
+
+func update_currency(currency: StringName, delta: int) -> bool:
+	var key: StringName = CurrencyCatalog.get_progression_key(currency)
+	if key == &"":
+		return false
+	if delta < 0 and progression.get_value(key) < -delta:
+		return false
+	if delta != 0:
+		progression.add(key, delta)
+		_update_progression_ui(key)
 	return true
 
 
@@ -200,6 +219,7 @@ func _apply_starting_values() -> void:
 		&"seeds": starting_seeds,
 		&"gems": starting_gems,
 		&"money": starting_money,
+		&"bamboo": starting_bamboo,
 		&"water_reserve": starting_water_reserve,
 		&"water_reserve_max": starting_water_reserve_max,
 	}
@@ -223,6 +243,17 @@ func _apply_level_starting_values() -> void:
 		starting_gems = int(loader.call("get_loaded_starting_gems"))
 	if loader.has_method("get_loaded_starting_money"):
 		starting_money = int(loader.call("get_loaded_starting_money"))
+	if loader.has_method("get_loaded_starting_bamboo"):
+		starting_bamboo = int(loader.call("get_loaded_starting_bamboo"))
+	if loader.has_method("get_loaded_starting_currencies"):
+		var raw_currencies: Variant = loader.call("get_loaded_starting_currencies")
+		if raw_currencies is Dictionary:
+			for raw_currency: Variant in (raw_currencies as Dictionary).keys():
+				var currency: StringName = StringName(str(raw_currency))
+				var key: StringName = CurrencyCatalog.get_progression_key(currency)
+				var prop: ProgressionProp = progression.get_prop(key)
+				if prop != null:
+					prop.value = int((raw_currencies as Dictionary)[raw_currency])
 
 
 func _ready() -> void:
@@ -320,6 +351,15 @@ func _get_money_label() -> RichTextLabel:
 	return scene.get_node_or_null("GameUI/currenciesUI/moneyIcon/moneyQT") as RichTextLabel
 
 
+func _get_currency_label(currency: StringName) -> RichTextLabel:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	var icon_name: String = CurrencyCatalog.get_icon_node_name(currency)
+	var label_name: String = CurrencyCatalog.get_label_node_name(currency)
+	return scene.get_node_or_null("GameUI/currenciesUI/%s/%s" % [icon_name, label_name]) as RichTextLabel
+
+
 func _get_water_reserve_bar() -> ProgressBar:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
@@ -329,23 +369,20 @@ func _get_water_reserve_bar() -> ProgressBar:
 
 ## Render every progression prop, one per line: "<display name>: <value>".
 ## Adding a prop to Progression.props makes it appear here automatically.
-func _update_progression_ui(animate_seed_label: bool = false, animate_gem_label: bool = false, animate_money_label: bool = false) -> void:
+func _update_progression_ui(animated_key: StringName = &"", animate_gem_label: bool = false, animate_money_label: bool = false) -> void:
+	if animate_gem_label:
+		animated_key = GEM_KEY
+	if animate_money_label:
+		animated_key = MONEY_KEY
 	values_changed.emit()
-	var seed_label: RichTextLabel = _get_seed_label()
-	if seed_label != null:
-		seed_label.text = "x %d" % progression.get_value(SEED_KEY)
-		if animate_seed_label:
-			_animate_seed_label(seed_label)
-	var gem_label: RichTextLabel = _get_gem_label()
-	if gem_label != null:
-		gem_label.text = "x %d" % progression.get_value(GEM_KEY)
-		if animate_gem_label:
-			_animate_gem_label(gem_label)
-	var money_label: RichTextLabel = _get_money_label()
-	if money_label != null:
-		money_label.text = "x %d" % progression.get_value(MONEY_KEY)
-		if animate_money_label:
-			_animate_money_label(money_label)
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		var key: StringName = CurrencyCatalog.get_progression_key(currency)
+		var currency_label: RichTextLabel = _get_currency_label(currency)
+		if currency_label == null:
+			continue
+		currency_label.text = "x %d" % progression.get_value(key)
+		if animated_key == key:
+			_animate_currency_label(currency_label, currency)
 
 	_update_day_label(progression.get_value(&"nDays"))
 	var water_reserve_bar: ProgressBar = _get_water_reserve_bar()
@@ -402,6 +439,24 @@ func _animate_money_label(money_label: RichTextLabel) -> void:
 	_money_label_tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_money_label_tween.tween_property(money_label, "scale", Vector2.ONE, 0.42)
 	_money_label_tween.tween_property(money_label, "modulate", Color.WHITE, 0.5)
+
+
+func _animate_currency_label(currency_label: RichTextLabel, currency: StringName) -> void:
+	match currency:
+		&"seed":
+			_animate_seed_label(currency_label)
+		&"gem":
+			_animate_gem_label(currency_label)
+		&"money":
+			_animate_money_label(currency_label)
+		_:
+			currency_label.pivot_offset = currency_label.size * 0.5
+			currency_label.scale = Vector2(1.55, 1.55)
+			currency_label.modulate = Color(0.6, 0.95, 0.45, 1.0)
+			var tween: Tween = create_tween().set_parallel(true)
+			tween.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			tween.tween_property(currency_label, "scale", Vector2.ONE, 0.42)
+			tween.tween_property(currency_label, "modulate", Color.WHITE, 0.5)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -1145,7 +1200,7 @@ func _validate_save(data: Dictionary) -> String:
 				if not item.has(field):
 					return "invalid ground collectible entry"
 			var currency: String = str(item["currency"])
-			if not ["seed", "gem", "money"].has(currency):
+			if not CurrencyCatalog.has_currency(StringName(currency)):
 				return "invalid ground collectible currency"
 			var state: String = str(item["state"])
 			if not ["falling", "ready"].has(state):
@@ -1200,12 +1255,13 @@ func _save_summary(data: Dictionary) -> String:
 	var raw_durability: Variant = data.get("player_placeable_durability", [])
 	if raw_durability is Array:
 		durability_count = (raw_durability as Array).size()
-	return "phase=%s day=%d seeds=%d gems=%d money=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d" % [
+	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d" % [
 		str(data.get("day_phase", "<missing>")),
 		int(progression_data.get("nDays", 0)),
 		int(progression_data.get("seeds", 0)),
 		int(progression_data.get("gems", 0)),
 		int(progression_data.get("money", 0)),
+		int(progression_data.get("bamboo", 0)),
 		plant_layer_count,
 		plant_states.size(),
 		watered_count,
@@ -1236,12 +1292,13 @@ func _live_scene_summary(scene: Node) -> String:
 		counter_total = int(building_manager.call("total_counter_stock"))
 	if building_manager != null and building_manager.has_method("rose_shop_counter_count"):
 		counter_buildings = int(building_manager.call("rose_shop_counter_count"))
-	return "phase=%s day=%d seeds=%d gems=%d money=%d roses=%d grown=%d unwatered=%d counter_buildings=%d counter_total=%d" % [
+	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d roses=%d grown=%d unwatered=%d counter_buildings=%d counter_total=%d" % [
 		_get_day_phase(),
 		progression.get_value(&"nDays"),
 		progression.get_value(SEED_KEY),
 		progression.get_value(GEM_KEY),
 		progression.get_value(MONEY_KEY),
+		progression.get_value(BAMBOO_KEY),
 		rose_count_value,
 		grown_count_value,
 		unwatered_count_value,

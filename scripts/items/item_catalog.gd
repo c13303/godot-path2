@@ -94,6 +94,15 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 21,
 		"max_stack": 999,
 	},
+	"bamboo": {
+		"id": "bamboo",
+		"name": "Bamboo",
+		"type": "resource",
+		"category": "resources",
+		"frame": 23,
+		"max_stack": 999,
+		"currency_item": true,
+	},
 	# Selecting this quick-slot tool opens the build picker in gardening mode (rose, ronce,
 	# pasteque, turrets). It is not a weapon or a placeable itself; the picker chooses which
 	# building to place.
@@ -339,7 +348,7 @@ const ITEM_DEFS: Dictionary = {
 	"rose_shop_counter": {
 		"id": "rose_shop_counter",
 		"name": "Rose Shop Counter",
-		"currency": &"gem",
+		"currency": &"bamboo",
 		"type": "placeable",
 		"category": "shop_counter",
 		"frame": 12,
@@ -453,6 +462,8 @@ static func get_giveable_starting_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []
 	for raw_item_id: Variant in ITEM_DEFS.keys():
 		var item_id: String = str(raw_item_id)
+		if bool(get_item_def(item_id).get("currency_item", false)):
+			continue
 		var item_type: String = str(get_item_def(item_id).get("type", ""))
 		if item_type == "placeable" or item_type == "resource":
 			ids.append(StringName(item_id))

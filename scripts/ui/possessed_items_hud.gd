@@ -5,33 +5,12 @@ const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png"
 const SEED_ICON_SCRIPT: Script = preload("res://scripts/ui/seed_icon.gd")
 const GEM_ICON_SCRIPT: Script = preload("res://scripts/ui/gem_icon.gd")
 const MONEY_ICON_SCRIPT: Script = preload("res://scripts/ui/money_icon.gd")
+const GENERIC_CURRENCY_ICON_SCRIPT: Script = preload("res://scripts/ui/generic_currency_icon.gd")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const ROW_SIZE: Vector2 = Vector2(40.0, 40.0)
 const LABEL_SIZE: Vector2 = Vector2(70.0, 34.0)
 const BOTTOM_ROW_Y: float = -64.0
 const ROW_STEP_Y: float = -50.0
-const PROGRESSION_KEYS: Array[StringName] = [&"money", &"seeds", &"gems"]
-const PROGRESSION_ITEM_IDS: Dictionary = {
-	&"money": "money",
-	&"seeds": "seed",
-	&"gems": "gem",
-}
-const CURRENCY_REGIONS: Dictionary = {
-	"seed": Rect2(226.0, 0.0, 32.0, 32.0),
-	"gem": Rect2(256.0, 0.0, 32.0, 32.0),
-	"money": Rect2(416.0, 0.0, 32.0, 32.0),
-}
-const COMPAT_NODE_NAMES: Dictionary = {
-	"seed": "seedIcon",
-	"gem": "gemIcon",
-	"money": "moneyIcon",
-}
-const COMPAT_LABEL_NAMES: Dictionary = {
-	"seed": "seedQT",
-	"gem": "gemQT",
-	"money": "moneyQT",
-}
-
 @export var game_ui_path: NodePath = NodePath("..")
 @export var progression_path: NodePath = NodePath("../../progression")
 
@@ -55,8 +34,8 @@ func _ready() -> void:
 func refresh() -> void:
 	var counts: Dictionary = _collect_possessed_counts()
 	var ordered_ids: Array[String] = _ordered_item_ids(counts)
-	for item_id: String in ["money", "seed", "gem"]:
-		_ensure_row(item_id)
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		_ensure_row(CurrencyCatalog.get_item_id(currency))
 	for item_id: String in ordered_ids:
 		_ensure_row(item_id)
 	for raw_item_id: Variant in _rows.keys():
@@ -88,8 +67,9 @@ func get_item_flight_target_global_position(item_id: String) -> Vector2:
 func _collect_possessed_counts() -> Dictionary:
 	var counts: Dictionary = {}
 	if _progression != null and _progression.has_method("get_value"):
-		for key: StringName in PROGRESSION_KEYS:
-			var item_id: String = str(PROGRESSION_ITEM_IDS[key])
+		for currency: StringName in CurrencyCatalog.get_currency_ids():
+			var key: StringName = CurrencyCatalog.get_progression_key(currency)
+			var item_id: String = CurrencyCatalog.get_item_id(currency)
 			var quantity: int = int(_progression.call("get_value", key))
 			if quantity > 0:
 				counts[item_id] = quantity
@@ -106,7 +86,8 @@ func _collect_possessed_counts() -> Dictionary:
 
 func _ordered_item_ids(counts: Dictionary) -> Array[String]:
 	var ids: Array[String] = []
-	for item_id: String in ["money", "seed", "gem"]:
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		var item_id: String = CurrencyCatalog.get_item_id(currency)
 		if int(counts.get(item_id, 0)) > 0:
 			ids.append(item_id)
 	for raw_item_id: Variant in counts.keys():
@@ -118,7 +99,9 @@ func _ordered_item_ids(counts: Dictionary) -> Array[String]:
 
 
 func _sort_currency_first(a: String, b: String) -> bool:
-	var order: Array[String] = ["money", "seed", "gem"]
+	var order: Array[String] = []
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		order.append(CurrencyCatalog.get_item_id(currency))
 	var ai: int = order.find(a)
 	var bi: int = order.find(b)
 	if ai >= 0 or bi >= 0:
@@ -133,7 +116,10 @@ func _sort_currency_first(a: String, b: String) -> bool:
 func _ensure_row(item_id: String) -> void:
 	if _rows.has(item_id):
 		return
-	var icon: TextureRect = get_node_or_null(str(COMPAT_NODE_NAMES.get(item_id, ""))) as TextureRect
+	var currency: StringName = _currency_for_item_id(item_id)
+	var icon: TextureRect = null
+	if currency != &"":
+		icon = get_node_or_null(CurrencyCatalog.get_icon_node_name(currency)) as TextureRect
 	if icon == null:
 		icon = TextureRect.new()
 		icon.name = item_id + "Icon"
@@ -147,7 +133,7 @@ func _ensure_row(item_id: String) -> void:
 	icon.size = ROW_SIZE
 	_apply_currency_animation_script(icon, item_id)
 
-	var label_name: String = str(COMPAT_LABEL_NAMES.get(item_id, "quantity"))
+	var label_name: String = CurrencyCatalog.get_label_node_name(currency) if currency != &"" else "quantity"
 	var label: RichTextLabel = icon.get_node_or_null(label_name) as RichTextLabel
 	if label == null:
 		label = RichTextLabel.new()
@@ -176,13 +162,19 @@ func _apply_currency_animation_script(icon: TextureRect, item_id: String) -> voi
 			icon.set_script(GEM_ICON_SCRIPT)
 		"money":
 			icon.set_script(MONEY_ICON_SCRIPT)
+		_:
+			var currency: StringName = _currency_for_item_id(item_id)
+			if currency != &"":
+				icon.set_script(GENERIC_CURRENCY_ICON_SCRIPT)
+				icon.set("currency_id", currency)
 
 
 func _item_texture(item_id: String) -> AtlasTexture:
 	var texture: AtlasTexture = AtlasTexture.new()
 	texture.atlas = ITEMS_TEXTURE
-	if CURRENCY_REGIONS.has(item_id):
-		texture.region = CURRENCY_REGIONS[item_id] as Rect2
+	var currency: StringName = _currency_for_item_id(item_id)
+	if currency != &"":
+		texture.region = CurrencyCatalog.get_icon_region(currency)
 		return texture
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	var frame: int = int(item_def.get("frame", -1))
@@ -190,6 +182,13 @@ func _item_texture(item_id: String) -> AtlasTexture:
 		return null
 	texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
 	return texture
+
+
+func _currency_for_item_id(item_id: String) -> StringName:
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		if CurrencyCatalog.get_item_id(currency) == item_id:
+			return currency
+	return &""
 
 
 func _layout_rows(ordered_ids: Array[String], counts: Dictionary) -> void:

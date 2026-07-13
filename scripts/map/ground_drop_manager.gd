@@ -16,9 +16,6 @@ const KIND_COLLECTIBLE: StringName = &"collectible"
 const STATE_FALLING: StringName = &"falling"
 const STATE_READY: StringName = &"ready"
 const STATE_FADING: StringName = &"fading"
-const CURRENCY_SEED: StringName = &"seed"
-const CURRENCY_GEM: StringName = &"gem"
-const CURRENCY_MONEY: StringName = &"money"
 const GRAVITY: float = 720.0
 const FLOOR_BOUNCE: float = 0.45
 const FLOOR_FRICTION: float = 0.64
@@ -94,11 +91,11 @@ func serialize_state() -> Array[Dictionary]:
 	for record: Dictionary in _active:
 		if StringName(record.get("kind", &"")) != KIND_COLLECTIBLE:
 			continue
-		var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
-		var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
-		result.append({
-			"currency": String(StringName(record.get("currency", CURRENCY_GEM))),
-			"state": String(StringName(record.get("state", STATE_READY))),
+			var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
+			var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
+			result.append({
+				"currency": String(StringName(record.get("currency", &"gem"))),
+				"state": String(StringName(record.get("state", STATE_READY))),
 			"x": ground_position.x,
 			"y": ground_position.y,
 			"vx": velocity.x,
@@ -255,7 +252,7 @@ func _process_ready_collectible(record: Dictionary, delta: float) -> void:
 	var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
 	if player.global_position.distance_squared_to(ground_position) > _pickup_radius_squared:
 		return
-	var currency: StringName = StringName(record.get("currency", CURRENCY_GEM))
+	var currency: StringName = StringName(record.get("currency", &"gem"))
 	if _start_currency_pickup(currency, ground_position, record):
 		record["pickup_pending"] = true
 		var root: Node2D = record["root"] as Node2D
@@ -466,14 +463,12 @@ func _currency_texture(currency: StringName) -> Texture2D:
 	var icon_texture: Texture2D = _currency_ui_texture(currency)
 	if icon_texture != null:
 		return icon_texture
-	var frame: int = 8
-	if currency == CURRENCY_SEED:
-		frame = 7
-	elif currency == CURRENCY_MONEY:
-		frame = 13
 	var texture: AtlasTexture = AtlasTexture.new()
 	texture.atlas = ITEMS_TEXTURE
-	texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
+	if CurrencyCatalog.has_currency(currency):
+		texture.region = CurrencyCatalog.get_icon_region(currency)
+	else:
+		texture.region = Rect2(Vector2(8.0 * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
 	return texture
 
 
@@ -481,10 +476,6 @@ func _currency_ui_texture(currency: StringName) -> Texture2D:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	var icon_name: String = "gemIcon"
-	if currency == CURRENCY_SEED:
-		icon_name = "seedIcon"
-	elif currency == CURRENCY_MONEY:
-		icon_name = "moneyIcon"
+	var icon_name: String = CurrencyCatalog.get_icon_node_name(currency)
 	var icon: TextureRect = scene.get_node_or_null("GameUI/currenciesUI/" + icon_name) as TextureRect
 	return icon.texture if icon != null else null

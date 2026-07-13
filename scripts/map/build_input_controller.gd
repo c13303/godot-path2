@@ -72,6 +72,9 @@ func input(event: InputEvent) -> void:
 			# drag just queues the one hovered cell. The queue then drains one cell at a time
 			# in BuildDragController.process_removal.
 			if key_event.pressed and not key_event.echo:
+				# X is the keyboard unbuild shortcut: equip the unbuild tool (so the slot
+				# highlights and the frame shows) and anchor the removal in one press.
+				_select_unbuild_tool()
 				_start_remove_drag()
 				_set_input_handled()
 				return
@@ -110,6 +113,23 @@ func input(event: InputEvent) -> void:
 			_finish_drag_build()
 			_set_input_handled()
 			return
+
+	# With the unbuild tool equipped, left-click drives removal (mirroring the X hold): press
+	# anchors a removal rectangle at the hovered cell, mouse motion grows it (handled above),
+	# and release commits it. A click with no drag just queues the single hovered cell.
+	if event is InputEventMouseButton and _is_unbuild_selected():
+		var unbuild_mouse_event: InputEventMouseButton = event as InputEventMouseButton
+		if unbuild_mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			if unbuild_mouse_event.pressed:
+				if _is_inventory_open() or _gui_hovered_control() != null:
+					return
+				_start_remove_drag()
+				_set_input_handled()
+				return
+			if _is_remove_drag_active():
+				_finish_remove_drag()
+				_set_input_handled()
+				return
 
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or _gui_hovered_control() != null:
@@ -186,6 +206,15 @@ func _placement_disabled() -> bool:
 
 func _is_inventory_open() -> bool:
 	return _game_ui and _game_ui.has_method("is_inventory_open") and bool(_game_ui.call("is_inventory_open"))
+
+
+func _is_unbuild_selected() -> bool:
+	return _game_ui and _game_ui.has_method("is_unbuild_tool_selected") and bool(_game_ui.call("is_unbuild_tool_selected"))
+
+
+func _select_unbuild_tool() -> void:
+	if _game_ui and _game_ui.has_method("select_unbuild_tool"):
+		_game_ui.call("select_unbuild_tool")
 
 
 func _hovered_cell() -> Vector2i:

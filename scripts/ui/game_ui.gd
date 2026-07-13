@@ -1,6 +1,9 @@
 extends CanvasLayer
 
 signal inventory_changed
+# Emitted when the unbuild tool is equipped/unequipped so the build frame overlay can
+# follow the selection without polling (see build_frame.gd).
+signal unbuild_selection_changed(active: bool)
 
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const INVENTORY_SLOT_COUNT: int = 32
@@ -28,7 +31,7 @@ const ITEM_NAME_KEY_PREFIX: String = "item."
 # slots are the build-tool menus. The quickbar is a fixed set of drop-up slots and is no longer
 # mapped 1:1 to inventory slots.
 const WEAPON_SLOT_KIND: String = "weapon"
-const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID]
+const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID, UNBUILD_TOOL_ID]
 const QUICK_SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 const QUICK_SLOT_GAP: float = 6.0
 const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
@@ -61,6 +64,10 @@ var _last_active_slot_index: int = 0
 var equipped_weapon_id: String = ""
 # The active build preview, or "" when the inactive quickbar should use weapon mode.
 var selected_build_item_id: String = ""
+# True while the unbuild tool is the equipped quick-slot. Unlike the build tools it has no
+# drop-up menu: selecting its slot equips it directly in play mode (left-click / X / pad-B
+# then remove buildings). Masked off at night by is_unbuild_tool_selected().
+var _unbuild_selected: bool = false
 var _progression_node: Node
 var _toolbar_slot_nodes: Array[ItemSlot] = []
 var _inventory_slot_nodes: Array[ItemSlot] = []
@@ -109,6 +116,10 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		clear_build_selection()
 		if equipped_weapon_id == "":
 			equipped_weapon_id = _first_possessed_weapon_id()
+	# Removal is night-gated too, so the unbuild tool unequips when night falls (this also fires
+	# unbuild_selection_changed, hiding the build frame).
+	if is_night and _unbuild_selected:
+		_set_unbuild_selected(false)
 	_refresh_all_slots()
 
 func _on_locale_changed(_locale: String) -> void:
@@ -187,11 +198,19 @@ func move_inventory_item(from_slot: int, to_slot: int) -> void:
 func activate_quickbar_slot(index: int) -> void:
 	if index < 0 or index >= QUICK_SLOT_KINDS.size():
 		return
-	if _is_quickbar_slot_disabled(QUICK_SLOT_KINDS[index]):
+	var kind: String = QUICK_SLOT_KINDS[index]
+	if _is_quickbar_slot_disabled(kind):
+		return
+	# The unbuild slot has no drop-up menu: activating it equips the tool directly instead
+	# of opening the (nonexistent) picker for that slot.
+	if kind == UNBUILD_TOOL_ID:
+		select_unbuild_tool()
 		return
 	quickbar_active = true
 	active_slot_index = index
 	_last_active_slot_index = index
+	# Opening a build-tool/weapon menu leaves unbuild mode.
+	_set_unbuild_selected(false)
 	_refresh_all_slots()
 
 ## Closes the quickbar back to play mode (menus closed, no labels).
@@ -264,7 +283,8 @@ func _first_possessed_weapon_id() -> String:
 func _is_quickbar_slot_disabled(kind: String) -> bool:
 	if kind == WEAPON_SLOT_KIND:
 		return _first_possessed_weapon_id() == ""
-	return GameState.is_night and kind == HAMMER_ID
+	# Hammer builds and unbuild removals are both blocked at night, so their slots grey out.
+	return GameState.is_night and (kind == HAMMER_ID or kind == UNBUILD_TOOL_ID)
 
 ## The active quick item: explicit build preview first, otherwise the equipped weapon.
 func get_selected_quick_item_id() -> String:
@@ -324,9 +344,16 @@ func get_selected_build_item_id() -> String:
 
 func set_selected_build_item(item_id: String) -> void:
 	selected_build_item_id = item_id
+	_set_unbuild_selected(false)
 
+## Clears any active build preview and leaves unbuild mode. Called on right-click / pad-cancel
+## and after placement flows, so it doubles as the deselect path for the unbuild tool.
 func clear_build_selection() -> void:
+	var was_unbuild: bool = _unbuild_selected
 	selected_build_item_id = ""
+	_set_unbuild_selected(false)
+	if was_unbuild:
+		_refresh_all_slots()
 
 func is_build_mode_active() -> bool:
 	return get_selected_build_item_id() != ""
@@ -353,8 +380,28 @@ func is_gardening_selected() -> bool:
 	var build_item_id: String = get_selected_build_item_id()
 	return build_item_id != "" and build_item_id in _gardening_buildable_ids()
 
+## True while the unbuild tool is equipped and usable. Masked off at night because the removal
+## mechanic itself is night-gated (removing blockers can stale monster flow fields), so every
+## consumer (build frame, pad cursor, left-click routing) goes inert at night.
 func is_unbuild_tool_selected() -> bool:
-	return false
+	return _unbuild_selected and not GameState.is_night
+
+## Equips the unbuild tool directly (no picker menu): closes any open quickbar menu, drops the
+## build preview, and highlights the unbuild slot. No-op while the slot is disabled (night).
+func select_unbuild_tool() -> void:
+	if _is_quickbar_slot_disabled(UNBUILD_TOOL_ID):
+		return
+	selected_build_item_id = ""
+	quickbar_active = false
+	active_slot_index = -1
+	_set_unbuild_selected(true)
+	_refresh_all_slots()
+
+func _set_unbuild_selected(active: bool) -> void:
+	if _unbuild_selected == active:
+		return
+	_unbuild_selected = active
+	unbuild_selection_changed.emit(is_unbuild_tool_selected())
 
 ## Opens the given build tool's drop-up menu (activating the quickbar). No-op if the tool id is
 ## not a quickbar slot kind. Kept for callers like the morning harvest's auto-open-hammer prompt.
@@ -376,6 +423,7 @@ func select_build_item_for_tool(tool_id: String, item_id: String) -> bool:
 	selected_build_item_id = item_id
 	quickbar_active = false
 	active_slot_index = -1
+	_set_unbuild_selected(false)
 	_refresh_all_slots()
 	return true
 
@@ -478,18 +526,9 @@ func collect_currency_from_world(
 ) -> bool:
 	if count <= 0:
 		return false
-	var icon: Node = null
-	var animate_method: String = ""
+	var icon: Node = _currency_icon_node(currency)
+	var animate_method: String = _currency_animate_method(currency)
 	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
-	if currency == &"seed":
-		icon = get_node_or_null("currenciesUI/seedIcon")
-		animate_method = "animate_seed_harvest"
-	elif currency == &"gem":
-		icon = get_node_or_null("currenciesUI/gemIcon")
-		animate_method = "animate_gem_harvest"
-	elif currency == &"money":
-		icon = get_node_or_null("currenciesUI/moneyIcon")
-		animate_method = "animate_money_harvest"
 	if icon == null or not icon.has_method(animate_method):
 		return false
 	var started_any: bool = false
@@ -610,16 +649,10 @@ func _finish_purchase_flight(item_sprite: TextureRect) -> void:
 	if is_instance_valid(item_sprite):
 		item_sprite.queue_free()
 
-## Maps an item's catalog currency (&"seed"/&"gem") to its progression prop key.
+## Maps an item's catalog currency to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:
 	var currency: StringName = ItemCatalog.get_currency(item_id)
-	if currency == &"seed":
-		return SEED_KEY
-	if currency == &"gem":
-		return GEM_KEY
-	if currency == &"money":
-		return MONEY_KEY
-	return &""
+	return CurrencyCatalog.get_progression_key(currency)
 
 func is_build_item_available(item_id: String) -> bool:
 	var scene: Node = get_tree().current_scene
@@ -1008,6 +1041,8 @@ func get_active_night_reward() -> Dictionary:
 		var reward_item_id: String = str(reward.item_id)
 		if reward_item_id != "" and ItemCatalog.get_item_def(reward_item_id).is_empty():
 			continue
+		if reward_item_id == "" and not CurrencyCatalog.has_currency(StringName(str(reward.currency))):
+			continue
 		if not GameState.is_special_reward_available(night_index, day, one_time, reward_key):
 			continue
 		rewards.append({
@@ -1053,6 +1088,9 @@ func _award_reward_currency(currency: String, amount: int, start_global_position
 	if amount <= 0:
 		return
 	var icon: Node = _reward_icon_node(currency)
+	var animate_method: String = _currency_animate_method(StringName(currency))
+	if icon != null and not icon.has_method(animate_method):
+		icon = null
 	var animated: int = mini(amount, REWARD_ANIM_CAP) if icon != null else 0
 	# Overflow past the animation cap (and everything when the icon is missing) is
 	# credited straight away; each flying sprite credits one unit as it lands.
@@ -1063,13 +1101,11 @@ func _award_reward_currency(currency: String, amount: int, start_global_position
 		return
 	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
 	for i: int in range(animated):
-		match currency:
-			"seed":
-				icon.call("animate_seed_harvest", world_position, i, Callable(), true)
-			"gem":
-				icon.call("animate_gem_harvest", world_position, i)
-			"money":
-				icon.call("animate_money_harvest", world_position, i)
+		var currency_id: StringName = StringName(currency)
+		if currency_id == &"seed":
+			icon.call(animate_method, world_position, i, Callable(), true)
+		else:
+			icon.call(animate_method, world_position, i)
 
 
 ## Grant an item reward into the inventory, flying one item sprite per unit (capped) to the
@@ -1090,24 +1126,27 @@ func _award_reward_item(item_id: String, quantity: int, start_global_position: V
 func _credit_reward_currency(currency: String, amount: int) -> void:
 	if _progression_node == null or amount <= 0:
 		return
-	match currency:
-		"seed":
-			_progression_node.call("update_seeds", amount)
-		"gem":
-			_progression_node.call("update_gems", amount)
-		"money":
-			_progression_node.call("update_money", amount)
+	if _progression_node.has_method("update_currency"):
+		_progression_node.call("update_currency", StringName(currency), amount)
 
 
 func _reward_icon_node(currency: String) -> Node:
+	return _currency_icon_node(StringName(currency))
+
+
+func _currency_icon_node(currency: StringName) -> Node:
+	return get_node_or_null("currenciesUI/" + CurrencyCatalog.get_icon_node_name(currency))
+
+
+func _currency_animate_method(currency: StringName) -> String:
 	match currency:
-		"seed":
-			return get_node_or_null("currenciesUI/seedIcon")
-		"gem":
-			return get_node_or_null("currenciesUI/gemIcon")
-		"money":
-			return get_node_or_null("currenciesUI/moneyIcon")
-	return null
+		&"seed":
+			return "animate_seed_harvest"
+		&"gem":
+			return "animate_gem_harvest"
+		&"money":
+			return "animate_money_harvest"
+	return "animate_currency_harvest"
 
 
 ## Public: how many more of item_id may still be placed given its per-world build
@@ -1125,7 +1164,7 @@ func _build_limit_remaining(item_id: String) -> int:
 
 
 func _build_limit_for_item(_item_id: String) -> int:
-	# No buildable is currently capped: the rose shop counter is bought with gems from the
+	# No buildable is currently capped: the rose shop counter is bought from the
 	# hammer picker and placed without a per-world limit, like walls/turrets. The legacy
 	# rose_shop_counter_limit config/loader plumbing is now unused.
 	return -1
@@ -1178,7 +1217,7 @@ func _build_tile_layer_for_item_def(item_def: Dictionary) -> TileMapLayer:
 
 ## Refund the full price of `count` removed units back to the matching currency,
 ## flying one currency icon per unit from `world_position` to the HUD and crediting
-## on arrival — exactly like the seed/gem/money harvest. Falls back to an instant credit
+## on arrival — exactly like the normal currency harvest. Falls back to an instant credit
 ## if the HUD icon is unavailable so a refund is never lost.
 func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
@@ -1193,17 +1232,8 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	if units <= 0:
 		return
 	var currency: StringName = ItemCatalog.get_currency(item_id)
-	var icon: Node = null
-	var animate_method: String = ""
-	if currency == &"seed":
-		icon = get_node_or_null("currenciesUI/seedIcon")
-		animate_method = "animate_seed_harvest"
-	elif currency == &"gem":
-		icon = get_node_or_null("currenciesUI/gemIcon")
-		animate_method = "animate_gem_harvest"
-	elif currency == &"money":
-		icon = get_node_or_null("currenciesUI/moneyIcon")
-		animate_method = "animate_money_harvest"
+	var icon: Node = _currency_icon_node(currency)
+	var animate_method: String = _currency_animate_method(currency)
 	if icon != null and icon.has_method(animate_method):
 		# Deconstruct refunds fly the whole building's worth of currency within ~1s
 		# regardless of the amount, by compressing the per-icon stagger delay.
@@ -1615,7 +1645,12 @@ func _apply_toolbar_slot(slot: ItemSlot, index: int) -> void:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	slot.set_item(item_def if not item_def.is_empty() else {}, 0)
 	slot.set_disabled(_is_quickbar_slot_disabled(kind))
-	slot.set_selected(quickbar_active and index == active_slot_index)
+	# Menu slots highlight while their drop-up is open; the unbuild tool has no menu, so its
+	# slot highlights whenever it is the equipped play-mode tool.
+	var is_selected: bool = quickbar_active and index == active_slot_index
+	if kind == UNBUILD_TOOL_ID:
+		is_selected = is_unbuild_tool_selected()
+	slot.set_selected(is_selected)
 
 ## Renders a backpack slot straight from its inventory contents (never selected/disabled).
 func _apply_inventory_slot(slot: ItemSlot, slot_index: int) -> void:

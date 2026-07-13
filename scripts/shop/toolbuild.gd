@@ -20,10 +20,6 @@ extends Control
 const COUNTER_ID: String = "rose_shop_counter"
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
-# Currency icon regions inside items.png (match the HUD seed/gem/money icons).
-const SEED_ICON_REGION: Rect2 = Rect2(226.0, 0.0, 32.0, 32.0)
-const GEM_ICON_REGION: Rect2 = Rect2(256.0, 0.0, 32.0, 32.0)
-const MONEY_ICON_REGION: Rect2 = Rect2(416.0, 0.0, 32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The merchant column is laid out as an aligned grid: icon | name | price.
 const MERCHANT_COLUMNS: int = 3
@@ -95,9 +91,7 @@ var _merchant_close_button: Button
 # vertical stack for the toolbuild picker, horizontal bar for the seed-merchant sale.
 var _items_list: BoxContainer
 var _merchant_items_list: GridContainer
-var _seed_icon: AtlasTexture
-var _gem_icon: AtlasTexture
-var _money_icon: AtlasTexture
+var _currency_icons: Dictionary = {}
 # item id -> its row / slot Button / icon TextureRect / affordable-count Label.
 var _slot_rows: Dictionary = {}
 var _slot_buttons: Dictionary = {}
@@ -146,9 +140,8 @@ func _ready() -> void:
 	# Root passes the mouse through so only the slot buttons capture clicks.
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	_seed_icon = _region_texture(SEED_ICON_REGION)
-	_gem_icon = _region_texture(GEM_ICON_REGION)
-	_money_icon = _region_texture(MONEY_ICON_REGION)
+	for currency: StringName in CurrencyCatalog.get_currency_ids():
+		_currency_icons[currency] = _region_texture(CurrencyCatalog.get_icon_region(currency))
 	_build_ui()
 
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -1269,14 +1262,7 @@ func _slot_badge_text(item_id: String) -> String:
 
 ## Maps an item's catalog currency to its HUD icon texture, or null if it has none.
 func _currency_texture(item_id: String) -> AtlasTexture:
-	match ItemCatalog.get_currency(item_id):
-		&"gem":
-			return _gem_icon
-		&"seed":
-			return _seed_icon
-		&"money":
-			return _money_icon
-	return null
+	return _currency_icon_for(String(ItemCatalog.get_currency(item_id)))
 
 
 ## Fills and colours the persistent per-row label groups for the seed/weapon merchant column
@@ -1559,17 +1545,10 @@ func _build_reward_row_cells(currency: String, item_id: String, amount: int, rew
 	return [button, name_label, free_label] as Array[Control]
 
 
-## Maps a currency id ("seed"/"gem"/"money") straight to its HUD icon texture. Unlike
+## Maps a currency id straight to its HUD icon texture. Unlike
 ## _currency_texture (which takes an item id), this takes the currency itself.
 func _currency_icon_for(currency: String) -> AtlasTexture:
-	match currency:
-		"gem":
-			return _gem_icon
-		"seed":
-			return _seed_icon
-		"money":
-			return _money_icon
-	return null
+	return _currency_icons.get(StringName(currency), null) as AtlasTexture
 
 
 func _on_special_reward_pressed(source: Button = null, reward_key: String = "") -> void:
@@ -1716,7 +1695,7 @@ func _display_name(item_id: String) -> String:
 
 func _item_frame_texture(item_def: Dictionary) -> AtlasTexture:
 	if str(item_def.get("id", "")) == SEED_ITEM_ID:
-		return _seed_icon
+		return _currency_icon_for("seed")
 	var frame: int = int(item_def.get("frame", 0))
 	return _region_texture(Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE))
 

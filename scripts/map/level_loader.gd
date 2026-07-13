@@ -57,6 +57,8 @@ var _loaded_map_bounds_world: Rect2 = Rect2()
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
+var _loaded_starting_bamboo: int = 0
+var _loaded_starting_currencies: Dictionary = {}
 var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_starting_items: Dictionary = {}
 var _loaded_starting_item_toolbuild_hidden: Array[StringName] = []
@@ -186,6 +188,14 @@ func get_loaded_starting_money() -> int:
 	return _loaded_starting_money
 
 
+func get_loaded_starting_bamboo() -> int:
+	return _loaded_starting_bamboo
+
+
+func get_loaded_starting_currencies() -> Dictionary:
+	return _loaded_starting_currencies.duplicate()
+
+
 func get_loaded_starting_weapons() -> Array[StringName]:
 	var weapons: Array[StringName] = []
 	for weapon_id: StringName in _loaded_starting_weapons:
@@ -284,6 +294,8 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 	_loaded_starting_seeds = 20
 	_loaded_starting_gems = 1000
 	_loaded_starting_money = 0
+	_loaded_starting_bamboo = 0
+	_loaded_starting_currencies = {}
 	_loaded_starting_weapons = [&"spray"]
 	_loaded_starting_items = {}
 	_loaded_starting_item_toolbuild_hidden = []
@@ -309,6 +321,9 @@ func _capture_level_spawn_config(level_root: Node, level_scene_path: String) -> 
 		_loaded_starting_seeds = config.starting_seeds
 		_loaded_starting_gems = config.starting_gems
 		_loaded_starting_money = config.starting_money
+		_loaded_starting_bamboo = config.starting_bamboo
+		_loaded_starting_currencies = _valid_starting_currencies(config.starting_currencies)
+		_apply_legacy_starting_currencies()
 		_loaded_starting_weapons = _valid_starting_weapons(config.starting_weapons)
 		_loaded_starting_items = _valid_starting_items(config.starting_items)
 		_loaded_starting_item_toolbuild_hidden = _valid_toolbuild_hidden_items(config.starting_item_toolbuild_hidden)
@@ -377,6 +392,38 @@ func _valid_starting_items(raw_items: Dictionary) -> Dictionary:
 			continue
 		items[item_id] = quantity
 	return items
+
+
+func _valid_starting_currencies(raw_currencies: Dictionary) -> Dictionary:
+	var currencies: Dictionary = {}
+	for raw_key: Variant in raw_currencies.keys():
+		var currency: StringName = StringName(str(raw_key))
+		if currency == &"" or not CurrencyCatalog.has_currency(currency):
+			continue
+		var quantity: int = int(raw_currencies[raw_key])
+		if quantity < 0:
+			continue
+		currencies[currency] = quantity
+	return currencies
+
+
+func _apply_legacy_starting_currencies() -> void:
+	if _loaded_starting_currencies.has(&"seed"):
+		_loaded_starting_seeds = int(_loaded_starting_currencies[&"seed"])
+	else:
+		_loaded_starting_currencies[&"seed"] = _loaded_starting_seeds
+	if _loaded_starting_currencies.has(&"gem"):
+		_loaded_starting_gems = int(_loaded_starting_currencies[&"gem"])
+	else:
+		_loaded_starting_currencies[&"gem"] = _loaded_starting_gems
+	if _loaded_starting_currencies.has(&"money"):
+		_loaded_starting_money = int(_loaded_starting_currencies[&"money"])
+	else:
+		_loaded_starting_currencies[&"money"] = _loaded_starting_money
+	if _loaded_starting_currencies.has(&"bamboo"):
+		_loaded_starting_bamboo = int(_loaded_starting_currencies[&"bamboo"])
+	else:
+		_loaded_starting_currencies[&"bamboo"] = _loaded_starting_bamboo
 
 
 ## Sanitize the authored hidden-item list to known item ids, dropping empties, unknown ids

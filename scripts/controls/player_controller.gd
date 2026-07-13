@@ -143,7 +143,7 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		_set_control_mode(INPUT_MODE_KMOUSE)
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and not _paused and not _is_inventory_open():
-			if _is_quickbar_active() or _in_build_mode():
+			if _is_quickbar_active() or _in_build_mode() or _unbuild_selected():
 				_clear_build_selection()
 				_deactivate_quickbar()
 				get_viewport().set_input_as_handled()
@@ -163,6 +163,10 @@ func _input(event: InputEvent) -> void:
 					return
 			# In build preview mode, the click belongs to the build system, not the weapon.
 			if _in_build_mode():
+				return
+			# With the unbuild tool equipped, left-click drives removal (handled by the build
+			# system's input controller), so the weapon must not fire.
+			if _unbuild_selected():
 				return
 			var weapon_id: String = _selected_item_id()
 			if fight_system and fight_system.is_held_weapon(weapon_id):
@@ -361,12 +365,24 @@ func _handle_pad_cancel() -> void:
 		_clear_build_selection()
 		_deactivate_quickbar()
 		return
-	if not _build_controls_active() or build_system == null:
+	if build_system == null:
 		return
+	# The seed-merchant shop owns B while it is open; don't let it double as the unbuild button.
+	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+		return
+	# Cancel an in-progress placement preview before treating B as the unbuild button.
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
 		return
-	# No placement preview to cancel: begin a bulk-unbuild rectangle at the cursor. Holding B
-	# and moving the cursor grows it; releasing B commits it (see _handle_pad_cancel_released).
+	# B is the pad unbuild shortcut: it equips the unbuild tool. When coming from play mode (no
+	# build cursor on screen yet) the first press only reveals the cursor, so the player can see
+	# where they will remove; from there (or straight from another build tool, whose cursor is
+	# already up) B anchors a bulk-unbuild rectangle at the cursor. Holding B and moving the
+	# cursor grows it; releasing commits it (see _handle_pad_cancel_released).
+	var had_build_cursor: bool = _build_controls_active()
+	if not _unbuild_selected():
+		_select_unbuild_tool()
+	if not had_build_cursor:
+		return
 	if build_system.has_method("pad_start_remove_drag"):
 		build_system.call("pad_start_remove_drag")
 
@@ -419,7 +435,7 @@ func _update_gun_fire(delta: float) -> void:
 	else:
 		trigger_allowed = trigger_allowed and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		trigger_allowed = trigger_allowed and get_viewport().gui_get_hovered_control() == null
-	trigger_allowed = trigger_allowed and not _in_build_mode()
+	trigger_allowed = trigger_allowed and not _in_build_mode() and not _unbuild_selected()
 	if trigger_allowed:
 		var selected_id: String = _selected_item_id()
 		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
@@ -776,9 +792,19 @@ func _clear_build_selection() -> void:
 func _in_build_mode() -> bool:
 	return game_ui and game_ui.has_method("get_selected_build_item_id") and String(game_ui.call("get_selected_build_item_id")) != ""
 
-# True while a build-tool menu or build preview is active.
+# True while a build-tool menu or build preview is active. The unbuild tool counts too, so its
+# build cursor / frame and removal input turn on the same way the placement tools do.
 func _build_tool_selected() -> bool:
+	if _unbuild_selected():
+		return true
 	return game_ui and game_ui.has_method("is_build_tool_selected") and bool(game_ui.call("is_build_tool_selected"))
+
+func _unbuild_selected() -> bool:
+	return game_ui and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
+
+func _select_unbuild_tool() -> void:
+	if game_ui and game_ui.has_method("select_unbuild_tool"):
+		game_ui.call("select_unbuild_tool")
 
 func _build_controls_active() -> bool:
 	if not _build_tool_selected():
