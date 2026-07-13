@@ -1467,10 +1467,8 @@ func day_clients_gone() -> bool:
 
 
 func remaining_planificator_client_count() -> int:
-	if (GameState.is_morning_phase or _day_start_pending) and _current_day_number_for_planificator() > 1:
-		return _client_sale.completed_night_client_count_for_day() if _has_client_targets_remaining() else 0
-	if _client_preparing or _client_sale_start_requested:
-		return _client_sale.completed_night_client_count_for_day() if _has_client_targets_remaining() else 0
+	if _client_sale.current_day_client_step_pending_or_active():
+		return _client_sale.planned_client_count_for_current_step()
 	return _client_sale.remaining_client_count_for_today()
 
 

@@ -84,9 +84,9 @@ func resolve(
 	var upcoming_index: int = completed_index + 1
 
 	# The day's client step is "in progress" from the instant the night ends until the
-	# step is explicitly completed or skipped (client_step_pending). We still require a
-	# positive live client count so a completed night with no authored clients falls
-	# straight through to the next-night preview instead of publishing an empty NOW slot.
+	# step is explicitly completed or skipped (client_step_pending). The client count is
+	# the planned count while that step is pending, then live/pending sale count once the
+	# sale is active. A zero-count client step falls through to the next-night preview.
 	var clients_in_progress: bool = (
 		client_step_pending
 		and _index_exists(completed_index, total_nights)

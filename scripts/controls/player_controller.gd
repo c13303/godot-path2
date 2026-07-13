@@ -305,22 +305,10 @@ func _update_pad_navigation_input() -> void:
 		or (up_pressed and not _dpad_up_pressed)
 		or (down_pressed and not _dpad_down_pressed)
 	)
-	if _pad_build_preview_active():
-		_dpad_left_pressed = left_pressed
-		_dpad_right_pressed = right_pressed
-		_dpad_up_pressed = up_pressed
-		_dpad_down_pressed = down_pressed
-		return
-	if any_new_press and _should_pad_open_quickbar_from_dpad():
-		_activate_last_quickbar_slot()
-		_dpad_left_pressed = left_pressed
-		_dpad_right_pressed = right_pressed
-		_dpad_up_pressed = up_pressed
-		_dpad_down_pressed = down_pressed
-		return
 	# While the seed-merchant shop is open it owns the whole d-pad: every direction browses its
 	# vertical item list (left/up step up, right/down step down) and quick-slot switching is
-	# suppressed so the shop keeps focus until it closes.
+	# suppressed so the shop keeps focus until it closes. This takes priority over an active
+	# build preview, which can still exist underneath the merchant modal.
 	if _is_merchant_shop_open():
 		var merchant_step: int = 0
 		if (up_pressed and not _dpad_up_pressed) or (left_pressed and not _dpad_left_pressed):
@@ -329,6 +317,19 @@ func _update_pad_navigation_input() -> void:
 			merchant_step = 1
 		if merchant_step != 0:
 			_step_pad_shop_selection(merchant_step)
+		_dpad_left_pressed = left_pressed
+		_dpad_right_pressed = right_pressed
+		_dpad_up_pressed = up_pressed
+		_dpad_down_pressed = down_pressed
+		return
+	if _pad_build_preview_active():
+		_dpad_left_pressed = left_pressed
+		_dpad_right_pressed = right_pressed
+		_dpad_up_pressed = up_pressed
+		_dpad_down_pressed = down_pressed
+		return
+	if any_new_press and _should_pad_open_quickbar_from_dpad():
+		_activate_last_quickbar_slot()
 		_dpad_left_pressed = left_pressed
 		_dpad_right_pressed = right_pressed
 		_dpad_up_pressed = up_pressed
@@ -384,14 +385,16 @@ func _handle_pad_accept() -> void:
 func _handle_pad_cancel() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
+	# The seed-merchant shop owns B while it is open: close the shop and do not fall through to
+	# quickbar or unbuild handling underneath it.
+	if _is_merchant_shop_open():
+		_try_toggle_merchant_shop()
+		return
 	if _is_quickbar_active():
 		_clear_build_selection()
 		_deactivate_quickbar()
 		return
 	if build_system == null:
-		return
-	# The seed-merchant shop owns B while it is open; don't let it double as the unbuild button.
-	if _is_merchant_shop_open():
 		return
 	# Cancel an in-progress placement preview first.
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):

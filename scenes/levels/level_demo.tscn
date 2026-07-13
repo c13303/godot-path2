@@ -1263,9 +1263,9 @@ tool_shop_prices = {
 &"wall": 10
 }
 tool_shop_growth_price_factors = {}
-merchant_available_items = Array[StringName]([&"imperial_seed", &"spray", &"beam", &"pasteque"])
+merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque"])
 merchant_prices = {
-&"beam": 30,
+&"beam": 100,
 &"bomb": 100,
 &"imperial_seed": 20,
 &"pasteque": 10,
@@ -1276,7 +1276,7 @@ merchant_prices = {
 }
 shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence", &"spray", &"beam"])
 shop_prices = {
-&"beam": 30,
+&"beam": 100,
 &"bomb": 100,
 &"fence": 1,
 &"imperial_seed": 20,

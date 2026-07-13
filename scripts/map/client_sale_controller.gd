@@ -282,6 +282,13 @@ func remaining_client_count_for_today() -> int:
 	return 0
 
 
+func planned_client_count_for_current_step() -> int:
+	var anchored_night_index: int = _manager.planificator_anchor_night_index()
+	if anchored_night_index >= 0:
+		return _client_count_for_completed_night_index(anchored_night_index)
+	return completed_night_client_count_for_day()
+
+
 func _roses_available() -> bool:
 	return _manager.total_counter_stock() > 0 or _manager.grownup_rose_count() > 0
 
@@ -301,11 +308,14 @@ func _dry_planted_roses_after_clients() -> void:
 # (day 1, and any day past the final authored night) have no authored clients. The index
 # is never clamped to the final night, so the trailing client day cannot reuse it.
 func completed_night_client_count_for_day() -> int:
+	return _client_count_for_completed_night_index(_manager.current_day_number() - 2)
+
+
+func _client_count_for_completed_night_index(completed_night_index: int) -> int:
 	var playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
 	var playlist: LevelSpawnPlaylist = playlist_config.level_spawn_playlist()
 	if playlist == null or playlist.nights.is_empty():
 		return LEGACY_FALLBACK_CLIENT_COUNT
-	var completed_night_index: int = _manager.current_day_number() - 2
 	if completed_night_index < 0 or completed_night_index >= playlist.nights.size():
 		return 0
 	var night: NightSpawnPlaylist = playlist.nights[completed_night_index]
