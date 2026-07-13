@@ -31,6 +31,7 @@ var seed_merchant_purchase_made: bool = false
 var _claimed_one_time_night_rewards: Dictionary = {}
 var _special_reward_claim_days: Dictionary = {}
 var _special_reward_legacy_claim_day: int = -1
+var _emitting_restored_phase_signals: bool = false
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
@@ -83,11 +84,17 @@ func restore_day_phase_flags(phase: String) -> void:
 
 
 func emit_restored_phase_signals() -> void:
+	_emitting_restored_phase_signals = true
 	mode_changed.emit(is_night)
 	building_phase_changed.emit(is_building_phase)
 	morning_phase_changed.emit(is_morning_phase)
 	client_phase_changed.emit(is_client_phase)
 	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
+	_emitting_restored_phase_signals = false
+
+
+func is_emitting_restored_phase_signals() -> bool:
+	return _emitting_restored_phase_signals
 
 
 ## Switch to night: monsters are allowed to spawn.

@@ -396,11 +396,12 @@ func _handle_pad_cancel() -> void:
 	# Cancel an in-progress placement preview first.
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
 		return
-	# Then abort an in-progress removal drag (keeping the unbuild tool equipped).
-	if build_system.has_method("pad_cancel_remove_drag") and bool(build_system.call("pad_cancel_remove_drag")):
-		return
-	# Otherwise B toggles the unbuild tool, mirroring right-click: select it, or deselect it if
-	# it is already the equipped tool. Removal itself is validated with A, not B.
+	# Abort any in-progress removal drag, but do NOT return: B then falls through to the toggle so
+	# a single press both cancels the drag and puts the unbuild icon away (like right-click).
+	if build_system.has_method("pad_cancel_remove_drag"):
+		build_system.call("pad_cancel_remove_drag")
+	# B toggles the unbuild tool, mirroring right-click: select it, or deselect it if it is already
+	# the equipped tool. Removal itself is validated with A, not B.
 	if _unbuild_selected():
 		_clear_build_selection()
 	else:

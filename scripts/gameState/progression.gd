@@ -286,6 +286,9 @@ func _ready() -> void:
 
 ## A night->day transition means a new day has begun.
 func _on_game_mode_changed(is_night: bool) -> void:
+	if GameState.is_emitting_restored_phase_signals():
+		_log("Day advance skipped: restored phase signal")
+		return
 	if is_night:
 		return
 	advance_day()

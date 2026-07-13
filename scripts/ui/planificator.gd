@@ -186,12 +186,13 @@ func _refresh() -> void:
 		return
 
 	var monster_counts: Dictionary = _get_monster_counts(night)
-	var night_count: int = _total_monster_count(monster_counts)
-	var day_count: int = maxi(0, night.clients)
+	var night_count: int = 0 if _should_hide_night_preview() else _total_monster_count(monster_counts)
+	var day_count: int = _preview_client_count_for_visible_phase(playlist, night_index)
 	var focus_section: String = _first_nonempty_section(today_count, night_count, day_count)
 	_apply_focus_section(focus_section)
 	_add_row(_today_rows, today_agent_type, today_count, focus_section == "today")
-	_add_monster_rows(monster_counts, focus_section == "night")
+	if night_count > 0:
+		_add_monster_rows(monster_counts, focus_section == "night")
 	_add_row(_day_rows, &"client", day_count, focus_section == "day")
 	if _victory_label != null:
 		_victory_label.visible = _tomorrow_is_victory_day()
@@ -300,6 +301,36 @@ func _get_monster_counts(night: NightSpawnPlaylist) -> Dictionary:
 			var count: int = maxi(0, wave.monster_count)
 			counts[monster_type] = int(counts.get(monster_type, 0)) + count
 	return counts
+
+
+func _should_hide_night_preview() -> bool:
+	return GameState.is_night or GameState.is_morning_phase
+
+
+func _preview_client_count_for_visible_phase(playlist: LevelSpawnPlaylist, preview_night_index: int) -> int:
+	if GameState.is_morning_phase:
+		return 0
+	var client_night_index: int = preview_night_index
+	if GameState.is_night:
+		client_night_index = _current_night_index(playlist)
+	if client_night_index < 0 or client_night_index >= playlist.nights.size():
+		return 0
+	var night: NightSpawnPlaylist = playlist.nights[client_night_index]
+	if night == null:
+		return 0
+	return maxi(0, night.clients)
+
+
+func _current_night_index(playlist: LevelSpawnPlaylist) -> int:
+	var total_nights: int = playlist.get_night_count()
+	if total_nights <= 0:
+		return 0
+	var progression: Node = _get_progression()
+	if progression == null or not progression.has_method("get_value"):
+		return 0
+	var day_number: int = int(progression.call("get_value", &"nDays"))
+	var day_index: int = maxi(0, day_number - 1)
+	return mini(day_index, total_nights - 1)
 
 
 func _total_monster_count(monster_counts: Dictionary) -> int:

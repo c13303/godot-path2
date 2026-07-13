@@ -1219,6 +1219,10 @@ func restore_day_phase(phase: String) -> void:
 		return
 	if GameState.is_night:
 		return
+	_day_start_pending = false
+	_night_preparing = false
+	_client_preparing = false
+	_night_preparation_ready = false
 	_morning_harvest.clear_active()
 	_reset_client_sale_state()
 	match phase:
@@ -1445,9 +1449,18 @@ func day_clients_gone() -> bool:
 
 
 func remaining_planificator_client_count() -> int:
+	if (GameState.is_morning_phase or _day_start_pending) and _current_day_number_for_planificator() > 1:
+		return _client_sale.current_night_client_count() if _has_client_targets_remaining() else 0
 	if _client_preparing or _client_sale_start_requested:
 		return _client_sale.current_night_client_count() if _has_client_targets_remaining() else 0
 	return _client_sale.remaining_client_count_for_today()
+
+
+func _current_day_number_for_planificator() -> int:
+	var progression: Node = _get_progression()
+	if progression == null or not progression.has_method("get_value"):
+		return 1
+	return int(progression.call("get_value", &"nDays"))
 
 
 func remaining_planificator_enemy_count() -> int:
@@ -1670,7 +1683,7 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 		# no live hostiles to restore here.
 		_notify_restored_phase()
 		return
-	_night_preparation_ready = bool(data.get("night_preparation_ready", true))
+	_night_preparation_ready = false
 	_agent_save_service.restore_state(data, false)
 	_purge_day_phase_monsters_after_load()
 	_notify_restored_phase()

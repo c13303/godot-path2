@@ -7,6 +7,7 @@ extends CanvasLayer
 			_rebuild_pool()
 
 @export_range(0.0, 500.0, 1.0) var distance_from_edge: float = 50.0
+@export_range(0.1, 10.0, 0.1) var arro_scale: float = 2.0
 @export var red_arro_texture: Texture2D = preload("res://assets/sprites/legval/arro_red.png")
 @export var green_arro_texture: Texture2D = preload("res://assets/sprites/legval/arro_green.png")
 @export var rotation_offset_degrees: float = 0.0
@@ -47,6 +48,7 @@ func _rebuild_pool() -> void:
 		arro.name = "arro_%03d" % index
 		arro.texture = red_arro_texture
 		arro.centered = true
+		arro.scale = Vector2(arro_scale, arro_scale)
 		arro.visible = false
 		add_child(arro)
 		_pool.append(arro)

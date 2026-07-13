@@ -140,6 +140,8 @@ func _process(delta: float) -> void:
 
 
 func _on_mode_changed(is_night: bool) -> void:
+	if GameState.is_emitting_restored_phase_signals():
+		return
 	# Night just ended: we are in the sunrise transition until the new day finishes.
 	_sun_rising = not is_night
 	_refresh()
