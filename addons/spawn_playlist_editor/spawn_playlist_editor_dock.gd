@@ -14,9 +14,9 @@ const DEFAULT_STARTING_MONEY: int = 0
 const DEFAULT_STARTING_BAMBOO: int = 0
 const DEFAULT_STARTING_WEAPONS: Array[StringName] = [&"spray"]
 const DEFAULT_MONSTER_DROP_SEED_CHANCE_PERCENT: int = 0
-const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"wall", &"ronce", &"fence"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"ronce", &"fence"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"spray", &"beam", &"sword", &"bomb"]
-const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"wall", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"turret_epine", &"ronce", &"fence", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 const WAVE_MOVE_WIDTH: float = 94.0
 const WAVE_NUMBER_WIDTH: float = 28.0
 const WAVE_TYPE_WIDTH: float = 112.0
@@ -536,13 +536,13 @@ func _build_shop_controls() -> void:
 	gardening_heading.text = "Gardening Tool"
 	gardening_heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(gardening_heading)
-	_build_shop_item_controls(ItemCatalog.get_gardening_shop_item_ids(), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
+	_build_shop_item_controls(_shop_sellable_item_ids(ItemCatalog.get_gardening_shop_item_ids()), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
 
 	var hammer_heading: Label = Label.new()
 	hammer_heading.text = "Hammer"
 	hammer_heading.add_theme_font_size_override("font_size", 15)
 	_shop_controls.add_child(hammer_heading)
-	_build_shop_item_controls(ItemCatalog.get_hammer_shop_item_ids(), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
+	_build_shop_item_controls(_shop_sellable_item_ids(ItemCatalog.get_hammer_shop_item_ids()), _tool_shop_available_checkboxes, _tool_shop_price_spins, _tool_shop_day_spins, _on_tool_shop_item_available_toggled, _on_tool_shop_price_changed, _on_tool_shop_day_changed, _tool_shop_growth_price_factor_spins, _on_tool_shop_growth_price_factor_changed)
 
 	_merchant_available_checkboxes.clear()
 	_merchant_price_spins.clear()
@@ -2437,11 +2437,23 @@ func _valid_weapon_ids(raw_weapons: Array[StringName]) -> Array[StringName]:
 
 
 func _tool_shop_item_ids() -> Array[StringName]:
-	return ItemCatalog.get_tool_shop_item_ids()
+	return _shop_sellable_item_ids(ItemCatalog.get_tool_shop_item_ids())
+
+
+func _shop_sellable_item_ids(source_item_ids: Array[StringName]) -> Array[StringName]:
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in source_item_ids:
+		if not ItemCatalog.is_fixed_stock(String(item_id)):
+			item_ids.append(item_id)
+	return item_ids
 
 
 func _merchant_item_ids() -> Array[StringName]:
-	return ItemCatalog.get_merchant_shop_item_ids()
+	var item_ids: Array[StringName] = []
+	for item_id: StringName in ItemCatalog.get_merchant_shop_item_ids():
+		if not ItemCatalog.is_fixed_stock(String(item_id)):
+			item_ids.append(item_id)
+	return item_ids
 
 
 func _legacy_shop_item_ids() -> Array[StringName]:

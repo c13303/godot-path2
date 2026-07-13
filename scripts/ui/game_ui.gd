@@ -672,12 +672,12 @@ func is_build_item_available(item_id: String) -> bool:
 		return false
 	if item_id == "rose_shop_counter":
 		return true
-	# Inventory-backed buildables are always offered in the toolbuild picker; their
-	# affordability is the owned count, so an empty stack simply greys the slot. The
-	# level author can still hide one by unchecking its "Available" box in the Gardening
-	# Tool / Hammer shop list: an explicit exclusion from the tool shop list wins over
-	# the always-offered rule (otherwise the checkbox would do nothing for these items).
+	# Inventory-backed buildables are offered in the toolbuild picker; their affordability
+	# is the owned count, so an empty stack simply greys the slot. Fixed-stock items are
+	# not shop items, so their picker visibility is independent from shop availability.
 	if ItemCatalog.is_inventory_backed(item_id):
+		if ItemCatalog.is_fixed_stock(item_id):
+			return true
 		if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
 			var raw_inventory_tool_ids: Variant = loader.call("get_loaded_tool_shop_available_items")
 			if raw_inventory_tool_ids is Array and not _string_array_contains(raw_inventory_tool_ids, item_id):

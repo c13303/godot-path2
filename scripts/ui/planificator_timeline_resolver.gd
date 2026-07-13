@@ -39,11 +39,14 @@ class TimelineRow extends RefCounted:
 
 
 # One display slot: a translated section label, its ordered rows, and whether it is the
-# terminal victory slot (which carries a label but no rows).
+# terminal victory slot (which carries a label but no rows). night_index is the playlist
+# night this slot refers to when meaningful (currently the TONIGHT preview), else -1; it
+# lets consumers map the focused night preview back to its authored spawners.
 class TimelineSlot extends RefCounted:
 	var kind: StringName
 	var rows: Array[TimelineRow] = []
 	var is_victory: bool = false
+	var night_index: int = -1
 
 	func _init(slot_kind: StringName, slot_is_victory: bool = false) -> void:
 		kind = slot_kind
@@ -146,6 +149,7 @@ func _tomorrow_client_slot(authored_count: int) -> TimelineSlot:
 
 func _tonight_monster_slot(playlist: LevelSpawnPlaylist, night_index: int) -> TimelineSlot:
 	var slot: TimelineSlot = TimelineSlot.new(SLOT_TONIGHT)
+	slot.night_index = night_index
 	_append_monster_rows(slot, _authored_monster_counts(playlist, night_index))
 	return slot
 

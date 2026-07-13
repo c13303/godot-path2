@@ -1262,7 +1262,10 @@ tool_shop_prices = {
 &"turret_epine": 3,
 &"wall": 10
 }
-tool_shop_growth_price_factors = {}
+tool_shop_growth_price_factors = {
+&"ronce": 1.1,
+&"turret_epine": 1.1
+}
 merchant_available_items = Array[StringName]([&"spray", &"beam", &"pasteque"])
 merchant_prices = {
 &"beam": 100,

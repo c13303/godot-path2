@@ -46,6 +46,7 @@
 [ext_resource type="PackedScene" uid="uid://cm82p0tkuhnki" path="res://scenes/particles/smoke.tscn" id="40_smkscn"]
 [ext_resource type="Script" uid="uid://q776h0tybxkw" path="res://scripts/animations/grownup_rose_dance.gd" id="41_rosedance"]
 [ext_resource type="Script" uid="uid://hmkmns3gn68r" path="res://scripts/ui/arros.gd" id="42_arros"]
+[ext_resource type="Script" uid="uid://b8wq2narrowspwn" path="res://scripts/ui/spawner_warning_arrows.gd" id="42_warnarros"]
 [ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
@@ -732,6 +733,9 @@ script = ExtResource("4_jptjp")
 
 [node name="arros" type="CanvasLayer" parent="." unique_id=1256371816]
 script = ExtResource("42_arros")
+
+[node name="spawnerWarningArros" type="CanvasLayer" parent="." unique_id=1256371817]
+script = ExtResource("42_warnarros")
 
 [node name="gameplayPhaseColors" type="Node" parent="." unique_id=683992596]
 script = ExtResource("25_gameplay_phase_colors")

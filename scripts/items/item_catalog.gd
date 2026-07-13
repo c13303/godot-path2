@@ -133,11 +133,9 @@ const ITEM_DEFS: Dictionary = {
 	"wall": {
 		"id": "wall",
 		"name": "Wall",
-		"currency": &"gem",
 		"type": "placeable",
 		"category": "wall",
 		"frame": 3,
-		"price": 100,
 		"target_layer": "wallz",
 		"atlas": Vector2i(11, 1),
 		"occupies_cell": true,
@@ -146,8 +144,9 @@ const ITEM_DEFS: Dictionary = {
 		"runtime_id": "",
 		# Owned as a stock count (shows in the currency HUD like the rest of the inventory):
 		# placing a wall consumes one from the stock instead of charging currency. Walls are
-		# granted as starting stock or merchant rewards, not bought (currency/price unused).
+		# granted as starting stock or rewards, not bought.
 		"inventory_backed": true,
+		"fixed_stock": true,
 		"max_health": 100,
 		"max_stack": 999,
 	},
@@ -367,8 +366,8 @@ const ITEM_DEFS: Dictionary = {
 		"requires_grass_green_floor": true,
 		"pad_skip_preview": true,
 		"runtime_id": "rose_shop_counter",
-		# Bought directly from the hammer build picker for gems, paid on placement (like
-		# walls/turrets). Not inventory-backed and not sold at the seed merchant.
+		# Bought directly from the hammer build picker with its catalog currency, paid
+		# on placement. Not inventory-backed and not sold at the seed merchant.
 		"max_health": 100,
 		"max_stack": 999,
 	},
@@ -419,6 +418,12 @@ static func is_placeable(item_id: String) -> bool:
 ## placement. See pasteque.
 static func is_inventory_backed(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("inventory_backed", false))
+
+## Fixed-stock items are granted in finite quantities by the level/reward data and
+## are never sold by either shop. They can still appear in the build picker so the
+## player can place the owned stock.
+static func is_fixed_stock(item_id: String) -> bool:
+	return bool(get_item_def(item_id).get("fixed_stock", false))
 
 ## Data-driven maximum health for a destructible player-built placeable. 0 means the
 ## item has no repeated-damage health (plants use the instant-destroy path instead).
@@ -512,7 +517,7 @@ static func get_merchant_shop_item_ids() -> Array[StringName]:
 			ids.append(weapon_id)
 	for raw_item_id: Variant in ITEM_DEFS.keys():
 		var item_id: String = str(raw_item_id)
-		if is_inventory_backed(item_id):
+		if is_inventory_backed(item_id) and not is_fixed_stock(item_id):
 			var id_name: StringName = StringName(item_id)
 			if not ids.has(id_name):
 				ids.append(id_name)

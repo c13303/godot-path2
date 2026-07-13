@@ -293,22 +293,65 @@ clients = 50
 special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_m4eog"), SubResource("Resource_jgjt4"), SubResource("Resource_ier6t")])
 special_reward_one_time = true
 
+[sub_resource type="Resource" id="Resource_86rn1"]
+script = ExtResource("4_wave")
+monster_count = 20
+
+[sub_resource type="Resource" id="Resource_x61nu"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+monster_count = 5
+
 [sub_resource type="Resource" id="Resource_hcmcw"]
 script = ExtResource("3_track")
 spawner_id = &"monster4"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_86rn1"), SubResource("Resource_x61nu")])
 
 [sub_resource type="Resource" id="Resource_wihrt"]
 script = ExtResource("4_wave")
 monster_count = 20
 
+[sub_resource type="Resource" id="Resource_6ho80"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+monster_count = 5
+
 [sub_resource type="Resource" id="Resource_vkbca"]
 script = ExtResource("3_track")
 spawner_id = &"monster1"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_wihrt")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_wihrt"), SubResource("Resource_6ho80")])
+
+[sub_resource type="Resource" id="Resource_ecqou"]
+script = ExtResource("4_wave")
+monster_count = 20
+
+[sub_resource type="Resource" id="Resource_x1mgs"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+monster_count = 5
+
+[sub_resource type="Resource" id="Resource_1jh15"]
+script = ExtResource("3_track")
+spawner_id = &"monster3"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_ecqou"), SubResource("Resource_x1mgs")])
+
+[sub_resource type="Resource" id="Resource_frwc5"]
+script = ExtResource("4_wave")
+monster_count = 20
+
+[sub_resource type="Resource" id="Resource_5hrt8"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+monster_count = 5
+
+[sub_resource type="Resource" id="Resource_na6qj"]
+script = ExtResource("3_track")
+spawner_id = &"monster2"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_frwc5"), SubResource("Resource_5hrt8")])
 
 [sub_resource type="Resource" id="Resource_r0w1a"]
 script = ExtResource("2_night_playlist")
-spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_hcmcw"), SubResource("Resource_vkbca")])
+spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_hcmcw"), SubResource("Resource_vkbca"), SubResource("Resource_1jh15"), SubResource("Resource_na6qj")])
 clients = 70
 
 [resource]

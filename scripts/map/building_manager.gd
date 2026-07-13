@@ -1597,6 +1597,44 @@ func planificator_anchor_night_index() -> int:
 	return _spawn_playlist_controller.current_night_index()
 
 
+# World-space centers of every spawner that has authored monster activity on the given
+# playlist night, distinct per spawner (one point per active spawner regardless of how
+# many waves it fires). Used by the night-warning arrows to flag the spawners that will
+# wake up next night. Returns an empty array for an out-of-range night or before the
+# spawner bindings are validated.
+func night_active_spawner_world_positions(night_index: int) -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	var config: SpawnPlaylistConfigService = get_spawn_playlist_config()
+	if config == null:
+		return positions
+	var playlist: LevelSpawnPlaylist = config.level_spawn_playlist()
+	if playlist == null or night_index < 0 or night_index >= playlist.nights.size():
+		return positions
+	var night: NightSpawnPlaylist = playlist.nights[night_index]
+	if night == null:
+		return positions
+	var bindings_by_id: Dictionary = config.spawner_bindings_by_id()
+	var seen: Dictionary = {}
+	for track: SpawnerWaveTrack in night.spawner_tracks:
+		if track == null or seen.has(track.spawner_id):
+			continue
+		if not _track_has_monster_activity(track):
+			continue
+		if not bindings_by_id.has(track.spawner_id):
+			continue
+		seen[track.spawner_id] = true
+		var cell: Vector2i = bindings_by_id[track.spawner_id] as Vector2i
+		positions.append(cell_center(cell))
+	return positions
+
+
+func _track_has_monster_activity(track: SpawnerWaveTrack) -> bool:
+	for wave: SpawnWave in track.waves:
+		if wave != null and wave.monster_count > 0:
+			return true
+	return false
+
+
 # Whether the current day's client step is still pending or active (see
 # ClientSaleController._client_step_pending). Delegated so the planificator does not read
 # day-phase booleans directly.
