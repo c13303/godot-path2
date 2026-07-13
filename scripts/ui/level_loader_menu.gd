@@ -10,6 +10,8 @@ const PAD_REPEAT_INTERVAL: float = 0.12
 const DEBUG_OPTIONS_NODE_NAME: String = "CPP"
 const LEVEL_SELECTION_PROPERTY: String = "level_selection"
 const SHOW_SPLASHSCREEN_PROPERTY: String = "show_splashscreen"
+const LEVEL_SELECTION_SETTING: String = "rabbit_game/startup/level_selection"
+const SHOW_SPLASHSCREEN_SETTING: String = "rabbit_game/startup/show_splashscreen"
 const SPLASH_PRELOADER_SCENE: String = "res://scenes/menus/splash_preloader.tscn"
 const CPP_OPTION_UNSET: int = -1
 const CPP_OPTION_DISABLED: int = 0
@@ -174,15 +176,33 @@ func _reset_pad_hold_navigation() -> void:
 
 
 func _is_level_selection_enabled() -> bool:
+	var configured_value: int = _read_project_bool_setting(LEVEL_SELECTION_SETTING)
+	if configured_value != CPP_OPTION_UNSET:
+		return configured_value == CPP_OPTION_ENABLED
 	return _read_cpp_bool_option(MAIN_RUN_SCENE, LEVEL_SELECTION_PROPERTY) == CPP_OPTION_ENABLED
 
 
 func _is_show_splashscreen_enabled() -> bool:
+	var configured_value: int = _read_project_bool_setting(SHOW_SPLASHSCREEN_SETTING)
+	if configured_value != CPP_OPTION_UNSET:
+		return configured_value == CPP_OPTION_ENABLED
 	return _read_cpp_bool_option(MAIN_RUN_SCENE, SHOW_SPLASHSCREEN_PROPERTY) == CPP_OPTION_ENABLED
 
 
+func _read_project_bool_setting(setting_name: String) -> int:
+	if not ProjectSettings.has_setting(setting_name):
+		return CPP_OPTION_UNSET
+	var raw_value: Variant = ProjectSettings.get_setting(setting_name)
+	if raw_value is bool:
+		return CPP_OPTION_ENABLED if bool(raw_value) else CPP_OPTION_DISABLED
+	push_warning("Level menu: project setting %s is not a bool" % setting_name)
+	return CPP_OPTION_UNSET
+
+
 ## Reads a bool @export of the CPP (CppDebugOptions) node straight from the mainRun
-## scene text, before that scene is instantiated. Returns CPP_OPTION_ENABLED /
+## scene text, before that scene is instantiated. Exported resources may not stay
+## readable as scene text, so this is only a compatibility fallback for projects
+## without the startup ProjectSettings above. Returns CPP_OPTION_ENABLED /
 ## _DISABLED, or _UNSET when the property is absent (its exported default applies).
 func _read_cpp_bool_option(scene_path: String, property_name: String) -> int:
 	var file: FileAccess = FileAccess.open(scene_path, FileAccess.READ)

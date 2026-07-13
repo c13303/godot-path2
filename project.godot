@@ -44,6 +44,11 @@ enabled=PackedStringArray("res://addons/spawn_playlist_editor/plugin.cfg")
 
 theme/custom="res://assets/themes/garden_theme.tres"
 
+[rabbit_game]
+
+startup/level_selection=false
+startup/show_splashscreen=true
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
