@@ -119,22 +119,16 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_5rl8i")])
 
 [sub_resource type="Resource" id="Resource_x28xm"]
 script = ExtResource("4_wave")
-monster_count = 5
+monster_count = 2
 
 [sub_resource type="Resource" id="Resource_srfm1"]
 script = ExtResource("3_track")
 spawner_id = &"monster3"
 waves = Array[ExtResource("4_wave")]([SubResource("Resource_x28xm")])
 
-[sub_resource type="Resource" id="Resource_07h4b"]
-script = ExtResource("4_wave")
-monster_count = 5
-wait_for_event = &"w1"
-
 [sub_resource type="Resource" id="Resource_52d1j"]
 script = ExtResource("3_track")
 spawner_id = &"monster4"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_07h4b")])
 
 [sub_resource type="Resource" id="Resource_d4glx"]
 script = ExtResource("4_rk5yt")
@@ -187,19 +181,22 @@ script = ExtResource("4_wave")
 monster_count = 5
 spawn_interval_seconds = 0.5
 wait_for_event = &"end1"
-
-[sub_resource type="Resource" id="Resource_g8l62"]
-script = ExtResource("4_wave")
-monster_type = &"bigmonster"
+emit_event = &"end2"
 
 [sub_resource type="Resource" id="Resource_5xk2r"]
 script = ExtResource("3_track")
 spawner_id = &"monster3"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_akol4"), SubResource("Resource_g8l62")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_akol4")])
+
+[sub_resource type="Resource" id="Resource_07h4b"]
+script = ExtResource("4_wave")
+monster_type = &"bigmonster"
+wait_for_event = &"end2"
 
 [sub_resource type="Resource" id="Resource_lqsmu"]
 script = ExtResource("3_track")
 spawner_id = &"monster4"
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_07h4b")])
 
 [sub_resource type="Resource" id="Resource_427i7"]
 script = ExtResource("4_rk5yt")
@@ -255,10 +252,14 @@ monster_type = &"bigmonster"
 monster_count = 2
 wait_for_event = &"vague2"
 
+[sub_resource type="Resource" id="Resource_g8l62"]
+script = ExtResource("4_wave")
+monster_count = 2
+
 [sub_resource type="Resource" id="Resource_mtmpg"]
 script = ExtResource("3_track")
 spawner_id = &"monster3"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_pwy8k")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_pwy8k"), SubResource("Resource_g8l62")])
 
 [sub_resource type="Resource" id="Resource_w6eun"]
 script = ExtResource("4_wave")
@@ -267,10 +268,14 @@ monster_count = 2
 wait_for_event = &"vague2"
 emit_event = &"vague3"
 
+[sub_resource type="Resource" id="Resource_lujmc"]
+script = ExtResource("4_wave")
+monster_count = 2
+
 [sub_resource type="Resource" id="Resource_gdx4o"]
 script = ExtResource("3_track")
 spawner_id = &"monster4"
-waves = Array[ExtResource("4_wave")]([SubResource("Resource_w6eun")])
+waves = Array[ExtResource("4_wave")]([SubResource("Resource_w6eun"), SubResource("Resource_lujmc")])
 
 [sub_resource type="Resource" id="Resource_m4eog"]
 script = ExtResource("4_rk5yt")
