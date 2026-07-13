@@ -16,6 +16,7 @@ fire_delay_ms = 1000.0
 projectile_visual_size = 32.0
 projectile_sprite = SubResource("AtlasTexture_epine")
 throw_offset = 16.0
+uses_water_projectile_render = true
 projectile_shadow_size = Vector2(10, 4)
 damage = 50
 smash_force = 400.0

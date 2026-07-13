@@ -27,6 +27,8 @@ class_name GunData
 # The sprite is drawn lifted by `projectile_altitude_px` along -Y, but z-ordering
 # and the shadow always use the ground position.
 @export_group("Projectile Visual")
+@export var uses_water_projectile_render: bool = false
+@export var projectile_modulate: Color = Color.WHITE
 @export var projectile_altitude_px: float = 10.0
 @export var projectile_shadow_enabled: bool = true
 @export var projectile_shadow_color: Color = Color(0.0, 0.0, 0.0, 0.3)

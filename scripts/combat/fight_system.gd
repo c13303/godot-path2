@@ -10,6 +10,7 @@ const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const WATER_RESERVE_MAX_KEY: StringName = &"water_reserve_max"
 const SPRAY_SOUND: AudioStream = preload("res://assets/sfx/spray.wav")
 const SPRAY_METABALL_SHADER: Shader = preload("res://scripts/combat/spray_metaball.gdshader")
+const WATER_PROJECTILE_RENDER = preload("res://scripts/combat/water_projectile_render.gd")
 
 @export var visualize_AOE_weapons: bool = true
 # When off, projectiles are drawn in a single batched layer with no per-Y z
@@ -99,11 +100,11 @@ func _ready() -> void:
 	if _projectiles:
 		_projectile_drawer = ProjectileDrawer.new()
 		_projectile_drawer.z_order_enabled = z_order_projectiles
-		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids)
+		_projectile_drawer.setup(_projectiles, _guns_by_id, _gun_type_ids, WATER_PROJECTILE_RENDER.COLOR)
 		add_child(_projectile_drawer)
 	if _projectiles:
 		_spray_projectile_drawer = SprayProjectileDrawer.new()
-		_spray_projectile_drawer.setup(_projectiles, _spray_type_ids, _weapons_by_id, SPRAY_METABALL_SHADER)
+		_spray_projectile_drawer.setup(_projectiles, _spray_type_ids, _weapons_by_id, SPRAY_METABALL_SHADER, WATER_PROJECTILE_RENDER.COLOR)
 		add_child(_spray_projectile_drawer)
 
 func _on_game_mode_changed(is_night: bool) -> void:
@@ -1178,15 +1179,17 @@ class SprayProjectileDrawer:
 	var _material: ShaderMaterial
 	var _fallback_shader: Shader
 	var _active_shader: Shader
+	var _water_projectile_color: Color = Color.WHITE
 	var _shader_points: Array = []
 	var _shader_radii: PackedFloat32Array = PackedFloat32Array()
 	var _draw_bounds: Rect2 = Rect2()
 	var _has_points: bool = false
 
-	func setup(projectile_system: Node, spray_type_ids: Dictionary, weapons_by_id: Dictionary, shader: Shader) -> void:
+	func setup(projectile_system: Node, spray_type_ids: Dictionary, weapons_by_id: Dictionary, shader: Shader, water_projectile_color: Color) -> void:
 		_projectile_system = projectile_system
 		_spray_type_ids = spray_type_ids
 		_weapons_by_id = weapons_by_id
+		_water_projectile_color = water_projectile_color
 		z_as_relative = false
 		z_index = DRAW_Z_INDEX
 		_material = ShaderMaterial.new()
@@ -1202,6 +1205,7 @@ class SprayProjectileDrawer:
 		_material.set_shader_parameter("droplet_count", 0)
 		_material.set_shader_parameter("droplets", _shader_points)
 		_material.set_shader_parameter("droplet_radii", _shader_radii)
+		_material.set_shader_parameter("spray_color", _water_projectile_color)
 
 	func _process(_delta: float) -> void:
 		if not _projectile_system or _material == null:
@@ -1327,12 +1331,14 @@ class ProjectileDrawer:
 	var _projectile_system: Node
 	var _guns_by_id: Dictionary = {}
 	var _gun_type_ids: Dictionary = {}
+	var _water_projectile_color: Color = Color.WHITE
 
 	# Per-type cached visual params (built once at setup; rebuilt only when guns
 	# change). Each entry is a Dictionary so the draw loop performs no resource
 	# lookups, no texture loads and no allocations.
 	# tid -> {
 	#   tex, half_size:Vector2, sprite_offset:Vector2,
+	#   modulate:Color,
 	#   altitude:float, shadow_enabled:bool, shadow_color:Color,
 	#   shadow_size:Vector2, shadow_half:Vector2, shadow_offset:Vector2,
 	#   shadow_tex, shadow_tex_offset:Vector2
@@ -1401,11 +1407,12 @@ class ProjectileDrawer:
 			if not tex:
 				continue
 			var sprite_offset: Vector2 = v2["sprite_offset"]
+			var modulate: Color = v2["modulate"]
 			var altitude: float = float(v2["altitude"])
 			var half_size: Vector2 = v2["half_size"]
 			var top_left: Vector2 = grounds[i] + sprite_offset
 			top_left.y -= altitude
-			ci.draw_texture_rect(tex, Rect2(top_left, half_size * 2.0), false)
+			ci.draw_texture_rect(tex, Rect2(top_left, half_size * 2.0), false, modulate)
 
 	static func _paint_oval(ci: CanvasItem, center: Vector2, half: Vector2, color: Color) -> void:
 		# Cheap procedural oval via a unit circle scaled by the shadow half-extents.
@@ -1417,10 +1424,11 @@ class ProjectileDrawer:
 			pts[i] = center + Vector2(cos(a) * half.x, sin(a) * half.y)
 		ci.draw_colored_polygon(pts, color)
 
-	func setup(projectile_system: Node, guns_by_id: Dictionary, gun_type_ids: Dictionary) -> void:
+	func setup(projectile_system: Node, guns_by_id: Dictionary, gun_type_ids: Dictionary, water_projectile_color: Color) -> void:
 		_projectile_system = projectile_system
 		_guns_by_id = guns_by_id
 		_gun_type_ids = gun_type_ids
+		_water_projectile_color = water_projectile_color
 		z_as_relative = false
 		rebuild_visual_cache()
 
@@ -1438,6 +1446,7 @@ class ProjectileDrawer:
 			var visual_size: float = gun.projectile_visual_size if gun.projectile_visual_size > 0.0 else gun.projectile_size
 			var half: float = visual_size * 0.5
 			var shadow_half: Vector2 = gun.projectile_shadow_size * 0.5
+			var projectile_modulate: Color = _water_projectile_color if gun.uses_water_projectile_render else gun.projectile_modulate
 			var shadow_tex: Texture2D = gun.projectile_shadow_texture
 			var shadow_tex_offset: Vector2 = Vector2.ZERO
 			if shadow_tex:
@@ -1446,6 +1455,7 @@ class ProjectileDrawer:
 				"tex": gun.projectile_sprite,
 				"half_size": Vector2(half, half),
 				"sprite_offset": Vector2(-half, -half),
+				"modulate": projectile_modulate,
 				"altitude": gun.projectile_altitude_px,
 				"shadow_enabled": gun.projectile_shadow_enabled,
 				"shadow_color": gun.projectile_shadow_color,
