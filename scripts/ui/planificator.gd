@@ -1,26 +1,30 @@
 extends Control
 
+# Renderer for the planificator timeline. It owns no schedule semantics: it collects its
+# authoritative dependencies (the playlist owned by BuildingManager, the progression day,
+# and the live now-counts), asks PlanificatorTimelineResolver for the ordered slots, and
+# draws at most two generic slot sections. The first resolved slot is always the focused
+# (large) slot; the second is normal-sized.
+
 const ICON_SIZE: Vector2 = Vector2(32.0, 32.0)
 const FOCUS_ICON_SIZE: Vector2 = Vector2(72.0, 72.0)
 const PANEL_WIDTH: float = 210.0
 const NORMAL_FONT_SIZE: int = 11
 const FOCUS_FONT_SIZE: int = 24
 const LIVE_REFRESH_SECONDS: float = 0.15
+const SLOT_COUNT: int = 2
 const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
-const KEY_TODAY: String = "planificator.today"
+
+const KEY_NOW: String = "planificator.now"
 const KEY_NIGHT: String = "planificator.tonight"
 const KEY_DAY: String = "planificator.tomorrow"
 const KEY_VICTORY: String = "planificator.victory"
 
-var _today_label: Label
-var _night_label: Label
-var _day_label: Label
-var _victory_label: Label
-var _today_rows: VBoxContainer
-var _night_rows: VBoxContainer
-var _day_rows: VBoxContainer
+var _slot_labels: Array[Label] = []
+var _slot_rows: Array[VBoxContainer] = []
+var _resolver: PlanificatorTimelineResolver = PlanificatorTimelineResolver.new()
 var _icon_cache: Dictionary = {}
 var _live_refresh_elapsed: float = 0.0
 
@@ -29,8 +33,6 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_ui()
 	_connect_refresh_signals()
-	_apply_translations()
-	call_deferred("_refresh")
 	call_deferred("_refresh")
 
 
@@ -45,6 +47,8 @@ func _process(delta: float) -> void:
 func _build_ui() -> void:
 	for child: Node in get_children():
 		child.queue_free()
+	_slot_labels.clear()
+	_slot_rows.clear()
 
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "Panel"
@@ -73,30 +77,15 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	margin.add_child(content)
 
-	_today_label = _make_section_label(NORMAL_FONT_SIZE)
-	content.add_child(_today_label)
-	_today_rows = VBoxContainer.new()
-	_today_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_today_rows.add_theme_constant_override("separation", 3)
-	content.add_child(_today_rows)
-
-	_night_label = _make_section_label(NORMAL_FONT_SIZE)
-	content.add_child(_night_label)
-	_night_rows = VBoxContainer.new()
-	_night_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_night_rows.add_theme_constant_override("separation", 3)
-	content.add_child(_night_rows)
-
-	_day_label = _make_section_label(NORMAL_FONT_SIZE)
-	content.add_child(_day_label)
-	_day_rows = VBoxContainer.new()
-	_day_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_day_rows.add_theme_constant_override("separation", 3)
-	content.add_child(_day_rows)
-
-	_victory_label = _make_section_label(NORMAL_FONT_SIZE)
-	_victory_label.visible = false
-	content.add_child(_victory_label)
+	for _index: int in range(SLOT_COUNT):
+		var label: Label = _make_section_label(NORMAL_FONT_SIZE)
+		content.add_child(label)
+		_slot_labels.append(label)
+		var rows: VBoxContainer = VBoxContainer.new()
+		rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		rows.add_theme_constant_override("separation", 3)
+		content.add_child(rows)
+		_slot_rows.append(rows)
 
 	_set_mouse_filter_recursive(self)
 
@@ -135,84 +124,88 @@ func _on_day_started(_day_number: int) -> void:
 
 
 func _on_locale_changed(_locale: String) -> void:
-	_apply_translations()
-
-
-func _apply_translations() -> void:
-	if _today_label != null:
-		_today_label.text = Translations.t(KEY_TODAY)
-	if _night_label != null:
-		_night_label.text = Translations.t(KEY_NIGHT)
-	if _day_label != null:
-		_day_label.text = Translations.t(KEY_DAY)
-	if _victory_label != null:
-		_victory_label.text = Translations.t(KEY_VICTORY)
+	_refresh()
 
 
 func _refresh() -> void:
-	if _today_rows == null or _night_rows == null or _day_rows == null:
+	if _slot_rows.size() < SLOT_COUNT or _slot_labels.size() < SLOT_COUNT:
 		return
-	_clear_rows(_today_rows)
-	_clear_rows(_night_rows)
-	_clear_rows(_day_rows)
 	visible = true
-	if _victory_label != null:
-		_victory_label.visible = false
+	for rows: VBoxContainer in _slot_rows:
+		_clear_rows(rows)
 
-	var today_agent_type: StringName = &"monster" if GameState.is_night else &"client"
-	var today_count: int = _remaining_enemy_count() if GameState.is_night else _remaining_client_count()
-	if GameState.is_morning_phase:
-		var morning_focus: String = "today" if today_count > 0 else ""
-		_apply_focus_section(morning_focus)
-		_add_row(_today_rows, today_agent_type, today_count, morning_focus == "today")
-		_update_section_visibility()
-		return
-
-	var playlist: LevelSpawnPlaylist = _get_playlist()
-	if playlist == null or playlist.nights.is_empty():
-		var fallback_focus: String = "today" if today_count > 0 else ""
-		_apply_focus_section(fallback_focus)
-		_add_row(_today_rows, today_agent_type, today_count, fallback_focus == "today")
-		_update_section_visibility()
-		return
-
-	var night_index: int = _get_preview_night_index(playlist)
-	var night: NightSpawnPlaylist = playlist.nights[night_index]
-	if night == null:
-		var empty_night_focus: String = "today" if today_count > 0 else ""
-		_apply_focus_section(empty_night_focus)
-		_add_row(_today_rows, today_agent_type, today_count, empty_night_focus == "today")
-		_update_section_visibility()
-		return
-
-	var monster_counts: Dictionary = _get_monster_counts(night)
-	var night_count: int = 0 if _should_hide_night_preview() else _total_monster_count(monster_counts)
-	var day_count: int = _preview_client_count_for_visible_phase(playlist, night_index)
-	var focus_section: String = _first_nonempty_section(today_count, night_count, day_count)
-	_apply_focus_section(focus_section)
-	_add_row(_today_rows, today_agent_type, today_count, focus_section == "today")
-	if night_count > 0:
-		_add_monster_rows(monster_counts, focus_section == "night")
-	_add_row(_day_rows, &"client", day_count, focus_section == "day")
-	if _victory_label != null:
-		_victory_label.visible = _tomorrow_is_victory_day()
-	_update_section_visibility()
+	var slots: Array = _resolve_slots()
+	for slot_index: int in range(SLOT_COUNT):
+		if slot_index < slots.size():
+			var slot: PlanificatorTimelineResolver.TimelineSlot = slots[slot_index]
+			_render_slot(slot_index, slot, slot_index == 0)
+		else:
+			_hide_slot(slot_index)
 	_set_mouse_filter_recursive(self)
 
 
-## Number of clients previewed for the coming day (the "tomorrow" section). Used by the
+## Number of clients previewed for the coming day (the TOMORROW slot). Used by the
 ## day-1 tutorial to check whether the player has planted enough roses to satisfy them.
+## Reads the same resolved timeline used for rendering; returns 0 when there is no
+## TOMORROW client slot.
 func previewed_client_count() -> int:
+	var slots: Array = _resolve_slots()
+	for slot: PlanificatorTimelineResolver.TimelineSlot in slots:
+		if slot.kind != PlanificatorTimelineResolver.SLOT_TOMORROW:
+			continue
+		var total: int = 0
+		for row: PlanificatorTimelineResolver.TimelineRow in slot.rows:
+			if row.agent_type == PlanificatorTimelineResolver.CLIENT_AGENT:
+				total += row.count
+		return total
+	return 0
+
+
+func _resolve_slots() -> Array:
 	var playlist: LevelSpawnPlaylist = _get_playlist()
-	if playlist == null or playlist.nights.is_empty():
-		return 0
-	var night_index: int = _get_preview_night_index(playlist)
-	if night_index < 0 or night_index >= playlist.nights.size():
-		return 0
-	var night: NightSpawnPlaylist = playlist.nights[night_index]
-	if night == null:
-		return 0
-	return maxi(0, night.clients)
+	var day_number: int = _get_day_number()
+	var live_monster_count: int = _remaining_enemy_count()
+	var live_client_count: int = _remaining_client_count()
+	return _resolver.resolve(playlist, day_number, live_monster_count, live_client_count)
+
+
+func _render_slot(slot_index: int, slot: PlanificatorTimelineResolver.TimelineSlot, focused: bool) -> void:
+	var label: Label = _slot_labels[slot_index]
+	var rows: VBoxContainer = _slot_rows[slot_index]
+	var font_size: int = FOCUS_FONT_SIZE if focused else NORMAL_FONT_SIZE
+	label.text = _slot_label_text(slot.kind)
+	label.add_theme_font_size_override("font_size", font_size)
+
+	if slot.is_victory:
+		# Victory carries a label but no rows.
+		label.visible = true
+		rows.visible = false
+		return
+
+	rows.add_theme_constant_override("separation", 8 if focused else 3)
+	for row: PlanificatorTimelineResolver.TimelineRow in slot.rows:
+		_add_row(rows, row.agent_type, row.count, focused)
+	var has_rows: bool = rows.get_child_count() > 0
+	label.visible = has_rows
+	rows.visible = has_rows
+
+
+func _hide_slot(slot_index: int) -> void:
+	_slot_labels[slot_index].visible = false
+	_slot_rows[slot_index].visible = false
+
+
+func _slot_label_text(kind: StringName) -> String:
+	match kind:
+		PlanificatorTimelineResolver.SLOT_NOW:
+			return Translations.t(KEY_NOW)
+		PlanificatorTimelineResolver.SLOT_TONIGHT:
+			return Translations.t(KEY_NIGHT)
+		PlanificatorTimelineResolver.SLOT_TOMORROW:
+			return Translations.t(KEY_DAY)
+		PlanificatorTimelineResolver.SLOT_VICTORY:
+			return Translations.t(KEY_VICTORY)
+	return ""
 
 
 func _clear_rows(container: VBoxContainer) -> void:
@@ -241,45 +234,24 @@ func _get_building_manager() -> Node:
 	return scene.get_node_or_null("Map/BuildingManager")
 
 
+# Authoritative playlist source: the one owned by BuildingManager's spawn-playlist
+# config, the same resource runtime spawning uses. May be briefly unavailable during
+# scene startup; the live poll refreshes again once it exists.
 func _get_playlist() -> LevelSpawnPlaylist:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
+	var building_manager: Node = _get_building_manager()
+	if building_manager == null or not building_manager.has_method("get_spawn_playlist_config"):
 		return null
-	var loader: Node = scene.get_node_or_null("LevelLoader")
-	if loader == null or not loader.has_method("get_loaded_spawn_playlist"):
+	var config: SpawnPlaylistConfigService = building_manager.call("get_spawn_playlist_config") as SpawnPlaylistConfigService
+	if config == null:
 		return null
-	return loader.call("get_loaded_spawn_playlist") as LevelSpawnPlaylist
+	return config.level_spawn_playlist()
 
 
-func _get_preview_night_index(playlist: LevelSpawnPlaylist) -> int:
-	var total_nights: int = playlist.get_night_count()
-	if total_nights <= 0:
-		return 0
+func _get_day_number() -> int:
 	var progression: Node = _get_progression()
 	if progression == null or not progression.has_method("get_value"):
-		return 0
-	var day_number: int = int(progression.call("get_value", &"nDays"))
-	var day_index: int = maxi(0, day_number - 1)
-	# Nights no longer loop; clamp so the trailing client day previews the final night.
-	return mini(day_index, total_nights - 1)
-
-
-## True when surviving tonight's fight leads straight into the run's trailing client-only
-## day (the victory day). Runs are finite: N authored nights fought on days 1..N, then the
-## win is claimed on day N+1. So the day *after* tonight is that victory day exactly when
-## the current day equals the authored night count.
-func _tomorrow_is_victory_day() -> bool:
-	var playlist: LevelSpawnPlaylist = _get_playlist()
-	if playlist == null:
-		return false
-	var total_nights: int = playlist.get_night_count()
-	if total_nights <= 0:
-		return false
-	var progression: Node = _get_progression()
-	if progression == null or not progression.has_method("get_value"):
-		return false
-	var day_number: int = int(progression.call("get_value", &"nDays"))
-	return day_number == total_nights
+		return 1
+	return int(progression.call("get_value", &"nDays"))
 
 
 func _get_progression() -> Node:
@@ -287,82 +259,6 @@ func _get_progression() -> Node:
 	if scene == null:
 		return null
 	return scene.get_node_or_null("progression")
-
-
-func _get_monster_counts(night: NightSpawnPlaylist) -> Dictionary:
-	var counts: Dictionary = {}
-	for track: SpawnerWaveTrack in night.spawner_tracks:
-		if track == null:
-			continue
-		for wave: SpawnWave in track.waves:
-			if wave == null:
-				continue
-			var monster_type: StringName = wave.monster_type
-			var count: int = maxi(0, wave.monster_count)
-			counts[monster_type] = int(counts.get(monster_type, 0)) + count
-	return counts
-
-
-func _should_hide_night_preview() -> bool:
-	return GameState.is_night or GameState.is_morning_phase
-
-
-func _preview_client_count_for_visible_phase(playlist: LevelSpawnPlaylist, preview_night_index: int) -> int:
-	if GameState.is_morning_phase:
-		return 0
-	var client_night_index: int = preview_night_index
-	if GameState.is_night:
-		client_night_index = _current_night_index(playlist)
-	if client_night_index < 0 or client_night_index >= playlist.nights.size():
-		return 0
-	var night: NightSpawnPlaylist = playlist.nights[client_night_index]
-	if night == null:
-		return 0
-	return maxi(0, night.clients)
-
-
-func _current_night_index(playlist: LevelSpawnPlaylist) -> int:
-	var total_nights: int = playlist.get_night_count()
-	if total_nights <= 0:
-		return 0
-	var progression: Node = _get_progression()
-	if progression == null or not progression.has_method("get_value"):
-		return 0
-	var day_number: int = int(progression.call("get_value", &"nDays"))
-	var day_index: int = maxi(0, day_number - 1)
-	return mini(day_index, total_nights - 1)
-
-
-func _total_monster_count(monster_counts: Dictionary) -> int:
-	var total: int = 0
-	for raw_count: Variant in monster_counts.values():
-		total += int(raw_count)
-	return total
-
-
-func _first_nonempty_section(today_count: int, night_count: int, day_count: int) -> String:
-	if today_count > 0:
-		return "today"
-	if night_count > 0:
-		return "night"
-	if day_count > 0:
-		return "day"
-	return ""
-
-
-func _add_monster_rows(monster_counts: Dictionary, large: bool = false) -> void:
-	var ordered_types: Array[StringName] = [&"basic", &"bigmonster"]
-	for monster_type: StringName in ordered_types:
-		var count: int = int(monster_counts.get(monster_type, 0))
-		if count > 0:
-			_add_row(_night_rows, monster_type, count, large)
-	for raw_type: Variant in monster_counts.keys():
-		var monster_type: StringName = StringName(str(raw_type))
-		if ordered_types.has(monster_type):
-			continue
-		var count: int = int(monster_counts.get(monster_type, 0))
-		if count > 0:
-			_add_row(_night_rows, monster_type, count, large)
 
 
 func _add_row(container: VBoxContainer, agent_type: StringName, count: int, large: bool = false) -> void:
@@ -390,39 +286,6 @@ func _add_row(container: VBoxContainer, agent_type: StringName, count: int, larg
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	count_label.add_theme_font_size_override("font_size", font_size)
 	row.add_child(count_label)
-
-
-func _apply_focus_section(section: String) -> void:
-	_apply_label_focus(_today_label, section == "today")
-	_apply_label_focus(_night_label, section == "night")
-	_apply_label_focus(_day_label, section == "day")
-	if _today_rows != null:
-		_today_rows.add_theme_constant_override("separation", 8 if section == "today" else 3)
-	if _night_rows != null:
-		_night_rows.add_theme_constant_override("separation", 8 if section == "night" else 3)
-	if _day_rows != null:
-		_day_rows.add_theme_constant_override("separation", 8 if section == "day" else 3)
-
-
-func _apply_label_focus(label: Label, focused: bool) -> void:
-	if label == null:
-		return
-	label.add_theme_font_size_override("font_size", FOCUS_FONT_SIZE if focused else NORMAL_FONT_SIZE)
-
-
-func _update_section_visibility() -> void:
-	if _today_label != null:
-		_today_label.visible = _today_rows != null and _today_rows.get_child_count() > 0
-	if _today_rows != null:
-		_today_rows.visible = _today_rows.get_child_count() > 0
-	if _night_label != null:
-		_night_label.visible = _night_rows != null and _night_rows.get_child_count() > 0
-	if _night_rows != null:
-		_night_rows.visible = _night_rows.get_child_count() > 0
-	if _day_label != null:
-		_day_label.visible = _day_rows != null and _day_rows.get_child_count() > 0
-	if _day_rows != null:
-		_day_rows.visible = _day_rows.get_child_count() > 0
 
 
 func _get_icon(agent_type: StringName) -> Texture2D:

@@ -11,6 +11,8 @@ class_name ClientSaleController
 # (_client_preparing and the phase gates) stays in the manager.
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+# Client demand used only for legacy levels that ship no authored spawn playlist.
+const LEGACY_FALLBACK_CLIENT_COUNT: int = 20
 
 var _manager: BuildingManager
 
@@ -125,7 +127,7 @@ func activate() -> void:
 	_client_sale_active = false
 	_client_sale_pending_spawners.clear()
 	_client_sale_spawn_timers.clear()
-	var client_total: int = current_night_client_count()
+	var client_total: int = completed_night_client_count_for_day()
 	var client_spawners: Dictionary = _manager.client_spawners()
 	if client_total <= 0 or client_spawners.is_empty() or not _manager.has_client_targets_remaining():
 		_manager.on_client_sale_skipped()
@@ -249,7 +251,7 @@ func remaining_client_count_for_today() -> int:
 	if remaining_count > 0:
 		return remaining_count
 	if _manager.has_client_targets_remaining():
-		return current_night_client_count()
+		return completed_night_client_count_for_day()
 	return 0
 
 
@@ -267,18 +269,21 @@ func _dry_planted_roses_after_clients() -> void:
 		plant_manager.call("dry_roses_once_after_clients_finished")
 
 
-func current_night_client_count() -> int:
+# Clients shown and spawned during day D belong to the night completed immediately
+# before that day: completed_night_index = day_number - 2. Days with no completed night
+# (day 1, and any day past the final authored night) have no authored clients. The index
+# is never clamped to the final night, so the trailing client day cannot reuse it.
+func completed_night_client_count_for_day() -> int:
 	var playlist_config: SpawnPlaylistConfigService = _manager.get_spawn_playlist_config()
 	var playlist: LevelSpawnPlaylist = playlist_config.level_spawn_playlist()
 	if playlist == null or playlist.nights.is_empty():
-		return 20
-	var night_index: int = playlist_config.current_playlist_night_index()
-	if night_index < 0 or night_index >= playlist.nights.size():
-		night_index = _manager.get_playlist_night_index_from_progression()
-	night_index = clampi(night_index, 0, playlist.nights.size() - 1)
-	var night: NightSpawnPlaylist = playlist.nights[night_index]
+		return LEGACY_FALLBACK_CLIENT_COUNT
+	var completed_night_index: int = _manager.current_day_number() - 2
+	if completed_night_index < 0 or completed_night_index >= playlist.nights.size():
+		return 0
+	var night: NightSpawnPlaylist = playlist.nights[completed_night_index]
 	if night == null:
-		return 20
+		return 0
 	return maxi(0, night.clients)
 
 

@@ -1279,7 +1279,7 @@ func is_client_sale_start_requested() -> bool:
 func _begin_client_sale_phase() -> void:
 	_client_sale.reset()
 	_client_tantrum.end()
-	var client_total: int = _client_sale.current_night_client_count()
+	var client_total: int = _client_sale.completed_night_client_count_for_day()
 	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
 		on_client_sale_skipped()
 		return
@@ -1450,9 +1450,9 @@ func day_clients_gone() -> bool:
 
 func remaining_planificator_client_count() -> int:
 	if (GameState.is_morning_phase or _day_start_pending) and _current_day_number_for_planificator() > 1:
-		return _client_sale.current_night_client_count() if _has_client_targets_remaining() else 0
+		return _client_sale.completed_night_client_count_for_day() if _has_client_targets_remaining() else 0
 	if _client_preparing or _client_sale_start_requested:
-		return _client_sale.current_night_client_count() if _has_client_targets_remaining() else 0
+		return _client_sale.completed_night_client_count_for_day() if _has_client_targets_remaining() else 0
 	return _client_sale.remaining_client_count_for_today()
 
 
@@ -1461,6 +1461,12 @@ func _current_day_number_for_planificator() -> int:
 	if progression == null or not progression.has_method("get_value"):
 		return 1
 	return int(progression.call("get_value", &"nDays"))
+
+
+# One-based progression day. Public so ClientSaleController can resolve the completed
+# night index (day - 2) without reaching into progression itself.
+func current_day_number() -> int:
+	return _current_day_number_for_planificator()
 
 
 func remaining_planificator_enemy_count() -> int:
