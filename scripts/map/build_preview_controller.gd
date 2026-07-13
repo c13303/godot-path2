@@ -39,6 +39,9 @@ var _preview_cells: Array[Vector2i] = []
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
 var _cursor_hidden_for_preview: bool = false
+# Hides the OS mouse cursor while a hammer/gardening menu is open, independent of whether a
+# preview ghost is drawn. Combined with _cursor_hidden_for_preview to drive final visibility.
+var _cursor_hidden_for_menu: bool = false
 var _drag_selection_rect: Panel = null
 var _drag_selection_style: StyleBoxFlat = null
 # Tracks the current rect tint so its colors are only swapped when the mode changes.
@@ -171,6 +174,23 @@ func _set_preview_cursor_hidden(hidden: bool) -> void:
 	if hidden == _cursor_hidden_for_preview:
 		return
 	_cursor_hidden_for_preview = hidden
+	_apply_cursor_visibility()
+
+
+## Hides the OS mouse cursor while a hammer/gardening menu is open, so no cursor shows over the
+## world until the player commits a tool or closes the menu back to weapon mode. No-op in pad mode
+## (the mouse is already hidden there by the control-mode owner).
+func set_menu_cursor_hidden(hidden: bool) -> void:
+	if _cursor_hidden_for_menu == hidden:
+		return
+	_cursor_hidden_for_menu = hidden
+	_apply_cursor_visibility()
+
+
+func _apply_cursor_visibility() -> void:
+	if _pad_cursor_active:
+		return
+	var hidden: bool = _cursor_hidden_for_preview or _cursor_hidden_for_menu
 	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN if hidden else Input.MOUSE_MODE_VISIBLE)
 
 

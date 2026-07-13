@@ -211,6 +211,11 @@ func activate_quickbar_slot(index: int) -> void:
 	_last_active_slot_index = index
 	# Opening a build-tool/weapon menu leaves unbuild mode.
 	_set_unbuild_selected(false)
+	# Opening a hammer/gardening menu drops any active build preview: the player must pick a
+	# buildable again, or close the menu back to weapon mode. Without this the ghost of the
+	# previously placed tool lingered under the freshly opened menu.
+	if kind == HAMMER_ID or kind == GARDENING_ID:
+		selected_build_item_id = ""
 	_refresh_all_slots()
 
 ## Closes the quickbar back to play mode (menus closed, no labels).

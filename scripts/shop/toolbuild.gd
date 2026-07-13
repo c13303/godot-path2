@@ -1006,6 +1006,9 @@ func _step_merchant_pad_selection(direction: int) -> void:
 		if index < 0:
 			index += ids.size()
 	_selected_merchant_item_id = ids[index]
+	# Merchant buttons do not use Godot focus. Once the pad moves the selection, clear any
+	# stale mouse hover so the visible highlight follows the pad-owned selection below.
+	_hovered_item_id = ""
 	_refresh_merchant_slots()
 
 
@@ -1384,6 +1387,7 @@ func _is_seed_merchant_shop_active() -> bool:
 func _refresh_merchant_slots() -> void:
 	_refresh_special_reward_row()
 	_refresh_special_reward_selection_style()
+	var highlighted_pad_id: String = _merchant_highlighted_pad_id()
 	for item_id: String in _merchant_item_ids():
 		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
 		if cells.is_empty():
@@ -1396,7 +1400,7 @@ func _refresh_merchant_slots() -> void:
 		var button: Button = _merchant_slot_buttons[item_id] as Button
 		var affordable: int = _merchant_affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0
-		var highlighted: bool = _hovered_item_id == item_id
+		var highlighted: bool = highlighted_pad_id == item_id
 		var state: Array[bool] = [highlighted, false]
 		if _merchant_slot_state.get(item_id) != state:
 			_merchant_slot_state[item_id] = state
@@ -1457,14 +1461,23 @@ func _special_reward_key_from_pad_id(pad_id: String) -> String:
 
 
 func _refresh_special_reward_selection_style() -> void:
+	var highlighted_pad_id: String = _merchant_highlighted_pad_id()
 	var index: int = 0
 	while index < _reward_cells.size():
 		var button: Button = _reward_cells[index] as Button
 		if button != null:
 			var pad_id: String = str(button.get_meta(&"reward_pad_id", ""))
-			var highlighted: bool = _hovered_item_id == pad_id
+			var highlighted: bool = highlighted_pad_id == pad_id
 			_apply_slot_style(button, highlighted, false)
 		index += MERCHANT_COLUMNS
+
+
+## The merchant has no native Control focus: mouse hover temporarily owns its highlight, and
+## the explicit merchant selection is the fallback used by gamepad navigation.
+func _merchant_highlighted_pad_id() -> String:
+	if _hovered_item_id != "":
+		return _hovered_item_id
+	return _selected_merchant_item_id
 
 
 ## Rebuilds the free reward rows pinned to the top of the merchant grid from game_ui's current
