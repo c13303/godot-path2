@@ -1,0 +1,42 @@
+[gd_scene load_steps=4 format=4]
+
+[ext_resource type="Script" path="res://scripts/ui/splash_preloader.gd" id="1_script"]
+[ext_resource type="Texture2D" uid="uid://cictfyck2m8yk" path="res://assets/splash/splash_frame.png" id="2_splash"]
+[ext_resource type="AudioStream" uid="uid://dmcu20lgk3mr1" path="res://assets/music/college quest.mp3" id="3_music"]
+
+[node name="SplashPreloader" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
+[node name="Splash" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_splash")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Music" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("3_music")
+volume_db = -10.0
+autoplay = true

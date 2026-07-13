@@ -41,14 +41,12 @@ func process(delta: float) -> void:
 		_clear_hover()
 		return
 
-	# While a hammer/gardening menu is open no buildable is committed yet: show no ghost preview
-	# and keep the mouse cursor hidden until the player picks a tool or closes the menu (which
-	# returns to weapon mode and restores the cursor via set_menu_cursor_hidden(false) below).
+	# While a hammer/gardening menu is open no buildable is committed yet, so show no ghost
+	# preview. Cursor visibility still follows the active control mode: visible for keyboard/mouse
+	# and hidden for gamepad.
 	if _is_build_menu_open():
-		_build_preview.set_menu_cursor_hidden(true)
 		_clear_hover()
 		return
-	_build_preview.set_menu_cursor_hidden(false)
 
 	var placeable_def: Dictionary = _selected_placeable_def()
 	if _is_build_drag_active():

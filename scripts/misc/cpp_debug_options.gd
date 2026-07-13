@@ -43,6 +43,12 @@ static func save_log(message: String) -> void:
 
 @export var level_selection: bool = false
 
+## When ON, a fullscreen splash (ROSE2COLERE_SPLASH + music) is shown while the
+## game (mainRun) loads, for at least 3 seconds. Read from the mainRun scene file
+## by the level menu before the game is instantiated, so it has no runtime effect
+## on this node.
+@export var show_splashscreen: bool = false
+
 ## Set just before reload_current_scene() by the ² dev key so the freshly
 ## reloaded scene comes up with debug_enabled forced ON, regardless of what the
 ## scene file / editor had. Static so it survives the scene reload.

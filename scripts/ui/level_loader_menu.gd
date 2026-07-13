@@ -9,9 +9,11 @@ const PAD_REPEAT_INITIAL_DELAY: float = 0.28
 const PAD_REPEAT_INTERVAL: float = 0.12
 const DEBUG_OPTIONS_NODE_NAME: String = "CPP"
 const LEVEL_SELECTION_PROPERTY: String = "level_selection"
-const LEVEL_SELECTION_UNSET: int = -1
-const LEVEL_SELECTION_DISABLED: int = 0
-const LEVEL_SELECTION_ENABLED: int = 1
+const SHOW_SPLASHSCREEN_PROPERTY: String = "show_splashscreen"
+const SPLASH_PRELOADER_SCENE: String = "res://scenes/menus/splash_preloader.tscn"
+const CPP_OPTION_UNSET: int = -1
+const CPP_OPTION_DISABLED: int = 0
+const CPP_OPTION_ENABLED: int = 1
 
 @onready var _choices: VBoxContainer = $Margin/Panel/Content/Scroll/Choices
 @onready var _empty_label: Label = $Margin/Panel/Content/EmptyLabel
@@ -172,15 +174,21 @@ func _reset_pad_hold_navigation() -> void:
 
 
 func _is_level_selection_enabled() -> bool:
-	var override_value: int = _read_level_selection_from_scene(MAIN_RUN_SCENE)
-	return override_value == LEVEL_SELECTION_ENABLED
+	return _read_cpp_bool_option(MAIN_RUN_SCENE, LEVEL_SELECTION_PROPERTY) == CPP_OPTION_ENABLED
 
 
-func _read_level_selection_from_scene(scene_path: String) -> int:
+func _is_show_splashscreen_enabled() -> bool:
+	return _read_cpp_bool_option(MAIN_RUN_SCENE, SHOW_SPLASHSCREEN_PROPERTY) == CPP_OPTION_ENABLED
+
+
+## Reads a bool @export of the CPP (CppDebugOptions) node straight from the mainRun
+## scene text, before that scene is instantiated. Returns CPP_OPTION_ENABLED /
+## _DISABLED, or _UNSET when the property is absent (its exported default applies).
+func _read_cpp_bool_option(scene_path: String, property_name: String) -> int:
 	var file: FileAccess = FileAccess.open(scene_path, FileAccess.READ)
 	if file == null:
 		push_warning("Level menu: cannot inspect debug options in %s" % scene_path)
-		return LEVEL_SELECTION_UNSET
+		return CPP_OPTION_UNSET
 
 	var in_debug_options_node: bool = false
 	while not file.eof_reached():
@@ -188,13 +196,13 @@ func _read_level_selection_from_scene(scene_path: String) -> int:
 		if line.begins_with("[node "):
 			in_debug_options_node = line.contains("name=\"%s\"" % DEBUG_OPTIONS_NODE_NAME)
 			continue
-		if in_debug_options_node and line.begins_with("%s = " % LEVEL_SELECTION_PROPERTY):
+		if in_debug_options_node and line.begins_with("%s = " % property_name):
 			var raw_value: String = line.get_slice("=", 1).strip_edges()
 			file.close()
-			return LEVEL_SELECTION_ENABLED if raw_value == "true" else LEVEL_SELECTION_DISABLED
+			return CPP_OPTION_ENABLED if raw_value == "true" else CPP_OPTION_DISABLED
 
 	file.close()
-	return LEVEL_SELECTION_UNSET
+	return CPP_OPTION_UNSET
 
 
 func _auto_load_default_level() -> void:
@@ -246,6 +254,11 @@ func _load_main_run() -> void:
 
 
 func _change_to_main_run() -> void:
-	var change_error: Error = get_tree().change_scene_to_file(MAIN_RUN_SCENE)
+	# When the splash is enabled, switch to it instead; it loads mainRun in the
+	# background and hands off to the game itself.
+	var target_scene: String = MAIN_RUN_SCENE
+	if _is_show_splashscreen_enabled():
+		target_scene = SPLASH_PRELOADER_SCENE
+	var change_error: Error = get_tree().change_scene_to_file(target_scene)
 	if change_error != OK:
-		push_error("Level menu: failed to load %s (error %d)" % [MAIN_RUN_SCENE, int(change_error)])
+		push_error("Level menu: failed to load %s (error %d)" % [target_scene, int(change_error)])
