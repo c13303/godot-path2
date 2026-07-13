@@ -45,7 +45,7 @@ func begin_phase() -> void:
 	var has_harvestable_imperials: bool = _harvestable_imperial_count() > 0
 	_active = false
 	if not has_grownup_roses and not has_pending_imperial_growth and not has_harvestable_imperials:
-		_manager.skip_client_sale_without_roses()
+		_manager.request_client_sale_start()
 		return
 	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
 		await plant_manager.call("bloom_grownup_roses")
@@ -53,7 +53,7 @@ func begin_phase() -> void:
 		return
 	var harvestable_imperials: int = _harvestable_imperial_count()
 	if _manager.grownup_rose_count() <= 0 and harvestable_imperials <= 0:
-		_manager.skip_client_sale_without_roses()
+		_manager.request_client_sale_start()
 		return
 	_active = true
 	if _manager.grownup_rose_count() > 0 and harvestable_imperials <= 0 and not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():

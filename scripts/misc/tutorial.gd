@@ -499,8 +499,6 @@ func _current_hold_action() -> StringName:
 	if _building_manager == null:
 		return HOLD_ACTION_NONE
 	if _building_manager.has_method("is_client_sale_start_requested") and bool(_building_manager.call("is_client_sale_start_requested")):
-		if not _has_roses_to_sell_today():
-			return HOLD_ACTION_NONE
 		return HOLD_ACTION_START_CLIENTS
 	if _building_manager.has_method("is_night_start_requested") and bool(_building_manager.call("is_night_start_requested")):
 		if not _can_start_night_after_clients():

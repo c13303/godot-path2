@@ -1335,7 +1335,7 @@ func _begin_client_sale_phase() -> void:
 	_client_sale.reset()
 	_client_tantrum.end()
 	var client_total: int = _client_sale.completed_night_client_count_for_day()
-	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
+	if client_total <= 0 or _client_spawners.is_empty():
 		on_client_sale_skipped()
 		return
 	GameState.start_morning()

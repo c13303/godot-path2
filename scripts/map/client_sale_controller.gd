@@ -159,7 +159,7 @@ func activate() -> void:
 	_client_sale_spawn_timers.clear()
 	var client_total: int = completed_night_client_count_for_day()
 	var client_spawners: Dictionary = _manager.client_spawners()
-	if client_total <= 0 or client_spawners.is_empty() or not _manager.has_client_targets_remaining():
+	if client_total <= 0 or client_spawners.is_empty():
 		_manager.on_client_sale_skipped()
 		return
 	var client_cells: Array[Vector2i] = []
@@ -188,10 +188,9 @@ func process(delta: float) -> void:
 		return
 	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
 	var client_counter_agents: Dictionary = _manager.client_counter_agents()
-	# No rose targets remain: cancel pending future client spawns and immediately
-	# turn every current rose-less client hostile. Rose-holders keep escaping.
+	# No roses remain: current rose-less clients turn hostile, while every scheduled
+	# client still gets to spawn and join the tantrum instead of silently disappearing.
 	if not _roses_available():
-		_client_sale_pending_spawners.clear()
 		client_tantrum.start_all_clients_without_rose()
 	var spawned_this_frame: bool = _process_client_spawns(delta)
 	if spawned_this_frame:
@@ -280,9 +279,7 @@ func remaining_client_count_for_today() -> int:
 	var remaining_count: int = _client_sale_pending_spawners.size() + client_count()
 	if remaining_count > 0:
 		return remaining_count
-	if _manager.has_client_targets_remaining():
-		return completed_night_client_count_for_day()
-	return 0
+	return completed_night_client_count_for_day()
 
 
 func planned_client_count_for_current_step() -> int:

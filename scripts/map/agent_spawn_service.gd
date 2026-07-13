@@ -26,11 +26,16 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
 	var t_sel: int = Time.get_ticks_usec()
 	var garden_id: int = _manager._select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _manager._select_garden_for_spawner(spawner_cell)
+	var spawn_directly_into_tantrum: bool = (
+		agent_kind == SPAWNER_KIND_CLIENT
+		and _manager.total_counter_stock() <= 0
+		and _manager.grownup_rose_count() <= 0
+	)
 	var sel_us: int = Time.get_ticks_usec() - t_sel
 	if telemetry.over_garden_threshold_us(sel_us):
 		telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
 			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager.get_garden_topology_service().gardens().size(), garden_id])
-	if garden_id <= 0:
+	if garden_id <= 0 and not spawn_directly_into_tantrum:
 		# Not an anomaly: every garden is eaten out, sold out, or walled off from this
 		# spawner (a normal defensive state). Recorded for reporting, logged debug-gated.
 		telemetry.log_expected_spawn_skip("spawner %s has no reachable garden" % spawner_cell)
@@ -38,26 +43,29 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 
 	# Route/cache lookup (+ entry-cell resolution). Hits are O(1); misses recompute
 	# the nearest garden entry. Hit/miss counters live in the called function.
-	var t_route: int = Time.get_ticks_usec()
-	var route: Dictionary = _manager._get_or_create_spawner_garden_route(spawner_cell, garden_id)
-	var route_us: int = Time.get_ticks_usec() - t_route
-	if telemetry.over_garden_threshold_us(route_us):
-		telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
-			"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
+	var route: Dictionary = {}
+	var entry_cell: Vector2i = INVALID_CELL
+	if not spawn_directly_into_tantrum:
+		var t_route: int = Time.get_ticks_usec()
+		route = _manager._get_or_create_spawner_garden_route(spawner_cell, garden_id)
+		var route_us: int = Time.get_ticks_usec() - t_route
+		if telemetry.over_garden_threshold_us(route_us):
+			telemetry.warn_garden_task_lag_us("_process_spawners.route_lookup", route_us,
+				"spawner_cell=%s garden=%d ready=%s" % [str(spawner_cell), garden_id, str(route.get("ready", false))])
+		entry_cell = route.get("entry_cell", INVALID_CELL) as Vector2i
 	# Lazy flow fields: the route's plant group is allocated immediately, but its flow
 	# field may still be queued/computing. We no longer refuse the spawn here — as long
 	# as a group exists, _assign_agent_to_garden_entry_flow parks the agent in the
 	# waiting-entry-flow set (it freezes as "ff wait" / "ff being computed") and attaches
 	# once the field is ready. Only a missing group means the route is genuinely unusable.
-	if int(route.get("plant_group", -1)) <= IDLE_GROUP:
+	if not spawn_directly_into_tantrum and int(route.get("plant_group", -1)) <= IDLE_GROUP:
 		telemetry.log_spawn_failure("spawner %s garden %d has no flow group" % [spawner_cell, garden_id])
 		return false
-	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
-	if entry_cell == INVALID_CELL:
+	if not spawn_directly_into_tantrum and entry_cell == INVALID_CELL:
 		telemetry.log_spawn_failure("spawner %s garden %d has no entry cell" % [spawner_cell, garden_id])
 		return false
 
-	if not _manager._is_sane_cell(entry_cell):
+	if not spawn_directly_into_tantrum and not _manager._is_sane_cell(entry_cell):
 		telemetry.log_spawn_failure("spawner %s garden %d insane entry_cell %s" % [spawner_cell, garden_id, entry_cell])
 		return false
 
@@ -118,6 +126,22 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		if telemetry.over_garden_threshold_us(reg_us):
 			telemetry.warn_garden_task_lag_us("_process_spawners.register_agent", reg_us,
 				"spawner_cell=%s nav_id=%d" % [str(spawner_cell), nav_id])
+
+		if spawn_directly_into_tantrum:
+			var tantrum_started: bool = _manager.get_client_tantrum_controller().start_for_client(agent)
+			if not tantrum_started:
+				if _manager.agent_manager.has_method("unregister_agent"):
+					_manager.agent_manager.call("unregister_agent", nav_id)
+				_manager._unregister_desire_agent(agent)
+				agent.remove_from_group(&"clients")
+				agent.queue_free()
+				telemetry.log_spawn_failure("spawner %s could not start rose-less client tantrum" % spawner_cell)
+				return false
+			_manager.get_spawn_tick_controller().increment_assigned_count()
+			telemetry.log("spawned tantrum client nav_id=%d spawn_cell=%s spawner=%s" % [
+				nav_id, spawn_cell, spawner_cell,
+			])
+			return true
 
 		# Assign the garden-entry route: attaches the monster to the entry flow
 		# group. Usually the heaviest leg when the route/flow is first created.
