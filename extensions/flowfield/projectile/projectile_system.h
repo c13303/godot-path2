@@ -22,6 +22,7 @@ namespace ffcore
         bool smash_detach_flow = false;
         double smash_control_suppression = 1.0;
         double smash_control_suppression_duration = 0.0;
+        bool direct_hit_only = false;
         bool smash_budget_enabled = false;
         int damage = 0;
 
@@ -165,6 +166,12 @@ namespace ffcore
 
         std::uint16_t checkout_slot(int type_id);
 
+        struct DirectHitResult
+        {
+            int agent_id = -1;
+            Vec2 impact_pos;
+        };
+
         // Raycast the projectile's ground path across matching static collider cells.
         bool raycast_static_colliders(const Vec2 &from, const Vec2 &to,
                                       std::uint32_t projectile_mask,
@@ -178,6 +185,8 @@ namespace ffcore
                              const Vec2i &collider_cell = Vec2i{});
 
         int find_direct_hit_agent(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &direction) const;
+        DirectHitResult find_segment_direct_hit_agent(const ProjectileTypeConfig &cfg, const Projectile &p,
+                                                      const Vec2 &from, const Vec2 &to) const;
         void apply_budgeted_projectile_smash(const ProjectileTypeConfig &cfg, const Projectile &p,
                                              const Vec2 &impact_pos, const Vec2 &impact_dir,
                                              int direct_hit_agent_id);

@@ -1606,6 +1606,26 @@ void SteeringSystem::apply_area_damage(const Vec2 &pos, double radius, int ignor
     }
 }
 
+void SteeringSystem::apply_damage_to_agent(int id, int damage, int affected_smash_classes)
+{
+    if (damage <= 0)
+        return;
+
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    const AgentData &agent = agents[it->second];
+    if (is_drowning_agent(agent))
+        return;
+    if (agent.profile.weapon_immune)
+        return;
+    if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+        return;
+
+    damage_events.push_back(DamageEvent{id, damage, agent_fight_center(agent)});
+}
+
 std::vector<DamageEvent> SteeringSystem::take_damage_events()
 {
     std::vector<DamageEvent> out;

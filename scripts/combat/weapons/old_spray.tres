@@ -1,14 +1,14 @@
-[gd_resource type="Resource" script_class="WeaponData" format=3 uid="uid://bs67ji5wuue4h"]
+[gd_resource type="Resource" script_class="WeaponData" format=3]
 
 [ext_resource type="Script" uid="uid://7fy1vw4t2nil" path="res://scripts/combat/weapons/weapon_data.gd" id="1_weapon_data"]
 [ext_resource type="Shader" uid="uid://j2vgdcjugb6p" path="res://scripts/combat/spray_metaball.gdshader" id="2_a3wbf"]
 
 [resource]
 script = ExtResource("1_weapon_data")
-id = "spray"
+id = "old_spray"
 throw_offset = 8.0
 directional_area_angle = 20.0
-smash_force = 200.0
+smash_force = 400.0
 control_suppression = 0.35
 control_suppression_duration = 0.15
 spray_projectiles_enabled = true
@@ -20,7 +20,7 @@ spray_aim_inertia = 0.05
 spray_projectile_speed = 600.0
 spray_projectile_lifetime = 0.27
 spray_projectile_radius = 6.0
-spray_projectile_direct_hit_only = true
+spray_projectile_smash_budget_enabled = true
 spray_projectile_spread_jitter_degrees = 3.0
 spray_waters_reactive_plants = true
 spray_visual_radius = 16.0

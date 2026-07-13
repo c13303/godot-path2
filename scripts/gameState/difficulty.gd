@@ -41,6 +41,8 @@ func _apply_hardcore_preset() -> void:
 	_spray.spray_projectile_lifetime = 0.27
 	_spray.spray_projectile_radius = 5.25
 	_spray.spray_projectile_damage = 4
+	_spray.spray_projectile_direct_hit_only = true
+	_spray.spray_projectile_smash_budget_enabled = false
 	_spray.spray_projectile_spread_jitter_degrees = 3.0
 	_spray.spray_projectile_static_collision_mask = 1
 	_spray.spray_projectile_pool_size = 128

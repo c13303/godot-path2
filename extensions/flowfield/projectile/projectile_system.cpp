@@ -40,6 +40,41 @@ namespace ffcore
                 return false;
             return true;
         }
+
+        bool segment_intersects_expanded_aabb(const Vec2 &from, const Vec2 &to,
+                                              const Vec2 &center, double half_w, double half_h,
+                                              double expansion, double &out_t)
+        {
+            const Vec2 delta = to - from;
+            const double min_x = center.x - half_w - expansion;
+            const double max_x = center.x + half_w + expansion;
+            const double min_y = center.y - half_h - expansion;
+            const double max_y = center.y + half_h + expansion;
+            double t_min = 0.0;
+            double t_max = 1.0;
+
+            auto clip_axis = [&](double start, double dir, double min_v, double max_v) -> bool
+            {
+                if (std::abs(dir) < 1e-8)
+                    return start >= min_v && start <= max_v;
+
+                double t1 = (min_v - start) / dir;
+                double t2 = (max_v - start) / dir;
+                if (t1 > t2)
+                    std::swap(t1, t2);
+                t_min = std::max(t_min, t1);
+                t_max = std::min(t_max, t2);
+                return t_min <= t_max;
+            };
+
+            if (!clip_axis(from.x, delta.x, min_x, max_x))
+                return false;
+            if (!clip_axis(from.y, delta.y, min_y, max_y))
+                return false;
+
+            out_t = std::clamp(t_min, 0.0, 1.0);
+            return true;
+        }
     }
 
     ProjectileSystem::ProjectileSystem() {}
@@ -168,6 +203,52 @@ namespace ffcore
             }
         }
         return hit_agent_id;
+    }
+
+    ProjectileSystem::DirectHitResult ProjectileSystem::find_segment_direct_hit_agent(const ProjectileTypeConfig &cfg, const Projectile &p,
+                                                                                      const Vec2 &from, const Vec2 &to) const
+    {
+        DirectHitResult result;
+        result.impact_pos = to;
+        if (!grid || !steering || cfg.radius < 0.0)
+            return result;
+
+        const Vec2 delta = to - from;
+        const double segment_len = delta.length();
+        const Vec2 query_center = from + delta * 0.5;
+        const double query_radius = segment_len * 0.5 + cfg.radius + steering->get_max_fight_query_padding();
+        auto neighbors = grid->query_neighbors(query_center, query_radius);
+
+        double best_t = std::numeric_limits<double>::infinity();
+        for (int nid : neighbors)
+        {
+            const AgentData *agent = steering->get_agent(nid);
+            if (!agent)
+                continue;
+            if (!smash_candidate_is_eligible(*agent, nid, p.owner_agent_id, p.affected_smash_classes))
+                continue;
+
+            const Vec2 fight_center = agent->position + Vec2(0, agent->profile.fight_offset_y);
+            double contact_t = 0.0;
+            if (!segment_intersects_expanded_aabb(from, to, fight_center,
+                                                  agent->profile.fight_half_w,
+                                                  agent->profile.fight_half_h,
+                                                  cfg.radius,
+                                                  contact_t))
+            {
+                continue;
+            }
+
+            if (contact_t < best_t ||
+                (contact_t == best_t && (result.agent_id < 0 || nid < result.agent_id)))
+            {
+                best_t = contact_t;
+                result.agent_id = nid;
+                result.impact_pos = from + delta * contact_t;
+            }
+        }
+
+        return result;
     }
 
     void ProjectileSystem::apply_budgeted_projectile_smash(const ProjectileTypeConfig &cfg, const Projectile &p,
@@ -426,6 +507,36 @@ namespace ffcore
                 }
 
                 Vec2 impact_dir = p.vel.normalized();
+                if (cfg.direct_hit_only && steering)
+                {
+                    DirectHitResult direct_hit = find_segment_direct_hit_agent(cfg, p, prev_pos, p.pos);
+                    if (direct_hit.agent_id >= 0)
+                    {
+                        p.pos = direct_hit.impact_pos;
+                        steering->apply_smash_impulse(
+                            direct_hit.agent_id,
+                            impact_dir,
+                            cfg.smash_force,
+                            cfg.smash_friction_loss,
+                            0.0,
+                            cfg.smash_detach_flow,
+                            cfg.smash_control_suppression,
+                            cfg.smash_control_suppression_duration);
+                        steering->apply_damage_to_agent(
+                            direct_hit.agent_id,
+                            cfg.damage,
+                            p.affected_smash_classes);
+
+                        impact_events.push_back(ProjectileImpact{
+                            p.pos, impact_dir, 0.0,
+                            static_cast<int>(p.type_id), static_cast<int>(ImpactKind::Agent)});
+
+                        p.active = 0;
+                        tp.free_list.push_back(static_cast<std::uint16_t>(i));
+                        continue;
+                    }
+                }
+
                 int hit_agent_id = find_direct_hit_agent(cfg, p, impact_dir);
 
                 if (hit_agent_id >= 0 && steering)

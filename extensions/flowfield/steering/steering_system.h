@@ -132,6 +132,7 @@ namespace ffcore
         bool update_continuous_aoe(int continuous_id, const Vec2 &direction, const Vec2 &follow_offset);
         void stop_continuous_aoe(int continuous_id);
         void apply_area_damage(const Vec2 &pos, double radius, int ignored_agent_id, int affected_smash_classes, int damage);
+        void apply_damage_to_agent(int id, int damage, int affected_smash_classes);
         std::vector<DamageEvent> take_damage_events();
         void set_agent_never_rest(int id, bool value);
         void set_agent_paused(int id, bool value);

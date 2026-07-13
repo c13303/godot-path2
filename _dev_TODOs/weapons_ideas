@@ -1,0 +1,17 @@
+- Liane Kraken.
+
+New Buidable Item : kraken
+Buildable only in watersource tiles.
+Cost in build quickbar tool : 20 gems
+
+Visually : it's like a tentacle. 
+Building style : like a turret but who dosent shoot. has a radius to catch an enemy + cooldown.
+Use the 8 frames for kraken.png . Size = 32x32 frames
+-Idea : At idle, the basis (frame 0) stays locked at its place, the rest is like a "charmed snake", see what I mean ? How would you call that ? Each part is smaller that previous (base = largest)
+-Attack : it stretches to its radius max to grab a monster. Then the monster is technically removed from the grid, visually we see the kraken bring back to its idle position. Should last 700ms, the move is like a whip catching the monster
+-Eating animation : the kraken and the monster are into a 3 second animation of eating (I guess, everything will vibrate or something ... suggestions ?) At the end the monster explodes like they do when they die. The gem is propulsed to nearest valid floor.
+-Digestion : that's the kraken resting for cooldown, can't attack. Needs a specific animation.
+
+So the main difficulty is to animate it programatically instead of spritesheet.
+
+I would need an editor for that. Do I really need to make my own, or can I use built in stuff in my version fog godot 4.6
