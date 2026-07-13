@@ -31,6 +31,7 @@ const IMPERIAL_PREVIEW_FRAME: int = 0
 const IMPERIAL_PREVIEW_OFFSET: Vector2 = Vector2(0.0, -18.0)
 
 var _manager: BuildSystem
+var _gamepad_mode_query: Callable = Callable()
 var _hover_active: bool = false
 var _hover_cell: Vector2i
 var _hover_item_id: String = ""
@@ -51,8 +52,9 @@ var _preview_visual: Node2D = null
 var _preview_visuals: Array[Node2D] = []
 
 
-func setup(manager: BuildSystem) -> void:
+func setup(manager: BuildSystem, gamepad_mode_query: Callable) -> void:
 	_manager = manager
+	_gamepad_mode_query = gamepad_mode_query
 
 
 func configure_layer() -> void:
@@ -190,8 +192,16 @@ func set_menu_cursor_hidden(hidden: bool) -> void:
 func _apply_cursor_visibility() -> void:
 	if _pad_cursor_active:
 		return
-	var hidden: bool = _cursor_hidden_for_preview or _cursor_hidden_for_menu
+	var hidden: bool = (
+		_cursor_hidden_for_preview
+		or _cursor_hidden_for_menu
+		or _is_gamepad_control_mode()
+	)
 	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN if hidden else Input.MOUSE_MODE_VISIBLE)
+
+
+func _is_gamepad_control_mode() -> bool:
+	return _gamepad_mode_query.is_valid() and bool(_gamepad_mode_query.call())
 
 
 func hovered_cell() -> Vector2i:

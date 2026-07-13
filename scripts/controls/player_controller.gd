@@ -215,6 +215,9 @@ func _apply_control_mode_mouse_visibility() -> void:
 func get_control_mode() -> String:
 	return _control_mode
 
+func is_gamepad_control_mode() -> bool:
+	return _control_mode == INPUT_MODE_PAD
+
 ## Snaps the pad build cursor to one tile right of the player the moment the toolbuild
 ## becomes the active build tool in pad mode (an inactive->active transition), so re-equipping
 ## it relocates the cursor next to the player instead of leaving it at the hidden mouse.

@@ -85,7 +85,7 @@ func _ready() -> void:
 		return
 	_placement_service.setup(self)
 	_removal_service.setup(self)
-	_build_preview.setup(self)
+	_build_preview.setup(self, _gamepad_mode_query())
 	_drag_controller.setup(self)
 	_input_controller.setup(
 		self,
@@ -103,6 +103,15 @@ func _ready() -> void:
 	set_process(true)
 	set_process_input(true)
 	GameState.mode_changed.connect(_on_game_mode_changed)
+
+func _gamepad_mode_query() -> Callable:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return Callable()
+	var player_controller: Node = scene.get_node_or_null("Player/PlayerController")
+	if player_controller == null or not player_controller.has_method("is_gamepad_control_mode"):
+		return Callable()
+	return Callable(player_controller, "is_gamepad_control_mode")
 
 func _create_controllers() -> bool:
 	if _build_preview == null:
