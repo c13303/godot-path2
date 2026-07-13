@@ -1,32 +1,31 @@
 extends RefCounted
 class_name PlanificatorTimelineResolver
 
-# Turns the current game/playlist state into an ordered list of zero, one, or two
-# display slots for the planificator. This is the single owner of the planificator's
-# schedule semantics: which encounter is running "now", what comes tonight/tomorrow,
-# and when only victory remains.
+# Turns the current game/playlist state into an ordered list of one or two display
+# slots for the planificator. This is the single owner of the planificator's schedule
+# semantics: which encounter is running "now", what comes tonight/tomorrow, and when
+# only victory remains.
 #
 # It is pure decisioning: it reads authored data from the playlist, live counts passed
 # in by the renderer, and the current GameState phase. It never creates Controls,
 # mutates scene nodes, spawns agents, or changes progression.
 #
-# Timeline model (playlist indices are zero-based, the progression day is one-based):
-#   upcoming_night_index(day)  = day - 1   (the night that will be fought next)
-#   completed_night_index(day) = day - 2   (the night that supplies today's clients)
-# An index outside [0, total_night_count) means that step does not exist. Indices are
-# never wrapped with modulo and never clamped to the final night.
+# Night indexing anchor (playlist indices are zero-based):
+#   During a night, the anchor is the night being fought.
+#   During the following day, the anchor is that same (just-completed) night, whose
+#   clients the day serves. The runtime playlist night index carries this anchor across
+#   the night->day transition without depending on the incremented progression day; the
+#   day-number fallback (day - 1 at night, day - 2 during the day) is used only when the
+#   runtime index is unavailable (e.g. a save loaded straight into a day phase).
+# The upcoming night is always anchor + 1 during the day. Indices are never wrapped with
+# modulo and never clamped to the final night.
 
 const SLOT_NOW: StringName = &"now"
 const SLOT_TONIGHT: StringName = &"tonight"
 const SLOT_TOMORROW: StringName = &"tomorrow"
 const SLOT_VICTORY: StringName = &"victory"
 
-const NOW_MONSTER_AGENT: StringName = &"monster"
 const CLIENT_AGENT: StringName = &"client"
-
-# Ordered monster types shown first in a TONIGHT breakdown; any other authored type is
-# appended after these in playlist key order.
-const ORDERED_MONSTER_TYPES: Array[StringName] = [&"basic", &"bigmonster"]
 
 
 # One agent row inside a slot (an icon + a count).
@@ -51,12 +50,16 @@ class TimelineSlot extends RefCounted:
 		is_victory = slot_is_victory
 
 
-# Resolve the ordered slots for the current frame. Returns 0, 1, or 2 slots and never
-# returns three normal timeline slots.
+# Resolve the ordered slots for the current frame. For a playlist-driven run this always
+# returns exactly two ordered slots, or a single VICTORY slot; the renderer validates the
+# result before publishing it. Legacy levels with no authored playlist fall back to a
+# single live-count slot.
 func resolve(
 	playlist: LevelSpawnPlaylist,
 	day_number: int,
-	live_now_monster_count: int,
+	anchor_night_index: int,
+	client_step_pending: bool,
+	live_now_monster_counts: Dictionary,
 	live_now_client_count: int
 ) -> Array:
 	# Victory is authoritative once latched, regardless of any residual counts.
@@ -65,23 +68,30 @@ func resolve(
 
 	var total_nights: int = playlist.get_night_count() if playlist != null else 0
 	if total_nights <= 0:
-		return _fallback_slots(live_now_monster_count, live_now_client_count)
-
-	var upcoming_index: int = day_number - 1
-	var completed_index: int = day_number - 2
+		return _fallback_slots(live_now_monster_counts, live_now_client_count)
 
 	# Night: the live monster fight is the running encounter; tomorrow's clients are the
 	# clients authored on the night currently being fought.
 	if GameState.is_night:
-		var night_slots: Array = [_now_monster_slot(live_now_monster_count)]
-		if _index_exists(upcoming_index, total_nights):
-			night_slots.append(_tomorrow_client_slot(_authored_client_count(playlist, upcoming_index)))
+		var fought_index: int = anchor_night_index if anchor_night_index >= 0 else day_number - 1
+		var night_slots: Array = [_now_monster_slot(live_now_monster_counts)]
+		if _index_exists(fought_index, total_nights):
+			night_slots.append(_tomorrow_client_slot(_authored_client_count(playlist, fought_index)))
 		return night_slots
 
-	# Daytime. A client sale for the completed night is "in progress" whenever that night
-	# exists and the live client count (authored during preparation, runtime remaining
-	# during the sale, zero once finished) is still positive.
-	var clients_in_progress: bool = _index_exists(completed_index, total_nights) and live_now_client_count > 0
+	# Daytime. The anchor is the just-completed night whose clients this day serves.
+	var completed_index: int = anchor_night_index if anchor_night_index >= 0 else day_number - 2
+	var upcoming_index: int = completed_index + 1
+
+	# The day's client step is "in progress" from the instant the night ends until the
+	# step is explicitly completed or skipped (client_step_pending). We still require a
+	# positive live client count so a completed night with no authored clients falls
+	# straight through to the next-night preview instead of publishing an empty NOW slot.
+	var clients_in_progress: bool = (
+		client_step_pending
+		and _index_exists(completed_index, total_nights)
+		and live_now_client_count > 0
+	)
 	if clients_in_progress:
 		var day_slots: Array = [_now_client_slot(live_now_client_count)]
 		if _index_exists(upcoming_index, total_nights):
@@ -104,9 +114,9 @@ func resolve(
 
 # Legacy behaviour for levels with no authored playlist: show only the current phase's
 # live count, matching the old single-section planificator.
-func _fallback_slots(live_now_monster_count: int, live_now_client_count: int) -> Array:
+func _fallback_slots(live_now_monster_counts: Dictionary, live_now_client_count: int) -> Array:
 	if GameState.is_night:
-		return [_now_monster_slot(live_now_monster_count)]
+		return [_now_monster_slot(live_now_monster_counts)]
 	if live_now_client_count > 0:
 		return [_now_client_slot(live_now_client_count)]
 	return []
@@ -116,9 +126,9 @@ func _index_exists(index: int, total_nights: int) -> bool:
 	return index >= 0 and index < total_nights
 
 
-func _now_monster_slot(live_count: int) -> TimelineSlot:
+func _now_monster_slot(counts: Dictionary) -> TimelineSlot:
 	var slot: TimelineSlot = TimelineSlot.new(SLOT_NOW)
-	_append_row(slot, NOW_MONSTER_AGENT, live_count)
+	_append_monster_rows(slot, counts)
 	return slot
 
 
@@ -136,19 +146,36 @@ func _tomorrow_client_slot(authored_count: int) -> TimelineSlot:
 
 func _tonight_monster_slot(playlist: LevelSpawnPlaylist, night_index: int) -> TimelineSlot:
 	var slot: TimelineSlot = TimelineSlot.new(SLOT_TONIGHT)
-	var counts: Dictionary = _authored_monster_counts(playlist, night_index)
-	for monster_type: StringName in ORDERED_MONSTER_TYPES:
-		_append_row(slot, monster_type, int(counts.get(monster_type, 0)))
-	for raw_type: Variant in counts.keys():
-		var monster_type: StringName = StringName(str(raw_type))
-		if ORDERED_MONSTER_TYPES.has(monster_type):
-			continue
-		_append_row(slot, monster_type, int(counts.get(monster_type, 0)))
+	_append_monster_rows(slot, _authored_monster_counts(playlist, night_index))
 	return slot
 
 
 func _victory_slot() -> TimelineSlot:
 	return TimelineSlot.new(SLOT_VICTORY, true)
+
+
+# Emit one row per monster type, catalog types first (in catalog order) and any other
+# authored/live type appended after. Generic: a newly catalogued monster type needs no
+# change here.
+func _append_monster_rows(slot: TimelineSlot, counts: Dictionary) -> void:
+	for monster_type: StringName in _ordered_monster_types(counts):
+		_append_row(slot, monster_type, int(counts.get(monster_type, 0)))
+
+
+func _ordered_monster_types(counts: Dictionary) -> Array[StringName]:
+	var ordered: Array[StringName] = []
+	var seen: Dictionary = {}
+	for monster_id: StringName in MonsterCatalog.get_ids():
+		if counts.has(monster_id) and not seen.has(monster_id):
+			ordered.append(monster_id)
+			seen[monster_id] = true
+	for raw_type: Variant in counts.keys():
+		var monster_type: StringName = StringName(str(raw_type))
+		if seen.has(monster_type):
+			continue
+		ordered.append(monster_type)
+		seen[monster_type] = true
+	return ordered
 
 
 # Skip empty rows so the renderer never draws an "X 0" line.

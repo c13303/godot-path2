@@ -20,6 +20,14 @@ var _client_sale_active: bool = false
 var _client_sale_pending_spawners: Array[Vector2i] = []
 var _client_sale_spawn_timers: Dictionary = {}  # Vector2i -> float
 
+# Authoritative day client-step lifecycle. True from the instant a night ends (a new day
+# begins) until that day's client step is explicitly completed or skipped. Distinct from
+# _client_sale_active, which only covers the active spawning/selling window: this stays
+# true through the pre-sale morning/preparation gap so the planificator can keep showing
+# the "NOW clients" slot across the whole night->day transition. Owned here (the day
+# client-sale owner), never derived from GameState phase booleans by the UI.
+var _client_step_pending: bool = false
+
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
@@ -38,6 +46,24 @@ func clear_spawns() -> void:
 
 func is_active() -> bool:
 	return _client_sale_active
+
+
+# --- Day client-step lifecycle (see _client_step_pending) ---
+
+# Open the day's client step. Called by BuildingManager the instant a night ends and the
+# new day begins, and on a save loaded straight into a daytime pre/active client phase.
+func begin_client_step() -> void:
+	_client_step_pending = true
+
+
+# Close the day's client step: the sale finished, or the day ran no client sale at all
+# (skipped), or a fresh night began. After this the planificator previews the next night.
+func mark_client_step_finished() -> void:
+	_client_step_pending = false
+
+
+func current_day_client_step_pending_or_active() -> bool:
+	return _client_step_pending
 
 
 func serialize_state() -> Dictionary:
@@ -226,6 +252,7 @@ func _finish_client_phase_if_empty() -> void:
 
 func _complete_client_sale() -> void:
 	_client_sale_active = false
+	mark_client_step_finished()
 	GameState.set_client_phase(false)
 	_dissolve_counter_piles_after_clients()
 	# On the final client day the last client leaving wins the run outright,

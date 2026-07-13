@@ -348,6 +348,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_sheep_controller.on_game_mode_changed(true)
 		_client_tantrum.end()
 		_client_sale.reset()
+		_client_sale.mark_client_step_finished()
 		clear_client_counter_agents()
 		_seed_merchant.on_night_started()
 		GameState.set_building_phase(false)
@@ -361,6 +362,11 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_spawner_reveal_phase.abort_night_reveal()
 		_sheep_controller.on_game_mode_changed(false)
 		_day_start_pending = true
+		# The night just ended: the completed night's client step is now pending, even
+		# though the morning/client phases have not been entered yet. Latch it here so the
+		# planificator shows "NOW clients + TONIGHT next night" from the first post-night
+		# frame, with no one-slot flash while the transition settles.
+		_client_sale.begin_client_step()
 		_night_preparation_token += 1
 		_night_preparing = false
 		_night_preparation_ready = false
@@ -1213,6 +1219,7 @@ func restore_day_phase(phase: String) -> void:
 	if phase == "night":
 		_morning_harvest.clear_active()
 		_reset_client_sale_state()
+		_client_sale.mark_client_step_finished()
 		_night_preparing = false
 		_client_preparing = false
 		_night_preparation_ready = true
@@ -1227,12 +1234,19 @@ func restore_day_phase(phase: String) -> void:
 	_reset_client_sale_state()
 	match phase:
 		"morning":
+			# The post-night morning/client window: the completed night's client step is
+			# still pending, so re-open the lifecycle latch (a save in this window persists
+			# as "morning") for a correct "NOW clients + TONIGHT" model right after load.
+			_client_sale.begin_client_step()
 			call_deferred("_begin_morning_phase")
 		"client":
+			_client_sale.begin_client_step()
 			call_deferred("_begin_client_sale_phase")
 		"seed_merchant":
+			_client_sale.begin_client_step()
 			call_deferred("_begin_seed_merchant_phase")
 		_:
+			_client_sale.mark_client_step_finished()
 			GameState.set_building_phase(true)
 
 
@@ -1325,6 +1339,10 @@ func try_start_night_after_clients() -> void:
 
 
 func on_client_sale_skipped() -> void:
+	# The day's client step is over (no sale ran, or it was cancelled): close the
+	# lifecycle latch so the planificator previews the next night instead of a stale
+	# "NOW clients" slot.
+	_client_sale.mark_client_step_finished()
 	_run_completion.on_client_sale_skipped()
 
 
@@ -1469,14 +1487,64 @@ func current_day_number() -> int:
 	return _current_day_number_for_planificator()
 
 
+# Aggregate live+pending monster count for the current night. Kept as a narrow public
+# wrapper (used by the planificator's legacy path and any external callers); it now sums
+# the per-type breakdown so there is a single counting algorithm.
 func remaining_planificator_enemy_count() -> int:
+	var total: int = 0
+	for raw_count: Variant in remaining_planificator_monster_counts_by_type().values():
+		total += int(raw_count)
+	return total
+
+
+# Current-night monster counts grouped by canonical monster_type (StringName -> int):
+# living scene monsters plus not-yet-spawned playlist monsters. A monster is counted once
+# as it moves from pending spawn to a living agent (the playlist remainder drops as the
+# scene group grows). Empty outside of night. When no plants remain, spawning has stopped,
+# so only the living monsters are reported (matching the day-transition behaviour).
+func remaining_planificator_monster_counts_by_type() -> Dictionary:
+	var counts: Dictionary = {}
 	if not GameState.is_night:
-		return 0
-	var active_count: int = _monster_count()
+		return counts
+	_accumulate_living_monster_counts_by_type(counts)
 	if _no_plants_remaining():
-		return active_count
-	var unspawned_count: int = _spawn_playlist_controller.remaining_unspawned_monster_count()
-	return active_count + unspawned_count
+		return counts
+	var pending: Dictionary = _spawn_playlist_controller.remaining_unspawned_monster_counts_by_type()
+	for raw_type: Variant in pending.keys():
+		var monster_type: StringName = StringName(str(raw_type))
+		counts[monster_type] = int(counts.get(monster_type, 0)) + int(pending[raw_type])
+	return counts
+
+
+# Group living scene monsters by the canonical monster_type stamped on each agent at
+# spawn (AgentDefinitionService.apply_monster_data). Identity comes only from that
+# authoritative metadata, never from sprite/scene/health. Missing metadata is an error
+# state: it is counted under the basic fallback with a diagnostic so the type is not
+# silently lost, but no monster is ever reclassified from correct metadata.
+func _accumulate_living_monster_counts_by_type(counts: Dictionary) -> void:
+	for node: Node in get_tree().get_nodes_in_group("monsters"):
+		if not is_instance_valid(node):
+			continue
+		var monster_type: StringName = MonsterCatalog.BASIC_ID
+		if node.has_meta("monster_type"):
+			monster_type = StringName(str(node.get_meta("monster_type")))
+		else:
+			push_warning("BuildingManager: living monster missing 'monster_type' metadata; counting it as '%s'." % String(MonsterCatalog.BASIC_ID))
+		counts[monster_type] = int(counts.get(monster_type, 0)) + 1
+
+
+# Runtime playlist night-index anchor for the planificator resolver: the night being
+# fought (at night) or the just-completed night (during the following day). See
+# SpawnPlaylistController.current_night_index for the stability contract.
+func planificator_anchor_night_index() -> int:
+	return _spawn_playlist_controller.current_night_index()
+
+
+# Whether the current day's client step is still pending or active (see
+# ClientSaleController._client_step_pending). Delegated so the planificator does not read
+# day-phase booleans directly.
+func current_day_client_step_pending_or_active() -> bool:
+	return _client_sale.current_day_client_step_pending_or_active()
 
 
 func is_runtime_ready_for_building_tick() -> bool:

@@ -43,6 +43,15 @@ func get_total_night_count() -> int:
 	return _playlist.get_night_count() if _playlist != null else 0
 
 
+# The night this controller is currently bound to. During a night it is the night being
+# fought; it stays set to that same night for the whole following day (the just-completed
+# night) until the next begin_night, so daytime callers can read it as the "completed
+# night" anchor without depending on the incremented progression day. -1 before the first
+# night of the run and after abort_current_night.
+func current_night_index() -> int:
+	return _current_night_index
+
+
 func get_current_night_debug_lines() -> Array[String]:
 	var lines: Array[String] = []
 	if _current_night == null:
@@ -155,12 +164,25 @@ func abort_current_night() -> void:
 
 
 func remaining_unspawned_monster_count() -> int:
-	if _current_night == null:
-		return 0
 	var total: int = 0
-	for track_state: Dictionary in _tracks:
-		total += _remaining_track_monster_count(track_state)
+	for raw_count: Variant in remaining_unspawned_monster_counts_by_type().values():
+		total += int(raw_count)
 	return total
+
+
+# Remaining not-yet-spawned monsters for the current night, grouped by canonical
+# monster_type (StringName -> int). Counts from each track's current runtime position:
+# the remainder of the current wave plus every later wave, preserving each wave's type. A
+# requested-but-not-yet-confirmed spawn is still part of its wave's remainder here (its
+# spawned_count has not advanced), so it is counted exactly once and never double-counted
+# once it becomes a living scene agent.
+func remaining_unspawned_monster_counts_by_type() -> Dictionary:
+	var counts: Dictionary = {}
+	if _current_night == null:
+		return counts
+	for track_state: Dictionary in _tracks:
+		_accumulate_remaining_track_counts_by_type(track_state, counts)
+	return counts
 
 
 func serialize_state() -> Dictionary:
@@ -330,26 +352,25 @@ func get_track_debug_context(track_index: int) -> String:
 	]
 
 
-func _remaining_track_monster_count(track_state: Dictionary) -> int:
+func _accumulate_remaining_track_counts_by_type(track_state: Dictionary, counts: Dictionary) -> void:
 	if _current_night == null:
-		return 0
+		return
 	var track_index: int = int(track_state.get("track_index", -1))
 	if track_index < 0 or track_index >= _current_night.spawner_tracks.size():
-		return 0
+		return
 	var track: SpawnerWaveTrack = _current_night.spawner_tracks[track_index]
 	var wave_index: int = maxi(0, int(track_state.get("wave_index", 0)))
 	var spawned_count: int = maxi(0, int(track_state.get("spawned_count", 0)))
-	var total: int = 0
 	for index: int in range(wave_index, track.waves.size()):
 		var wave: SpawnWave = track.waves[index]
 		if wave == null:
 			continue
 		var wave_count: int = maxi(0, wave.monster_count)
-		if index == wave_index:
-			total += maxi(0, wave_count - spawned_count)
-		else:
-			total += wave_count
-	return total
+		var remaining: int = maxi(0, wave_count - spawned_count) if index == wave_index else wave_count
+		if remaining <= 0:
+			continue
+		var monster_type: StringName = wave.monster_type
+		counts[monster_type] = int(counts.get(monster_type, 0)) + remaining
 
 
 func _advance_track_past_completed_zero_waves(track_state: Dictionary) -> void:
