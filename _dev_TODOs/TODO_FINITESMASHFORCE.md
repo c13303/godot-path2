@@ -1,456 +1,736 @@
-# Task: Add finite smash-force absorption to spray projectiles
+# Task: Back up the current spray and convert the active spray to direct-hit-only projectiles
 
 Read and follow `AGENTS.md` before editing.
 
-Implement only **Problem #1**: one spray projectile must no longer give every overlapping agent an independent copy of its complete smash force.
+Implement only this task.
 
-Do not address player knockback, big-monster contact push, control suppression, or Problem #2.
+## Objective
 
-## Current defect
+1. Preserve the **current spray weapon** as an unused backup resource named:
 
-The relevant path is:
-
-```txt
-scripts/combat/fight_system.gd
-    _register_spray_projectiles()
-
-extensions/flowfield/godot/projectile_system_native.cpp
-    ProjectileSystemNative::register_type()
-
-extensions/flowfield/projectile/projectile_system.cpp
-    ProjectileSystem::update()
-
-extensions/flowfield/steering/steering_system.cpp
-    SteeringSystem::apply_area_smash()
-    SteeringSystem::apply_smash_impulse()
+```text
+res://scripts/combat/weapons/old_spray.tres
 ```
 
-On an agent impact, `ProjectileSystem::update()` currently calls:
+2. Convert the active `spray` weapon so that:
 
-```txt
-steering->apply_area_smash(...)
+> Each spray projectile collides with exactly one front-most agent and applies its complete damage and smash effect only to that agent.
+
+The active weapon must remain identified as `"spray"` and continue being the weapon used by `level_demo.tscn`, the player, shops, difficulty presets, and spray turrets.
+
+`old_spray` must not be used or registered anywhere in `level_demo.tscn`.
+
+---
+
+# 1. Preserve the current spray as `old_spray`
+
+Before changing `spray.tres`, copy its **current working-tree contents** to:
+
+```text
+scripts/combat/weapons/old_spray.tres
 ```
 
-`apply_area_smash()` independently applies `force * attenuation` to every eligible agent inside the AoE.
+This backup must preserve the current spray configuration, including the previously implemented smash-budget configuration if that field currently exists.
 
-For `scripts/combat/weapons/spray.tres`:
+Change only what is necessary to make it a separate dormant resource:
 
-```txt
-smash_force = 400
-falloff = 0
-spray_projectile_radius = 6
+```text
+id = "old_spray"
 ```
 
-Because falloff is zero, every overlapping eligible agent receives the complete force of `400`, regardless of crowd density.
+Do not duplicate the embedded resource UID from `spray.tres`.
 
-This creates smash force out of nothing: a projectile affecting 50 stacked agents effectively produces approximately 50 times as much total impulse as the same projectile hitting one agent.
+Either:
 
-## Required behavior
+* assign a genuinely unique resource UID using the project’s established method; or
+* omit the `uid` field from the new `.tres` header and allow Godot to assign one later.
 
-For the spray weapon, one projectile must have a **finite total smash-force budget**.
+Never leave `spray.tres` and `old_spray.tres` with the same UID.
 
-The projectile’s configured `smash_force` must serve both as:
+## `old_spray` must remain completely unused
 
-* the maximum force that one agent can receive from that projectile;
-* the total force budget available across all agents affected by that projectile impact.
+Do not add `old_spray` to:
 
-Consequences:
+* `FightSystem.weapons`;
+* `ItemCatalog`;
+* starting weapons;
+* merchant inventories;
+* legacy shops;
+* turret defaults;
+* difficulty presets;
+* `level_demo.tscn`;
+* another scene or resource;
+* any preload or runtime registration.
 
-* One isolated normal agent still receives the full configured smash force.
-* In a dense crowd, the directly hit/front agent receives the force first.
-* Any remaining force may propagate to subsequent agents.
-* Once the budget is empty, deeper agents receive no smash impulse.
-* One projectile must never distribute more total pre-resistance smash force than its configured `smash_force`.
-* A sustained spray should progressively peel or push the front of a crowd instead of moving the complete stack simultaneously.
+A repository search for these must return no references outside the backup resource itself:
 
-For the current spray settings, the directly hit agent will normally consume the complete budget because its attenuation is `1.0`. That is acceptable and intended.
-
-## Ownership and architecture
-
-This is **projectile-impact behavior** and belongs in:
-
-```txt
-extensions/flowfield/projectile/projectile_system.cpp
-extensions/flowfield/projectile/projectile_system.h
+```text
+old_spray
+old_spray.tres
 ```
 
-Do not add the new algorithm to `steering_system.cpp`. That file is already very large, and generic `apply_area_smash()` has valid uses for explosions, melee attacks, and true AoE effects.
+The backup exists only for future manual restoration.
 
-Reuse the existing public steering operations:
+Do not replace any `"spray"` item ID in `level_demo.tscn` with `"old_spray"`.
 
-```txt
-SteeringSystem::get_agent()
-SteeringSystem::apply_smash_impulse()
-SteeringSystem::get_max_fight_query_padding()
+---
+
+# 2. Preserve the active spray’s identity and presentation
+
+The active resource remains:
+
+```text
+scripts/combat/weapons/spray.tres
 ```
 
-Do not create a new service, manager, framework, generic force-distribution system, or new source file.
+Its ID remains:
 
-A focused private helper inside `ProjectileSystem` is appropriate.
+```text
+id = "spray"
+```
 
-## Configuration
+Preserve its existing configuration unless specifically required by this task:
 
-Add an explicit opt-in configuration flag.
+* projectile rate;
+* projectile speed;
+* lifetime;
+* collision radius;
+* visual radius;
+* shader;
+* projectile growth;
+* spread;
+* reserve cost;
+* reserve timing;
+* watering behavior;
+* static collision mask;
+* pool size;
+* smash force;
+* damage;
+* friction;
+* control suppression;
+* control-suppression duration;
+* affected smash classes.
 
-### `scripts/combat/weapons/weapon_data.gd`
+Do not convert it into a `GunData`.
 
-Under the existing `Spray Projectiles` group, add:
+It remains a spray-projectile `WeaponData`.
+
+Do not change its item-catalog entry, shop availability, price, icon/frame, inventory ID, or input handling.
+
+---
+
+# 3. Add an explicit direct-hit projectile mode
+
+The generic native projectile system is also used by guns and other weapon behavior. Do not globally convert all projectiles to direct-hit-only behavior.
+
+Add an explicit opt-in field under the existing `Spray Projectiles` section of:
+
+```text
+scripts/combat/weapons/weapon_data.gd
+```
+
+Use a clear name such as:
 
 ```gdscript
-@export var spray_projectile_smash_budget_enabled: bool = false
+@export var spray_projectile_direct_hit_only: bool = false
 ```
 
-The default must be `false` so existing `WeaponData` resources retain their current behavior.
+The default must be `false`.
 
-Do not add a multiplier, penetration count, target limit, density scalar, or other tuning field. The total budget is exactly `smash_force`.
+Set it to `true` in:
 
-### `scripts/combat/weapons/spray.tres`
-
-Enable the new behavior:
-
-```txt
-spray_projectile_smash_budget_enabled = true
+```text
+scripts/combat/weapons/spray.tres
 ```
 
-Only enable it for `spray.tres`.
+The copied `old_spray.tres` must retain the old behavior. Therefore, its direct-hit-only field must remain `false` or omitted.
 
-Do not enable it for `beam.tres` or any gun resource.
+If the previous force-budget patch added a field such as:
 
-Player and turret spray attacks both reuse `spray.tres`; both should therefore receive the corrected behavior.
-
-### `scripts/combat/fight_system.gd`
-
-In `_register_spray_projectiles()`, pass the flag in the native projectile configuration dictionary:
-
-```txt
-"smash_budget_enabled": weapon.spray_projectile_smash_budget_enabled
+```text
+spray_projectile_smash_budget_enabled
 ```
 
-Do not alter `_register_guns()`.
+then for the active `spray.tres`:
 
-### Native configuration
+* enable direct-hit-only behavior;
+* disable the budgeted AoE smash behavior.
 
-In `ProjectileTypeConfig`, add:
+Do not execute both modes for one impact.
+
+The previous mode may remain available for the dormant `old_spray` backup.
+
+---
+
+# 4. Pass the mode explicitly to the native projectile system
+
+In:
+
+```text
+scripts/combat/fight_system.gd
+```
+
+update `_register_spray_projectiles()` so the native projectile configuration receives the direct-hit setting, for example:
+
+```text
+"direct_hit_only": weapon.spray_projectile_direct_hit_only
+```
+
+Do not change `_register_guns()` unless the native configuration requires the same optional key to be passed explicitly. Missing keys must still default to legacy behavior.
+
+Add the corresponding configuration field to:
+
+```text
+extensions/flowfield/projectile/projectile_system.h
+```
+
+For example:
 
 ```cpp
-bool smash_budget_enabled = false;
+bool direct_hit_only = false;
 ```
 
-In `ProjectileSystemNative::register_type()`, read the optional dictionary key:
+Read the optional dictionary key in:
 
-```txt
-smash_budget_enabled
-```
-
-Missing keys must preserve the legacy default of `false`.
-
-## Direct-hit selection
-
-The current impact detection stores only a `bool hit` and stops at the first overlapping neighbor returned by the spatial grid.
-
-That ordering is not guaranteed to represent the front agent in a dense crowd.
-
-Replace the boolean-only result with an identified direct-hit agent:
-
-```txt
-hit_agent_id
-```
-
-Among eligible agents whose fight AABB overlaps the projectile collision circle, select the front-most contact along the projectile travel direction.
-
-Use the projected leading edge of the fight AABB rather than relying only on its center.
-
-For normalized projectile direction `dir`, the projected leading-edge score can be based on:
-
-```txt
-dot(fight_center - projectile_position, dir)
-- abs(dir.x) * fight_half_w
-- abs(dir.y) * fight_half_h
-```
-
-The smallest score is the agent encountered first along the projectile path.
-
-Use the agent ID as a deterministic final tie-breaker.
-
-Do not implement a broader swept-agent collision rewrite or change the existing static-collider raycast. Only make direct-hit selection deterministic enough for the smash-budget ordering.
-
-## Budgeted smash algorithm
-
-When an agent impact occurs:
-
-* If `smash_budget_enabled == false`, preserve the existing `apply_area_smash()` call exactly.
-* If `smash_budget_enabled == true`, use the new budgeted projectile-smash helper.
-* Damage must still be applied through the existing `apply_area_damage()` call independently of smash budgeting.
-
-The helper must perform the following work.
-
-### 1. Query only local candidates
-
-Use the spatial grid with:
-
-```txt
-aoe_radius + steering->get_max_fight_query_padding()
-```
-
-Do not iterate over all agents.
-
-### 2. Apply the same eligibility rules as the existing area smash
-
-Exclude:
-
-* the projectile owner;
-* missing/stale agent IDs;
-* drowning agents;
-* `weapon_immune` agents;
-* agents whose `smash_class` does not match `affected_smash_classes`;
-* agents whose fight AABB is outside `aoe_radius`.
-
-Use the existing fight geometry:
-
-```txt
-fight_center = agent.position + (0, fight_offset_y)
-point_aabb_distance(...)
-```
-
-Do not use only the agent origin or world radius.
-
-### 3. Build a deterministic front-to-back candidate order
-
-The identified direct-hit agent must be first if it remains eligible.
-
-Order the remaining candidates from front to back along the projectile direction using their projected AABB leading edge.
-
-Use deterministic tie-breaking, preferably:
-
-1. projected leading edge;
-2. lateral distance from the projectile axis;
-3. agent ID.
-
-Do not depend on `SpatialGrid::query_neighbors()` ordering.
-
-### 4. Preserve existing attenuation semantics
-
-For each candidate, calculate distance and falloff exactly as `apply_area_smash()` currently does:
-
-```txt
-base = max(0, 1 - distance / radius)
-attenuation = pow(base, max(0, falloff))
-desired_force = smash_force * attenuation
-```
-
-Preserve the existing zero-falloff behavior.
-
-### 5. Spend the finite force budget
-
-Initialize:
-
-```txt
-remaining_budget = max(0, smash_force)
-```
-
-For each ordered candidate:
-
-```txt
-allocated_force = min(desired_force, remaining_budget)
-```
-
-If `allocated_force` is meaningfully greater than zero:
-
-* call `steering->apply_smash_impulse()` with `allocated_force`;
-* pass through the existing friction, detach-flow, control-suppression, and suppression-duration values unchanged;
-* subtract `allocated_force` from `remaining_budget`.
-
-Stop once the remaining budget is effectively zero.
-
-The sum of all force values passed to `apply_smash_impulse()` for one projectile impact must never exceed the initial budget.
-
-### 6. Do not double-apply resistance
-
-`SteeringSystem::apply_smash_impulse()` already divides incoming force by:
-
-```txt
-agent.profile.smash_resist
-```
-
-Do not reproduce or pre-apply that calculation in `ProjectileSystem`.
-
-The finite budget represents physical incoming impulse. `smash_resist` remains the receiving agent’s inertia and continues reducing its resulting movement exactly as before.
-
-Do not modify `smash_resist` semantics.
-
-## Damage behavior
-
-Keep this call unchanged:
-
-```txt
-steering->apply_area_damage(...)
-```
-
-All agents currently eligible for projectile AoE damage must continue receiving damage exactly as before.
-
-This task changes smash-force distribution only.
-
-Do not combine the damage budget with the smash budget.
-
-## Impact events and visuals
-
-Preserve the existing `ProjectileImpact` event:
-
-* same impact position;
-* same direction;
-* same radius;
-* same type ID;
-* same `ImpactKind::Agent`.
-
-Impact visuals must remain unchanged.
-
-The projectile must still despawn after the first detected agent impact.
-
-## End-of-life AoE
-
-Do not apply this budget system to:
-
-```txt
-trigger_end_aoe()
-end_of_life_aoe_enabled
-end_aoe_force
-```
-
-Wall-impact and expiry AoEs must retain their current generic `apply_area_smash()` behavior.
-
-## Expected changed files
-
-The implementation should normally be limited to:
-
-```txt
-scripts/combat/weapons/weapon_data.gd
-scripts/combat/weapons/spray.tres
-scripts/combat/fight_system.gd
+```text
 extensions/flowfield/godot/projectile_system_native.cpp
-extensions/flowfield/projectile/projectile_system.h
-extensions/flowfield/projectile/projectile_system.cpp
 ```
 
-Do not modify:
+Existing projectile configurations without the key must behave exactly as before.
 
-```txt
-extensions/flowfield/steering/steering_system.cpp
+---
+
+# 5. Select one real front-most collision target
+
+The existing projectile collision path must not use the first ID returned by:
+
+```text
+SpatialGrid::query_neighbors()
+```
+
+Spatial-grid neighbor ordering is not a valid collision order.
+
+For direct-hit-only projectiles, identify the actual first eligible agent touched during the projectile’s movement from:
+
+```text
+prev_pos
+```
+
+to:
+
+```text
+p.pos
+```
+
+Implement this as focused private logic owned by:
+
+```text
+ProjectileSystem
+```
+
+Do not add it to `SteeringSystem`.
+
+## Candidate query
+
+Use only the existing spatial grid.
+
+Query around the projectile movement segment, not all agents.
+
+A suitable local query region is centered on the movement segment and large enough to contain:
+
+* the complete segment;
+* the projectile collision radius;
+* the maximum agent fight-query padding.
+
+Do not introduce a global-agent iteration.
+
+## Agent eligibility
+
+A direct-hit candidate must satisfy the same filtering currently used for projectile impacts:
+
+* not the projectile owner;
+* agent still exists;
+* not drowning;
+* not `weapon_immune`;
+* matches `affected_smash_classes`;
+* its fight geometry is intersected by the projectile.
+
+Use the agent’s fight AABB:
+
+```text
+fight_center
+fight_half_w
+fight_half_h
+fight_offset_y
+```
+
+Do not use only the agent origin or visual sprite bounds.
+
+## Collision ordering
+
+Treat the projectile as a moving circle.
+
+For collision testing, expand the agent fight AABB by the projectile radius, then test the movement segment against that expanded AABB.
+
+For every intersected eligible candidate, calculate the earliest contact parameter along the segment.
+
+Select:
+
+1. the smallest contact parameter;
+2. agent ID as the deterministic tie-breaker.
+
+This ensures that the agent physically closest to the front of the projectile path absorbs the projectile.
+
+Do not use random selection.
+
+Do not use distance to the projectile’s final position as the sole ordering criterion.
+
+Do not rely on spatial-grid iteration order.
+
+## Impact position
+
+When a segment contact is found, use the calculated first-contact point as the projectile impact position where practical.
+
+This avoids placing the impact behind the front agent when the projectile travelled several pixels during the frame.
+
+Do not change static-collider ordering: wall/static collision handling must continue occurring before agent-impact handling as it currently does.
+
+---
+
+# 6. Apply the complete effect only to the selected agent
+
+When `direct_hit_only == true` and a valid agent is hit:
+
+## Smash
+
+Call the existing direct operation:
+
+```text
+SteeringSystem::apply_smash_impulse()
+```
+
+for the selected agent ID only.
+
+Pass the full configured values unchanged:
+
+* `smash_force`;
+* projectile direction;
+* friction loss;
+* detach-flow value;
+* control suppression;
+* control-suppression duration.
+
+Do not apply falloff.
+
+Do not divide the force by crowd size.
+
+Do not spend a force budget across several agents.
+
+Do not call `apply_area_smash()` for this impact.
+
+`smash_resist` must continue being handled by `apply_smash_impulse()` exactly as before.
+
+Do not pre-apply or duplicate resistance.
+
+## Damage
+
+Apply the full configured projectile damage to the same selected agent only:
+
+```text
+cfg.damage
+```
+
+Do not call `apply_area_damage()` for this impact.
+
+The complete direct projectile effect is therefore:
+
+```text
+one projectile
+→ one selected front agent
+→ one full smash impulse
+→ one full damage event
+→ projectile despawns
+```
+
+No other nearby agent receives damage or smash from that projectile.
+
+---
+
+# 7. Add a focused direct-damage operation
+
+The native projectile system currently has:
+
+```text
+apply_smash_impulse(agent_id, ...)
+```
+
+but damage is currently exposed through:
+
+```text
+apply_area_damage(...)
+```
+
+Add a small direct operation to the core `SteeringSystem`, for example:
+
+```text
+apply_damage_to_agent(...)
+```
+
+in:
+
+```text
 extensions/flowfield/steering/steering_system.h
-scripts/combat/weapons/gun_data.gd
+extensions/flowfield/steering/steering_system.cpp
 ```
 
-unless an unexpected compile-level dependency makes it strictly necessary. Report such a dependency before broadening the design.
+This method should:
 
-## Scope restrictions
+* accept an agent ID;
+* accept damage;
+* optionally accept `affected_smash_classes` if needed to preserve filtering;
+* reject missing agents;
+* reject non-positive damage;
+* reject drowning agents;
+* reject `weapon_immune` agents;
+* reject agents outside the requested smash-class mask;
+* push one existing `DamageEvent`;
+* use the agent fight center as the damage-event position.
+
+Do not introduce a second damage-event system.
+
+Do not expose this method to GDScript unless an actual current caller requires it.
+
+It is acceptable for it to be a public C++ core operation used directly by `ProjectileSystem`.
+
+Avoid duplicating the full damage-event logic in `ProjectileSystem`.
+
+---
+
+# 8. Preserve the old projectile paths
+
+For projectile types where:
+
+```text
+direct_hit_only == false
+```
+
+preserve their current behavior.
+
+This includes:
+
+* existing gun projectile AoEs;
+* water gun behavior;
+* thorn gun behavior;
+* end-of-life AoEs;
+* explosions;
+* beam behavior;
+* melee behavior;
+* the dormant `old_spray` behavior;
+* the previously implemented force-budget mode, if it currently exists.
+
+The native impact branch should conceptually remain:
+
+```text
+if direct_hit_only:
+    apply full smash and damage to selected agent only
+elif existing smash-budget mode is enabled:
+    use the existing budgeted behavior
+else:
+    use the existing legacy AoE behavior
+```
+
+Use clean direct control flow. Do not stack multiple effect modes.
+
+Do not remove the previous budget implementation during this task unless inspection proves it is incomplete dead code and removing it would not prevent `old_spray` from reproducing the backed-up behavior.
+
+---
+
+# 9. Projectile lifetime and impact events
+
+After a direct agent hit:
+
+* record one `ProjectileImpact`;
+* mark it as `ImpactKind::Agent`;
+* deactivate the projectile;
+* return its slot to the free list;
+* do not let it continue into another agent.
+
+Because no gameplay AoE was applied, the impact event radius should represent that accurately.
+
+Prefer:
+
+```text
+radius = 0
+```
+
+for a direct-hit-only agent impact, unless an existing consumer specifically requires the physical projectile radius.
+
+Do not report the old `aoe_radius` as though an AoE was applied.
+
+The active spray currently has no agent-impact AoE ring rendering, so this should not change its visible spray presentation.
+
+Preserve:
+
+* water metaball rendering;
+* active projectile rendering;
+* damage-number rendering;
+* splash effects triggered by damage events;
+* static plant watering;
+* static wall/turret collisions;
+* expiry behavior.
+
+---
+
+# 10. `level_demo.tscn` requirements
+
+`level_demo.tscn` currently uses the item ID:
+
+```text
+spray
+```
+
+in merchant/shop configuration.
+
+Keep those entries as `"spray"`.
+
+The scene should therefore automatically use the newly converted active spray through the existing item and `FightSystem` wiring.
+
+Do not add:
+
+```text
+old_spray
+```
+
+to:
+
+* `starting_weapons`;
+* `merchant_available_items`;
+* `merchant_prices`;
+* `shop_available_items`;
+* `shop_prices`;
+* any scene node;
+* any exported weapon array.
+
+No `level_demo.tscn` edit should be necessary merely to activate the new behavior, because the active resource path and item ID remain unchanged.
+
+If no scene edit is needed, leave the scene untouched.
+
+---
+
+# 11. Difficulty and turret behavior
+
+Keep:
+
+```text
+scripts/gameState/difficulty.gd
+```
+
+preloading and modifying:
+
+```text
+spray.tres
+```
+
+It must not reference `old_spray.tres`.
+
+If the difficulty preset explicitly resets every spray field, add the new direct-hit-only field to the hardcore reset so pressing F3 cannot accidentally disable the new behavior:
+
+```text
+_spray.spray_projectile_direct_hit_only = true
+```
+
+If the old budget field is currently reset there, ensure the active spray’s settings remain unambiguous:
+
+```text
+direct hit only = true
+budgeted AoE smash = false
+```
+
+Turrets currently reuse the `"spray"` weapon through `FightSystem`.
+
+They should automatically receive direct-hit-only behavior too.
+
+Do not create a separate turret implementation.
+
+---
+
+# 12. Scope restrictions
 
 Do not:
 
-* address big-monster/player knockback;
-* modify player controls or control suppression;
-* alter contact push;
-* modify generic melee, explosion, bomb, sword, beam, or gun behavior;
-* divide smash force equally by the number of targets;
-* choose a random target;
-* add a hardcoded maximum target count;
-* add global configuration;
-* add new debugging UI;
-* perform unrelated cleanup;
-* refactor the complete projectile system;
-* change damage behavior;
-* change projectile visuals;
-* change projectile lifetime, speed, radius, or fire rate.
+* change Problem #2 or big-monster player knockback;
+* modify player movement or input suppression outside existing spray values;
+* change contact push;
+* convert spray into `GunData`;
+* remove spray metaball visuals;
+* reduce projectile count as a substitute for correct collision behavior;
+* add a hard maximum number of agents;
+* divide force by target count;
+* keep AoE damage while making only smash direct;
+* let one projectile damage one agent and smash another;
+* add `old_spray` to the item catalog;
+* register `old_spray`;
+* modify unrelated level configuration;
+* run Godot;
+* run tests;
+* compile the extension;
+* export or build the project;
+* perform unrelated cleanup.
 
-## Performance requirements
+---
 
-The game may contain hundreds of agents.
+# 13. Expected files
 
-The new work must:
+The change should normally be limited to:
 
-* use the existing spatial-grid query;
-* run only when a budget-enabled projectile actually impacts an agent;
-* allocate and sort only the local AoE candidates;
-* avoid per-frame global-agent scans;
-* avoid persistent per-projectile candidate state;
-* avoid GDScript-side agent enumeration.
+```text
+scripts/combat/weapons/old_spray.tres          new dormant backup
+scripts/combat/weapons/spray.tres
+scripts/combat/weapons/weapon_data.gd
+scripts/combat/fight_system.gd
+scripts/gameState/difficulty.gd                only if preset reset requires it
+extensions/flowfield/projectile/projectile_system.h
+extensions/flowfield/projectile/projectile_system.cpp
+extensions/flowfield/godot/projectile_system_native.cpp
+extensions/flowfield/steering/steering_system.h
+extensions/flowfield/steering/steering_system.cpp
+```
 
-A small local candidate vector and an `O(k log k)` sort for the locally affected agents are acceptable.
+Do not modify `level_demo.tscn` unless inspection finds an explicit embedded weapon-resource override that must be corrected.
 
-## Compatibility requirements
+Do not add a new controller, service, manager, or C++ source file.
 
-The new native configuration must default to legacy behavior.
+---
 
-Existing projectile dictionaries without `smash_budget_enabled` must continue working.
+# 14. Acceptance criteria
 
-Existing guns, beam projectiles, end-of-life AoEs, melee attacks, explosions, and other direct `apply_area_smash()` callers must remain behaviorally unchanged.
+The task is complete only when all of the following are true:
 
-Do not remove or rename existing native methods or dictionary keys.
+1. `old_spray.tres` contains a backup of the spray configuration that existed before this task.
+2. `old_spray.tres` has its own ID and does not duplicate the active resource UID.
+3. Nothing references or registers `old_spray`.
+4. The active resource remains `spray.tres` with `id = "spray"`.
+5. `level_demo.tscn` continues using `"spray"`.
+6. One active spray projectile selects one deterministic front-most agent.
+7. That selected agent receives the projectile’s full smash force.
+8. That same selected agent receives the projectile’s full damage.
+9. No other agent receives damage or smash from that projectile.
+10. The projectile despawns immediately after that direct hit.
+11. Generic projectile AoEs and end-of-life AoEs remain unchanged.
+12. The active spray’s visuals, firing, resource cost, watering and turret reuse remain unchanged.
+13. The new behavior does not depend on spatial-grid neighbor ordering.
 
-## Manual test scenarios
+---
 
-Do not run Godot, tests, compilation, export, or build commands. The user performs testing manually.
+# 15. Important gameplay expectation
 
-Include these manual tests in the final report:
+Do not misreport the result.
 
-1. **Single normal monster**
+This change guarantees:
 
-   * Hit one isolated monster with one spray projectile.
-   * It should receive approximately the same knockback as before.
+```text
+one projectile cannot affect several agents
+```
 
-2. **Dense stacked crowd**
+It does not guarantee:
 
-   * Stack many normal monsters inside one projectile AoE.
-   * One projectile must not kick the complete stack.
-   * The directly hit/front agent should receive the force first.
+```text
+one spray burst can affect only one agent
+```
 
-3. **Sustained spray**
+The spray fires many projectiles with spread. Different projectiles may legitimately hit different agents, especially when agents stand side by side.
 
-   * Hold the spray against a dense crowd.
-   * The crowd should be pushed progressively from the front rather than all agents moving simultaneously from each projectile.
+The intended crowd protection is strongest when agents are aligned front-to-back:
 
-4. **Heavy monster**
+* the front agent absorbs incoming projectiles;
+* agents directly behind it remain untouched until exposed;
+* side-by-side agents may each be hit by different droplets.
 
-   * Hit an isolated monster with increased `smash_resist`.
-   * Its knockback reduction must remain consistent with the previous behavior.
+---
 
-5. **Damage preservation**
+# 16. Manual tests
 
-   * Confirm agents inside the damage AoE still receive the same damage as before, even when they receive no remaining smash force.
+Do not run these tests. Include them in the final report for the user.
 
-6. **Turret spray**
+## Backup/resource checks
 
-   * Confirm a turret using the same spray weapon gets the same budgeted crowd behavior.
+1. Search the repository for `old_spray`.
+2. Confirm the only result is the resource itself.
+3. Confirm `old_spray.tres` and `spray.tres` do not share a UID.
+4. Confirm no duplicate weapon ID is registered.
 
-7. **Beam regression**
+## Single-agent test
 
-   * Confirm `beam.tres` retains its previous smash behavior because its new resource flag remains false.
+1. Fire one or several spray droplets at one isolated normal monster.
+2. Confirm its damage and knockback remain comparable to the active spray before this task.
 
-8. **Gun regression**
+## Front-to-back crowd test
 
-   * Test water and thorn gun projectiles.
-   * Their direct and end-of-life AoEs must remain unchanged.
+1. Place five agents tightly behind one another in the firing direction.
+2. Fire briefly.
+3. Confirm front agents absorb projectiles.
+4. Confirm one projectile never damages or knocks back several agents.
+5. Confirm rear agents remain protected until their collision geometry becomes exposed.
 
-9. **Melee/explosion regression**
+## Side-by-side test
 
-   * Confirm sword, bomb, and other generic area-smash behavior is unchanged.
+1. Place five agents side by side.
+2. Fire the spray across them.
+3. Different projectiles may hit different agents.
+4. Confirm this is not mistaken for one projectile applying an AoE.
 
-10. **Impact visuals**
+## Damage-event test
 
-    * Confirm projectile impact rings/events still appear once at the correct impact position.
+1. Observe damage numbers during a single projectile hit.
+2. Confirm one projectile produces at most one damage event.
 
-## Final report
+## Deterministic collision test
+
+1. Stack or overlap several agents.
+2. Fire repeatedly from the same direction.
+3. Confirm the front-most collision target is consistently selected rather than changing according to grid ordering.
+
+## Turret test
+
+1. Use a turret configured with `"spray"`.
+2. Confirm its individual projectiles also affect one agent each.
+
+## Static collision and watering test
+
+1. Fire at walls, reactive roses and turrets.
+2. Confirm collision, watering and splash behavior remain unchanged.
+
+## Regression tests
+
+Confirm unchanged behavior for:
+
+* beam;
+* water gun;
+* thorn gun;
+* bomb;
+* sword;
+* projectile expiry;
+* wall-impact/end-of-life AoEs.
+
+---
+
+# 17. Final report
 
 Report:
 
 1. Changed files.
-2. The exact configuration field added.
-3. Where direct-hit selection now occurs.
-4. Where the finite budget is owned and distributed.
-5. Confirmation that total applied smash force is capped at one projectile’s `smash_force`.
-6. Confirmation that damage remains unbudgeted and unchanged.
-7. Confirmation that generic `apply_area_smash()` was not modified.
-8. Confirmation that Problem #2 was not touched.
-9. Any compatibility behavior retained.
-10. Any production-quality concern discovered.
-11. The manual tests the user should run.
+2. How `old_spray.tres` was made UID-safe.
+3. Confirmation that `old_spray` has zero external references.
+4. The new configuration field and its default.
+5. How the front-most agent is selected.
+6. Whether segment-versus-expanded-AABB collision was used.
+7. How direct damage is queued.
+8. Confirmation that full smash and full damage target the same single agent.
+9. Confirmation that no AoE damage or AoE smash occurs for active spray agent impacts.
+10. Confirmation that existing generic projectile behavior was preserved.
+11. Confirmation that `level_demo.tscn` still uses `"spray"` and never uses `"old_spray"`.
+12. Confirmation that Problem #2 was untouched.
+13. Any private coupling or production-quality concern discovered.
+14. Manual test scenarios.
 
-Do not claim runtime or compile validation because you are not authorized to run them.
+Do not claim compilation or runtime validation because those actions are not authorized.

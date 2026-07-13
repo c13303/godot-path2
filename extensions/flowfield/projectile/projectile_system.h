@@ -22,6 +22,7 @@ namespace ffcore
         bool smash_detach_flow = false;
         double smash_control_suppression = 1.0;
         double smash_control_suppression_duration = 0.0;
+        bool smash_budget_enabled = false;
         int damage = 0;
 
         // Bitmask of static-collider channels that stop this projectile.
@@ -175,5 +176,10 @@ namespace ffcore
                              const Vec2 &at, ImpactKind kind,
                              std::uint32_t collider_mask = 0,
                              const Vec2i &collider_cell = Vec2i{});
+
+        int find_direct_hit_agent(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &direction) const;
+        void apply_budgeted_projectile_smash(const ProjectileTypeConfig &cfg, const Projectile &p,
+                                             const Vec2 &impact_pos, const Vec2 &impact_dir,
+                                             int direct_hit_agent_id);
     };
 }

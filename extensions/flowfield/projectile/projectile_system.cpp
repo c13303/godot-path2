@@ -8,6 +8,40 @@
 
 namespace ffcore
 {
+    namespace
+    {
+        constexpr double FORCE_EPSILON = 1e-8;
+
+        double projected_aabb_leading_edge(const Vec2 &origin, const Vec2 &dir, const AgentData &agent)
+        {
+            Vec2 fight_center = agent.position + Vec2(0, agent.profile.fight_offset_y);
+            Vec2 offset = fight_center - origin;
+            return offset.dot(dir) -
+                   std::abs(dir.x) * agent.profile.fight_half_w -
+                   std::abs(dir.y) * agent.profile.fight_half_h;
+        }
+
+        double lateral_axis_distance(const Vec2 &origin, const Vec2 &dir, const AgentData &agent)
+        {
+            Vec2 fight_center = agent.position + Vec2(0, agent.profile.fight_offset_y);
+            Vec2 offset = fight_center - origin;
+            return std::abs(offset.x * dir.y - offset.y * dir.x);
+        }
+
+        bool smash_candidate_is_eligible(const AgentData &agent, int agent_id, int ignored_agent_id, int affected_smash_classes)
+        {
+            if (agent_id == ignored_agent_id)
+                return false;
+            if (agent.phase == AgentPhase::Drowning)
+                return false;
+            if (agent.profile.weapon_immune)
+                return false;
+            if (affected_smash_classes != 0 && (agent.profile.smash_class & affected_smash_classes) == 0)
+                return false;
+            return true;
+        }
+    }
+
     ProjectileSystem::ProjectileSystem() {}
 
     void ProjectileSystem::set_static_collision_grid(int origin_x, int origin_y, int width, int height,
@@ -102,6 +136,129 @@ namespace ffcore
                 break;
         }
         return false;
+    }
+
+    int ProjectileSystem::find_direct_hit_agent(const ProjectileTypeConfig &cfg, const Projectile &p, const Vec2 &direction) const
+    {
+        if (!grid || !steering)
+            return -1;
+
+        double query_radius = cfg.radius + steering->get_max_fight_query_padding();
+        auto neighbors = grid->query_neighbors(p.pos, query_radius);
+        int hit_agent_id = -1;
+        double best_leading_edge = std::numeric_limits<double>::infinity();
+        for (int nid : neighbors)
+        {
+            const AgentData *agent = steering->get_agent(nid);
+            if (!agent)
+                continue;
+            if (!smash_candidate_is_eligible(*agent, nid, p.owner_agent_id, p.affected_smash_classes))
+                continue;
+
+            Vec2 fight_center = agent->position + Vec2(0, agent->profile.fight_offset_y);
+            if (!circle_overlaps_aabb(p.pos, cfg.radius, fight_center, agent->profile.fight_half_w, agent->profile.fight_half_h))
+                continue;
+
+            double leading_edge = projected_aabb_leading_edge(p.pos, direction, *agent);
+            if (leading_edge < best_leading_edge ||
+                (leading_edge == best_leading_edge && (hit_agent_id < 0 || nid < hit_agent_id)))
+            {
+                best_leading_edge = leading_edge;
+                hit_agent_id = nid;
+            }
+        }
+        return hit_agent_id;
+    }
+
+    void ProjectileSystem::apply_budgeted_projectile_smash(const ProjectileTypeConfig &cfg, const Projectile &p,
+                                                           const Vec2 &impact_pos, const Vec2 &impact_dir,
+                                                           int direct_hit_agent_id)
+    {
+        if (!grid || !steering)
+            return;
+        if (!std::isfinite(impact_pos.x) || !std::isfinite(impact_pos.y) ||
+            !std::isfinite(cfg.aoe_radius) || !std::isfinite(cfg.smash_force))
+            return;
+        if (cfg.aoe_radius <= 0.0)
+            return;
+
+        double remaining_budget = std::max(0.0, cfg.smash_force);
+        if (remaining_budget <= FORCE_EPSILON)
+            return;
+
+        struct SmashCandidate
+        {
+            int id = -1;
+            double distance = 0.0;
+            double leading_edge = 0.0;
+            double lateral_distance = 0.0;
+            bool direct_hit = false;
+        };
+
+        std::vector<SmashCandidate> candidates;
+        double query_radius = cfg.aoe_radius + steering->get_max_fight_query_padding();
+        auto neighbors = grid->query_neighbors(impact_pos, query_radius);
+        candidates.reserve(neighbors.size());
+
+        for (int nid : neighbors)
+        {
+            const AgentData *agent = steering->get_agent(nid);
+            if (!agent)
+                continue;
+            if (!smash_candidate_is_eligible(*agent, nid, p.owner_agent_id, p.affected_smash_classes))
+                continue;
+
+            Vec2 fight_center = agent->position + Vec2(0, agent->profile.fight_offset_y);
+            double distance = point_aabb_distance(impact_pos, fight_center, agent->profile.fight_half_w, agent->profile.fight_half_h);
+            if (distance > cfg.aoe_radius)
+                continue;
+
+            candidates.push_back(SmashCandidate{
+                nid,
+                distance,
+                projected_aabb_leading_edge(impact_pos, impact_dir, *agent),
+                lateral_axis_distance(impact_pos, impact_dir, *agent),
+                nid == direct_hit_agent_id});
+        }
+
+        if (candidates.empty())
+            return;
+
+        std::sort(candidates.begin(), candidates.end(), [](const SmashCandidate &a, const SmashCandidate &b)
+                  {
+                      if (a.direct_hit != b.direct_hit)
+                          return a.direct_hit;
+                      if (a.leading_edge != b.leading_edge)
+                          return a.leading_edge < b.leading_edge;
+                      if (a.lateral_distance != b.lateral_distance)
+                          return a.lateral_distance < b.lateral_distance;
+                      return a.id < b.id;
+                  });
+
+        double safe_falloff = std::max(0.0, cfg.smash_falloff);
+        for (const SmashCandidate &candidate : candidates)
+        {
+            if (remaining_budget <= FORCE_EPSILON)
+                break;
+
+            double base = std::max(0.0, 1.0 - candidate.distance / cfg.aoe_radius);
+            double attenuation = std::pow(base, safe_falloff);
+            double desired_force = cfg.smash_force * attenuation;
+            double allocated_force = std::min(desired_force, remaining_budget);
+            if (allocated_force <= FORCE_EPSILON)
+                continue;
+
+            steering->apply_smash_impulse(
+                candidate.id,
+                impact_dir,
+                allocated_force,
+                cfg.smash_friction_loss,
+                0.0,
+                cfg.smash_detach_flow,
+                cfg.smash_control_suppression,
+                cfg.smash_control_suppression_duration);
+            remaining_budget -= allocated_force;
+        }
     }
 
     void ProjectileSystem::trigger_end_aoe(const ProjectileTypeConfig &cfg, const Projectile &p,
@@ -268,51 +425,30 @@ namespace ffcore
                     continue;
                 }
 
-                double query_radius = cfg.radius + (steering ? steering->get_max_fight_query_padding() : 0.0);
-                auto neighbors = grid->query_neighbors(p.pos, query_radius);
-                bool hit = false;
-                for (int nid : neighbors)
+                Vec2 impact_dir = p.vel.normalized();
+                int hit_agent_id = find_direct_hit_agent(cfg, p, impact_dir);
+
+                if (hit_agent_id >= 0 && steering)
                 {
-                    if (nid == p.owner_agent_id)
-                        continue;
-
-                    // We don't have direct agent lookup here; let SteeringSystem do
-                    // the faction/immune filtering inside apply_area_smash. To detect
-                    // contact we still need a position — query the steering system.
-                    const AgentData *a = steering ? steering->get_agent(nid) : nullptr;
-                    if (!a)
-                        continue;
-                    if (a->phase == AgentPhase::Drowning)
-                        continue;
-                    if (a->profile.weapon_immune)
-                        continue;
-                    if (p.affected_smash_classes != 0 &&
-                        (a->profile.smash_class & p.affected_smash_classes) == 0)
-                        continue;
-
-                    Vec2 fight_center = a->position + Vec2(0, a->profile.fight_offset_y);
-                    if (circle_overlaps_aabb(p.pos, cfg.radius, fight_center, a->profile.fight_half_w, a->profile.fight_half_h))
+                    if (cfg.smash_budget_enabled)
                     {
-                        hit = true;
-                        break;
+                        apply_budgeted_projectile_smash(cfg, p, p.pos, impact_dir, hit_agent_id);
                     }
-                }
-
-                if (hit && steering)
-                {
-                    Vec2 impact_dir = p.vel.normalized();
-                    steering->apply_area_smash(
-                        p.pos,
-                        cfg.aoe_radius,
-                        impact_dir,
-                        cfg.smash_force,
-                        cfg.smash_friction_loss,
-                        cfg.smash_falloff,
-                        cfg.smash_detach_flow,
-                        cfg.smash_control_suppression,
-                        cfg.smash_control_suppression_duration,
-                        p.owner_agent_id,
-                        p.affected_smash_classes);
+                    else
+                    {
+                        steering->apply_area_smash(
+                            p.pos,
+                            cfg.aoe_radius,
+                            impact_dir,
+                            cfg.smash_force,
+                            cfg.smash_friction_loss,
+                            cfg.smash_falloff,
+                            cfg.smash_detach_flow,
+                            cfg.smash_control_suppression,
+                            cfg.smash_control_suppression_duration,
+                            p.owner_agent_id,
+                            p.affected_smash_classes);
+                    }
                     steering->apply_area_damage(
                         p.pos,
                         cfg.aoe_radius,

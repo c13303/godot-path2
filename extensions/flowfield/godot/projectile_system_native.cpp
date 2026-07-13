@@ -103,6 +103,7 @@ int ProjectileSystemNative::register_type(const Dictionary &cfg)
     if (cfg.has("smash_detach_flow")) c.smash_detach_flow = bool(cfg["smash_detach_flow"]);
     if (cfg.has("smash_control_suppression")) c.smash_control_suppression = double(cfg["smash_control_suppression"]);
     if (cfg.has("smash_control_suppression_duration")) c.smash_control_suppression_duration = double(cfg["smash_control_suppression_duration"]);
+    if (cfg.has("smash_budget_enabled")) c.smash_budget_enabled = bool(cfg["smash_budget_enabled"]);
     if (cfg.has("damage")) c.damage = int(cfg["damage"]);
     if (cfg.has("static_collision_mask"))
         c.static_collision_mask = static_cast<std::uint32_t>(int64_t(cfg["static_collision_mask"]));

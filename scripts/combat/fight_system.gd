@@ -498,6 +498,7 @@ func _register_spray_projectiles() -> void:
 			"smash_control_suppression": weapon.control_suppression,
 			"smash_control_suppression_duration": weapon.control_suppression_duration,
 			"damage": weapon.spray_projectile_damage,
+			"smash_budget_enabled": weapon.spray_projectile_smash_budget_enabled,
 			"static_collision_mask": weapon.spray_projectile_static_collision_mask,
 			"end_of_life_aoe_enabled": false,
 			"pool_size": weapon.spray_projectile_pool_size,

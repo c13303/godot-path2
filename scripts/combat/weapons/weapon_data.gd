@@ -32,6 +32,7 @@ class_name WeaponData
 @export var spray_projectile_lifetime: float = 0.28
 @export var spray_projectile_radius: float = 5.25
 @export var spray_projectile_damage: int = 4
+@export var spray_projectile_smash_budget_enabled: bool = false
 @export var spray_projectile_spread_jitter_degrees: float = 4.0
 @export_flags("Terrain", "Reactive Plant", "Turret") var spray_projectile_static_collision_mask: int = 1
 @export var spray_projectile_pool_size: int = 128
