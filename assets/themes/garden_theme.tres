@@ -1,0 +1,7 @@
+[gd_resource type="Theme" format=3 uid="uid://ortm23exq8o7"]
+
+[ext_resource type="FontFile" uid="uid://fppb4fjfkd15" path="res://assets/fonts/Blue Winter.ttf" id="1_font"]
+
+[resource]
+default_font = ExtResource("1_font")
+default_font_size = 16

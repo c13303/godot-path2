@@ -40,6 +40,10 @@ window/stretch/aspect="expand"
 
 enabled=PackedStringArray("res://addons/spawn_playlist_editor/plugin.cfg")
 
+[gui]
+
+theme/custom="res://assets/themes/garden_theme.tres"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

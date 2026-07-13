@@ -69,6 +69,11 @@ func start_music() -> void:
 	music_enable = true
 
 
+## Stops the persistent theme player and prevents it from looping.
+func stop_music() -> void:
+	music_enable = false
+
+
 func play_sound(sound_id: StringName) -> bool:
 	var sound_props: Dictionary = SOUNDS.get(sound_id, {}) as Dictionary
 	if sound_props.is_empty():
