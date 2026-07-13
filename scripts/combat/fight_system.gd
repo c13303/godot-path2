@@ -1407,12 +1407,12 @@ class ProjectileDrawer:
 			if not tex:
 				continue
 			var sprite_offset: Vector2 = v2["sprite_offset"]
-			var modulate: Color = v2["modulate"]
+			var sprite_modulate: Color = v2["modulate"]
 			var altitude: float = float(v2["altitude"])
 			var half_size: Vector2 = v2["half_size"]
 			var top_left: Vector2 = grounds[i] + sprite_offset
 			top_left.y -= altitude
-			ci.draw_texture_rect(tex, Rect2(top_left, half_size * 2.0), false, modulate)
+			ci.draw_texture_rect(tex, Rect2(top_left, half_size * 2.0), false, sprite_modulate)
 
 	static func _paint_oval(ci: CanvasItem, center: Vector2, half: Vector2, color: Color) -> void:
 		# Cheap procedural oval via a unit circle scaled by the shadow half-extents.

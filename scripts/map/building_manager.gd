@@ -377,7 +377,11 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	var night_index: int = _spawn_playlist_config.current_playlist_night_index()
 	if _spawn_playlist_config.playlist_spawning_enabled():
 		if not _spawn_playlist_controller.begin_night(night_index):
-			push_error("BuildingManager: playlist night index %d is invalid; using legacy fallback spawning this night." % (night_index + 1))
+			var failure_reason: String = _spawn_playlist_controller.get_begin_night_failure_reason(night_index)
+			push_error("BuildingManager: playlist night index %d is invalid; monster spawning is disabled for this night. Reason: %s" % [
+				night_index + 1,
+				failure_reason,
+			])
 			_spawn_playlist_config.set_playlist_spawning_enabled(false)
 			_spawn_playlist_config.set_playlist_spawning_invalid(true)
 		else:
@@ -387,14 +391,11 @@ func _on_game_mode_changed(is_night: bool) -> void:
 			])
 			for line: String in _spawn_playlist_controller.get_current_night_debug_lines():
 				CppDebugOptions.dlog("BuildingManager: playlist " + line)
-	if _spawn_playlist_config.playlist_spawning_enabled():
-		_spawn_tick_controller.clear_legacy_fallback()
-	else:
-		_spawn_tick_controller.begin_legacy_fallback_night()
+	_spawn_tick_controller.clear_legacy_fallback()
 	if _spawn_playlist_config.playlist_spawning_invalid():
-		push_error("BuildingManager: assigned spawn playlist is invalid; using legacy fallback spawning this night.")
+		push_error("BuildingManager: assigned spawn playlist is invalid; monster spawning is disabled for this night. See earlier playlist validation errors for the reason.")
 	elif not _spawn_playlist_config.playlist_spawning_enabled():
-		push_error("BuildingManager: no valid spawn playlist is enabled; using legacy fallback spawning this night.")
+		push_error("BuildingManager: no valid spawn playlist is enabled; monster spawning is disabled for this night.")
 	_spawn_tick_controller.clear_ready_queue()
 	_night_preparation_token += 1
 	_night_preparing = true

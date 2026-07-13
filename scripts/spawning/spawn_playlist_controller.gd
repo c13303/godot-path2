@@ -127,6 +127,25 @@ func begin_night(night_index: int) -> bool:
 	return true
 
 
+func get_begin_night_failure_reason(night_index: int) -> String:
+	if not _configured:
+		if _last_errors.is_empty():
+			return "spawn playlist controller is not configured"
+		var errors: PackedStringArray = PackedStringArray()
+		for error: String in _last_errors:
+			errors.append(error)
+		return "spawn playlist controller is not configured: %s" % "; ".join(errors)
+	if _playlist == null:
+		return "spawn playlist resource is missing"
+	if night_index < 0:
+		return "night index %d is below zero" % night_index
+	if night_index >= _playlist.nights.size():
+		return "night index %d is outside playlist night count %d" % [night_index, _playlist.nights.size()]
+	if _playlist.nights[night_index] == null:
+		return "night %d is null" % (night_index + 1)
+	return "unknown playlist begin-night failure"
+
+
 func abort_current_night() -> void:
 	_current_night_index = -1
 	_current_night = null
