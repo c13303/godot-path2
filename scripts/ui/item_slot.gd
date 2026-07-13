@@ -2,6 +2,8 @@ extends PanelContainer
 class_name ItemSlot
 
 const ITEM_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
+# Numeric font theme for the stack-quantity readout (icon + count), distinct from body text.
+const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 
 var game_ui: Node
 var slot_type: String = "inventory"
@@ -87,6 +89,7 @@ func _build() -> void:
 	stack.add_child(_key_label)
 
 	_quantity_label = Label.new()
+	_quantity_label.theme = NUMBER_THEME
 	_quantity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_quantity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quantity_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM

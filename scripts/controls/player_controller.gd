@@ -468,10 +468,13 @@ func _update_gun_fire(delta: float) -> void:
 	trigger_allowed = trigger_allowed and not _in_build_mode() and not _unbuild_selected()
 	if trigger_allowed:
 		var selected_id: String = _selected_item_id()
-		if not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
+		if selected_id != "" and not _selected_item_disabled_for_placement(selected_id) and direction.length_squared() >= 0.000001:
 			weapon_id = selected_id
-			if _control_mode == INPUT_MODE_PAD and not fight_system.is_held_weapon(weapon_id) and not _right_stick_weapon_active:
-				fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))
+			if fight_system.is_held_weapon(weapon_id):
+				_update_player_facing(direction)
+			elif _control_mode == INPUT_MODE_PAD and not _right_stick_weapon_active:
+				if bool(fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))):
+					_update_player_facing(direction)
 			_right_stick_weapon_active = _control_mode == INPUT_MODE_PAD
 	else:
 		_right_stick_weapon_active = false
@@ -860,6 +863,7 @@ func _try_use_equipped_item() -> void:
 	var origin: Vector2 = _weapon_origin(player)
 	var direction: Vector2 = get_global_mouse_position() - origin
 	if bool(fight_system.use_weapon(weapon_id, origin, direction, player_nav_id, _weapon_origin_offset(player))):
+		_update_player_facing(direction)
 		get_viewport().set_input_as_handled()
 
 func _toggle_pause() -> void:

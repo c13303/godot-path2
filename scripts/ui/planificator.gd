@@ -14,6 +14,8 @@ const FOCUS_FONT_SIZE: int = 24
 const LIVE_REFRESH_SECONDS: float = 0.15
 const SLOT_COUNT: int = 2
 # Fallback icon for a monster type with no catalog texture; clients use their own sheet.
+# Numeric font theme for the per-type count readout (icon + count), distinct from body text.
+const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const FALLBACK_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const CLIENT_ICON_HFRAMES: int = 7
@@ -364,6 +366,7 @@ func _add_row(container: VBoxContainer, agent_type: StringName, count: int, larg
 	row.add_child(icon)
 
 	var count_label: Label = Label.new()
+	count_label.theme = NUMBER_THEME
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count_label.text = "X %d" % count
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

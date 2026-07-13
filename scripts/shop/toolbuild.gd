@@ -19,6 +19,8 @@ extends Control
 
 const COUNTER_ID: String = "rose_shop_counter"
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
+# Numeric font theme for the slot count/price badges (icon + number), distinct from body text.
+const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The merchant column is laid out as an aligned grid: icon | name | price.
@@ -539,6 +541,7 @@ func _build_merchant_slot(item_id: String) -> Button:
 ## A small number badge overlaid on the bottom-right of a slot icon.
 func _make_icon_count_label(text: String) -> Label:
 	var count: Label = Label.new()
+	count.theme = NUMBER_THEME
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
@@ -700,6 +703,7 @@ func _build_slot(item_id: String) -> Button:
 	button.add_child(badge)
 
 	var count: Label = Label.new()
+	count.theme = NUMBER_THEME
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM

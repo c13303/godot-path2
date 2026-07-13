@@ -1,0 +1,7 @@
+[gd_resource type="Theme" format=3 uid="uid://bhpuo5gdtyiwu"]
+
+[ext_resource type="FontFile" uid="uid://blc6k4netsg1c" path="res://assets/fonts/Yaelah.ttf" id="1_font"]
+
+[resource]
+default_font = ExtResource("1_font")
+default_font_size = 16

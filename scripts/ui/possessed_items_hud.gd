@@ -6,6 +6,8 @@ const SEED_ICON_SCRIPT: Script = preload("res://scripts/ui/seed_icon.gd")
 const GEM_ICON_SCRIPT: Script = preload("res://scripts/ui/gem_icon.gd")
 const MONEY_ICON_SCRIPT: Script = preload("res://scripts/ui/money_icon.gd")
 const GENERIC_CURRENCY_ICON_SCRIPT: Script = preload("res://scripts/ui/generic_currency_icon.gd")
+# Numeric font theme for the quantity readouts (icon + "x N"), distinct from body text.
+const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const ROW_SIZE: Vector2 = Vector2(40.0, 40.0)
 const LABEL_SIZE: Vector2 = Vector2(70.0, 34.0)
@@ -167,6 +169,7 @@ func _ensure_row(item_id: String) -> void:
 	if label == null:
 		label = RichTextLabel.new()
 		label.name = label_name
+		label.theme = NUMBER_THEME
 		icon.add_child(label)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.bbcode_enabled = true

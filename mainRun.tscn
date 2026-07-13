@@ -54,6 +54,7 @@
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
+[ext_resource type="Theme" uid="uid://bhpuo5gdtyiwu" path="res://assets/themes/number_theme.tres" id="50_number_theme"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -899,6 +900,9 @@ offset_left = -225.0
 offset_top = 95.0
 offset_right = 304.0
 offset_bottom = 223.0
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
 text = "Achetez des roses avec l'outil MAGASIN"
 horizontal_alignment = 1
 script = ExtResource("20_7xko8")
@@ -943,6 +947,7 @@ curve_strength = 2.0
 
 [node name="seedQT" type="RichTextLabel" parent="GameUI/currenciesUI/seedIcon" unique_id=618629205]
 layout_mode = 0
+theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
@@ -966,6 +971,7 @@ curve_strength = 2.0
 
 [node name="gemQT" type="RichTextLabel" parent="GameUI/currenciesUI/gemIcon" unique_id=1609902140]
 layout_mode = 0
+theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
@@ -989,6 +995,7 @@ curve_strength = 2.0
 
 [node name="moneyQT" type="RichTextLabel" parent="GameUI/currenciesUI/moneyIcon" unique_id=1319827880]
 layout_mode = 0
+theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
