@@ -19,6 +19,10 @@ const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
 const DIRECTION_UP: Vector2i = Vector2i(0, -1)
+# The build cursor / preview may never sit more than this many tiles from the player on
+# either axis (Chebyshev range). Both the mouse target and the accumulated pad offset are
+# clamped to it so the preview always stays within reach of the player.
+const MAX_BUILD_CURSOR_TILES_FROM_PLAYER: int = 10
 const FENCE_ITEM_ID: String = "fence"
 const FENCE_NEIGHBOR_NORTH: int = 1
 const FENCE_NEIGHBOR_EAST: int = 2
@@ -189,8 +193,25 @@ func _is_gamepad_control_mode() -> bool:
 
 func hovered_cell() -> Vector2i:
 	if _pad_cursor_active:
+		# The pad offset is kept clamped at every mutation, so it is already in range here.
 		return player_cell() + _pad_cursor_offset
-	return mouse_hovered_cell()
+	return _clamp_cell_to_player_range(mouse_hovered_cell())
+
+
+# Clamps an absolute cell so it lies within MAX_BUILD_CURSOR_TILES_FROM_PLAYER tiles of the
+# player on each axis.
+func _clamp_cell_to_player_range(cell: Vector2i) -> Vector2i:
+	var origin: Vector2i = player_cell()
+	return origin + _clamp_offset_to_player_range(cell - origin)
+
+
+# Clamps a player-relative offset to the build-cursor Chebyshev range.
+func _clamp_offset_to_player_range(offset: Vector2i) -> Vector2i:
+	var max_tiles: int = MAX_BUILD_CURSOR_TILES_FROM_PLAYER
+	return Vector2i(
+		clampi(offset.x, -max_tiles, max_tiles),
+		clampi(offset.y, -max_tiles, max_tiles)
+	)
 
 
 func mouse_hovered_cell() -> Vector2i:
@@ -219,7 +240,7 @@ func set_pad_cursor_active(active: bool) -> void:
 	_pad_cursor_active = active
 	if not active:
 		return
-	_pad_cursor_offset = mouse_hovered_cell() - player_cell()
+	_pad_cursor_offset = _clamp_offset_to_player_range(mouse_hovered_cell() - player_cell())
 
 
 func place_cursor_right_of_player() -> void:
@@ -233,7 +254,7 @@ func move_pad_cursor(direction: Vector2i) -> void:
 	if not _pad_cursor_active:
 		_pad_cursor_offset = mouse_hovered_cell() - player_cell()
 		_pad_cursor_active = true
-	_pad_cursor_offset += direction
+	_pad_cursor_offset = _clamp_offset_to_player_range(_pad_cursor_offset + direction)
 
 
 func create_remove_progress(cell: Vector2i, value: float) -> void:

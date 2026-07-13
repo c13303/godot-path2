@@ -235,9 +235,8 @@ func _update_pad_cursor(delta: float) -> void:
 		return
 	var stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	if _pad_build_cursor_mode_active():
-		var left_stick: Vector2 = _gamepad_stick_vector(JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y)
-		if left_stick != Vector2.ZERO:
-			stick = left_stick
+		# The build cursor is driven only by the d-pad and the right stick. The left stick
+		# stays reserved for player movement and must never move the cursor.
 		var dpad_direction: Vector2i = _dpad_cell_direction()
 		if dpad_direction != Vector2i.ZERO:
 			_update_pad_cursor_repeat(dpad_direction, delta)
