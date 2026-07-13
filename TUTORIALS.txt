@@ -1,4 +1,8 @@
 
+unbuild tool selected (highest-priority hint)
+    = "Sélectionnez les objets à démonter" / "Select the objects to dismantle"
+                                                            [tutorial.unbuild_selection]
+
 water reserve empty
     = "Rechargez votre eau !" / "Refill your water !"      [tutorial.refill_water]
     (only hint allowed to stay visible during the NIGHT)

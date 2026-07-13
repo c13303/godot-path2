@@ -1,22 +1,24 @@
 extends RichTextLabel
 ## Day-phase contextual hint.
 ##
-## Each frame it inspects water first, then during the day it inspects the
-## rose/seed economy and shows the single most relevant next step, translated
-## through the Translations singleton. Empty water stays visible at night; other
-## hints are hidden at night. When every planted rose is watered and the player
-## has nothing left to plant or buy, a hold-to-confirm prompt is shown.
+## Each frame it first checks for the temporary unbuild mode, then water, and
+## during the day it inspects the rose/seed economy. It shows the single most
+## relevant next step, translated through the Translations singleton. Empty water
+## stays visible at night; other hints are hidden at night. When every planted rose
+## is watered and the player has nothing left to plant or buy, a hold-to-confirm
+## prompt is shown.
 ##
 ## Priority order (most prioritary first):
-##   1. empty water reserve ......................... Refill your water
-##   2. dawn harvest (grown roses) .................. Harvest / add counters / place shop
-##   3. client sale phase ........................... nothing (only the tantrum alert)
-##   4. seed merchant reward waiting ................ Merchant has a reward
-##   5. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
-##   6. seeds left, shop tool equipped .............. Plant roses
-##   7. planted roses still dry ..................... Water your roses
-##   8. day 1 pasteque/turret still placeable ....... Plant pasteque / turret
-##   9. all roses watered, clients done ............. Hold to start night
+##   1. unbuild tool selected ....................... Select objects to dismantle
+##   2. empty water reserve ......................... Refill your water
+##   3. dawn harvest (grown roses) .................. Harvest / add counters / place shop
+##   4. client sale phase ........................... nothing (only the tantrum alert)
+##   5. seed merchant reward waiting ................ Merchant has a reward
+##   6. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
+##   7. seeds left, shop tool equipped .............. Plant roses
+##   8. planted roses still dry ..................... Water your roses
+##   9. day 1 pasteque/turret still placeable ....... Plant pasteque / turret
+##  10. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -40,6 +42,7 @@ const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
 const KEY_START_CLIENTS_PAD: String = "tutorial.hold_start_clients_pad"
+const KEY_UNBUILD_SELECTION: String = "tutorial.unbuild_selection"
 
 const HOLD_ACTION_NONE: StringName = &""
 const HOLD_ACTION_START_CLIENTS: StringName = &"start_clients"
@@ -170,6 +173,9 @@ func _on_building_added(_cell: Vector2i, item_id: String) -> void:
 
 func _on_locale_changed(_locale: String) -> void:
 	# Same message, new language: re-translate in place without re-blanking.
+	if _unbuild_tool_selected():
+		_show_key_immediately(KEY_UNBUILD_SELECTION)
+		return
 	if _alert_key != "":
 		text = _alert_text()
 		return
@@ -184,6 +190,9 @@ func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 	_alert_count = count
 	_alert_persistent = persistent
 	_alert_remaining = ALERT_DURATION if not persistent else 0.0
+	if _unbuild_tool_selected():
+		_show_key_immediately(KEY_UNBUILD_SELECTION)
+		return
 	visible = true
 	text = _alert_text()
 	_set_glow(false)
@@ -208,6 +217,12 @@ func clear_alert(key: String = "") -> void:
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
+	# Unbuild is a temporary interaction mode. Its instruction must replace every other
+	# contextual hint or alert until the tool is deselected.
+	if _unbuild_tool_selected():
+		_reset_hold_progress()
+		_show_key_immediately(KEY_UNBUILD_SELECTION)
+		return
 	if _water_refill_needed():
 		_reset_hold_progress()
 		_show_key_immediately(KEY_REFILL_WATER)
@@ -397,6 +412,14 @@ func _water_refill_needed() -> bool:
 	if _progression == null or not _progression.has_method("get_value"):
 		return false
 	return int(_progression.call("get_value", WATER_RESERVE_KEY)) <= 0
+
+
+func _unbuild_tool_selected() -> bool:
+	return (
+		_game_ui != null
+		and _game_ui.has_method("is_unbuild_tool_selected")
+		and bool(_game_ui.call("is_unbuild_tool_selected"))
+	)
 
 
 func _show_key_immediately(key: String) -> void:

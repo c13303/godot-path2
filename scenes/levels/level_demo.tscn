@@ -1249,7 +1249,7 @@ starting_items = {
 &"pasteque": 1,
 &"wall": 2
 }
-tool_shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence"])
+tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence"])
 tool_shop_prices = {
 &"fence": 1,
 &"imperial_seed": 20,
@@ -1274,7 +1274,7 @@ merchant_prices = {
 &"sword": 100,
 &"wall": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"rose_shop_counter", &"wall", &"fence", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,

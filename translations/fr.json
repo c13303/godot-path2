@@ -65,5 +65,6 @@
 	"tutorial.hold_start_night_space": "Maintenir ESPACE pour démarrer la nuit",
 	"tutorial.hold_start_night_pad": "Maintenir X pour démarrer la nuit",
 	"tutorial.hold_start_clients_space": "Maintenir ESPACE pour faire entrer les clients",
-	"tutorial.hold_start_clients_pad": "Maintenir X pour faire entrer les clients"
+	"tutorial.hold_start_clients_pad": "Maintenir X pour faire entrer les clients",
+	"tutorial.unbuild_selection": "Sélectionnez les objets à démonter"
 }

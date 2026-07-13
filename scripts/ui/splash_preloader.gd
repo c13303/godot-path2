@@ -4,20 +4,21 @@ extends Control
 # Startup splash shown while the heavy mainRun scene loads in the background.
 #
 # The image and music are prewired in splash_preloader.tscn (no hot loading);
-# this script only drives timing and the transition into the game:
-#   * mainRun is loaded on a worker thread as soon as the splash appears.
-#   * The splash stays visible for at least MIN_DISPLAY_SECONDS.
-#   * Once loading has finished, a click or any key skips straight to the game,
-#     bypassing the remaining minimum time. With no input, it auto-advances as
-#     soon as both loading is done and the minimum time has elapsed.
+# this script only covers the disk load and the transition into the game:
+#   * mainRun is loaded on a worker thread as soon as the splash appears (this
+#     only overlaps the disk read/parse with the splash; the scene's own
+#     instantiation and _ready init still run on the main thread on entry).
+#   * A click or any key requests entering the game. If the parse is already
+#     done it happens instantly; otherwise the request is remembered and
+#     honored the moment the parse finishes.
+#   * With no input, the splash stays up (it never auto-advances).
 # ---------------------------------------------------------------------------
 
 const MAIN_RUN_SCENE: String = "res://mainRun.tscn"
-const MIN_DISPLAY_SECONDS: float = 3.0
 
-var _elapsed: float = 0.0
 var _load_requested: bool = false
 var _loaded_scene: PackedScene = null
+var _skip_requested: bool = false
 var _advancing: bool = false
 
 
@@ -31,20 +32,19 @@ func _ready() -> void:
 		_loaded_scene = load(MAIN_RUN_SCENE) as PackedScene
 
 
-func _process(delta: float) -> void:
-	_elapsed += delta
+func _process(_delta: float) -> void:
 	_poll_loading()
-	if _loaded_scene != null and _elapsed >= MIN_DISPLAY_SECONDS:
-		_advance_to_game()
+	_try_advance()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _is_skip_event(event):
 		return
 	get_viewport().set_input_as_handled()
-	# A click/key bypasses the minimum display time, but only once the game is ready.
-	if _loaded_scene != null:
-		_advance_to_game()
+	# A click/key requests entering the game. It only takes effect once the scene
+	# has finished loading; until then the request is simply remembered.
+	_skip_requested = true
+	_try_advance()
 
 
 func _is_skip_event(event: InputEvent) -> bool:
@@ -70,8 +70,8 @@ func _poll_loading() -> void:
 		_loaded_scene = load(MAIN_RUN_SCENE) as PackedScene
 
 
-func _advance_to_game() -> void:
-	if _advancing or _loaded_scene == null:
+func _try_advance() -> void:
+	if _advancing or not _skip_requested or _loaded_scene == null:
 		return
 	_advancing = true
 	var change_error: Error = get_tree().change_scene_to_packed(_loaded_scene)
