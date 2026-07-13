@@ -71,6 +71,10 @@ var _last_lance_facing: Vector2 = Vector2.RIGHT
 var _player_in_water: bool = false
 
 func _ready() -> void:
+	# Input mouse mode is global and survives reload_current_scene(). Reapply the
+	# controller's fresh default so a cursor hidden by the previous scene does not
+	# remain hidden when the reloaded scene starts in keyboard/mouse mode.
+	_apply_control_mode_mouse_visibility()
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
 		global_config_node = scene.get_node_or_null("CPP/GlobalConfigNative")
@@ -198,11 +202,15 @@ func _set_control_mode(mode: String) -> void:
 	if _control_mode == mode:
 		return
 	_control_mode = mode
+	_apply_control_mode_mouse_visibility()
+	if _control_mode == INPUT_MODE_KMOUSE:
+		_deactivate_pad_build_cursor()
+
+func _apply_control_mode_mouse_visibility() -> void:
 	if _control_mode == INPUT_MODE_PAD:
 		Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN)
 	else:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-		_deactivate_pad_build_cursor()
 
 func get_control_mode() -> String:
 	return _control_mode
