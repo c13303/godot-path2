@@ -257,16 +257,22 @@ func pad_move_cursor(direction: Vector2i) -> void:
 		_update_remove_drag()
 
 
-## Pad bulk-unbuild, mirroring the keyboard X hold. The pad unbuild button (B) press anchors a
-## removal rectangle at the cursor; moving the cursor grows it (see pad_move_cursor); releasing
-## commits the rectangle to the removal queue, which drains one cell at a time. A press+release
-## with no cursor movement just queues the single hovered cell.
-func pad_start_remove_drag() -> void:
-	_start_remove_drag()
+## Pad unbuild validation via the accept (A) button, mirroring how placement is confirmed. The
+## first A anchors a removal rectangle at the cursor; moving the cursor grows it (see
+## pad_move_cursor); a second A commits the rectangle to the removal queue, which drains one cell
+## at a time. Anchor + commit on the same cell just queues that single cell.
+func pad_confirm_remove_at_cursor() -> void:
+	if _placement_disabled() or _is_inventory_open():
+		return
+	if _is_remove_drag_active():
+		_finish_remove_drag()
+	else:
+		_start_remove_drag()
 
 
-func pad_finish_remove_drag() -> void:
-	_finish_remove_drag()
+## Aborts an in-progress pad removal drag (the B / cancel button). Returns true when one was active.
+func pad_cancel_remove_drag() -> bool:
+	return _drag_controller.cancel_remove_drag()
 
 
 func pad_rotate_selected_at_cursor() -> bool:
@@ -787,9 +793,9 @@ func _mouse_hovered_cell() -> Vector2i:
 func _player_cell() -> Vector2i:
 	return _build_preview.player_cell()
 
-# Frames the bounding box spanning start_cell..end_cell with the green outline.
-func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
-	_build_preview.show_drag_selection_rect(start_cell, end_cell)
+# Frames the bounding box spanning start_cell..end_cell: green for placement, red when remove.
+func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: bool = false) -> void:
+	_build_preview.show_drag_selection_rect(start_cell, end_cell, remove)
 
 func _hide_drag_selection_rect() -> void:
 	_build_preview.hide_drag_selection_rect()

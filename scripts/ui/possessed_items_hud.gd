@@ -11,11 +11,25 @@ const ROW_SIZE: Vector2 = Vector2(40.0, 40.0)
 const LABEL_SIZE: Vector2 = Vector2(70.0, 34.0)
 const BOTTOM_ROW_Y: float = -64.0
 const ROW_STEP_Y: float = -50.0
+const ROSE_ITEM_ID: String = "rose"
+const ROSE_DRY_ID: String = "rose_dry"
+const ROSE_WET_ID: String = "rose_wet"
+const ROSE_GROWNUP_ID: String = "rose_grownup"
+const ROSE_STATE_IDS: Array[String] = [ROSE_DRY_ID, ROSE_WET_ID, ROSE_GROWNUP_ID]
+const ROSE_STATE_FRAMES: Dictionary = {
+	ROSE_DRY_ID: 24,
+	ROSE_WET_ID: 25,
+	ROSE_GROWNUP_ID: 26,
+}
 @export var game_ui_path: NodePath = NodePath("..")
 @export var progression_path: NodePath = NodePath("../../progression")
+@export var plant_manager_path: NodePath = NodePath("../../Map/PlantManager")
+@export var building_manager_path: NodePath = NodePath("../../Map/BuildingManager")
 
 var _game_ui: Node
 var _progression: Node
+var _plant_manager: Node
+var _building_manager: Node
 var _rows: Dictionary = {}
 var _labels: Dictionary = {}
 
@@ -24,10 +38,14 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_ui = get_node_or_null(game_ui_path)
 	_progression = get_node_or_null(progression_path)
+	_plant_manager = get_node_or_null(plant_manager_path)
+	_building_manager = get_node_or_null(building_manager_path)
 	if _progression != null and _progression.has_signal("values_changed"):
 		_progression.connect("values_changed", Callable(self, "refresh"))
 	if _game_ui != null and _game_ui.has_signal("inventory_changed"):
 		_game_ui.connect("inventory_changed", Callable(self, "refresh"))
+	_connect_plant_refresh_signals()
+	_connect_counter_refresh_signal()
 	refresh()
 
 
@@ -79,8 +97,13 @@ func _collect_possessed_counts() -> Dictionary:
 			for raw_item_id: Variant in (raw_counts as Dictionary).keys():
 				var item_id: String = str(raw_item_id)
 				var quantity: int = int((raw_counts as Dictionary)[raw_item_id])
-				if item_id != "" and quantity > 0 and not ItemCatalog.is_weapon(item_id):
+				if item_id != "" and item_id != ROSE_ITEM_ID and quantity > 0 and not ItemCatalog.is_weapon(item_id):
 					counts[item_id] = int(counts.get(item_id, 0)) + quantity
+	var rose_counts: Dictionary = _current_rose_state_counts()
+	for rose_id: String in ROSE_STATE_IDS:
+		var quantity: int = int(rose_counts.get(rose_id, 0))
+		if quantity > 0:
+			counts[rose_id] = quantity
 	return counts
 
 
@@ -95,6 +118,12 @@ func _ordered_item_ids(counts: Dictionary) -> Array[String]:
 		if item_id != "" and not ids.has(item_id) and int(counts[item_id]) > 0:
 			ids.append(item_id)
 	ids.sort_custom(Callable(self, "_sort_currency_first"))
+	for rose_id: String in ROSE_STATE_IDS:
+		if ids.has(rose_id):
+			ids.erase(rose_id)
+	for rose_id: String in ROSE_STATE_IDS:
+		if int(counts.get(rose_id, 0)) > 0:
+			ids.append(rose_id)
 	return ids
 
 
@@ -176,12 +205,18 @@ func _item_texture(item_id: String) -> AtlasTexture:
 	if currency != &"":
 		texture.region = CurrencyCatalog.get_icon_region(currency)
 		return texture
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	var frame: int = int(item_def.get("frame", -1))
+	var frame: int = _item_frame(item_id)
 	if frame < 0:
 		return null
 	texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
 	return texture
+
+
+func _item_frame(item_id: String) -> int:
+	if ROSE_STATE_FRAMES.has(item_id):
+		return int(ROSE_STATE_FRAMES[item_id])
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	return int(item_def.get("frame", -1))
 
 
 func _currency_for_item_id(item_id: String) -> StringName:
@@ -189,6 +224,58 @@ func _currency_for_item_id(item_id: String) -> StringName:
 		if CurrencyCatalog.get_item_id(currency) == item_id:
 			return currency
 	return &""
+
+
+func _connect_plant_refresh_signals() -> void:
+	if _plant_manager == null:
+		return
+	for signal_name: StringName in [&"plant_added", &"plant_removed", &"plant_state_changed"]:
+		if not _plant_manager.has_signal(signal_name):
+			continue
+		var callback: Callable = Callable(self, "_on_plant_count_changed")
+		if not _plant_manager.is_connected(signal_name, callback):
+			_plant_manager.connect(signal_name, callback)
+
+
+func _connect_counter_refresh_signal() -> void:
+	if _building_manager == null or not _building_manager.has_signal(&"counter_stock_changed"):
+		return
+	var callback: Callable = Callable(self, "_on_plant_count_changed")
+	if not _building_manager.is_connected(&"counter_stock_changed", callback):
+		_building_manager.connect(&"counter_stock_changed", callback)
+
+
+func _on_plant_count_changed(_a: Variant = null, _b: Variant = null) -> void:
+	refresh()
+
+
+func _current_rose_state_counts() -> Dictionary:
+	var counts: Dictionary = {}
+	counts[ROSE_DRY_ID] = 0
+	counts[ROSE_WET_ID] = 0
+	counts[ROSE_GROWNUP_ID] = _current_counter_rose_count()
+	if _plant_manager == null:
+		return counts
+	if (
+		not _plant_manager.has_method("rose_count")
+		or not _plant_manager.has_method("unwatered_rose_count")
+		or not _plant_manager.has_method("grownup_rose_count")
+	):
+		return counts
+	var total: int = int(_plant_manager.call("rose_count"))
+	var dry_count: int = int(_plant_manager.call("unwatered_rose_count"))
+	var grownup_count: int = int(_plant_manager.call("grownup_rose_count"))
+	var wet_count: int = maxi(0, total - dry_count - grownup_count)
+	counts[ROSE_DRY_ID] = maxi(0, dry_count)
+	counts[ROSE_WET_ID] = wet_count
+	counts[ROSE_GROWNUP_ID] = grownup_count + int(counts[ROSE_GROWNUP_ID])
+	return counts
+
+
+func _current_counter_rose_count() -> int:
+	if _building_manager == null or not _building_manager.has_method("total_counter_stock"):
+		return 0
+	return int(_building_manager.call("total_counter_stock"))
 
 
 func _layout_rows(ordered_ids: Array[String], counts: Dictionary) -> void:

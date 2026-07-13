@@ -1,10 +1,10 @@
 extends Control
 
 const ICON_SIZE: Vector2 = Vector2(32.0, 32.0)
-const TODAY_ICON_SIZE: Vector2 = Vector2(64.0, 64.0)
+const FOCUS_ICON_SIZE: Vector2 = Vector2(72.0, 72.0)
 const PANEL_WIDTH: float = 210.0
 const NORMAL_FONT_SIZE: int = 11
-const TODAY_FONT_SIZE: int = 22
+const FOCUS_FONT_SIZE: int = 24
 const LIVE_REFRESH_SECONDS: float = 0.15
 const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
@@ -73,7 +73,7 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	margin.add_child(content)
 
-	_today_label = _make_section_label(TODAY_FONT_SIZE)
+	_today_label = _make_section_label(NORMAL_FONT_SIZE)
 	content.add_child(_today_label)
 	_today_rows = VBoxContainer.new()
 	_today_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -159,25 +159,43 @@ func _refresh() -> void:
 	if _victory_label != null:
 		_victory_label.visible = false
 
-	if GameState.is_night:
-		_add_row(_today_rows, &"monster", _remaining_enemy_count(), true)
-	else:
-		_add_row(_today_rows, &"client", _remaining_client_count(), true)
+	var today_agent_type: StringName = &"monster" if GameState.is_night else &"client"
+	var today_count: int = _remaining_enemy_count() if GameState.is_night else _remaining_client_count()
+	if GameState.is_morning_phase:
+		var morning_focus: String = "today" if today_count > 0 else ""
+		_apply_focus_section(morning_focus)
+		_add_row(_today_rows, today_agent_type, today_count, morning_focus == "today")
+		_update_section_visibility()
+		return
 
 	var playlist: LevelSpawnPlaylist = _get_playlist()
 	if playlist == null or playlist.nights.is_empty():
+		var fallback_focus: String = "today" if today_count > 0 else ""
+		_apply_focus_section(fallback_focus)
+		_add_row(_today_rows, today_agent_type, today_count, fallback_focus == "today")
+		_update_section_visibility()
 		return
 
 	var night_index: int = _get_preview_night_index(playlist)
 	var night: NightSpawnPlaylist = playlist.nights[night_index]
 	if night == null:
+		var empty_night_focus: String = "today" if today_count > 0 else ""
+		_apply_focus_section(empty_night_focus)
+		_add_row(_today_rows, today_agent_type, today_count, empty_night_focus == "today")
+		_update_section_visibility()
 		return
 
 	var monster_counts: Dictionary = _get_monster_counts(night)
-	_add_monster_rows(monster_counts)
-	_add_row(_day_rows, &"client", maxi(0, night.clients))
+	var night_count: int = _total_monster_count(monster_counts)
+	var day_count: int = maxi(0, night.clients)
+	var focus_section: String = _first_nonempty_section(today_count, night_count, day_count)
+	_apply_focus_section(focus_section)
+	_add_row(_today_rows, today_agent_type, today_count, focus_section == "today")
+	_add_monster_rows(monster_counts, focus_section == "night")
+	_add_row(_day_rows, &"client", day_count, focus_section == "day")
 	if _victory_label != null:
 		_victory_label.visible = _tomorrow_is_victory_day()
+	_update_section_visibility()
 	_set_mouse_filter_recursive(self)
 
 
@@ -284,28 +302,47 @@ func _get_monster_counts(night: NightSpawnPlaylist) -> Dictionary:
 	return counts
 
 
-func _add_monster_rows(monster_counts: Dictionary) -> void:
+func _total_monster_count(monster_counts: Dictionary) -> int:
+	var total: int = 0
+	for raw_count: Variant in monster_counts.values():
+		total += int(raw_count)
+	return total
+
+
+func _first_nonempty_section(today_count: int, night_count: int, day_count: int) -> String:
+	if today_count > 0:
+		return "today"
+	if night_count > 0:
+		return "night"
+	if day_count > 0:
+		return "day"
+	return ""
+
+
+func _add_monster_rows(monster_counts: Dictionary, large: bool = false) -> void:
 	var ordered_types: Array[StringName] = [&"basic", &"bigmonster"]
 	for monster_type: StringName in ordered_types:
 		var count: int = int(monster_counts.get(monster_type, 0))
 		if count > 0:
-			_add_row(_night_rows, monster_type, count)
+			_add_row(_night_rows, monster_type, count, large)
 	for raw_type: Variant in monster_counts.keys():
 		var monster_type: StringName = StringName(str(raw_type))
 		if ordered_types.has(monster_type):
 			continue
 		var count: int = int(monster_counts.get(monster_type, 0))
 		if count > 0:
-			_add_row(_night_rows, monster_type, count)
+			_add_row(_night_rows, monster_type, count, large)
 
 
 func _add_row(container: VBoxContainer, agent_type: StringName, count: int, large: bool = false) -> void:
-	var icon_size: Vector2 = TODAY_ICON_SIZE if large else ICON_SIZE
-	var font_size: int = TODAY_FONT_SIZE if large else NORMAL_FONT_SIZE
+	if count <= 0:
+		return
+	var icon_size: Vector2 = FOCUS_ICON_SIZE if large else ICON_SIZE
+	var font_size: int = FOCUS_FONT_SIZE if large else NORMAL_FONT_SIZE
 	var row: HBoxContainer = HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.custom_minimum_size = Vector2(0.0, icon_size.y)
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", 9 if large else 6)
 	container.add_child(row)
 
 	var icon: TextureRect = TextureRect.new()
@@ -322,6 +359,39 @@ func _add_row(container: VBoxContainer, agent_type: StringName, count: int, larg
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	count_label.add_theme_font_size_override("font_size", font_size)
 	row.add_child(count_label)
+
+
+func _apply_focus_section(section: String) -> void:
+	_apply_label_focus(_today_label, section == "today")
+	_apply_label_focus(_night_label, section == "night")
+	_apply_label_focus(_day_label, section == "day")
+	if _today_rows != null:
+		_today_rows.add_theme_constant_override("separation", 8 if section == "today" else 3)
+	if _night_rows != null:
+		_night_rows.add_theme_constant_override("separation", 8 if section == "night" else 3)
+	if _day_rows != null:
+		_day_rows.add_theme_constant_override("separation", 8 if section == "day" else 3)
+
+
+func _apply_label_focus(label: Label, focused: bool) -> void:
+	if label == null:
+		return
+	label.add_theme_font_size_override("font_size", FOCUS_FONT_SIZE if focused else NORMAL_FONT_SIZE)
+
+
+func _update_section_visibility() -> void:
+	if _today_label != null:
+		_today_label.visible = _today_rows != null and _today_rows.get_child_count() > 0
+	if _today_rows != null:
+		_today_rows.visible = _today_rows.get_child_count() > 0
+	if _night_label != null:
+		_night_label.visible = _night_rows != null and _night_rows.get_child_count() > 0
+	if _night_rows != null:
+		_night_rows.visible = _night_rows.get_child_count() > 0
+	if _day_label != null:
+		_day_label.visible = _day_rows != null and _day_rows.get_child_count() > 0
+	if _day_rows != null:
+		_day_rows.visible = _day_rows.get_child_count() > 0
 
 
 func _get_icon(agent_type: StringName) -> Texture2D:

@@ -135,7 +135,7 @@ func update_remove_drag() -> void:
 
 func preview_remove_drag() -> void:
 	clear_preview_remove_progress_bars()
-	_show_drag_selection_rect(_remove_drag_start_cell, _remove_drag_end_cell)
+	_show_drag_selection_rect(_remove_drag_start_cell, _remove_drag_end_cell, true)
 	var committed: Dictionary = committed_cell_set()
 	var removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _remove_drag_end_cell)
 	for removal: Dictionary in removals:
@@ -151,6 +151,9 @@ func finish_remove_drag() -> void:
 		return
 	_remove_drag_active = false
 	_hide_drag_selection_rect()
+	# Validating a removal selection unequips the unbuild tool (back to play mode). The committed
+	# queue below keeps draining independently of tool selection.
+	_clear_build_selection()
 	var was_active: bool = _remove_active
 	var new_removals: Array[Dictionary] = _remove_rectangle_cells(_remove_drag_start_cell, _hovered_cell())
 	clear_preview_remove_progress_bars()
@@ -174,6 +177,17 @@ func finish_remove_drag() -> void:
 	if not was_active:
 		_remove_elapsed = 0.0
 	_clear_hover()
+
+
+## Aborts an in-progress removal drag gesture (the red rectangle being dragged) without touching
+## whatever is already committed to the removal queue. Returns true when a drag was cancelled.
+func cancel_remove_drag() -> bool:
+	if not _remove_drag_active:
+		return false
+	_remove_drag_active = false
+	_hide_drag_selection_rect()
+	clear_preview_remove_progress_bars()
+	return true
 
 
 func process_removal(delta: float) -> void:
@@ -297,8 +311,8 @@ func _hide_drag_selection_rect() -> void:
 	_manager._hide_drag_selection_rect()
 
 
-func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
-	_manager._show_drag_selection_rect(start_cell, end_cell)
+func _show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: bool = false) -> void:
+	_manager._show_drag_selection_rect(start_cell, end_cell, remove)
 
 
 func _remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:

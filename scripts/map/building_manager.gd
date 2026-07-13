@@ -14,6 +14,7 @@ class_name BuildingManager
 
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
+signal counter_stock_changed(previous: int, value: int)
 # Emitted from plant_contact_dance_router.gd; ignore the false unused-signal warning.
 @warning_ignore("unused_signal")
 signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float)
@@ -1781,6 +1782,7 @@ func serialize_counter_stock() -> Array[Dictionary]:
 
 func restore_counter_stock(saved_stock: Array) -> void:
 	_counter_stock_manager.restore_counter_stock(saved_stock)
+	counter_stock_changed.emit(0, _total_counter_stock())
 
 
 func _counter_stock(counter_cell: Vector2i) -> int:
@@ -1804,6 +1806,7 @@ func _after_counter_stock_changed(previous: int, value: int) -> void:
 
 
 func notify_counter_stock_changed(previous: int, value: int) -> void:
+	counter_stock_changed.emit(previous, value)
 	# A counter gaining its first rose turns it into an edible garden, which requires
 	# folding its access tiles into the garden topology (a full rebuild). Depletion
 	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and

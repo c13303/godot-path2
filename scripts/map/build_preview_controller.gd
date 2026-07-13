@@ -11,6 +11,10 @@ const PREVIEW_FORBIDDEN_RANGE_COLOR: Color = Color(1.0, 0.18, 0.18, 0.5)
 const PREVIEW_Z_INDEX: int = 4095
 const DRAG_SELECT_FILL_COLOR: Color = Color(0.20, 1.0, 0.35, 0.10)
 const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
+# Removal / unbuild selection uses a red rect to read as "destructive" instead of the green
+# placement rect.
+const DRAG_REMOVE_FILL_COLOR: Color = Color(1.0, 0.22, 0.24, 0.14)
+const DRAG_REMOVE_BORDER_COLOR: Color = Color(1.0, 0.32, 0.34)
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
@@ -36,6 +40,9 @@ var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
 var _cursor_hidden_for_preview: bool = false
 var _drag_selection_rect: Panel = null
+var _drag_selection_style: StyleBoxFlat = null
+# Tracks the current rect tint so its colors are only swapped when the mode changes.
+var _drag_rect_is_remove: bool = false
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _preview_visual: Node2D = null
 var _preview_visuals: Array[Node2D] = []
@@ -280,11 +287,12 @@ func free_remove_progress_for_cell(cell: Vector2i) -> void:
 	_remove_progress_by_cell.erase(cell)
 
 
-func show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i) -> void:
+func show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: bool = false) -> void:
 	var previewbuild: TileMapLayer = _preview_layer()
 	if previewbuild == null or previewbuild.tile_set == null:
 		return
 	_ensure_drag_selection_rect()
+	_set_drag_selection_remove(remove)
 	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
 	var min_cell: Vector2i = Vector2i(mini(start_cell.x, end_cell.x), mini(start_cell.y, end_cell.y))
 	var max_cell: Vector2i = Vector2i(maxi(start_cell.x, end_cell.x), maxi(start_cell.y, end_cell.y))
@@ -338,7 +346,19 @@ func _ensure_drag_selection_rect() -> void:
 	style.border_color = DRAG_SELECT_BORDER_COLOR
 	style.set_corner_radius_all(2)
 	_drag_selection_rect.add_theme_stylebox_override("panel", style)
+	_drag_selection_style = style
+	_drag_rect_is_remove = false
 	previewbuild.add_child(_drag_selection_rect)
+
+
+# Swaps the selection rect between the green (placement) and red (removal/unbuild) tints, only
+# touching the stylebox when the mode actually changes.
+func _set_drag_selection_remove(remove: bool) -> void:
+	if _drag_selection_style == null or _drag_rect_is_remove == remove:
+		return
+	_drag_rect_is_remove = remove
+	_drag_selection_style.bg_color = DRAG_REMOVE_FILL_COLOR if remove else DRAG_SELECT_FILL_COLOR
+	_drag_selection_style.border_color = DRAG_REMOVE_BORDER_COLOR if remove else DRAG_SELECT_BORDER_COLOR
 
 
 func _draw_fence_preview_cells(candidate_cells: Array[Vector2i]) -> Array[Vector2i]:

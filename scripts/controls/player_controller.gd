@@ -100,8 +100,6 @@ func _input(event: InputEvent) -> void:
 		elif joy_button_event.button_index == JOY_BUTTON_B:
 			if joy_button_event.pressed:
 				_handle_pad_cancel()
-			else:
-				_handle_pad_cancel_released()
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_Y:
 			if joy_button_event.pressed:
@@ -320,6 +318,22 @@ func _update_pad_navigation_input() -> void:
 		_dpad_up_pressed = up_pressed
 		_dpad_down_pressed = down_pressed
 		return
+	# While the seed-merchant shop is open it owns the whole d-pad: every direction browses its
+	# vertical item list (left/up step up, right/down step down) and quick-slot switching is
+	# suppressed so the shop keeps focus until it closes.
+	if _is_merchant_shop_open():
+		var merchant_step: int = 0
+		if (up_pressed and not _dpad_up_pressed) or (left_pressed and not _dpad_left_pressed):
+			merchant_step = -1
+		elif (down_pressed and not _dpad_down_pressed) or (right_pressed and not _dpad_right_pressed):
+			merchant_step = 1
+		if merchant_step != 0:
+			_step_pad_shop_selection(merchant_step)
+		_dpad_left_pressed = left_pressed
+		_dpad_right_pressed = right_pressed
+		_dpad_up_pressed = up_pressed
+		_dpad_down_pressed = down_pressed
+		return
 	if left_pressed and not _dpad_left_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
 		game_ui.call("step_selected_quick_slot", -1)
 	if right_pressed and not _dpad_right_pressed and game_ui and game_ui.has_method("step_selected_quick_slot"):
@@ -337,12 +351,15 @@ func _step_pad_shop_selection(direction: int) -> void:
 	if toolbuild != null and toolbuild.has_method("step_pad_selection"):
 		toolbuild.call("step_pad_selection", direction)
 
+func _is_merchant_shop_open() -> bool:
+	return toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open"))
+
 func _should_pad_open_quickbar_from_dpad() -> bool:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return false
 	if _is_quickbar_active():
 		return false
-	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+	if _is_merchant_shop_open():
 		return false
 	return game_ui != null and game_ui.has_method("activate_last_quickbar_slot")
 
@@ -354,6 +371,12 @@ func _handle_pad_accept() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
 	if toolbuild != null and toolbuild.has_method("activate_pad_selection") and bool(toolbuild.call("activate_pad_selection")):
+		return
+	# A validates the unbuild selection like placing a building: first press anchors the removal
+	# rectangle, a second press commits it.
+	if _unbuild_selected():
+		if build_system != null and build_system.has_method("pad_confirm_remove_at_cursor"):
+			build_system.call("pad_confirm_remove_at_cursor")
 		return
 	if _in_build_mode() and build_system != null and build_system.has_method("pad_place_selected_at_cursor"):
 		build_system.call("pad_place_selected_at_cursor")
@@ -368,28 +391,20 @@ func _handle_pad_cancel() -> void:
 	if build_system == null:
 		return
 	# The seed-merchant shop owns B while it is open; don't let it double as the unbuild button.
-	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+	if _is_merchant_shop_open():
 		return
-	# Cancel an in-progress placement preview before treating B as the unbuild button.
+	# Cancel an in-progress placement preview first.
 	if build_system.has_method("pad_cancel_build_preview") and bool(build_system.call("pad_cancel_build_preview")):
 		return
-	# B is the pad unbuild shortcut: it equips the unbuild tool. When coming from play mode (no
-	# build cursor on screen yet) the first press only reveals the cursor, so the player can see
-	# where they will remove; from there (or straight from another build tool, whose cursor is
-	# already up) B anchors a bulk-unbuild rectangle at the cursor. Holding B and moving the
-	# cursor grows it; releasing commits it (see _handle_pad_cancel_released).
-	var had_build_cursor: bool = _build_controls_active()
-	if not _unbuild_selected():
-		_select_unbuild_tool()
-	if not had_build_cursor:
+	# Then abort an in-progress removal drag (keeping the unbuild tool equipped).
+	if build_system.has_method("pad_cancel_remove_drag") and bool(build_system.call("pad_cancel_remove_drag")):
 		return
-	if build_system.has_method("pad_start_remove_drag"):
-		build_system.call("pad_start_remove_drag")
-
-
-func _handle_pad_cancel_released() -> void:
-	if build_system != null and build_system.has_method("pad_finish_remove_drag"):
-		build_system.call("pad_finish_remove_drag")
+	# Otherwise B toggles the unbuild tool, mirroring right-click: select it, or deselect it if
+	# it is already the equipped tool. Removal itself is validated with A, not B.
+	if _unbuild_selected():
+		_clear_build_selection()
+	else:
+		_select_unbuild_tool()
 
 func _handle_pad_rotate_build() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
@@ -809,7 +824,7 @@ func _select_unbuild_tool() -> void:
 func _build_controls_active() -> bool:
 	if not _build_tool_selected():
 		return false
-	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+	if _is_merchant_shop_open():
 		return false
 	return true
 

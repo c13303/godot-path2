@@ -80,9 +80,8 @@ var _starting_bamboo: SpinBox
 var _monster_drop_seed_chance: SpinBox
 var _weapon_checks_box: HBoxContainer
 var _weapon_checkboxes: Dictionary = {}  # StringName -> CheckBox
-var _starting_items_box: GridContainer
+var _starting_items_box: HFlowContainer
 var _starting_item_spins: Dictionary = {}  # StringName -> SpinBox
-var _starting_item_available_checks: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_available_checkboxes: Dictionary = {}  # StringName -> CheckBox
 var _tool_shop_price_spins: Dictionary = {}  # StringName -> SpinBox
 var _tool_shop_day_spins: Dictionary = {}  # StringName -> SpinBox
@@ -466,43 +465,24 @@ func _build_starting_controls() -> void:
 		_weapon_checkboxes[weapon_id] = checkbox
 
 	var items_label: Label = Label.new()
-	items_label.text = "Starting items (any non-weapon item; 0 = none). Uncheck Available to hide a buildable from the toolbuild vertical menu."
+	items_label.text = "Starting items (any non-weapon item; 0 = none)."
 	items_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_starting_controls.add_child(items_label)
 
-	# One item per row: Available checkbox | item name | starting quantity.
-	_starting_items_box = GridContainer.new()
-	_starting_items_box.columns = 3
+	# Each item is a name + quantity pair, laid out horizontally and wrapping to fit
+	# the dock (like the currency row above).
+	_starting_items_box = HFlowContainer.new()
 	_starting_controls.add_child(_starting_items_box)
 
-	var available_header: Label = Label.new()
-	available_header.text = "Available"
-	available_header.custom_minimum_size = Vector2(80.0, 0.0)
-	_starting_items_box.add_child(available_header)
-	var item_header: Label = Label.new()
-	item_header.text = "Item"
-	item_header.custom_minimum_size = Vector2(140.0, 0.0)
-	_starting_items_box.add_child(item_header)
-	var quantity_header: Label = Label.new()
-	quantity_header.text = "Qty"
-	quantity_header.custom_minimum_size = Vector2(74.0, 0.0)
-	_starting_items_box.add_child(quantity_header)
-
 	_starting_item_spins.clear()
-	_starting_item_available_checks.clear()
 	for item_id: StringName in _giveable_starting_item_ids():
-		var available_check: CheckBox = CheckBox.new()
-		available_check.tooltip_text = "Show %s in the toolbuild vertical menu" % String(item_id)
-		available_check.custom_minimum_size = Vector2(80.0, 0.0)
-		available_check.toggled.connect(_on_starting_item_available_toggled.bind(item_id))
-		_starting_items_box.add_child(available_check)
-		_starting_item_available_checks[item_id] = available_check
+		var item_cell: HBoxContainer = HBoxContainer.new()
+		_starting_items_box.add_child(item_cell)
 
 		var item_label: Label = Label.new()
 		item_label.text = _item_display_name(item_id)
 		item_label.tooltip_text = String(item_id)
-		item_label.custom_minimum_size = Vector2(140.0, 0.0)
-		_starting_items_box.add_child(item_label)
+		item_cell.add_child(item_label)
 
 		var quantity_spin: SpinBox = SpinBox.new()
 		quantity_spin.min_value = 0.0
@@ -510,7 +490,7 @@ func _build_starting_controls() -> void:
 		quantity_spin.step = 1.0
 		quantity_spin.custom_minimum_size = Vector2(74.0, 0.0)
 		quantity_spin.value_changed.connect(_on_starting_item_changed.bind(item_id))
-		_starting_items_box.add_child(quantity_spin)
+		item_cell.add_child(quantity_spin)
 		_starting_item_spins[item_id] = quantity_spin
 
 
@@ -964,13 +944,6 @@ func _refresh_starting_controls() -> void:
 		if quantity_spin != null:
 			quantity_spin.value = float(_starting_item_quantity(starting_items, item_id))
 			quantity_spin.editable = has_level
-	var hidden_items: Array = config.starting_item_toolbuild_hidden if config != null else []
-	for raw_item_id: Variant in _starting_item_available_checks.keys():
-		var item_id: StringName = raw_item_id as StringName
-		var available_check: CheckBox = _starting_item_available_checks[item_id] as CheckBox
-		if available_check != null:
-			available_check.button_pressed = not _toolbuild_hidden_has(hidden_items, item_id)
-			available_check.disabled = not has_level
 
 
 func _refresh_monster_drop_controls() -> void:
@@ -1892,16 +1865,6 @@ func _on_starting_item_changed(value: float, item_id: StringName) -> void:
 	mark_dirty()
 
 
-func _on_starting_item_available_toggled(_enabled: bool, _item_id: StringName) -> void:
-	if _loading_ui:
-		return
-	var config: LevelSpawnConfig = _get_or_create_loaded_level_config()
-	if config == null:
-		return
-	config.starting_item_toolbuild_hidden = _selected_starting_item_hidden()
-	mark_dirty()
-
-
 func _on_client_frequency_changed(value: float, spawner_id: StringName) -> void:
 	if _loading_ui:
 		return
@@ -2045,7 +2008,7 @@ func _assign_playlist_to_level_scene() -> bool:
 		root.set("starting_currencies", _selected_starting_currencies())
 		root.set("starting_weapons", _selected_starting_weapons())
 		root.set("starting_items", _selected_starting_items())
-		root.set("starting_item_toolbuild_hidden", _selected_starting_item_hidden())
+		root.set("starting_item_toolbuild_hidden", [] as Array[StringName])
 		root.set("monster_drop_seed_chance_percent", clampi(int(_monster_drop_seed_chance.value), 0, 100))
 		root.set("tool_shop_available_items", _selected_tool_shop_available_items())
 		root.set("tool_shop_prices", _selected_tool_shop_prices())
@@ -2079,7 +2042,7 @@ func _apply_starting_values_to_config(config: LevelSpawnConfig) -> void:
 	config.starting_currencies = _selected_starting_currencies()
 	config.starting_weapons = _selected_starting_weapons()
 	config.starting_items = _selected_starting_items()
-	config.starting_item_toolbuild_hidden = _selected_starting_item_hidden()
+	config.starting_item_toolbuild_hidden = []
 	config.monster_drop_seed_chance_percent = clampi(int(_monster_drop_seed_chance.value), 0, 100)
 	config.tool_shop_available_items = _selected_tool_shop_available_items()
 	config.tool_shop_prices = _selected_tool_shop_prices()
@@ -2313,24 +2276,6 @@ func _selected_starting_currencies() -> Dictionary:
 		&"money": int(_starting_money.value),
 		&"bamboo": int(_starting_bamboo.value),
 	}
-
-
-## Item ids whose "Available" box is unchecked: they are hidden from the toolbuild vertical
-## menu. Empty means every buildable stays available.
-func _selected_starting_item_hidden() -> Array[StringName]:
-	var hidden: Array[StringName] = []
-	for raw_item_id: Variant in _starting_item_available_checks.keys():
-		var item_id: StringName = raw_item_id as StringName
-		var available_check: CheckBox = _starting_item_available_checks[item_id] as CheckBox
-		if available_check != null and not available_check.button_pressed:
-			hidden.append(item_id)
-	return hidden
-
-
-## Membership test for an authored hidden-items list, tolerating either a StringName or a
-## String entry (as tscn / hand edits may produce).
-func _toolbuild_hidden_has(hidden_items: Array, item_id: StringName) -> bool:
-	return hidden_items.has(item_id) or hidden_items.has(String(item_id))
 
 
 ## Every non-weapon item that can be granted at start: placeables and resources

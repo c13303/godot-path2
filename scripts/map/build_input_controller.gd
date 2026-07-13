@@ -82,20 +82,11 @@ func input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var key_event: InputEventKey = event as InputEventKey
 		if key_event.physical_keycode == KEY_X:
-			# Hold X to bulk-unbuild: pressing anchors a removal rectangle at the hovered
-			# cell, mouse motion grows it (see the InputEventMouseMotion branch below), and
-			# releasing commits the whole rectangle to the removal queue. A quick tap with no
-			# drag just queues the one hovered cell. The queue then drains one cell at a time
-			# in BuildDragController.process_removal.
+			# X only toggles the unbuild tool on/off (the slot highlights, the red frame/cursor
+			# show). Removal itself is validated with left-click, like placing a building. Pressing
+			# X again deselects, mirroring right-click.
 			if key_event.pressed and not key_event.echo:
-				# X is the keyboard unbuild shortcut: equip the unbuild tool (so the slot
-				# highlights and the frame shows) and anchor the removal in one press.
-				_select_unbuild_tool()
-				_start_remove_drag()
-				_set_input_handled()
-				return
-			if not key_event.pressed:
-				_finish_remove_drag()
+				_toggle_unbuild_tool()
 				_set_input_handled()
 				return
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_R:
@@ -130,8 +121,8 @@ func input(event: InputEvent) -> void:
 			_set_input_handled()
 			return
 
-	# With the unbuild tool equipped, left-click drives removal (mirroring the X hold): press
-	# anchors a removal rectangle at the hovered cell, mouse motion grows it (handled above),
+	# With the unbuild tool equipped, left-click validates the removal (like placing a building):
+	# press anchors a removal rectangle at the hovered cell, mouse motion grows it (handled above),
 	# and release commits it. A click with no drag just queues the single hovered cell.
 	if event is InputEventMouseButton and _is_unbuild_selected():
 		var unbuild_mouse_event: InputEventMouseButton = event as InputEventMouseButton
@@ -229,7 +220,7 @@ func _is_unbuild_selected() -> bool:
 
 
 func _show_unbuild_cursor(cell: Vector2i) -> void:
-	_build_preview.show_drag_selection_rect(cell, cell)
+	_build_preview.show_drag_selection_rect(cell, cell, true)
 	_unbuild_cursor_visible = true
 
 
@@ -243,6 +234,19 @@ func _hide_unbuild_cursor() -> void:
 func _select_unbuild_tool() -> void:
 	if _game_ui and _game_ui.has_method("select_unbuild_tool"):
 		_game_ui.call("select_unbuild_tool")
+
+
+func _clear_build_selection() -> void:
+	if _game_ui and _game_ui.has_method("clear_build_selection"):
+		_game_ui.call("clear_build_selection")
+
+
+func _toggle_unbuild_tool() -> void:
+	if _is_unbuild_selected():
+		_drag_controller.cancel_remove_drag()
+		_clear_build_selection()
+	else:
+		_select_unbuild_tool()
 
 
 func _hovered_cell() -> Vector2i:
