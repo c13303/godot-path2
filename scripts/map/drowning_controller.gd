@@ -10,7 +10,7 @@ enum WaterTrackResult {
 
 # Owns the "agent drowns in deep water" hazard: per-frame water sensing, pooled
 # splash playback, and the drowning damage timeline. Follows the same
-# manager-owned controller pattern as SeedMerchantController/MorningHarvestController:
+# manager-owned controller pattern as SeedMerchantController/DawnHarvestController:
 # it holds a back-reference to BuildingManager and delegates the shared agent
 # suspend/capture/resume machinery (also used by turret-eating) back to the
 # manager rather than duplicating it.

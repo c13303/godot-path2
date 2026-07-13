@@ -9,7 +9,7 @@ extends RichTextLabel
 ##
 ## Priority order (most prioritary first):
 ##   1. empty water reserve ......................... Refill your water
-##   2. morning harvest (grown roses) ............... Harvest / add counters / place shop
+##   2. dawn harvest (grown roses) .................. Harvest / add counters / place shop
 ##   3. client sale phase ........................... nothing (only the tantrum alert)
 ##   4. seed merchant reward waiting ................ Merchant has a reward
 ##   5. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
@@ -86,8 +86,8 @@ var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
 var _has_planted_turret_epine: bool = false
-# True during the sunrise transition: night has just ended but the first day phase
-# (the morning harvest) has not begun yet. Set when night turns off, cleared once
+# True during the first part of dawn: night has ended but plant growth and the
+# dawn harvest have not finished starting. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
 var _sun_rising: bool = false
 
@@ -128,8 +128,8 @@ func _resolve_nodes() -> void:
 		_toolbuild = scene.get_node_or_null("GameUI/Toolbuild") as Control
 		_planificator = scene.get_node_or_null("GameUI/planificator") as Control
 		_hold_progress_circle = scene.get_node_or_null("GameUI/holdProgressCircle") as Control
-		if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
-			GameState.building_phase_changed.connect(_on_building_phase_changed)
+		if not GameState.afternoon_phase_changed.is_connected(_on_afternoon_phase_changed):
+			GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
 		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_day_toggle = get_node_or_null("../dayToggle") as Control
@@ -147,14 +147,14 @@ func _on_mode_changed(is_night: bool) -> void:
 	_refresh()
 
 
-## The new day has finished growing; the morning phase is about to begin, so the
+## The new day has finished growing; the dawn harvest is about to begin, so the
 ## sunrise transition is over.
 func _on_new_day_finished() -> void:
 	_sun_rising = false
 	_refresh()
 
 
-func _on_building_phase_changed(_is_building_phase: bool) -> void:
+func _on_afternoon_phase_changed(_is_afternoon_phase: bool) -> void:
 	_refresh()
 
 
@@ -263,10 +263,10 @@ func _refresh(delta: float = 0.0) -> void:
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
 		return
-	# The morning harvest can be skipped straight to the client sale by holding space once
+	# The dawn harvest can be skipped straight to the client sale by holding space once
 	# the roses are grown up. The hold runs in the background so the harvest hint stays on
 	# screen; the progress circle only appears while the key is actually held.
-	if _morning_client_skip_available():
+	if _dawn_client_skip_available():
 		_advance_hold(HOLD_ACTION_START_CLIENTS, delta)
 	else:
 		_reset_hold_progress()
@@ -333,11 +333,11 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
-	# Sunrise transition after a night: no day phase has begun yet, so falling through
-	# would wrongly show "pass the night". Stay blank until the morning phase starts.
+	# Sunrise transition after a night: dawn growth has not finished, so falling through
+	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
 		return ""
-	if GameState.is_morning_phase:
+	if GameState.is_dawn_phase:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			if _has_counter_room_for_harvest():
 				return KEY_HARVEST_ROSE
@@ -346,12 +346,18 @@ func _current_message_key() -> String:
 			if _rose_shop_counter_count() > 0:
 				return KEY_ADD_COUNTERS_TO_SELL_ROSES
 			return KEY_PLACE_SHOP
-		if _rose_shop_counter_count() <= 0:
+		if _client_sale_requested_without_roses():
+			return KEY_NO_ROSES_NO_CLIENTS
+		if GameState.is_seed_merchant_phase and _has_active_night_reward():
+			return KEY_SEED_MERCHANT_REWARD
+		if not _client_sale_start_requested() and _rose_shop_counter_count() <= 0:
 			return KEY_PLACE_SHOP
 		return ""
 	# Client sale in progress: only the water-empty hint (handled above) and the
 	# persistent tantrum alert may show, so suppress every economy hint here.
 	if GameState.is_client_phase:
+		return ""
+	if not GameState.is_afternoon_phase:
 		return ""
 	if _client_sale_requested_without_roses():
 		return KEY_NO_ROSES_NO_CLIENTS
@@ -405,7 +411,7 @@ func _show_key_immediately(key: String) -> void:
 
 
 func _should_request_start_night_prompt() -> bool:
-	if GameState.is_night or GameState.is_morning_phase or GameState.is_client_phase or GameState.is_seed_merchant_phase:
+	if not GameState.is_afternoon_phase or GameState.is_seed_merchant_phase:
 		return false
 	# During the sunrise transition the new day has not begun yet: no phase flag is set
 	# and the roses are still wet from overnight (they only dry when the build phase
@@ -537,14 +543,22 @@ func _advance_hold(action: StringName, delta: float) -> void:
 	_reset_hold_progress()
 
 
-## True while the day is awake, the morning harvest is running and at least one rose has
+## True while the dawn harvest is running and at least one rose has
 ## grown up: the player may start the client sale early, before harvesting.
-func _morning_client_skip_available() -> bool:
-	if not GameState.is_morning_phase:
+func _dawn_client_skip_available() -> bool:
+	if not GameState.is_dawn_phase:
 		return false
 	if _building_manager == null or not _building_manager.has_method("grownup_rose_count"):
 		return false
 	return int(_building_manager.call("grownup_rose_count")) > 0
+
+
+func _client_sale_start_requested() -> bool:
+	return (
+		_building_manager != null
+		and _building_manager.has_method("is_client_sale_start_requested")
+		and bool(_building_manager.call("is_client_sale_start_requested"))
+	)
 
 
 func _client_sale_requested_without_roses() -> bool:

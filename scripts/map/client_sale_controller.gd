@@ -264,11 +264,10 @@ func _complete_client_sale() -> void:
 	if _manager.try_finish_final_day():
 		return
 	_dry_planted_roses_after_clients()
+	GameState.start_afternoon()
 	if _manager.can_start_night_after_clients():
 		_manager.request_night_after_clients()
 		return
-	if not GameState.is_seed_merchant_phase:
-		GameState.set_building_phase(true)
 
 
 func client_count() -> int:

@@ -1,17 +1,29 @@
 extends Node
 ## Global game state singleton (autoloaded as "GameState").
-## Holds shared game data such as the current day/night mode.
+## Owns the current top-level gameplay phase and shared run data.
+
+enum GameplayPhase {
+	AFTERNOON,
+	NIGHT,
+	DAWN,
+	MORNING,
+}
 
 ## Emitted whenever the day/night mode changes. `is_night` is the new value.
 signal mode_changed(is_night: bool)
-signal building_phase_changed(is_building_phase: bool)
+signal gameplay_phase_changed(phase: int)
+signal afternoon_phase_changed(is_afternoon_phase: bool)
+signal dawn_phase_changed(is_dawn_phase: bool)
 signal morning_phase_changed(is_morning_phase: bool)
 signal client_phase_changed(is_client_phase: bool)
 signal seed_merchant_phase_changed(is_seed_merchant_phase: bool)
 
-## True while night is active. The game starts in day mode.
+## The single authoritative owner of the run's broad phase. Narrow flags such as
+## `is_client_phase` and `is_seed_merchant_phase` describe activity within it.
+var gameplay_phase: int = GameplayPhase.AFTERNOON
+var is_afternoon_phase: bool = true
 var is_night: bool = false
-var is_building_phase: bool = true
+var is_dawn_phase: bool = false
 var is_morning_phase: bool = false
 var is_client_phase: bool = false
 var is_seed_merchant_phase: bool = false
@@ -43,8 +55,10 @@ const FORCE_LEVEL_SELECTION_META: StringName = &"force_level_selection"
 ## This is intentionally silent: callers use it while replacing/reloading scenes, so
 ## emitting mode_changed would let the outgoing scene advance a day or start phases.
 func reset_transient_run_state() -> void:
+	gameplay_phase = GameplayPhase.AFTERNOON
+	is_afternoon_phase = true
 	is_night = false
-	is_building_phase = true
+	is_dawn_phase = false
 	is_morning_phase = false
 	is_client_phase = false
 	is_seed_merchant_phase = false
@@ -53,43 +67,20 @@ func reset_transient_run_state() -> void:
 	seed_merchant_purchase_made = false
 
 
-## Restore phase flags for an already loaded scene without emitting mode_changed.
-## Runtime saves may restore night directly; callers rebuild navigation explicitly.
-func restore_day_phase_flags(phase: String) -> void:
-	is_night = phase == "night"
-	is_building_phase = false
-	is_morning_phase = false
-	is_client_phase = false
+## Restore a canonical phase without running transition side effects. Runtime systems
+## rebuild their own state after the save sections have been applied.
+func restore_gameplay_phase_flags(phase_name: String) -> void:
+	_apply_gameplay_phase(_phase_from_name(phase_name), false)
+	is_client_phase = gameplay_phase == GameplayPhase.MORNING
 	is_seed_merchant_phase = false
 	seed_merchant_purchase_made = false
-	if is_night:
-		building_phase_changed.emit(false)
-		morning_phase_changed.emit(false)
-		client_phase_changed.emit(false)
-		seed_merchant_phase_changed.emit(false)
-		return
-	match phase:
-		"morning":
-			is_morning_phase = true
-		"client":
-			is_client_phase = true
-		"seed_merchant":
-			is_seed_merchant_phase = true
-		_:
-			is_building_phase = true
-	building_phase_changed.emit(is_building_phase)
-	morning_phase_changed.emit(is_morning_phase)
-	client_phase_changed.emit(is_client_phase)
-	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
 
 
 func emit_restored_phase_signals() -> void:
 	_emitting_restored_phase_signals = true
 	mode_changed.emit(is_night)
-	building_phase_changed.emit(is_building_phase)
-	morning_phase_changed.emit(is_morning_phase)
-	client_phase_changed.emit(is_client_phase)
-	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
+	gameplay_phase_changed.emit(gameplay_phase)
+	_emit_phase_flag_signals()
 	_emitting_restored_phase_signals = false
 
 
@@ -99,15 +90,24 @@ func is_emitting_restored_phase_signals() -> bool:
 
 ## Switch to night: monsters are allowed to spawn.
 func start_night() -> void:
-	set_morning_phase(false)
-	set_client_phase(false)
-	set_seed_merchant_phase(false)
-	set_night(true)
+	set_gameplay_phase(GameplayPhase.NIGHT)
 
 
 ## Switch to day: monster spawning is suppressed.
 func start_day() -> void:
-	set_night(false)
+	start_dawn()
+
+
+func start_afternoon() -> void:
+	set_gameplay_phase(GameplayPhase.AFTERNOON)
+
+
+func start_dawn() -> void:
+	set_gameplay_phase(GameplayPhase.DAWN)
+
+
+func start_morning() -> void:
+	set_gameplay_phase(GameplayPhase.MORNING)
 
 
 func set_reservoir_destroyed(value: bool) -> void:
@@ -118,35 +118,12 @@ func set_run_won(value: bool) -> void:
 	is_run_won = value
 
 
-func set_building_phase(value: bool) -> void:
-	if is_building_phase == value:
-		return
-	is_building_phase = value
-	if value:
-		set_morning_phase(false)
-		set_client_phase(false)
-	building_phase_changed.emit(is_building_phase)
-
-
-func set_morning_phase(value: bool) -> void:
-	if is_morning_phase == value:
-		return
-	is_morning_phase = value
-	if value:
-		set_client_phase(false)
-		is_building_phase = false
-		building_phase_changed.emit(is_building_phase)
-	morning_phase_changed.emit(is_morning_phase)
-
-
 func set_client_phase(value: bool) -> void:
+	if value and gameplay_phase != GameplayPhase.MORNING:
+		start_morning()
 	if is_client_phase == value:
 		return
 	is_client_phase = value
-	if value:
-		set_morning_phase(false)
-		is_building_phase = false
-		building_phase_changed.emit(is_building_phase)
 	client_phase_changed.emit(is_client_phase)
 
 
@@ -156,8 +133,6 @@ func set_seed_merchant_phase(value: bool) -> void:
 	is_seed_merchant_phase = value
 	if value:
 		seed_merchant_purchase_made = false
-		is_building_phase = false
-		building_phase_changed.emit(is_building_phase)
 	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
 
 
@@ -171,15 +146,96 @@ func toggle() -> void:
 
 
 func set_night(value: bool) -> void:
-	if is_night == value:
+	if value:
+		start_night()
+	elif is_night:
+		start_dawn()
+
+
+func set_gameplay_phase(value: int) -> void:
+	if value < GameplayPhase.AFTERNOON or value > GameplayPhase.MORNING:
+		push_error("GameState: invalid gameplay phase %d" % value)
 		return
-	is_night = value
+	if gameplay_phase == value:
+		return
+	var was_night: bool = is_night
+	_apply_gameplay_phase(value, true)
+	if was_night != is_night:
+		mode_changed.emit(is_night)
+	gameplay_phase_changed.emit(gameplay_phase)
+
+
+func gameplay_phase_name() -> String:
+	match gameplay_phase:
+		GameplayPhase.NIGHT:
+			return "night"
+		GameplayPhase.DAWN:
+			return "dawn"
+		GameplayPhase.MORNING:
+			return "morning"
+		_:
+			return "afternoon"
+
+
+func canonical_phase_name_from_legacy(legacy_phase: String) -> String:
+	match legacy_phase:
+		"night":
+			return "night"
+		"morning", "seed_merchant":
+			return "dawn"
+		"client":
+			return "morning"
+		_:
+			return "afternoon"
+
+
+func _phase_from_name(phase_name: String) -> int:
+	match phase_name:
+		"night":
+			return GameplayPhase.NIGHT
+		"dawn":
+			return GameplayPhase.DAWN
+		"morning":
+			return GameplayPhase.MORNING
+		_:
+			return GameplayPhase.AFTERNOON
+
+
+func _apply_gameplay_phase(value: int, emit_flag_signals: bool) -> void:
+	var previous_afternoon: bool = is_afternoon_phase
+	var previous_dawn: bool = is_dawn_phase
+	var previous_morning: bool = is_morning_phase
+	var previous_client: bool = is_client_phase
+	var previous_seed_merchant: bool = is_seed_merchant_phase
+	gameplay_phase = value
+	is_afternoon_phase = value == GameplayPhase.AFTERNOON
+	is_night = value == GameplayPhase.NIGHT
+	is_dawn_phase = value == GameplayPhase.DAWN
+	is_morning_phase = value == GameplayPhase.MORNING
+	if not is_morning_phase:
+		is_client_phase = false
 	if is_night:
-		set_building_phase(false)
-		set_morning_phase(false)
-		set_client_phase(false)
-		set_seed_merchant_phase(false)
-	mode_changed.emit(is_night)
+		is_seed_merchant_phase = false
+	if not emit_flag_signals:
+		return
+	if previous_afternoon != is_afternoon_phase:
+		afternoon_phase_changed.emit(is_afternoon_phase)
+	if previous_dawn != is_dawn_phase:
+		dawn_phase_changed.emit(is_dawn_phase)
+	if previous_morning != is_morning_phase:
+		morning_phase_changed.emit(is_morning_phase)
+	if previous_client != is_client_phase:
+		client_phase_changed.emit(is_client_phase)
+	if previous_seed_merchant != is_seed_merchant_phase:
+		seed_merchant_phase_changed.emit(is_seed_merchant_phase)
+
+
+func _emit_phase_flag_signals() -> void:
+	afternoon_phase_changed.emit(is_afternoon_phase)
+	dawn_phase_changed.emit(is_dawn_phase)
+	morning_phase_changed.emit(is_morning_phase)
+	client_phase_changed.emit(is_client_phase)
+	seed_merchant_phase_changed.emit(is_seed_merchant_phase)
 
 
 func set_selected_level_scene_path(scene_path: String) -> void:

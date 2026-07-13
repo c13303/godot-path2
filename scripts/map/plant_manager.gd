@@ -37,7 +37,7 @@ var _last_build_phase_rose_dry_day: int = -1
 func _ready() -> void:
 	initialize_from_layer()
 	_connect_day_started()
-	if GameState.is_building_phase:
+	if GameState.is_afternoon_phase:
 		_last_build_phase_rose_dry_day = _current_day_number()
 
 func _connect_day_started() -> void:
@@ -74,6 +74,17 @@ func _on_day_started(_day_number: int) -> void:
 	_log("Rose-growth auto-save succeeded; grown_roses=%d" % grown_count)
 	new_day_finished.emit()
 	day_seed_harvest_finished.emit()
+
+
+## A dawn save can be loaded after the day counter advanced but before this delayed
+## growth finished. The restored gameplay phase owns the decision to resume it.
+func resume_dawn_growth_after_load() -> void:
+	if not GameState.is_dawn_phase:
+		return
+	var current_day: int = _current_day_number()
+	if current_day < 0:
+		return
+	_on_day_started(current_day)
 
 func _get_progression_node() -> Node:
 	var scene: Node = get_tree().current_scene
@@ -294,7 +305,7 @@ func _grow_imperial_cell(cell: Vector2i, plant_data: Dictionary) -> bool:
 
 
 ## Opens every grown rose into its full-bloom "rose-rose" tile one by one. Called
-## when the morning harvest phase begins so watered roses (still green from
+## when the dawn harvest begins so watered roses (still green from
 ## overnight growth) visibly bloom into full roses before the player can collect
 ## them. The full map completes in total_duration_seconds, so more roses bloom
 ## faster per rose.

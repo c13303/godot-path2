@@ -404,7 +404,7 @@ func _set_unbuild_selected(active: bool) -> void:
 	unbuild_selection_changed.emit(is_unbuild_tool_selected())
 
 ## Opens the given build tool's drop-up menu (activating the quickbar). No-op if the tool id is
-## not a quickbar slot kind. Kept for callers like the morning harvest's auto-open-hammer prompt.
+## not a quickbar slot kind. Kept for callers like the dawn harvest's auto-open-hammer prompt.
 func select_build_tool(tool_id: String) -> void:
 	var index: int = QUICK_SLOT_KINDS.find(tool_id)
 	if index >= 0:

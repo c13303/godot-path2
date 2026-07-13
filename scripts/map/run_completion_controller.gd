@@ -58,20 +58,20 @@ func start_night_after_clients() -> void:
 	GameState.start_night()
 
 
-# Replaces set_building_phase(true) on days that run no client sale at all: the final
+# Starts afternoon on days that run no client sale at all; the final
 # client day has nothing left to do, so it wins; earlier days fall back to building.
 func on_client_sale_skipped() -> void:
 	if is_final_client_day():
 		declare_victory()
 		return
-	GameState.set_building_phase(true)
+	GameState.start_afternoon()
 
 
 func declare_victory() -> void:
 	# A destroyed reservoir is a loss even on the last day, so it always wins the race.
 	if GameState.is_reservoir_destroyed or GameState.is_run_won:
 		return
-	GameState.set_building_phase(true)
+	GameState.start_afternoon()
 	GameState.set_run_won(true)
 
 

@@ -1,5 +1,5 @@
 extends RefCounted
-class_name MorningHarvestController
+class_name DawnHarvestController
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PLAYER_HARVEST_RADIUS_TILES: int = 1
@@ -24,7 +24,7 @@ func is_active() -> bool:
 func on_counter_capacity_added() -> void:
 	if _active:
 		return
-	if GameState.is_night or not GameState.is_morning_phase:
+	if not GameState.is_dawn_phase:
 		return
 	if _manager.grownup_rose_count() <= 0:
 		return
@@ -34,7 +34,7 @@ func on_counter_capacity_added() -> void:
 
 
 func begin_phase() -> void:
-	_manager.reset_client_state_for_morning()
+	_manager.reset_client_state_for_dawn()
 	var has_grownup_roses: bool = _manager.grownup_rose_count() > 0
 	var plant_manager: Node = _plant_manager()
 	var has_pending_imperial_growth: bool = (
@@ -47,14 +47,12 @@ func begin_phase() -> void:
 	if not has_grownup_roses and not has_pending_imperial_growth and not has_harvestable_imperials:
 		_manager.skip_client_sale_without_roses()
 		return
-	GameState.set_morning_phase(true)
 	if plant_manager != null and plant_manager.has_method("bloom_grownup_roses"):
 		await plant_manager.call("bloom_grownup_roses")
 	if GameState.is_night:
 		return
 	var harvestable_imperials: int = _harvestable_imperial_count()
 	if _manager.grownup_rose_count() <= 0 and harvestable_imperials <= 0:
-		GameState.set_morning_phase(false)
 		_manager.skip_client_sale_without_roses()
 		return
 	_active = true
@@ -63,7 +61,6 @@ func begin_phase() -> void:
 			_manager.auto_select_hammer()
 			return
 		_active = false
-		GameState.set_morning_phase(false)
 		_manager.request_client_sale_start()
 		return
 	if _manager.grownup_rose_count() > 0 and not _manager.has_counter_room_for_harvest():
@@ -97,13 +94,11 @@ func check_finished() -> void:
 			if _harvestable_imperial_count() > 0:
 				return
 			_active = false
-			GameState.set_morning_phase(false)
 			_manager.request_client_sale_start()
 		return
 	if _harvestable_imperial_count() > 0:
 		return
 	_active = false
-	GameState.set_morning_phase(false)
 	_manager.request_client_sale_start()
 
 

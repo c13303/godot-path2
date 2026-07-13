@@ -8,13 +8,20 @@ const SAVE_PATH: String = "user://progression_save.json"
 ## Auto-save slot, written on each new day / on quit and restored on launch.
 ## Kept separate from SAVE_PATH so auto-saving never clobbers a manual F5 save.
 const AUTOSAVE_PATH: String = "user://progression_autosave.json"
-# v3 adds the "player_placeable_durability" section (player-built provenance + health).
-const SAVE_VERSION: int = 3
+# v4 replaces the ambiguous day-phase flags with one canonical gameplay phase and
+# persists the dawn sub-stage needed to resume before clients correctly.
+const SAVE_VERSION: int = 4
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
 const BAMBOO_KEY: StringName = &"bamboo"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
+const DAY_LABEL_WITH_TOTAL_KEY: String = "ui.day_label.with_total"
+const DAY_LABEL_KEY: String = "ui.day_label"
+const PHASE_AFTERNOON_KEY: String = "phase.afternoon"
+const PHASE_NIGHT_KEY: String = "phase.night"
+const PHASE_DAWN_KEY: String = "phase.dawn"
+const PHASE_MORNING_KEY: String = "phase.morning"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
 const LAYER_NAMES: Array[String] = [
 	"floor",
@@ -260,6 +267,10 @@ func _ready() -> void:
 	# GameState is an autoload, so reconnect every time a fresh scene loads.
 	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
 		GameState.mode_changed.connect(_on_game_mode_changed)
+	if not GameState.gameplay_phase_changed.is_connected(_on_gameplay_phase_changed):
+		GameState.gameplay_phase_changed.connect(_on_gameplay_phase_changed)
+	if not Translations.locale_changed.is_connected(_on_locale_changed):
+		Translations.locale_changed.connect(_on_locale_changed)
 
 	# Seed the props from the inspector-exposed Starting Props before any save is
 	# applied, so a saved game still overrides these starting values below.
@@ -294,17 +305,37 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	advance_day()
 
 
-## Show the current day on the dedicated day label. When the level has an authored
-## run length this includes the total, e.g. "day 3/10"; otherwise just "day 3".
+func _on_gameplay_phase_changed(_phase: int) -> void:
+	_update_day_label(progression.get_value(&"nDays"))
+
+
+func _on_locale_changed(_locale: String) -> void:
+	_update_day_label(progression.get_value(&"nDays"))
+
+
+## Show the current day and authoritative gameplay phase on the dedicated label.
 func _update_day_label(day_number: int) -> void:
 	var label: RichTextLabel = _get_day_label()
 	if label == null:
 		return
 	var total_days: int = _get_total_run_days()
+	var phase_name: String = _gameplay_phase_display_name()
 	if total_days > 0:
-		label.text = "day %d/%d" % [day_number, total_days]
+		label.text = Translations.t(DAY_LABEL_WITH_TOTAL_KEY) % [day_number, total_days, phase_name]
 	else:
-		label.text = "day %d" % day_number
+		label.text = Translations.t(DAY_LABEL_KEY) % [day_number, phase_name]
+
+
+func _gameplay_phase_display_name() -> String:
+	match GameState.gameplay_phase:
+		GameState.GameplayPhase.NIGHT:
+			return Translations.t(PHASE_NIGHT_KEY)
+		GameState.GameplayPhase.DAWN:
+			return Translations.t(PHASE_DAWN_KEY)
+		GameState.GameplayPhase.MORNING:
+			return Translations.t(PHASE_MORNING_KEY)
+		_:
+			return Translations.t(PHASE_AFTERNOON_KEY)
 
 
 ## Total days in the current run (authored nights + the trailing client day), read
@@ -479,7 +510,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		load_progression()
 
 
-func save_progression(save_path: String = SAVE_PATH, day_phase_override: String = "") -> bool:
+func save_progression(
+	save_path: String = SAVE_PATH,
+	gameplay_phase_override: String = "",
+	gameplay_phase_state_override: Dictionary = {}
+) -> bool:
 	var scene: Node = get_tree().current_scene
 	# Reject saving while any client tantrum is active, before touching either save
 	# slot. Hostile combat state is intentionally never serialized, so a mid-tantrum
@@ -504,20 +539,23 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 		layer_data[layer_name] = serialized_cells
 		_log("Captured layer %s: %d cells" % [layer_name, serialized_cells.size()])
 
-	var day_phase: String = day_phase_override if day_phase_override != "" else _get_day_phase()
+	var gameplay_phase: String = gameplay_phase_override if gameplay_phase_override != "" else _get_gameplay_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
-	var day_phase_state: Dictionary = _get_day_phase_state(scene)
+	var gameplay_phase_state: Dictionary = _get_gameplay_phase_state(scene)
+	for raw_key: Variant in gameplay_phase_state_override.keys():
+		var key: String = str(raw_key)
+		gameplay_phase_state[key] = gameplay_phase_state_override[raw_key]
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"night_rewards": GameState.get_special_reward_claim_save_data(),
-		"day_phase": day_phase,
-		"day_phase_state": day_phase_state,
+		"gameplay_phase": gameplay_phase,
+		"gameplay_phase_state": gameplay_phase_state,
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
@@ -594,7 +632,10 @@ func auto_save_after_rose_growth() -> bool:
 		_log("Rose-growth auto-save skipped: auto-save disabled; day still advances")
 		return true
 	_log("Rose-growth auto-save requested")
-	return save_progression(AUTOSAVE_PATH, "morning")
+	return save_progression(AUTOSAVE_PATH, "dawn", {
+		"dawn_stage": "harvest",
+		"seed_merchant_active": true,
+	})
 
 
 ## Startup auto-load: restore the auto-save slot into the freshly loaded scene.
@@ -779,8 +820,21 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_restore_player_placeable_durability(scene, data.get("player_placeable_durability", []))
 	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
 	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
-	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
-	_restore_day_phase_state(scene, data.get("day_phase_state", {}))
+	var gameplay_phase: String = str(data.get("gameplay_phase", ""))
+	var legacy_phase: String = str(data.get("day_phase", ""))
+	var raw_phase_state: Variant = data.get("gameplay_phase_state", data.get("day_phase_state", {}))
+	if gameplay_phase == "":
+		gameplay_phase = GameState.canonical_phase_name_from_legacy(legacy_phase)
+		# Older builds wrote the pre-client dawn window as "building" even though
+		# the durable client request proved that afternoon had not started yet.
+		if (
+			legacy_phase == "building"
+			and raw_phase_state is Dictionary
+			and bool((raw_phase_state as Dictionary).get("client_sale_start_requested", false))
+		):
+			gameplay_phase = "dawn"
+			(raw_phase_state as Dictionary)["dawn_stage"] = "pre_clients"
+	_restore_gameplay_phase(scene, gameplay_phase, raw_phase_state, has_runtime_agents, legacy_phase)
 	call_deferred("_restore_runtime_agents_deferred", raw_runtime_agents)
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
@@ -859,23 +913,8 @@ func _get_ground_collectibles(scene: Node) -> Array[Dictionary]:
 	return collectibles
 
 
-func _get_day_phase() -> String:
-	if GameState.is_night:
-		return "night"
-	if GameState.is_morning_phase:
-		return "morning"
-	if GameState.is_client_phase:
-		return "client"
-	if GameState.is_seed_merchant_phase:
-		return "seed_merchant"
-	if GameState.is_building_phase:
-		return "building"
-	# No phase flag is set: this is the post-night day-start window (roses growing before
-	# the morning harvest begins). It shares the "building" fallback with the end-of-day
-	# build phase, but the two must not be conflated on load: restoring it as "building"
-	# leaves the client sale looking already-finished, letting the player skip that day's
-	# clients. Persist it as "morning" so a reload resumes the harvest -> client sale.
-	return "morning"
+func _get_gameplay_phase() -> String:
+	return GameState.gameplay_phase_name()
 
 
 func _get_plant_states(scene: Node) -> Array[Dictionary]:
@@ -902,11 +941,11 @@ func _get_runtime_agents(scene: Node) -> Dictionary:
 	return {}
 
 
-func _get_day_phase_state(scene: Node) -> Dictionary:
+func _get_gameplay_phase_state(scene: Node) -> Dictionary:
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if building_manager == null or not building_manager.has_method("serialize_day_phase_state_for_save"):
+	if building_manager == null or not building_manager.has_method("serialize_gameplay_phase_state_for_save"):
 		return {}
-	var raw_state: Variant = building_manager.call("serialize_day_phase_state_for_save")
+	var raw_state: Variant = building_manager.call("serialize_gameplay_phase_state_for_save")
 	if raw_state is Dictionary:
 		return raw_state as Dictionary
 	return {}
@@ -1057,31 +1096,24 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 	_log("Plant states restored: %d entries" % states.size())
 
 
-func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = false) -> void:
+func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has_runtime_agents: bool, legacy_phase: String) -> void:
 	if phase == "":
 		return
-	if phase == "building":
+	if phase == "afternoon":
 		var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
 		if plant_manager != null and plant_manager.has_method("mark_build_phase_rose_dry_handled_for_current_day"):
 			plant_manager.call("mark_build_phase_rose_dry_handled_for_current_day")
-	GameState.restore_day_phase_flags(phase)
+	GameState.restore_gameplay_phase_flags(phase)
+	var phase_state: Dictionary = raw_state as Dictionary if raw_state is Dictionary else {}
+	if legacy_phase == "seed_merchant" and not phase_state.has("dawn_stage"):
+		phase_state["dawn_stage"] = "pre_clients"
+		phase_state["seed_merchant_active"] = true
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if has_runtime_agents and (phase == "night" or phase == "client"):
-		_log("Day phase restored from runtime snapshot: %s" % phase)
-		return
-	if building_manager != null and building_manager.has_method("restore_day_phase"):
-		building_manager.call("restore_day_phase", phase)
-		_log("Day phase restored: %s" % phase)
-
-
-func _restore_day_phase_state(scene: Node, raw_state: Variant) -> void:
-	if not (raw_state is Dictionary):
-		return
-	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if building_manager == null or not building_manager.has_method("restore_day_phase_state_from_save"):
-		return
-	building_manager.call("restore_day_phase_state_from_save", raw_state as Dictionary)
-	_log("Day phase state restored: %s" % str(raw_state))
+	if building_manager != null and building_manager.has_method("restore_gameplay_phase"):
+		building_manager.call("restore_gameplay_phase", phase, phase_state, has_runtime_agents)
+		_log("Gameplay phase restored: %s state=%s" % [phase, str(phase_state)])
+	if not has_runtime_agents:
+		GameState.emit_restored_phase_signals()
 
 
 func _restore_runtime_agents(scene: Node, raw_state: Variant) -> void:
@@ -1128,8 +1160,10 @@ func _reindex_loaded_layers(scene: Node) -> void:
 
 func _validate_save(data: Dictionary) -> String:
 	var save_version: int = int(data.get("version", -1))
-	if save_version != 1 and save_version != 2 and save_version != 3:
+	if save_version != 1 and save_version != 2 and save_version != 3 and save_version != 4:
 		return "unsupported save version"
+	if save_version == 4 and not data.has("gameplay_phase"):
+		return "missing gameplay phase"
 	if not (data.get("layers") is Dictionary) or not (data.get("player") is Dictionary):
 		return "missing save sections"
 
@@ -1233,18 +1267,26 @@ func _validate_save(data: Dictionary) -> String:
 			var state: String = str(item["state"])
 			if not ["falling", "ready"].has(state):
 				return "invalid ground collectible state"
-	if data.has("day_phase"):
+	if data.has("gameplay_phase"):
+		var gameplay_phase: String = str(data["gameplay_phase"])
+		if not ["afternoon", "night", "dawn", "morning"].has(gameplay_phase):
+			return "invalid gameplay phase"
+	elif data.has("day_phase"):
 		var phase: String = str(data["day_phase"])
 		if not ["building", "morning", "client", "seed_merchant", "night"].has(phase):
 			return "invalid day phase"
-	if data.has("day_phase_state"):
-		if not (data["day_phase_state"] is Dictionary):
-			return "invalid day phase state"
-		var day_phase_state: Dictionary = data["day_phase_state"] as Dictionary
-		if day_phase_state.has("client_step_pending") and not (day_phase_state["client_step_pending"] is bool):
-			return "invalid day phase state"
-		if day_phase_state.has("client_sale_start_requested") and not (day_phase_state["client_sale_start_requested"] is bool):
-			return "invalid day phase state"
+	var raw_phase_state: Variant = data.get("gameplay_phase_state", data.get("day_phase_state", {}))
+	if not (raw_phase_state is Dictionary):
+		return "invalid gameplay phase state"
+	var gameplay_phase_state: Dictionary = raw_phase_state as Dictionary
+	if gameplay_phase_state.has("dawn_stage") and not ["sunrise", "harvest", "pre_clients"].has(str(gameplay_phase_state["dawn_stage"])):
+		return "invalid dawn stage"
+	if gameplay_phase_state.has("seed_merchant_active") and not (gameplay_phase_state["seed_merchant_active"] is bool):
+		return "invalid gameplay phase state"
+	if gameplay_phase_state.has("client_step_pending") and not (gameplay_phase_state["client_step_pending"] is bool):
+		return "invalid gameplay phase state"
+	if gameplay_phase_state.has("client_sale_start_requested") and not (gameplay_phase_state["client_sale_start_requested"] is bool):
+		return "invalid gameplay phase state"
 	if data.has("runtime_agents") and not (data["runtime_agents"] is Dictionary):
 		return "invalid runtime agents"
 	return ""
@@ -1292,7 +1334,7 @@ func _save_summary(data: Dictionary) -> String:
 	if raw_durability is Array:
 		durability_count = (raw_durability as Array).size()
 	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d" % [
-		str(data.get("day_phase", "<missing>")),
+		str(data.get("gameplay_phase", data.get("day_phase", "<missing>"))),
 		int(progression_data.get("nDays", 0)),
 		int(progression_data.get("seeds", 0)),
 		int(progression_data.get("gems", 0)),
@@ -1329,7 +1371,7 @@ func _live_scene_summary(scene: Node) -> String:
 	if building_manager != null and building_manager.has_method("rose_shop_counter_count"):
 		counter_buildings = int(building_manager.call("rose_shop_counter_count"))
 	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d roses=%d grown=%d unwatered=%d counter_buildings=%d counter_total=%d" % [
-		_get_day_phase(),
+		_get_gameplay_phase(),
 		progression.get_value(&"nDays"),
 		progression.get_value(SEED_KEY),
 		progression.get_value(GEM_KEY),

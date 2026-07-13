@@ -145,8 +145,8 @@ func _ready() -> void:
 	_build_ui()
 
 	GameState.mode_changed.connect(_on_game_mode_changed)
-	if not GameState.building_phase_changed.is_connected(_on_building_phase_changed):
-		GameState.building_phase_changed.connect(_on_building_phase_changed)
+	if not GameState.afternoon_phase_changed.is_connected(_on_afternoon_phase_changed):
+		GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
 	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_set_toolbuild_open(false)
@@ -828,15 +828,15 @@ func _close_merchant_shop() -> void:
 
 # --- Phase handling ----------------------------------------------------------
 
-## Night closes only the hammer picker. Day/building phase changes still close the picker
+## Night closes only the hammer picker. Leaving afternoon still closes the picker
 ## for client/merchant transitions.
 func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night and _shown_build_tool_id == HAMMER_TOOL_ID:
 		_close_all()
 
 
-func _on_building_phase_changed(is_building_phase: bool) -> void:
-	if not is_building_phase and not GameState.is_night:
+func _on_afternoon_phase_changed(is_afternoon_phase: bool) -> void:
+	if not is_afternoon_phase and not GameState.is_night:
 		_close_toolbuild()
 
 

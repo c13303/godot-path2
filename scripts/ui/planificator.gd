@@ -107,14 +107,8 @@ func _make_section_label(font_size: int) -> Label:
 
 
 func _connect_refresh_signals() -> void:
-	if not GameState.mode_changed.is_connected(_on_refresh_signal):
-		GameState.mode_changed.connect(_on_refresh_signal)
-	if not GameState.building_phase_changed.is_connected(_on_refresh_signal):
-		GameState.building_phase_changed.connect(_on_refresh_signal)
-	if not GameState.client_phase_changed.is_connected(_on_refresh_signal):
-		GameState.client_phase_changed.connect(_on_refresh_signal)
-	if not GameState.morning_phase_changed.is_connected(_on_refresh_signal):
-		GameState.morning_phase_changed.connect(_on_refresh_signal)
+	if not GameState.gameplay_phase_changed.is_connected(_on_gameplay_phase_changed):
+		GameState.gameplay_phase_changed.connect(_on_gameplay_phase_changed)
 	if not Translations.locale_changed.is_connected(_on_locale_changed):
 		Translations.locale_changed.connect(_on_locale_changed)
 	var progression: Node = _get_progression()
@@ -124,7 +118,7 @@ func _connect_refresh_signals() -> void:
 			progression.connect(&"day_started", callback)
 
 
-func _on_refresh_signal(_value: bool) -> void:
+func _on_gameplay_phase_changed(_phase: int) -> void:
 	_queue_refresh()
 
 

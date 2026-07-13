@@ -37,6 +37,10 @@ func start_pending_leave_if_needed() -> void:
 		start_leave_for_night()
 
 
+func is_active() -> bool:
+	return _active and is_instance_valid(_agent)
+
+
 func begin_phase(merchant_spawners: Dictionary) -> void:
 	clear_phase(false)
 	if GameState.is_night:
@@ -86,13 +90,11 @@ func process_phase() -> void:
 	# The client sale can finish before the player has watered every rose. When that
 	# happens client sale does NOT start the night and the merchant lingers. Re-check
 	# here so finishing the watering afterwards still ends the day.
-	if not GameState.is_night and not GameState.is_morning_phase and _manager.can_start_night_after_clients():
+	if GameState.is_afternoon_phase and _manager.can_start_night_after_clients():
 		_manager.request_night_after_clients()
 		return
 	if GameState.is_seed_merchant_phase and GameState.seed_merchant_purchase_made and not is_player_near():
 		GameState.set_seed_merchant_phase(false)
-		if not _manager.is_client_sale_active() and not GameState.is_client_phase and not GameState.is_morning_phase:
-			GameState.set_building_phase(true)
 
 
 func process_proximity() -> void:
@@ -102,7 +104,6 @@ func process_proximity() -> void:
 		return
 	var near: bool = is_player_near()
 	if near and not GameState.is_night and not GameState.is_seed_merchant_phase:
-		GameState.set_building_phase(false)
 		GameState.set_seed_merchant_phase(true)
 	# Keep walking to the authored spot even when the player is close; the merchant only
 	# freezes for the player once it has parked (_waiting). The player can still open the
@@ -194,8 +195,6 @@ func request_leave() -> void:
 		return
 	if not GameState.is_night:
 		GameState.set_seed_merchant_phase(false)
-		if not GameState.is_morning_phase and not GameState.is_client_phase:
-			GameState.set_building_phase(true)
 		return
 	start_leave_for_night()
 
@@ -233,8 +232,6 @@ func clear_phase(free_agent: bool) -> void:
 
 func end_phase() -> void:
 	clear_phase(false)
-	if not GameState.is_morning_phase and not GameState.is_client_phase:
-		GameState.set_building_phase(true)
 
 
 func on_agent_removed(agent: Node2D) -> void:
@@ -242,8 +239,6 @@ func on_agent_removed(agent: Node2D) -> void:
 		return
 	_reset_state()
 	GameState.set_seed_merchant_phase(false)
-	if not GameState.is_night and not GameState.is_morning_phase and not GameState.is_client_phase:
-		GameState.set_building_phase(true)
 
 
 func _spawn_from(spawner_cell: Vector2i) -> bool:

@@ -172,7 +172,7 @@ var _spawn_playlist_config: SpawnPlaylistConfigService = SpawnPlaylistConfigServ
 var _client_counter_agents: Dictionary = _agent_navigation_phases.client_counter_agents()  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
-var _morning_harvest: MorningHarvestController = MorningHarvestController.new()
+var _dawn_harvest: DawnHarvestController = DawnHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 # Generic player-built destructible system: provenance, health, target selection,
 # damage, instant plant destruction, and durability save/load. The tantrum
@@ -233,7 +233,7 @@ func _ready() -> void:
 	_agent_navigation_phases.setup(self)
 	_garden_topology.setup(self)
 	_seed_merchant.setup(self)
-	_morning_harvest.setup(self)
+	_dawn_harvest.setup(self)
 	_client_tantrum.setup(self)
 	_durability.setup(self)
 	_health_overlay = BuildingHealthOverlay.new()
@@ -338,6 +338,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if _suppress_next_restored_mode_signal:
 		_suppress_next_restored_mode_signal = false
 		return
+	if GameState.is_emitting_restored_phase_signals():
+		return
 	_spawn_tick_controller.reset_empty_night()
 	_client_preparing = false
 	if is_night:
@@ -351,8 +353,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale.mark_client_step_finished()
 		clear_client_counter_agents()
 		_seed_merchant.on_night_started()
-		GameState.set_building_phase(false)
-		_morning_harvest.clear_active()
+		_dawn_harvest.clear_active()
 		# Counters normally empty the moment the last client of the sale leaves (see
 		# _dissolve_counter_piles_after_clients). This is only a fallback for days where no
 		# client sale ever runs (no client spawners / stock but no buyers): it's idempotent
@@ -363,7 +364,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_sheep_controller.on_game_mode_changed(false)
 		_day_start_pending = true
 		# The night just ended: the completed night's client step is now pending, even
-		# though the morning/client phases have not been entered yet. Latch it here so the
+		# though the dawn harvest has not begun yet. Latch it here so the
 		# planificator shows "NOW clients + TONIGHT next night" from the first post-night
 		# frame, with no one-slot flash while the transition settles.
 		_client_sale.begin_client_step()
@@ -649,7 +650,8 @@ func _abort_client_preparation(token: int) -> void:
 		return
 	_client_preparing = false
 	_client_sale.reset()
-	GameState.set_building_phase(true)
+	_client_sale_start_requested = true
+	GameState.start_dawn()
 
 
 # Preparation-success transitions. The manager owns these flags and the
@@ -884,7 +886,7 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_agent_cell_tracker.invalidate_cell(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
-	_morning_harvest.on_counter_capacity_added()
+	_dawn_harvest.on_counter_capacity_added()
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
@@ -1164,15 +1166,15 @@ func _on_new_day_finished() -> void:
 		return
 	_day_start_pending = false
 	_begin_seed_merchant_phase()
-	_begin_morning_phase()
+	_begin_dawn_harvest()
 
 
-func _begin_morning_phase() -> void:
-	await _morning_harvest.begin_phase()
+func _begin_dawn_harvest() -> void:
+	await _dawn_harvest.begin_phase()
 
 
-func _process_morning_harvest_walkover() -> void:
-	_morning_harvest.process_walkover()
+func _process_dawn_harvest_walkover() -> void:
+	_dawn_harvest.process_walkover()
 
 
 # Clients and merchants crush any plant they walk over, leaving debris behind.
@@ -1213,12 +1215,12 @@ func trample_pasteque_at_agent(agent: Node2D) -> void:
 
 
 func has_grownup_roses_to_harvest() -> bool:
-	return _morning_harvest.has_grownup_roses_to_harvest()
+	return _dawn_harvest.has_grownup_roses_to_harvest()
 
 
-func restore_day_phase(phase: String) -> void:
+func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_agents: bool) -> void:
 	if phase == "night":
-		_morning_harvest.clear_active()
+		_dawn_harvest.clear_active()
 		_reset_client_sale_state()
 		_client_sale.mark_client_step_finished()
 		_night_preparing = false
@@ -1231,87 +1233,70 @@ func restore_day_phase(phase: String) -> void:
 	_night_preparing = false
 	_client_preparing = false
 	_night_preparation_ready = false
-	_morning_harvest.clear_active()
+	_dawn_harvest.clear_active()
 	_reset_client_sale_state()
+	if bool(phase_state.get("seed_merchant_active", false)):
+		call_deferred("_restore_seed_merchant_after_load")
 	match phase:
+		"dawn":
+			_client_sale.begin_client_step()
+			var dawn_stage: String = str(phase_state.get("dawn_stage", ""))
+			if dawn_stage == "":
+				dawn_stage = "pre_clients" if bool(phase_state.get("client_sale_start_requested", false)) else "harvest"
+			match dawn_stage:
+				"sunrise":
+					_day_start_pending = true
+					call_deferred("_resume_dawn_growth_after_load")
+				"pre_clients":
+					_client_sale_start_requested = true
+				_:
+					call_deferred("_begin_dawn_harvest")
 		"morning":
-			# The post-night morning/client window: the completed night's client step is
-			# still pending, so re-open the lifecycle latch (a save in this window persists
-			# as "morning") for a correct "NOW clients + TONIGHT" model right after load.
 			_client_sale.begin_client_step()
-			call_deferred("_begin_morning_phase")
-		"client":
-			_client_sale.begin_client_step()
-			call_deferred("_begin_client_sale_phase")
-		"seed_merchant":
-			_client_sale.begin_client_step()
-			call_deferred("_begin_seed_merchant_phase")
+			GameState.set_client_phase(true)
+			if not has_runtime_agents:
+				call_deferred("_begin_client_sale_phase")
 		_:
 			_client_sale.mark_client_step_finished()
-			GameState.set_building_phase(true)
+			GameState.start_afternoon()
 
 
-func serialize_day_phase_state_for_save() -> Dictionary:
+func serialize_gameplay_phase_state_for_save() -> Dictionary:
+	var dawn_stage: String = "harvest"
+	if GameState.is_dawn_phase:
+		if _day_start_pending:
+			dawn_stage = "sunrise"
+		elif _client_sale_start_requested:
+			dawn_stage = "pre_clients"
 	return {
+		"dawn_stage": dawn_stage,
+		"seed_merchant_active": _seed_merchant.is_active(),
 		"client_step_pending": _client_sale.current_day_client_step_pending_or_active(),
-		"client_sale_start_requested": _client_sale_start_requested or _client_sale_can_start_from_current_phase(),
+		"client_sale_start_requested": _client_sale_start_requested,
 	}
 
 
-func restore_day_phase_state_from_save(data: Dictionary) -> void:
-	if GameState.is_night:
-		_day_start_pending = false
-		_client_sale.restore_client_step_pending(false)
+func _resume_dawn_growth_after_load() -> void:
+	if not GameState.is_dawn_phase or not _day_start_pending:
 		return
-	if data.is_empty() and _should_recover_legacy_client_start_request():
-		_day_start_pending = false
-		_client_sale.restore_client_step_pending(true)
-		_client_sale_start_requested = true
-		return
-	_day_start_pending = false
-	var client_step_pending: bool = bool(data.get(
-		"client_step_pending",
-		_client_sale.current_day_client_step_pending_or_active()
-	))
-	var client_sale_start_requested: bool = bool(data.get("client_sale_start_requested", false))
-	_client_sale.restore_client_step_pending(client_step_pending)
-	_client_sale_start_requested = client_sale_start_requested or _client_sale_can_start_from_current_phase()
-	if _client_sale_start_requested and GameState.is_seed_merchant_phase:
-		GameState.set_seed_merchant_phase(false)
-		GameState.set_building_phase(true)
+	if plant_manager != null and plant_manager.has_method("resume_dawn_growth_after_load"):
+		plant_manager.call("resume_dawn_growth_after_load")
 
 
-func _should_recover_legacy_client_start_request() -> bool:
-	return (
-		GameState.is_building_phase
-		and not GameState.is_morning_phase
-		and not GameState.is_client_phase
-		and not GameState.is_seed_merchant_phase
-		and _client_sale.completed_night_client_count_for_day() > 0
-		# Old saves did not persist the client-step latch. Counter stock is the
-		# unambiguous legacy signal for a completed harvest awaiting its sale;
-		# counter piles are dissolved when the sale finishes.
-		and _total_counter_stock() > 0
-	)
+func _restore_seed_merchant_after_load() -> void:
+	# Runtime-agent restore clears all transient agents one frame after phase restore.
+	# Recreate the deliberately non-serialized merchant only after that cleanup.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not GameState.is_night and not _seed_merchant.is_active():
+		_begin_seed_merchant_phase()
 
 
-func _client_sale_can_start_from_current_phase() -> bool:
-	return (
-		_client_sale.current_day_client_step_pending_or_active()
-		and GameState.is_building_phase
-		and not GameState.is_morning_phase
-		and not GameState.is_client_phase
-		and not GameState.is_seed_merchant_phase
-		and not _client_preparing
-		and not _client_sale.is_active()
-	)
+func _check_dawn_harvest_finished() -> void:
+	_dawn_harvest.check_finished()
 
 
-func _check_morning_harvest_finished() -> void:
-	_morning_harvest.check_finished()
-
-
-func reset_client_state_for_morning() -> void:
+func reset_client_state_for_dawn() -> void:
 	_reset_client_sale_state()
 
 
@@ -1330,24 +1315,20 @@ func _reset_client_sale_state() -> void:
 
 func begin_client_sale_phase() -> void:
 	_client_sale_start_requested = false
-	# The player may trigger clients before finishing (or even starting) the morning
+	# The player may trigger clients before finishing (or even starting) the dawn
 	# harvest, so end the harvest here; the client sale itself is unchanged.
-	_morning_harvest.clear_active()
+	_dawn_harvest.clear_active()
 	_begin_client_sale_phase()
 
 
 func request_client_sale_start() -> void:
 	if GameState.is_night:
 		return
-	GameState.set_building_phase(true)
 	_client_sale_start_requested = true
 
 
 func is_client_sale_start_requested() -> bool:
-	# Compatibility query used by the tutorial. The explicit request is useful during
-	# normal transitions, but save/load may legitimately clear transient requests while
-	# rebuilding runtime agents. The durable phase + client-step state remains authoritative.
-	return _client_sale_start_requested or _client_sale_can_start_from_current_phase()
+	return _client_sale_start_requested
 
 
 func _begin_client_sale_phase() -> void:
@@ -1357,6 +1338,8 @@ func _begin_client_sale_phase() -> void:
 	if client_total <= 0 or _client_spawners.is_empty() or not _has_client_targets_remaining():
 		on_client_sale_skipped()
 		return
+	GameState.start_morning()
+	GameState.set_client_phase(true)
 	_night_preparation_token += 1
 	_client_preparing = true
 	_night_preparation_ready = false
@@ -1379,7 +1362,7 @@ func request_night_after_clients() -> void:
 	if not can_start_night_after_clients():
 		_night_start_requested = false
 		return
-	GameState.set_building_phase(true)
+	GameState.start_afternoon()
 	_night_start_requested = true
 
 
@@ -1642,8 +1625,8 @@ func get_sheep_controller() -> SheepController:
 	return _sheep_controller
 
 
-func get_morning_harvest_controller() -> MorningHarvestController:
-	return _morning_harvest
+func get_dawn_harvest_controller() -> DawnHarvestController:
+	return _dawn_harvest
 
 
 func get_drowning_controller() -> DrowningController:
@@ -1801,7 +1784,8 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 	# is where these transient prompt requests are normally cleared. Clear them here so a
 	# request set during the pre-restore load transition can't leak into the restored phase.
 	_night_start_requested = false
-	_client_sale_start_requested = false
+	if not GameState.is_dawn_phase:
+		_client_sale_start_requested = false
 	if GameState.is_night:
 		_night_preparation_token += 1
 		_night_preparing = true

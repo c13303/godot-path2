@@ -25,8 +25,8 @@ func process(delta: float) -> void:
 	if _should_skip_paused_runtime():
 		_manager._sync_plant_zone_debug_visibility()
 		return
-	if _manager.get_morning_harvest_controller().is_active():
-		_manager.get_morning_harvest_controller().process_walkover()
+	if _manager.get_dawn_harvest_controller().is_active():
+		_manager.get_dawn_harvest_controller().process_walkover()
 
 	var frame_start_us: int = Time.get_ticks_usec()
 	var debug_telemetry: BuildingDebugTelemetry = _manager.get_building_debug_telemetry()
