@@ -10,8 +10,8 @@ const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const CLIENT_SPRITE_HFRAMES: int = 7
 const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
-const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.45
-const BIG_MONSTER_WALK_SQUASH: float = 0.06
+const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.225
+const BIG_MONSTER_WALK_SQUASH: float = 0.03
 
 var _manager: Node
 
