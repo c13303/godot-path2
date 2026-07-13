@@ -11,6 +11,8 @@ const BIG_MONSTER_ID: StringName = &"bigmonster"
 const FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL: StringName = &"directional_4_horizontal"
 const BASIC_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
+const BIG_MONSTER_SPRITE_SCALE: Vector2 = Vector2(0.75, 0.75)
+const BIG_MONSTER_SPRITE_OFFSET: Vector2 = Vector2(0.0, -48.0)
 
 
 static func get_all() -> Array[MonsterData]:
@@ -62,8 +64,8 @@ static func _make_bigmonster() -> MonsterData:
 	data.texture = BIG_MONSTER_TEXTURE
 	data.sprite_hframes = 4
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
-	data.sprite_scale = Vector2(0.75, 0.75)
-	data.sprite_offset = Vector2(0.0, -28.0)
+	data.sprite_scale = BIG_MONSTER_SPRITE_SCALE
+	data.sprite_offset = BIG_MONSTER_SPRITE_OFFSET
 	data.max_health = 200
 	data.speed_scale = 0.5
 	data.crowd_resist_scale = 2.0

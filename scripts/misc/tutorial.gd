@@ -56,7 +56,6 @@ const ALERT_DARK_RED: Color = Color(0.55, 0.0, 0.0)
 const ALERT_FLASH_SPEED: float = 8.0
 const GARDENING_TOOL_ID: String = "gardening"
 const HAMMER_TOOL_ID: String = "hammer"
-const WEAPON_TOOL_ID: String = "weapon"
 const ROSE_ITEM_ID: String = "rose"
 const PASTEQUE_ITEM_ID: String = "pasteque"
 const TURRET_EPINE_ITEM_ID: String = "turret_epine"
@@ -766,11 +765,9 @@ func _update_tutorial_arrow(key: String) -> void:
 			return
 		_hide_tutorial_arrow()
 		return
-	if key == KEY_WATER_ROSES and _is_day_one():
-		var weapon_rect: Rect2 = _quick_slot_rect(WEAPON_TOOL_ID)
-		if weapon_rect.size != Vector2.ZERO:
-			_tutorial_arrow.point_down_at(weapon_rect, get_process_delta_time())
-			return
+	if key == KEY_WATER_ROSES:
+		# "Arrosez vos roses" shows no arrow: the water tool is the only equipped
+		# option at that point, so the hint text alone is enough.
 		_hide_tutorial_arrow()
 		return
 	if key == KEY_PLACE_SHOP and _is_day_two():
