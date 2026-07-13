@@ -21,6 +21,18 @@ func is_active() -> bool:
 	return _active
 
 
+func on_counter_capacity_added() -> void:
+	if _active:
+		return
+	if GameState.is_night or not GameState.is_morning_phase:
+		return
+	if _manager.grownup_rose_count() <= 0:
+		return
+	if not _manager.has_counter_room_for_harvest():
+		return
+	_active = true
+
+
 func begin_phase() -> void:
 	_manager.reset_client_state_for_morning()
 	var has_grownup_roses: bool = _manager.grownup_rose_count() > 0

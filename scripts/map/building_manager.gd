@@ -884,6 +884,7 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_agent_cell_tracker.invalidate_cell(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
+	_morning_harvest.on_counter_capacity_added()
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
@@ -1250,6 +1251,62 @@ func restore_day_phase(phase: String) -> void:
 			GameState.set_building_phase(true)
 
 
+func serialize_day_phase_state_for_save() -> Dictionary:
+	return {
+		"client_step_pending": _client_sale.current_day_client_step_pending_or_active(),
+		"client_sale_start_requested": _client_sale_start_requested or _client_sale_can_start_from_current_phase(),
+	}
+
+
+func restore_day_phase_state_from_save(data: Dictionary) -> void:
+	if GameState.is_night:
+		_day_start_pending = false
+		_client_sale.restore_client_step_pending(false)
+		return
+	if data.is_empty() and _should_recover_legacy_client_start_request():
+		_day_start_pending = false
+		_client_sale.restore_client_step_pending(true)
+		_client_sale_start_requested = true
+		return
+	_day_start_pending = false
+	var client_step_pending: bool = bool(data.get(
+		"client_step_pending",
+		_client_sale.current_day_client_step_pending_or_active()
+	))
+	var client_sale_start_requested: bool = bool(data.get("client_sale_start_requested", false))
+	_client_sale.restore_client_step_pending(client_step_pending)
+	_client_sale_start_requested = client_sale_start_requested or _client_sale_can_start_from_current_phase()
+	if _client_sale_start_requested and GameState.is_seed_merchant_phase:
+		GameState.set_seed_merchant_phase(false)
+		GameState.set_building_phase(true)
+
+
+func _should_recover_legacy_client_start_request() -> bool:
+	return (
+		GameState.is_building_phase
+		and not GameState.is_morning_phase
+		and not GameState.is_client_phase
+		and not GameState.is_seed_merchant_phase
+		and _client_sale.completed_night_client_count_for_day() > 0
+		# Old saves did not persist the client-step latch. Counter stock is the
+		# unambiguous legacy signal for a completed harvest awaiting its sale;
+		# counter piles are dissolved when the sale finishes.
+		and _total_counter_stock() > 0
+	)
+
+
+func _client_sale_can_start_from_current_phase() -> bool:
+	return (
+		_client_sale.current_day_client_step_pending_or_active()
+		and GameState.is_building_phase
+		and not GameState.is_morning_phase
+		and not GameState.is_client_phase
+		and not GameState.is_seed_merchant_phase
+		and not _client_preparing
+		and not _client_sale.is_active()
+	)
+
+
 func _check_morning_harvest_finished() -> void:
 	_morning_harvest.check_finished()
 
@@ -1287,7 +1344,10 @@ func request_client_sale_start() -> void:
 
 
 func is_client_sale_start_requested() -> bool:
-	return _client_sale_start_requested
+	# Compatibility query used by the tutorial. The explicit request is useful during
+	# normal transitions, but save/load may legitimately clear transient requests while
+	# rebuilding runtime agents. The durable phase + client-step state remains authoritative.
+	return _client_sale_start_requested or _client_sale_can_start_from_current_phase()
 
 
 func _begin_client_sale_phase() -> void:
@@ -1377,7 +1437,13 @@ func can_start_night_after_clients() -> bool:
 	# spawns, yet the player must still be able to water their roses and end the day.
 	# _client_preparing covers the deferred window before clients spawn, so night
 	# can't jump ahead of a sale that is genuinely coming.
-	return not _day_start_pending and not _client_preparing and _client_sale.clients_finished_for_day() and _client_sale.all_planted_roses_are_wet()
+	return (
+		not _day_start_pending
+		and not _client_preparing
+		and not _client_sale.current_day_client_step_pending_or_active()
+		and _client_sale.clients_finished_for_day()
+		and _client_sale.all_planted_roses_are_wet()
+	)
 
 
 func has_clients_for_save_load() -> bool:

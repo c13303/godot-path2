@@ -66,6 +66,10 @@ func current_day_client_step_pending_or_active() -> bool:
 	return _client_step_pending
 
 
+func restore_client_step_pending(value: bool) -> void:
+	_client_step_pending = value
+
+
 func serialize_state() -> Dictionary:
 	var pending_spawners: Array[Dictionary] = []
 	for spawner_cell: Vector2i in _client_sale_pending_spawners:

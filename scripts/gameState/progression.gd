@@ -510,12 +510,14 @@ func save_progression(save_path: String = SAVE_PATH, day_phase_override: String 
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
+	var day_phase_state: Dictionary = _get_day_phase_state(scene)
 	var data: Dictionary = {
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"night_rewards": GameState.get_special_reward_claim_save_data(),
 		"day_phase": day_phase,
+		"day_phase_state": day_phase_state,
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"counter_stock": counter_stock,
@@ -778,6 +780,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
 	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
 	_restore_day_phase(scene, str(data.get("day_phase", "")), has_runtime_agents)
+	_restore_day_phase_state(scene, data.get("day_phase_state", {}))
 	call_deferred("_restore_runtime_agents_deferred", raw_runtime_agents)
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
@@ -894,6 +897,16 @@ func _get_runtime_agents(scene: Node) -> Dictionary:
 	if building_manager == null or not building_manager.has_method("serialize_runtime_agents_for_save"):
 		return {}
 	var raw_state: Variant = building_manager.call("serialize_runtime_agents_for_save")
+	if raw_state is Dictionary:
+		return raw_state as Dictionary
+	return {}
+
+
+func _get_day_phase_state(scene: Node) -> Dictionary:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_day_phase_state_for_save"):
+		return {}
+	var raw_state: Variant = building_manager.call("serialize_day_phase_state_for_save")
 	if raw_state is Dictionary:
 		return raw_state as Dictionary
 	return {}
@@ -1061,15 +1074,27 @@ func _restore_day_phase(scene: Node, phase: String, has_runtime_agents: bool = f
 		_log("Day phase restored: %s" % phase)
 
 
+func _restore_day_phase_state(scene: Node, raw_state: Variant) -> void:
+	if not (raw_state is Dictionary):
+		return
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_day_phase_state_from_save"):
+		return
+	building_manager.call("restore_day_phase_state_from_save", raw_state as Dictionary)
+	_log("Day phase state restored: %s" % str(raw_state))
+
+
 func _restore_runtime_agents(scene: Node, raw_state: Variant) -> void:
 	if not (raw_state is Dictionary):
+		return
+	var runtime_state: Dictionary = raw_state as Dictionary
+	if runtime_state.is_empty():
 		return
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if building_manager == null or not building_manager.has_method("restore_runtime_agents_from_save"):
 		return
-	building_manager.call("restore_runtime_agents_from_save", raw_state as Dictionary)
+	building_manager.call("restore_runtime_agents_from_save", runtime_state)
 	var agents: Array = []
-	var runtime_state: Dictionary = raw_state as Dictionary
 	var raw_agents: Variant = runtime_state.get("agents", [])
 	if raw_agents is Array:
 		agents = raw_agents as Array
@@ -1212,6 +1237,14 @@ func _validate_save(data: Dictionary) -> String:
 		var phase: String = str(data["day_phase"])
 		if not ["building", "morning", "client", "seed_merchant", "night"].has(phase):
 			return "invalid day phase"
+	if data.has("day_phase_state"):
+		if not (data["day_phase_state"] is Dictionary):
+			return "invalid day phase state"
+		var day_phase_state: Dictionary = data["day_phase_state"] as Dictionary
+		if day_phase_state.has("client_step_pending") and not (day_phase_state["client_step_pending"] is bool):
+			return "invalid day phase state"
+		if day_phase_state.has("client_sale_start_requested") and not (day_phase_state["client_sale_start_requested"] is bool):
+			return "invalid day phase state"
 	if data.has("runtime_agents") and not (data["runtime_agents"] is Dictionary):
 		return "invalid runtime agents"
 	return ""
