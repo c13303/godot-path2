@@ -154,6 +154,15 @@ func abort_current_night() -> void:
 	_pending_emits.clear()
 
 
+func remaining_unspawned_monster_count() -> int:
+	if _current_night == null:
+		return 0
+	var total: int = 0
+	for track_state: Dictionary in _tracks:
+		total += _remaining_track_monster_count(track_state)
+	return total
+
+
 func serialize_state() -> Dictionary:
 	var events: Array[String] = []
 	for raw_event: Variant in _events_emitted.keys():
@@ -319,6 +328,28 @@ func get_track_debug_context(track_index: int) -> String:
 		int(state.get("spawned_count", 0)),
 		total,
 	]
+
+
+func _remaining_track_monster_count(track_state: Dictionary) -> int:
+	if _current_night == null:
+		return 0
+	var track_index: int = int(track_state.get("track_index", -1))
+	if track_index < 0 or track_index >= _current_night.spawner_tracks.size():
+		return 0
+	var track: SpawnerWaveTrack = _current_night.spawner_tracks[track_index]
+	var wave_index: int = maxi(0, int(track_state.get("wave_index", 0)))
+	var spawned_count: int = maxi(0, int(track_state.get("spawned_count", 0)))
+	var total: int = 0
+	for index: int in range(wave_index, track.waves.size()):
+		var wave: SpawnWave = track.waves[index]
+		if wave == null:
+			continue
+		var wave_count: int = maxi(0, wave.monster_count)
+		if index == wave_index:
+			total += maxi(0, wave_count - spawned_count)
+		else:
+			total += wave_count
+	return total
 
 
 func _advance_track_past_completed_zero_waves(track_state: Dictionary) -> void:

@@ -1436,11 +1436,27 @@ func is_client_sale_active() -> bool:
 
 
 # True during the day when no client is present, preparing to spawn, or throwing a
-# tantrum — i.e. the present day's clients are gone (or have not arrived yet). The
-# planificator preview polls this so it shows at day start and after the sale, but
-# hides while clients are on the map.
+# tantrum — i.e. the present day's clients are gone (or have not arrived yet).
+# Kept as a narrow public query for scene/script call sites that may still ask
+# whether the client phase has fully cleared.
 func day_clients_gone() -> bool:
 	return not _client_preparing and _client_sale.clients_finished_for_day()
+
+
+func remaining_planificator_client_count() -> int:
+	if _client_preparing or _client_sale_start_requested:
+		return _client_sale.current_night_client_count() if _has_client_targets_remaining() else 0
+	return _client_sale.remaining_client_count_for_today()
+
+
+func remaining_planificator_enemy_count() -> int:
+	if not GameState.is_night:
+		return 0
+	var active_count: int = _monster_count()
+	if _no_plants_remaining():
+		return active_count
+	var unspawned_count: int = _spawn_playlist_controller.remaining_unspawned_monster_count()
+	return active_count + unspawned_count
 
 
 func is_runtime_ready_for_building_tick() -> bool:

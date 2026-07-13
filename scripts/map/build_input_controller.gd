@@ -15,6 +15,9 @@ var _placement_service: BuildPlacementService
 var _build_mode_state: BuildModeStateController
 var _game_ui: CanvasLayer
 
+# True while the idle unbuild cursor rect is shown, so it is only hidden once (not every frame).
+var _unbuild_cursor_visible: bool = false
+
 
 func setup(
 	manager: BuildSystem,
@@ -42,6 +45,19 @@ func process(delta: float) -> void:
 	if _is_build_drag_active():
 		_update_build_drag(placeable_def)
 		return
+
+	# The unbuild tool has no buildable to ghost, so its cursor is a single-cell selection rect
+	# tracking the hovered cell. This is what makes the gamepad cursor visible before a removal
+	# begins (once a removal drag starts, that same rect grows to the drag rectangle).
+	if _is_unbuild_selected():
+		_clear_hover()
+		if _placement_disabled() or _is_inventory_open() or _gui_hovered_control() != null:
+			_hide_unbuild_cursor()
+		else:
+			_show_unbuild_cursor(_hovered_cell())
+		return
+	_hide_unbuild_cursor()
+
 	if _placement_disabled() or placeable_def.is_empty() or _is_inventory_open() or _gui_hovered_control() != null:
 		_clear_hover()
 		return
@@ -210,6 +226,18 @@ func _is_inventory_open() -> bool:
 
 func _is_unbuild_selected() -> bool:
 	return _game_ui and _game_ui.has_method("is_unbuild_tool_selected") and bool(_game_ui.call("is_unbuild_tool_selected"))
+
+
+func _show_unbuild_cursor(cell: Vector2i) -> void:
+	_build_preview.show_drag_selection_rect(cell, cell)
+	_unbuild_cursor_visible = true
+
+
+func _hide_unbuild_cursor() -> void:
+	if not _unbuild_cursor_visible:
+		return
+	_build_preview.hide_drag_selection_rect()
+	_unbuild_cursor_visible = false
 
 
 func _select_unbuild_tool() -> void:

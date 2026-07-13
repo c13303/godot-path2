@@ -242,6 +242,19 @@ func client_count() -> int:
 	return _manager.get_tree().get_nodes_in_group("clients").size()
 
 
+func remaining_client_count_for_today() -> int:
+	if GameState.is_morning_phase:
+		return current_night_client_count() if _manager.has_client_targets_remaining() else 0
+	if clients_finished_for_day():
+		return 0
+	var remaining_count: int = _client_sale_pending_spawners.size() + client_count()
+	if remaining_count > 0:
+		return remaining_count
+	if _manager.has_client_targets_remaining():
+		return current_night_client_count()
+	return 0
+
+
 func _roses_available() -> bool:
 	return _manager.total_counter_stock() > 0 or _manager.grownup_rose_count() > 0
 

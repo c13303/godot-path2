@@ -1,11 +1,14 @@
 extends Control
 
 const ICON_SIZE: Vector2 = Vector2(32.0, 32.0)
-const PANEL_WIDTH: float = 190.0
+const TODAY_ICON_SIZE: Vector2 = Vector2(64.0, 64.0)
+const PANEL_WIDTH: float = 210.0
+const NORMAL_FONT_SIZE: int = 11
+const TODAY_FONT_SIZE: int = 22
+const LIVE_REFRESH_SECONDS: float = 0.15
 const MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
-const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
 const KEY_TODAY: String = "planificator.today"
 const KEY_NIGHT: String = "planificator.tonight"
 const KEY_DAY: String = "planificator.tomorrow"
@@ -19,6 +22,7 @@ var _today_rows: VBoxContainer
 var _night_rows: VBoxContainer
 var _day_rows: VBoxContainer
 var _icon_cache: Dictionary = {}
+var _live_refresh_elapsed: float = 0.0
 
 
 func _ready() -> void:
@@ -28,6 +32,14 @@ func _ready() -> void:
 	_apply_translations()
 	call_deferred("_refresh")
 	call_deferred("_refresh")
+
+
+func _process(delta: float) -> void:
+	_live_refresh_elapsed += delta
+	if _live_refresh_elapsed < LIVE_REFRESH_SECONDS:
+		return
+	_live_refresh_elapsed = 0.0
+	_refresh()
 
 
 func _build_ui() -> void:
@@ -58,41 +70,41 @@ func _build_ui() -> void:
 
 	var content: VBoxContainer = VBoxContainer.new()
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_theme_constant_override("separation", 6)
+	content.add_theme_constant_override("separation", 8)
 	margin.add_child(content)
 
-	_today_label = _make_section_label()
+	_today_label = _make_section_label(TODAY_FONT_SIZE)
 	content.add_child(_today_label)
 	_today_rows = VBoxContainer.new()
 	_today_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_today_rows.add_theme_constant_override("separation", 3)
 	content.add_child(_today_rows)
 
-	_night_label = _make_section_label()
+	_night_label = _make_section_label(NORMAL_FONT_SIZE)
 	content.add_child(_night_label)
 	_night_rows = VBoxContainer.new()
 	_night_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_night_rows.add_theme_constant_override("separation", 3)
 	content.add_child(_night_rows)
 
-	_day_label = _make_section_label()
+	_day_label = _make_section_label(NORMAL_FONT_SIZE)
 	content.add_child(_day_label)
 	_day_rows = VBoxContainer.new()
 	_day_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_day_rows.add_theme_constant_override("separation", 3)
 	content.add_child(_day_rows)
 
-	_victory_label = _make_section_label()
+	_victory_label = _make_section_label(NORMAL_FONT_SIZE)
 	_victory_label.visible = false
 	content.add_child(_victory_label)
 
 	_set_mouse_filter_recursive(self)
 
 
-func _make_section_label() -> Label:
+func _make_section_label(font_size: int) -> Label:
 	var label: Label = Label.new()
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_font_size_override("font_size", font_size)
 	return label
 
 
@@ -103,6 +115,8 @@ func _connect_refresh_signals() -> void:
 		GameState.building_phase_changed.connect(_on_refresh_signal)
 	if not GameState.client_phase_changed.is_connected(_on_refresh_signal):
 		GameState.client_phase_changed.connect(_on_refresh_signal)
+	if not GameState.morning_phase_changed.is_connected(_on_refresh_signal):
+		GameState.morning_phase_changed.connect(_on_refresh_signal)
 	if not Translations.locale_changed.is_connected(_on_locale_changed):
 		Translations.locale_changed.connect(_on_locale_changed)
 	var progression: Node = _get_progression()
@@ -141,28 +155,23 @@ func _refresh() -> void:
 	_clear_rows(_today_rows)
 	_clear_rows(_night_rows)
 	_clear_rows(_day_rows)
+	visible = true
+	if _victory_label != null:
+		_victory_label.visible = false
 
 	if GameState.is_night:
-		visible = false
-		return
-
-	# Only preview once the present day's clients (and any tantrum) are gone.
-	if not _day_clients_gone():
-		visible = false
-		return
+		_add_row(_today_rows, &"monster", _remaining_enemy_count(), true)
+	else:
+		_add_row(_today_rows, &"client", _remaining_client_count(), true)
 
 	var playlist: LevelSpawnPlaylist = _get_playlist()
 	if playlist == null or playlist.nights.is_empty():
-		visible = false
 		return
-	visible = true
 
 	var night_index: int = _get_preview_night_index(playlist)
 	var night: NightSpawnPlaylist = playlist.nights[night_index]
 	if night == null:
 		return
-
-	_add_row(_today_rows, &"rose", _current_rose_count())
 
 	var monster_counts: Dictionary = _get_monster_counts(night)
 	_add_monster_rows(monster_counts)
@@ -192,26 +201,18 @@ func _clear_rows(container: VBoxContainer) -> void:
 		child.queue_free()
 
 
-func _day_clients_gone() -> bool:
+func _remaining_client_count() -> int:
 	var building_manager: Node = _get_building_manager()
-	if building_manager == null or not building_manager.has_method("day_clients_gone"):
-		return false
-	return bool(building_manager.call("day_clients_gone"))
+	if building_manager != null and building_manager.has_method("remaining_planificator_client_count"):
+		return int(building_manager.call("remaining_planificator_client_count"))
+	return 0
 
 
-## Roses currently planted, counting every state (dry, watered, grownup) together.
-func _current_rose_count() -> int:
-	var plant_manager: Node = _get_plant_manager()
-	if plant_manager == null or not plant_manager.has_method("rose_count"):
-		return 0
-	return int(plant_manager.call("rose_count"))
-
-
-func _get_plant_manager() -> Node:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return null
-	return scene.get_node_or_null("Map/PlantManager")
+func _remaining_enemy_count() -> int:
+	var building_manager: Node = _get_building_manager()
+	if building_manager != null and building_manager.has_method("remaining_planificator_enemy_count"):
+		return int(building_manager.call("remaining_planificator_enemy_count"))
+	return get_tree().get_nodes_in_group("monsters").size()
 
 
 func _get_building_manager() -> Node:
@@ -298,16 +299,18 @@ func _add_monster_rows(monster_counts: Dictionary) -> void:
 			_add_row(_night_rows, monster_type, count)
 
 
-func _add_row(container: VBoxContainer, agent_type: StringName, count: int) -> void:
+func _add_row(container: VBoxContainer, agent_type: StringName, count: int, large: bool = false) -> void:
+	var icon_size: Vector2 = TODAY_ICON_SIZE if large else ICON_SIZE
+	var font_size: int = TODAY_FONT_SIZE if large else NORMAL_FONT_SIZE
 	var row: HBoxContainer = HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.custom_minimum_size = Vector2(0.0, ICON_SIZE.y)
+	row.custom_minimum_size = Vector2(0.0, icon_size.y)
 	row.add_theme_constant_override("separation", 6)
 	container.add_child(row)
 
 	var icon: TextureRect = TextureRect.new()
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.custom_minimum_size = ICON_SIZE
+	icon.custom_minimum_size = icon_size
 	icon.texture = _get_icon(agent_type)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -317,6 +320,7 @@ func _add_row(container: VBoxContainer, agent_type: StringName, count: int) -> v
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count_label.text = "X %d" % count
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	count_label.add_theme_font_size_override("font_size", font_size)
 	row.add_child(count_label)
 
 
@@ -331,9 +335,6 @@ func _get_icon(agent_type: StringName) -> Texture2D:
 			frame_size = Vector2i(96, 96)
 		&"client":
 			texture = CLIENT_TEXTURE
-			frame_size = Vector2i(64, 64)
-		&"rose":
-			texture = ROSE_TEXTURE
 			frame_size = Vector2i(64, 64)
 		_:
 			texture = MONSTER_TEXTURE
