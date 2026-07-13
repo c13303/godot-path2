@@ -55,6 +55,7 @@ var inventory_slots: Array[Dictionary] = []
 # active_slot_index is that open slot (index into QUICK_SLOT_KINDS), or -1 when inactive.
 var quickbar_active: bool = false
 var active_slot_index: int = -1
+var _last_active_slot_index: int = 0
 # The persistently equipped weapon, wielded in play mode. Independent of the quickbar slots now
 # that every weapon shares the single weapon menu; empty falls back to the first possessed weapon.
 var equipped_weapon_id: String = ""
@@ -190,6 +191,7 @@ func activate_quickbar_slot(index: int) -> void:
 		return
 	quickbar_active = true
 	active_slot_index = index
+	_last_active_slot_index = index
 	_refresh_all_slots()
 
 ## Closes the quickbar back to play mode (menus closed, no labels).
@@ -211,6 +213,19 @@ func get_active_menu_kind() -> String:
 
 func get_active_slot_index() -> int:
 	return active_slot_index if quickbar_active else -1
+
+## Gamepad: opens the last usable quickbar slot. Used when the player first touches the D-pad
+## from play mode, so the quickbar comes back where they last left it.
+func activate_last_quickbar_slot() -> bool:
+	if quickbar_active:
+		return true
+	var preferred_index: int = _last_active_slot_index
+	if _try_activate_quickbar_slot(preferred_index):
+		return true
+	for index: int in range(QUICK_SLOT_KINDS.size()):
+		if _try_activate_quickbar_slot(index):
+			return true
+	return false
 
 ## Equips a possessed weapon from the weapon menu: it becomes the wielded weapon, any build
 ## preview is cleared, and the quickbar closes to play mode.
@@ -1627,6 +1642,14 @@ func step_selected_quick_slot(direction: int) -> void:
 		if not _is_quickbar_slot_disabled(QUICK_SLOT_KINDS[next_index]):
 			activate_quickbar_slot(next_index)
 			return
+
+func _try_activate_quickbar_slot(index: int) -> bool:
+	if index < 0 or index >= QUICK_SLOT_KINDS.size():
+		return false
+	if _is_quickbar_slot_disabled(QUICK_SLOT_KINDS[index]):
+		return false
+	activate_quickbar_slot(index)
+	return true
 
 func _quick_slot_index_from_event(event: InputEventKey) -> int:
 	if _is_numpad_number_key(event):

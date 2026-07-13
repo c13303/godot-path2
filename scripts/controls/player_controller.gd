@@ -61,7 +61,7 @@ var _pad_cursor_repeat_time: float = 0.0
 var _pad_build_controls_active_prev: bool = false
 var _right_stick_weapon_active: bool = false
 var _rush_active: bool = false
-var _rush_shift_was_pressed: bool = false
+var _rush_input_was_pressed: bool = false
 var _rush_time_left: float = 0.0
 var _rush_direction: Vector2 = Vector2.ZERO
 var _rush_sample_position: Vector2 = Vector2.ZERO
@@ -89,7 +89,11 @@ func _input(event: InputEvent) -> void:
 		_active_gamepad_device = joy_button_event.device
 		if joy_button_event.pressed:
 			_set_control_mode(INPUT_MODE_PAD)
-		if joy_button_event.button_index == JOY_BUTTON_A:
+		if joy_button_event.button_index == JOY_BUTTON_START:
+			if joy_button_event.pressed:
+				_toggle_pause()
+			get_viewport().set_input_as_handled()
+		elif joy_button_event.button_index == JOY_BUTTON_A:
 			if joy_button_event.pressed:
 				_handle_pad_accept()
 			get_viewport().set_input_as_handled()
@@ -104,6 +108,10 @@ func _input(event: InputEvent) -> void:
 				# At the merchant, Y opens/closes the shop; else it rotates the build preview.
 				if not _try_toggle_merchant_shop():
 					_handle_pad_rotate_build()
+			get_viewport().set_input_as_handled()
+		elif joy_button_event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			if joy_button_event.pressed:
+				_handle_pad_rotate_build()
 			get_viewport().set_input_as_handled()
 		return
 
@@ -289,7 +297,20 @@ func _update_pad_navigation_input() -> void:
 	var right_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_RIGHT)
 	var up_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_UP)
 	var down_pressed: bool = Input.is_joy_button_pressed(_active_gamepad_device, JOY_BUTTON_DPAD_DOWN)
+	var any_new_press: bool = (
+		(left_pressed and not _dpad_left_pressed)
+		or (right_pressed and not _dpad_right_pressed)
+		or (up_pressed and not _dpad_up_pressed)
+		or (down_pressed and not _dpad_down_pressed)
+	)
 	if _pad_build_preview_active():
+		_dpad_left_pressed = left_pressed
+		_dpad_right_pressed = right_pressed
+		_dpad_up_pressed = up_pressed
+		_dpad_down_pressed = down_pressed
+		return
+	if any_new_press and _should_pad_open_quickbar_from_dpad():
+		_activate_last_quickbar_slot()
 		_dpad_left_pressed = left_pressed
 		_dpad_right_pressed = right_pressed
 		_dpad_up_pressed = up_pressed
@@ -312,6 +333,19 @@ func _step_pad_shop_selection(direction: int) -> void:
 	if toolbuild != null and toolbuild.has_method("step_pad_selection"):
 		toolbuild.call("step_pad_selection", direction)
 
+func _should_pad_open_quickbar_from_dpad() -> bool:
+	if _paused or _cutscene_input_locked or _is_inventory_open():
+		return false
+	if _is_quickbar_active():
+		return false
+	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+		return false
+	return game_ui != null and game_ui.has_method("activate_last_quickbar_slot")
+
+func _activate_last_quickbar_slot() -> void:
+	if game_ui != null and game_ui.has_method("activate_last_quickbar_slot"):
+		game_ui.call("activate_last_quickbar_slot")
+
 func _handle_pad_accept() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return
@@ -322,6 +356,10 @@ func _handle_pad_accept() -> void:
 
 func _handle_pad_cancel() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
+		return
+	if _is_quickbar_active():
+		_clear_build_selection()
+		_deactivate_quickbar()
 		return
 	if not _build_controls_active() or build_system == null:
 		return
@@ -584,15 +622,16 @@ func _update_player_input(delta: float) -> void:
 		dir = dir.normalized()
 
 	var shift_pressed: bool = _is_any_key_pressed([KEY_SHIFT])
+	var rush_pressed: bool = shift_pressed or _pad_rush_pressed()
 	var rush_started: bool = false
 	if _paused or _cutscene_input_locked:
 		_stop_rush()
-	elif shift_pressed and not _rush_shift_was_pressed and not _rush_active:
+	elif rush_pressed and not _rush_input_was_pressed and not _rush_active:
 		var start_direction: Vector2 = dir if dir.length_squared() > 0.0 else _last_move_direction
 		if start_direction.length_squared() > 0.0:
 			_start_rush(start_direction.normalized())
 			rush_started = true
-	_rush_shift_was_pressed = shift_pressed
+	_rush_input_was_pressed = rush_pressed
 
 	if _rush_active and not rush_started:
 		var player: Node2D = _get_player_node()
@@ -692,6 +731,11 @@ func _is_any_key_pressed(keys: Array[int]) -> bool:
 		if Input.is_key_pressed(key) or Input.is_physical_key_pressed(key):
 			return true
 	return false
+
+func _pad_rush_pressed() -> bool:
+	if _control_mode != INPUT_MODE_PAD or _active_gamepad_device < 0:
+		return false
+	return Input.get_joy_axis(_active_gamepad_device, JOY_AXIS_TRIGGER_RIGHT) >= gamepad_trigger_threshold
 
 func _is_inventory_open() -> bool:
 	return game_ui and game_ui.has_method("is_inventory_open") and bool(game_ui.call("is_inventory_open"))

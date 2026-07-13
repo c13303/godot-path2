@@ -77,6 +77,7 @@ var _selected_affordable_prev: int = -1
 var _toolbuild_column: VBoxContainer
 # The weapons drop-up (slot 0): a vertical menu of possessed weapons, rebuilt when the owned
 # set or equipped weapon changes. Selecting one equips it and closes the quickbar.
+var _selected_weapon_item_id: String = ""
 var _weapon_column: VBoxContainer
 var _weapon_items_list: VBoxContainer
 var _weapon_rows: Dictionary = {}
@@ -192,8 +193,10 @@ func _process(_delta: float) -> void:
 		_close_toolbuild()
 	if weapon_should_show and _weapon_column != null and not _weapon_column.visible:
 		_weapon_column.visible = true
+		_ensure_weapon_pad_selection()
 	elif not weapon_should_show and _weapon_column != null and _weapon_column.visible:
 		_weapon_column.visible = false
+		_selected_weapon_item_id = ""
 		_reset_hover_label()
 	if merchant_should_show:
 		_open_merchant_shop()
@@ -284,11 +287,12 @@ func _refresh_weapon_menu() -> void:
 	if signature != _weapon_signature:
 		_weapon_signature = signature
 		_rebuild_weapon_rows(ids)
+	_ensure_weapon_pad_selection()
 	for id: String in ids:
 		var button: Button = _weapon_buttons.get(id) as Button
 		if button == null:
 			continue
-		_apply_slot_style(button, id == _hovered_item_id, false)
+		_apply_slot_style(button, id == _hovered_item_id or id == _selected_weapon_item_id, false)
 
 
 func _rebuild_weapon_rows(ids: Array[String]) -> void:
@@ -888,6 +892,9 @@ func step_pad_selection(direction: int) -> void:
 	if _merchant_column != null and _merchant_column.visible:
 		_step_merchant_pad_selection(direction)
 		return
+	if _weapon_column != null and _weapon_column.visible:
+		_step_weapon_pad_selection(direction)
+		return
 	if _toolbuild_column != null and _toolbuild_column.visible:
 		_step_build_pad_selection(direction)
 
@@ -900,6 +907,11 @@ func activate_pad_selection() -> bool:
 			return true
 		if _selected_merchant_item_id != "":
 			_on_merchant_item_pressed(_selected_merchant_item_id)
+			return true
+	if _weapon_column != null and _weapon_column.visible:
+		_ensure_weapon_pad_selection()
+		if _selected_weapon_item_id != "":
+			_on_weapon_pressed(_selected_weapon_item_id)
 			return true
 	# Gamepad: confirming while the build menu is open commits the highlighted buildable.
 	if _toolbuild_column != null and _toolbuild_column.visible and _selected_item_id != "":
@@ -961,6 +973,25 @@ func _step_build_pad_selection(direction: int) -> void:
 	_highlight_item(ids[index])
 
 
+func _step_weapon_pad_selection(direction: int) -> void:
+	var ids: Array[String] = _possessed_weapon_ids()
+	if ids.is_empty():
+		_selected_weapon_item_id = ""
+		_reset_hover_label()
+		return
+	var index: int = ids.find(_selected_weapon_item_id)
+	if index < 0:
+		index = 0 if direction >= 0 else ids.size() - 1
+	else:
+		index = (index + direction) % ids.size()
+		if index < 0:
+			index += ids.size()
+	_selected_weapon_item_id = ids[index]
+	_hovered_item_id = _selected_weapon_item_id
+	_refresh_weapon_menu()
+	_update_hover_label()
+
+
 func _visible_build_item_ids() -> Array[String]:
 	var ids: Array[String] = []
 	for item_id: String in _active_build_item_ids():
@@ -995,6 +1026,21 @@ func _ensure_merchant_pad_selection() -> void:
 	_refresh_merchant_slots()
 
 
+func _ensure_weapon_pad_selection() -> void:
+	var ids: Array[String] = _possessed_weapon_ids()
+	if ids.is_empty():
+		_selected_weapon_item_id = ""
+		if _weapon_column != null and _weapon_column.visible:
+			_reset_hover_label()
+		return
+	if ids.has(_selected_weapon_item_id):
+		_hovered_item_id = _selected_weapon_item_id
+		return
+	var equipped: String = _equipped_weapon_id()
+	_selected_weapon_item_id = equipped if ids.has(equipped) else ids[0]
+	_hovered_item_id = _selected_weapon_item_id
+
+
 func _visible_merchant_pad_item_ids() -> Array[String]:
 	var ids: Array[String] = []
 	var reward_keys: Array[String] = _active_special_reward_keys()
@@ -1010,6 +1056,7 @@ func _visible_merchant_pad_item_ids() -> Array[String]:
 ## stays open). Used for the menu's default/browse selection.
 func _highlight_item(item_id: String) -> void:
 	_selected_item_id = item_id
+	_hovered_item_id = item_id
 	# Seed the run-dry tracker with the highlight's current count so the refresh below (and a
 	# deliberately-empty highlight) never mis-fires an auto-switch.
 	_selected_affordable_prev = _affordable_quantity(item_id)
@@ -1034,6 +1081,8 @@ func _commit_item(item_id: String) -> void:
 ## Clears the menu highlight.
 func _clear_highlight() -> void:
 	_selected_item_id = ""
+	if _toolbuild_column != null and _toolbuild_column.visible:
+		_reset_hover_label()
 	_refresh_slots()
 
 
@@ -1097,7 +1146,7 @@ func _refresh_slots() -> void:
 		var button: Button = _slot_buttons[item_id] as Button
 		var affordable: int = _affordable_quantity(item_id)
 		var disabled: bool = affordable <= 0 or _is_item_locked(item_id)
-		var highlighted: bool = item_id == _hovered_item_id
+		var highlighted: bool = item_id == _hovered_item_id or item_id == _selected_item_id
 		var count_label: Label = _slot_counts[item_id] as Label
 		count_label.text = _slot_badge_text(item_id)
 		# Inventory-backed buildables (pasteque, the rose shop counter) show an owned count
