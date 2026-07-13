@@ -9,10 +9,16 @@ const GENERIC_CURRENCY_ICON_SCRIPT: Script = preload("res://scripts/ui/generic_c
 # Numeric font theme for the quantity readouts (icon + "x N"), distinct from body text.
 const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
-const ROW_SIZE: Vector2 = Vector2(40.0, 40.0)
-const LABEL_SIZE: Vector2 = Vector2(70.0, 34.0)
-const BOTTOM_ROW_Y: float = -64.0
-const ROW_STEP_Y: float = -50.0
+# The currency / possessed HUD lives at the top-left corner with icons + text enlarged 35% over
+# the base 40px row (40 -> 54, 70x34 label -> 95x46, 16px font -> 22px).
+const ROW_SIZE: Vector2 = Vector2(54.0, 54.0)
+const LABEL_SIZE: Vector2 = Vector2(95.0, 46.0)
+const LABEL_FONT_SIZE: int = 22
+# Rows stack downward from the corner. LEFT_INSET / TOP_INSET keep a balanced margin from the
+# screen edges (aligned with the bottom-left water reserve). ROW_STEP_Y is the row pitch.
+const LEFT_INSET: float = 24.0
+const TOP_INSET: float = 24.0
+const ROW_STEP_Y: float = 68.0
 const ROSE_ITEM_ID: String = "rose"
 const ROSE_DRY_ID: String = "rose_dry"
 const ROSE_WET_ID: String = "rose_wet"
@@ -175,11 +181,14 @@ func _ensure_row(item_id: String) -> void:
 	label.bbcode_enabled = true
 	label.fit_content = true
 	label.scroll_active = false
-	label.offset_left = 40.0
-	label.offset_top = 5.0
-	label.offset_right = 110.0
-	label.offset_bottom = 39.0
+	# The label sits just right of the icon and is vertically aligned with it; offsets scale
+	# with ROW_SIZE so the readout tracks the enlarged icon.
+	label.offset_left = ROW_SIZE.x
+	label.offset_top = 7.0
+	label.offset_right = ROW_SIZE.x + LABEL_SIZE.x
+	label.offset_bottom = ROW_SIZE.y - 1.0
 	label.custom_minimum_size = LABEL_SIZE
+	label.add_theme_font_size_override("normal_font_size", LABEL_FONT_SIZE)
 	_rows[item_id] = icon
 	_labels[item_id] = label
 
@@ -282,13 +291,13 @@ func _current_counter_rose_count() -> int:
 
 
 func _layout_rows(ordered_ids: Array[String], counts: Dictionary) -> void:
-	var y: float = BOTTOM_ROW_Y
+	var y: float = TOP_INSET
 	for item_id: String in ordered_ids:
 		if int(counts.get(item_id, 0)) <= 0:
 			continue
 		var row: Control = _rows[item_id] as Control
-		row.offset_left = 165.0
+		row.offset_left = LEFT_INSET
 		row.offset_top = y
-		row.offset_right = 205.0
+		row.offset_right = LEFT_INSET + ROW_SIZE.x
 		row.offset_bottom = y + ROW_SIZE.y
 		y += ROW_STEP_Y

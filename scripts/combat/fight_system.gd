@@ -104,7 +104,7 @@ func _ready() -> void:
 		add_child(_projectile_drawer)
 	if _projectiles:
 		_spray_projectile_drawer = SprayProjectileDrawer.new()
-		_spray_projectile_drawer.setup(_projectiles, _spray_type_ids, _weapons_by_id, SPRAY_METABALL_SHADER, WATER_PROJECTILE_RENDER.COLOR)
+		_spray_projectile_drawer.setup(_projectiles, _spray_type_ids, _weapons_by_id, SPRAY_METABALL_SHADER, WATER_PROJECTILE_RENDER.COLOR, _player)
 		add_child(_spray_projectile_drawer)
 
 func _on_game_mode_changed(is_night: bool) -> void:
@@ -1180,16 +1180,18 @@ class SprayProjectileDrawer:
 	var _fallback_shader: Shader
 	var _active_shader: Shader
 	var _water_projectile_color: Color = Color.WHITE
+	var _player: Node2D
 	var _shader_points: Array = []
 	var _shader_radii: PackedFloat32Array = PackedFloat32Array()
 	var _draw_bounds: Rect2 = Rect2()
 	var _has_points: bool = false
 
-	func setup(projectile_system: Node, spray_type_ids: Dictionary, weapons_by_id: Dictionary, shader: Shader, water_projectile_color: Color) -> void:
+	func setup(projectile_system: Node, spray_type_ids: Dictionary, weapons_by_id: Dictionary, shader: Shader, water_projectile_color: Color, player: Node2D) -> void:
 		_projectile_system = projectile_system
 		_spray_type_ids = spray_type_ids
 		_weapons_by_id = weapons_by_id
 		_water_projectile_color = water_projectile_color
+		_player = player
 		z_as_relative = false
 		z_index = DRAW_Z_INDEX
 		_material = ShaderMaterial.new()
@@ -1208,6 +1210,7 @@ class SprayProjectileDrawer:
 		_material.set_shader_parameter("spray_color", _water_projectile_color)
 
 	func _process(_delta: float) -> void:
+		_sync_z_index_with_player_facing()
 		if not _projectile_system or _material == null:
 			return
 		var had_points: bool = _has_points
@@ -1275,6 +1278,12 @@ class SprayProjectileDrawer:
 			return
 		_active_shader = shader
 		_material.shader = shader
+
+	func _sync_z_index_with_player_facing() -> void:
+		if _player != null and _player.has_method("is_facing_north") and bool(_player.call("is_facing_north")):
+			z_index = int(_player.z_index) - 1
+			return
+		z_index = DRAW_Z_INDEX
 
 	func _get_spray_projectile_states(type_id: int) -> Array:
 		var states: Array = []

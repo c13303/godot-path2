@@ -320,10 +320,14 @@ func _update_day_label(day_number: int) -> void:
 		return
 	var total_days: int = _get_total_run_days()
 	var phase_name: String = _gameplay_phase_display_name()
+	# The label is pinned to the top-right, so its text is right-aligned to hug the right edge
+	# (RichTextLabel.fit_content only sizes height, not width).
+	var day_text: String
 	if total_days > 0:
-		label.text = Translations.t(DAY_LABEL_WITH_TOTAL_KEY) % [day_number, total_days, phase_name]
+		day_text = Translations.t(DAY_LABEL_WITH_TOTAL_KEY) % [day_number, total_days, phase_name]
 	else:
-		label.text = Translations.t(DAY_LABEL_KEY) % [day_number, phase_name]
+		day_text = Translations.t(DAY_LABEL_KEY) % [day_number, phase_name]
+	label.text = "[right]%s[/right]" % day_text
 
 
 func _gameplay_phase_display_name() -> String:
@@ -354,7 +358,7 @@ func _get_day_label() -> RichTextLabel:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("GameUI/top anchor/dayLabel") as RichTextLabel
+	return scene.get_node_or_null("GameUI/dayLabel") as RichTextLabel
 
 
 func _get_progression_ui() -> RichTextLabel:

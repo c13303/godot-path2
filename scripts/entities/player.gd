@@ -94,6 +94,9 @@ func set_facing_direction(direction: Vector2) -> void:
 		_facing_west = false
 	_apply_facing_visual()
 
+func is_facing_north() -> bool:
+	return _facing_frame == FRAME_NORTH
+
 func _apply_sprite_offset() -> void:
 	var sprite: Sprite2D = get_sprite()
 	if sprite:

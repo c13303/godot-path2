@@ -195,6 +195,7 @@ func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 		return
 	visible = true
 	text = _alert_text()
+	modulate = _current_alert_color()
 	_set_glow(false)
 	_update_tutorial_arrow("")
 
@@ -214,9 +215,36 @@ func clear_alert(key: String = "") -> void:
 	_refresh()
 
 
+func _update_alert_timer(delta: float) -> void:
+	if _alert_key == "" or _alert_persistent:
+		return
+	if delta <= 0.0:
+		return
+	_alert_remaining -= delta
+	if _alert_remaining <= 0.0:
+		_clear_elapsed_alert()
+
+
+func _clear_elapsed_alert() -> void:
+	_alert_key = ""
+	_alert_count = -1
+	_alert_remaining = 0.0
+	_alert_persistent = false
+	modulate = Color.WHITE
+
+
+func _current_alert_color() -> Color:
+	if _alert_persistent:
+		return ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, 0.5)
+	var elapsed: float = ALERT_DURATION - _alert_remaining
+	var pulse: float = (sin(elapsed * ALERT_FLASH_SPEED) + 1.0) * 0.5
+	return ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, pulse)
+
+
 func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
+	_update_alert_timer(delta)
 	# Unbuild is a temporary interaction mode. Its instruction must replace every other
 	# contextual hint or alert until the tool is deselected.
 	if _unbuild_tool_selected():
@@ -232,24 +260,18 @@ func _refresh(delta: float = 0.0) -> void:
 		if _alert_persistent:
 			visible = true
 			text = _alert_text()
-			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, 0.5)
+			modulate = _current_alert_color()
 			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
-		_alert_remaining -= delta
 		if _alert_remaining > 0.0:
 			visible = true
 			text = _alert_text()
-			var pulse: float = (sin((ALERT_DURATION - _alert_remaining) * ALERT_FLASH_SPEED) + 1.0) * 0.5
-			modulate = ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, pulse)
+			modulate = _current_alert_color()
 			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
-		_alert_key = ""
-		_alert_count = -1
-		_alert_remaining = 0.0
-		_alert_persistent = false
-		modulate = Color.WHITE
+		_clear_elapsed_alert()
 	# While a spawner-reveal cutscene is scrolling the camera the player has no control,
 	# so the contextual hint is hidden. The cutscene shows its own focus alert (handled by
 	# the alert branch above), which is why this check sits after it.

@@ -39,8 +39,8 @@ func point_left_at(target_rect: Rect2, delta: float) -> void:
 
 func point_right_at(target_rect: Rect2, delta: float) -> void:
 	_base_position = Vector2(
-		target_rect.position.x - ICON_GAP - ARROW_SIZE.x,
-		target_rect.position.y + target_rect.size.y * 0.5 - ARROW_SIZE.y * 0.5
+		target_rect.position.x - ICON_GAP,
+		target_rect.position.y + target_rect.size.y * 0.5 + ARROW_SIZE.y * 0.5
 	)
 	_apply_transform(POINT_RIGHT_ROTATION, delta)
 

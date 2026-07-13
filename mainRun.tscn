@@ -875,18 +875,16 @@ texture = SubResource("AtlasTexture_sun")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="dayLabel" type="RichTextLabel" parent="GameUI/top anchor" unique_id=2071789186]
+[node name="dayLabel" type="RichTextLabel" parent="GameUI" unique_id=2071789186]
 layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = 51.0
-offset_top = -52.0
-offset_right = 361.0
-offset_bottom = -16.0
-grow_horizontal = 2
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -336.0
+offset_top = 28.0
+offset_right = -16.0
+offset_bottom = 64.0
+grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 2
 bbcode_enabled = true
@@ -924,12 +922,9 @@ script = ExtResource("20_hold_circle")
 
 [node name="currenciesUI" type="Control" parent="GameUI" unique_id=401142736]
 layout_mode = 3
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_top = -40.0
+anchors_preset = 0
 offset_right = 40.0
-grow_vertical = 0
+offset_bottom = 40.0
 script = ExtResource("48_possessed_hud")
 
 [node name="seedIcon" type="TextureRect" parent="GameUI/currenciesUI" unique_id=1153248331]
