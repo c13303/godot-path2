@@ -4,9 +4,11 @@ class_name DawnHarvestController
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PLAYER_HARVEST_RADIUS_TILES: int = 1
 const IMPERIAL_ROSE_ITEM_ID: String = "imperial_rose"
+const ADD_COUNTERS_TUTORIAL_KEY: String = "tutorial.add_counters_to_sell_roses"
 
 var _manager: BuildingManager
 var _active: bool = false
+var _counter_room_alert_cell: Vector2i = INVALID_CELL
 
 
 func setup(manager: BuildingManager) -> void:
@@ -15,6 +17,7 @@ func setup(manager: BuildingManager) -> void:
 
 func clear_active() -> void:
 	_active = false
+	_counter_room_alert_cell = INVALID_CELL
 
 
 func is_active() -> bool:
@@ -84,7 +87,9 @@ func process_walkover() -> void:
 		return
 	var harvest_cell: Vector2i = _player_harvestable_plant_cell(GameState.is_client_phase)
 	if harvest_cell == INVALID_CELL:
+		_show_counter_room_alert_if_blocked(plant_manager)
 		return
+	_counter_room_alert_cell = INVALID_CELL
 	if plant_manager.has_method("is_imperial_harvestable") and bool(plant_manager.call("is_imperial_harvestable", harvest_cell)):
 		_harvest_imperial_rose(plant_manager, harvest_cell)
 		return
@@ -181,6 +186,43 @@ func _is_harvestable_plant_cell(plant_manager: Node, cell: Vector2i, roses_only:
 	if plant_manager.has_method("is_imperial_harvestable") and bool(plant_manager.call("is_imperial_harvestable", cell)):
 		return true
 	return false
+
+
+func _show_counter_room_alert_if_blocked(plant_manager: Node) -> void:
+	if _manager.has_counter_room_for_harvest():
+		_counter_room_alert_cell = INVALID_CELL
+		return
+	if _manager.rose_shop_counter_count() <= 0:
+		_counter_room_alert_cell = INVALID_CELL
+		return
+	var rose_cell: Vector2i = _player_grownup_rose_cell(plant_manager)
+	if rose_cell == INVALID_CELL:
+		_counter_room_alert_cell = INVALID_CELL
+		return
+	if rose_cell == _counter_room_alert_cell:
+		return
+	_counter_room_alert_cell = rose_cell
+	_manager.show_tutorial_alert(ADD_COUNTERS_TUTORIAL_KEY)
+
+
+func _player_grownup_rose_cell(plant_manager: Node) -> Vector2i:
+	var floorz: TileMapLayer = _floorz()
+	var player: Node2D = _manager.get_tree().get_first_node_in_group("player") as Node2D
+	if player == null or floorz == null:
+		return INVALID_CELL
+	if not plant_manager.has_method("is_rose_grownup"):
+		return INVALID_CELL
+	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
+	if bool(plant_manager.call("is_rose_grownup", player_cell)):
+		return player_cell
+	for dy: int in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
+		for dx: int in range(-PLAYER_HARVEST_RADIUS_TILES, PLAYER_HARVEST_RADIUS_TILES + 1):
+			if dx == 0 and dy == 0:
+				continue
+			var cell: Vector2i = player_cell + Vector2i(dx, dy)
+			if bool(plant_manager.call("is_rose_grownup", cell)):
+				return cell
+	return INVALID_CELL
 
 
 func _harvestable_imperial_count() -> int:

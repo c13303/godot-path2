@@ -1,12 +1,14 @@
 extends Control
 class_name CutsceneSkipPrompt
 
-const TEXT_KEY: String = "cutscene.hold_left_mouse_skip"
+const TEXT_KEY_KMOUSE: String = "cutscene.hold_left_mouse_skip"
+const TEXT_KEY_PAD: String = "cutscene.hold_pad_button_skip"
 const CIRCLE_RADIUS: float = 14.0
 const CIRCLE_WIDTH: float = 4.0
 const CIRCLE_SEGMENTS: int = 32
 
 var _progress: float = 0.0
+var _pad_mode: bool = false
 var _label: Label
 
 
@@ -54,9 +56,16 @@ func _draw() -> void:
 		)
 
 
+func set_pad_mode(pad_mode: bool) -> void:
+	if _pad_mode == pad_mode:
+		return
+	_pad_mode = pad_mode
+	_refresh_text()
+
+
 func _refresh_text() -> void:
 	if _label != null:
-		_label.text = Translations.t(TEXT_KEY)
+		_label.text = Translations.t(TEXT_KEY_PAD if _pad_mode else TEXT_KEY_KMOUSE)
 
 
 func _on_locale_changed(_locale: String) -> void:

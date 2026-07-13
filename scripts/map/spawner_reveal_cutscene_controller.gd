@@ -88,6 +88,7 @@ func _input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if not _active or _skip_requested:
 		return
+	_update_skip_prompt_mode()
 	if not _skip_held or not _is_skip_input_held():
 		_set_skip_held(false)
 		return
@@ -232,6 +233,7 @@ func _show_skip_prompt() -> void:
 		_skip_prompt.offset_bottom = -28.0
 		_skip_prompt_layer.add_child(_skip_prompt)
 	_skip_prompt.visible = true
+	_update_skip_prompt_mode()
 	_update_skip_prompt_progress()
 
 
@@ -244,6 +246,12 @@ func _hide_skip_prompt() -> void:
 func _update_skip_prompt_progress() -> void:
 	if _skip_prompt != null:
 		_skip_prompt.set_progress(_skip_hold_elapsed / SKIP_HOLD_SECONDS)
+
+
+func _update_skip_prompt_mode() -> void:
+	if _skip_prompt == null or _player_controller == null:
+		return
+	_skip_prompt.set_pad_mode(_player_controller.get_control_mode() == PlayerController.INPUT_MODE_PAD)
 
 
 func _show_focus_tutorial() -> void:

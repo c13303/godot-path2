@@ -220,11 +220,16 @@ script = ExtResource("4_rk5yt")
 currency = "gem"
 amount = 100
 
+[sub_resource type="Resource" id="Resource_xr1nq"]
+script = ExtResource("4_rk5yt")
+currency = "bamboo"
+amount = 40
+
 [sub_resource type="Resource" id="Resource_sugyw"]
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_wwrq6"), SubResource("Resource_qdpv2"), SubResource("Resource_5xk2r"), SubResource("Resource_lqsmu")])
 clients = 40
-special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_427i7"), SubResource("Resource_lshym")])
+special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_427i7"), SubResource("Resource_lshym"), SubResource("Resource_xr1nq")])
 special_reward_one_time = true
 
 [sub_resource type="Resource" id="Resource_wo2k5"]
@@ -286,11 +291,16 @@ script = ExtResource("4_rk5yt")
 currency = "gem"
 amount = 200
 
+[sub_resource type="Resource" id="Resource_ier6t"]
+script = ExtResource("4_rk5yt")
+currency = "bamboo"
+amount = 40
+
 [sub_resource type="Resource" id="Resource_yh1qh"]
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_idj8x"), SubResource("Resource_ln1tn"), SubResource("Resource_mtmpg"), SubResource("Resource_gdx4o")])
 clients = 50
-special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_m4eog"), SubResource("Resource_jgjt4")])
+special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_m4eog"), SubResource("Resource_jgjt4"), SubResource("Resource_ier6t")])
 special_reward_one_time = true
 
 [sub_resource type="Resource" id="Resource_hcmcw"]

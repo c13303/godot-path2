@@ -1397,6 +1397,10 @@ func skip_client_sale_without_roses() -> void:
 	on_client_sale_skipped()
 
 
+func show_tutorial_alert(key: String) -> void:
+	_show_tutorial_alert(key)
+
+
 func _show_tutorial_alert(key: String) -> void:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
