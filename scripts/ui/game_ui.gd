@@ -32,7 +32,10 @@ const ITEM_NAME_KEY_PREFIX: String = "item."
 # mapped 1:1 to inventory slots.
 const WEAPON_SLOT_KIND: String = "weapon"
 const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID, UNBUILD_TOOL_ID]
-const QUICK_SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
+# Quickbar tabs are enlarged 35% over the base 56px slot so they read at the same scale as the
+# drop-up submenus that rise from them (see toolbuild.QUICK_MENU_SLOT_SIZE). Inventory backpack
+# slots keep the base size (see ItemSlot.setup).
+const QUICK_SLOT_SIZE: Vector2 = Vector2(76.0, 76.0)
 const QUICK_SLOT_GAP: float = 6.0
 const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
 @onready var toolbar_slots: HBoxContainer = $"bottom anchor/ToolbarPanel/toolbar"
@@ -1562,7 +1565,7 @@ func _build_toolbar() -> void:
 	for i in range(QUICK_SLOT_KINDS.size()):
 		var slot: ItemSlot = ItemSlotScript.new()
 		toolbar_slots.add_child(slot)
-		slot.setup(self, "quick", i)
+		slot.setup(self, "quick", i, QUICK_SLOT_SIZE.x)
 		_toolbar_slot_nodes.append(slot)
 	call_deferred("_fit_toolbar_panel_to_slots")
 

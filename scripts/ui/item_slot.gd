@@ -5,9 +5,14 @@ const ITEM_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 # Numeric font theme for the stack-quantity readout (icon + count), distinct from body text.
 const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 
+# Base slot geometry is authored for 56px; setup() may request a larger slot (e.g. the
+# enlarged quickbar tabs) and every child metric scales from this against BASE_SLOT_SIZE.
+const BASE_SLOT_SIZE: float = 56.0
+
 var game_ui: Node
 var slot_type: String = "inventory"
 var slot_index: int = -1
+var slot_pixel_size: float = BASE_SLOT_SIZE
 var item_data: Dictionary = {}
 var quantity: int = 0
 var selected: bool = false
@@ -17,10 +22,11 @@ var _icon: TextureRect
 var _key_label: Label
 var _quantity_label: Label
 
-func setup(owner_ui: Node, type: String, index: int = -1) -> void:
+func setup(owner_ui: Node, type: String, index: int = -1, pixel_size: float = BASE_SLOT_SIZE) -> void:
 	game_ui = owner_ui
 	slot_type = type
 	slot_index = index
+	slot_pixel_size = pixel_size
 	_build()
 	_refresh()
 
@@ -48,7 +54,10 @@ func flash() -> void:
 	tween.tween_property(self, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _build() -> void:
-	custom_minimum_size = Vector2(56, 56)
+	# Every child metric below is authored at 56px and scaled by this factor, so a larger slot
+	# grows its icon, hotkey number and quantity badge proportionally and stays centred.
+	var f: float = slot_pixel_size / BASE_SLOT_SIZE
+	custom_minimum_size = Vector2(slot_pixel_size, slot_pixel_size)
 	size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -58,34 +67,34 @@ func _build() -> void:
 		return
 
 	var stack := Control.new()
-	stack.custom_minimum_size = Vector2(56, 56)
+	stack.custom_minimum_size = Vector2(slot_pixel_size, slot_pixel_size)
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(stack)
 
 	_icon = TextureRect.new()
-	_icon.custom_minimum_size = Vector2(40, 40)
+	_icon.custom_minimum_size = Vector2(40, 40) * f
 	_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_icon.offset_left = 8.0
-	_icon.offset_top = 8.0
-	_icon.offset_right = -8.0
-	_icon.offset_bottom = -8.0
+	_icon.offset_left = 8.0 * f
+	_icon.offset_top = 8.0 * f
+	_icon.offset_right = -8.0 * f
+	_icon.offset_bottom = -8.0 * f
 	stack.add_child(_icon)
 
 	_key_label = Label.new()
 	_key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_key_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_key_label.add_theme_font_size_override("font_size", 11)
+	_key_label.add_theme_font_size_override("font_size", int(round(11.0 * f)))
 	_key_label.add_theme_color_override("font_color", Color(0.86, 0.89, 0.92))
 	_key_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_key_label.offset_left = 3.0
-	_key_label.offset_top = 2.0
-	_key_label.offset_right = 16.0
-	_key_label.offset_bottom = 16.0
+	_key_label.offset_left = 3.0 * f
+	_key_label.offset_top = 2.0 * f
+	_key_label.offset_right = 16.0 * f
+	_key_label.offset_bottom = 16.0 * f
 	stack.add_child(_key_label)
 
 	_quantity_label = Label.new()
@@ -93,16 +102,16 @@ func _build() -> void:
 	_quantity_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_quantity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_quantity_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	_quantity_label.add_theme_font_size_override("font_size", 14)
+	_quantity_label.add_theme_font_size_override("font_size", int(round(14.0 * f)))
 	_quantity_label.add_theme_color_override("font_color", Color.WHITE)
 	_quantity_label.add_theme_color_override("font_shadow_color", Color.BLACK)
 	_quantity_label.add_theme_constant_override("shadow_offset_x", 1)
 	_quantity_label.add_theme_constant_override("shadow_offset_y", 1)
 	_quantity_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_quantity_label.offset_left = 2.0
-	_quantity_label.offset_top = 2.0
-	_quantity_label.offset_right = -4.0
-	_quantity_label.offset_bottom = -2.0
+	_quantity_label.offset_left = 2.0 * f
+	_quantity_label.offset_top = 2.0 * f
+	_quantity_label.offset_right = -4.0 * f
+	_quantity_label.offset_bottom = -2.0 * f
 	stack.add_child(_quantity_label)
 
 func _refresh() -> void:

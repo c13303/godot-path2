@@ -23,6 +23,12 @@ const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png"
 const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
+# The quickbar drop-up submenus (weapon + build/garden/hammer) use a larger frame so their
+# buildable icons read 35% bigger than the base slot, matching the enlarged quickbar tabs.
+# The icon inset scales with the frame (8 -> 11) so the icon stays centred and the 35% ratio
+# holds (40px -> 54px icon area). The merchant shop grid keeps SLOT_SIZE.
+const QUICK_MENU_SLOT_SIZE: Vector2 = Vector2(76.0, 76.0)
+const QUICK_MENU_ICON_INSET: float = 11.0
 # The merchant column is laid out as an aligned grid: icon | name | price.
 const MERCHANT_COLUMNS: int = 3
 const DROPUP_GAP: float = 0.0
@@ -309,7 +315,7 @@ func _build_weapon_slot(item_id: String) -> Button:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	var button: Button = Button.new()
 	button.name = item_id
-	button.custom_minimum_size = SLOT_SIZE
+	button.custom_minimum_size = QUICK_MENU_SLOT_SIZE
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(_on_weapon_pressed.bind(item_id))
 	_connect_hover_label(button, item_id)
@@ -320,10 +326,10 @@ func _build_weapon_slot(item_id: String) -> Button:
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 8.0
-	icon.offset_top = 8.0
-	icon.offset_right = -8.0
-	icon.offset_bottom = -8.0
+	icon.offset_left = QUICK_MENU_ICON_INSET
+	icon.offset_top = QUICK_MENU_ICON_INSET
+	icon.offset_right = -QUICK_MENU_ICON_INSET
+	icon.offset_bottom = -QUICK_MENU_ICON_INSET
 	button.add_child(icon)
 	_apply_slot_style(button, false, false)
 
@@ -380,7 +386,7 @@ func _update_weapon_column_anchor() -> void:
 	var center_x: float = float(game_ui.call("get_quick_slot_center_x", WEAPON_MENU_SLOT_INDEX))
 	if center_x < 0.0:
 		return
-	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
+	var left: float = center_x - QUICK_MENU_SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
 	_weapon_column.offset_left = left
 	_weapon_column.offset_right = left
 
@@ -672,7 +678,7 @@ func _build_slot(item_id: String) -> Button:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	var button: Button = Button.new()
 	button.name = item_id
-	button.custom_minimum_size = SLOT_SIZE
+	button.custom_minimum_size = QUICK_MENU_SLOT_SIZE
 	# Mouse-only: keyboard/gamepad focus would let the GUI layer swallow game input.
 	button.focus_mode = Control.FOCUS_NONE
 	button.pressed.connect(_on_item_pressed.bind(item_id))
@@ -684,10 +690,10 @@ func _build_slot(item_id: String) -> Button:
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 8.0
-	icon.offset_top = 8.0
-	icon.offset_right = -8.0
-	icon.offset_bottom = -8.0
+	icon.offset_left = QUICK_MENU_ICON_INSET
+	icon.offset_top = QUICK_MENU_ICON_INSET
+	icon.offset_right = -QUICK_MENU_ICON_INSET
+	icon.offset_bottom = -QUICK_MENU_ICON_INSET
 	button.add_child(icon)
 
 	# Price badge pinned to the slot's bottom-right, laid out as "<price> <currency icon>"
@@ -707,7 +713,7 @@ func _build_slot(item_id: String) -> Button:
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	count.add_theme_font_size_override("font_size", 14)
+	count.add_theme_font_size_override("font_size", 28)
 	count.add_theme_color_override("font_color", Color.WHITE)
 	count.add_theme_color_override("font_shadow_color", Color.BLACK)
 	count.add_theme_constant_override("shadow_offset_x", 1)
@@ -716,7 +722,7 @@ func _build_slot(item_id: String) -> Button:
 
 	var currency: TextureRect = TextureRect.new()
 	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.custom_minimum_size = Vector2(14.0, 14.0)
+	currency.custom_minimum_size = Vector2(28.0, 28.0)
 	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	currency.size_flags_vertical = Control.SIZE_SHRINK_END
@@ -1666,7 +1672,7 @@ func _update_build_column_anchor() -> void:
 	var center_x: float = float(game_ui.call("get_build_tool_slot_center_x"))
 	if center_x < 0.0:
 		return
-	var left: float = center_x - SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
+	var left: float = center_x - QUICK_MENU_SLOT_SIZE.x * 0.5 - BAR_CONTENT_INSET
 	_toolbuild_column.offset_left = left
 	_toolbuild_column.offset_right = left
 

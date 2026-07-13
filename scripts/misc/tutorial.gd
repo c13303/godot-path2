@@ -755,7 +755,7 @@ func _update_tutorial_arrow(key: String) -> void:
 		if _is_hammer_menu_open():
 			var counter_rect: Rect2 = _visible_build_item_rect(COUNTER_ITEM_ID)
 			if counter_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_left_at(counter_rect, get_process_delta_time())
+				_tutorial_arrow.point_right_at(counter_rect, get_process_delta_time())
 				return
 		else:
 			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
@@ -771,7 +771,7 @@ func _update_tutorial_arrow(key: String) -> void:
 	if _is_gardening_menu_open():
 		var item_rect: Rect2 = _visible_build_item_rect(item_id)
 		if item_rect.size != Vector2.ZERO:
-			_tutorial_arrow.point_left_at(item_rect, get_process_delta_time())
+			_tutorial_arrow.point_right_at(item_rect, get_process_delta_time())
 			return
 	elif not _gardening_equipped():
 		var tool_rect: Rect2 = _gardening_tool_rect()

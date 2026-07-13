@@ -947,12 +947,12 @@ curve_strength = 2.0
 
 [node name="seedQT" type="RichTextLabel" parent="GameUI/currenciesUI/seedIcon" unique_id=618629205]
 layout_mode = 0
-theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
 offset_bottom = 39.0
 mouse_filter = 2
+theme = ExtResource("50_number_theme")
 text = "x 999"
 fit_content = true
 
@@ -971,12 +971,12 @@ curve_strength = 2.0
 
 [node name="gemQT" type="RichTextLabel" parent="GameUI/currenciesUI/gemIcon" unique_id=1609902140]
 layout_mode = 0
-theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
 offset_bottom = 39.0
 mouse_filter = 2
+theme = ExtResource("50_number_theme")
 text = "x 0"
 fit_content = true
 
@@ -995,12 +995,12 @@ curve_strength = 2.0
 
 [node name="moneyQT" type="RichTextLabel" parent="GameUI/currenciesUI/moneyIcon" unique_id=1319827880]
 layout_mode = 0
-theme = ExtResource("50_number_theme")
 offset_left = 40.0
 offset_top = 5.0
 offset_right = 100.0
 offset_bottom = 39.0
 mouse_filter = 2
+theme = ExtResource("50_number_theme")
 text = "x 0"
 fit_content = true
 
