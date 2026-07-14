@@ -1,12 +1,14 @@
 extends Control
 
 ## The build picker is the building picker for build mode. It is open exactly while a build
-## tool (gardening or hammer) is the selected quick slot (see game_ui.get_selected_build_tool_id)
+## tool (gardening, hammer, or buildhouse) is the selected quick slot (see
+## game_ui.get_selected_build_tool_id)
 ## and during the day; selecting any other quick slot closes it. The active tool decides which
 ## buildables it lists: gardening offers rose/ronce/pasteque/turrets, hammer offers
-## counter/wall/fence. The seed merchant column is opt-in: standing at the merchant shows a
-## prompt (merchant_prompt.gd) and the player opens/closes the column with the interact button
-## (see toggle_merchant_shop); while it is open it takes over from the build/weapon columns.
+## counter/wall/fence, and buildhouse offers owned house placeables. The seed merchant column
+## is opt-in: standing at the merchant shows a prompt (merchant_prompt.gd) and the player
+## opens/closes the column with the interact button (see toggle_merchant_shop); while it is
+## open it takes over from the build/weapon columns.
 ## It renders as a vertical column
 ## rising up out of the active tool's quick slot, like a dropdown that opens upward:
 ## one icon per buildable, with the build price overlaid where the quantity badge would
@@ -39,11 +41,11 @@ const BAR_CONTENT_INSET: float = 10.0
 # tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
 const SEED_MERCHANT_BAR_TOP: float = 250.0
 const PASTEQUE_ID: String = "pasteque"
-# The build picker is opened by one of two quick-bar tools, each offering its own buildables:
-# the gardening tool grows plants/turrets, the hammer builds structures. The active tool
-# (game_ui.get_selected_build_tool_id) decides which set is shown and anchored to.
+# The build picker is opened by quick-bar build tools, each offering its own buildables. The
+# active tool (game_ui.get_selected_build_tool_id) decides which set is shown and anchored to.
 const GARDENING_TOOL_ID: String = "gardening"
 const HAMMER_TOOL_ID: String = "hammer"
+const BUILD_HOUSE_TOOL_ID: String = "buildhouse"
 # Slot 0 of the quickbar is the weapons menu; this kind string matches game_ui.WEAPON_SLOT_KIND.
 const WEAPON_MENU_KIND: String = "weapon"
 const WEAPON_MENU_SLOT_INDEX: int = 0
@@ -59,7 +61,7 @@ var progression_node: Node
 var game_ui: Node
 # The buildable currently highlighted in the open picker.
 var _selected_item_id: String = ""
-# Per build tool (gardening/hammer): the last building the player picked with it, restored
+# Per build tool: the last building the player picked with it, restored
 # when that tool's picker reopens if the building still exists.
 var _last_picked_by_tool: Dictionary = {}
 # The build tool whose column is currently shown, so a tool switch (gardening<->hammer) while
@@ -219,7 +221,7 @@ func _process(_delta: float) -> void:
 		_update_merchant_close_button()
 
 
-## The kind of quickbar menu game_ui currently has open ("weapon"/gardening/hammer), or "".
+## The kind of quickbar menu game_ui currently has open, or "".
 func _active_menu_kind() -> String:
 	if game_ui != null and game_ui.has_method("get_active_menu_kind"):
 		return str(game_ui.call("get_active_menu_kind"))
@@ -838,10 +840,10 @@ func _close_merchant_shop() -> void:
 
 # --- Phase handling ----------------------------------------------------------
 
-## Night closes only the hammer picker. Leaving afternoon still closes the picker
+## Night closes structural pickers. Leaving afternoon still closes the picker
 ## for client/merchant transitions.
 func _on_game_mode_changed(is_night: bool) -> void:
-	if is_night and _shown_build_tool_id == HAMMER_TOOL_ID:
+	if is_night and (_shown_build_tool_id == HAMMER_TOOL_ID or _shown_build_tool_id == BUILD_HOUSE_TOOL_ID):
 		_close_all()
 
 
@@ -954,11 +956,16 @@ func toggle_merchant_shop() -> bool:
 
 
 func _tool_blocked_by_night(tool_id: String) -> bool:
-	return GameState.is_night and tool_id == HAMMER_TOOL_ID
+	return GameState.is_night and (tool_id == HAMMER_TOOL_ID or tool_id == BUILD_HOUSE_TOOL_ID)
 
 
 func _item_blocked_by_night(item_id: String) -> bool:
-	return GameState.is_night and item_id in _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
+	if not GameState.is_night:
+		return false
+	return (
+		item_id in _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
+		or item_id in _string_names_to_strings(ItemCatalog.get_house_build_item_ids())
+	)
 
 
 func _step_build_pad_selection(direction: int) -> void:
@@ -1327,7 +1334,7 @@ func _merchant_price(item_id: String) -> int:
 	return ItemCatalog.get_price(item_id)
 
 
-## The build tool currently selected in the quick bar (gardening/hammer), or "" if none.
+## The build tool currently selected in the quick bar, or "" if none.
 func _selected_build_tool_id() -> String:
 	if game_ui != null and game_ui.has_method("get_selected_build_tool_id"):
 		return str(game_ui.call("get_selected_build_tool_id"))
@@ -1342,6 +1349,8 @@ func _active_build_item_ids() -> Array[String]:
 			return _string_names_to_strings(ItemCatalog.get_gardening_shop_item_ids())
 		HAMMER_TOOL_ID:
 			return _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
+		BUILD_HOUSE_TOOL_ID:
+			return _string_names_to_strings(ItemCatalog.get_house_build_item_ids())
 	return []
 
 

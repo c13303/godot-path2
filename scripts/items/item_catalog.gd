@@ -125,6 +125,15 @@ const ITEM_DEFS: Dictionary = {
 		"category": "tools",
 		"frame": 19,
 	},
+	# Selecting this quick-slot tool opens the build picker for inventory-owned house
+	# placeables. It is a menu tool only; the chosen house item drives placement.
+	"buildhouse": {
+		"id": "buildhouse",
+		"name": "Build House",
+		"type": "tool",
+		"category": "tools",
+		"frame": 27,
+	},
 	# Holding left-click with this quick-slot tool removes the hovered building.
 	"unbuild_tool": {
 		"id": "unbuild_tool",
@@ -169,9 +178,9 @@ const ITEM_DEFS: Dictionary = {
 		"name": "House",
 		"type": "placeable",
 		"category": "house",
-		# Menu/reward icon reuses the wall frame for now; the world object and preview use
+		# Menu/reward icon uses the house build icon; the world object and preview use
 		# HOUSE_TEXTURE (house1.png) via HouseManager, not this frame.
-		"frame": 3,
+		"frame": 27,
 		"target_layer": "wallz",
 		"special_placement_kind": &"house",
 		"house_texture": HOUSE_TEXTURE,
@@ -569,13 +578,27 @@ static func get_hammer_shop_item_ids() -> Array[StringName]:
 		if str(item_def.get("type", "")) != "placeable":
 			continue
 		var category: String = str(item_def.get("category", ""))
-		if category == "shop_counter" or category == "wall" or category == "house" or category == "fence" or category == "furniture":
+		if category == "shop_counter" or category == "wall" or category == "fence" or category == "furniture":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"house", &"fence"])
+	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"fence"])
+
+static func get_house_build_item_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for raw_item_id: Variant in ITEM_DEFS.keys():
+		var item_id: String = str(raw_item_id)
+		var item_def: Dictionary = get_item_def(item_id)
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		if StringName(item_def.get("special_placement_kind", &"")) == &"house":
+			ids.append(StringName(item_id))
+	return _ordered_known_first(ids, [&"house"])
 
 static func get_tool_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = get_gardening_shop_item_ids()
 	for item_id: StringName in get_hammer_shop_item_ids():
+		if not ids.has(item_id):
+			ids.append(item_id)
+	for item_id: StringName in get_house_build_item_ids():
 		if not ids.has(item_id):
 			ids.append(item_id)
 	return ids

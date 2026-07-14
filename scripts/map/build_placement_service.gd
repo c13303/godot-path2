@@ -114,6 +114,9 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 		if not is_buildable_floor_cell(entrance):
 			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
 			return
+		if _house_presence_has_non_wet_grass(entrance):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+			return
 		_notify("invalid construction")
 		return
 	if not can_afford(item_id):
@@ -152,9 +155,21 @@ func house_placement_rejection(entrance: Vector2i, placeable_def: Dictionary) ->
 	if wallz == null:
 		return "wall layer unavailable"
 	for cell: Vector2i in house_manager.get_presence_cells(entrance):
+		if not is_grass_green_floor_cell(cell):
+			return "presence cell %s is not wet grass" % str(cell)
 		if not is_valid_placeable_cell(cell, wallz, placeable_def):
 			return "presence cell %s is blocked or not buildable" % str(cell)
 	return ""
+
+
+func _house_presence_has_non_wet_grass(entrance: Vector2i) -> bool:
+	var house_manager: HouseManager = _manager.get_house_manager()
+	if house_manager == null:
+		return false
+	for cell: Vector2i in house_manager.get_presence_cells(entrance):
+		if not is_grass_green_floor_cell(cell):
+			return true
+	return false
 
 
 func _cell_world_position(cell: Vector2i) -> Vector2:

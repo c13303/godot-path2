@@ -20,18 +20,20 @@ const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
 # Quick-slot tools that drive build mode rather than acting as weapons. The build picker is
-# split into two tools: gardening (rose/ronce/pasteque/turrets) and hammer (counter/wall/fence).
-# Both open the same picker; the selected tool decides which buildables it offers.
+# split by tool: gardening (rose/ronce/pasteque/turrets), hammer (counter/wall/fence), and
+# buildhouse (owned house placeables). They open the same picker; the selected tool decides
+# which buildables it offers.
 const GARDENING_ID: String = "gardening"
 const HAMMER_ID: String = "hammer"
-const BUILD_TOOL_IDS: Array[String] = [GARDENING_ID, HAMMER_ID]
+const BUILD_HOUSE_ID: String = "buildhouse"
+const BUILD_TOOL_IDS: Array[String] = [GARDENING_ID, HAMMER_ID, BUILD_HOUSE_ID]
 const UNBUILD_TOOL_ID: String = "unbuild_tool"
 const ITEM_NAME_KEY_PREFIX: String = "item."
 # Slot 0 of the quickbar is the weapons menu (a drop-up over all possessed weapons); the other
 # slots are the build-tool menus. The quickbar is a fixed set of drop-up slots and is no longer
 # mapped 1:1 to inventory slots.
 const WEAPON_SLOT_KIND: String = "weapon"
-const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID, UNBUILD_TOOL_ID]
+const QUICK_SLOT_KINDS: Array[String] = [WEAPON_SLOT_KIND, GARDENING_ID, HAMMER_ID, BUILD_HOUSE_ID, UNBUILD_TOOL_ID]
 # Quickbar tabs are enlarged 35% over the base 56px slot so they read at the same scale as the
 # drop-up submenus that rise from them (see toolbuild.QUICK_MENU_SLOT_SIZE). Inventory backpack
 # slots keep the base size (see ItemSlot.setup).
@@ -113,8 +115,8 @@ func _setup_day_toggle() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
-	# Night disables hammer construction only. Gardening stays available.
-	if is_night and _selected_build_item_is_hammer():
+	# Night disables structural construction only. Gardening stays available.
+	if is_night and _selected_build_item_is_structural():
 		deactivate_quickbar()
 		clear_build_selection()
 		if equipped_weapon_id == "":
@@ -214,10 +216,10 @@ func activate_quickbar_slot(index: int) -> void:
 	_last_active_slot_index = index
 	# Opening a build-tool/weapon menu leaves unbuild mode.
 	_set_unbuild_selected(false)
-	# Opening a hammer/gardening menu drops any active build preview: the player must pick a
+	# Opening a build-tool menu drops any active build preview: the player must pick a
 	# buildable again, or close the menu back to weapon mode. Without this the ghost of the
 	# previously placed tool lingered under the freshly opened menu.
-	if kind == HAMMER_ID or kind == GARDENING_ID:
+	if kind in BUILD_TOOL_IDS:
 		selected_build_item_id = ""
 	_refresh_all_slots()
 
@@ -291,8 +293,8 @@ func _first_possessed_weapon_id() -> String:
 func _is_quickbar_slot_disabled(kind: String) -> bool:
 	if kind == WEAPON_SLOT_KIND:
 		return _first_possessed_weapon_id() == ""
-	# Hammer builds and unbuild removals are both blocked at night, so their slots grey out.
-	return GameState.is_night and (kind == HAMMER_ID or kind == UNBUILD_TOOL_ID)
+	# Structural builds and unbuild removals are blocked at night, so their slots grey out.
+	return GameState.is_night and (kind == HAMMER_ID or kind == BUILD_HOUSE_ID or kind == UNBUILD_TOOL_ID)
 
 ## The active quick item: explicit build preview first, otherwise the equipped weapon.
 func get_selected_quick_item_id() -> String:
@@ -338,10 +340,12 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 	return true
 
 func is_item_disabled_for_placement(item_id: String) -> bool:
-	return GameState.is_night and item_id in _hammer_buildable_ids()
+	return GameState.is_night and (item_id in _hammer_buildable_ids() or item_id in _house_buildable_ids())
 
-func _selected_build_item_is_hammer() -> bool:
-	return selected_build_item_id != "" and selected_build_item_id in _hammer_buildable_ids()
+func _selected_build_item_is_structural() -> bool:
+	if selected_build_item_id == "":
+		return false
+	return selected_build_item_id in _hammer_buildable_ids() or selected_build_item_id in _house_buildable_ids()
 
 # --- Build menu state --------------------------------------------------------
 
@@ -370,16 +374,16 @@ func is_build_mode_active() -> bool:
 func is_build_tool_selected() -> bool:
 	return is_build_menu_open() or is_build_mode_active()
 
-## True while one of the build-tool drop-up menus (gardening/hammer) is open.
+## True while one of the build-tool drop-up menus is open.
 func is_build_menu_open() -> bool:
 	var kind: String = get_active_menu_kind()
-	return kind == GARDENING_ID or kind == HAMMER_ID
+	return kind in BUILD_TOOL_IDS
 
-## The open build-tool menu's id (gardening/hammer), or "" when no build menu is open. The
+## The open build-tool menu's id, or "" when no build menu is open. The
 ## picker uses this to decide which buildables to offer and which quick slot to anchor to.
 func get_selected_build_tool_id() -> String:
 	var kind: String = get_active_menu_kind()
-	return kind if (kind == GARDENING_ID or kind == HAMMER_ID) else ""
+	return kind if kind in BUILD_TOOL_IDS else ""
 
 ## True while the gardening menu is open or a gardening buildable is active for placement.
 func is_gardening_selected() -> bool:
@@ -440,6 +444,8 @@ func _tool_offers_build_item(tool_id: String, item_id: String) -> bool:
 		return item_id in _gardening_buildable_ids()
 	if tool_id == HAMMER_ID:
 		return item_id in _hammer_buildable_ids()
+	if tool_id == BUILD_HOUSE_ID:
+		return item_id in _house_buildable_ids()
 	return false
 
 
@@ -449,6 +455,10 @@ func _gardening_buildable_ids() -> Array[String]:
 
 func _hammer_buildable_ids() -> Array[String]:
 	return _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
+
+
+func _house_buildable_ids() -> Array[String]:
+	return _string_names_to_strings(ItemCatalog.get_house_build_item_ids())
 
 
 func _string_names_to_strings(item_ids: Array[StringName]) -> Array[String]:
@@ -487,7 +497,7 @@ func get_quick_slot_left_x(index: int) -> float:
 	return _toolbar_slot_nodes[index].get_global_rect().position.x
 
 
-## Global-space rect for a quick slot kind ("weapon", "gardening", "hammer").
+## Global-space rect for a quick slot kind ("weapon", "gardening", "hammer", "buildhouse").
 func get_quick_slot_global_rect_for_kind(kind: String) -> Rect2:
 	var index: int = QUICK_SLOT_KINDS.find(kind)
 	if index < 0 or index >= _toolbar_slot_nodes.size():
@@ -676,6 +686,8 @@ func is_build_item_available(item_id: String) -> bool:
 	# is the owned count, so an empty stack simply greys the slot. Fixed-stock items are
 	# not shop items, so their picker visibility is independent from shop availability.
 	if ItemCatalog.is_inventory_backed(item_id):
+		if ItemCatalog.is_house_placeable(item_id):
+			return true
 		if ItemCatalog.is_fixed_stock(item_id):
 			return true
 		if loader != null and loader.has_method("get_loaded_tool_shop_available_items"):
@@ -1287,7 +1299,7 @@ func _setup_starting_inventory() -> void:
 		inventory_slots[i] = _empty_slot()
 	for weapon_id: StringName in _get_level_starting_weapons():
 		add_inventory(String(weapon_id), 1)
-	# The gardening/hammer tools are no longer inventory items; they are fixed quickbar menu
+	# The build tools are no longer inventory items; they are fixed quickbar menu
 	# slots shown unconditionally (see QUICK_SLOT_KINDS / _build_toolbar).
 	# Any non-weapon items the level grants at start (e.g. pasteque x10).
 	var starting_items: Dictionary = _get_level_starting_items()
@@ -1634,7 +1646,7 @@ func _refresh_all_slots() -> void:
 func _strip_non_backpack_items_from_inventory() -> void:
 	for i: int in range(inventory_slots.size()):
 		var item_id: String = _slot_item_id(inventory_slots[i])
-		if item_id == GARDENING_ID or item_id == HAMMER_ID or item_id == UNBUILD_TOOL_ID:
+		if item_id in BUILD_TOOL_IDS or item_id == UNBUILD_TOOL_ID:
 			inventory_slots[i] = _empty_slot()
 
 func _normalize_unique_weapons() -> void:
