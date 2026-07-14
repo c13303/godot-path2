@@ -84,6 +84,8 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	_buildings_by_cell[cell] = building_data
 	if item_def.has("turret_sprite_visual"):
 		_register_turret_sprite_runtime(cell, runtime_id, item_def)
+	elif item_def.get("building_visual_scene", null) is PackedScene:
+		_register_building_visual_scene_runtime(cell, runtime_id, item_def)
 	if runtime_id == "reservoir":
 		_register_reservoir_runtime(cell, runtime_id)
 	if light_source > 0.0:
@@ -153,6 +155,13 @@ func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
 		if str(data.get("item_id", "")) == item_id:
 			cells.append(cell)
 	return cells
+
+
+func get_runtime_node(cell: Vector2i) -> Node2D:
+	var node: Node2D = _runtime_nodes_by_cell.get(cell, null) as Node2D
+	if node != null and is_instance_valid(node):
+		return node
+	return null
 
 
 func count_buildings_by_item_id(item_id: String) -> int:
@@ -305,6 +314,26 @@ func _register_turret_sprite_runtime(cell: Vector2i, runtime_id: String, item_de
 	runtime_node.z_index = int(runtime_node.global_position.y)
 	parent.add_child(runtime_node)
 	runtime_node.call("setup", visual_def, direction)
+	_runtime_nodes_by_cell[cell] = runtime_node
+
+
+func _register_building_visual_scene_runtime(cell: Vector2i, runtime_id: String, item_def: Dictionary) -> void:
+	var parent: Node2D = _runtime_parent()
+	if not parent:
+		return
+	var scene: PackedScene = item_def.get("building_visual_scene", null) as PackedScene
+	if scene == null:
+		return
+	var runtime_node: Node2D = scene.instantiate() as Node2D
+	if runtime_node == null:
+		return
+	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.z_as_relative = false
+	runtime_node.global_position = _cell_center(cell)
+	runtime_node.z_index = int(runtime_node.global_position.y)
+	parent.add_child(runtime_node)
+	if runtime_node.has_method("reset_to_idle"):
+		runtime_node.call("reset_to_idle")
 	_runtime_nodes_by_cell[cell] = runtime_node
 
 func _runtime_parent() -> Node2D:

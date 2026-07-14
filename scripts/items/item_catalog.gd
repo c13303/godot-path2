@@ -3,6 +3,8 @@ class_name ItemCatalog
 
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
 const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_epine.png")
+const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_visual.tscn")
+const KRAKEN_DATA: Resource = preload("res://scripts/combat/kraken/kraken.tres")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
@@ -345,6 +347,29 @@ const ITEM_DEFS: Dictionary = {
 		},
 		"max_stack": 999,
 	},
+	"kraken": {
+		"id": "kraken",
+		"name": "Kraken Vine",
+		"currency": &"gem",
+		"type": "placeable",
+		"category": "trap",
+		"frame": 6,
+		"price": 20,
+		"target_layer": "traversable_buildings",
+		"atlas": INVISIBLE_BUILDING_MARKER_ATLAS,
+		"occupies_cell": true,
+		"blocks_movement": false,
+		"blocks_player_movement": false,
+		"blocks_projectiles": false,
+		"placement_surface": &"water_source",
+		"drag_buildable": false,
+		"pad_skip_preview": true,
+		"runtime_id": "kraken",
+		"building_visual_scene": KRAKEN_VISUAL_SCENE,
+		"kraken_data": KRAKEN_DATA,
+		"max_health": 1,
+		"max_stack": 999,
+	},
 	"rose_shop_counter": {
 		"id": "rose_shop_counter",
 		"name": "Rose Shop Counter",
@@ -484,9 +509,9 @@ static func get_gardening_shop_item_ids() -> Array[StringName]:
 		if str(item_def.get("type", "")) != "placeable":
 			continue
 		var category: String = str(item_def.get("category", ""))
-		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation":
+		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation" or category == "trap":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine"])
+	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"kraken"])
 
 static func get_hammer_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []

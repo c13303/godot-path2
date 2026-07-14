@@ -77,6 +77,9 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 		var turret_cells: Array[Vector2i] = [cell]
 		_draw_turret_sprite_preview_cells(previewbuild, turret_cells, placeable_def)
 		_preview_cells.append(cell)
+	elif _has_building_visual_scene(placeable_def):
+		_draw_building_visual_scene_preview(previewbuild, cell, placeable_def)
+		_preview_cells.append(cell)
 	elif _has_logical_plant_visual(placeable_def):
 		var plant_cells: Array[Vector2i] = [cell]
 		_draw_logical_plant_preview_cells(previewbuild, plant_cells, placeable_def)
@@ -148,8 +151,12 @@ func refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 	if previewbuild == null:
 		return
 	var blocker: Dictionary = _manager._turret_range_blocker_for_cell(_hover_cell, placeable_def)
+	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	var blocked: bool = not blocker.is_empty()
+	if target_layer != null and not _manager._is_valid_placeable_cell(_hover_cell, target_layer, placeable_def):
+		blocked = true
 	previewbuild.modulate = PREVIEW_FORBIDDEN_RANGE_COLOR if blocked else PREVIEW_NORMAL_COLOR
+	_set_preview_visual_modulate(PREVIEW_FORBIDDEN_RANGE_COLOR if blocked else PREVIEW_NORMAL_COLOR)
 
 
 func clear_hover() -> void:
@@ -439,6 +446,30 @@ func _draw_turret_sprite_preview_cells(previewbuild: TileMapLayer, cells: Array[
 		_preview_visuals.append(preview_visual)
 
 
+func _draw_building_visual_scene_preview(previewbuild: TileMapLayer, cell: Vector2i, placeable_def: Dictionary) -> void:
+	_clear_preview_visual()
+	var scene: PackedScene = placeable_def.get("building_visual_scene", null) as PackedScene
+	if scene == null:
+		return
+	var preview_visual: Node2D = scene.instantiate() as Node2D
+	if preview_visual == null:
+		return
+	preview_visual.name = "BuildingVisualPreview_%d_%d" % [cell.x, cell.y]
+	preview_visual.position = previewbuild.map_to_local(cell)
+	preview_visual.z_as_relative = false
+	preview_visual.z_index = PREVIEW_Z_INDEX
+	previewbuild.add_child(preview_visual)
+	if preview_visual.has_method("reset_to_idle"):
+		preview_visual.call("reset_to_idle")
+	_preview_visuals.append(preview_visual)
+
+
+func _set_preview_visual_modulate(color: Color) -> void:
+	for preview_visual: Node2D in _preview_visuals:
+		if preview_visual != null and is_instance_valid(preview_visual):
+			preview_visual.modulate = color
+
+
 func _draw_logical_plant_preview_cells(previewbuild: TileMapLayer, cells: Array[Vector2i], placeable_def: Dictionary) -> void:
 	_clear_preview_visual()
 	if str(placeable_def.get("plant_kind", "")) != PlantManager.PLANT_KIND_IMPERIAL:
@@ -480,6 +511,10 @@ func _clear_preview_visual() -> void:
 func _has_turret_sprite_visual(placeable_def: Dictionary) -> bool:
 	var visual_def: Dictionary = placeable_def.get("turret_sprite_visual", {}) as Dictionary
 	return not visual_def.is_empty()
+
+
+func _has_building_visual_scene(placeable_def: Dictionary) -> bool:
+	return placeable_def.get("building_visual_scene", null) is PackedScene
 
 
 func _has_logical_plant_visual(placeable_def: Dictionary) -> bool:

@@ -18,6 +18,7 @@
 [ext_resource type="Script" uid="uid://cv7jp6vpx4hh8" path="res://scripts/map/building_manager.gd" id="18_vt3yt"]
 [ext_resource type="Script" uid="uid://d3edhdcktbvkw" path="res://scripts/combat/fight_system.gd" id="19_gvmlv"]
 [ext_resource type="Script" uid="uid://b1e22fwbyfhns" path="res://scripts/combat/turret_system.gd" id="19_turret"]
+[ext_resource type="Script" path="res://scripts/combat/kraken/kraken_system.gd" id="19_kraken"]
 [ext_resource type="Script" uid="uid://y5eghj2cqur0" path="res://scripts/misc/tutorial.gd" id="20_7xko8"]
 [ext_resource type="Script" uid="uid://bjnkc6aqd1hij" path="res://scripts/ui/game_ui.gd" id="20_hamdt"]
 [ext_resource type="Script" uid="uid://ctxmkiji884l3" path="res://scripts/ui/hold_progress_circle.gd" id="20_hold_circle"]
@@ -834,6 +835,9 @@ script = ExtResource("19_gvmlv")
 [node name="turretSystem" type="Node2D" parent="fightSystem" unique_id=936456910]
 script = ExtResource("19_turret")
 
+[node name="krakenSystem" type="Node2D" parent="fightSystem"]
+script = ExtResource("19_kraken")
+
 [node name="GameUI" type="CanvasLayer" parent="." unique_id=1892661931]
 layer = 50
 script = ExtResource("20_hamdt")
@@ -1378,6 +1382,7 @@ script = ExtResource("28_g12xc")
 
 [node name="musicAutostart" type="Node" parent="." unique_id=1937632267]
 script = ExtResource("27_music_autostart")
+disable_music = true
 
 [node name="menus" type="Node" parent="." unique_id=586165781]
 script = ExtResource("35_ikr28")

@@ -41,6 +41,7 @@ var health: int = 100
 var _flash_time_left: float = 0.0
 var _dead: bool = false
 var _paused: bool = false
+var _external_capture_active: bool = false
 
 @export var use_native_steering: bool = true
 @export var max_speed: float = 100.0
@@ -120,6 +121,10 @@ func _process(delta: float) -> void:
 
 func take_damage(amount: int) -> bool:
 	if _dead or amount <= 0:
+		return false
+	if _external_capture_active:
+		_flash_time_left = FLASH_DURATION
+		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 		return false
 	if _is_damage_immune_agent() and status != "drowning":
 		_flash_time_left = FLASH_DURATION
@@ -343,6 +348,8 @@ func stop_eating() -> void:
 	_set_phase(PHASE_NONE)
 
 func start_drowning(seconds: float) -> void:
+	if _external_capture_active:
+		return
 	status = "drowning"
 	_eating_timer = 0.0
 	_clear_monster_held_rose()
@@ -400,6 +407,27 @@ func stop_waiting_new_status() -> void:
 	if status == "waiting_new_status":
 		status = ""
 		_set_phase(PHASE_NONE)
+
+
+func begin_external_capture() -> void:
+	_external_capture_active = true
+	status = "external_capture"
+	_eating_timer = 0.0
+	_clear_monster_held_rose()
+	_set_phase(PHASE_NONE)
+
+
+func end_external_capture() -> void:
+	if not _external_capture_active:
+		return
+	_external_capture_active = false
+	if status == "external_capture":
+		status = ""
+	_set_phase(PHASE_NONE)
+
+
+func is_external_capture_active() -> bool:
+	return _external_capture_active
 
 func start_angry() -> void:
 	status = "angry"

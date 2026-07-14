@@ -18,13 +18,33 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 	if not is_instance_valid(agent):
 		return
 	var is_client: bool = agent.is_in_group("clients")
-	var is_merchant: bool = agent.is_in_group("merchants")
-	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not is_merchant
+	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not agent.is_in_group("merchants")
 	var death_position: Vector2 = agent.global_position
 	if spawn_death_effects:
 		_manager.spawn_agent_death_burst(death_position)
 	if spawn_death_effects and awards_monster_drop:
 		_spawn_monster_death_drop(death_position)
+	_remove_dead_agent_without_drop(agent)
+
+
+func remove_dead_monster_with_forced_currency_drop(agent: Node2D, currency: StringName, landing_target: Vector2) -> void:
+	if not is_instance_valid(agent):
+		return
+	var death_position: Vector2 = agent.global_position
+	_manager.spawn_agent_death_burst(death_position)
+	_manager.spawn_collectible_currency_toward(currency, death_position, landing_target)
+	_remove_dead_agent_without_drop(agent)
+
+
+func _spawn_monster_death_drop(world_position: Vector2) -> void:
+	var seed_chance_percent: int = _manager._monster_death_drop_seed_chance_percent()
+	var seed_chance: float = float(clampi(seed_chance_percent, 0, 100)) / 100.0
+	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
+	_manager.spawn_collectible_currency(drop_type, world_position)
+
+
+func _remove_dead_agent_without_drop(agent: Node2D) -> void:
+	var is_merchant: bool = agent.is_in_group("merchants")
 	var nav_id: int = int(agent.get("nav_id"))
 	_manager._clear_removed_agent_state(nav_id)
 	_manager._unregister_nav_agent(nav_id)
@@ -35,10 +55,3 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 	agent.queue_free()
 	if is_merchant:
 		_manager._on_removed_merchant_agent(agent)
-
-
-func _spawn_monster_death_drop(world_position: Vector2) -> void:
-	var seed_chance_percent: int = _manager._monster_death_drop_seed_chance_percent()
-	var seed_chance: float = float(clampi(seed_chance_percent, 0, 100)) / 100.0
-	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
-	_manager.spawn_collectible_currency(drop_type, world_position)

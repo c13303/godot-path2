@@ -28,6 +28,30 @@ func resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dicti
 	resume_agent_after_turret_eating(nav_id, agent, resume_state)
 
 
+func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionary:
+	var resume_state: Dictionary = capture_agent_resume_state(nav_id, agent)
+	_detach_agent_navigation(nav_id)
+	_entry_path_agents().erase(nav_id)
+	_manager._erase_astar_in_agent(nav_id)
+	_manager._erase_eating_agent(nav_id)
+	_escaping_agents().erase(nav_id)
+	_client_counter_agents().erase(nav_id)
+	_manager.get_drowning_controller().clear_agent(nav_id)
+	_manager.get_drowning_controller().stop_splash(agent)
+	_manager.get_turret_eating_controller().clear_agent(nav_id)
+	_manager.get_agent_cell_tracker().suspend_agent(agent)
+	if agent.has_method("begin_external_capture"):
+		agent.call("begin_external_capture")
+	return resume_state
+
+
+func resume_agent_after_external_capture(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
+	if agent != null and is_instance_valid(agent) and agent.has_method("end_external_capture"):
+		agent.call("end_external_capture")
+	_manager.get_agent_cell_tracker().resume_agent(agent)
+	resume_agent_after_turret_eating(nav_id, agent, resume_state)
+
+
 func capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 	var entry_path_agents: Dictionary = _entry_path_agents()
 	if entry_path_agents.has(nav_id):

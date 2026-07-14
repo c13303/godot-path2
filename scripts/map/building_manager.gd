@@ -2313,6 +2313,12 @@ func _suspend_agent_for_turret_eating(nav_id: int) -> void:
 func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
 	_agent_suspend.resume_agent_after_turret_eating(nav_id, agent, resume_state)
 
+func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionary:
+	return _agent_suspend.suspend_agent_for_external_capture(nav_id, agent)
+
+func resume_agent_after_external_capture(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
+	_agent_suspend.resume_agent_after_external_capture(nav_id, agent, resume_state)
+
 # A devoured turret leaves the same debris tile a consumed rose does, so the cell
 # reads as "something was eaten here". plantz/blocking_buildings share one TileSet
 # and transform (see mainRun.tscn), so the turret cell maps directly and its source
@@ -2490,6 +2496,10 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 	_monster_death.remove_dead_monster(agent, spawn_death_effects)
 
 
+func remove_dead_monster_with_forced_currency_drop(agent: Node2D, currency: StringName, landing_target: Vector2) -> void:
+	_monster_death.remove_dead_monster_with_forced_currency_drop(agent, currency, landing_target)
+
+
 func spawn_agent_death_burst(world_position: Vector2) -> void:
 	if _ground_drop_manager != null:
 		_ground_drop_manager.spawn_agent_death_burst(world_position)
@@ -2503,6 +2513,17 @@ func spawn_plant_parts_burst(world_position: Vector2) -> void:
 func spawn_collectible_currency(currency: StringName, world_position: Vector2) -> void:
 	if _ground_drop_manager != null:
 		_ground_drop_manager.spawn_collectible_currency(currency, world_position)
+
+
+func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, landing_target: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_collectible_currency_toward(currency, origin, landing_target)
+
+
+func nearest_valid_dry_floor_world(origin: Vector2) -> Vector2:
+	if _ground_drop_manager == null:
+		return origin
+	return _ground_drop_manager.nearest_valid_dry_floor_world(origin)
 
 
 func _clear_removed_agent_state(nav_id: int) -> void:

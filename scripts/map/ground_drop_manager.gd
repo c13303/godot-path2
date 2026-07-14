@@ -31,6 +31,7 @@ const PICKUP_CHECK_INTERVAL: float = 0.06
 const FLOAT_AMPLITUDE: float = 3.0
 const FLOAT_SPEED: float = 1.65
 const LANDING_SEARCH_RADIUS_CELLS: int = 2
+const FORCED_LANDING_SEARCH_RADIUS_CELLS: int = 24
 const DEFAULT_POOL_SIZE: int = 36
 
 @export_range(0, 16, 1, "or_greater") var corpse_part_count: int = 3
@@ -84,6 +85,51 @@ func spawn_collectible_currency(currency: StringName, world_position: Vector2) -
 	sprite.centered = true
 	sprite.scale = Vector2(0.72, 0.72)
 	_activate_record(record)
+
+
+func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, landing_target: Vector2) -> void:
+	var record: Dictionary = _acquire_record()
+	_configure_record_base(record, KIND_COLLECTIBLE, origin)
+	record["currency"] = currency
+	record["state"] = STATE_FALLING
+	record["landing_target"] = landing_target
+	var offset: Vector2 = landing_target - origin
+	var travel_seconds: float = clampf(offset.length() / 260.0, 0.35, 0.85)
+	record["velocity"] = offset / travel_seconds
+	record["height"] = 8.0
+	record["vertical_velocity"] = GRAVITY * travel_seconds * 0.5
+	record["rotation_velocity"] = randf_range(-2.2, 2.2)
+	record["float_phase"] = randf_range(0.0, TAU)
+	record["pickup_pending"] = false
+	var sprite: Sprite2D = record["sprite"] as Sprite2D
+	sprite.texture = _currency_texture(currency)
+	sprite.centered = true
+	sprite.scale = Vector2(0.72, 0.72)
+	_activate_record(record)
+
+
+func nearest_valid_dry_floor_world(origin: Vector2) -> Vector2:
+	if _manager == null or _manager.floorz == null:
+		return origin
+	var origin_cell: Vector2i = _manager.floorz.local_to_map(_manager.floorz.to_local(origin))
+	var best_cell: Vector2i = Vector2i(2147483647, 2147483647)
+	var best_distance_squared: float = INF
+	for radius: int in range(0, FORCED_LANDING_SEARCH_RADIUS_CELLS + 1):
+		for y: int in range(origin_cell.y - radius, origin_cell.y + radius + 1):
+			for x: int in range(origin_cell.x - radius, origin_cell.x + radius + 1):
+				if radius > 0 and x != origin_cell.x - radius and x != origin_cell.x + radius and y != origin_cell.y - radius and y != origin_cell.y + radius:
+					continue
+				var cell: Vector2i = Vector2i(x, y)
+				if not _is_valid_dry_landing_cell(cell):
+					continue
+				var candidate: Vector2 = _manager.cell_center(cell)
+				var distance_squared: float = candidate.distance_squared_to(origin)
+				if distance_squared < best_distance_squared:
+					best_distance_squared = distance_squared
+					best_cell = cell
+		if best_cell != Vector2i(2147483647, 2147483647):
+			return _manager.cell_center(best_cell)
+	return origin
 
 
 func serialize_state() -> Array[Dictionary]:
@@ -192,6 +238,7 @@ func _process_record(record: Dictionary, delta: float) -> void:
 
 func _process_falling(record: Dictionary, delta: float) -> void:
 	var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
+	var previous_ground_position: Vector2 = ground_position
 	var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
 	var height: float = float(record.get("height", 0.0))
 	var vertical_velocity: float = float(record.get("vertical_velocity", 0.0))
@@ -206,6 +253,10 @@ func _process_falling(record: Dictionary, delta: float) -> void:
 	height += vertical_velocity * delta
 	if height <= 0.0:
 		height = 0.0
+		if record.has("landing_target"):
+			ground_position = record["landing_target"] as Vector2
+			_rest_record(record, ground_position)
+			return
 		ground_position = _resolve_landing_position(ground_position)
 		if absf(vertical_velocity) <= rest_vertical_speed and velocity.length() <= rest_horizontal_speed:
 			_rest_record(record, ground_position)
@@ -221,6 +272,13 @@ func _process_falling(record: Dictionary, delta: float) -> void:
 	record["height"] = height
 	record["vertical_velocity"] = vertical_velocity
 	record["rotation"] = spin + rotation_velocity * delta
+	if record.has("landing_target"):
+		var landing_target: Vector2 = record["landing_target"] as Vector2
+		var previous_distance: float = previous_ground_position.distance_squared_to(landing_target)
+		var current_distance: float = ground_position.distance_squared_to(landing_target)
+		if current_distance <= 16.0 or current_distance > previous_distance:
+			_rest_record(record, landing_target)
+			return
 	if height <= REST_HEIGHT_EPSILON and velocity.length() <= rest_horizontal_speed and absf(vertical_velocity) <= rest_vertical_speed:
 		_rest_record(record, _resolve_landing_position(ground_position))
 
@@ -381,6 +439,7 @@ func _release_record(record: Dictionary) -> void:
 	record["active"] = false
 	record["kind"] = &""
 	record["state"] = &""
+	record.erase("landing_target")
 	var root: Node2D = record["root"] as Node2D
 	if root != null:
 		root.visible = false
@@ -450,6 +509,14 @@ func _is_blocked_world(world_position: Vector2) -> bool:
 	if _manager == null or not _manager.has_method("is_ground_drop_blocked_world"):
 		return false
 	return bool(_manager.call("is_ground_drop_blocked_world", world_position))
+
+
+func _is_valid_dry_landing_cell(cell: Vector2i) -> bool:
+	if _manager == null:
+		return false
+	if _manager.watersources != null and _manager.watersources.get_cell_source_id(cell) >= 0:
+		return false
+	return not _manager.is_ground_drop_blocked_cell(cell)
 
 
 func _part_texture(atlas: Texture2D, frame_index: int) -> AtlasTexture:

@@ -389,6 +389,8 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 		var enemy: Node2D = raw_enemy as Node2D
 		if enemy == null or not is_instance_valid(enemy):
 			continue
+		if enemy.has_method("is_external_capture_active") and bool(enemy.call("is_external_capture_active")):
+			continue
 		var enemy_cell: Vector2i = layer.local_to_map(layer.to_local(enemy.global_position))
 		var offset: Vector2i = enemy_cell - turret_cell
 		var step: int = _line_step_for_offset(offset, direction)
@@ -419,6 +421,8 @@ func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_
 	for raw_enemy: Node in get_tree().get_nodes_in_group(&"monsters"):
 		var enemy: Node2D = raw_enemy as Node2D
 		if enemy == null or not is_instance_valid(enemy):
+			continue
+		if enemy.has_method("is_external_capture_active") and bool(enemy.call("is_external_capture_active")):
 			continue
 		var distance_squared: float = origin.distance_squared_to(enemy.global_position)
 		if distance_squared <= nearest_distance_squared and _turret_can_see_world_position(turret_cell, enemy.global_position):

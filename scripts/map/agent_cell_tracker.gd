@@ -19,6 +19,8 @@ var _agents: Dictionary = {}
 var _cell_to_agents: Dictionary = {}
 # instance_id -> true for agents that need continuous water reevaluation.
 var _water_candidates: Dictionary = {}
+# instance_id -> true while an external gameplay owner controls the agent transform.
+var _suspended: Dictionary = {}
 # FIFO dedup queue of instance_ids pending an interaction check.
 var _queue: Array[int] = []
 var _queued: Dictionary = {}
@@ -61,6 +63,40 @@ func unregister(agent: Node2D) -> void:
 	_remove_id(agent.get_instance_id())
 
 
+func suspend_agent(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
+	var id: int = agent.get_instance_id()
+	if not _agents.has(id):
+		return
+	var record: Dictionary = _agents[id] as Dictionary
+	var cell: Vector2i = record["cell"] as Vector2i
+	if cell != INVALID_CELL:
+		_reindex(id, cell, INVALID_CELL)
+		record["cell"] = INVALID_CELL
+	_suspended[id] = true
+	_water_candidates.erase(id)
+	_queued.erase(id)
+	_general_checked_this_frame.erase(id)
+	_erase_from_queue(id)
+
+
+func resume_agent(agent: Node2D) -> void:
+	if agent == null or not is_instance_valid(agent):
+		return
+	var id: int = agent.get_instance_id()
+	if not _agents.has(id):
+		return
+	_suspended.erase(id)
+	refresh_agent(agent)
+
+
+func is_agent_suspended(agent: Node2D) -> bool:
+	if agent == null or not is_instance_valid(agent):
+		return false
+	return _suspended.has(agent.get_instance_id())
+
+
 func request_recheck(agent: Node2D) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
@@ -77,6 +113,8 @@ func refresh_agent(agent: Node2D) -> void:
 		return
 	var id: int = agent.get_instance_id()
 	if not _agents.has(id):
+		return
+	if _suspended.has(id):
 		return
 	var record: Dictionary = _agents[id] as Dictionary
 	var cell: Vector2i = _current_floor_cell(agent)
@@ -135,6 +173,7 @@ func clear() -> void:
 	_agents.clear()
 	_cell_to_agents.clear()
 	_water_candidates.clear()
+	_suspended.clear()
 	_queue.clear()
 	_queued.clear()
 	_general_checked_this_frame.clear()
@@ -169,6 +208,8 @@ func _poll_transitions() -> void:
 	var dead: Array[int] = []
 	for raw_id: Variant in _agents:
 		var id: int = int(raw_id)
+		if _suspended.has(id):
+			continue
 		var record: Dictionary = _agents[id] as Dictionary
 		var agent: Node2D = (record["ref"] as WeakRef).get_ref() as Node2D
 		if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():
@@ -197,6 +238,8 @@ func _drain_queue(delta: float) -> void:
 		var id: int = _queue[i]
 		if not _queued.has(id):
 			continue
+		if _suspended.has(id):
+			continue
 		var record: Dictionary = _agents.get(id, {}) as Dictionary
 		if record.is_empty():
 			continue
@@ -222,6 +265,9 @@ func _tick_water_candidates(delta: float) -> void:
 	var invalid_seen: bool = false
 	for raw_id: Variant in _water_candidates.keys():
 		var id: int = int(raw_id)
+		if _suspended.has(id):
+			dead.append(id)
+			continue
 		if _general_checked_this_frame.has(id):
 			continue
 		var record: Dictionary = _agents.get(id, {}) as Dictionary
@@ -308,6 +354,7 @@ func _remove_id(id: int) -> void:
 				_cell_to_agents.erase(cell)
 	_agents.erase(id)
 	_water_candidates.erase(id)
+	_suspended.erase(id)
 	_queued.erase(id)
 	_general_checked_this_frame.erase(id)
 	_erase_from_queue(id)
@@ -324,3 +371,33 @@ func _current_floor_cell(agent: Node2D) -> Vector2i:
 	if floor_layer == null:
 		return INVALID_CELL
 	return floor_layer.local_to_map(floor_layer.to_local(agent.global_position))
+
+
+func get_agents_in_world_radius(center: Vector2, radius: float, category: StringName) -> Array[Node2D]:
+	var result: Array[Node2D] = []
+	if _manager == null or _manager.floorz == null or radius <= 0.0:
+		return result
+	var floor_layer: TileMapLayer = _manager.floorz
+	var tile_size: Vector2i = floor_layer.tile_set.tile_size if floor_layer.tile_set != null else Vector2i(32, 32)
+	var cell_radius: int = ceili(radius / maxf(1.0, float(maxi(tile_size.x, tile_size.y))))
+	var center_cell: Vector2i = floor_layer.local_to_map(floor_layer.to_local(center))
+	var radius_squared: float = radius * radius
+	for y: int in range(center_cell.y - cell_radius, center_cell.y + cell_radius + 1):
+		for x: int in range(center_cell.x - cell_radius, center_cell.x + cell_radius + 1):
+			var cell: Vector2i = Vector2i(x, y)
+			var bucket: Dictionary = _cell_to_agents.get(cell, {}) as Dictionary
+			if bucket.is_empty():
+				continue
+			for raw_id: Variant in bucket.keys():
+				var id: int = int(raw_id)
+				if _suspended.has(id):
+					continue
+				var record: Dictionary = _agents.get(id, {}) as Dictionary
+				if record.is_empty() or (record["category"] as StringName) != category:
+					continue
+				var agent: Node2D = (record["ref"] as WeakRef).get_ref() as Node2D
+				if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():
+					continue
+				if agent.global_position.distance_squared_to(center) <= radius_squared:
+					result.append(agent)
+	return result

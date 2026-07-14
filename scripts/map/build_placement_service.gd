@@ -8,6 +8,9 @@ const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 const ALERT_NON_BUILDABLE_FLOOR_KEY: String = "alert.non_buildable_floor"
+const ALERT_NEEDS_WATER_KEY: String = "alert.needs_water"
+const PLACEMENT_SURFACE_BUILDABLE_FLOOR: StringName = &"buildable_floor"
+const PLACEMENT_SURFACE_WATER_SOURCE: StringName = &"water_source"
 const FENCE_ITEM_ID: String = "fence"
 
 var _manager: BuildSystem
@@ -46,7 +49,10 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		return
 
 	if not is_valid_placeable_cell(cell, target_layer, placeable_def):
-		if not is_buildable_floor_cell(cell):
+		if placement_surface(placeable_def) == PLACEMENT_SURFACE_WATER_SOURCE and not is_water_source_cell(cell):
+			_show_tutorial_alert(ALERT_NEEDS_WATER_KEY)
+			return
+		if placement_surface(placeable_def) == PLACEMENT_SURFACE_BUILDABLE_FLOOR and not is_buildable_floor_cell(cell):
 			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
 			return
 		if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
@@ -295,17 +301,26 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 
 
 func is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
-	if is_water_source_cell(cell):
-		return false
-	if not is_buildable_floor_cell(cell):
-		return false
-	if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
-		return false
-	if bool(placeable_def.get("requires_walkable_floor", false)) and not is_free_walkable_cell(cell):
-		return false
+	var surface: StringName = placement_surface(placeable_def)
+	if surface == PLACEMENT_SURFACE_WATER_SOURCE:
+		if not is_water_source_cell(cell):
+			return false
+	else:
+		if is_water_source_cell(cell):
+			return false
+		if not is_buildable_floor_cell(cell):
+			return false
+		if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
+			return false
+		if bool(placeable_def.get("requires_walkable_floor", false)) and not is_free_walkable_cell(cell):
+			return false
 	if not turret_range_blocker_for_cell(cell, placeable_def).is_empty():
 		return false
 	return not is_placeable_occupied(cell, target_layer, placeable_def)
+
+
+func placement_surface(placeable_def: Dictionary) -> StringName:
+	return StringName(placeable_def.get("placement_surface", PLACEMENT_SURFACE_BUILDABLE_FLOOR))
 
 
 func is_logical_plant(placeable_def: Dictionary) -> bool:

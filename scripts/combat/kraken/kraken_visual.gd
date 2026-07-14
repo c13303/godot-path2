@@ -75,6 +75,7 @@ var _grab_preparation_start_points: PackedVector2Array = PackedVector2Array()
 var _grab_extension_start_points: PackedVector2Array = PackedVector2Array()
 var _contact_emitted: bool = false
 var _finish_emitted: bool = false
+var _animation_paused: bool = false
 
 
 func _ready() -> void:
@@ -85,6 +86,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _animation_paused:
+		return
 	var safe_delta: float = maxf(0.0, delta)
 	_idle_time += safe_delta
 	_state_time += safe_delta
@@ -127,6 +130,13 @@ func play_grab_retract(target_global_position: Vector2) -> void:
 	_finish_emitted = false
 
 
+func update_grab_target_global_position(target_global_position: Vector2) -> void:
+	if _state != STATE_GRAB_PREPARING and _state != STATE_GRAB_EXTENDING:
+		return
+	var target_local: Vector2 = to_local(target_global_position)
+	_grab_target = _clamp_to_reach(target_local)
+
+
 func play_eating() -> void:
 	_capture_eating_start_pose()
 	_state = STATE_EATING
@@ -162,6 +172,10 @@ func get_animation_state() -> StringName:
 
 func get_effective_maximum_grab_reach() -> float:
 	return minf(maximum_grab_reach, maximum_stretched_segment_spacing * float(MOVABLE_SEGMENT_COUNT))
+
+
+func set_animation_paused(paused: bool) -> void:
+	_animation_paused = paused
 
 
 func _setup_segment_points() -> void:
