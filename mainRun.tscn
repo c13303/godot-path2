@@ -56,7 +56,9 @@
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
 [ext_resource type="Theme" uid="uid://bhpuo5gdtyiwu" path="res://assets/themes/number_theme.tres" id="50_number_theme"]
-[ext_resource type="Script" uid="uid://pathprevctrl001" path="res://scripts/map/path_preview_controller.gd" id="51_path_preview"]
+[ext_resource type="Script" uid="uid://b1ma6ecjehdsq" path="res://scripts/map/path_preview_controller.gd" id="51_path_preview"]
+[ext_resource type="PackedScene" path="res://scenes/dialog.tscn" id="60_dialog"]
+[ext_resource type="Script" uid="uid://bmh7gdxndafa6" path="res://scripts/ui/merchant_dialog_controller.gd" id="61_mdc"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -692,12 +694,12 @@ script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+debug_enabled = true
 dev_keys = true
-draw_bottleneck_zones = false
 refresh_interval = 0.0
 draw_flow_field = true
 verbose = true
-show_gardens = false
+show_enters_exits = true
 monster_eating_time = 1.0
 debug_gardens_lag_ms = 35.0
 
@@ -755,7 +757,7 @@ script = ExtResource("12_t6n3k")
 
 [node name="MonTilemap" type="Node" parent="Map" unique_id=62371074]
 
-[node name="PathPreview" type="Node2D" parent="Map/MonTilemap"]
+[node name="PathPreview" type="Node2D" parent="Map/MonTilemap" unique_id=587246300]
 script = ExtResource("51_path_preview")
 
 [node name="plantz" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1102024521]
@@ -1370,6 +1372,16 @@ offset_bottom = 300.0
 grow_horizontal = 0
 mouse_filter = 2
 script = ExtResource("45_s6agy")
+
+[node name="MerchantDialogController" type="Node" parent="GameUI" unique_id=343104799 node_paths=PackedStringArray("dialog", "game_ui", "player_controller", "building_manager")]
+script = ExtResource("61_mdc")
+dialog = NodePath("../Dialog")
+game_ui = NodePath("..")
+player_controller = NodePath("../../Player/PlayerController")
+building_manager = NodePath("../../Map/BuildingManager")
+
+[node name="Dialog" parent="GameUI" unique_id=2138026225 instance=ExtResource("60_dialog")]
+visible = false
 
 [node name="progression" type="Node" parent="." unique_id=1463723645]
 script = ExtResource("22_m1b8m")

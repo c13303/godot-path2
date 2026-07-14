@@ -15,6 +15,7 @@ const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var toolbuild: Control = $"../../GameUI/Toolbuild"
+@onready var merchant_dialog_controller: Node = $"../../GameUI/MerchantDialogController"
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
@@ -315,23 +316,9 @@ func _update_pad_navigation_input() -> void:
 		or (up_pressed and not _dpad_up_pressed)
 		or (down_pressed and not _dpad_down_pressed)
 	)
-	# While the seed-merchant shop is open it owns the whole d-pad: every direction browses its
-	# vertical item list (left/up step up, right/down step down) and quick-slot switching is
-	# suppressed so the shop keeps focus until it closes. This takes priority over an active
-	# build preview, which can still exist underneath the merchant modal.
-	if _is_merchant_shop_open():
-		var merchant_step: int = 0
-		if (up_pressed and not _dpad_up_pressed) or (left_pressed and not _dpad_left_pressed):
-			merchant_step = -1
-		elif (down_pressed and not _dpad_down_pressed) or (right_pressed and not _dpad_right_pressed):
-			merchant_step = 1
-		if merchant_step != 0:
-			_step_pad_shop_selection(merchant_step)
-		_dpad_left_pressed = left_pressed
-		_dpad_right_pressed = right_pressed
-		_dpad_up_pressed = up_pressed
-		_dpad_down_pressed = down_pressed
-		return
+	# The seed-merchant dialog is modal and locks gameplay input while open, so this per-frame
+	# quick-slot navigation does not run underneath it; the dialog owns its own d-pad/stick
+	# selection.
 	if _pad_build_cursor_mode_active():
 		_dpad_left_pressed = left_pressed
 		_dpad_right_pressed = right_pressed
@@ -363,7 +350,7 @@ func _step_pad_shop_selection(direction: int) -> void:
 		toolbuild.call("step_pad_selection", direction)
 
 func _is_merchant_shop_open() -> bool:
-	return toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open"))
+	return merchant_dialog_controller != null and merchant_dialog_controller.has_method("is_shop_open") and bool(merchant_dialog_controller.call("is_shop_open"))
 
 func _should_pad_open_quickbar_from_dpad() -> bool:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
@@ -394,11 +381,6 @@ func _handle_pad_accept() -> void:
 
 func _handle_pad_cancel() -> void:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
-		return
-	# The seed-merchant shop owns B while it is open: close the shop and do not fall through to
-	# quickbar or unbuild handling underneath it.
-	if _is_merchant_shop_open():
-		_try_toggle_merchant_shop()
 		return
 	if _is_quickbar_active():
 		_clear_build_selection()
@@ -816,9 +798,9 @@ func _active_quickbar_menu_kind() -> String:
 func _try_toggle_merchant_shop() -> bool:
 	if _paused or _is_inventory_open():
 		return false
-	if toolbuild == null or not toolbuild.has_method("toggle_merchant_shop"):
+	if merchant_dialog_controller == null or not merchant_dialog_controller.has_method("request_shop_toggle"):
 		return false
-	return bool(toolbuild.call("toggle_merchant_shop"))
+	return bool(merchant_dialog_controller.call("request_shop_toggle"))
 
 
 func _deactivate_quickbar() -> void:
@@ -913,6 +895,9 @@ func set_cutscene_input_locked(locked: bool) -> void:
 	if locked:
 		_stop_rush()
 		_right_stick_weapon_active = false
+
+func is_cutscene_input_locked() -> bool:
+	return _cutscene_input_locked
 
 func is_paused() -> bool:
 	return _paused

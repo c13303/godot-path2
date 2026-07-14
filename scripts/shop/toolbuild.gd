@@ -2,45 +2,36 @@ extends Control
 
 ## The build picker is the building picker for build mode. It is open exactly while a build
 ## tool (gardening, hammer, or buildhouse) is the selected quick slot (see
-## game_ui.get_selected_build_tool_id)
-## and during the day; selecting any other quick slot closes it. The active tool decides which
-## buildables it lists: gardening offers rose/ronce/pasteque/turrets, hammer offers
-## counter/wall/fence, and buildhouse offers owned house placeables. The seed merchant column
-## is opt-in: standing at the merchant shows a prompt (merchant_prompt.gd) and the player
-## opens/closes the column with the interact button (see toggle_merchant_shop); while it is
-## open it takes over from the build/weapon columns.
-## It renders as a vertical column
-## rising up out of the active tool's quick slot, like a dropdown that opens upward:
-## one icon per buildable, with the build price overlaid where the quantity badge would
-## be. The rose shop counter uses that same badge for its remaining fixed stock. A single
-## floating label sits just to the right of the currently selected icon only, showing that
-## buildable's name. The floating label has a transparent background and ignores all mouse
-## events. Unaffordable / unavailable buildables are greyed out like disabled quick slots,
-## and the floating label turns red when the selected buildable cannot be placed.
+## game_ui.get_selected_build_tool_id) and during the day; selecting any other quick slot
+## closes it. The active tool decides which buildables it lists: gardening offers
+## rose/ronce/pasteque/turrets, hammer offers counter/wall/fence, and buildhouse offers owned
+## house placeables.
+## It renders as a vertical column rising up out of the active tool's quick slot, like a
+## dropdown that opens upward: one icon per buildable, with the build price overlaid where the
+## quantity badge would be. The rose shop counter uses that same badge for its remaining fixed
+## stock. A single floating label sits just to the right of the currently selected icon only,
+## showing that buildable's name. The floating label has a transparent background and ignores
+## all mouse events. Unaffordable / unavailable buildables are greyed out like disabled quick
+## slots, and the floating label turns red when the selected buildable cannot be placed.
 ## Clicking a slot selects it for placement and closes the quickbar into build preview mode.
+## Slot 0 opens the weapon picker instead: a drop-up menu of possessed weapons; selecting one
+## equips it. The seed merchant shop is a separate modal owned by MerchantDialogController.
 
 const COUNTER_ID: String = "rose_shop_counter"
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 # Numeric font theme for the slot count/price badges (icon + number), distinct from body text.
 const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
-const SLOT_SIZE: Vector2 = Vector2(56.0, 56.0)
 # The quickbar drop-up submenus (weapon + build/garden/hammer) use a larger frame so their
 # buildable icons read 35% bigger than the base slot, matching the enlarged quickbar tabs.
 # The icon inset scales with the frame (8 -> 11) so the icon stays centred and the 35% ratio
-# holds (40px -> 54px icon area). The merchant shop grid keeps SLOT_SIZE.
+# holds (40px -> 54px icon area).
 const QUICK_MENU_SLOT_SIZE: Vector2 = Vector2(76.0, 76.0)
 const QUICK_MENU_ICON_INSET: float = 11.0
-# The merchant column is laid out as an aligned grid: icon | name | price.
-const MERCHANT_COLUMNS: int = 3
 const DROPUP_GAP: float = 0.0
 # Left inset from the panel edge to the first slot (panel border + margin_left), so the
 # column's slots can be centred on the toolbuild icon.
 const BAR_CONTENT_INSET: float = 10.0
-# Y offset (from the top) of the seed-merchant column's top, placing it just below the
-# tutorial hint text (GameUI/top anchor/tutorial spans roughly down to y ~240).
-const SEED_MERCHANT_BAR_TOP: float = 250.0
-const PASTEQUE_ID: String = "pasteque"
 # The build picker is opened by quick-bar build tools, each offering its own buildables. The
 # active tool (game_ui.get_selected_build_tool_id) decides which set is shown and anchored to.
 const GARDENING_TOOL_ID: String = "gardening"
@@ -50,10 +41,6 @@ const BUILD_HOUSE_TOOL_ID: String = "buildhouse"
 const WEAPON_MENU_KIND: String = "weapon"
 const WEAPON_MENU_SLOT_INDEX: int = 0
 const SEED_ITEM_ID: String = "seed"
-# The seed-merchant column also carries inventory-backed buildables (pasteque),
-# which are bought here and later placed from the gardening column above.
-const SPECIAL_REWARD_PAD_ID: String = "__special_reward__"
-const SPECIAL_REWARD_PAD_PREFIX: String = "__special_reward__:"
 const SELECTED_LABEL_COLOR: Color = Color(0.92, 0.88, 0.78)
 const SELECTED_DISABLED_LABEL_COLOR: Color = Color(0.85, 0.25, 0.25)
 
@@ -67,11 +54,6 @@ var _last_picked_by_tool: Dictionary = {}
 # The build tool whose column is currently shown, so a tool switch (gardening<->hammer) while
 # the picker stays open re-runs the open/default-selection logic for the new tool.
 var _shown_build_tool_id: String = ""
-var _selected_merchant_item_id: String = ""
-# True while the player has actively opened the merchant shop with the interact button
-# (E / pad Y). Standing next to the merchant only shows the prompt; the column stays hidden
-# until this is set. Cleared when the shop is closed or the player leaves the merchant.
-var _merchant_shop_open_requested: bool = false
 # The level must open with the toolbuild showing rose. Consumed on the first toolbuild picker
 # open so the counter-preference / last-picked logic resumes on every later open.
 var _level_start_default_pending: bool = true
@@ -91,16 +73,8 @@ var _weapon_buttons: Dictionary = {}
 var _weapon_icons: Dictionary = {}
 var _weapon_names: Dictionary = {}
 var _weapon_signature: String = ""
-var _merchant_column: VBoxContainer
-# The merchant column's background panel, tracked so the floating close cross can be pinned to
-# its bottom-right corner each frame.
-var _merchant_panel: PanelContainer
-# The close (X) button pinned to the merchant modal's bottom-right corner; closes the shop.
-var _merchant_close_button: Button
-# A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime:
-# vertical stack for the toolbuild picker, horizontal bar for the seed-merchant sale.
+# A plain BoxContainer (not VBox/HBox) so its `vertical` axis can be flipped at runtime.
 var _items_list: BoxContainer
-var _merchant_items_list: GridContainer
 var _currency_icons: Dictionary = {}
 # item id -> its row / slot Button / icon TextureRect / affordable-count Label.
 var _slot_rows: Dictionary = {}
@@ -109,9 +83,8 @@ var _slot_icons: Dictionary = {}
 var _slot_counts: Dictionary = {}
 # item id -> the small currency icon shown right after the price in each slot's badge.
 var _slot_currencies: Dictionary = {}
-# item id -> its persistent per-row label group (name + price + currency icon) and its
-# parts. Only shown during the seed/weapon merchant column; hidden in build phase, which
-# uses the single floating label below instead.
+# item id -> its persistent per-row label group (name + price + currency icon) and its parts.
+# Hidden in build phase, which uses the single floating label below instead.
 var _row_labels: Dictionary = {}
 var _row_names: Dictionary = {}
 var _row_prices: Dictionary = {}
@@ -124,22 +97,6 @@ var _hovered_item_id: String = ""
 # item id -> last applied [selected, disabled] state, so styles are only rebuilt on
 # change instead of every frame.
 var _slot_state: Dictionary = {}
-# Per item id: the four aligned grid cells (icon button, name, quantity, price group) so a
-# whole row's visibility can be toggled together, plus the parts refilled each refresh.
-var _merchant_row_cells: Dictionary = {}
-var _merchant_slot_buttons: Dictionary = {}
-var _merchant_slot_icons: Dictionary = {}
-var _merchant_row_names: Dictionary = {}
-var _merchant_row_prices: Dictionary = {}
-var _merchant_row_currencies: Dictionary = {}
-var _merchant_slot_state: Dictionary = {}
-# The free "special reward" is rendered as one grid row per granted currency, pinned above
-# the item rows. These cells are rebuilt whenever the offer changes and moved ahead of the
-# item rows; _reward_cells tracks them so they can be removed on the next rebuild.
-var _reward_cells: Array[Control] = []
-# Signature of the currently rendered reward contents, so they are only rebuilt when
-# the offered reward changes instead of every frame.
-var _special_reward_signature: String = ""
 
 
 func _ready() -> void:
@@ -157,36 +114,23 @@ func _ready() -> void:
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	if not GameState.afternoon_phase_changed.is_connected(_on_afternoon_phase_changed):
 		GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
-	if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
-		GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
 	_set_toolbuild_open(false)
 	set_process(true)
 
 
 ## Toolbuild picker visibility is derived from the quick-bar selection: open only while the
-## Build tool is the selected quick slot and building is currently allowed.
+## Build tool is the selected quick slot and building is currently allowed. The weapon picker
+## opens instead when slot 0 (weapons) is the active menu.
 func _process(_delta: float) -> void:
-	# Standing at the merchant during its phase only arms the shop; the column itself opens once
-	# the player presses the interact button (see toggle_merchant_shop). Leaving the merchant
-	# disarms it so re-approaching shows the prompt again instead of re-opening the shop.
-	var merchant_active: bool = _is_seed_merchant_shop_active()
-	if not merchant_active and _merchant_shop_open_requested:
-		_merchant_shop_open_requested = false
-	var merchant_should_show: bool = merchant_active and _merchant_shop_open_requested
 	var menu_kind: String = _active_menu_kind()
 	var build_tool_id: String = _selected_build_tool_id()
 	var build_should_show: bool = (
 		build_tool_id != ""
 		and not _tool_blocked_by_night(build_tool_id)
-		and not merchant_should_show
 	)
-	# The weapons menu is available day and night (weapons are wielded at night); it only yields
-	# to the seed-merchant column.
-	var weapon_should_show: bool = (
-		menu_kind == WEAPON_MENU_KIND
-		and not merchant_should_show
-	)
-	visible = build_should_show or merchant_should_show or weapon_should_show
+	# The weapons menu is available day and night (weapons are wielded at night).
+	var weapon_should_show: bool = menu_kind == WEAPON_MENU_KIND
+	visible = build_should_show or weapon_should_show
 	# Open on first show, and re-open when the active tool changes while already open so the
 	# column re-anchors and picks a valid default for the newly selected tool.
 	if build_should_show and _toolbuild_column != null and (not _toolbuild_column.visible or build_tool_id != _shown_build_tool_id):
@@ -201,10 +145,6 @@ func _process(_delta: float) -> void:
 		_weapon_column.visible = false
 		_selected_weapon_item_id = ""
 		_reset_hover_label()
-	if merchant_should_show:
-		_open_merchant_shop()
-	elif _merchant_column != null and _merchant_column.visible:
-		_close_merchant_shop()
 	if _toolbuild_column != null and _toolbuild_column.visible:
 		_apply_phase_layout()
 		_refresh_slots()
@@ -214,11 +154,6 @@ func _process(_delta: float) -> void:
 		_refresh_weapon_menu()
 		_update_weapon_column_anchor()
 		_update_hover_label()
-	if _merchant_column != null and _merchant_column.visible:
-		_apply_merchant_layout()
-		_refresh_merchant_slots()
-		_update_hover_label()
-		_update_merchant_close_button()
 
 
 ## The kind of quickbar menu game_ui currently has open, or "".
@@ -242,7 +177,6 @@ func _build_ui() -> void:
 	column.add_child(_build_bar())
 	_build_selected_label()
 	_build_weapon_ui()
-	_build_merchant_ui()
 	move_child(_selected_label, get_child_count() - 1)
 	_apply_phase_layout()
 
@@ -393,180 +327,6 @@ func _update_weapon_column_anchor() -> void:
 	_weapon_column.offset_right = left
 
 
-func _build_merchant_ui() -> void:
-	var column: VBoxContainer = VBoxContainer.new()
-	_merchant_column = column
-	column.name = "MerchantColumn"
-	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_theme_constant_override("separation", 6)
-	column.alignment = BoxContainer.ALIGNMENT_BEGIN
-	add_child(column)
-
-	var panel: PanelContainer = PanelContainer.new()
-	_merchant_panel = panel
-	panel.name = "MerchantBarPanel"
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	panel.add_theme_stylebox_override("panel", _bar_background_style())
-	column.add_child(panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 8)
-	margin.add_theme_constant_override("margin_top", 6)
-	margin.add_theme_constant_override("margin_right", 8)
-	margin.add_theme_constant_override("margin_bottom", 6)
-	panel.add_child(margin)
-
-	var grid: GridContainer = GridContainer.new()
-	_merchant_items_list = grid
-	grid.name = "MerchantItemsGrid"
-	grid.columns = MERCHANT_COLUMNS
-	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 6)
-	margin.add_child(grid)
-
-	for item_id: String in _merchant_item_ids():
-		_build_merchant_item_cells(grid, item_id)
-	column.visible = false
-	_build_merchant_close_button()
-
-
-## The floating close (X) button pinned to the merchant modal's bottom-right corner. It lives on
-## the toolbuild root (a non-container, mouse-pass-through Control) so it can be positioned freely
-## over the auto-sized merchant panel without the panel's container stretching it.
-func _build_merchant_close_button() -> void:
-	var button: Button = Button.new()
-	_merchant_close_button = button
-	button.name = "MerchantCloseButton"
-	button.text = "X"
-	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(28.0, 28.0)
-	button.add_theme_font_size_override("font_size", 16)
-	button.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	button.pressed.connect(_on_merchant_close_pressed)
-	_apply_slot_style(button, false, false)
-	button.visible = false
-	add_child(button)
-
-
-func _on_merchant_close_pressed() -> void:
-	_merchant_shop_open_requested = false
-
-
-## Pins the close cross to the merchant panel's bottom-right corner (inset a few pixels).
-func _update_merchant_close_button() -> void:
-	if _merchant_close_button == null or _merchant_panel == null:
-		return
-	const INSET: float = 6.0
-	_merchant_close_button.visible = true
-	var corner: Vector2 = _merchant_panel.global_position + _merchant_panel.size
-	_merchant_close_button.global_position = corner - _merchant_close_button.size - Vector2(INSET, INSET)
-
-
-func _special_reward_label() -> String:
-	var key: String = "merchant.special_reward"
-	var translated: String = Translations.t(key)
-	return "Special reward" if translated == key else translated
-
-
-## Appends one item's three aligned grid cells (icon button, name, price group) to the
-## merchant grid. All three cells are tracked together so the whole row is shown or hidden
-## as one, keeping every visible row an exact multiple of the column count so the grid stays
-## aligned.
-func _build_merchant_item_cells(grid: GridContainer, item_id: String) -> void:
-	var button: Button = _build_merchant_slot(item_id)
-	grid.add_child(button)
-
-	var name_label: Label = _make_row_label(18)
-	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	name_label.text = _display_name(item_id)
-	grid.add_child(name_label)
-
-	var price_group: HBoxContainer = _build_price_group()
-	grid.add_child(price_group)
-
-	_merchant_row_names[item_id] = name_label
-	_merchant_row_prices[item_id] = price_group.get_child(0)
-	_merchant_row_currencies[item_id] = price_group.get_child(2)
-	_merchant_row_cells[item_id] = [button, name_label, price_group] as Array[Control]
-
-
-## A price-column cell rendering "<price> x <currency icon>". The children are ordered
-## [price label, "x" label, currency icon] so callers can address them by index.
-func _build_price_group() -> HBoxContainer:
-	var group: HBoxContainer = HBoxContainer.new()
-	group.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	group.add_theme_constant_override("separation", 4)
-
-	var price_label: Label = _make_row_label(18)
-	price_label.add_theme_color_override("font_color", Color.WHITE)
-	group.add_child(price_label)
-
-	var x_label: Label = _make_row_label(18)
-	x_label.add_theme_color_override("font_color", Color.WHITE)
-	x_label.text = "x"
-	group.add_child(x_label)
-
-	var currency: TextureRect = TextureRect.new()
-	currency.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	currency.custom_minimum_size = Vector2(20.0, 20.0)
-	currency.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	currency.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	currency.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	group.add_child(currency)
-	return group
-
-
-func _build_merchant_slot(item_id: String) -> Button:
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	var button: Button = Button.new()
-	button.name = item_id
-	button.custom_minimum_size = SLOT_SIZE
-	button.focus_mode = Control.FOCUS_NONE
-	button.pressed.connect(_on_merchant_item_pressed.bind(item_id))
-	_connect_hover_label(button, item_id)
-
-	var icon: TextureRect = TextureRect.new()
-	icon.texture = _item_frame_texture(item_def)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 8.0
-	icon.offset_top = 8.0
-	icon.offset_right = -8.0
-	icon.offset_bottom = -8.0
-	button.add_child(icon)
-
-	_merchant_slot_buttons[item_id] = button
-	_merchant_slot_icons[item_id] = icon
-	return button
-
-
-## A small number badge overlaid on the bottom-right of a slot icon.
-func _make_icon_count_label(text: String) -> Label:
-	var count: Label = Label.new()
-	count.theme = NUMBER_THEME
-	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	count.add_theme_font_size_override("font_size", 14)
-	count.add_theme_color_override("font_color", Color.WHITE)
-	count.add_theme_color_override("font_shadow_color", Color.BLACK)
-	count.add_theme_constant_override("shadow_offset_x", 1)
-	count.add_theme_constant_override("shadow_offset_y", 1)
-	count.set_anchors_preset(Control.PRESET_FULL_RECT)
-	count.offset_left = 2.0
-	count.offset_top = 2.0
-	count.offset_right = -4.0
-	count.offset_bottom = -2.0
-	count.text = text
-	return count
-
-
 ## Builds the single floating label (name only) that sits to the right of the selected
 ## slot. It has no background and ignores all mouse events.
 func _build_selected_label() -> void:
@@ -616,8 +376,7 @@ func _build_bar() -> Control:
 
 ## One row of the column: the slot button plus a persistent name / price / currency-icon
 ## label group. In build phase the label group is hidden and the shared floating label
-## next to the selected slot is used instead (see _build_selected_label); in the seed/weapon
-## merchant column the per-row label group is shown for every item.
+## next to the selected slot is used instead (see _build_selected_label).
 func _build_slot_row(item_id: String) -> HBoxContainer:
 	var row: HBoxContainer = HBoxContainer.new()
 	row.name = item_id + "Row"
@@ -630,9 +389,8 @@ func _build_slot_row(item_id: String) -> HBoxContainer:
 	return row
 
 
-## Builds the persistent per-row label group (name + price + currency icon) shown beside the
-## slot in the seed/weapon merchant column. Hidden by default; _refresh_slots reveals and
-## fills it during the merchant phase.
+## Builds the persistent per-row label group (name + price + currency icon). Hidden by
+## default; kept for parity with the row layout.
 func _build_row_label(item_id: String) -> HBoxContainer:
 	var group: HBoxContainer = HBoxContainer.new()
 	group.name = item_id + "Label"
@@ -780,11 +538,6 @@ func _open_build_picker() -> void:
 	_clear_highlight()
 
 
-func _close_all() -> void:
-	_close_toolbuild()
-	_close_merchant_shop()
-
-
 ## Hides the build column. The caller decides whether build preview remains active.
 func _close_toolbuild() -> void:
 	_set_toolbuild_open(false)
@@ -805,57 +558,26 @@ func _set_toolbuild_open(is_open: bool) -> void:
 	visible = is_open or _other_columns_visible()
 
 
-## True when the merchant or weapon columns are showing, so the root stays visible while only the
-## build column closes (e.g. switching from a build menu to the weapon menu).
+## True when the weapon column is showing, so the root stays visible while only the build
+## column closes (e.g. switching from a build menu to the weapon menu).
 func _other_columns_visible() -> bool:
-	if _merchant_column != null and _merchant_column.visible:
-		return true
 	if _weapon_column != null and _weapon_column.visible:
 		return true
 	return false
 
 
-func _open_merchant_shop() -> void:
-	if _merchant_column == null:
-		return
-	if _toolbuild_column != null and _toolbuild_column.visible:
-		_close_toolbuild()
-	_merchant_column.visible = true
-	visible = true
-	_apply_merchant_layout()
-	_refresh_merchant_slots()
-	_ensure_merchant_pad_selection()
-
-
-func _close_merchant_shop() -> void:
-	if _merchant_column != null:
-		_merchant_column.visible = false
-	if _merchant_close_button != null:
-		_merchant_close_button.visible = false
-	_merchant_shop_open_requested = false
-	_selected_merchant_item_id = ""
-	_reset_hover_label()
-	visible = (_toolbuild_column != null and _toolbuild_column.visible) or (_weapon_column != null and _weapon_column.visible)
-
-
 # --- Phase handling ----------------------------------------------------------
 
 ## Night closes structural pickers. Leaving afternoon still closes the picker
-## for client/merchant transitions.
+## for client transitions.
 func _on_game_mode_changed(is_night: bool) -> void:
 	if is_night and (_shown_build_tool_id == HAMMER_TOOL_ID or _shown_build_tool_id == BUILD_HOUSE_TOOL_ID):
-		_close_all()
+		_close_toolbuild()
 
 
 func _on_afternoon_phase_changed(is_afternoon_phase: bool) -> void:
 	if not is_afternoon_phase and not GameState.is_night:
 		_close_toolbuild()
-
-
-func _on_seed_merchant_phase_changed(is_seed_merchant_phase: bool) -> void:
-	_apply_phase_layout()
-	if not is_seed_merchant_phase:
-		_close_merchant_shop()
 
 
 # --- Selection ---------------------------------------------------------------
@@ -869,33 +591,8 @@ func _on_item_pressed(item_id: String) -> void:
 	_commit_item(item_id)
 
 
-func _on_merchant_item_pressed(item_id: String) -> void:
-	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
-		return
-	if not _is_merchant_item(item_id) or not _is_merchant_item_available(item_id):
-		return
-	var purchased: bool = false
-	var button: Button = _merchant_slot_buttons.get(item_id) as Button
-	var start_position: Vector2 = button.get_global_rect().get_center() if button != null else Vector2.ZERO
-	if item_id == SEED_ITEM_ID and game_ui != null and game_ui.has_method("try_purchase_seed_merchant_item"):
-		purchased = bool(game_ui.call("try_purchase_seed_merchant_item", item_id, 1))
-	elif ItemCatalog.is_inventory_backed(item_id) and game_ui != null and game_ui.has_method("try_purchase_placeable_merchant_item"):
-		purchased = bool(game_ui.call("try_purchase_placeable_merchant_item", item_id, 1))
-	elif ItemCatalog.is_weapon(item_id) and game_ui != null and game_ui.has_method("try_purchase_shop_inventory_item"):
-		purchased = bool(game_ui.call("try_purchase_shop_inventory_item", item_id, 1))
-	if purchased:
-		GameState.seed_merchant_purchase_made = true
-		Sfx.play_sound(&"buy")
-		_animate_purchase_to_ui(item_id, start_position)
-		_refresh_merchant_slots()
-		_refresh_slots()
-
-
 func step_pad_selection(direction: int) -> void:
 	if direction == 0:
-		return
-	if _merchant_column != null and _merchant_column.visible:
-		_step_merchant_pad_selection(direction)
 		return
 	if _weapon_column != null and _weapon_column.visible:
 		_step_weapon_pad_selection(direction)
@@ -905,14 +602,6 @@ func step_pad_selection(direction: int) -> void:
 
 
 func activate_pad_selection() -> bool:
-	if _merchant_column != null and _merchant_column.visible:
-		_ensure_merchant_pad_selection()
-		if _is_special_reward_pad_id(_selected_merchant_item_id):
-			_on_special_reward_pressed(null, _special_reward_key_from_pad_id(_selected_merchant_item_id))
-			return true
-		if _selected_merchant_item_id != "":
-			_on_merchant_item_pressed(_selected_merchant_item_id)
-			return true
 	if _weapon_column != null and _weapon_column.visible:
 		_ensure_weapon_pad_selection()
 		if _selected_weapon_item_id != "":
@@ -927,10 +616,6 @@ func activate_pad_selection() -> bool:
 	return false
 
 
-func is_merchant_shop_open() -> bool:
-	return _merchant_column != null and _merchant_column.visible
-
-
 ## Global-space rect for a visible build-picker item slot. Used by tutorial pointers only.
 func get_visible_build_item_global_rect(item_id: String) -> Rect2:
 	if _toolbuild_column == null or not _toolbuild_column.visible:
@@ -939,20 +624,6 @@ func get_visible_build_item_global_rect(item_id: String) -> Rect2:
 	if button == null or not button.visible:
 		return Rect2()
 	return button.get_global_rect()
-
-
-## Interact-button entry point (E / pad Y). Opens the merchant shop when the player is standing
-## at the merchant during its day phase, or closes it when already open. Returns true when the
-## press was consumed (at the merchant, or shop open) so the caller can fall back to another
-## action otherwise (e.g. pad Y rotating a build preview when not at the merchant).
-func toggle_merchant_shop() -> bool:
-	if is_merchant_shop_open():
-		_merchant_shop_open_requested = false
-		return true
-	if GameState.is_night or not _is_seed_merchant_shop_active():
-		return false
-	_merchant_shop_open_requested = true
-	return true
 
 
 func _tool_blocked_by_night(tool_id: String) -> bool:
@@ -1010,35 +681,6 @@ func _visible_build_item_ids() -> Array[String]:
 	return ids
 
 
-func _step_merchant_pad_selection(direction: int) -> void:
-	var ids: Array[String] = _visible_merchant_pad_item_ids()
-	if ids.is_empty():
-		_selected_merchant_item_id = ""
-		return
-	var index: int = ids.find(_selected_merchant_item_id)
-	if index < 0:
-		index = 0 if direction >= 0 else ids.size() - 1
-	else:
-		index = (index + direction) % ids.size()
-		if index < 0:
-			index += ids.size()
-	_selected_merchant_item_id = ids[index]
-	# Merchant buttons do not use Godot focus. Once the pad moves the selection, clear any
-	# stale mouse hover so the visible highlight follows the pad-owned selection below.
-	_hovered_item_id = ""
-	_refresh_merchant_slots()
-
-
-func _ensure_merchant_pad_selection() -> void:
-	var ids: Array[String] = _visible_merchant_pad_item_ids()
-	if ids.is_empty():
-		_selected_merchant_item_id = ""
-		return
-	if not ids.has(_selected_merchant_item_id):
-		_selected_merchant_item_id = ids[0]
-	_refresh_merchant_slots()
-
-
 func _ensure_weapon_pad_selection() -> void:
 	var ids: Array[String] = _possessed_weapon_ids()
 	if ids.is_empty():
@@ -1052,17 +694,6 @@ func _ensure_weapon_pad_selection() -> void:
 	var equipped: String = _equipped_weapon_id()
 	_selected_weapon_item_id = equipped if ids.has(equipped) else ids[0]
 	_hovered_item_id = _selected_weapon_item_id
-
-
-func _visible_merchant_pad_item_ids() -> Array[String]:
-	var ids: Array[String] = []
-	var reward_keys: Array[String] = _active_special_reward_keys()
-	for reward_key: String in reward_keys:
-		ids.append(_special_reward_pad_id(reward_key))
-	for item_id: String in _merchant_item_ids():
-		if _should_show_merchant_item(item_id):
-			ids.append(item_id)
-	return ids
 
 
 ## Highlights a buildable in the open menu without equipping it (no build preview, quickbar
@@ -1109,12 +740,6 @@ func _affordable_quantity(item_id: String) -> int:
 	return 0
 
 
-func _merchant_affordable_quantity(item_id: String) -> int:
-	if game_ui != null and game_ui.has_method("get_merchant_affordable_quantity"):
-		return int(game_ui.call("get_merchant_affordable_quantity", item_id))
-	return 0
-
-
 func _is_item_locked(_item_id: String) -> bool:
 	return false
 
@@ -1142,10 +767,6 @@ func _is_item_available(item_id: String) -> bool:
 	return game_ui == null or not game_ui.has_method("is_build_item_available") or bool(game_ui.call("is_build_item_available", item_id))
 
 
-func _is_merchant_item_available(item_id: String) -> bool:
-	return game_ui == null or not game_ui.has_method("is_merchant_item_available") or bool(game_ui.call("is_merchant_item_available", item_id))
-
-
 # --- Per-frame refresh -------------------------------------------------------
 
 func _refresh_slots() -> void:
@@ -1169,8 +790,6 @@ func _refresh_slots() -> void:
 		var slot_currency_texture: AtlasTexture = null if ItemCatalog.is_inventory_backed(item_id) else _currency_texture(item_id)
 		slot_currency.texture = slot_currency_texture
 		slot_currency.visible = slot_currency_texture != null
-		# The merchant column signals unaffordability through the per-row label colour, so its
-		# slots stay at full colour; the build column greys unaffordable/locked slots.
 		var visual_disabled: bool = disabled
 		var state: Array[bool] = [highlighted, visual_disabled]
 		if _slot_state.get(item_id) != state:
@@ -1238,18 +857,11 @@ func _button_for_item(item_id: String) -> Button:
 		return _slot_buttons[item_id] as Button
 	if _weapon_buttons.has(item_id):
 		return _weapon_buttons[item_id] as Button
-	if _merchant_slot_buttons.has(item_id):
-		return _merchant_slot_buttons[item_id] as Button
-	if item_id.begins_with(SPECIAL_REWARD_PAD_PREFIX):
-		for cell: Control in _reward_cells:
-			var button: Button = cell as Button
-			if button != null and str(button.get_meta(&"reward_pad_id", "")) == item_id:
-				return button
 	return null
 
 
-## Fills in and positions the floating label next to the slot the mouse is hovering. Build and
-## merchant items that cannot be used turn the label red. Hidden when nothing is hovered.
+## Fills in and positions the floating label next to the slot the mouse is hovering. Build
+## items that cannot be placed turn the label red. Hidden when nothing is hovered.
 func _update_hover_label() -> void:
 	if _selected_label == null:
 		return
@@ -1264,11 +876,8 @@ func _update_hover_label() -> void:
 	if _slot_buttons.has(item_id):
 		var can_place: bool = _can_afford(item_id) and not _is_item_locked(item_id)
 		color = SELECTED_LABEL_COLOR if can_place else SELECTED_DISABLED_LABEL_COLOR
-	elif _merchant_slot_buttons.has(item_id):
-		var can_buy: bool = _can_afford(item_id) and not _is_item_locked(item_id)
-		color = SELECTED_LABEL_COLOR if can_buy else SELECTED_DISABLED_LABEL_COLOR
 	_selected_name.add_theme_color_override("font_color", color)
-	_selected_name.text = _special_reward_label() if item_id.begins_with(SPECIAL_REWARD_PAD_PREFIX) else _display_name(item_id)
+	_selected_name.text = _display_name(item_id)
 	_position_selected_label(button)
 
 
@@ -1285,9 +894,8 @@ func _currency_texture(item_id: String) -> AtlasTexture:
 	return _currency_icon_for(String(ItemCatalog.get_currency(item_id)))
 
 
-## Fills and colours the persistent per-row label groups for the seed/weapon merchant column
-## (name + price + currency icon), reddening items the player cannot currently afford. In build
-## phase every row label stays hidden (the floating selected label is used instead).
+## Fills and colours the persistent per-row label groups (name + price + currency icon). In
+## build phase every row label stays hidden (the floating selected label is used instead).
 func _update_row_labels() -> void:
 	var show_rows: bool = false
 	for item_id: String in _all_item_ids():
@@ -1328,12 +936,6 @@ func _build_price(item_id: String) -> int:
 	return ItemCatalog.get_price(item_id)
 
 
-func _merchant_price(item_id: String) -> int:
-	if game_ui != null and game_ui.has_method("get_merchant_price"):
-		return int(game_ui.call("get_merchant_price", item_id))
-	return ItemCatalog.get_price(item_id)
-
-
 ## The build tool currently selected in the quick bar, or "" if none.
 func _selected_build_tool_id() -> String:
 	if game_ui != null and game_ui.has_method("get_selected_build_tool_id"):
@@ -1358,20 +960,10 @@ func _should_show_item(item_id: String) -> bool:
 	return item_id in _active_build_item_ids() and _is_item_available(item_id)
 
 
-func _should_show_merchant_item(item_id: String) -> bool:
-	return item_id in _merchant_item_ids() and _is_merchant_item(item_id) and _is_merchant_item_available(item_id)
-
-
-func _is_merchant_item(item_id: String) -> bool:
-	return item_id == SEED_ITEM_ID or ItemCatalog.is_weapon(item_id) or ItemCatalog.is_inventory_backed(item_id)
-
-
+## Every item id that gets a persistent slot row in the build column. Inventory-backed
+## merchant placeables (pasteque) are included so they have a gardening-column slot.
 func _all_item_ids() -> Array[String]:
-	var ids: Array[String] = _active_candidate_item_ids()
-	for item_id: String in _merchant_item_ids():
-		if not ids.has(item_id):
-			ids.append(item_id)
-	return ids
+	return _active_candidate_item_ids()
 
 
 func _active_candidate_item_ids() -> Array[String]:
@@ -1393,230 +985,7 @@ func _string_names_to_strings(item_ids: Array[StringName]) -> Array[String]:
 	return ids
 
 
-func _player_near_seed_merchant() -> bool:
-	var scene: Node = get_tree().current_scene
-	var manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
-	return manager != null and manager.has_method("is_player_near_seed_merchant") and bool(manager.call("is_player_near_seed_merchant"))
-
-
-func _is_seed_merchant_shop_active() -> bool:
-	return GameState.is_seed_merchant_phase and _player_near_seed_merchant()
-
-
-func _refresh_merchant_slots() -> void:
-	_refresh_special_reward_row()
-	_refresh_special_reward_selection_style()
-	var highlighted_pad_id: String = _merchant_highlighted_pad_id()
-	for item_id: String in _merchant_item_ids():
-		var cells: Array = _merchant_row_cells.get(item_id, []) as Array
-		if cells.is_empty():
-			continue
-		var should_show: bool = _should_show_merchant_item(item_id)
-		for cell: Control in cells:
-			cell.visible = should_show
-		if not should_show:
-			continue
-		var button: Button = _merchant_slot_buttons[item_id] as Button
-		var affordable: int = _merchant_affordable_quantity(item_id)
-		var disabled: bool = affordable <= 0
-		var highlighted: bool = highlighted_pad_id == item_id
-		var state: Array[bool] = [highlighted, false]
-		if _merchant_slot_state.get(item_id) != state:
-			_merchant_slot_state[item_id] = state
-			_apply_slot_style(button, highlighted, false)
-			(_merchant_slot_icons[item_id] as TextureRect).modulate = Color.WHITE
-		var color: Color = SELECTED_DISABLED_LABEL_COLOR if disabled else SELECTED_LABEL_COLOR
-		var name_label: Label = _merchant_row_names[item_id] as Label
-		var price_label: Label = _merchant_row_prices[item_id] as Label
-		var currency: TextureRect = _merchant_row_currencies[item_id] as TextureRect
-		var x_label: Label = (cells[2] as HBoxContainer).get_child(1) as Label
-		name_label.add_theme_color_override("font_color", color)
-		price_label.add_theme_color_override("font_color", color)
-		x_label.add_theme_color_override("font_color", color)
-		currency.modulate = color
-		name_label.text = _display_name(item_id)
-		price_label.text = str(_merchant_price(item_id))
-		var currency_texture: AtlasTexture = _currency_texture(item_id)
-		currency.texture = currency_texture
-		currency.visible = currency_texture != null
-		x_label.visible = currency_texture != null
-
-
-func _has_active_special_reward() -> bool:
-	if game_ui == null or not game_ui.has_method("get_active_night_reward"):
-		return false
-	var info: Dictionary = game_ui.call("get_active_night_reward") as Dictionary
-	return not info.is_empty()
-
-
-func _active_special_reward_keys() -> Array[String]:
-	var keys: Array[String] = []
-	if game_ui == null or not game_ui.has_method("get_active_night_reward"):
-		return keys
-	var info: Dictionary = game_ui.call("get_active_night_reward") as Dictionary
-	if info.is_empty():
-		return keys
-	var rewards: Array = info.get("rewards", []) as Array
-	for raw_reward: Variant in rewards:
-		var reward: Dictionary = raw_reward as Dictionary
-		keys.append(str(reward.get("key", "")))
-	return keys
-
-
-## The pad-selection id for a single special reward: the shared prefix plus the reward's
-## key, so each granted reward row gets its own selectable pad id.
-func _special_reward_pad_id(reward_key: String) -> String:
-	return SPECIAL_REWARD_PAD_PREFIX + reward_key
-
-
-## True when a merchant pad id refers to a special-reward row (rather than a weapon/seed item).
-func _is_special_reward_pad_id(pad_id: String) -> bool:
-	return pad_id.begins_with(SPECIAL_REWARD_PAD_PREFIX)
-
-
-## The reward key encoded in a special-reward pad id (inverse of _special_reward_pad_id).
-func _special_reward_key_from_pad_id(pad_id: String) -> String:
-	return pad_id.substr(SPECIAL_REWARD_PAD_PREFIX.length())
-
-
-func _refresh_special_reward_selection_style() -> void:
-	var highlighted_pad_id: String = _merchant_highlighted_pad_id()
-	var index: int = 0
-	while index < _reward_cells.size():
-		var button: Button = _reward_cells[index] as Button
-		if button != null:
-			var pad_id: String = str(button.get_meta(&"reward_pad_id", ""))
-			var highlighted: bool = highlighted_pad_id == pad_id
-			_apply_slot_style(button, highlighted, false)
-		index += MERCHANT_COLUMNS
-
-
-## The merchant has no native Control focus: mouse hover temporarily owns its highlight, and
-## the explicit merchant selection is the fallback used by gamepad navigation.
-func _merchant_highlighted_pad_id() -> String:
-	if _hovered_item_id != "":
-		return _hovered_item_id
-	return _selected_merchant_item_id
-
-
-## Rebuilds the free reward rows pinned to the top of the merchant grid from game_ui's current
-## offer as one grid row per granted currency, then moves them ahead of the item rows.
-## Only rebuilds when the offered payout changes.
-func _refresh_special_reward_row() -> void:
-	if _merchant_items_list == null:
-		return
-	var info: Dictionary = {}
-	if game_ui != null and game_ui.has_method("get_active_night_reward"):
-		info = game_ui.call("get_active_night_reward")
-	var rewards: Array = (info.get("rewards", []) as Array) if not info.is_empty() else []
-	var signature: String = ""
-	for raw_reward: Variant in rewards:
-		var reward: Dictionary = raw_reward as Dictionary
-		signature += "%s:%s:%s:%d|" % [
-			str(reward.get("key", "")), str(reward.get("currency", "")),
-			str(reward.get("item_id", "")), int(reward.get("amount", 0))
-		]
-	if signature == _special_reward_signature:
-		return
-	_special_reward_signature = signature
-	for cell: Control in _reward_cells:
-		_merchant_items_list.remove_child(cell)
-		cell.queue_free()
-	_reward_cells.clear()
-	var insert_index: int = 0
-	for raw_reward: Variant in rewards:
-		var reward: Dictionary = raw_reward as Dictionary
-		var reward_cells: Array[Control] = _build_reward_row_cells(
-			str(reward.get("currency", "")), str(reward.get("item_id", "")),
-			int(reward.get("amount", 0)), str(reward.get("key", ""))
-		)
-		for cell: Control in reward_cells:
-			_merchant_items_list.add_child(cell)
-			_merchant_items_list.move_child(cell, insert_index)
-			insert_index += 1
-			_reward_cells.append(cell)
-
-
-## The three cells for one free-reward payout: the reward icon (a claim button) with the
-## granted amount overlaid as a count badge, the reward name, and an empty price column. An
-## item reward (item_id set) shows the item's own sprite and name; otherwise a currency icon.
-func _build_reward_row_cells(currency: String, item_id: String, amount: int, reward_key: String) -> Array[Control]:
-	var button: Button = Button.new()
-	button.custom_minimum_size = SLOT_SIZE
-	button.focus_mode = Control.FOCUS_NONE
-	var reward_pad_id: String = _special_reward_pad_id(reward_key)
-	button.set_meta(&"reward_pad_id", reward_pad_id)
-	button.pressed.connect(_on_special_reward_pressed.bind(button, reward_key))
-	_connect_hover_label(button, reward_pad_id)
-	_apply_slot_style(button, false, false)
-
-	var icon: TextureRect = TextureRect.new()
-	icon.texture = (
-		_item_frame_texture(ItemCatalog.get_item_def(item_id)) if item_id != ""
-		else _currency_icon_for(currency)
-	)
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 8.0
-	icon.offset_top = 8.0
-	icon.offset_right = -8.0
-	icon.offset_bottom = -8.0
-	button.add_child(icon)
-	button.add_child(_make_icon_count_label(str(amount)))
-
-	var name_label: Label = _make_row_label(18)
-	name_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	name_label.text = _display_name(item_id) if item_id != "" else _special_reward_label()
-
-	var free_label: Label = _make_row_label(18)
-	free_label.add_theme_color_override("font_color", SELECTED_LABEL_COLOR)
-	free_label.text = ""
-
-	return [button, name_label, free_label] as Array[Control]
-
-
-## Maps a currency id straight to its HUD icon texture. Unlike
-## _currency_texture (which takes an item id), this takes the currency itself.
-func _currency_icon_for(currency: String) -> AtlasTexture:
-	return _currency_icons.get(StringName(currency), null) as AtlasTexture
-
-
-func _on_special_reward_pressed(source: Button = null, reward_key: String = "") -> void:
-	if _merchant_column == null or not _merchant_column.visible or GameState.is_night:
-		return
-	if game_ui == null or not game_ui.has_method("claim_active_night_reward"):
-		return
-	var reward_source: Button = source if source != null else _first_reward_button()
-	var start_position: Vector2 = reward_source.get_global_rect().get_center() if reward_source != null else Vector2.ZERO
-	if bool(game_ui.call("claim_active_night_reward", start_position, reward_key)):
-		Sfx.play_sound(&"buy")
-		_refresh_special_reward_row()
-
-
-func _first_reward_button() -> Button:
-	var index: int = 0
-	while index < _reward_cells.size():
-		var button: Button = _reward_cells[index] as Button
-		if button != null:
-			return button
-		index += MERCHANT_COLUMNS
-	return null
-
-
-func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) -> void:
-	if game_ui == null:
-		return
-	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
-	if item_id == SEED_ITEM_ID:
-		var seed_icon_node: Node = game_ui.get_node_or_null("currenciesUI/seedIcon")
-		if seed_icon_node != null and seed_icon_node.has_method("animate_seed_harvest"):
-			seed_icon_node.call("animate_seed_harvest", world_position, 0, Callable(), false)
-		return
-	if game_ui.has_method("animate_inventory_item_to_slot"):
-		game_ui.call("animate_inventory_item_to_slot", item_id, start_global_position)
-
+# --- Styling / textures ------------------------------------------------------
 
 func _apply_phase_layout() -> void:
 	if _toolbuild_column == null:
@@ -1647,33 +1016,6 @@ func _dropup_bottom_offset() -> float:
 	return -84.0
 
 
-func _apply_merchant_layout() -> void:
-	if _merchant_column == null:
-		return
-	_merchant_column.anchor_left = 0.0
-	_merchant_column.anchor_right = 0.0
-	_merchant_column.anchor_top = 0.0
-	_merchant_column.anchor_bottom = 0.0
-	_merchant_column.grow_horizontal = Control.GROW_DIRECTION_END
-	_merchant_column.grow_vertical = Control.GROW_DIRECTION_END
-	_merchant_column.offset_top = SEED_MERCHANT_BAR_TOP
-	_merchant_column.offset_bottom = SEED_MERCHANT_BAR_TOP
-	_merchant_column.alignment = BoxContainer.ALIGNMENT_BEGIN
-	_update_merchant_column_anchor()
-
-
-## Aligns the merchant column's slots to the quickbar's left edge.
-func _update_merchant_column_anchor() -> void:
-	if _merchant_column == null or game_ui == null or not game_ui.has_method("get_quick_bar_left_x"):
-		return
-	var left_x: float = float(game_ui.call("get_quick_bar_left_x"))
-	if left_x < 0.0:
-		return
-	var left: float = left_x - BAR_CONTENT_INSET
-	_merchant_column.offset_left = left
-	_merchant_column.offset_right = left
-
-
 ## Aligns the build-phase column's slots horizontally over the active build tool's quick slot.
 func _update_build_column_anchor() -> void:
 	if _toolbuild_column == null or game_ui == null or not game_ui.has_method("get_build_tool_slot_center_x"):
@@ -1685,8 +1027,6 @@ func _update_build_column_anchor() -> void:
 	_toolbuild_column.offset_left = left
 	_toolbuild_column.offset_right = left
 
-
-# --- Styling / textures ------------------------------------------------------
 
 func _apply_slot_style(button: Button, selected: bool, disabled: bool) -> void:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
@@ -1730,6 +1070,11 @@ func _item_frame_texture(item_def: Dictionary) -> AtlasTexture:
 		return _currency_icon_for("seed")
 	var frame: int = int(item_def.get("frame", 0))
 	return _region_texture(Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE))
+
+
+## Maps a currency id straight to its HUD icon texture.
+func _currency_icon_for(currency: String) -> AtlasTexture:
+	return _currency_icons.get(StringName(currency), null) as AtlasTexture
 
 
 func _region_texture(region: Rect2) -> AtlasTexture:

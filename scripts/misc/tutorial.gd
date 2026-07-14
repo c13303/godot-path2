@@ -223,7 +223,11 @@ func _refresh(delta: float = 0.0) -> void:
 		_resolve_nodes()
 	_update_alert_timer(delta)
 	if _alert_key != "":
-		_reset_hold_progress()
+		var alert_start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
+		if alert_start_night_skip_hold_active:
+			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
+		else:
+			_reset_hold_progress()
 		if _alert_persistent:
 			visible = true
 			text = _alert_text()
@@ -252,20 +256,27 @@ func _refresh(delta: float = 0.0) -> void:
 		_set_glow(false)
 		_update_tutorial_arrow("")
 		return
-	if _should_request_start_night_prompt():
-		_request_start_night_prompt()
 	var hold_action: StringName = _current_hold_action()
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
 		return
+	var start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
 	# These are tutorial hints only; they must not withhold the afternoon end hold
-	# prompt once the phase owner has made night start available.
+	# action once the phase owner has made night start available. The visible prompt
+	# appears only when it is the natural next message; holding the input before that
+	# is the explicit player action that skips the remaining tutorial hints.
 	if _unbuild_tool_selected():
-		_reset_hold_progress()
+		if start_night_skip_hold_active:
+			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
+		else:
+			_reset_hold_progress()
 		_show_key_immediately(KEY_UNBUILD_SELECTION)
 		return
 	if _water_refill_needed():
-		_reset_hold_progress()
+		if start_night_skip_hold_active:
+			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
+		else:
+			_reset_hold_progress()
 		_show_key_immediately(KEY_REFILL_WATER)
 		return
 	# The dawn harvest can be skipped straight to the client sale by holding space once
@@ -273,13 +284,15 @@ func _refresh(delta: float = 0.0) -> void:
 	# screen; the progress circle only appears while the key is actually held.
 	if _dawn_client_skip_available():
 		_advance_hold(HOLD_ACTION_START_CLIENTS, delta)
-	else:
+	elif not start_night_skip_hold_active:
 		_reset_hold_progress()
 	var key: String = _current_message_key()
 	if key == KEY_PASS_NIGHT and not GameState.is_night:
 		_request_start_night_prompt()
 		_show_hold_action(HOLD_ACTION_START_NIGHT, delta)
 		return
+	if start_night_skip_hold_active:
+		_advance_hold(HOLD_ACTION_START_NIGHT, delta)
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
 		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
@@ -464,13 +477,11 @@ func _current_hold_action() -> StringName:
 		return HOLD_ACTION_NONE
 	if _building_manager.has_method("is_client_sale_start_requested") and bool(_building_manager.call("is_client_sale_start_requested")):
 		return HOLD_ACTION_START_CLIENTS
-	if _building_manager.has_method("is_night_start_requested") and bool(_building_manager.call("is_night_start_requested")):
-		if not _can_start_night_after_clients():
-			if _building_manager.has_method("clear_night_start_request"):
-				_building_manager.call("clear_night_start_request")
-			return HOLD_ACTION_NONE
-		return HOLD_ACTION_START_NIGHT
 	return HOLD_ACTION_NONE
+
+
+func _start_night_pre_prompt_hold_active() -> bool:
+	return _should_request_start_night_prompt() and _hold_input_pressed()
 
 
 ## Shows the hold prompt as the on-screen hint and advances its progress. Used when the

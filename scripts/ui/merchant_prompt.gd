@@ -5,7 +5,7 @@ extends Control
 ## device (frame 0 = keyboard E, frame 1 = gamepad Y) with a small drop shadow so it stays
 ## readable over the gameplay below, and hides once the shop is open, at night, or when the
 ## player walks away. It only draws the hint; opening the shop is handled by the player
-## controller (interact button) and the toolbuild shop column.
+## controller (interact button) and the MerchantDialogController.
 
 const PROMPT_TEXTURE: Texture2D = preload("res://assets/sprites/buttons/E-Y.png")
 const FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
@@ -20,7 +20,7 @@ const SHADOW_OFFSET: Vector2 = Vector2(2.0, 3.0)
 
 var _building_manager: Node
 var _player_controller: Node
-var _toolbuild: Node
+var _merchant_controller: Node
 var _icon: TextureRect
 var _shadow: TextureRect
 var _frame_kmouse: AtlasTexture
@@ -80,8 +80,8 @@ func _should_show() -> bool:
 	# walking in, the player can press interact but no prompt is drawn.
 	if manager.has_method("has_seed_merchant_reached_spot") and not bool(manager.call("has_seed_merchant_reached_spot")):
 		return false
-	var toolbuild: Node = _resolve_toolbuild()
-	if toolbuild != null and toolbuild.has_method("is_merchant_shop_open") and bool(toolbuild.call("is_merchant_shop_open")):
+	var merchant_controller: Node = _resolve_merchant_controller()
+	if merchant_controller != null and merchant_controller.has_method("is_shop_open") and bool(merchant_controller.call("is_shop_open")):
 		return false
 	return true
 
@@ -126,11 +126,11 @@ func _resolve_player_controller() -> Node:
 	return _player_controller
 
 
-func _resolve_toolbuild() -> Node:
-	if _toolbuild == null or not is_instance_valid(_toolbuild):
+func _resolve_merchant_controller() -> Node:
+	if _merchant_controller == null or not is_instance_valid(_merchant_controller):
 		var scene: Node = get_tree().current_scene
-		_toolbuild = scene.get_node_or_null("GameUI/Toolbuild") if scene != null else null
-	return _toolbuild
+		_merchant_controller = scene.get_node_or_null("GameUI/MerchantDialogController") if scene != null else null
+	return _merchant_controller
 
 
 func _region_texture(frame: int) -> AtlasTexture:

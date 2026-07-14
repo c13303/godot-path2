@@ -54,6 +54,9 @@ const FENCE_ATLAS_BY_MASK: Dictionary = {
 @export var occupied_groups: Array[String] = ["main_chars", "monsters", "player"]
 @export var build_fx_pool_size: int = 60
 
+# Player controller, resolved lazily, used only to honour its gameplay-input lock (modal
+# dialogs / cutscenes) so build input does not act underneath them.
+var _player_controller: Node = null
 var _atlas_source_id: int = -1
 # Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
 # wall/building is built or removed during the day (see _refresh_cell_collision).
@@ -169,7 +172,21 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not _controllers_ready or _input_controller == null:
 		return
+	# A modal dialog / cutscene locks gameplay input on the player controller. Build input runs
+	# from _input (before the modal's GUI backdrop), so honour that lock here too, otherwise
+	# keyboard rotate/unbuild would still act underneath an open dialog.
+	if _gameplay_input_locked():
+		return
 	_input_controller.input(event)
+
+
+## True while the player controller has gameplay input locked (an open modal dialog or a
+## running cutscene). Resolved lazily and cached.
+func _gameplay_input_locked() -> bool:
+	if _player_controller == null or not is_instance_valid(_player_controller):
+		var scene: Node = get_tree().current_scene
+		_player_controller = scene.get_node_or_null("Player/PlayerController") if scene != null else null
+	return _player_controller != null and _player_controller.has_method("is_cutscene_input_locked") and bool(_player_controller.call("is_cutscene_input_locked"))
 
 # Narrow wrappers exposed to BuildInputController so it can route input without owning
 # drag/preview state (those stay in BuildDragController / BuildPreviewController).

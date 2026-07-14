@@ -1516,8 +1516,9 @@ func _process_seed_merchant_phase() -> void:
 
 
 # True whenever the player is within interaction range of the merchant, no matter what
-# the merchant is doing (walking in, parked at the spot, or walking back out). This
-# drives both the toolbuild picker visibility (toolbuild.gd) and the movement pause below.
+# the merchant is doing (walking in, parked at the spot, or walking back out). This drives
+# the interaction prompt (merchant_prompt.gd), the shop (MerchantDialogController), and the
+# movement pause below.
 func is_player_near_seed_merchant() -> bool:
 	return _seed_merchant.is_player_near()
 
@@ -1536,7 +1537,7 @@ func get_seed_merchant_world_position() -> Vector2:
 
 # Freezes the merchant while the player is close and lets it resume the moment they
 # leave, so getting near always stops it. Getting near also shows the shop prompt; the
-# player opens the shop itself with the interact button (see toolbuild.toggle_merchant_shop).
+# player opens the shop itself with the interact button (see MerchantDialogController.request_shop_toggle).
 func _process_seed_merchant_proximity() -> void:
 	_seed_merchant.process_proximity()
 

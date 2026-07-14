@@ -66,6 +66,8 @@
 	"planificator.victory": "Victory !",
 	"merchant.special_reward": "Special reward",
 	"merchant.free": "free",
+	"merchant.seed.name": "Seed Merchant",
+	"merchant.seed.greeting": "Hey, Rose! I've got some things for you!",
 	"tutorial.hold_start_night_space": "Hold Space to start the night",
 	"tutorial.hold_start_night_pad": "Hold X to start the night",
 	"tutorial.hold_start_clients_space": "Hold Space to let clients come in",

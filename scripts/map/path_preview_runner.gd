@@ -1,8 +1,6 @@
 extends Node2D
 class_name PathPreviewRunner
 
-signal finished(runner: PathPreviewRunner)
-
 const IDLE_GROUP: int = 0
 const FALLBACK_SAMPLE_DIRECTIONS: Array[Vector2] = [
 	Vector2.RIGHT,
@@ -18,6 +16,7 @@ const FALLBACK_SAMPLE_DIRECTIONS: Array[Vector2] = [
 var _flow: Node
 var _active: bool = false
 var _group_id: int = IDLE_GROUP
+var _world_position: Vector2 = Vector2.ZERO
 var _goal_world: Vector2 = Vector2.ZERO
 var _route_color: Color = Color.WHITE
 var _speed: float = 180.0
@@ -31,12 +30,13 @@ var _trail_point_limit: int = 8
 var _star_radius: float = 5.0
 var _lifetime: float = 0.0
 var _zero_flow_seconds: float = 0.0
-var _debug_logs: bool = true
 
 
-func configure(flow: Node, debug_logs: bool = true) -> void:
+func configure(flow: Node, _preview_z_index: int) -> void:
 	_flow = flow
-	_debug_logs = debug_logs
+	position = Vector2.ZERO
+	rotation = 0.0
+	scale = Vector2.ONE
 	set_process(false)
 	visible = false
 
@@ -69,7 +69,7 @@ func start(
 	_lifetime = 0.0
 	_zero_flow_seconds = 0.0
 	_trail_points.clear()
-	global_position = start_world
+	_world_position = start_world
 	_active = group_id > IDLE_GROUP and _flow != null
 	visible = _active
 	set_process(_active)
@@ -96,22 +96,19 @@ func _process(delta: float) -> void:
 	if _lifetime >= _max_lifetime:
 		_finish("max_lifetime")
 		return
-	if not _position_is_finite(global_position):
+	if not _position_is_finite(_world_position):
 		_finish("non_finite_position")
 		return
-	if global_position.distance_to(_goal_world) <= _arrival_radius:
+	if _world_position.distance_to(_goal_world) <= _arrival_radius:
 		_finish("arrival_distance")
 		return
 	if _flow == null:
 		_finish("missing_flow")
 		return
 	if _flow.has_method("group_route_cost_at_world"):
-		var cost: float = float(_flow.call("group_route_cost_at_world", _group_id, global_position))
+		var cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
 		if not is_finite(cost):
 			_finish("unreachable_cost")
-			return
-		if cost <= _arrival_radius:
-			_finish("arrival_cost")
 			return
 
 	var remaining_distance: float = maxf(0.0, _speed * delta)
@@ -120,24 +117,51 @@ func _process(delta: float) -> void:
 	for _index: int in range(substeps):
 		var direction: Vector2 = _sample_direction()
 		if direction == Vector2.ZERO:
+			# Zero native flow inside the goal cell is expected: the native field
+			# assigns zero direction to its goal. Only there do we steer directly
+			# toward the exact goal center; a zero elsewhere is a real failure.
+			if _is_at_goal_cell():
+				var goal_delta: Vector2 = _goal_world - _world_position
+				if goal_delta.length_squared() <= 0.0001:
+					_finish("arrival_at_goal_cell")
+					return
+				direction = goal_delta.normalized()
+				_zero_flow_seconds = 0.0
+				var distance_to_goal: float = _world_position.distance_to(_goal_world)
+				var actual_step: float = minf(step_distance, distance_to_goal)
+				_world_position += direction * actual_step
+				if _world_position.distance_to(_goal_world) <= _arrival_radius:
+					_finish("arrival_after_step")
+					return
+				continue
 			_zero_flow_seconds += delta
 			if _zero_flow_seconds >= _max_zero_flow_seconds:
 				_finish("zero_flow_timeout")
 				return
 			break
 		_zero_flow_seconds = 0.0
-		global_position += direction * step_distance
-		if global_position.distance_to(_goal_world) <= _arrival_radius:
+		_world_position += direction * step_distance
+		if _world_position.distance_to(_goal_world) <= _arrival_radius:
 			_finish("arrival_after_step")
 			return
-	_record_trail_point(global_position)
+	_record_trail_point(_world_position)
 	queue_redraw()
+
+
+# True only when the native route cost confirms the current cell is the goal
+# cell (cost 0.0). Route cost is not a pixel distance, so this must never be
+# compared against the arrival radius.
+func _is_at_goal_cell() -> bool:
+	if _flow == null or not _flow.has_method("group_route_cost_at_world"):
+		return false
+	var cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
+	return is_finite(cost) and cost <= 0.001
 
 
 func _sample_direction() -> Vector2:
 	var direction: Vector2 = Vector2.ZERO
 	if _flow.has_method("compute_group_flow_dir"):
-		var raw_dir: Variant = _flow.call("compute_group_flow_dir", _group_id, global_position)
+		var raw_dir: Variant = _flow.call("compute_group_flow_dir", _group_id, _world_position)
 		if raw_dir is Vector2:
 			direction = raw_dir as Vector2
 	else:
@@ -152,13 +176,13 @@ func _sample_direction() -> Vector2:
 func _sample_cost_gradient_direction() -> Vector2:
 	if not _flow.has_method("group_route_cost_at_world"):
 		return Vector2.ZERO
-	var current_cost: float = float(_flow.call("group_route_cost_at_world", _group_id, global_position))
+	var current_cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
 	if not is_finite(current_cost):
 		return Vector2.ZERO
 	var best_direction: Vector2 = Vector2.ZERO
 	var best_cost: float = current_cost
 	for sample_direction: Vector2 in FALLBACK_SAMPLE_DIRECTIONS:
-		var sample_pos: Vector2 = global_position + sample_direction * _max_substep
+		var sample_pos: Vector2 = _world_position + sample_direction * _max_substep
 		var sample_cost: float = float(_flow.call("group_route_cost_at_world", _group_id, sample_pos))
 		if not is_finite(sample_cost):
 			continue
@@ -176,13 +200,8 @@ func _record_trail_point(world_pos: Vector2) -> void:
 		_trail_points.pop_front()
 
 
-func _finish(reason: String) -> void:
-	if _debug_logs:
-		print("[PathPreviewRunner] recycle group=%d reason=%s pos=%s goal=%s lifetime=%.2f zero_flow=%.2f" % [
-			_group_id, reason, str(global_position), str(_goal_world), _lifetime, _zero_flow_seconds
-		])
+func _finish(_reason: String) -> void:
 	recycle()
-	finished.emit(self)
 
 
 func _draw() -> void:
@@ -192,7 +211,7 @@ func _draw() -> void:
 		var alpha: float = float(index) / float(_trail_points.size())
 		var color: Color = Color(_route_color.r, _route_color.g, _route_color.b, _route_color.a * alpha * 0.45)
 		draw_line(to_local(_trail_points[index - 1]), to_local(_trail_points[index]), color, 2.0)
-	_draw_star(Vector2.ZERO, _star_radius, _route_color)
+	_draw_star(to_local(_world_position), _star_radius, _route_color)
 
 
 func _draw_star(center: Vector2, radius: float, color: Color) -> void:
