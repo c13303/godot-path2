@@ -7,6 +7,7 @@ const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_vis
 const KRAKEN_DATA: Resource = preload("res://scripts/combat/kraken/kraken.tres")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const HOUSE_TEXTURE: Texture2D = preload("res://assets/sprites/house/house1.png")
+const HOUSE_WIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/wiphouse.png")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
 const ITEM_DEFS: Dictionary = {
@@ -184,6 +185,9 @@ const ITEM_DEFS: Dictionary = {
 		"target_layer": "wallz",
 		"special_placement_kind": &"house",
 		"house_texture": HOUSE_TEXTURE,
+		"house_completed_texture": HOUSE_TEXTURE,
+		"house_wip_texture": HOUSE_WIP_TEXTURE,
+		"builder_work_seconds": 20.0,
 		"inventory_backed": true,
 		"fixed_stock": false,
 		"drag_buildable": false,
@@ -499,6 +503,19 @@ static func is_house_placeable(item_id: String) -> bool:
 ## Null for non-house items.
 static func get_house_texture(item_id: String) -> Texture2D:
 	return get_item_def(item_id).get("house_texture", null) as Texture2D
+
+
+static func get_house_completed_texture(item_id: String) -> Texture2D:
+	var item_def: Dictionary = get_item_def(item_id)
+	return item_def.get("house_completed_texture", item_def.get("house_texture", null)) as Texture2D
+
+
+static func get_house_wip_texture(item_id: String) -> Texture2D:
+	return get_item_def(item_id).get("house_wip_texture", null) as Texture2D
+
+
+static func get_house_builder_work_seconds(item_id: String) -> float:
+	return maxf(0.0, float(get_item_def(item_id).get("builder_work_seconds", 20.0)))
 
 
 ## Fixed-stock items are granted in finite quantities by the level/reward data and

@@ -186,6 +186,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	_runtime_rebuild_progress = 1.0
 	if ok:
 		_runtime_rebuild_wants_gardens = false
+		_manager.get_house_builder_work_controller().on_topology_changed()
 		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))
 		CppDebugOptions.dlog("walkability rebuild completed in %dms (budgeted)" % elapsed_ms)
 	else:
@@ -207,6 +208,7 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager._rebuild_walkable_map_cache()
 	_manager.get_seed_merchant_controller().repath_for_walkability_change()
 	_manager.get_builder_controller().repath_for_walkability_change()
+	_manager.get_house_builder_work_controller().on_topology_changed()
 	var topology: GardenTopologyService = _garden_topology
 	if topology.plant_zone_built():
 		_manager._rebuild_plant_zone_from_layer()

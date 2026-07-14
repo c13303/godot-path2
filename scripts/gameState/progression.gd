@@ -1280,6 +1280,10 @@ func _validate_save(data: Dictionary) -> String:
 			for field: String in ["item_id", "entrance_x", "entrance_y"]:
 				if not entry.has(field):
 					return "invalid runtime house entry"
+			if entry.has("status") and not (str(entry["status"]) in ["wip", "completed"]):
+				return "invalid runtime house status"
+			if entry.has("construction_order") and not (entry["construction_order"] is int or entry["construction_order"] is float):
+				return "invalid runtime house construction order"
 	if data.has("plant_states"):
 		if not (data["plant_states"] is Array):
 			return "invalid plant states"

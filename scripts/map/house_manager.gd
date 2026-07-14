@@ -27,6 +27,8 @@ const FOOTPRINT_OFFSETS: Array[Vector2i] = [
 ## Same invisible blocker the reservoir base uses (see LevelLoader.RESERVOIR_BASE_WALL_ATLAS).
 const HOUSE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
 const AUTHORED_HOUSE_PREFIX: String = "house_"
+const HOUSE_STATUS_WIP: StringName = &"wip"
+const HOUSE_STATUS_COMPLETED: StringName = &"completed"
 ## Set on a prepared authored house sprite so the runtime registry reads the resolved
 ## entrance cell instead of re-deriving it (which could drift after reparenting).
 const ENTRANCE_CELL_META: StringName = &"house_entrance_cell"
@@ -53,6 +55,8 @@ class HouseRecord extends RefCounted:
 	var removable: bool = false
 	var destructible: bool = false
 	var under_construction: bool = false
+	var status: StringName = HOUSE_STATUS_COMPLETED
+	var construction_order: int = 0
 
 
 var _manager: BuildingManager = null
@@ -66,6 +70,7 @@ var _entrance_to_house: Dictionary = {}
 var _presence_to_house: Dictionary = {}
 ## Monotonic counter for unique runtime (player-built) house ids.
 var _runtime_house_seq: int = 0
+var _next_construction_order: int = 1
 
 
 func setup(manager: BuildingManager) -> void:
@@ -172,6 +177,7 @@ func register_authored_houses() -> void:
 		record.player_built = false
 		record.removable = false
 		record.destructible = false
+		record.status = HOUSE_STATUS_COMPLETED
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +188,16 @@ func register_authored_houses() -> void:
 ## Validates the whole 3x2 presence atomically and rejects (no mutation) if anything is
 ## invalid, then commits in one batch: sprite -> snap -> z-index -> five walls (one
 ## update_internals) -> immediate player collision -> registry -> a single hard-topology
-## invalidation -> one construction visual. Returns true on success.
-func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: Node = null, item_id: String = "house") -> bool:
+## invalidation -> WIP task notification. Returns true on success.
+func create_house(
+		id: StringName,
+		source: Variant,
+		entrance: Vector2i,
+		parent: Node = null,
+		item_id: String = "house",
+		status: StringName = HOUSE_STATUS_WIP,
+		construction_order: int = -1
+) -> bool:
 	var texture: Texture2D = _resolve_texture(source)
 	var rejection: String = _validate_runtime_house(entrance, texture)
 	if rejection != "":
@@ -209,6 +223,8 @@ func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: N
 	record.player_built = true
 	record.removable = true
 	record.destructible = ItemCatalog.get_max_health(item_id) > 0
+	record.status = _normalized_status(status)
+	record.construction_order = _assign_construction_order(construction_order)
 	# One destructible target for the whole house (entrance-keyed on the logical "houses" layer),
 	# never five per-cell targets. Registered through BuildingManager's durability facade.
 	if record.destructible:
@@ -217,7 +233,8 @@ func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: N
 	# then batches the quiet window, budgeted walkability rebuild, garden/route updates and
 	# lazy flow-field recomputation.
 	_manager.get_building_invalidation_controller().after_walkability_changed("runtime_house_built")
-	_start_house_construction_visual(record)
+	if record.status == HOUSE_STATUS_WIP:
+		_manager.get_house_builder_work_controller().on_wip_house_added(record.id)
 	return true
 
 
@@ -226,7 +243,9 @@ func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: N
 ## service stays free of house geometry. Returns false (no mutation) if the atomic re-validation
 ## inside create_house fails, letting the caller restore the consumed item.
 func build_player_house(item_id: String, entrance: Vector2i) -> bool:
-	var texture: Texture2D = ItemCatalog.get_house_texture(item_id)
+	var texture: Texture2D = ItemCatalog.get_house_wip_texture(item_id)
+	if texture == null:
+		texture = ItemCatalog.get_house_completed_texture(item_id)
 	if texture == null:
 		push_warning("HouseManager: item '%s' has no house texture; cannot build." % item_id)
 		return false
@@ -270,6 +289,8 @@ func remove_player_built_house_no_refund(entrance: Vector2i) -> bool:
 ## owned blocker cells (one update_internals), refresh player collision, free the sprite, drop every
 ## registry/presence entry, and trigger exactly one hard-topology invalidation. Never refunds.
 func _teardown_house(record: HouseRecord) -> void:
+	if record.status == HOUSE_STATUS_WIP:
+		_manager.get_house_builder_work_controller().on_wip_house_removed(record.id)
 	var blockers: Array[Vector2i] = record.blocking_cells
 	for cell: Vector2i in blockers:
 		if _wallz.get_cell_source_id(cell) < 0:
@@ -317,9 +338,10 @@ func get_house_health_bar_world_position(entrance: Vector2i) -> Vector2:
 # Save / restore of player-built runtime houses (authored houses are recreated by level loading).
 # ---------------------------------------------------------------------------
 
-## Minimal save records for player-built houses only: catalog item id + entrance cell. The five
-## blockers are already serialized through wallz; the sprite and logical registry are rebuilt from
-## these on load. Construction progress is intentionally not saved (loaded houses are complete).
+## Minimal save records for player-built houses only: catalog item id, entrance cell, persistent
+## WIP/completed status, and deterministic construction order. The five blockers are already
+## serialized through wallz; the sprite and logical registry are rebuilt from these on load.
+## Runtime Builder work progress is intentionally not saved.
 func serialize_player_built_houses() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for record: HouseRecord in _houses:
@@ -329,6 +351,8 @@ func serialize_player_built_houses() -> Array[Dictionary]:
 			"item_id": record.item_id,
 			"entrance_x": record.entrance_cell.x,
 			"entrance_y": record.entrance_cell.y,
+			"status": String(record.status),
+			"construction_order": record.construction_order,
 		})
 	return out
 
@@ -347,17 +371,25 @@ func restore_player_built_houses(records: Array) -> void:
 		var entry: Dictionary = raw_record as Dictionary
 		var item_id: String = str(entry.get("item_id", "house"))
 		var entrance: Vector2i = Vector2i(int(entry.get("entrance_x", 0)), int(entry.get("entrance_y", 0)))
-		if _restore_one_player_house(item_id, entrance, source_id):
+		var status: StringName = _normalized_status(StringName(str(entry.get("status", String(HOUSE_STATUS_COMPLETED)))))
+		var construction_order: int = int(entry.get("construction_order", -1))
+		if _restore_one_player_house(item_id, entrance, source_id, status, construction_order):
 			repaired_any = true
 	if repaired_any:
 		_wallz.update_internals()
 
 
-func _restore_one_player_house(item_id: String, entrance: Vector2i, source_id: int) -> bool:
+func _restore_one_player_house(
+		item_id: String,
+		entrance: Vector2i,
+		source_id: int,
+		status: StringName,
+		construction_order: int
+) -> bool:
 	if _presence_to_house.has(entrance) or has_house_at_entrance(entrance):
 		push_warning("HouseManager: saved house at %s conflicts with an existing house; skipping." % str(entrance))
 		return false
-	var texture: Texture2D = ItemCatalog.get_house_texture(item_id)
+	var texture: Texture2D = _texture_for_status(item_id, status)
 	if texture == null:
 		push_warning("HouseManager: saved house item '%s' has no texture; skipping." % item_id)
 		return false
@@ -376,6 +408,10 @@ func _restore_one_player_house(item_id: String, entrance: Vector2i, source_id: i
 	record.player_built = true
 	record.removable = true
 	record.destructible = ItemCatalog.get_max_health(item_id) > 0
+	record.status = _normalized_status(status)
+	record.construction_order = _assign_construction_order(construction_order)
+	if record.status == HOUSE_STATUS_WIP:
+		_manager.get_house_builder_work_controller().on_wip_house_added(record.id)
 	return repaired
 
 
@@ -413,10 +449,32 @@ func _make_runtime_sprite(source: Variant, texture: Texture2D, id: StringName) -
 			sprite.get_parent().remove_child(sprite)
 	else:
 		sprite = Sprite2D.new()
-		sprite.texture = texture
 		sprite.centered = true
+	sprite.texture = texture
 	sprite.name = String(id)
 	return sprite
+
+
+func _texture_for_status(item_id: String, status: StringName) -> Texture2D:
+	if _normalized_status(status) == HOUSE_STATUS_WIP:
+		var wip_texture: Texture2D = ItemCatalog.get_house_wip_texture(item_id)
+		if wip_texture != null:
+			return wip_texture
+	return ItemCatalog.get_house_completed_texture(item_id)
+
+
+func _normalized_status(status: StringName) -> StringName:
+	if status == HOUSE_STATUS_WIP:
+		return HOUSE_STATUS_WIP
+	return HOUSE_STATUS_COMPLETED
+
+
+func _assign_construction_order(saved_order: int) -> int:
+	var order: int = saved_order
+	if order <= 0:
+		order = _next_construction_order
+	_next_construction_order = maxi(_next_construction_order, order + 1)
+	return order
 
 
 func _runtime_house_container() -> Node2D:
@@ -429,12 +487,6 @@ func _runtime_house_container() -> Node2D:
 		container.name = RUNTIME_HOUSE_CONTAINER_NAME
 		host.add_child(container)
 	return container
-
-
-func _start_house_construction_visual(record: HouseRecord) -> void:
-	var overlay: BuildingConstructionOverlay = _manager.get_construction_overlay()
-	if overlay != null and record.sprite != null:
-		overlay.track_house_visual(record.sprite)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +534,70 @@ func find_house_by_name(id: StringName) -> HouseRecord:
 func get_house_entrance(id: StringName) -> Vector2i:
 	var record: HouseRecord = find_house_by_name(id)
 	return record.entrance_cell if record != null else Vector2i(2147483647, 2147483647)
+
+
+func get_house_sprite(id: StringName) -> Sprite2D:
+	var record: HouseRecord = find_house_by_name(id)
+	if record == null or record.sprite == null or not is_instance_valid(record.sprite):
+		return null
+	return record.sprite
+
+
+func house_status(house_id: StringName) -> StringName:
+	var record: HouseRecord = find_house_by_name(house_id)
+	return record.status if record != null else &""
+
+
+func is_house_wip(house_id: StringName) -> bool:
+	return house_status(house_id) == HOUSE_STATUS_WIP
+
+
+func is_house_completed(house_id: StringName) -> bool:
+	return house_status(house_id) == HOUSE_STATUS_COMPLETED
+
+
+func get_wip_house_ids_in_build_order() -> Array[StringName]:
+	var records: Array[HouseRecord] = []
+	for record: HouseRecord in _houses:
+		if record.player_built and record.status == HOUSE_STATUS_WIP:
+			records.append(record)
+	records.sort_custom(func(a: HouseRecord, b: HouseRecord) -> bool:
+		if a.construction_order == b.construction_order:
+			return String(a.id) < String(b.id)
+		return a.construction_order < b.construction_order
+	)
+	var ids: Array[StringName] = []
+	for record: HouseRecord in records:
+		ids.append(record.id)
+	return ids
+
+
+func complete_house(house_id: StringName) -> bool:
+	var record: HouseRecord = find_house_by_name(house_id)
+	if record == null or record.status != HOUSE_STATUS_WIP:
+		return false
+	var texture: Texture2D = ItemCatalog.get_house_completed_texture(record.item_id)
+	if texture == null:
+		push_warning("HouseManager: completed texture missing for house '%s' item '%s'." % [String(house_id), record.item_id])
+		return false
+	record.status = HOUSE_STATUS_COMPLETED
+	if record.sprite != null and is_instance_valid(record.sprite):
+		record.sprite.texture = texture
+	return true
+
+
+func house_work_seconds(house_id: StringName) -> float:
+	var record: HouseRecord = find_house_by_name(house_id)
+	if record == null:
+		return 0.0
+	return ItemCatalog.get_house_builder_work_seconds(record.item_id)
+
+
+func is_house_navigation_ready(house_id: StringName) -> bool:
+	if find_house_by_name(house_id) == null:
+		return false
+	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
+	return not invalidation.navigation_topology_dirty() and not invalidation.runtime_rebuild_active()
 
 
 func get_house_blocking_cells(id: StringName) -> Array[Vector2i]:

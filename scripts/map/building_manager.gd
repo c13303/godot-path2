@@ -203,6 +203,7 @@ var _sheep_controller: SheepController = SHEEP_CONTROLLER_SCRIPT.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 var _house_manager: HouseManager = HouseManager.new()
+var _house_builder_work: HouseBuilderWorkController = HouseBuilderWorkController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
@@ -283,6 +284,7 @@ func _ready() -> void:
 	_setup_zone_overlay()
 	_setup_construction_overlay()
 	_setup_house_manager()
+	_setup_house_builder_work()
 	_setup_ground_drop_manager()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -357,6 +359,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale.mark_client_step_finished()
 		clear_client_counter_agents()
 		_seed_merchant.on_night_started()
+		_house_builder_work.on_night_started()
 		_builder.on_night_started()
 		_dawn_harvest.clear_active()
 		# Counters normally empty the moment the last client of the sale leaves (see
@@ -744,6 +747,14 @@ func get_construction_overlay() -> BuildingConstructionOverlay:
 func _setup_house_manager() -> void:
 	_house_manager.setup(self)
 	_house_manager.register_authored_houses()
+
+
+func _setup_house_builder_work() -> void:
+	var overlay: HouseWorkProgressOverlay = HouseWorkProgressOverlay.new()
+	overlay.name = "HouseWorkProgressOverlay"
+	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
+	overlay_parent.add_child(overlay)
+	_house_builder_work.setup(self, _house_manager, _builder, overlay)
 
 
 func get_house_manager() -> HouseManager:
@@ -1507,6 +1518,7 @@ func _begin_seed_merchant_phase() -> void:
 
 func _begin_builder_day() -> void:
 	_builder.begin_day()
+	_house_builder_work.on_topology_changed()
 
 
 func _process_seed_merchant_arrival() -> void:
@@ -1721,6 +1733,10 @@ func get_seed_merchant_controller() -> SeedMerchantController:
 
 func get_builder_controller() -> BuilderController:
 	return _builder
+
+
+func get_house_builder_work_controller() -> HouseBuilderWorkController:
+	return _house_builder_work
 
 
 func get_sheep_controller() -> SheepController:
