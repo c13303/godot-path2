@@ -23,10 +23,12 @@ extends RichTextLabel
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const TutorialArrowScript: Script = preload("res://scripts/misc/tutorial_arrow.gd")
+const TutorialWorldArrowScript: Script = preload("res://scripts/misc/tutorial_world_arrow.gd")
 
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
+const KEY_BLOCK_PASSAGE_WALL: String = "tutorial.block_passage_wall"
 const KEY_PLANT_PASTEQUE: String = "tutorial.plant_pasteque"
 const KEY_PLANT_TURRET_EPINE: String = "tutorial.plant_turret_epine"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
@@ -60,6 +62,7 @@ const ROSE_ITEM_ID: String = "rose"
 const PASTEQUE_ITEM_ID: String = "pasteque"
 const TURRET_EPINE_ITEM_ID: String = "turret_epine"
 const COUNTER_ITEM_ID: String = "rose_shop_counter"
+const WALL_ITEM_ID: String = "wall"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -87,6 +90,7 @@ var _alert_count: int = -1
 var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
+var _tutorial_world_arrow: TutorialWorldArrow
 var _has_planted_turret_epine: bool = false
 # True during the first part of dawn: night has ended but plant growth and the
 # dawn harvest have not finished starting. Set when night turns off, cleared once
@@ -409,6 +413,8 @@ func _current_message_key() -> String:
 	if unwatered > 0:
 		return KEY_WATER_ROSES
 	if _can_start_night_after_clients() and _has_day_one_build_prompt_remaining():
+		if _should_prompt_build_wall():
+			return KEY_BLOCK_PASSAGE_WALL
 		if _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0:
 			return KEY_PLANT_PASTEQUE
 		if _should_prompt_plant_turret_epine():
@@ -733,7 +739,8 @@ func _has_day_one_build_prompt_remaining() -> bool:
 	return (
 		_is_day_one()
 		and (
-			_build_affordable_quantity(PASTEQUE_ITEM_ID) > 0
+			_should_prompt_build_wall()
+			or _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0
 			or _should_prompt_plant_turret_epine()
 		)
 	)
@@ -741,6 +748,18 @@ func _has_day_one_build_prompt_remaining() -> bool:
 
 func _should_prompt_plant_turret_epine() -> bool:
 	return not _has_planted_turret_epine and _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
+
+
+## Day-1 wall step: prompt until at least one wall is built (and the player still owns a
+## wall to place). Precedes the watermelon/spitter prompts.
+func _should_prompt_build_wall() -> bool:
+	return _wall_count() <= 0 and _build_affordable_quantity(WALL_ITEM_ID) > 0
+
+
+func _wall_count() -> int:
+	if _building_object_manager != null and _building_object_manager.has_method("count_buildings_by_item_id"):
+		return int(_building_object_manager.call("count_buildings_by_item_id", WALL_ITEM_ID))
+	return 0
 
 
 func _tutorial_item_for_key(key: String) -> String:
@@ -755,6 +774,9 @@ func _tutorial_item_for_key(key: String) -> String:
 
 
 func _update_tutorial_arrow(key: String) -> void:
+	# The HUD arrow (below) and the world arrow are driven together: whichever contextual
+	# message is showing decides both. Most steps have no world target, so this clears.
+	_update_tutorial_world_arrow(key)
 	_ensure_tutorial_arrow()
 	if _tutorial_arrow == null:
 		return
@@ -768,6 +790,19 @@ func _update_tutorial_arrow(key: String) -> void:
 	if key == KEY_WATER_ROSES:
 		# "Arrosez vos roses" shows no arrow: the water tool is the only equipped
 		# option at that point, so the hint text alone is enough.
+		_hide_tutorial_arrow()
+		return
+	if key == KEY_BLOCK_PASSAGE_WALL:
+		if _is_hammer_menu_open():
+			var wall_rect: Rect2 = _visible_build_item_rect(WALL_ITEM_ID)
+			if wall_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_right_at(wall_rect, get_process_delta_time())
+				return
+		else:
+			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
+			if hammer_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
+				return
 		_hide_tutorial_arrow()
 		return
 	if key == KEY_PLACE_SHOP and _is_day_two():
@@ -808,6 +843,54 @@ func _ensure_tutorial_arrow() -> void:
 	_tutorial_arrow = TutorialArrowScript.new() as TutorialArrow
 	_tutorial_arrow.name = "TutorialArrow"
 	_game_ui.call_deferred("add_child", _tutorial_arrow)
+
+
+## Points the world arrow at the tile a step designates (e.g. build the watermelon on tuto1),
+## or clears it when the current step has no world target. Complements the HUD arrow, which
+## points at the tool/build item to select.
+func _update_tutorial_world_arrow(key: String) -> void:
+	_ensure_tutorial_world_arrow()
+	if _tutorial_world_arrow == null:
+		return
+	var target_name: String = _world_arrow_target_for_key(key)
+	if target_name == "":
+		_tutorial_world_arrow.clear()
+		return
+	var marker: Node2D = _tuto_marker_node(target_name)
+	if marker == null:
+		_tutorial_world_arrow.clear()
+		return
+	_tutorial_world_arrow.point_at_node(marker)
+
+
+## Maps a contextual message key to the name of the world marker node it should point at.
+## Empty string means the step has no world target.
+func _world_arrow_target_for_key(key: String) -> String:
+	if key == KEY_BLOCK_PASSAGE_WALL:
+		return "tuto2"
+	if key == KEY_PLANT_PASTEQUE:
+		return "tuto1"
+	if key == KEY_PLANT_TURRET_EPINE:
+		return "tuto3"
+	return ""
+
+
+func _tuto_marker_node(node_name: String) -> Node2D:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("Map/MonTilemap/spawners/%s" % node_name) as Node2D
+
+
+func _ensure_tutorial_world_arrow() -> void:
+	if _tutorial_world_arrow != null and is_instance_valid(_tutorial_world_arrow):
+		return
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return
+	_tutorial_world_arrow = TutorialWorldArrowScript.new() as TutorialWorldArrow
+	_tutorial_world_arrow.name = "TutorialWorldArrow"
+	scene.call_deferred("add_child", _tutorial_world_arrow)
 
 
 func _is_gardening_menu_open() -> bool:

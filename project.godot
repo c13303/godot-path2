@@ -47,7 +47,7 @@ theme/custom="res://assets/themes/garden_theme.tres"
 [rabbit_game]
 
 startup/level_selection=false
-startup/show_splashscreen=true
+startup/show_splashscreen=false
 
 [rendering]
 

@@ -1342,13 +1342,21 @@ metadata/water = true
 
 [node name="spawners" type="Node" parent="." unique_id=608668911]
 
+[node name="tuto3" type="Sprite2D" parent="spawners" unique_id=1153011826]
+visible = false
+position = Vector2(2089, 1910)
+texture = ExtResource("7_wyhb5")
+metadata/id = ""
+
 [node name="tuto2" type="Sprite2D" parent="spawners" unique_id=799027934]
+visible = false
 position = Vector2(1869, 1853)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="tuto1" type="Sprite2D" parent="spawners" unique_id=1544535754]
-position = Vector2(1935, 1306)
+visible = false
+position = Vector2(2031, 1938)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
