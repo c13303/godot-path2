@@ -19,6 +19,10 @@ const PROGRESS_BAR_WIDTH_RATIO: float = 0.8
 var building_manager: BuildingManager = null
 
 var _pending_cells: Dictionary = {}
+# External sprite visuals (houses) that share the same flow-construction progress but draw
+# their own single bar via a BuildingConstructionIndicator child. Kept alongside pending cells
+# so the same state machine drives both; processing stays active while either is non-empty.
+var _house_indicators: Array[BuildingConstructionIndicator] = []
 var _flow_queue_peak: int = 0
 var _progress: float = 0.0
 
@@ -40,19 +44,60 @@ func untrack_cell(cell: Vector2i) -> void:
 		queue_redraw()
 
 
+# Registers a house sprite as one under-construction visual: a single progress bar and a 50%
+# ghost, completing together with the shared flow-construction progress. See
+# BuildingConstructionIndicator.
+func track_house_visual(sprite: Sprite2D) -> void:
+	if sprite == null:
+		return
+	var indicator: BuildingConstructionIndicator = BuildingConstructionIndicator.new()
+	indicator.name = "HouseConstructionIndicator"
+	sprite.add_child(indicator)
+	indicator.setup(sprite)
+	_house_indicators.append(indicator)
+	set_process(true)
+	queue_redraw()
+
+
 func _process(_delta: float) -> void:
-	if _pending_cells.is_empty() or building_manager == null:
+	if building_manager == null:
 		_pending_cells.clear()
+		_finish_house_indicators()
+		_flow_queue_peak = 0
+		set_process(false)
+		queue_redraw()
+		return
+	if _pending_cells.is_empty() and _house_indicators.is_empty():
 		_flow_queue_peak = 0
 		set_process(false)
 		queue_redraw()
 		return
 	_progress = _compute_construction_progress()
+	_update_house_indicators()
 	if _progress >= 1.0:
 		_pending_cells.clear()
+		_finish_house_indicators()
 		_flow_queue_peak = 0
 		set_process(false)
 	queue_redraw()
+
+
+func _update_house_indicators() -> void:
+	var i: int = 0
+	while i < _house_indicators.size():
+		var indicator: BuildingConstructionIndicator = _house_indicators[i]
+		if not is_instance_valid(indicator):
+			_house_indicators.remove_at(i)
+			continue
+		indicator.set_progress(_progress)
+		i += 1
+
+
+func _finish_house_indicators() -> void:
+	for indicator: BuildingConstructionIndicator in _house_indicators:
+		if is_instance_valid(indicator):
+			indicator.finish()
+	_house_indicators.clear()
 
 
 # Coarse but honest progress: dirty/quiet window -> 10%, budgeted walkability

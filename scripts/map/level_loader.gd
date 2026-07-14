@@ -104,6 +104,11 @@ func _load_level() -> void:
 	# Instanced off-tree; we only keep its authored layers and discard the shell.
 	var level_root: Node = scene_to_load.instantiate()
 	_capture_level_spawn_config(level_root, scene_to_load.resource_path)
+	# Authored houses must be normalized (sprite snapped, footprint walls stamped, paired spot
+	# markers moved to the entrance) BEFORE spawner bindings are captured: a paired spot such as
+	# seedmerchent_spot is converted into the merchant's stored spot_cell, so it has to be in its
+	# final position first. HouseManager owns the geometry; LevelLoader only invokes it.
+	HouseManager.prepare_authored_houses(level_root)
 	_capture_level_spawner_bindings(level_root)
 	_capture_level_map_bounds(level_root)
 	for layer_name in LEVEL_LAYER_NAMES:

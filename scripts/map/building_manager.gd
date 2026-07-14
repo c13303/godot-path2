@@ -201,6 +201,7 @@ var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.n
 var _sheep_controller: SheepController = SHEEP_CONTROLLER_SCRIPT.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
+var _house_manager: HouseManager = HouseManager.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
@@ -279,6 +280,7 @@ func _ready() -> void:
 	_setup_counter_stock_manager()
 	_setup_zone_overlay()
 	_setup_construction_overlay()
+	_setup_house_manager()
 	_setup_ground_drop_manager()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -725,6 +727,52 @@ func _setup_construction_overlay() -> void:
 	_construction_overlay.building_manager = self
 	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(_construction_overlay)
+
+
+func get_construction_overlay() -> BuildingConstructionOverlay:
+	return _construction_overlay
+
+
+# Thin house wiring: HouseManager owns all house geometry/registry/creation. Runs after the
+# level layers are resolved (so floor/wallz exist) and the spawner container has been
+# reparented under MonTilemap, but before startup topology sync (_sync_runtime_state) finishes,
+# so the authored house blockers are already present when the scan/precompute runs.
+func _setup_house_manager() -> void:
+	_house_manager.setup(self)
+	_house_manager.register_authored_houses()
+	_setup_house_runtime_test_controller()
+
+
+func get_house_manager() -> HouseManager:
+	return _house_manager
+
+
+# =============================================================================
+# TEMPORARY HOUSE PASS 1 TEST WIRING
+# Remove together with scripts/debug/house_runtime_test_controller.gd once runtime house
+# placement is integrated into the real build system.
+# =============================================================================
+func _setup_house_runtime_test_controller() -> void:
+	var controller: HouseRuntimeTestController = HouseRuntimeTestController.new()
+	controller.name = "HouseRuntimeTestController"
+	add_child(controller)
+	controller.setup(_house_manager, floorz)
+
+
+# Immediately (before the next budgeted rebuild) toggles one cell's native player collision.
+# Thin generic wrapper over BuildingNavigationSyncService for HouseManager's atomic commit.
+func set_player_navigation_cell_blocked(cell: Vector2i, blocked: bool) -> void:
+	_building_navigation_sync.set_player_cell_blocked(cell, blocked)
+
+
+# Generic navigation queries used by HouseManager's placement validation.
+# (is_walkable_cell already exists below as a public wrapper over _is_walkable.)
+func has_floor_cell(cell: Vector2i) -> bool:
+	return _has_floor(cell)
+
+
+func has_wall_cell(cell: Vector2i) -> bool:
+	return _has_wall(cell)
 
 
 func _setup_ground_drop_manager() -> void:
