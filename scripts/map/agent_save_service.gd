@@ -256,7 +256,7 @@ func _serialize_agent_phase(nav_id: int) -> Dictionary:
 	return {"kind": "retarget"}
 
 
-# Despawn every monster still on the map, reusing the same native/desire cleanup as
+# Despawn every monster still on the map, reusing the same native/tracker cleanup as
 # the normal agent teardown. Used by BuildingManager's day-phase load safety net;
 # monsters must never survive into a day. Returns how many were removed.
 func purge_day_phase_monsters() -> int:
@@ -269,7 +269,7 @@ func purge_day_phase_monsters() -> int:
 		if nav_id >= 0:
 			_manager._clear_removed_agent_state(nav_id)
 			_manager._unregister_nav_agent(nav_id)
-		_manager._unregister_desire_agent(agent)
+		_manager._unregister_runtime_agent(agent)
 		agent.queue_free()
 		removed += 1
 	return removed
@@ -290,7 +290,7 @@ func _clear_existing_agents() -> void:
 				_manager._clear_removed_agent_state(nav_id)
 				_manager._unregister_nav_agent(nav_id)
 				seen_ids[nav_id] = true
-			_manager._unregister_desire_agent(agent)
+			_manager._unregister_runtime_agent(agent)
 			if group_name == &"builders":
 				_manager._on_removed_builder_agent(agent)
 			agent.queue_free()
@@ -320,11 +320,11 @@ func _restore_agent_node(data: Dictionary) -> Node2D:
 	agent.z_index = int(agent.global_position.y)
 	if kind == SPAWNER_KIND_CLIENT:
 		agent.add_to_group("clients")
-		_manager._register_desire_agent(agent, &"clients")
+		_manager._register_runtime_agent(agent, &"clients")
 		_manager._apply_client_data(agent)
 	else:
 		agent.add_to_group("monsters")
-		_manager._register_desire_agent(agent, &"monsters")
+		_manager._register_runtime_agent(agent, &"monsters")
 		var monster_type: StringName = StringName(str(data.get("monster_type", "basic")))
 		_manager._apply_monster_data(agent, monster_type)
 	_restore_metadata(agent, _dict_from_value(data.get("metadata", {})))

@@ -37,12 +37,25 @@ Notes:
 ## SpawnerRouteService
 Owns:
 - Spawner escape routes, spawner-to-garden route groups, exit-wall escape groups, route cache stats.
+- Queued group-flow rebuild requests, including explicit fence-blocking policy for preview-only groups.
 
 Does not own:
 - Spawner source-of-truth dictionaries or spawn timing.
 
 Notes:
 - Uses agent/flow dynamic calls where external native or scene APIs are optional.
+
+## PathPreviewController / PathPreviewRunner
+Owns:
+- Preview-only client/monster route descriptors, temporary flow groups, route signatures, low-frequency refresh, runner pooling, and phase cleanup.
+- One moving procedural star plus its bounded fading trail per active runner.
+
+Does not own:
+- Gameplay spawning, normal spawner/garden route groups, native agent registration, steering, A* routes, or map topology state.
+
+Notes:
+- Preview groups are allocated through AgentManager but never receive agents. Flow builds use SpawnerRouteService's normal one-request-per-frame queue with explicit policy: clients block fences, monsters ignore fences.
+- The old footstep/ground-stamp mechanic has been removed. Runtime agents now register with AgentCellTracker through runtime-agent tracking wrappers only.
 
 ## AgentNavigationPhaseController
 Owns:

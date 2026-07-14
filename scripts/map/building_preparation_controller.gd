@@ -106,6 +106,7 @@ func _run_shared_preparation(token: int) -> bool:
 	prep_result = await _manager._validate_gardens_budgeted(token)
 	if not prep_result:
 		return false
+	_manager.get_building_invalidation_controller().mark_navigation_rebuild_completed()
 	return true
 
 

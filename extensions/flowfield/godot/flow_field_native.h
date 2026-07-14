@@ -231,6 +231,7 @@ namespace godot
         static double move_cost_for_dir(int dir_index);
 
         godot::Vector2 compute_flow_dir(Vector2 world_pos) const;
+        godot::Vector2 compute_group_flow_dir(int group_id, Vector2 world_pos) const;
 
         ffcore::FlowField *get_field() { return &field; }
         Vector2 get_goal_world() const { return goal_world; }

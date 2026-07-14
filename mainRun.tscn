@@ -35,7 +35,6 @@
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
 [ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
 [ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
-[ext_resource type="Script" uid="uid://b4mvldtd7kft4" path="res://scripts/map/desire.gd" id="31_desire"]
 [ext_resource type="Script" uid="uid://bmoneyicon13q" path="res://scripts/ui/money_icon.gd" id="31_money_icon"]
 [ext_resource type="Script" uid="uid://ddklovsi2tle0" path="res://scripts/animations/characterAnimation.gd" id="32_anim"]
 [ext_resource type="Script" uid="uid://sfwpyffffhdb" path="res://scripts/ui/menus.gd" id="35_ikr28"]
@@ -57,6 +56,7 @@
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
 [ext_resource type="Theme" uid="uid://bhpuo5gdtyiwu" path="res://assets/themes/number_theme.tres" id="50_number_theme"]
+[ext_resource type="Script" uid="uid://pathprevctrl001" path="res://scripts/map/path_preview_controller.gd" id="51_path_preview"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -755,9 +755,8 @@ script = ExtResource("12_t6n3k")
 
 [node name="MonTilemap" type="Node" parent="Map" unique_id=62371074]
 
-[node name="Desire" type="Sprite2D" parent="Map/MonTilemap" unique_id=1391463247]
-z_index = -99
-script = ExtResource("31_desire")
+[node name="PathPreview" type="Node2D" parent="Map/MonTilemap"]
+script = ExtResource("51_path_preview")
 
 [node name="plantz" type="TileMapLayer" parent="Map/MonTilemap" unique_id=1102024521]
 z_index = -60

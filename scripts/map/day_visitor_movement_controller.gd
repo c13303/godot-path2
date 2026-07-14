@@ -10,7 +10,6 @@ var _manager: BuildingManager
 var _diagnostic_label: String = "day visitor"
 var _agent_kind: StringName = &""
 var _scene_group: StringName = &""
-var _desire_category: StringName = &""
 var _active: bool = false
 var _agent: Node2D
 var _nav_id: int = -1
@@ -33,7 +32,7 @@ func spawn(
 		target_cell: Vector2i,
 		agent_kind: StringName,
 		scene_group: StringName,
-		desire_category: StringName,
+		tracking_category: StringName,
 		visual_setup: Callable
 ) -> bool:
 	clear(false)
@@ -56,7 +55,7 @@ func spawn(
 	agent.global_position = _manager.cell_center(spawn_cell)
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group(scene_group)
-	_manager.register_desire_agent(agent, desire_category)
+	_manager.register_runtime_agent(agent, tracking_category)
 	agent.set_meta("agent_kind", agent_kind)
 	agent.set_meta("spawner_cell", source_spawner_cell)
 	visual_setup.call(agent)
@@ -68,7 +67,6 @@ func spawn(
 	agent_manager.call("assign_agent_path", nav_id, path_world)
 	_agent_kind = agent_kind
 	_scene_group = scene_group
-	_desire_category = desire_category
 	_active = true
 	_agent = agent
 	_nav_id = nav_id

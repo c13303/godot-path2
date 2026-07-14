@@ -131,9 +131,8 @@ func _ensure_spawned() -> bool:
 	agent.global_position = _manager.cell_center(_idle_cell)
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group("sheep")
-	# Sheep don't use the desire ground-marker system, so register them with the cell
-	# tracker directly (the desire wrapper handles monsters/clients/merchants). Sheep
-	# live for the level's lifetime, so there's no runtime unregister path.
+	# Sheep live for the level's lifetime, so they use the direct tracked-agent API
+	# and have no runtime unregister path.
 	_manager.register_tracked_agent(agent, &"sheep")
 	agent.set_meta("agent_kind", &"sheep")
 	agent.set_meta("monster_speed_scale", SHEEP_SPEED_SCALE)

@@ -30,6 +30,7 @@ var _runtime_rebuild_wants_gardens: bool = false
 # Coarse 0..1 progress of the current runtime rebuild, advanced between the
 # budgeted passes. Read by BuildingConstructionOverlay for the progress bar.
 var _runtime_rebuild_progress: float = 0.0
+var _navigation_revision: int = 0
 
 const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
@@ -135,6 +136,14 @@ func navigation_topology_dirty() -> bool:
 	return _navigation_topology_dirty
 
 
+func navigation_revision() -> int:
+	return _navigation_revision
+
+
+func mark_navigation_rebuild_completed() -> void:
+	_bump_navigation_revision()
+
+
 # Budgeted (multi-frame) mirror of _apply_walkability_topology_rebuild for live
 # gameplay: same step order, but the heavy passes (walkable cache, garden
 # clustering/validation, exit-wall escapes) are sliced across frames using the
@@ -186,6 +195,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	_runtime_rebuild_progress = 1.0
 	if ok:
 		_runtime_rebuild_wants_gardens = false
+		_bump_navigation_revision()
 		_manager.get_house_builder_work_controller().on_topology_changed()
 		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))
 		CppDebugOptions.dlog("walkability rebuild completed in %dms (budgeted)" % elapsed_ms)
@@ -224,6 +234,7 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager._rebuild_exit_wall_escapes()
 	telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
 		"exits=%d" % route_service.exit_wall_escape_count())
+	_bump_navigation_revision()
 
 
 func _apply_plant_layout_rebuild() -> void:
@@ -231,6 +242,9 @@ func _apply_plant_layout_rebuild() -> void:
 		return
 	clear_plant_layout_dirty()
 	_manager._rebuild_walkable_map_cache()
-	var topology: GardenTopologyService = _garden_topology
-	if topology.plant_zone_built():
-		_manager._rebuild_plant_zone_from_layer()
+	_manager._rebuild_plant_zone_from_layer()
+	_bump_navigation_revision()
+
+
+func _bump_navigation_revision() -> void:
+	_navigation_revision += 1

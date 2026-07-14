@@ -100,11 +100,11 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	agent.z_index = int(agent.global_position.y)
 	if agent_kind == SPAWNER_KIND_CLIENT:
 		agent.add_to_group("clients")
-		_manager._register_desire_agent(agent, &"clients")
+		_manager._register_runtime_agent(agent, &"clients")
 		_manager._apply_client_data(agent)
 	else:
 		agent.add_to_group("monsters")
-		_manager._register_desire_agent(agent, &"monsters")
+		_manager._register_runtime_agent(agent, &"monsters")
 		# Apply the monster bible entry (sprite + health + speed/inertia metas)
 		# before the agent is registered with the native manager, which reads the
 		# metas in spawn_agent.
@@ -132,7 +132,7 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 			if not tantrum_started:
 				if _manager.agent_manager.has_method("unregister_agent"):
 					_manager.agent_manager.call("unregister_agent", nav_id)
-				_manager._unregister_desire_agent(agent)
+				_manager._unregister_runtime_agent(agent)
 				agent.remove_from_group(&"clients")
 				agent.queue_free()
 				telemetry.log_spawn_failure("spawner %s could not start rose-less client tantrum" % spawner_cell)
@@ -156,7 +156,7 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 			if _manager.agent_manager.has_method("unregister_agent"):
 				_manager.agent_manager.call("unregister_agent", nav_id)
 			var failed_group: StringName = &"clients" if agent_kind == SPAWNER_KIND_CLIENT else &"monsters"
-			_manager._unregister_desire_agent(agent)
+			_manager._unregister_runtime_agent(agent)
 			agent.remove_from_group(failed_group)
 			agent.queue_free()
 			telemetry.log_spawn_failure("spawner %s garden %d entry flow not ready" % [spawner_cell, garden_id])

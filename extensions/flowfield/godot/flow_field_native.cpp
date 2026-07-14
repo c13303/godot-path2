@@ -109,6 +109,7 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("compute_distance_field_global"), &FlowFieldNative::compute_distance_field_global);
     ClassDB::bind_method(D_METHOD("set_cell_blocked", "map_cell", "blocked"), &FlowFieldNative::set_cell_blocked);
     ClassDB::bind_method(D_METHOD("compute_flow_dir", "world_pos"), &FlowFieldNative::compute_flow_dir);
+    ClassDB::bind_method(D_METHOD("compute_group_flow_dir", "group_id", "world_pos"), &FlowFieldNative::compute_group_flow_dir);
 
 }
 
@@ -1732,6 +1733,30 @@ Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
     Vector2 b = d01.lerp(d11, frac.x);
     Vector2 result = a.lerp(b, frac.y);
 
+    float len2 = result.x * result.x + result.y * result.y;
+    return (len2 > 1e-6f) ? (result / Math::sqrt(len2)) : Vector2(0, 0);
+}
+
+Vector2 FlowFieldNative::compute_group_flow_dir(int group_id, Vector2 world_pos) const
+{
+    if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
+        return Vector2(0, 0);
+    if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y))
+        return Vector2(0, 0);
+
+    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+    if (!mgr)
+        return Vector2(0, 0);
+
+    const ffcore::FlowField *ff = mgr->get_group_flow(group_id);
+    if (!ff || !ff->is_ready())
+        return Vector2(0, 0);
+
+    ffcore::Vec2 dir = ff->compute_flow_dir(ffcore::Vec2(world_pos.x, world_pos.y));
+    if (!std::isfinite(dir.x) || !std::isfinite(dir.y))
+        return Vector2(0, 0);
+
+    Vector2 result(dir.x, dir.y);
     float len2 = result.x * result.x + result.y * result.y;
     return (len2 > 1e-6f) ? (result / Math::sqrt(len2)) : Vector2(0, 0);
 }

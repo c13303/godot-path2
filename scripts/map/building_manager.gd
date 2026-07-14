@@ -188,7 +188,7 @@ var _drowning_controller: DrowningController = DrowningController.new()
 var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 # Detects agent cell transitions and dispatches tile-based interactions (drowning,
 # turret eating, rose/pasteque trampling) only on entry, replacing four per-frame
-# full-agent scans. Registration is embedded in _register_desire_agent (see below).
+# full-agent scans. Runtime agents register through _register_runtime_agent.
 var _agent_cell_tracker: AgentCellTracker = AgentCellTracker.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _building_scan: BuildingScanService = BuildingScanService.new()
@@ -215,7 +215,6 @@ var _spawner_reveal_phase: SpawnerRevealPhaseController = SPAWNER_REVEAL_PHASE_C
 var _plant_contact_dance_router: PlantContactDanceRouter = PLANT_CONTACT_DANCE_ROUTER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
-var _desire: Node
 
 func set_empty_garden_local_retarget_radius(value: int) -> void:
 	empty_garden_local_retarget_radius = maxi(0, value)
@@ -273,7 +272,6 @@ func _ready() -> void:
 	_plant_contact_dance_router.setup(self)
 	add_child(_spawner_reveal_cutscene)
 	_resolve_level_layers()
-	_resolve_desire()
 	_load_level_spawn_config()
 	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
@@ -310,29 +308,17 @@ func _resolve_level_layers() -> void:
 		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 
-func _resolve_desire() -> void:
-	_desire = get_node_or_null("../MonTilemap/Desire")
+# Authoritative Godot-side runtime-agent registration choke for monsters, clients,
+# merchants, and builders. This only owns AgentCellTracker membership; native
+# AgentManager registration stays with the spawn/navigation code.
+func _register_runtime_agent(agent: Node2D, category: StringName) -> void:
+	_agent_cell_tracker.register(agent, category)
 
 
-# Authoritative Godot-side agent registration choke for monsters/clients/merchants:
-# every spawn (agent_spawn_service, agent_save_service) and removal path routes
-# through here, so besides the desire ground-marker it also (un)registers the agent
-# with the cell tracker. Sheep don't use desire; they register via the public
-# register_tracked_agent below.
-func _register_desire_agent(agent: Node2D, group_name: StringName) -> void:
-	if _desire != null and _desire.has_method("register_agent"):
-		_desire.call("register_agent", agent, group_name)
-	_agent_cell_tracker.register(agent, group_name)
-
-
-func _unregister_desire_agent(agent: Node2D) -> void:
-	if _desire != null and _desire.has_method("unregister_agent"):
-		_desire.call("unregister_agent", agent)
+func _unregister_runtime_agent(agent: Node2D) -> void:
 	_agent_cell_tracker.unregister(agent)
 
 
-# Cell-tracker registration for agents that do not go through the desire system
-# (sheep). Kept separate so the desire wrapper's contract stays unchanged.
 func register_tracked_agent(agent: Node2D, category: StringName) -> void:
 	_agent_cell_tracker.register(agent, category)
 
@@ -1666,15 +1652,22 @@ func planificator_anchor_night_index() -> int:
 # spawner bindings are validated.
 func night_active_spawner_world_positions(night_index: int) -> Array[Vector2]:
 	var positions: Array[Vector2] = []
+	for cell: Vector2i in night_active_spawner_cells(night_index):
+		positions.append(cell_center(cell))
+	return positions
+
+
+func night_active_spawner_cells(night_index: int) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
 	var config: SpawnPlaylistConfigService = get_spawn_playlist_config()
 	if config == null:
-		return positions
+		return cells
 	var playlist: LevelSpawnPlaylist = config.level_spawn_playlist()
 	if playlist == null or night_index < 0 or night_index >= playlist.nights.size():
-		return positions
+		return cells
 	var night: NightSpawnPlaylist = playlist.nights[night_index]
 	if night == null:
-		return positions
+		return cells
 	var bindings_by_id: Dictionary = config.spawner_bindings_by_id()
 	var seen: Dictionary = {}
 	for track: SpawnerWaveTrack in night.spawner_tracks:
@@ -1686,8 +1679,8 @@ func night_active_spawner_world_positions(night_index: int) -> Array[Vector2]:
 			continue
 		seen[track.spawner_id] = true
 		var cell: Vector2i = bindings_by_id[track.spawner_id] as Vector2i
-		positions.append(cell_center(cell))
-	return positions
+		cells.append(cell)
+	return cells
 
 
 func _track_has_monster_activity(track: SpawnerWaveTrack) -> bool:
@@ -1695,6 +1688,45 @@ func _track_has_monster_activity(track: SpawnerWaveTrack) -> bool:
 		if wave != null and wave.monster_count > 0:
 			return true
 	return false
+
+
+func completed_night_client_count_for_day() -> int:
+	return _client_sale.completed_night_client_count_for_day()
+
+
+func current_playlist_night_index() -> int:
+	return _spawn_playlist_config.current_playlist_night_index()
+
+
+func upcoming_authored_night_index_for_preview() -> int:
+	var night_index: int = current_day_number() - 1
+	if night_index < 0 or night_index >= _spawn_playlist_config.total_night_count():
+		return -1
+	return night_index
+
+
+func authored_night_count() -> int:
+	return _spawn_playlist_config.total_night_count()
+
+
+func ensure_path_preview_topology_ready() -> void:
+	var source_plant_count: int = preview_source_plant_count()
+	if _garden_topology.plant_zone_built() and (_garden_topology.gardens().size() > 0 or source_plant_count <= 0):
+		return
+	if _garden_topology.plant_zone_built():
+		_garden_topology.set_plant_zone_built(false)
+	_sync_flow_extra_blocking_cells()
+	_rebuild_walkable_map_cache()
+	_build_plant_zone()
+	_building_invalidation_controller.clear_plant_layout_dirty()
+	_building_invalidation_controller.mark_navigation_rebuild_completed()
+
+
+func preview_source_plant_count() -> int:
+	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
+		return 0
+	var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
+	return plant_cells.size()
 
 
 # Whether the current day's client step is still pending or active (see
@@ -1985,8 +2017,8 @@ func cell_center(cell: Vector2i) -> Vector2:
 	return _cell_center(cell)
 
 
-func register_desire_agent(agent: Node2D, group_name: StringName) -> void:
-	_register_desire_agent(agent, group_name)
+func register_runtime_agent(agent: Node2D, category: StringName) -> void:
+	_register_runtime_agent(agent, category)
 
 
 func path_cells_to_world(path_cells: PackedVector2Array, nav_id: int = -1, disperse_endpoint: bool = false) -> PackedVector2Array:
@@ -2624,7 +2656,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	_entry_path_agents.erase(nav_id)
 	if agent.has_method("stop_escape"):
 		agent.call("stop_escape")
-	_unregister_desire_agent(agent)
+	_unregister_runtime_agent(agent)
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.remove_from_group("builders")
@@ -2901,6 +2933,14 @@ func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 	return _spawner_garden_selection_service.select_garden_for_client_spawner(spawner_cell)
 
 
+func select_garden_entry_for_preview(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
+	return _spawner_garden_selection_service.select_garden_entry_for_preview(spawner_cell, agent_kind)
+
+
+func preview_selection_debug_summary(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
+	return _spawner_garden_selection_service.preview_selection_debug_summary(spawner_cell, agent_kind)
+
+
 func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
 	return _spawner_garden_selection_service.select_spawner_garden_for_agent(from_cell, agent_kind)
 
@@ -2916,6 +2956,28 @@ func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i)
 
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
 	return _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
+
+
+func resolve_spawner_escape_target_cell(spawner_cell: Vector2i) -> Vector2i:
+	return _spawner_route_service.resolve_spawner_escape_target_cell(spawner_cell)
+
+
+func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, block_fences: bool, label: String = "") -> void:
+	_spawner_route_service.request_group_flow_rebuild_with_policy(group_id, goal_world, block_fences, label)
+
+
+func create_preview_flow_group() -> int:
+	if agent_manager == null or not agent_manager.has_method("create_group"):
+		return -1
+	return int(agent_manager.call("create_group"))
+
+
+func dissolve_preview_flow_group(group_id: int) -> void:
+	if group_id <= IDLE_GROUP:
+		return
+	_spawner_route_service.cancel_queued_group_flow_request(group_id)
+	if agent_manager != null and agent_manager.has_method("dissolve_group"):
+		agent_manager.call("dissolve_group", group_id)
 
 # Returns true once the agent has a real new nav state (a garden entry flow, or a
 # successfully assigned escape). Returns false only when neither a garden route nor

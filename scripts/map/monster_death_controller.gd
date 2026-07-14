@@ -49,7 +49,7 @@ func _remove_dead_agent_without_drop(agent: Node2D) -> void:
 	var nav_id: int = int(agent.get("nav_id"))
 	_manager._clear_removed_agent_state(nav_id)
 	_manager._unregister_nav_agent(nav_id)
-	_manager._unregister_desire_agent(agent)
+	_manager._unregister_runtime_agent(agent)
 	agent.remove_from_group("monsters")
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")

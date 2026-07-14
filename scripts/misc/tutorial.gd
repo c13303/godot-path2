@@ -4,9 +4,9 @@ extends RichTextLabel
 ## Each frame it first checks for the temporary unbuild mode, then water, and
 ## during the day it inspects the rose/seed economy. It shows the single most
 ## relevant next step, translated through the Translations singleton. Empty water
-## stays visible at night; other hints are hidden at night. When every planted rose
-## is watered and the player has nothing left to plant or buy, a hold-to-confirm
-## prompt is shown.
+## stays visible at night; other hints are hidden at night. Once the phase owner says
+## the afternoon can end, a hold-to-confirm prompt is shown without waiting on optional
+## tutorial build/economy steps.
 ##
 ## Priority order (most prioritary first):
 ##   1. unbuild tool selected ....................... Select objects to dismantle
@@ -17,20 +17,15 @@ extends RichTextLabel
 ##   6. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
 ##   7. seeds left, shop tool equipped .............. Plant roses
 ##   8. planted roses still dry ..................... Water your roses
-##   9. day 1 pasteque/turret still placeable ....... Plant pasteque / turret
-##  10. all roses watered, clients done ............. Hold to start night
+##   9. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
 const TutorialArrowScript: Script = preload("res://scripts/misc/tutorial_arrow.gd")
-const TutorialWorldArrowScript: Script = preload("res://scripts/misc/tutorial_world_arrow.gd")
 
 const KEY_BUY_ROSES: String = "tutorial.buy_roses"
 const KEY_PLANT_ROSES: String = "tutorial.plant_roses"
 const KEY_WATER_ROSES: String = "tutorial.water_roses"
-const KEY_BLOCK_PASSAGE_WALL: String = "tutorial.block_passage_wall"
-const KEY_PLANT_PASTEQUE: String = "tutorial.plant_pasteque"
-const KEY_PLANT_TURRET_EPINE: String = "tutorial.plant_turret_epine"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
 const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
@@ -39,7 +34,6 @@ const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_ro
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
 const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
-const KEY_PLANT_MORE_ROSES: String = "tutorial.plant_more_roses"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -59,10 +53,7 @@ const ALERT_FLASH_SPEED: float = 8.0
 const GARDENING_TOOL_ID: String = "gardening"
 const HAMMER_TOOL_ID: String = "hammer"
 const ROSE_ITEM_ID: String = "rose"
-const PASTEQUE_ITEM_ID: String = "pasteque"
-const TURRET_EPINE_ITEM_ID: String = "turret_epine"
 const COUNTER_ITEM_ID: String = "rose_shop_counter"
-const WALL_ITEM_ID: String = "wall"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -75,7 +66,6 @@ var _toolbuild: Control
 var _building_manager: Node
 var _building_object_manager: Node
 var _day_toggle: Control
-var _planificator: Control
 var _player_controller: Node
 var _hold_progress_circle: Control
 var _hold_action: StringName = HOLD_ACTION_NONE
@@ -90,11 +80,6 @@ var _alert_count: int = -1
 var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
-var _tutorial_world_arrow: TutorialWorldArrow
-var _has_planted_turret_epine: bool = false
-# Wall stock captured the first time the day-1 wall step is evaluated. The step is skipped
-# once the current stock drops below this, i.e. as soon as one starting wall is placed.
-var _wall_stock_baseline: int = -1
 # True during the first part of dawn: night has ended but plant growth and the
 # dawn harvest have not finished starting. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -124,18 +109,10 @@ func _resolve_nodes() -> void:
 			_plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 		_building_manager = scene.get_node_or_null("Map/BuildingManager")
 		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
-		if _building_object_manager != null:
-			if _building_object_manager.has_method("count_buildings_by_item_id") \
-					and int(_building_object_manager.call("count_buildings_by_item_id", TURRET_EPINE_ITEM_ID)) > 0:
-				_has_planted_turret_epine = true
-			if _building_object_manager.has_signal("building_added") \
-					and not _building_object_manager.is_connected("building_added", Callable(self, "_on_building_added")):
-				_building_object_manager.connect("building_added", Callable(self, "_on_building_added"))
 		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
 		_toolbuild = scene.get_node_or_null("GameUI/Toolbuild") as Control
-		_planificator = scene.get_node_or_null("GameUI/planificator") as Control
 		_hold_progress_circle = scene.get_node_or_null("GameUI/holdProgressCircle") as Control
 		if not GameState.afternoon_phase_changed.is_connected(_on_afternoon_phase_changed):
 			GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
@@ -169,12 +146,6 @@ func _on_afternoon_phase_changed(_is_afternoon_phase: bool) -> void:
 
 func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
 	_refresh()
-
-
-func _on_building_added(_cell: Vector2i, item_id: String) -> void:
-	if item_id == TURRET_EPINE_ITEM_ID:
-		_has_planted_turret_epine = true
-		_refresh()
 
 
 func _on_locale_changed(_locale: String) -> void:
@@ -251,16 +222,6 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	_update_alert_timer(delta)
-	# Unbuild is a temporary interaction mode. Its instruction must replace every other
-	# contextual hint or alert until the tool is deselected.
-	if _unbuild_tool_selected():
-		_reset_hold_progress()
-		_show_key_immediately(KEY_UNBUILD_SELECTION)
-		return
-	if _water_refill_needed():
-		_reset_hold_progress()
-		_show_key_immediately(KEY_REFILL_WATER)
-		return
 	if _alert_key != "":
 		_reset_hold_progress()
 		if _alert_persistent:
@@ -291,20 +252,21 @@ func _refresh(delta: float = 0.0) -> void:
 		_set_glow(false)
 		_update_tutorial_arrow("")
 		return
-	# Day-1 guard: before offering to start the night, make sure the player has planted
-	# enough roses to satisfy tomorrow's clients. If not, nudge them toward the planificator
-	# (which previews that demand) instead of showing the start-night prompt.
-	if _should_warn_plant_more_roses():
-		_reset_hold_progress()
-		if _building_manager != null and _building_manager.has_method("clear_night_start_request"):
-			_building_manager.call("clear_night_start_request")
-		_show_plant_more_roses_warning()
-		return
 	if _should_request_start_night_prompt():
 		_request_start_night_prompt()
 	var hold_action: StringName = _current_hold_action()
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
+		return
+	# These are tutorial hints only; they must not withhold the afternoon end hold
+	# prompt once the phase owner has made night start available.
+	if _unbuild_tool_selected():
+		_reset_hold_progress()
+		_show_key_immediately(KEY_UNBUILD_SELECTION)
+		return
+	if _water_refill_needed():
+		_reset_hold_progress()
+		_show_key_immediately(KEY_REFILL_WATER)
 		return
 	# The dawn harvest can be skipped straight to the client sale by holding space once
 	# the roses are grown up. The hold runs in the background so the harvest hint stays on
@@ -415,13 +377,6 @@ func _current_message_key() -> String:
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES
-	if _can_start_night_after_clients() and _has_day_one_build_prompt_remaining():
-		if _should_prompt_build_wall():
-			return KEY_BLOCK_PASSAGE_WALL
-		if _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0:
-			return KEY_PLANT_PASTEQUE
-		if _should_prompt_plant_turret_epine():
-			return KEY_PLANT_TURRET_EPINE
 	if _should_prompt_place_shop():
 		return KEY_PLACE_SHOP
 	# Every planted rose is watered, and the client sale has actually completed:
@@ -472,43 +427,7 @@ func _should_request_start_night_prompt() -> bool:
 	# start-night prompt. That request may only happen once the real day is under way.
 	if _sun_rising:
 		return false
-	if _has_day_one_build_prompt_remaining():
-		return false
 	return _can_start_night_after_clients()
-
-
-## Day-1 only: the player is ready to end the day but has not planted enough roses to
-## satisfy the clients the planificator previews for tomorrow. When true the start-night
-## prompt is withheld in favour of the "plant more roses" nudge.
-func _should_warn_plant_more_roses() -> bool:
-	if not _is_day_one():
-		return false
-	if not _should_request_start_night_prompt():
-		return false
-	return _planted_rose_count() < _next_day_client_demand()
-
-
-func _planted_rose_count() -> int:
-	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
-		return 0
-	return int(_plant_manager.call("rose_count"))
-
-
-func _next_day_client_demand() -> int:
-	if _planificator == null or not _planificator.has_method("previewed_client_count"):
-		return 0
-	return int(_planificator.call("previewed_client_count"))
-
-
-func _show_plant_more_roses_warning() -> void:
-	visible = true
-	modulate = Color.WHITE
-	_displayed_key = KEY_PLANT_MORE_ROSES
-	_pending_key = KEY_PLANT_MORE_ROSES
-	_pending_remaining = 0.0
-	text = Translations.t(KEY_PLANT_MORE_ROSES)
-	_set_glow(false)
-	_update_tutorial_arrow(KEY_PLANT_MORE_ROSES)
 
 
 ## True while the night or client spawner-reveal cutscene is playing (camera scrolling
@@ -524,17 +443,9 @@ func _is_spawner_reveal_cutscene_active() -> bool:
 
 
 func _can_start_night_after_clients() -> bool:
-	if not _has_planted_roses_on_floor():
-		return false
 	if _building_manager == null or not _building_manager.has_method("can_start_night_after_clients"):
 		return false
 	return bool(_building_manager.call("can_start_night_after_clients"))
-
-
-func _has_planted_roses_on_floor() -> bool:
-	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
-		return false
-	return int(_plant_manager.call("rose_count")) > 0
 
 
 func _request_start_night_prompt() -> void:
@@ -714,22 +625,10 @@ func _has_active_night_reward() -> bool:
 	return not reward_info.is_empty()
 
 
-func _is_day_one() -> bool:
-	if _progression == null or not _progression.has_method("get_value"):
-		return false
-	return int(_progression.call("get_value", &"nDays")) == 1
-
-
 func _is_day_two() -> bool:
 	if _progression == null or not _progression.has_method("get_value"):
 		return false
 	return int(_progression.call("get_value", &"nDays")) == 2
-
-
-func _build_affordable_quantity(item_id: String) -> int:
-	if _game_ui == null or not _game_ui.has_method("get_build_affordable_quantity"):
-		return 0
-	return int(_game_ui.call("get_build_affordable_quantity", item_id))
 
 
 func _should_prompt_place_shop() -> bool:
@@ -738,81 +637,20 @@ func _should_prompt_place_shop() -> bool:
 	return true
 
 
-func _has_day_one_build_prompt_remaining() -> bool:
-	return (
-		_is_day_one()
-		and (
-			_should_prompt_build_wall()
-			or _build_affordable_quantity(PASTEQUE_ITEM_ID) > 0
-			or _should_prompt_plant_turret_epine()
-		)
-	)
-
-
-func _should_prompt_plant_turret_epine() -> bool:
-	return not _has_planted_turret_epine and _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
-
-
-## Day-1 wall step: prompt until the player places their first wall. Walls are tilemap
-## tiles (not building-object nodes), so we track placement through the inventory stock
-## instead: the step shows while the wall stock is still at its starting baseline and
-## is skipped the moment one wall has been spent. Precedes the watermelon/spitter prompts.
-func _should_prompt_build_wall() -> bool:
-	var stock: int = _wall_stock()
-	# Capture the baseline only once real stock exists, so a premature 0 (inventory not yet
-	# granted / game_ui not resolved) never latches the step off before the player can build.
-	if _wall_stock_baseline < 0 and stock > 0:
-		_wall_stock_baseline = stock
-	return _wall_stock_baseline > 0 and stock >= _wall_stock_baseline
-
-
-func _wall_stock() -> int:
-	if _game_ui != null and _game_ui.has_method("get_inventory_item_quantity"):
-		return int(_game_ui.call("get_inventory_item_quantity", WALL_ITEM_ID))
-	return 0
-
-
 func _tutorial_item_for_key(key: String) -> String:
 	match key:
 		KEY_BUY_ROSES, KEY_PLANT_ROSES:
 			return ROSE_ITEM_ID
-		KEY_PLANT_PASTEQUE:
-			return PASTEQUE_ITEM_ID
-		KEY_PLANT_TURRET_EPINE:
-			return TURRET_EPINE_ITEM_ID
 	return ""
 
 
 func _update_tutorial_arrow(key: String) -> void:
-	# The HUD arrow (below) and the world arrow are driven together: whichever contextual
-	# message is showing decides both. Most steps have no world target, so this clears.
-	_update_tutorial_world_arrow(key)
 	_ensure_tutorial_arrow()
 	if _tutorial_arrow == null:
-		return
-	if key == KEY_PLANT_MORE_ROSES:
-		var planner_rect: Rect2 = _planificator_rect()
-		if planner_rect.size != Vector2.ZERO:
-			_tutorial_arrow.point_right_at(planner_rect, get_process_delta_time())
-			return
-		_hide_tutorial_arrow()
 		return
 	if key == KEY_WATER_ROSES:
 		# "Arrosez vos roses" shows no arrow: the water tool is the only equipped
 		# option at that point, so the hint text alone is enough.
-		_hide_tutorial_arrow()
-		return
-	if key == KEY_BLOCK_PASSAGE_WALL:
-		if _is_hammer_menu_open():
-			var wall_rect: Rect2 = _visible_build_item_rect(WALL_ITEM_ID)
-			if wall_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_right_at(wall_rect, get_process_delta_time())
-				return
-		else:
-			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
-			if hammer_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
-				return
 		_hide_tutorial_arrow()
 		return
 	if key == KEY_PLACE_SHOP and _is_day_two():
@@ -855,54 +693,6 @@ func _ensure_tutorial_arrow() -> void:
 	_game_ui.call_deferred("add_child", _tutorial_arrow)
 
 
-## Points the world arrow at the tile a step designates (e.g. build the watermelon on tuto1),
-## or clears it when the current step has no world target. Complements the HUD arrow, which
-## points at the tool/build item to select.
-func _update_tutorial_world_arrow(key: String) -> void:
-	_ensure_tutorial_world_arrow()
-	if _tutorial_world_arrow == null:
-		return
-	var target_name: String = _world_arrow_target_for_key(key)
-	if target_name == "":
-		_tutorial_world_arrow.clear()
-		return
-	var marker: Node2D = _tuto_marker_node(target_name)
-	if marker == null:
-		_tutorial_world_arrow.clear()
-		return
-	_tutorial_world_arrow.point_at_node(marker)
-
-
-## Maps a contextual message key to the name of the world marker node it should point at.
-## Empty string means the step has no world target.
-func _world_arrow_target_for_key(key: String) -> String:
-	if key == KEY_BLOCK_PASSAGE_WALL:
-		return "tuto2"
-	if key == KEY_PLANT_PASTEQUE:
-		return "tuto1"
-	if key == KEY_PLANT_TURRET_EPINE:
-		return "tuto3"
-	return ""
-
-
-func _tuto_marker_node(node_name: String) -> Node2D:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return null
-	return scene.get_node_or_null("Map/MonTilemap/spawners/%s" % node_name) as Node2D
-
-
-func _ensure_tutorial_world_arrow() -> void:
-	if _tutorial_world_arrow != null and is_instance_valid(_tutorial_world_arrow):
-		return
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return
-	_tutorial_world_arrow = TutorialWorldArrowScript.new() as TutorialWorldArrow
-	_tutorial_world_arrow.name = "TutorialWorldArrow"
-	scene.call_deferred("add_child", _tutorial_world_arrow)
-
-
 func _is_gardening_menu_open() -> bool:
 	return (
 		_game_ui != null
@@ -923,12 +713,6 @@ func _visible_build_item_rect(item_id: String) -> Rect2:
 	if _toolbuild == null or not _toolbuild.has_method("get_visible_build_item_global_rect"):
 		return Rect2()
 	return _toolbuild.call("get_visible_build_item_global_rect", item_id) as Rect2
-
-
-func _planificator_rect() -> Rect2:
-	if _planificator == null or not _planificator.visible:
-		return Rect2()
-	return _planificator.get_global_rect()
 
 
 func _gardening_tool_rect() -> Rect2:

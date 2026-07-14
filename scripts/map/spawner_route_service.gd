@@ -57,6 +57,15 @@ func queued_flow_request_count() -> int:
 	return _flow_request_queue.size()
 
 
+func cancel_queued_group_flow_request(group_id: int) -> void:
+	if not _queued_flow_group_ids.has(group_id):
+		return
+	var index: int = int(_queued_flow_group_ids[group_id])
+	if index >= 0 and index < _flow_request_queue.size():
+		_flow_request_queue.remove_at(index)
+	_reindex_queued_flow_groups()
+
+
 func has_spawner_route(spawner_cell: Vector2i) -> bool:
 	return _spawner_routes.has(spawner_cell)
 
@@ -393,6 +402,10 @@ func nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
 
 
 func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: String = "") -> void:
+	request_group_flow_rebuild_with_policy(group_id, goal_world, _fences_block_navigation(), label)
+
+
+func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, block_fences: bool, label: String = "") -> void:
 	if not _is_finite_world(goal_world):
 		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
 		return
@@ -411,7 +424,7 @@ func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: Strin
 	var request: Dictionary = {
 		"group_id": group_id,
 		"goal_world": goal_world,
-		"block_fences": _fences_block_navigation(),
+		"block_fences": block_fences,
 		"label": resolved_label,
 	}
 	if _queued_flow_group_ids.has(group_id):
@@ -421,6 +434,22 @@ func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: Strin
 			return
 	_queued_flow_group_ids[group_id] = _flow_request_queue.size()
 	_flow_request_queue.append(request)
+
+
+func resolve_spawner_escape_target_cell(spawner_cell: Vector2i) -> Vector2i:
+	var bound_exit_cell: Vector2i = _spawner_exit_cell_by_cell().get(spawner_cell, INVALID_CELL) as Vector2i
+	var exit_wall_cell: Vector2i = bound_exit_cell
+	if exit_wall_cell == INVALID_CELL:
+		exit_wall_cell = _nearest_exit_wall_for_spawner(spawner_cell)
+	var escape_wall_target_cell: Vector2i = INVALID_CELL
+	if exit_wall_cell != INVALID_CELL:
+		if bound_exit_cell != INVALID_CELL and _is_walkable(exit_wall_cell):
+			escape_wall_target_cell = exit_wall_cell
+		else:
+			escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
+	if escape_wall_target_cell == INVALID_CELL:
+		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "preview escape@%s" % spawner_cell)
+	return escape_wall_target_cell
 
 
 func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> int:
