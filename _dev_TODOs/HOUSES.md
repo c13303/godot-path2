@@ -1,44 +1,112 @@
-Implement **House support — pass 1: authored registration, sprite anchoring, wall footprint, and temporary runtime construction test**.
+Implement **House support — pass 2: real inventory-backed buildable, editor acquisition paths, complete preview, unbuild, durability, and save/load**.
 
 Read and follow `AGENTS.md` before editing.
 
-Do not run Godot, tests, compilation, export, or build commands. The user performs all runtime testing.
+Do not run Godot, tests, compilation, export, or build commands. The user performs runtime testing.
 
-## Objective
+# Objective
 
-Prepare a reusable, production-oriented house system.
+Convert the house system created in pass 1 into a complete player buildable.
 
-This pass handles only:
+The house must:
 
-1. Detecting and registering houses already authored in a level.
-2. Correctly snapping and Y-sorting their sprites.
-3. Registering their five blocking footprint cells as walls.
-4. Exposing a generic runtime house creation method.
-5. Temporarily testing runtime construction with the `K` key and `test_flyhouse`.
+* Be an owned-stock item, consumed on placement exactly like wall stock.
+* Appear in the hammer build menu.
+* Be grantable as level-start inventory.
+* Be grantable as a survived-night reward.
+* Be optionally purchasable from the seed merchant.
+* Be configurable through the Rose Level Editor for all three acquisition paths.
+* Show a six-cell placement preview.
+* Show the complete house sprite in the correct position during preview.
+* Build through the existing runtime house and navigation-construction pipeline.
+* Be unbuilt as one complete logical object.
+* Return one house item to inventory when normally unbuilt.
+* Be one destructible player-built structure with one health pool.
+* Be destroyed as a whole without refund when destroyed by enemies.
+* Save and reload correctly.
 
-Do not implement the final build-menu integration yet.
+Remove the temporary `K` runtime-house test from pass 1 after the real buildable path is operational.
+
+Do not implement additional house variants yet.
+
+---
+
+# Existing pass-1 system
+
+Inspect the actual current code before editing.
+
+Pass 1 should already provide a focused house owner, expected to be something similar to:
+
+```text
+scripts/map/house_manager.gd
+```
+
+It should already own:
+
+* House geometry.
+* House registry.
+* Authored-house discovery.
+* Entrance cells.
+* Five navigation-blocking cells.
+* Sprite snapping.
+* Bottom-edge z-index.
+* Runtime house creation.
+* Batched wall stamping.
+* Runtime construction progress.
+* Authored `house_seedmerchant` registration.
+* `seedmerchent_spot` snapping.
+* A temporary `K` test using `test_flyhouse`.
+
+Reuse and extend that owner.
+
+Do not create a second house registry, duplicate geometry methods, or bypass the pass-1 runtime construction method.
+
+If pass 1 used slightly different filenames or public method names, adapt to the actual implementation while preserving its ownership.
+
+Before changing anything, identify:
+
+1. The actual `HouseManager` API.
+2. How authored and runtime house records differ.
+3. How the six-cell presence is currently indexed.
+4. How the five blocking wall cells are stamped and removed.
+5. How the construction overlay tracks a runtime house.
+6. How the temporary `K` controller is wired.
+7. Which calls are public and which still rely on private manager access.
+
+Do not perform broad cleanup unrelated to this feature.
 
 ---
 
 # Fixed house geometry
 
-The logical anchor of a house is always its **entrance cell**.
+The entrance cell remains the logical anchor.
 
-A house has a `3 × 2` map presence:
+Map presence:
 
 ```text
 WWW
 WEW
 ```
 
-Relative to the entrance cell `(0, 0)`:
+Relative to entrance `(0, 0)`:
 
 ```text
 (-1,-1)  (0,-1)  (1,-1)
 (-1, 0)  (0, 0)  (1, 0)
 ```
 
-The five blocking cells are:
+The complete six-cell presence is:
+
+```text
+(-1,-1)
+( 0,-1)
+( 1,-1)
+(-1, 0)
+( 0, 0)  entrance
+( 1, 0)
+```
+
+The five navigation blockers are:
 
 ```text
 (-1,-1)
@@ -48,9 +116,16 @@ The five blocking cells are:
 ( 1, 0)
 ```
 
-The entrance `(0, 0)` must remain completely walkable.
+The entrance `(0, 0)` is:
 
-The sprite occupies `3 × 3` visual tiles:
+* Part of the house’s reserved placement presence.
+* Included in preview coverage.
+* Not a wall.
+* Not a player collision blocker.
+* Not a navigation blocker.
+* Not available for another placeable while the house exists.
+
+Sprite footprint:
 
 ```text
 SSS
@@ -58,600 +133,1287 @@ WWW
 WEW
 ```
 
-The upper `SSS` row is visual only. It must not create walls, collision, placement occupancy, or navigation blockers. Agents can move behind that part, using normal z-index sorting.
+The top visual row remains visual only. It is not included in placement occupancy.
 
-## Sprite anchoring
+All geometry must remain centralized in `HouseManager`.
 
-The sprite’s horizontal centre must align with the entrance cell centre.
+Do not reproduce these offsets separately in preview, placement, removal, durability, and save code.
 
-The **bottom edge of the sprite** must align with the **bottom edge of the entrance cell**.
-
-Do not align the sprite origin or centre directly to the entrance.
-
-Use the actual `Sprite2D` texture, `centered`, `offset`, transform, and TileMap conversion methods. Do not assume a hardcoded 48-pixel sprite or calculate cells through manual division of world coordinates.
-
-The target bottom-centre world position is:
-
-* X: entrance cell centre X.
-* Y: entrance cell centre Y plus half the tile height.
-
-For an authored house, derive the initial entrance cell from the currently authored sprite bottom-centre:
-
-1. Determine the sprite bottom-centre in world space.
-2. Move the probe upward by half a tile.
-3. Convert that point through the floor or wall TileMapLayer to obtain the entrance cell.
-4. Snap the sprite exactly using the target alignment above.
-
-## Z-index
-
-Agents use their ground position as z-index.
-
-Set every house sprite to:
+Expose focused methods such as:
 
 ```text
-z_as_relative = false
-z_index = integer world Y of the sprite bottom edge
+get_presence_cells(entrance_cell)
+get_blocking_cells(entrance_cell)
+get_house_at_presence_cell(cell)
+get_house_entrance(house_id)
+get_house_sprite(house_id)
 ```
 
-Do not use the sprite centre Y.
-
-Expected result:
-
-* An agent above the house base draws behind it.
-* An agent below the house base draws in front.
-* The upper visual row behaves as an overhang that agents can walk behind.
+Use the existing equivalent methods when already present.
 
 ---
 
-# Current codebase facts to respect
+# Catalog item
 
-Relevant existing architecture:
+Add one item with the stable ID:
 
-* `LevelLoader` instances the authored level off-tree.
-* It captures spawner bindings before moving the level layers and `spawners` container into `Map/MonTilemap`.
-* `BuildingManager` is a large façade and must not receive the house implementation itself.
-* Startup topology is consumed through `BuildingManager._sync_runtime_state()`.
-* Runtime hard-topology changes use `BuildingInvalidationController`.
-* Runtime walkability rebuilding is already budgeted.
-* Lazy flow-field requests are already tracked by `SpawnerRouteService`.
-* `BuildingConstructionOverlay` already represents wall construction progress.
-* `BuildingObjectManager` is based around one logical building per cell and is not the correct owner for a multi-cell house.
-* The invisible blocking wall atlas currently used under reservoirs is `(15, 0)` on `wallz`.
-* `house_seedmerchant`, `seedmerchent_spot`, and `test_flyhouse` already exist as direct children of the level’s `spawners` node.
-* `house1.png` is already available at:
+```text
+house
+```
+
+Display name:
+
+```text
+House
+```
+
+Visual asset:
 
 ```text
 res://assets/sprites/house/house1.png
 ```
 
-Do not rename the existing typoed nodes:
+Use the wall icon for menus for now:
 
 ```text
-seedmerchent
-seedmerchent_exit
-seedmerchent_spot
+frame = 3
 ```
 
-Do not move `test_flyhouse` in `level_demo.tscn`. The user has already corrected its position locally.
+The preview and world object must use the actual house sprite, not the wall icon.
+
+The item should conceptually contain:
+
+```text
+"id": "house"
+"name": "House"
+"type": "placeable"
+"category": "house"
+"frame": 3
+"inventory_backed": true
+"fixed_stock": false
+"drag_buildable": false
+"max_health": 100
+"max_stack": 999
+"currency": &"money"
+"price": 0
+```
+
+Add whatever focused house visual/catalog field is appropriate, for example:
+
+```text
+"house_texture": HOUSE_TEXTURE
+```
+
+or:
+
+```text
+"special_placement_kind": &"house"
+```
+
+Do not identify house behavior solely from `item_id == "house"` in many unrelated files.
+
+A small catalog query such as this is appropriate:
+
+```text
+ItemCatalog.is_house_placeable(item_id)
+```
+
+or a placeable-definition field queried by the relevant owners.
+
+## Inventory semantics
+
+The house uses wall-like owned-stock semantics:
+
+* The player owns a quantity.
+* Placing consumes one.
+* Normal unbuild returns one.
+* Enemy destruction returns nothing.
+* No currency is charged during placement.
+
+However, do **not** set `fixed_stock = true`.
+
+The current wall is fixed stock because it is never sold by the merchant. The house must be optionally purchasable, so it must remain:
+
+```text
+inventory_backed = true
+fixed_stock = false
+```
+
+This gives it wall-like placement semantics while preserving merchant compatibility.
+
+## Merchant balance
+
+Do not invent a default price.
+
+Use:
+
+```text
+currency = &"money"
+price = 0
+```
+
+Do not include the house in default level merchant stock.
+
+A level author who enables it as a merchant item must author a positive merchant price in the Rose Level Editor.
+
+A missing or zero merchant price must not grant a free house. Preserve the existing merchant purchase rejection for non-positive prices.
 
 ---
 
-# Required ownership
+# Hammer build menu
 
-Create a focused house owner, preferably:
+Add the house to the hammer category.
+
+Update the authoritative catalog query, expected to be:
 
 ```text
-scripts/map/house_manager.gd
+ItemCatalog.get_hammer_shop_item_ids()
 ```
 
-Use `class_name HouseManager`.
+Place it after wall unless the current menu ordering has a clearer established convention.
 
-`HouseManager` owns:
+Expected approximate ordering:
 
-* House geometry rules.
-* House registry.
-* Entrance cells.
-* Blocking footprint cells.
-* Authored house discovery.
-* Sprite snapping.
-* Sprite z-index.
-* Runtime house creation.
-* Batched stamping of house wall cells.
-* Starting the runtime house construction visual.
-* Duplicate-house and footprint-conflict prevention.
+```text
+rose_shop_counter
+wall
+house
+fence
+```
 
-It does not own:
+The house must:
 
-* Flow-field generation.
-* Garden rebuilding.
-* General building placement.
-* Player inventory or currencies.
-* Build-menu state.
-* Save/load.
-* House removal.
-* House health.
-* Merchant AI.
+* Use the wall icon in the menu.
+* Show its owned quantity through the existing inventory-backed quantity display.
+* Be selectable only when allowed by the level’s toolbuild availability configuration.
+* Be unaffordable/unplaceable when owned quantity is zero.
+* Consume exactly one item per house.
+* Never support drag or bulk placement.
 
-`BuildingManager` may only contain thin house setup, accessors, and generic navigation wrappers.
+Do not implement a special house inventory counter outside the normal inventory system.
 
-Do not put the house algorithms in:
-
-* `BuildingManager`
-* `BuildSystem`
-* `BuildPlacementService`
-* `BuildingObjectManager`
-* `LevelLoader`
-
-`LevelLoader` may invoke a focused public/static house preparation entry point because authored houses must be normalized before spawner bindings are captured.
-
-Update `scripts/map/ARCHITECTURE.md` with the new ownership.
+Do not add another HUD currency.
 
 ---
 
-# House registry
+# Rose Level Editor integration
 
-Keep one logical record per house, not one record per blocking cell.
+Find the actual Rose Level Editor implementation in the repository.
 
-A record should contain at least:
+Do not guess its file locations. Search for:
 
-* House name or ID.
-* House `Sprite2D`.
+* `starting_items`
+* `starting_item_toolbuild_hidden`
+* `merchant_available_items`
+* `merchant_prices`
+* `merchant_days`
+* `NightReward`
+* `special_rewards`
+* `get_giveable_starting_item_ids`
+* `get_merchant_shop_item_ids`
+* Item dropdown or item picker population
+* The Items tab and Merchant tab
+
+The house must be available in all relevant editor surfaces.
+
+## 1. Starting inventory
+
+The editor must allow the level author to grant:
+
+```text
+house -> quantity
+```
+
+through `LevelSpawnConfig.starting_items`.
+
+The generated level data must use the existing generic format:
+
+```text
+starting_items = {
+    &"house": quantity
+}
+```
+
+Do not create a house-specific starting field.
+
+Because `house` is a normal non-weapon placeable, it should be included through the existing catalog source such as:
+
+```text
+ItemCatalog.get_giveable_starting_item_ids()
+```
+
+If the editor has a separate hardcoded list, replace or update the smallest authoritative list rather than adding scattered special cases.
+
+## 2. Night reward
+
+The editor must allow `house` as a `NightReward.item_id`.
+
+The existing reward system already supports inventory items:
+
+```text
+item_id = "house"
+amount = quantity
+```
+
+Claiming the reward must:
+
+* Add the quantity to the normal inventory.
+* Use the wall icon for the reward/menu animation.
+* Respect inventory capacity.
+* Leave an unclaimable reward available when inventory capacity is insufficient.
+* Use the existing generic reward path.
+
+Do not create a house-specific reward type.
+
+## 3. Seed merchant
+
+The editor must allow `house` in:
+
+```text
+merchant_available_items
+merchant_prices
+merchant_days
+merchant_growth_price_factors
+```
+
+where those controls already exist.
+
+When enabled for a level:
+
+* The seed merchant displays the house.
+* It uses the wall icon.
+* Purchasing spends money.
+* Purchasing adds one house to inventory.
+* Placement later consumes the stocked item.
+* The player does not pay again on placement.
+
+The house must use the existing inventory-backed placeable purchase path:
+
+```text
+try_purchase_placeable_merchant_item(...)
+```
+
+Do not create a house-specific purchase method.
+
+The editor should reject, visibly warn about, or clearly flag an enabled merchant house with a price of zero, following whatever validation pattern the editor currently uses. Do not invent a price.
+
+## Editor source of truth
+
+Prefer catalog-driven editor population.
+
+The intended result is that future house item definitions using the same immediate house-placeable contract can appear without editing three separate hardcoded editor lists.
+
+Do not create a speculative generic editor framework. Use the current catalog/query conventions.
+
+If the Rose Level Editor is genuinely outside the supplied repository, do not fake integration. Report the missing editor location precisely in the final report. Continue implementing all runtime catalog/config support that the editor will consume.
+
+---
+
+# House placement routing
+
+`BuildPlacementService` currently assumes most placeables are one tile.
+
+Do not force the house through that one-cell commit path.
+
+Add a focused branch for house placeables before generic tile placement.
+
+The routing should conceptually be:
+
+1. Determine hovered entrance cell.
+2. Ask `HouseManager` for complete placement validation.
+3. If invalid, show invalid preview/notification.
+4. Verify the player owns one house.
+5. Consume exactly one inventory item.
+6. Ask `HouseManager` to commit one runtime player-built house.
+7. If an unexpected commit failure occurs after inventory consumption, restore the consumed item immediately.
+8. Clear selection when the player has no remaining stock.
+
+`BuildPlacementService` remains the owner of:
+
+* Generic placement request coordination.
+* Inventory/payment coordination.
+* Notifications.
+* Build FX call.
+
+`HouseManager` remains the owner of:
+
+* House-specific validation.
+* Six-cell occupancy.
+* Sprite creation.
+* Wall stamping.
+* Registry mutation.
+* Construction state.
+* Batched navigation invalidation.
+
+Do not place the five blocking cells through five calls to the ordinary wall placement method.
+
+Do not call `try_purchase_build("wall", 5)`.
+
+Do not consume six house items.
+
+---
+
+# Placement validation
+
+The hovered build cell is the entrance cell.
+
+Validate the complete six-cell presence before consuming inventory or changing the scene.
+
+All six cells must be evaluated atomically.
+
+A house is invalid when any presence cell:
+
+* Is outside the valid floor map.
+* Does not satisfy the same basic buildable-floor requirements as a wall.
+* Already belongs to another house.
+* Contains an existing wall.
+* Contains a plant.
+* Contains a fence.
+* Contains a traversable building.
+* Contains a blocking building.
+* Contains a reservoir or other registered runtime building.
+* Contains an incompatible placeable.
+* Is occupied by a blocking entity according to the existing placement occupancy checks.
+
+The entrance must also be empty during placement even though it remains walkable after construction.
+
+Do not clear or overwrite an existing tile to make the house fit.
+
+Unlike the generic one-cell placement path, house placement must not call `clear_other_build_layer()` over the footprint.
+
+Any conflict rejects the complete placement with no partial mutation.
+
+The top visual-only row is not validated as occupied map presence.
+
+## Existing authored houses
+
+Authored houses must also reserve their complete six-cell presence in `HouseManager`.
+
+This prevents the player from placing another object:
+
+* On an authored house wall cell.
+* In the authored house entrance.
+* Inside its logical presence.
+
+Authored houses remain non-player-built and must not become refundable or destructible merely because they exist in the registry.
+
+---
+
+# Placement preview
+
+The preview must represent the actual house, not one wall tile.
+
+Extend the existing preview owner, expected to be:
+
+```text
+BuildPreviewController
+```
+
+Do not move general preview ownership into `HouseManager`.
+
+`BuildPreviewController` should ask `HouseManager` for geometry and sprite positioning.
+
+## Required preview contents
+
+For the hovered entrance cell, show:
+
+1. Coverage over all six occupied presence cells.
+2. The complete `house1.png` sprite.
+3. The sprite bottom-aligned exactly as it will be after placement.
+4. The entrance included in the six-cell coverage.
+5. No coverage over the sprite-only top row.
+
+The six-cell coverage can reuse the current preview tile/selection visual system. It must clearly cover:
+
+```text
+WWW
+WEW
+```
+
+including `E`.
+
+The house sprite must:
+
+* Be horizontally centred on the entrance.
+* Have its bottom edge aligned with the entrance cell’s bottom edge.
+* Use the same shared positioning method as the final house.
+* Be semi-transparent as appropriate for a preview.
+* Be cleaned up whenever the preview is cleared or the selected item changes.
+
+Do not independently recalculate sprite alignment in `BuildPreviewController`.
+
+## Valid/invalid state
+
+Validation applies to the complete footprint.
+
+When all six cells are valid:
+
+* Show the normal valid preview color.
+* Show the full sprite using the normal preview modulation.
+
+When any presence cell is invalid:
+
+* Tint the complete six-cell footprint invalid.
+* Tint the complete house sprite invalid.
+* Do not show a mixture of five green cells and one red cell.
+
+The player must understand that the house placement is one atomic object.
+
+## Mouse and gamepad
+
+The same preview must work for:
+
+* Mouse hover placement.
+* Gamepad build cursor placement.
+
+The gamepad anchor cell is also the entrance.
+
+Do not set `pad_skip_preview = true`.
+
+Do not enable drag placement.
+
+Rotation is out of scope.
+
+---
+
+# Placement commit
+
+After successful validation and inventory consumption, call the authoritative runtime-house creation method from pass 1.
+
+The resulting player-built house must:
+
+* Create one logical house registry record.
+* Reserve all six presence cells.
+* Stamp exactly five invisible wall cells.
+* Leave the entrance TileMap cell empty.
+* Create one visible house sprite.
+* Apply bottom-edge z-index.
+* Immediately synchronize player collision for all five blocking cells.
+* Trigger exactly one hard-topology invalidation.
+* Use exactly one construction-progress visual.
+* Become one player-built durability target.
+* Play at most one build FX, centred on the entrance or logical house centre.
+* Consume exactly one `house` inventory item.
+
+Do not trigger five flow-field invalidations.
+
+Do not create five construction bars.
+
+Do not register five independent wall buildings.
+
+Use the existing pass-1 construction behavior:
+
+* House sprite is translucent while navigation work is pending.
+* One progress bar represents the whole house.
+* It completes only after the existing topology and flow work is complete.
+
+---
+
+# House registry requirements
+
+Each runtime house record must contain enough authoritative state for this pass.
+
+At minimum:
+
+* Stable runtime house ID.
+* Catalog item ID.
 * Entrance cell.
-* Five blocking cells.
-* Whether it was authored or created at runtime.
-* Whether it is currently under construction, when relevant.
+* Six presence cells, or the information required to derive them.
+* Five blocking cells, or the information required to derive them.
+* Sprite node.
+* Authored/runtime origin.
+* Player-built flag.
+* Removable flag.
+* Destructible flag.
+* Construction state when currently relevant.
 
-Provide focused query methods such as:
+Do not store duplicate geometry arrays when they can be derived safely from the entrance through one centralized method.
 
-* Find a house by name.
-* Check whether an entrance cell already has a house.
-* Get a house entrance.
-* Get its blocking cells.
+Maintain a lookup from every one of the six presence cells to the owning house.
 
-Do not create a speculative base class, resource hierarchy, plugin architecture, or generic building framework.
+This lookup is required for:
 
-Different house types will be added later, but this pass only needs a clean method that accepts a house sprite or texture and an entrance cell.
+* Placement conflict detection.
+* Hover/unbuild detection.
+* Rectangle unbuild deduplication.
+* Entrance removal.
+* Durability validity.
+* Save validation.
+
+One house must always be one logical object.
 
 ---
 
-# Authored house preparation
+# Unbuild support
 
-Authored houses are detected as:
+The complete player-built house can be unbuilt.
 
-* Direct children of `spawners`.
-* `Sprite2D` nodes.
-* Node name begins with `house_`.
+The unbuild tool must recognize the house when hovering any of its six presence cells:
 
-The current authored test house is:
+```text
+WWW
+WEW
+```
+
+This includes the entrance, even though the entrance has no wall tile.
+
+Consult `HouseManager` before or alongside ordinary TileMap removal lookup.
+
+Do not rely on the invisible wall atlas to identify a house.
+
+## Authored houses
+
+Authored houses such as:
 
 ```text
 house_seedmerchant
 ```
 
-## Critical LevelLoader ordering
+must not be removable through the player unbuild tool.
 
-Authored house normalization must occur inside the off-tree level instance **before**:
+Only player-built runtime houses are removable and refundable.
 
-```text
-_capture_level_spawner_bindings(level_root)
-```
+## Removal selection
 
-This is required because `LevelLoader` converts `seedmerchent_spot` into a stored `SpawnerBinding.spot_cell`. Moving the spot after bindings have been captured would leave the merchant target stale.
+When the cursor touches any house presence cell:
 
-Adjust `_load_level()` ordering so that it is conceptually:
+* Resolve the complete logical house.
+* Normalize the removal record to its house ID and entrance.
+* Show one unbuild operation, not one operation per wall cell.
 
-1. Instantiate the level.
-2. Capture general spawn configuration.
-3. Prepare authored houses and linked entrance markers.
-4. Capture spawner bindings.
-5. Continue the existing map-bounds and reparenting process.
+For rectangle removal:
 
-Do not duplicate the house geometry inside `LevelLoader`. It should invoke the house owner’s authored preparation API.
+* If several selected cells belong to the same house, include that house only once.
+* Do not queue five removals for its five walls.
+* Do not refund multiple houses because multiple footprint cells were selected.
 
-## `house_seedmerchant`
-
-For `house_seedmerchant`:
-
-1. Derive its entrance cell from its current sprite bottom edge.
-2. Snap its sprite exactly to that entrance.
-3. Set its z-index from its final bottom-edge world Y.
-4. Register its five wall cells.
-5. Leave the entrance empty and walkable.
-6. Find the exact sibling node:
+Use a stable logical removal key such as:
 
 ```text
-seedmerchent_spot
+house:<runtime_house_id>
 ```
 
-7. Snap `seedmerchent_spot.global_position` to the exact centre of the house entrance cell.
+or the established equivalent.
 
-The corrected spot must be in place before `_capture_level_spawner_bindings()` runs.
+## Removal progress
 
-This exact house/spot pairing is test-specific. Keep the underlying “snap a node to a house entrance” method generic rather than embedding merchant logic in the geometry functions.
+Reuse the normal unbuild hold/progress interaction.
 
-## Authored wall stamping
+A single progress indicator is sufficient.
 
-Use the transparent `wallz` atlas tile `(15, 0)` for empty footprint cells.
+Anchor it consistently to:
 
-Resolve the actual atlas source ID from the live `wallz.tile_set`. Do not hardcode a source ID.
+* The entrance cell, or
+* The house sprite.
 
-Stamp the five cells as one batch and call `wallz.update_internals()` once.
+Do not show six independent removal bars.
 
-Do not put a wall on the entrance.
+## Atomic teardown
 
-Do not trigger a runtime rebuild or construction progress display for authored houses. Their blockers must already exist when normal startup topology scanning and precomputation run.
+The authoritative normal-unbuild method must remove the complete house atomically:
 
-Do not silently overwrite conflicting authored data:
+1. Validate that it is a live, player-built, removable house.
+2. Cancel any active house construction visual safely.
+3. Remove its single durability record.
+4. Clear all six presence-cell ownership entries.
+5. Erase its five owned invisible wall cells.
+6. Call `wallz.update_internals()` once.
+7. Refresh player collision for all five blocking cells.
+8. Remove/free the visible sprite.
+9. Remove the logical registry record.
+10. Trigger one hard-topology invalidation.
+11. Return exactly one `house` item through the existing refund system.
+12. Play at most one unbuild/refund animation.
 
-* If the entrance already contains a wall, report a clear error.
-* If an intended blocking cell already contains a wall, it may remain because it is already blocking, but report an informative warning if it is not the expected invisible tile.
-* Do not erase arbitrary authored tiles to force registration.
+Because the house is inventory-backed, normal unbuild must use the existing inventory refund semantics:
 
-Set metadata on prepared authored house sprites if useful, for example their resolved entrance cell, so the runtime registry does not have to infer it differently.
+```text
+refund_build("house", world_position, 1)
+```
 
-After the level container has been reparented, `HouseManager` must register the prepared live nodes into its authoritative registry without causing another topology rebuild.
+This should return one house to inventory rather than returning money.
+
+Do not refund five wall items.
+
+Do not return money.
+
+## Ownership safety
+
+Only erase a blocker cell when it is still owned by that house.
+
+If a blocker cell unexpectedly contains foreign authored data or no longer matches the house-owned invisible blocker, do not erase arbitrary foreign content. Report a concise warning and continue the safest possible cleanup.
 
 ---
 
-# BuildingManager integration
+# Destructible integration
 
-Instantiate and set up `HouseManager` from `BuildingManager`.
+A player-built house is a destructible building like the other player-built structures.
 
-This must remain thin orchestration only.
+Use:
 
-House setup must happen after level layers are resolved but before startup flow/topology synchronization is allowed to finish.
+```text
+max_health = 100
+```
 
-Expose a typed getter:
+A house must be:
+
+* One target.
+* One health pool.
+* One health bar.
+* One destruction event.
+
+Do not register its five wall cells as five durability targets.
+
+Do not register the entrance as a separate target.
+
+Authored houses remain outside player-built durability unless explicitly marked player-built in the future.
+
+## Durability identity
+
+Use the entrance as the stable logical cell for durability serialization and target identity.
+
+Use a logical durability layer/name such as:
+
+```text
+houses
+```
+
+Do not pretend the house is a normal `wallz` item. The invisible wall cells are implementation details and their atlas does not identify the logical house.
+
+Extend `PlayerPlaceableDurabilityService` cleanly so it can validate and destroy this logical multi-cell placeable.
+
+The service should be able to:
+
+* Register a player-built house.
+* Validate that the house still exists through `HouseManager`.
+* Resolve its item ID.
+* Resolve its attack target position.
+* Resolve its health-bar position.
+* Destroy it through a no-refund `HouseManager` method.
+* Serialize and restore its current health.
+
+Avoid putting house geometry into the durability service.
+
+## Attack target position
+
+Tantrum clients need a reachable target.
+
+For the house:
+
+* Use the entrance cell centre as the attack/navigation target position.
+* The entrance remains walkable, so agents can approach it.
+* Destruction still affects the entire house.
+
+Do not target the centre of a blocking wall cell if that makes the target unreachable.
+
+The existing assault planner should continue consuming the generic durability target API. Do not add house-specific behavior to the planner.
+
+## Health-bar position
+
+The health bar must appear above the visible house sprite, not over the entrance ground cell.
+
+Add or extend a generic durability query such as:
+
+```text
+health_bar_world_position(target_key)
+```
+
+For normal tile buildings, preserve the current cell-centre behavior.
+
+For a house, ask `HouseManager` or the house sprite for a suitable point above the sprite bounds.
+
+Update `BuildingHealthOverlay` to consume this query rather than assuming every bar belongs at:
+
+```text
+building_manager.cell_center(cell)
+```
+
+The health bar remains hidden at full health and appears after the first hit.
+
+## Hostile destruction
+
+When health reaches zero:
+
+* Remove the one durability record.
+* Call the authoritative complete-house teardown without refund.
+* Remove the sprite.
+* Clear six-cell occupancy.
+* Remove the five blockers.
+* Update collision.
+* Trigger one topology invalidation.
+* Do not grant inventory.
+* Do not grant money.
+* Do not leave five wall durability records.
+* Do not leave invisible blockers behind.
+
+Preserve the current no-refund destruction path for all existing placeables.
+
+Do not add debris unless the catalog explicitly requests it. The house should not leave debris in this pass.
+
+---
+
+# Save/load
+
+A player-built house must survive normal save/load.
+
+The five invisible wall cells are already serialized through `wallz`, but that is not enough because the sprite and logical house registry are not TileMap cells.
+
+Add explicit runtime-house serialization.
+
+## House save records
+
+Save only player-built runtime houses.
+
+Do not serialize authored houses; they are recreated by normal level loading.
+
+A saved house record should contain at least:
+
+```text
+item_id
+entrance_x
+entrance_y
+```
+
+Include a stable house-kind or visual identifier only when it is needed to reconstruct the catalog-defined visual.
+
+Do not save raw node paths, instance IDs, textures as strings duplicated from the catalog, or all six derived cells unnecessarily.
+
+Do not serialize temporary construction progress. A loaded house may be treated as fully constructed because startup navigation is reconstructed from the restored map.
+
+## Progression save integration
+
+Add a save section such as:
+
+```text
+runtime_houses
+```
+
+or:
+
+```text
+player_built_houses
+```
+
+Use thin façade methods through `BuildingManager`, for example:
+
+```text
+serialize_player_built_houses()
+restore_player_built_houses(records)
+```
+
+The real logic stays in `HouseManager`.
+
+Bump the save version if required by the project’s current compatibility convention.
+
+If bumping from version 4 to version 5:
+
+* Accept versions 1–5.
+* Treat missing house data in versions 1–4 as an empty list.
+* Validate house entries in version 5.
+* Preserve all existing save compatibility behavior.
+* Do not invalidate old saves merely because they have no house section.
+
+## Required load order
+
+On load:
+
+1. The level and authored houses are created normally.
+2. Saved TileMap layers are restored, including the five house blocker cells.
+3. Player-built house records are restored into `HouseManager`.
+4. Their visible sprites and six-cell registry ownership are recreated.
+5. The restored blocker cells are validated.
+6. Building/runtime layer indexes are restored as currently required.
+7. House durability records are restored only after the house registry exists.
+8. Navigation startup/rebuild sees the restored wall footprint.
+9. No construction progress bar appears for loaded houses.
+
+Do not recreate the five blocker cells through five runtime placement operations during load.
+
+Do not trigger one runtime topology rebuild per restored house.
+
+The load path should either:
+
+* Reuse the wall cells already restored from the save, or
+* Repair a missing expected blocker in one controlled batch when safe.
+
+If the save contains an impossible conflict, report a warning and skip or repair it safely. Do not erase arbitrary scene content.
+
+## Durability save/load
+
+The generic durability section must preserve:
+
+* House target identity.
+* Current health.
+* Maximum health.
+
+When durability restoration validates a record with logical layer `houses`, it must ask `HouseManager`, not a TileMap layer.
+
+Loaded damaged houses must show the health bar correctly after restoration.
+
+## Inventory
+
+No house-specific inventory save work should be needed.
+
+The existing inventory save/load must preserve unplaced owned houses automatically through the catalog item ID.
+
+Verify this path rather than duplicating it.
+
+---
+
+# Temporary pass-1 test removal
+
+After the real buildable placement works, remove all temporary `K` test code introduced in pass 1.
+
+Expected candidates include:
+
+```text
+scripts/debug/house_runtime_test_controller.gd
+```
+
+and any temporary setup or scene wiring associated with it.
+
+Remove:
+
+* `K` input handling.
+* `test_flyhouse` runtime placement calls.
+* Temporary comments and constants.
+* Temporary controller instantiation.
+* Temporary scene node wiring.
+
+Do not remove or reposition the authored `test_flyhouse` marker unless the user explicitly requests scene cleanup later. It may remain unused in the level scene.
+
+Do not remove reusable runtime-house APIs merely because the temporary caller is removed.
+
+---
+
+# BuildingManager and BuildSystem constraints
+
+`BuildingManager` remains a façade/coordinator.
+
+It may expose thin methods such as:
 
 ```text
 get_house_manager()
+serialize_player_built_houses()
+restore_player_built_houses(records)
+register_player_built_house_durability(...)
+remove_player_built_house_no_refund(...)
 ```
 
-Add only any generic thin wrapper that is genuinely required, for example a public wrapper for immediately setting one player-navigation cell blocked through the existing `BuildingNavigationSyncService`.
+Use the smallest necessary API.
 
-Do not let `HouseManager` call arbitrary private `BuildingManager` fields and methods.
+Do not add:
 
-Prefer intention-revealing public APIs.
+* House geometry.
+* Footprint loops.
+* Sprite positioning.
+* Save record transformation.
+* Placement validation algorithms.
+* Unbuild algorithms.
 
-Do not add house geometry, sprite calculations, footprint loops, or registry state to `BuildingManager`.
+to `BuildingManager`.
+
+`BuildSystem` may route placement/removal calls but must not become the house owner.
+
+Avoid new calls such as:
+
+```text
+_manager._house_manager._private_method()
+```
+
+Use typed getters and focused public methods.
+
+Report any private coupling retained.
 
 ---
 
-# Runtime house creation API
+# Architecture constraints
 
-Implement a generic runtime method that accepts at least:
+Respect `AGENTS.md`.
 
-* House name or ID.
-* Texture or prepared `Sprite2D`.
-* Entrance cell.
-* Optional runtime parent.
+In particular:
 
-For this pass, runtime houses may be parented under a dedicated `Node2D` container such as:
+* Dedicated ownership.
+* No broad manager growth.
+* No blind abstractions.
+* No speculative multi-building framework.
+* No giant methods.
+* No duplicate state.
+* No hidden five-cell side effects.
+* Explicit typed GDScript.
+* No unnecessary `:=`.
+* No Godot/test/build execution.
 
-```text
-Map/MonTilemap/Houses
-```
+The correct split should remain approximately:
 
-Do not unnecessarily reparent authored houses; registering them in their existing `spawners` parent is acceptable.
+## `HouseManager`
 
-## Runtime validation
+Owns:
 
-Before changing anything, validate the complete `3 × 2` presence atomically.
+* House geometry.
+* Six-cell occupancy.
+* Five-cell wall footprint.
+* Authored/runtime registry.
+* Placement validation.
+* Runtime creation.
+* Normal removal.
+* Hostile destruction teardown.
+* Sprite positioning.
+* House save records.
 
-The runtime build must be rejected without partial mutation when:
+## `BuildPreviewController`
 
-* A house already uses the entrance.
-* The entrance is not a valid walkable floor cell.
-* Any presence cell is outside the floor.
-* Any blocking footprint cell is already occupied by a wall or incompatible building.
-* The entrance is occupied by a wall or other blocking placeable.
-* The required wall atlas source cannot be resolved.
-* The house sprite or texture is invalid.
+Owns:
 
-The visual-only upper row must not be checked as occupied map presence. It is intentionally allowed to overlap space agents can walk through behind the sprite.
+* Six-cell preview rendering.
+* Full preview sprite lifecycle.
+* Valid/invalid preview tint.
 
-The temporary marker is already correctly placed; do not alter its scene position.
+It asks `HouseManager` for geometry and positioning.
 
-## Atomic commit order
+## `BuildPlacementService`
 
-After all validation succeeds:
+Owns:
 
-1. Create and parent the house sprite.
-2. Snap it to the entrance.
-3. Assign its bottom-edge z-index.
-4. Stamp all five invisible wall cells.
-5. Call `wallz.update_internals()` once.
-6. Immediately mark all five cells blocked for player collision using the existing native single-cell collision synchronization path.
-7. Register one logical house record.
-8. Mark hard navigation topology dirty exactly once.
-9. Start one house construction visual.
+* Routing the selected house item.
+* Inventory availability.
+* Consuming one unit.
+* Calling `HouseManager`.
+* Rollback if commit unexpectedly fails.
 
-Do not issue five independent topology invalidations.
+## `BuildRemovalService`
 
-Use the existing invalidation controller:
+Owns:
 
-```text
-BuildingInvalidationController.after_walkability_changed(...)
-```
+* Resolving unbuild requests.
+* Delegating complete house removal.
+* Calling the generic refund path.
+* Deduplicating rectangle-removal records.
 
-Use a clear reason such as:
+## `PlayerPlaceableDurabilityService`
 
-```text
-runtime_house_built
-```
+Owns:
 
-The existing runtime system must then perform its normal:
+* One durability target per player-built house.
+* Current/max health.
+* Validation through the house owner.
+* No-refund destruction dispatch.
+* Durability serialization.
 
-* Quiet-window batching.
-* Budgeted walkability rebuild.
-* Garden/route updates.
-* Lazy flow-field recomputation.
+## `BuildingHealthOverlay`
 
-Do not manually rebuild flow fields from `HouseManager`.
+Owns:
 
-Do not directly call all the rebuild operations yourself.
+* Drawing the house health bar at the position supplied by durability.
 
-Do not modify the C++ extension.
+## `Progression`
 
-The periodic topology scan must not cause a duplicate rebuild after the authoritative runtime invalidation. Preserve the current signature resynchronization behavior.
+Owns:
 
----
+* Writing and restoring the runtime-house save section.
+* Save-version validation and compatibility.
 
-# Construction visual
+## Rose Level Editor
 
-A runtime house must behave visually like a wall under construction:
+Owns:
 
-* House sprite at approximately 50% opacity.
-* Exactly one progress bar for the entire house.
-* Progress remains until:
+* Authoring starting quantities.
+* Reward item selection.
+* Merchant availability, price, day, and growth factor.
 
-  * The topology dirty period is consumed.
-  * The budgeted runtime rebuild has completed.
-  * The lazy flow request queue is empty.
-  * The async flow worker is idle.
-* The house then returns to its original modulation.
-* The progress bar disappears.
-
-Do not show five progress bars for the five wall cells.
-
-Do not track the five cells through the current ordinary tile-cell construction API.
-
-Extend `BuildingConstructionOverlay` cleanly so it can also track an external sprite visual, while preserving all current wall/turret/fence behavior.
-
-Recommended ownership:
-
-* `BuildingConstructionOverlay` continues to own navigation-construction progress and completion.
-* Add a small focused visual indicator script if needed, for example:
-
-```text
-scripts/map/building_construction_indicator.gd
-```
-
-* The indicator can be a child of the house sprite so its z-index stays above that house.
-* It should draw one bar centred just above the sprite’s actual local rect.
-* Preserve the sprite’s original RGB and alpha, and restore them exactly after construction.
-* Clean up safely if the sprite is freed before construction completes.
-
-The existing progress stages should remain unchanged:
-
-* Dirty/quiet window.
-* Budgeted runtime rebuild progress.
-* Lazy flow queue drain.
-* Async worker still active.
-* Complete.
-
-When extending `BuildingConstructionOverlay`, ensure processing remains active when it has pending external visuals even if `_pending_cells` is empty.
-
-Do not introduce a second independent copy of the flow-construction state machine unless there is no clean way to reuse the overlay.
+Update `scripts/map/ARCHITECTURE.md` with the final ownership.
 
 ---
 
-# Temporary `K` test
+# Explicitly forbidden implementations
 
-Create an isolated temporary controller, preferably:
+Do not:
 
-```text
-scripts/debug/house_runtime_test_controller.gd
-```
-
-Mark it prominently:
-
-```text
-TEMPORARY HOUSE PASS 1 TEST
-Remove after runtime house placement is integrated into the real build system.
-```
-
-Keep the temporary code isolated and easy to delete.
-
-The controller must:
-
-1. Listen for a non-echo pressed `K` key event.
-2. Locate:
-
-```text
-Map/MonTilemap/spawners/test_flyhouse
-```
-
-3. Interpret the marker’s cell as the house entrance cell.
-4. Call the generic runtime house creation method.
-5. Use:
-
-```text
-res://assets/sprites/house/house1.png
-```
-
-6. Create a clearly named runtime test house, for example:
-
-```text
-house_runtime_test
-```
-
-7. Prevent repeated `K` presses from stacking duplicate houses.
-8. On a second press, safely do nothing and optionally print a concise debug warning.
-
-Do not use the build menu.
-
-Do not consume currency.
-
-Do not add an item to `ItemCatalog`.
-
-Do not create a preview.
-
-Do not add refund or removal support.
-
-Do not place five ordinary wall constructions independently.
-
-The test controller may be wired from `BuildingManager` through a clearly marked temporary setup block or as an isolated temporary scene node. Do not put the raw `K` input handling into the main house implementation.
+* Represent one house as five walls plus one fake entrance building.
+* Consume or refund five wall items.
+* Register five durability targets.
+* Use one health pool per blocker cell.
+* Place a hidden tile on the entrance.
+* Make the entrance non-walkable.
+* Allow another buildable to occupy the entrance.
+* Use only a one-cell preview.
+* Preview only the wall icon.
+* Place the sprite at the entrance cell centre without bottom alignment.
+* Duplicate house geometry offsets in multiple files.
+* Route house removal through five independent `remove_tile()` calls with five invalidations.
+* Recompute flow fields five times.
+* Add house-specific merchant purchase logic.
+* Add house-specific reward logic.
+* Add a house-specific inventory.
+* Make authored `house_seedmerchant` player-removable.
+* Make authored houses tantrum targets.
+* Keep the temporary `K` path after integration.
+* Modify the C++ extension.
+* Perform broad unrelated cleanup.
+* Add rotation or additional footprint sizes.
+* Create additional house art.
 
 ---
 
-# Explicitly out of scope
+# Likely files
 
-Do not implement any of the following in this pass:
+Inspect the current implementation before deciding the exact list.
 
-* Build-menu house item.
-* Placement preview.
-* Mouse placement.
-* Cost or currencies.
-* Refund.
-* House removal.
-* Save/load.
-* Health or tantrum targeting.
-* Build FX.
-* House interiors.
-* Entering the house.
-* Door animation.
-* Multiple orientations.
-* Rotated footprints.
-* Different footprint sizes.
-* House-specific gameplay.
-* Merchant behavior changes beyond snapping its existing target spot.
-* Changes to the C++ extension.
-* Broad BuildingManager cleanup.
-* Broad LevelLoader refactoring.
-* Changes to `test_flyhouse` authored position.
-
-Do not register the five house blockers as five player-built durability targets.
-
-Do not represent a house as five or six `BuildingObjectManager` buildings.
-
----
-
-# Expected files
-
-The clean implementation will likely involve:
-
-New:
+Likely modified files:
 
 ```text
+scripts/items/item_catalog.gd
 scripts/map/house_manager.gd
-scripts/debug/house_runtime_test_controller.gd
-```
-
-Possibly new, if useful for a clean single progress bar:
-
-```text
-scripts/map/building_construction_indicator.gd
-```
-
-Modified:
-
-```text
-scripts/map/level_loader.gd
+scripts/map/build_placement_service.gd
+scripts/map/build_preview_controller.gd
+scripts/map/build_removal_service.gd
+scripts/map/buildsystem.gd
 scripts/map/building_manager.gd
-scripts/map/building_construction_overlay.gd
+scripts/map/player_placeable_durability_service.gd
+scripts/map/building_health_overlay.gd
+scripts/gameState/progression.gd
 scripts/map/ARCHITECTURE.md
 ```
 
-Potentially `mainRun.tscn` only if the isolated temporary test controller is scene-wired there.
+Possible Rose Level Editor files, depending on actual repository layout:
 
-Do not modify `level_demo.tscn` merely to reposition `test_flyhouse`.
+```text
+Items tab/controller
+Merchant tab/controller
+Night reward editor
+Level config serializer
+Editor validation
+```
 
-If the current local code differs slightly, adapt to the existing architecture while preserving the ownership and behavior specified here.
+Likely removed:
+
+```text
+scripts/debug/house_runtime_test_controller.gd
+```
+
+and any temporary pass-1 scene wiring.
+
+Do not modify unrelated gameplay files simply because they can reach `BuildingManager`.
 
 ---
 
 # Acceptance criteria
 
-## Authored house
+## Catalog and inventory
 
-At level startup:
+* `house` exists as one catalog item.
+* Display name is `House`.
+* Menu icon is the wall icon.
+* World and preview use `house1.png`.
+* It appears in the hammer build menu.
+* It is inventory-backed.
+* Placement consumes one.
+* Normal unbuild restores one.
+* Enemy destruction restores nothing.
+* It is not bulk/drag buildable.
+* Zero stock prevents placement.
+* No direct placement currency is charged.
 
-* `house_seedmerchant` is detected automatically from its `house_` prefix.
-* Its sprite snaps to the tile grid.
-* Its bottom edge exactly matches the bottom edge of its entrance cell.
-* Its z-index is based on its bottom edge.
-* Exactly five cells block navigation.
-* The entrance remains walkable.
-* The top sprite-only row has no map blocker.
-* `seedmerchent_spot` is exactly at the entrance cell centre.
-* The stored merchant `spot_cell` therefore resolves to the house entrance.
-* The merchant can still path to the spot.
-* The house blockers are included in startup topology precomputation.
-* No runtime construction bar appears for the authored house.
-* No extra post-startup topology rebuild is triggered specifically for the authored house.
+## Rose Level Editor
 
-## Z-index
+* House appears in the starting-item selector.
+* A starting quantity is saved into `starting_items`.
+* House appears in reward item selection.
+* A house reward saves through `NightReward.item_id`.
+* House appears as an optional seed-merchant inventory-backed item.
+* Merchant price/day/growth configuration can be authored.
+* House is not enabled in merchant defaults automatically.
+* A missing positive merchant price cannot create a free purchase.
+* Editor data uses existing generic runtime resource fields.
 
-Verify manually:
+## Starting inventory
 
-* An agent walking above the house base is drawn behind the house.
-* An agent walking below the house base is drawn in front.
-* An agent can travel through valid space behind the visual-only upper row.
-* Sorting does not use the sprite centre.
+With a level configured for:
 
-## Runtime test
+```text
+house: 2
+```
 
-When `K` is pressed:
+the fresh player starts with two houses.
 
-* One house using `house1.png` is created.
-* Its entrance is exactly the `test_flyhouse` marker cell.
-* Its sprite is snapped using the same rules as the authored house.
-* Exactly five invisible wall cells are stamped.
-* The entrance remains walkable.
-* Player collision changes immediately for all five wall cells.
-* One hard-topology invalidation is issued.
-* One budgeted runtime rebuild begins through the existing system.
-* The house is translucent during construction.
-* Exactly one progress bar is shown.
-* The bar remains until lazy flow work is genuinely finished.
-* The sprite returns to normal afterward.
-* Agents subsequently route around the five blockers and can use the entrance.
-* Pressing `K` again does not duplicate or overwrite the house.
-* No five-cell rebuild storm occurs.
-* No five progress bars appear.
+The hammer menu displays quantity two.
+
+Placing one reduces it to one.
+
+## Reward
+
+A night reward configured with:
+
+```text
+item_id = "house"
+amount = 1
+```
+
+adds one house to inventory when claimed.
+
+The reward remains claimable if inventory capacity prevents the grant.
+
+## Merchant
+
+When a level enables house at a positive money price:
+
+* It appears at the seed merchant.
+* Purchase spends the configured money.
+* One unit enters inventory.
+* Placement consumes the unit later.
+* Placement does not charge money again.
+
+## Preview
+
+* Hovered cell is the entrance.
+* All six cells are visibly covered.
+* The entrance is included.
+* The top sprite-only row is not marked as occupied.
+* Full `house1.png` is visible.
+* Sprite bottom aligns with entrance bottom.
+* Preview matches final placement exactly.
+* Any invalid footprint cell makes the whole preview invalid.
+* Mouse and gamepad use the same result.
+* Preview is cleaned up correctly.
+
+## Placement
+
+* One inventory item is consumed.
+* One logical house is registered.
+* All six presence cells are reserved.
+* Exactly five wall cells are stamped.
+* Entrance remains walkable.
+* One sprite is created.
+* One construction bar appears.
+* One topology invalidation occurs.
+* Navigation eventually routes around the five blockers.
+* No partial house appears after invalid placement.
+* No existing tiles are silently overwritten.
+
+## Unbuild
+
+* Hovering any of the six presence cells resolves the house.
+* Entrance hover also resolves it.
+* One unbuild operation removes the full object.
+* Rectangle removal deduplicates one house.
+* Sprite disappears.
+* All six occupancy entries disappear.
+* Five wall cells disappear.
+* Entrance remains empty.
+* Collision updates for all five blockers.
+* One topology invalidation occurs.
+* One house item returns to inventory.
+* No wall items or money are returned.
+* Authored `house_seedmerchant` cannot be unbuilt.
+
+## Durability
+
+* One player-built house creates one target.
+* Maximum health is 100.
+* First damage shows one health bar.
+* Health bar appears above the house sprite.
+* Tantrum clients approach the entrance.
+* Damage affects one shared health pool.
+* Destruction removes the full house.
+* Five blockers are removed.
+* No refund occurs.
+* No invisible blockers remain.
+* Authored houses are not registered as player-built targets.
+
+## Save/load
+
+* Unplaced house stock survives save/load through inventory.
+* Player-built houses survive save/load.
+* Their sprites return.
+* Their six-cell registry ownership returns.
+* Their five blockers remain.
+* Their entrance remains walkable.
+* Their current health returns.
+* Damaged-house health bars use the correct position.
+* Authored houses are not duplicated.
+* Loaded houses do not show construction progress.
+* Old saves without house data still load.
+* Loading several houses does not trigger one runtime rebuild per house.
 
 ## Regression safety
 
-Existing behavior must remain intact for:
+Verify no regressions in:
 
-* Ordinary wall placement and removal.
-* Existing wall construction progress.
-* Turrets and fences.
-* Reservoir anchoring.
-* Startup spawner binding capture.
-* Monster/client/merchant route preparation.
-* Seed merchant spawning and departure.
-* Runtime topology signature resynchronization.
+* Wall placement.
+* Wall drag placement.
+* Wall inventory stock.
+* Wall unbuild/refund.
+* Existing construction bars.
+* Fence placement/removal.
+* Turret placement/removal.
+* Kraken placement/removal.
+* Pasteque inventory purchase and refund.
+* Ordinary one-cell building durability.
+* Tantrum target selection.
+* Starting items.
+* Night item rewards.
+* Merchant inventory-backed purchases.
+* Save/load of existing TileMap layers.
+* `house_seedmerchant`.
+* `seedmerchent_spot`.
+* Startup flow-field precomputation.
+
+---
+
+# Manual test plan to report
+
+Do not run these tests. Include them in the final implementation report.
+
+1. Configure one starting house in the Rose Level Editor.
+2. Start a fresh run and verify hammer stock.
+3. Preview the house over valid terrain.
+4. Verify all six cells are covered.
+5. Verify the full sprite alignment.
+6. Move one footprint cell over an obstacle and verify the whole preview turns invalid.
+7. Place the house.
+8. Verify stock decreases by one.
+9. Verify only five cells block movement.
+10. Walk through the entrance.
+11. Walk above and below the house to verify z-index.
+12. Wait for construction completion.
+13. Unbuild by hovering a wall cell.
+14. Rebuild and unbuild by hovering the entrance.
+15. Verify one inventory item returns each time.
+16. Configure a house night reward and claim it.
+17. Configure a positive-price merchant house and purchase it.
+18. Verify purchase charges money but placement does not.
+19. Damage the house and verify one health bar.
+20. Destroy it and verify no refund.
+21. Save with a built undamaged house and reload.
+22. Save with a damaged house and reload.
+23. Load an older save without runtime-house data.
+24. Verify authored `house_seedmerchant` remains present and non-removable.
+25. Verify the `K` test no longer exists.
 
 ---
 
 # Final report
 
-Do not run the game.
-
 At completion, report:
 
-1. Every changed and created file.
-2. The final ownership split.
-3. How authored houses are prepared before spawner binding capture.
-4. How the entrance cell is derived.
-5. How sprite bottom alignment and z-index are calculated.
-6. How the five wall cells are committed as one batch.
-7. How runtime invalidation is issued only once.
-8. How the single house progress bar reuses existing navigation construction state.
-9. The exact temporary test code that should later be deleted.
-10. Any compatibility wrapper retained.
-11. Any remaining private coupling.
-12. Production-quality concerns noticed.
-13. Manual test steps, without claiming they were run.
+1. Every created, modified, and removed file.
+2. The actual pass-1 APIs reused.
+3. The final house item definition.
+4. Why `inventory_backed` is true and `fixed_stock` is false.
+5. How the Rose Level Editor exposes starting, reward, and merchant acquisition.
+6. How the six-cell preview is rendered.
+7. How full-sprite preview alignment shares the production positioning code.
+8. How complete-footprint validation works.
+9. How inventory consumption is rolled back after an unexpected commit failure.
+10. How any footprint cell resolves to one house during unbuild.
+11. How rectangle removal deduplicates houses.
+12. How normal unbuild returns one inventory item.
+13. How hostile destruction avoids refund.
+14. How one durability target represents the complete house.
+15. How attack and health-bar positions differ.
+16. How runtime houses are saved and restored.
+17. Save-version compatibility changes.
+18. The temporary `K` code removed.
+19. Any private coupling retained.
+20. Any architectural concern discovered.
+21. Manual test steps without claiming they were run.
