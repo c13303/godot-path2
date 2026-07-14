@@ -25,6 +25,7 @@ var _walkability_quiet_seconds_remaining: float = 0.0
 # ticks; native steering keeps moving agents on their current flow fields. The id
 # guards the active flag against a superseded (zombie) coroutine clearing it.
 var _runtime_rebuild_active: bool = false
+var _runtime_rebuild_is_plant_layout: bool = false
 var _runtime_rebuild_id: int = 0
 var _runtime_rebuild_wants_gardens: bool = false
 # Coarse 0..1 progress of the current runtime rebuild, advanced between the
@@ -54,6 +55,12 @@ func clear_navigation_topology_dirty() -> void:
 
 func mark_plant_layout_dirty() -> void:
 	_plant_layout_dirty = true
+	_walkability_quiet_seconds_remaining = WALKABILITY_REBUILD_QUIET_SECONDS
+	# A plant edit between budgeted slices supersedes that topology snapshot.
+	if _runtime_rebuild_active:
+		if not _runtime_rebuild_is_plant_layout:
+			_navigation_topology_dirty = true
+		_manager.advance_preparation_token()
 
 
 func clear_plant_layout_dirty() -> void:
@@ -86,9 +93,8 @@ func mark_after_counter_stock_restored() -> void:
 
 
 # A plant was added/removed during the day (or while no runtime agents are active).
-# Invalidates the built plant-zone snapshot, marks navigation topology dirty, and
-# refreshes the zone overlay. Matches the old inline sequence in _on_plant_added /
-# _on_plant_removed exactly (set_plant_zone_built -> dirty -> overlay redraw).
+# Invalidates the built plant-zone snapshot, restarts the shared topology quiet
+# period, and refreshes the zone overlay. The budgeted owner rebuilds later.
 func after_plant_layout_changed(_reason: String = "") -> void:
 	var topology: GardenTopologyService = _garden_topology
 	topology.set_plant_zone_built(false)
@@ -110,8 +116,9 @@ func apply_navigation_topology_rebuild(delta: float = -1.0) -> void:
 		_manager.advance_preparation_token()
 		_runtime_rebuild_id += 1
 		_runtime_rebuild_active = false
+		_runtime_rebuild_is_plant_layout = false
 		_navigation_topology_dirty = true
-	if _navigation_topology_dirty and delta > 0.0:
+	if (_navigation_topology_dirty or _plant_layout_dirty) and delta > 0.0:
 		_walkability_quiet_seconds_remaining = maxf(0.0, _walkability_quiet_seconds_remaining - delta)
 		if _walkability_quiet_seconds_remaining > 0.0:
 			return
@@ -120,8 +127,11 @@ func apply_navigation_topology_rebuild(delta: float = -1.0) -> void:
 			_start_runtime_walkability_rebuild()
 		else:
 			_apply_walkability_topology_rebuild()
-	elif _plant_layout_dirty and delta <= 0.0:
-		_apply_plant_layout_rebuild()
+	elif _plant_layout_dirty:
+		if delta > 0.0:
+			_start_runtime_plant_layout_rebuild()
+		else:
+			_apply_plant_layout_rebuild()
 
 
 func runtime_rebuild_active() -> bool:
@@ -134,6 +144,10 @@ func runtime_rebuild_progress() -> float:
 
 func navigation_topology_dirty() -> bool:
 	return _navigation_topology_dirty
+
+
+func plant_layout_dirty() -> bool:
+	return _plant_layout_dirty
 
 
 func navigation_revision() -> int:
@@ -154,15 +168,19 @@ func _start_runtime_walkability_rebuild() -> void:
 	if _runtime_rebuild_active:
 		return
 	clear_navigation_topology_dirty()
-	clear_plant_layout_dirty()
 	# Capture the tile state we are about to rebuild for, so the next periodic scan sees a
 	# matching baseline and does not re-trigger a second rebuild for this same mutation.
 	_manager.get_building_scan_service().resync_topology_signatures()
 	_runtime_rebuild_active = true
+	_runtime_rebuild_is_plant_layout = false
 	_runtime_rebuild_id += 1
 	# Remember that gardens were built so an aborted run still rebuilds them on the
 	# next attempt (a partial run can leave plant_zone_built false).
-	_runtime_rebuild_wants_gardens = _runtime_rebuild_wants_gardens or _garden_topology.plant_zone_built()
+	_runtime_rebuild_wants_gardens = (
+		_runtime_rebuild_wants_gardens
+		or _plant_layout_dirty
+		or _garden_topology.plant_zone_built()
+	)
 	_run_runtime_walkability_rebuild(_manager.advance_preparation_token(), _runtime_rebuild_id)
 
 
@@ -195,6 +213,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	_runtime_rebuild_progress = 1.0
 	if ok:
 		_runtime_rebuild_wants_gardens = false
+		clear_plant_layout_dirty()
 		_bump_navigation_revision()
 		_manager.get_house_builder_work_controller().on_topology_changed()
 		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))
@@ -203,13 +222,13 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 		CppDebugOptions.dlog("walkability rebuild aborted (superseded)")
 	if rebuild_id == _runtime_rebuild_id:
 		_runtime_rebuild_active = false
+		_runtime_rebuild_is_plant_layout = false
 
 
 func _apply_walkability_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
 		return
 	clear_navigation_topology_dirty()
-	clear_plant_layout_dirty()
 	# Keep the periodic scan's baseline in sync with the tiles we rebuild for so it does
 	# not re-detect this mutation and rebuild again (see resync_topology_signatures).
 	_manager.get_building_scan_service().resync_topology_signatures()
@@ -220,7 +239,7 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager.get_builder_controller().repath_for_walkability_change()
 	_manager.get_house_builder_work_controller().on_topology_changed()
 	var topology: GardenTopologyService = _garden_topology
-	if topology.plant_zone_built():
+	if _plant_layout_dirty or topology.plant_zone_built():
 		_manager._rebuild_plant_zone_from_layer()
 	_manager._rebuild_spawner_garden_route_cache()
 	var route_service: SpawnerRouteService = _spawner_route_service
@@ -234,17 +253,54 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager._rebuild_exit_wall_escapes()
 	telemetry.warn_garden_task_lag_us("_rebuild_exit_wall_escapes", Time.get_ticks_usec() - exits_us,
 		"exits=%d" % route_service.exit_wall_escape_count())
+	clear_plant_layout_dirty()
 	_bump_navigation_revision()
+
+
+# Plant placement does not change walkability. This uses the same quiet period,
+# preparation token, active-state gate, and per-frame budget as wall rebuilding,
+# while limiting work to garden topology and its real inbound spawner routes.
+func _start_runtime_plant_layout_rebuild() -> void:
+	if _runtime_rebuild_active:
+		return
+	_runtime_rebuild_active = true
+	_runtime_rebuild_is_plant_layout = true
+	_runtime_rebuild_id += 1
+	_run_runtime_plant_layout_rebuild(_manager.advance_preparation_token(), _runtime_rebuild_id)
+
+
+func _run_runtime_plant_layout_rebuild(token: int, rebuild_id: int) -> void:
+	var started_us: int = Time.get_ticks_usec()
+	CppDebugOptions.dlog("plant layout rebuild started (budgeted)")
+	_runtime_rebuild_progress = 0.0
+	var ok: bool = bool(await _manager._build_gardens_from_plants_budgeted(token))
+	_runtime_rebuild_progress = 0.5
+	if ok:
+		ok = bool(await _manager._validate_gardens_budgeted(token))
+	_runtime_rebuild_progress = 0.8
+	if ok:
+		_spawner_route_service.rebuild_spawner_garden_route_cache()
+		_manager._queue_agents_after_garden_rebuild()
+		clear_plant_layout_dirty()
+		_bump_navigation_revision()
+		_runtime_rebuild_progress = 1.0
+		var elapsed_ms: int = int(round(float(Time.get_ticks_usec() - started_us) / 1000.0))
+		CppDebugOptions.dlog("plant layout rebuild completed in %dms (budgeted)" % elapsed_ms)
+	else:
+		CppDebugOptions.dlog("plant layout rebuild aborted (superseded)")
+	if rebuild_id == _runtime_rebuild_id:
+		_runtime_rebuild_active = false
+		_runtime_rebuild_is_plant_layout = false
 
 
 func _apply_plant_layout_rebuild() -> void:
 	if not _plant_layout_dirty:
 		return
-	clear_plant_layout_dirty()
-	_manager._rebuild_walkable_map_cache()
 	_manager._rebuild_plant_zone_from_layer()
+	clear_plant_layout_dirty()
 	_bump_navigation_revision()
 
 
 func _bump_navigation_revision() -> void:
 	_navigation_revision += 1
+	_spawner_route_service.prepare_upcoming_monster_routes(_navigation_revision)

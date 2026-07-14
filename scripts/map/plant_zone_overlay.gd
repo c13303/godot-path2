@@ -2,7 +2,7 @@ extends Node2D
 
 # Drawn by BuildingManager when debug_show_plantzone is true.
 # - zone tiles, including margin: orange 30% opacity, filled.
-# - selected A* entry/exit tiles: orange 100%, filled.
+# - selected monster-route entry tiles: yellow 90% opacity, filled.
 
 var building_manager: Node
 
@@ -60,9 +60,9 @@ func _draw() -> void:
 		var center_local: Vector2 = _cell_center_local(floorz, c)
 		draw_rect(Rect2(center_local - half, half * 2.0), DIRTY_COLOR, true)
 
-	# Selected inbound garden-entry tiles (yellow), one per relevant spawner/garden
-	# pair. Runtime monsters do not navigate to a selected garden exit after eating
-	# (they use the global escape flow field), so no exit tile is drawn.
+	# Selected monster garden entries (yellow), read from the same prepared inbound
+	# route descriptors followed by PathPreviewRunner. This overlay never resolves
+	# a separate entrance or fictional exit.
 	var show_enters_exits: bool = false
 	if building_manager.has_method("get_show_enters_exits"):
 		show_enters_exits = bool(building_manager.call("get_show_enters_exits"))

@@ -1,634 +1,642 @@
-# Fix PathPreview early arrival, remove outbound preview, and correct misleading garden entry/exit debug display
+# PathPreview final repair — remove duplicate navigation and make it a pure view
 
-Work from the attached updated codebase and follow `AGENTS.md`.
+Work from the attached updated codebase.
 
-Do not run Godot, tests, compilation, export, or build commands. The user will test manually.
+Follow `AGENTS.md`.
 
-## Confirmed problems from static inspection
+Do not run Godot, tests, compilation, export, or build commands. The user performs runtime testing.
 
-There are three related but distinct issues.
-
-### 1. PathPreview stops many tiles before the garden entrance
-
-In:
-
-```text
-scripts/map/path_preview_runner.gd
-```
-
-the runner currently contains:
-
-```gdscript
-var cost: float = float(
-    _flow.call("group_route_cost_at_world", _group_id, _world_position)
-)
-
-if cost <= _arrival_radius:
-    _finish("arrival_cost")
-    return
-```
-
-This is invalid because the units do not match.
-
-`_arrival_radius` is a world-space pixel distance:
-
-```gdscript
-@export var arrival_radius: float = 12.0
-```
-
-But `group_route_cost_at_world()` returns the native Dijkstra route cost:
-
-```text
-cardinal step = 1.0
-diagonal step = 1.414213...
-```
-
-It is therefore measured approximately in tile steps, not pixels.
-
-With an arrival radius of `12.0`, the star can terminate around 12 tiles before its actual goal.
-
-This is the primary reason the star path currently stops far before the selected garden entrance.
-
-### 2. Flow direction becomes zero inside the goal tile
-
-The native flow field deliberately assigns a zero direction to its goal cell.
-
-Therefore, after removing the invalid cost/radius comparison, a runner entering the goal tile may receive:
-
-```gdscript
-direction == Vector2.ZERO
-```
-
-while still being several pixels from the exact cell center.
-
-The runner currently treats sustained zero flow as a failure and recycles after:
-
-```gdscript
-_max_zero_flow_seconds
-```
-
-For the final goal cell, zero flow is expected and must not be treated as an error.
-
-### 3. The garden “exit” debug tile is not a real runtime exit
-
-Garden topology stores one common set of garden boundary/access cells:
-
-```gdscript
-garden["entry_cells"]
-```
-
-There is no independently authored or stored entrance set and exit set.
-
-The debug overlay derives:
-
-```text
-entrance = nearest/scored boundary cell relative to the spawner
-exit     = scored boundary cell relative to the despawner
-```
-
-However, runtime agents no longer navigate to a selected garden exit after eating.
-
-Current runtime escape behavior in:
-
-```text
-scripts/map/agent_navigation_phase_controller.gd
-```
-
-assigns the agent directly to the global escape flow field from its current position:
-
-```gdscript
-assign_agent_to_escape(agent)
-```
-
-Therefore, the green debug “garden exit” is hypothetical legacy information. It does not represent a cell that the monster actually visits.
-
-This makes the overlay look reversed or incorrect even when the inbound entry selection itself is valid.
+This is one focused architectural correction. Do not add another fallback, timer workaround, pixel offset, or parallel scheduler.
 
 ---
 
-# Required change 1: remove the outbound PathPreview leg completely
+## Confirm the current defective implementation before editing
 
-The current attached code still creates two legs in:
+The attached code still contains the wrong architecture.
 
-```text
-scripts/map/path_preview_controller.gd
-```
+Verify these points in the current files before changing anything:
 
-Current code:
+1. `PathPreviewController` calls or indirectly calls:
 
 ```gdscript
-_append_leg_plan(
-    legs,
-    spawner_cell,
-    spawner_cell,
-    entry_cell,
-    block_fences,
-    route_color,
-    &"inbound"
-)
-
-_append_leg_plan(
-    legs,
-    spawner_cell,
-    entry_cell,
-    escape_cell,
-    block_fences,
-    route_color,
-    &"outbound"
-)
+ensure_path_preview_topology_ready()
 ```
 
-Remove the second leg entirely.
+2. That call can synchronously execute expensive garden/navigation preparation such as:
 
-Monster PathPreview must only compute and display:
-
-```text
-active monster spawner -> selected real garden entry
+```gdscript
+_sync_flow_extra_blocking_cells()
+_rebuild_walkable_map_cache()
+_build_plant_zone()
 ```
 
-It must not compute or display:
+3. `PathPreviewController` independently:
+
+* selects gardens;
+* selects entry cells;
+* allocates temporary native flow groups;
+* requests new flow-field computations;
+* tracks their readiness;
+* destroys them when the preview changes.
+
+4. The current controller still creates an outbound preview leg:
 
 ```text
 garden entry -> despawner
 ```
 
-This means removing all preview-only outbound work:
+5. `PathPreviewRunner` still contains an invalid comparison equivalent to:
 
-* outbound leg descriptor;
-* outbound preview flow group;
-* outbound route signature data;
-* outbound star runner;
-* preview escape-target resolution;
-* outbound-specific direction values;
-* outbound-specific counters or logs.
+```gdscript
+route_cost <= arrival_radius
+```
 
-Do not merely hide the outbound runner after computing its flow field.
+where route cost is measured in tile traversal cost and arrival radius is measured in pixels.
 
-The unnecessary flow group must not be created at all.
+6. The debug overlay independently recomputes garden entrance/exit cells rather than displaying the endpoint used by the actual prepared route.
 
-## Updated route signature
+If any of these have already been partially changed, adapt the patch to the current code, but preserve the required final architecture below.
 
-The signature for one selected route needs only:
+---
+
+# Required final architecture
+
+There must be exactly one ownership chain:
+
+```text
+GardenTopologyService / invalidation owner
+    prepares garden topology lazily
+
+SpawnerRouteService
+    prepares and owns real inbound spawner routes
+
+PathPreviewController
+    reads those prepared routes and displays them
+
+PathPreviewRunner
+    follows an existing ready route group
+```
+
+PathPreview must no longer own navigation preparation.
+
+---
+
+# 1. PathPreview must never rebuild garden topology
+
+Remove every call from PathPreview that can prepare, rebuild, validate, or mutate garden topology.
+
+In particular, `PathPreviewController` must not call:
+
+```gdscript
+ensure_path_preview_topology_ready()
+_build_plant_zone()
+_rebuild_walkable_map_cache()
+clear_plant_layout_dirty()
+mark_navigation_rebuild_completed()
+```
+
+directly or through a PathPreview-specific helper.
+
+Delete `ensure_path_preview_topology_ready()` if it exists only for PathPreview.
+
+If other code still uses it, remove only the PathPreview call and report the remaining callers.
+
+## Required behavior after rose placement
+
+Rose placement may only:
+
+```text
+mark plant/garden topology dirty
+schedule the existing lazy/debounced topology preparation
+return immediately
+```
+
+It must not synchronously rebuild gardens for the preview.
+
+PathPreview must tolerate topology being temporarily dirty or unavailable:
+
+```text
+topology not ready = no preview yet
+```
+
+No warning is required. The stars may appear later.
+
+---
+
+# 2. Reuse the existing lazy garden preparation lifecycle
+
+Find the existing quiet-period/budgeted preparation mechanism used for expensive navigation changes such as wall edits.
+
+Reuse or minimally generalize that existing owner.
+
+Do not create:
+
+* a PathPreview timer queue;
+* `await process_frame` loops;
+* a second scheduler;
+* a thread owned by PathPreview;
+* repeated polling that starts expensive work;
+* immediate rebuilds from rose-placement callbacks.
+
+## Required plant-layout flow
+
+Implement this lifecycle:
+
+```text
+rose placed
+→ mark plant layout dirty
+→ reset existing navigation/garden quiet period
+→ after the quiet period, begin the existing budgeted garden rebuild
+→ publish/advance the normal garden topology revision
+→ request actual spawner-route preparation
+```
+
+Drawing several roses quickly must coalesce into one preparation cycle after the player pauses.
+
+Do not rebuild the walkable map cache when only plants changed unless static inspection proves that plant placement actually changes walkability.
+
+Do not clear dirty state from PathPreview.
+
+The topology/invalidation owner clears its own dirty state only after successful preparation.
+
+---
+
+# 3. SpawnerRouteService must own the prepared inbound routes
+
+Use `SpawnerRouteService` as the sole owner of spawner-to-garden route descriptors and flow groups.
+
+The route descriptor for each relevant upcoming monster spawner must expose at least:
+
+```gdscript
+spawner_cell
+garden_id
+entry_cell
+entry_world
+group_id
+ready
+topology_revision
+```
+
+Use the existing equivalent fields and structures where possible. Do not introduce a second descriptor type if the service already has one.
+
+## Route semantics
+
+Prepare exactly one monster route per active upcoming-night spawner:
+
+```text
+spawner -> selected garden entry
+```
+
+Do not prepare a visual exit route.
+
+Do not prepare:
+
+```text
+garden entry -> despawner
+```
+
+for PathPreview.
+
+Actual monsters may continue using their existing runtime escape flow after eating. That behavior is unrelated and must remain untouched.
+
+## Shared computation
+
+The flow group displayed by PathPreview must be the same prepared inbound route group owned by `SpawnerRouteService`.
+
+PathPreview must not allocate a duplicate group.
+
+PathPreview must not call:
+
+```gdscript
+request_group_flow_rebuild_with_policy()
+assign_flow_to_group()
+request_flow_to_group()
+```
+
+for its own cosmetic group.
+
+If the service currently destroys these routes before the night begins, adjust their lifecycle so the prepared routes remain valid through the preview and can be reused by runtime navigation where compatible.
+
+Do not maintain two groups representing the same:
+
+```text
+spawner + garden + entry + navigation policy
+```
+
+## Navigation policy
+
+The prepared monster route must use the real monster policy.
+
+For example, if monsters can cross fences:
+
+```text
+monster preview/runtime route: fences do not block
+```
+
+Do not derive navigation policy from the fact that the current phase is afternoon.
+
+The route descriptor must explicitly represent the route kind or policy.
+
+---
+
+# 4. PathPreviewController becomes a pure consumer
+
+After this patch, `PathPreviewController` may only:
+
+* determine whether preview should currently be visible;
+* obtain active upcoming-night spawner IDs/cells;
+* query `SpawnerRouteService` for prepared route descriptors;
+* wait until a descriptor is `ready`;
+* create/reuse a visual runner for the descriptor’s `group_id`;
+* recycle visuals when routes disappear or the phase changes.
+
+It must not:
+
+* rebuild topology;
+* select a garden independently;
+* select an entry independently;
+* resolve a despawner;
+* allocate flow groups;
+* request flow computation;
+* mutate navigation revisions;
+* clear dirty flags.
+
+## No-garden and not-ready states
+
+When there is no garden:
+
+```text
+no route descriptor
+no stars
+no warnings
+```
+
+When topology exists but route preparation is not finished:
+
+```text
+descriptor absent or not ready
+no star yet
+no synchronous work
+```
+
+When the route becomes ready:
+
+```text
+spawn the runner using the existing group_id
+```
+
+The preview may appear several frames after planting. Smooth planting is more important than immediate visualization.
+
+## Route identity
+
+Use the service-owned route identity or a stable key such as:
 
 ```text
 spawner cell
 garden ID
-selected entry cell
-navigation revision
-preview kind
+entry cell
+topology revision
+group ID
 ```
 
-Do not include `escape_cell`.
+When that identity changes:
 
-Conceptually:
+* recycle the old runner;
+* create a runner for the new ready route;
+* do not dissolve the group from PathPreview.
 
-```gdscript
-signature_parts.append(
-    "%s:%d:%s" % [
-        str(spawner_cell),
-        garden_id,
-        str(entry_cell),
-    ]
-)
-```
-
-Preserve whatever stable formatting best fits the existing implementation.
-
-## Expected route count
-
-For two active monster spawners:
-
-```text
-selected gardens: 2
-preview legs:     2 total
-preview groups:   2 total
-```
-
-Not four.
-
-Do not modify actual monster escape navigation.
+`SpawnerRouteService`, not PathPreview, owns group destruction.
 
 ---
 
-# Required change 2: fix PathPreview arrival units
+# 5. Remove all outbound preview code
 
-In:
+Delete from the preview feature:
+
+* outbound leg construction;
+* escape-cell lookup used by preview;
+* outbound route signatures;
+* outbound runner creation;
+* outbound counters;
+* outbound debug output;
+* preview-owned outbound groups.
+
+For two active monster spawners, the final preview must contain:
 
 ```text
-scripts/map/path_preview_runner.gd
+2 inbound routes
+2 runners maximum
+0 outbound routes
 ```
 
-remove this arrival condition completely:
+Do not simply hide outbound stars while still computing their fields.
+
+---
+
+# 6. Repair PathPreviewRunner completion logic
+
+The runner must follow the shared route group to the exact selected entry tile.
+
+## Delete the invalid unit comparison
+
+Remove any condition equivalent to:
 
 ```gdscript
-if cost <= _arrival_radius:
-    _finish("arrival_cost")
-    return
+if route_cost <= arrival_radius:
+    finish()
 ```
 
-Do not replace it with:
+Do not convert pixels to tiles to preserve this logic.
 
-```gdscript
-cost <= arrival_radius / tile_size
-```
+Route cost is not world-space distance.
 
-Do not invent a conversion between route cost and pixels.
+## Authoritative normal arrival
 
-Route cost can include:
-
-* cardinal steps;
-* diagonal steps;
-* potentially future weighted navigation costs.
-
-It is not an authoritative world-space distance.
-
-## Correct arrival condition
-
-Normal arrival must use only world-space distance:
+Use:
 
 ```gdscript
 _world_position.distance_to(_goal_world) <= _arrival_radius
 ```
 
-This check already exists before and after movement. Preserve it.
+for visible arrival.
 
-Route cost may continue to be used for:
+Both values are world-space coordinates.
 
-* detecting an unreachable position;
-* gradient fallback sampling;
-* detecting that the runner is inside the exact goal cell.
+## Handle the native goal cell correctly
 
-It must not be compared to a pixel radius.
+The native flow direction may be `Vector2.ZERO` inside the goal cell because its route cost is `0.0`.
+
+When:
+
+```gdscript
+flow_direction == Vector2.ZERO
+```
+
+query route cost.
+
+If route cost is finite and approximately zero:
+
+```gdscript
+route_cost <= 0.001
+```
+
+move directly toward `_goal_world`.
+
+Clamp the final movement step so it cannot overshoot:
+
+```gdscript
+var remaining: float = _world_position.distance_to(_goal_world)
+var movement: float = minf(speed * delta, remaining)
+_world_position += direction_to_goal * movement
+```
+
+Do not directly steer toward the goal when route cost is nonzero. That could cross walls.
+
+## Remove the fixed normal lifetime failure
+
+A fixed lifetime such as:
+
+```gdscript
+max_runner_lifetime = 8.0
+```
+
+cannot be used as a normal completion rule because valid routes may be longer than:
+
+```text
+speed × 8 seconds
+```
+
+Replace it with a stalled-progress safety watchdog.
+
+Track meaningful progress, for example:
+
+```text
+distance to goal decreases
+or route cost decreases
+or world position changes sufficiently
+```
+
+Only recycle as stalled after no meaningful progress for a generous duration.
+
+A long but progressing valid route must be allowed to continue.
+
+Retain protection against genuinely unreachable or frozen routes.
 
 ---
 
-# Required change 3: complete movement to the center of the goal cell
+# 7. Debug overlay must show the shared route endpoint
 
-When the runner is inside the native flow field’s goal cell:
+Stop independently deriving “entrance” and “exit” markers from garden boundary cells.
 
-```gdscript
-group_route_cost_at_world(...) == 0.0
-```
+The overlay must read the same prepared route descriptors from `SpawnerRouteService`.
 
-the native flow direction is intentionally zero.
-
-In that specific state, move directly toward `_goal_world` instead of starting the zero-flow timeout.
-
-## Required behavior
-
-At each movement substep:
-
-1. Sample the flow direction normally.
-2. If it is nonzero, follow it normally.
-3. If it is zero:
-
-   * read the current route cost;
-   * if the cost is finite and approximately zero, use direct final steering:
+For each active prepared route, draw exactly:
 
 ```gdscript
-var goal_delta: Vector2 = _goal_world - _world_position
-direction = goal_delta.normalized()
+descriptor.entry_cell
 ```
 
-* otherwise preserve the existing zero-flow timeout behavior.
-
-Use a small exact-goal-cell epsilon, for example:
-
-```gdscript
-cost <= 0.001
-```
-
-This is valid because route cost `0.0` specifically identifies the native goal cell.
-
-Do not use the arrival radius in this comparison.
-
-## Prevent overshoot
-
-When direct final steering is active, do not move farther than the remaining distance to the goal.
-
-Use a clamped movement amount:
-
-```gdscript
-var distance_to_goal: float = _world_position.distance_to(_goal_world)
-var actual_step: float = minf(step_distance, distance_to_goal)
-_world_position += direction * actual_step
-```
-
-The existing world-distance arrival check should then recycle the runner when it reaches the configured pixel radius.
-
-The star should visibly reach the actual selected garden-entry tile instead of disappearing at the beginning of the goal tile.
-
-## Preserve real zero-flow failure handling
-
-A zero direction outside the goal cell can still indicate:
-
-* an invalid field;
-* an isolated cell;
-* a transient sampling issue.
-
-Keep `_zero_flow_seconds` and `_max_zero_flow_seconds` for those cases.
-
-Do not globally convert all zero-flow states into direct movement toward the goal, because that would let the preview visually cross walls or bypass invalid navigation.
-
-Only use direct goal steering when the native route cost confirms:
+Use one clearly documented color for:
 
 ```text
-current cell is the goal cell
+selected monster garden entry
 ```
+
+The user expects this marker to indicate the endpoint reached by the star.
+
+Remove the green fictional exit marker completely.
+
+There is no need to display a selected garden exit because runtime monsters no longer navigate through such a waypoint after eating.
+
+Do not remove generic garden boundary data from `GardenTopologyService`; it may still be required for entry selection.
+
+Only remove the misleading overlay calculation and display.
+
+## Expected overlay relationship
+
+For every visible preview runner:
+
+```text
+runner goal cell == displayed entry marker cell
+```
+
+No separate resolver call is permitted in the overlay.
 
 ---
 
-# Required change 4: remove the misleading garden exit overlay
+# 8. Remove polling that performs work
 
-Relevant files:
+A lightweight poll that only checks revisions/readiness is acceptable if the current architecture has no signal.
 
-```text
-scripts/map/building_debug_query_service.gd
-scripts/map/plant_zone_overlay.gd
-scripts/map/building_manager.gd
-```
+A poll must never:
 
-The current debug overlay exposes:
+* rebuild gardens;
+* request new groups;
+* take full-map snapshots;
+* mutate dirty state.
 
-```gdscript
-get_garden_enter_tiles()
-get_garden_exit_tiles()
-```
+Prefer existing signals/revision notifications where already available.
 
-and draws:
+Do not create a large new event framework solely for this patch.
 
-```text
-yellow = enter
-green  = exit
-```
+---
 
-The green exit marker is misleading because runtime monsters do not use that selected border cell when escaping.
+# 9. Remove obsolete PathPreview code
 
-## Required debug behavior
+After converting PathPreview to a pure consumer, delete obsolete code rather than leaving it dormant.
 
-When “show enters/exits” debug display is enabled:
-
-* continue showing the actual selected inbound garden entry;
-* stop calculating and drawing the hypothetical garden exit;
-* do not show a green exit tile.
-
-The debug display should clearly represent:
+Expected removals include, where present:
 
 ```text
-selected inbound garden entry for each relevant spawner/garden pair
+preview leg plan structures
+preview group allocation helpers
+preview group dissolution helpers
+preview flow request callbacks
+preview-specific topology preparation
+escape target resolution
+outbound direction values
+temporary route statistics
+test diagnostics
+per-group wait logs
+direct-no-garden fallback
 ```
 
-not an unused theoretical egress point.
+Keep runner pooling and visual animation code.
 
-## Naming cleanup
+Keep strict GDScript typing.
 
-Because only entries remain, clean up misleading names where safe.
+Do not perform unrelated cleanup.
 
-Preferred direction:
+---
 
-```gdscript
-get_garden_enter_tiles()
-```
+# Mandatory code searches before finalizing
 
-may remain as a compatibility wrapper if scene or dynamic usage is uncertain.
-
-The overlay comment should be updated from:
+Search the repository for all callers/references to:
 
 ```text
-Enter / exit garden border tiles
-```
-
-to something accurate, such as:
-
-```text
-Selected inbound garden-entry tiles
-```
-
-Remove:
-
-```gdscript
+ensure_path_preview_topology_ready
+request_group_flow_rebuild_with_policy
+direct_no_garden
+outbound
+arrival_cost
+max_runner_lifetime
+get_garden_exit_tiles
+get_garden_enter_tiles
 EXIT_COLOR
-get_garden_exit_tiles()
 ```
 
-only if search proves they are not dynamically referenced.
+Confirm that no obsolete PathPreview-owned route computation remains.
 
-If `BuildingManager.get_garden_exit_tiles()` may be externally referenced, retain it as a compatibility wrapper temporarily but stop calling it from the overlay. Mention this in the final report.
-
-Do not remove:
-
-```gdscript
-GardenAccessResolver.nearest_garden_entry_to_exit()
-```
-
-unless repository-wide search proves it has no runtime or dynamic users.
-
-This task is not a broad cleanup of garden-access scoring.
-
-## Spawner filtering
-
-The debug entrance overlay currently iterates all registered spawners.
-
-Do not redesign this unless necessary.
-
-The critical requirement is that the debug marker displayed as an entrance corresponds to the same resolver used by the remaining inbound PathPreview:
-
-```gdscript
-nearest_garden_entry(garden_id, spawner_cell)
-```
-
-The PathPreview itself must continue selecting through:
-
-```gdscript
-select_garden_entry_for_preview(spawner_cell, preview_kind)
-```
+Also search for every construction of `PathPreviewRunner` and verify that each runner receives a service-owned ready `group_id`.
 
 ---
 
-# Required change 5: keep lazy flow-field scheduling
+# Manual acceptance criteria
 
-The current controller submits preview flow work through:
+The user will test these cases.
 
-```gdscript
-_manager.request_group_flow_rebuild_with_policy(...)
-```
+## A. Draw the first roses
 
-This delegates to:
+Expected:
+
+* rose placement remains responsive;
+* no immediate full garden rebuild from PathPreview;
+* no preview-native group allocation occurs in the rose-placement call stack;
+* stars may appear after the existing quiet/budgeted preparation completes.
+
+## B. Draw several roses continuously
+
+Expected:
+
+* repeated placements coalesce;
+* no rebuild per rose;
+* no repeated destruction/recreation of preview-owned groups;
+* one route refresh occurs after the quiet period.
+
+## C. No garden
+
+Expected:
+
+* no preview;
+* no group request from PathPreview;
+* no warnings;
+* no direct spawner-to-despawner fallback.
+
+## D. Route reaches the garden
+
+Expected:
+
+* star follows the full inbound route;
+* star does not stop approximately 12 tiles early;
+* star is not killed after an arbitrary eight seconds while progressing;
+* star enters the selected entry tile;
+* star moves toward the exact entry-cell center after reaching native route cost zero.
+
+## E. Debug marker
+
+Expected:
+
+* one selected-entry marker per prepared route;
+* marker is on the same cell used as runner goal;
+* no fictional exit marker;
+* no independently recomputed entrance.
+
+## F. Two active spawners
+
+Expected:
 
 ```text
-SpawnerRouteService.request_group_flow_rebuild_with_policy()
+2 shared inbound route groups
+2 preview runners maximum
+0 outbound preview groups
+0 PathPreview-owned groups
 ```
 
-which queues requests in:
+## G. Phase transition
 
-```gdscript
-_flow_request_queue
-```
+Expected:
 
-and drains them through:
+* PathPreview recycles its visual runners;
+* it does not destroy service-owned route groups merely because the visual phase ended;
+* route ownership remains with `SpawnerRouteService`.
 
-```gdscript
-process_queued_flow_requests()
-```
+## H. Runtime monsters
 
-Preserve this lazy scheduling.
+Expected:
 
-Do not replace it with a synchronous call to:
+* monsters use the prepared inbound route correctly;
+* monsters still transition to garden targeting;
+* monsters still escape after eating through the existing runtime escape system;
+* no runtime exit behavior was removed.
 
-```gdscript
-assign_flow_to_group()
-```
+## I. Wall modification
 
-Do not call the native async request directly from PathPreview.
+Expected:
 
-Removing the outbound leg should halve the number of preview flow groups and reduce planting-time preview work.
-
-One inbound preview request per active spawner is sufficient.
+* normal wall invalidation still rebuilds routes through the existing lazy system;
+* prepared route descriptors update;
+* PathPreview follows the replacement groups without creating duplicates.
 
 ---
 
-# No-garden behavior
+# Required final report
 
-Preserve:
-
-```text
-no garden = no PathPreview
-```
-
-When the garden count is zero:
-
-* no preview flow groups;
-* no queued preview jobs;
-* no star runners;
-* no direct spawner-to-despawner fallback;
-* no warning;
-* no routine log.
-
-When the first valid garden appears, enqueue only the inbound route.
-
----
-
-# Logging
-
-PathPreview should remain silent during expected gameplay.
-
-Do not add logs for:
-
-* no garden;
-* runner arrival;
-* goal-cell final steering;
-* route allocation;
-* lazy waiting;
-* route replacement;
-* zero-flow timeout;
-* runner recycling.
-
-Retain restrained warnings only for actual invalid configuration, such as failure to allocate a preview group or an invalid goal cell.
-
----
-
-# Do not change
-
-Do not modify:
-
-* native C++ route-cost units;
-* actual monster entry navigation;
-* actual monster escape navigation;
-* garden topology generation;
-* plant-zone margin size;
-* selected garden scoring;
-* client target selection;
-* camera transforms;
-* star rendering coordinates;
-* map cell/world conversion;
-* wall invalidation;
-* the lazy FF scheduler architecture.
-
-Do not add a visual offset or camera correction.
-
-The observed premature stop is not a parallax problem.
-
----
-
-# Manual validation
-
-The user will test manually.
-
-## Test A — No garden
-
-During day 1 afternoon before planting:
-
-* no red star;
-* no queued preview group;
-* no console spam.
-
-## Test B — First garden
-
-Plant the first rose:
-
-* one inbound flow request is queued per active monster spawner;
-* no outbound group is allocated;
-* no noticeable synchronous hitch from an additional outbound field.
-
-## Test C — Early-stop regression
-
-For a garden far from its spawner:
-
-* star follows the full route;
-* star does not disappear 12 tiles before the entry;
-* star enters the actual selected garden-entry tile;
-* star reaches close to the tile center before recycling.
-
-## Test D — Goal cell
-
-Observe the final section:
-
-* runner does not freeze at the edge of the goal tile;
-* runner moves directly to `goal_world` only after reaching the native goal cell;
-* it does not cross obstacles to shortcut the route.
-
-## Test E — Debug overlay
-
-With garden debug entry display enabled:
-
-* selected inbound entries are shown;
-* no green hypothetical garden-exit tiles are shown;
-* entry markers correspond to the goals reached by the red stars.
-
-## Test F — Actual monster navigation
-
-At night:
-
-* monsters still follow their runtime flow to the garden;
-* monsters switch to internal garden targeting normally;
-* after eating, monsters still use the existing direct escape FF;
-* no runtime escape behavior was removed with the visual outbound preview.
-
-## Test G — Multiple spawners
-
-With two active spawners:
-
-* exactly two inbound preview groups;
-* each spawner targets its selected garden entry;
-* no duplicate outbound stars;
-* each star reaches its own selected entry.
-
----
-
-# Final report
-
-Report:
+Provide a concrete report containing:
 
 1. Exact files changed.
-2. Confirmation that route cost was incorrectly compared with a pixel radius.
-3. Confirmation that the `cost <= arrival_radius` condition was removed.
-4. How zero native flow inside the goal cell is now finalized toward `goal_world`.
-5. Confirmation that direct final steering is allowed only at route cost zero.
-6. Confirmation that outbound preview computation and rendering were removed.
-7. Confirmation that the green hypothetical garden-exit overlay was removed or disabled.
-8. Any compatibility wrapper retained and why.
-9. Confirmation that lazy preview flow scheduling was preserved.
-10. Confirmation that runtime monster entry and escape navigation were untouched.
-11. Confirmation that Godot/tests/builds were not run.
+2. The old synchronous rose-placement-to-preview call chain that was removed.
+3. The existing lazy/debounced owner now responsible for plant topology preparation.
+4. The `SpawnerRouteService` structure/API used by PathPreview.
+5. Proof that PathPreview no longer allocates or requests any flow group.
+6. Proof that only one inbound route exists per active spawner.
+7. Proof that the outbound preview was deleted rather than hidden.
+8. The exact invalid runner completion conditions removed.
+9. The new goal-cell and stalled-progress behavior.
+10. The exact debug overlay source for `entry_cell`.
+11. Repository-search results for the obsolete symbols listed above.
+12. Confirmation that actual monster escape navigation was untouched.
+13. Confirmation that Godot/tests/builds were not run.
 
-Do not claim runtime success. State the manual validation cases required.
+Do not claim runtime validation.
+
+Do not return a partial cosmetic fix. If the current code structure prevents one part of this ownership model, explain the concrete blocker in the final report, but complete every other required deletion and correction.

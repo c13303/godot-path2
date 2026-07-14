@@ -96,7 +96,7 @@ func select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 	return best_garden_id
 
 
-func select_garden_entry_for_preview(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
+func select_garden_entry_for_route(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
 	var best: Dictionary = {}
 	var best_dist: int = 2147483647
 	var topology: GardenTopologyService = _garden_topology
@@ -105,12 +105,12 @@ func select_garden_entry_for_preview(spawner_cell: Vector2i, agent_kind: StringN
 	for raw_garden_id: Variant in gardens.keys():
 		var garden_id: int = int(raw_garden_id)
 		var garden: Dictionary = gardens[garden_id] as Dictionary
-		# Client preview can trust daytime targetability. Monster preview runs during
-		# afternoon, so targetability may still include daytime fence blocking; use
-		# target presence + entry scoring and let the preview flow use monster policy.
+		# Monster routes may be prepared during afternoon, when targetability still
+		# reflects daytime fence blocking. Use target presence + entry scoring; the
+		# route service applies the explicit monster navigation policy.
 		if agent_kind == SPAWNER_KIND_CLIENT and not bool(garden.get("targetable", false)):
 			continue
-		if not _garden_has_preview_target(garden_id, agent_kind):
+		if not _garden_has_route_target(garden_id, agent_kind):
 			continue
 		var entry_cell: Vector2i = _garden_access_resolver.nearest_garden_entry(garden_id, spawner_cell)
 		if entry_cell == INVALID_CELL:
@@ -129,58 +129,7 @@ func select_garden_entry_for_preview(spawner_cell: Vector2i, agent_kind: StringN
 	return best
 
 
-func preview_selection_debug_summary(spawner_cell: Vector2i, agent_kind: StringName, max_samples: int = 8) -> Dictionary:
-	var summary: Dictionary = {
-		"spawner": spawner_cell,
-		"kind": agent_kind,
-		"gardens": 0,
-		"targetable": 0,
-		"with_plants": 0,
-		"with_entries": 0,
-		"with_target": 0,
-		"with_nearest_entry": 0,
-		"samples": [],
-	}
-	var topology: GardenTopologyService = _garden_topology
-	topology.begin_garden_iteration()
-	var gardens: Dictionary = topology.gardens()
-	summary["gardens"] = gardens.size()
-	var samples: Array[Dictionary] = []
-	for raw_garden_id: Variant in gardens.keys():
-		var garden_id: int = int(raw_garden_id)
-		var garden: Dictionary = gardens[garden_id] as Dictionary
-		var plant_cells: Dictionary = garden.get("plant_cells", {}) as Dictionary
-		var entry_cells: Array = garden.get("entry_cells", []) as Array
-		var targetable: bool = bool(garden.get("targetable", false))
-		var has_target: bool = _garden_has_preview_target(garden_id, agent_kind)
-		var nearest_entry: Vector2i = INVALID_CELL
-		if not entry_cells.is_empty():
-			nearest_entry = _garden_access_resolver.nearest_garden_entry(garden_id, spawner_cell)
-		if targetable:
-			summary["targetable"] = int(summary["targetable"]) + 1
-		if not plant_cells.is_empty():
-			summary["with_plants"] = int(summary["with_plants"]) + 1
-		if not entry_cells.is_empty():
-			summary["with_entries"] = int(summary["with_entries"]) + 1
-		if has_target:
-			summary["with_target"] = int(summary["with_target"]) + 1
-		if nearest_entry != INVALID_CELL:
-			summary["with_nearest_entry"] = int(summary["with_nearest_entry"]) + 1
-		if samples.size() < max_samples:
-			samples.append({
-				"id": garden_id,
-				"targetable": targetable,
-				"plant_cells": plant_cells.size(),
-				"entry_cells": entry_cells.size(),
-				"has_target": has_target,
-				"nearest_entry": nearest_entry,
-			})
-	topology.end_garden_iteration()
-	summary["samples"] = samples
-	return summary
-
-
-func _garden_has_preview_target(garden_id: int, agent_kind: StringName) -> bool:
+func _garden_has_route_target(garden_id: int, agent_kind: StringName) -> bool:
 	var gardens: Dictionary = _garden_topology.gardens()
 	if not gardens.has(garden_id):
 		return false

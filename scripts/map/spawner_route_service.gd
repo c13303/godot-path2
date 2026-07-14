@@ -8,10 +8,12 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
+const ROUTE_KIND_MONSTER_INBOUND: StringName = &"monster_inbound"
 
 var _manager: BuildingManager
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
+var _prepared_upcoming_monster_routes: Dictionary = {}
 var _dirty_spawner_escapes: Dictionary = {}
 var _exit_wall_escapes: Dictionary = {}
 var _route_cache_hits: int = 0
@@ -55,6 +57,60 @@ func spawner_garden_route_count() -> int:
 
 func queued_flow_request_count() -> int:
 	return _flow_request_queue.size()
+
+
+# Prepares the one real inbound route needed by each active spawner in the upcoming
+# authored night. These descriptors reference the same plant_group used by runtime
+# monsters; PathPreview only reads them and never owns a flow group.
+func prepare_upcoming_monster_routes(topology_revision: int) -> void:
+	_prepared_upcoming_monster_routes.clear()
+	if not _garden_topology().plant_zone_built():
+		return
+	var night_index: int = _manager.upcoming_authored_night_index_for_preview()
+	if night_index < 0 or night_index >= _manager.authored_night_count():
+		return
+	var spawner_cells: Array[Vector2i] = _manager.night_active_spawner_cells(night_index)
+	_sort_cells(spawner_cells)
+	for spawner_cell: Vector2i in spawner_cells:
+		var selected: Dictionary = _manager.select_garden_entry_for_route(spawner_cell, SPAWNER_KIND_MONSTER)
+		if selected.is_empty():
+			continue
+		var garden_id: int = int(selected.get("garden_id", 0))
+		if garden_id <= 0:
+			continue
+		var route: Dictionary = get_or_create_spawner_garden_route(spawner_cell, garden_id)
+		var group_id: int = int(route.get("plant_group", IDLE_GROUP))
+		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
+		if group_id <= IDLE_GROUP or entry_cell == INVALID_CELL:
+			continue
+		_prepared_upcoming_monster_routes[spawner_cell] = {
+			"spawner_cell": spawner_cell,
+			"garden_id": garden_id,
+			"entry_cell": entry_cell,
+			"entry_world": route.get("entry_world", Vector2.ZERO) as Vector2,
+			"group_id": group_id,
+			"ready": spawner_garden_route_flow_ready(route, spawner_cell),
+			"topology_revision": topology_revision,
+			"route_kind": ROUTE_KIND_MONSTER_INBOUND,
+			"block_fences": false,
+		}
+
+
+func prepared_upcoming_monster_routes() -> Array[Dictionary]:
+	var prepared: Array[Dictionary] = []
+	if not _garden_topology().plant_zone_built():
+		return prepared
+	var spawner_cells: Array[Vector2i] = []
+	for raw_spawner_cell: Variant in _prepared_upcoming_monster_routes.keys():
+		spawner_cells.append(raw_spawner_cell as Vector2i)
+	_sort_cells(spawner_cells)
+	for spawner_cell: Vector2i in spawner_cells:
+		var descriptor: Dictionary = _prepared_upcoming_monster_routes[spawner_cell] as Dictionary
+		var group_id: int = int(descriptor.get("group_id", IDLE_GROUP))
+		descriptor["ready"] = group_flow_is_ready_at_world(group_id, _cell_center(spawner_cell))
+		_prepared_upcoming_monster_routes[spawner_cell] = descriptor
+		prepared.append(descriptor.duplicate())
+	return prepared
 
 
 func cancel_queued_group_flow_request(group_id: int) -> void:
@@ -195,6 +251,7 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 	var agent_manager: Node = _agent_manager()
 	if agent_manager and agent_manager.has_method("dissolve_group"):
 		if escape_group > IDLE_GROUP:
+			cancel_queued_group_flow_request(escape_group)
 			agent_manager.call("dissolve_group", escape_group)
 		if _spawner_garden_routes.has(spawner_cell):
 			var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
@@ -202,9 +259,11 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 				var garden_route: Dictionary = raw_route as Dictionary
 				var plant_group: int = int(garden_route.get("plant_group", -1))
 				if plant_group > IDLE_GROUP:
+					cancel_queued_group_flow_request(plant_group)
 					agent_manager.call("dissolve_group", plant_group)
 	_spawner_routes.erase(spawner_cell)
 	_spawner_garden_routes.erase(spawner_cell)
+	_prepared_upcoming_monster_routes.erase(spawner_cell)
 
 
 func drain_dirty_routes() -> void:
@@ -299,7 +358,9 @@ func rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 		route["entry_world"] = entry_world
 		route["ready"] = false
 		route["flow_requested"] = true
-		request_group_flow_rebuild(plant_group, entry_world, "spawner %s garden %d" % [str(spawner_cell), garden_id])
+		var block_fences: bool = bool(route.get("block_fences", _route_blocks_fences(spawner_cell)))
+		request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences,
+			"spawner %s garden %d" % [str(spawner_cell), garden_id])
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
 
@@ -436,22 +497,6 @@ func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, 
 	_flow_request_queue.append(request)
 
 
-func resolve_spawner_escape_target_cell(spawner_cell: Vector2i) -> Vector2i:
-	var bound_exit_cell: Vector2i = _spawner_exit_cell_by_cell().get(spawner_cell, INVALID_CELL) as Vector2i
-	var exit_wall_cell: Vector2i = bound_exit_cell
-	if exit_wall_cell == INVALID_CELL:
-		exit_wall_cell = _nearest_exit_wall_for_spawner(spawner_cell)
-	var escape_wall_target_cell: Vector2i = INVALID_CELL
-	if exit_wall_cell != INVALID_CELL:
-		if bound_exit_cell != INVALID_CELL and _is_walkable(exit_wall_cell):
-			escape_wall_target_cell = exit_wall_cell
-		else:
-			escape_wall_target_cell = _nearest_walkable_adjacent(exit_wall_cell)
-	if escape_wall_target_cell == INVALID_CELL:
-		escape_wall_target_cell = _resolve_walkable_goal(spawner_cell, "preview escape@%s" % spawner_cell)
-	return escape_wall_target_cell
-
-
 func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> int:
 	if _flow_request_queue.is_empty():
 		return 0
@@ -532,12 +577,16 @@ func release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> voi
 	var plant_group: int = int(route.get("plant_group", -1))
 	var agent_manager: Node = _agent_manager()
 	if plant_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
+		cancel_queued_group_flow_request(plant_group)
 		agent_manager.call("dissolve_group", plant_group)
 	routes.erase(garden_id)
 	if routes.is_empty():
 		_spawner_garden_routes.erase(spawner_cell)
 	else:
 		_spawner_garden_routes[spawner_cell] = routes
+	var prepared: Dictionary = _prepared_upcoming_monster_routes.get(spawner_cell, {}) as Dictionary
+	if int(prepared.get("garden_id", 0)) == garden_id:
+		_prepared_upcoming_monster_routes.erase(spawner_cell)
 
 
 func garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
@@ -549,7 +598,12 @@ func garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 		return false
 	if int(route.get("garden_epoch", -1)) != int(garden.get("epoch", -2)):
 		return false
-	return int(route.get("garden_version", -1)) == int(garden.get("version", 0))
+	if int(route.get("garden_version", -1)) != int(garden.get("version", 0)):
+		return false
+	var spawner_cell: Vector2i = route.get("spawner_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL:
+		return false
+	return bool(route.get("block_fences", true)) == _route_blocks_fences(spawner_cell)
 
 
 func spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i) -> bool:
@@ -597,13 +651,20 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		plant_group = int(agent_manager.call("create_group"))
 	if plant_group <= IDLE_GROUP:
 		return {"ready": false}
-	request_group_flow_rebuild(plant_group, entry_world, "spawner %s garden %d" % [str(spawner_cell), garden_id])
+	var block_fences: bool = _route_blocks_fences(spawner_cell)
+	request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences,
+		"spawner %s garden %d" % [str(spawner_cell), garden_id])
 	var route: Dictionary = {
+		"spawner_cell": spawner_cell,
+		"garden_id": garden_id,
 		"entry_cell": entry_cell,
 		"entry_world": entry_world,
 		"plant_group": plant_group,
+		"group_id": plant_group,
 		"ready": spawner_garden_route_flow_ready({"plant_group": plant_group}, spawner_cell),
 		"flow_requested": true,
+		"route_kind": ROUTE_KIND_MONSTER_INBOUND if not block_fences else &"client_inbound",
+		"block_fences": block_fences,
 		"garden_version": int(garden.get("version", 0)),
 		"garden_epoch": int(garden.get("epoch", -1))
 	}
@@ -697,9 +758,24 @@ func _fences_block_navigation() -> bool:
 	return _manager._fences_block_navigation()
 
 
+func _route_blocks_fences(spawner_cell: Vector2i) -> bool:
+	var spawner_kind: StringName = _spawner_kind_by_cell().get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
+	return spawner_kind != SPAWNER_KIND_MONSTER
+
+
 func _nearest_garden_entry(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
 	return _manager._nearest_garden_entry(garden_id, spawner_cell)
 
 
 func _is_sane_cell(cell: Vector2i) -> bool:
 	return _manager._is_sane_cell(cell)
+
+
+func _sort_cells(cells: Array[Vector2i]) -> void:
+	cells.sort_custom(Callable(self, "_cell_less_than"))
+
+
+func _cell_less_than(a: Vector2i, b: Vector2i) -> bool:
+	if a.y == b.y:
+		return a.x < b.x
+	return a.y < b.y

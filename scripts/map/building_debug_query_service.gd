@@ -73,27 +73,13 @@ func is_verbose() -> bool:
 
 
 func get_garden_enter_tiles() -> Array:
-	var tiles: Dictionary = {}
-	for raw_spawner_cell: Variant in _manager.get_spawners().keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		for raw_garden_id: Variant in _manager.get_garden_topology_service().gardens().keys():
-			var garden_id: int = int(raw_garden_id)
-			var enter_cell: Vector2i = _manager._nearest_garden_entry(garden_id, spawner_cell)
-			if enter_cell != INVALID_CELL:
-				tiles[enter_cell] = true
-	return tiles.keys()
-
-
-func get_garden_exit_tiles() -> Array:
-	var tiles: Dictionary = {}
-	for raw_spawner_cell: Variant in _manager.get_spawners().keys():
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		for raw_garden_id: Variant in _manager.get_garden_topology_service().gardens().keys():
-			var garden_id: int = int(raw_garden_id)
-			var exit_cell: Vector2i = _manager._nearest_garden_entry_to_exit(garden_id, spawner_cell)
-			if exit_cell != INVALID_CELL:
-				tiles[exit_cell] = true
-	return tiles.keys()
+	var tiles: Array[Vector2i] = []
+	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
+	for descriptor: Dictionary in route_service.prepared_upcoming_monster_routes():
+		var entry_cell: Vector2i = descriptor.get("entry_cell", INVALID_CELL) as Vector2i
+		if entry_cell != INVALID_CELL:
+			tiles.append(entry_cell)
+	return tiles
 
 
 func get_unreachable_garden_cells() -> Array:

@@ -1710,26 +1710,6 @@ func authored_night_count() -> int:
 	return _spawn_playlist_config.total_night_count()
 
 
-func ensure_path_preview_topology_ready() -> void:
-	var source_plant_count: int = preview_source_plant_count()
-	if _garden_topology.plant_zone_built() and (_garden_topology.gardens().size() > 0 or source_plant_count <= 0):
-		return
-	if _garden_topology.plant_zone_built():
-		_garden_topology.set_plant_zone_built(false)
-	_sync_flow_extra_blocking_cells()
-	_rebuild_walkable_map_cache()
-	_build_plant_zone()
-	_building_invalidation_controller.clear_plant_layout_dirty()
-	_building_invalidation_controller.mark_navigation_rebuild_completed()
-
-
-func preview_source_plant_count() -> int:
-	if plant_manager == null or not plant_manager.has_method("get_plant_cells"):
-		return 0
-	var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
-	return plant_cells.size()
-
-
 # Whether the current day's client step is still pending or active (see
 # ClientSaleController._client_step_pending). Delegated so the planificator does not read
 # day-phase booleans directly.
@@ -2934,12 +2914,8 @@ func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 	return _spawner_garden_selection_service.select_garden_for_client_spawner(spawner_cell)
 
 
-func select_garden_entry_for_preview(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
-	return _spawner_garden_selection_service.select_garden_entry_for_preview(spawner_cell, agent_kind)
-
-
-func preview_selection_debug_summary(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
-	return _spawner_garden_selection_service.preview_selection_debug_summary(spawner_cell, agent_kind)
+func select_garden_entry_for_route(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
+	return _spawner_garden_selection_service.select_garden_entry_for_route(spawner_cell, agent_kind)
 
 
 func _select_spawner_garden_for_agent(from_cell: Vector2i, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Dictionary:
@@ -2958,27 +2934,6 @@ func _spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i)
 func _get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> Dictionary:
 	return _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
 
-
-func resolve_spawner_escape_target_cell(spawner_cell: Vector2i) -> Vector2i:
-	return _spawner_route_service.resolve_spawner_escape_target_cell(spawner_cell)
-
-
-func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, block_fences: bool, label: String = "") -> void:
-	_spawner_route_service.request_group_flow_rebuild_with_policy(group_id, goal_world, block_fences, label)
-
-
-func create_preview_flow_group() -> int:
-	if agent_manager == null or not agent_manager.has_method("create_group"):
-		return -1
-	return int(agent_manager.call("create_group"))
-
-
-func dissolve_preview_flow_group(group_id: int) -> void:
-	if group_id <= IDLE_GROUP:
-		return
-	_spawner_route_service.cancel_queued_group_flow_request(group_id)
-	if agent_manager != null and agent_manager.has_method("dissolve_group"):
-		agent_manager.call("dissolve_group", group_id)
 
 # Returns true once the agent has a real new nav state (a garden entry flow, or a
 # successfully assigned escape). Returns false only when neither a garden route nor
@@ -3083,15 +3038,9 @@ func set_verbose(value: bool) -> void:
 func _is_verbose() -> bool:
 	return _debug_query_service.is_verbose()
 
-# Garden border tiles a monster crosses to ENTER: per spawner, the garden
-# entry cell nearest that spawner. Aggregated across all spawners/gardens.
+# Selected entry cells from the prepared upcoming monster-route descriptors.
 func get_garden_enter_tiles() -> Array:
 	return _debug_query_service.get_garden_enter_tiles()
-
-# Garden border tiles a monster crosses to EXIT: per spawner, the garden
-# entry cell nearest that spawner's exit-wall. Aggregated across all spawners.
-func get_garden_exit_tiles() -> Array:
-	return _debug_query_service.get_garden_exit_tiles()
 
 func get_unreachable_garden_cells() -> Array:
 	return _debug_query_service.get_unreachable_garden_cells()

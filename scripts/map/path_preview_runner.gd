@@ -2,6 +2,8 @@ extends Node2D
 class_name PathPreviewRunner
 
 const IDLE_GROUP: int = 0
+const GOAL_ROUTE_COST: float = 0.001
+const PROGRESS_DISTANCE: float = 0.25
 const FALLBACK_SAMPLE_DIRECTIONS: Array[Vector2] = [
 	Vector2.RIGHT,
 	Vector2.LEFT,
@@ -13,7 +15,7 @@ const FALLBACK_SAMPLE_DIRECTIONS: Array[Vector2] = [
 	Vector2(-0.70710678, -0.70710678),
 ]
 
-var _flow: Node
+var _flow: Node = null
 var _active: bool = false
 var _group_id: int = IDLE_GROUP
 var _world_position: Vector2 = Vector2.ZERO
@@ -21,15 +23,16 @@ var _goal_world: Vector2 = Vector2.ZERO
 var _route_color: Color = Color.WHITE
 var _speed: float = 180.0
 var _arrival_radius: float = 12.0
-var _max_lifetime: float = 8.0
-var _max_zero_flow_seconds: float = 0.35
+var _stalled_timeout: float = 5.0
 var _max_substep: float = 8.0
 var _max_substeps: int = 8
 var _trail_points: Array[Vector2] = []
 var _trail_point_limit: int = 8
 var _star_radius: float = 5.0
-var _lifetime: float = 0.0
-var _zero_flow_seconds: float = 0.0
+var _stalled_seconds: float = 0.0
+var _last_progress_position: Vector2 = Vector2.ZERO
+var _best_distance_to_goal: float = INF
+var _best_route_cost: float = INF
 
 
 func configure(flow: Node, _preview_z_index: int) -> void:
@@ -42,34 +45,34 @@ func configure(flow: Node, _preview_z_index: int) -> void:
 
 
 func start(
-		group_id: int,
-		start_world: Vector2,
-		goal_world: Vector2,
-		route_color: Color,
-		speed: float,
-		arrival_radius: float,
-		max_lifetime: float,
-		max_zero_flow_seconds: float,
-		max_substep: float,
-		max_substeps: int,
-		trail_point_limit: int,
-		star_radius: float
+	group_id: int,
+	start_world: Vector2,
+	goal_world: Vector2,
+	route_color: Color,
+	speed: float,
+	arrival_radius: float,
+	stalled_timeout: float,
+	max_substep: float,
+	max_substeps: int,
+	trail_point_limit: int,
+	star_radius: float
 ) -> void:
 	_group_id = group_id
 	_goal_world = goal_world
 	_route_color = route_color
 	_speed = speed
 	_arrival_radius = arrival_radius
-	_max_lifetime = max_lifetime
-	_max_zero_flow_seconds = max_zero_flow_seconds
+	_stalled_timeout = maxf(1.0, stalled_timeout)
 	_max_substep = maxf(1.0, max_substep)
 	_max_substeps = maxi(1, max_substeps)
 	_trail_point_limit = maxi(2, trail_point_limit)
 	_star_radius = maxf(1.0, star_radius)
-	_lifetime = 0.0
-	_zero_flow_seconds = 0.0
+	_stalled_seconds = 0.0
 	_trail_points.clear()
 	_world_position = start_world
+	_last_progress_position = start_world
+	_best_distance_to_goal = start_world.distance_to(goal_world)
+	_best_route_cost = _route_cost_at(start_world)
 	_active = group_id > IDLE_GROUP and _flow != null
 	visible = _active
 	set_process(_active)
@@ -92,10 +95,6 @@ func is_active() -> bool:
 func _process(delta: float) -> void:
 	if not _active:
 		return
-	_lifetime += delta
-	if _lifetime >= _max_lifetime:
-		_finish("max_lifetime")
-		return
 	if not _position_is_finite(_world_position):
 		_finish("non_finite_position")
 		return
@@ -105,11 +104,10 @@ func _process(delta: float) -> void:
 	if _flow == null:
 		_finish("missing_flow")
 		return
-	if _flow.has_method("group_route_cost_at_world"):
-		var cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
-		if not is_finite(cost):
-			_finish("unreachable_cost")
-			return
+	var route_cost: float = _route_cost_at(_world_position)
+	if not is_finite(route_cost):
+		_finish("unreachable_cost")
+		return
 
 	var remaining_distance: float = maxf(0.0, _speed * delta)
 	var substeps: int = mini(_max_substeps, maxi(1, ceili(remaining_distance / _max_substep)))
@@ -117,45 +115,54 @@ func _process(delta: float) -> void:
 	for _index: int in range(substeps):
 		var direction: Vector2 = _sample_direction()
 		if direction == Vector2.ZERO:
-			# Zero native flow inside the goal cell is expected: the native field
-			# assigns zero direction to its goal. Only there do we steer directly
-			# toward the exact goal center; a zero elsewhere is a real failure.
-			if _is_at_goal_cell():
-				var goal_delta: Vector2 = _goal_world - _world_position
-				if goal_delta.length_squared() <= 0.0001:
+			route_cost = _route_cost_at(_world_position)
+			if is_finite(route_cost) and route_cost <= GOAL_ROUTE_COST:
+				var remaining: float = _world_position.distance_to(_goal_world)
+				if remaining <= _arrival_radius:
 					_finish("arrival_at_goal_cell")
 					return
-				direction = goal_delta.normalized()
-				_zero_flow_seconds = 0.0
-				var distance_to_goal: float = _world_position.distance_to(_goal_world)
-				var actual_step: float = minf(step_distance, distance_to_goal)
-				_world_position += direction * actual_step
+				var direction_to_goal: Vector2 = _world_position.direction_to(_goal_world)
+				var movement: float = minf(step_distance, remaining)
+				_world_position += direction_to_goal * movement
 				if _world_position.distance_to(_goal_world) <= _arrival_radius:
-					_finish("arrival_after_step")
+					_finish("arrival_after_goal_step")
 					return
 				continue
-			_zero_flow_seconds += delta
-			if _zero_flow_seconds >= _max_zero_flow_seconds:
-				_finish("zero_flow_timeout")
-				return
 			break
-		_zero_flow_seconds = 0.0
 		_world_position += direction * step_distance
 		if _world_position.distance_to(_goal_world) <= _arrival_radius:
 			_finish("arrival_after_step")
 			return
+
+	_update_stalled_watchdog(delta)
+	if not _active:
+		return
 	_record_trail_point(_world_position)
 	queue_redraw()
 
 
-# True only when the native route cost confirms the current cell is the goal
-# cell (cost 0.0). Route cost is not a pixel distance, so this must never be
-# compared against the arrival radius.
-func _is_at_goal_cell() -> bool:
+func _update_stalled_watchdog(delta: float) -> void:
+	var distance_to_goal: float = _world_position.distance_to(_goal_world)
+	var route_cost: float = _route_cost_at(_world_position)
+	var position_progress: bool = _last_progress_position.distance_to(_world_position) >= PROGRESS_DISTANCE
+	var distance_progress: bool = distance_to_goal <= _best_distance_to_goal - PROGRESS_DISTANCE
+	var cost_progress: bool = is_finite(route_cost) and route_cost < _best_route_cost - GOAL_ROUTE_COST
+	if position_progress or distance_progress or cost_progress:
+		_stalled_seconds = 0.0
+		_last_progress_position = _world_position
+		_best_distance_to_goal = minf(_best_distance_to_goal, distance_to_goal)
+		if is_finite(route_cost):
+			_best_route_cost = minf(_best_route_cost, route_cost)
+		return
+	_stalled_seconds += delta
+	if _stalled_seconds >= _stalled_timeout:
+		_finish("stalled")
+
+
+func _route_cost_at(world_pos: Vector2) -> float:
 	if _flow == null or not _flow.has_method("group_route_cost_at_world"):
-		return false
-	var cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
-	return is_finite(cost) and cost <= 0.001
+		return INF
+	return float(_flow.call("group_route_cost_at_world", _group_id, world_pos))
 
 
 func _sample_direction() -> Vector2:
@@ -174,16 +181,14 @@ func _sample_direction() -> Vector2:
 
 
 func _sample_cost_gradient_direction() -> Vector2:
-	if not _flow.has_method("group_route_cost_at_world"):
-		return Vector2.ZERO
-	var current_cost: float = float(_flow.call("group_route_cost_at_world", _group_id, _world_position))
+	var current_cost: float = _route_cost_at(_world_position)
 	if not is_finite(current_cost):
 		return Vector2.ZERO
 	var best_direction: Vector2 = Vector2.ZERO
 	var best_cost: float = current_cost
 	for sample_direction: Vector2 in FALLBACK_SAMPLE_DIRECTIONS:
 		var sample_pos: Vector2 = _world_position + sample_direction * _max_substep
-		var sample_cost: float = float(_flow.call("group_route_cost_at_world", _group_id, sample_pos))
+		var sample_cost: float = _route_cost_at(sample_pos)
 		if not is_finite(sample_cost):
 			continue
 		if sample_cost < best_cost:
