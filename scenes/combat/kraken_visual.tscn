@@ -4,56 +4,56 @@
 [ext_resource type="Texture2D" path="res://assets/sprites/animations/kraken.png" id="2_texture"]
 
 [node name="KrakenVisual" type="Node2D"]
-texture_filter = 1
+texture_filter = 2
 script = ExtResource("1_script")
 kraken_texture = ExtResource("2_texture")
 
 [node name="Segments" type="Node2D" parent="."]
-texture_filter = 1
+texture_filter = 2
 
 [node name="Segment0" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 
 [node name="Segment1" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 1
 
 [node name="Segment2" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 2
 
 [node name="Segment3" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 3
 
 [node name="Segment4" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 4
 
 [node name="Segment5" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 5
 
 [node name="Segment6" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 6
 
 [node name="Segment7" type="Sprite2D" parent="Segments"]
-texture_filter = 1
+texture_filter = 2
 texture = ExtResource("2_texture")
 hframes = 8
 frame = 7

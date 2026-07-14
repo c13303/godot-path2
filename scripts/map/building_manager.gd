@@ -2211,6 +2211,10 @@ func unregister_player_placeable(cell: Vector2i, layer_name: String = "") -> voi
 	_durability.unregister_player_placeable_at(cell, layer_name)
 
 
+func damage_player_placeable_at(cell: Vector2i, layer_name: String, item_id: String, amount: int) -> bool:
+	return _durability.apply_damage_at(cell, layer_name, item_id, amount)
+
+
 func serialize_player_placeable_durability() -> Array[Dictionary]:
 	return _durability.serialize()
 
@@ -2338,6 +2342,25 @@ func _leave_turret_debris(turret_cell: Vector2i) -> void:
 	plantz.set_cell(turret_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 	_flush_plant_layer_visuals()
 	_sync_building_cell_speed(turret_cell, "debris")
+
+
+func leave_destroyed_placeable_debris(cell: Vector2i, layer_name: String) -> void:
+	if plantz == null:
+		return
+	var source_layer: TileMapLayer = _placeable_layer_for_name(layer_name)
+	if source_layer == null:
+		return
+	var source_id: int = source_layer.get_cell_source_id(cell)
+	if source_id < 0:
+		return
+	spawn_plant_parts_burst(cell_center(cell))
+	if plantz.get_cell_source_id(cell) >= 0:
+		return
+	var alternative_tile: int = source_layer.get_cell_alternative_tile(cell)
+	plantz.set_cell(cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
+	_flush_plant_layer_visuals()
+	_sync_building_cell_speed(cell, "debris")
+
 
 func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
 	if traversable_buildings == null:

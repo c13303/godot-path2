@@ -539,6 +539,8 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		var spawner_node: Node2D = child as Node2D
 		if spawner_node == null:
 			continue
+		if _is_spawner_marker_node(spawner_node):
+			continue
 		var spawner_id: StringName = StringName(spawner_node.name)
 		if spawner_id == &"":
 			continue
@@ -548,12 +550,12 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		var local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
 		var cell: Vector2i = floor_layer.local_to_map(local_pos)
 		var exit_cell: Vector2i = cell
-		var exit_node: Node2D = spawner_node.get_node_or_null("exit") as Node2D
+		var exit_node: Node2D = _find_spawner_marker_node(spawner_container, spawner_node, spawner_id, "exit")
 		if exit_node != null:
 			var exit_local_pos: Vector2 = floor_layer.to_local(exit_node.global_position)
 			exit_cell = floor_layer.local_to_map(exit_local_pos)
 		var spot_cell: Vector2i = Vector2i(2147483647, 2147483647)
-		var spot_node: Node2D = spawner_node.get_node_or_null("spot") as Node2D
+		var spot_node: Node2D = _find_spawner_marker_node(spawner_container, spawner_node, spawner_id, "spot")
 		if spot_node != null:
 			var spot_local_pos: Vector2 = floor_layer.to_local(spot_node.global_position)
 			spot_cell = floor_layer.local_to_map(spot_local_pos)
@@ -566,6 +568,19 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		if kind == SPAWNER_KIND_CLIENT:
 			binding.frequency_client = maxf(0.0, float(spawner_node.get_meta(CLIENT_FREQUENCY_META, 1.0)))
 		_loaded_spawner_bindings.append(binding)
+
+
+func _is_spawner_marker_node(node: Node) -> bool:
+	var node_name: String = String(node.name)
+	return node_name.ends_with("_exit") or node_name.ends_with("_spot")
+
+
+func _find_spawner_marker_node(spawner_container: Node, spawner_node: Node2D, spawner_id: StringName, marker_name: String) -> Node2D:
+	var sibling_marker_name: String = "%s_%s" % [String(spawner_id), marker_name]
+	var sibling_marker: Node2D = spawner_container.get_node_or_null(NodePath(sibling_marker_name)) as Node2D
+	if sibling_marker != null:
+		return sibling_marker
+	return spawner_node.get_node_or_null(NodePath(marker_name)) as Node2D
 
 
 # Reads the level's mapBounds rectangle (a CollisionShape2D + RectangleShape2D used

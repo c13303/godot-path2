@@ -79,7 +79,7 @@ var _animation_paused: bool = false
 
 
 func _ready() -> void:
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_setup_segment_points()
 	_setup_segments()
 	reset_to_idle()
@@ -203,7 +203,7 @@ func _setup_segments() -> void:
 			sprite = Sprite2D.new()
 			sprite.name = "Segment%d" % index
 			segment_root.add_child(sprite)
-		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		sprite.texture = kraken_texture
 		sprite.hframes = SEGMENT_COUNT
 		sprite.vframes = 1

@@ -1,10 +1,6 @@
-[gd_resource type="Resource" script_class="KrakenData" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="KrakenData" format=3 uid="uid://poug6dld718n"]
 
-[ext_resource type="Script" path="res://scripts/combat/kraken/kraken_data.gd" id="1_kraken_data"]
+[ext_resource type="Script" uid="uid://bbpg88ty5ungu" path="res://scripts/combat/kraken/kraken_data.gd" id="1_kraken_data"]
 
 [resource]
 script = ExtResource("1_kraken_data")
-capture_range = 190.0
-target_scan_interval = 0.1
-digestion_seconds = 5.0
-forced_drop_currency = &"gem"

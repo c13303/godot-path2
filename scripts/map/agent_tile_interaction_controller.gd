@@ -14,6 +14,8 @@ const CATEGORY_MONSTERS: StringName = &"monsters"
 const CATEGORY_CLIENTS: StringName = &"clients"
 const CATEGORY_MERCHANTS: StringName = &"merchants"
 const CATEGORY_SHEEP: StringName = &"sheep"
+const KRAKEN_ITEM_ID: String = "kraken"
+const KRAKEN_LAYER_NAME: String = "traversable_buildings"
 
 var _manager: BuildingManager = null
 
@@ -29,10 +31,12 @@ func setup(manager: BuildingManager) -> void:
 # the original non-drowning interaction order: rose -> pasteque -> turret.
 # Drowning is run by AgentCellTracker immediately afterwards so the same central
 # water result can drive both the targeted candidate set and the drowning start.
-func evaluate(agent: Node2D, category: StringName, _cell: Vector2i) -> void:
+func evaluate(agent: Node2D, category: StringName, cell: Vector2i) -> void:
 	if _manager == null or agent == null or not is_instance_valid(agent):
 		return
 	var debug: bool = CppDebugOptions.logs_enabled
+	if category == CATEGORY_MONSTERS:
+		_damage_kraken_at_cell(cell)
 	if category == CATEGORY_CLIENTS or category == CATEGORY_MERCHANTS:
 		_manager.trample_rose_at_agent(agent)
 		if debug:
@@ -46,6 +50,15 @@ func evaluate(agent: Node2D, category: StringName, _cell: Vector2i) -> void:
 		if debug:
 			_debug_turret += 1
 	refresh_contact_dance(agent, category)
+
+
+func _damage_kraken_at_cell(cell: Vector2i) -> void:
+	var item_def: Dictionary = ItemCatalog.get_item_def(KRAKEN_ITEM_ID)
+	var damage: int = maxi(0, int(item_def.get("walkover_damage_by_monsters", 0)))
+	if damage <= 0:
+		return
+	if _manager.has_method("damage_player_placeable_at"):
+		_manager.call("damage_player_placeable_at", cell, KRAKEN_LAYER_NAME, KRAKEN_ITEM_ID, damage)
 
 
 func refresh_contact_dance(agent: Node2D, category: StringName) -> void:
