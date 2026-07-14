@@ -9,7 +9,7 @@ const IDLE_GROUP: int = 0
 @export var preview_z_index: int = -50
 @export var monster_color: Color = Color(1.0, 0.22, 0.16, 0.58)
 @export_range(30.0, 600.0, 5.0, "or_greater") var runner_speed: float = 190.0
-@export_range(0.05, 3.0, 0.05, "or_greater") var emission_interval: float = 0.55
+@export_range(0.05, 3.0, 0.05, "or_greater") var emission_interval: float = 0.5
 @export_range(2.0, 24.0, 0.5, "or_greater") var star_radius: float = 5.0
 @export_range(4.0, 64.0, 1.0, "or_greater") var arrival_radius: float = 12.0
 @export_range(1.0, 30.0, 0.5, "or_greater") var stalled_runner_timeout: float = 5.0
@@ -90,14 +90,12 @@ func _refresh_now() -> void:
 		var group_id: int = int(descriptor.get("group_id", IDLE_GROUP))
 		if group_id <= IDLE_GROUP:
 			continue
-		var runner: PathPreviewRunner = _runner_for_route(_routes.size())
 		_routes.append({
 			"group_id": group_id,
 			"start_world": _manager.cell_center(descriptor.get("spawner_cell", Vector2i.ZERO) as Vector2i),
 			"goal_world": descriptor.get("entry_world", Vector2.ZERO) as Vector2,
 			"ready": bool(descriptor.get("ready", false)),
 			"emit_timer": 0.0,
-			"runner": runner,
 		})
 
 
@@ -130,16 +128,12 @@ func _emit_due_runners(delta: float) -> void:
 		var route: Dictionary = _routes[index]
 		if not bool(route.get("ready", false)):
 			continue
-		var runner: PathPreviewRunner = route.get("runner") as PathPreviewRunner
-		if runner != null and runner.is_active():
-			continue
 		var timer: float = maxf(0.0, float(route.get("emit_timer", 0.0)) - delta)
 		if timer > 0.0:
 			route["emit_timer"] = timer
 			_routes[index] = route
 			continue
-		if runner == null:
-			continue
+		var runner: PathPreviewRunner = _idle_runner()
 		runner.start(
 			int(route.get("group_id", IDLE_GROUP)),
 			route.get("start_world", Vector2.ZERO) as Vector2,
@@ -153,18 +147,19 @@ func _emit_due_runners(delta: float) -> void:
 			8,
 			star_radius
 		)
-		route["runner"] = runner
 		route["emit_timer"] = emission_interval
 		_routes[index] = route
 
 
-func _runner_for_route(route_index: int) -> PathPreviewRunner:
-	while _runners.size() <= route_index:
-		var runner: PathPreviewRunner = RUNNER_SCRIPT.new() as PathPreviewRunner
-		add_child(runner)
-		runner.configure(_flow, preview_z_index)
-		_runners.append(runner)
-	return _runners[route_index]
+func _idle_runner() -> PathPreviewRunner:
+	for runner: PathPreviewRunner in _runners:
+		if not runner.is_active():
+			return runner
+	var runner: PathPreviewRunner = RUNNER_SCRIPT.new() as PathPreviewRunner
+	add_child(runner)
+	runner.configure(_flow, preview_z_index)
+	_runners.append(runner)
+	return runner
 
 
 func _clear_routes() -> void:
