@@ -92,6 +92,9 @@ var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
 var _tutorial_world_arrow: TutorialWorldArrow
 var _has_planted_turret_epine: bool = false
+# Wall stock captured the first time the day-1 wall step is evaluated. The step is skipped
+# once the current stock drops below this, i.e. as soon as one starting wall is placed.
+var _wall_stock_baseline: int = -1
 # True during the first part of dawn: night has ended but plant growth and the
 # dawn harvest have not finished starting. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
@@ -750,15 +753,22 @@ func _should_prompt_plant_turret_epine() -> bool:
 	return not _has_planted_turret_epine and _build_affordable_quantity(TURRET_EPINE_ITEM_ID) > 0
 
 
-## Day-1 wall step: prompt until at least one wall is built (and the player still owns a
-## wall to place). Precedes the watermelon/spitter prompts.
+## Day-1 wall step: prompt until the player places their first wall. Walls are tilemap
+## tiles (not building-object nodes), so we track placement through the inventory stock
+## instead: the step shows while the wall stock is still at its starting baseline and
+## is skipped the moment one wall has been spent. Precedes the watermelon/spitter prompts.
 func _should_prompt_build_wall() -> bool:
-	return _wall_count() <= 0 and _build_affordable_quantity(WALL_ITEM_ID) > 0
+	var stock: int = _wall_stock()
+	# Capture the baseline only once real stock exists, so a premature 0 (inventory not yet
+	# granted / game_ui not resolved) never latches the step off before the player can build.
+	if _wall_stock_baseline < 0 and stock > 0:
+		_wall_stock_baseline = stock
+	return _wall_stock_baseline > 0 and stock >= _wall_stock_baseline
 
 
-func _wall_count() -> int:
-	if _building_object_manager != null and _building_object_manager.has_method("count_buildings_by_item_id"):
-		return int(_building_object_manager.call("count_buildings_by_item_id", WALL_ITEM_ID))
+func _wall_stock() -> int:
+	if _game_ui != null and _game_ui.has_method("get_inventory_item_quantity"):
+		return int(_game_ui.call("get_inventory_item_quantity", WALL_ITEM_ID))
 	return 0
 
 
