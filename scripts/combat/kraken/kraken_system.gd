@@ -9,22 +9,33 @@ const STATE_RETRACTING: StringName = &"retracting"
 const STATE_EATING: StringName = &"eating"
 const STATE_DIGESTING: StringName = &"digesting"
 const RANGE_CANCEL_TOLERANCE: float = 1.25
+const OVERLAY_Z_INDEX: int = 4094
+
+@export var capture_range_color: Color = Color(0.35, 0.65, 0.78, 0.22)
 
 var _fight_system: FightSystem
 var _building_objects: BuildingObjectManager
 var _building_manager: BuildingManager
+var _build_system: Node
 var _krakens: Dictionary = {}
 var _reserved_target_ids: Dictionary = {}
+var _has_hovered_kraken: bool = false
+var _hovered_kraken_cell: Vector2i = Vector2i.ZERO
+var _has_preview_kraken: bool = false
+var _preview_kraken_cell: Vector2i = Vector2i.ZERO
 
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
 	_building_objects = get_node_or_null("../../Map/BuildingObjectManager") as BuildingObjectManager
 	_building_manager = get_node_or_null("../../Map/BuildingManager") as BuildingManager
+	_build_system = get_node_or_null("../../Map/BuildSystem")
 	if _fight_system == null or _building_objects == null or _building_manager == null:
 		push_error("KrakenSystem: required gameplay owners are missing.")
 		set_process(false)
 		return
+	z_as_relative = false
+	z_index = OVERLAY_Z_INDEX
 	_building_objects.building_added.connect(_on_building_added)
 	_building_objects.building_removed.connect(_on_building_removed)
 	for cell: Vector2i in _building_objects.get_building_cells():
@@ -40,6 +51,8 @@ func _exit_tree() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_hovered_kraken()
+	_update_preview_kraken()
 	var paused: bool = _fight_system != null and _fight_system.has_method("is_paused") and bool(_fight_system.call("is_paused"))
 	for raw_cell: Variant in _krakens.keys():
 		var cell: Vector2i = raw_cell as Vector2i
@@ -63,14 +76,31 @@ func _process(delta: float) -> void:
 		_krakens[cell] = state
 
 
+func _draw() -> void:
+	var layer: TileMapLayer = _kraken_layer()
+	if layer == null:
+		return
+	if _has_preview_kraken:
+		_draw_kraken_range(layer, _preview_kraken_cell, _kraken_capture_range())
+	elif _has_hovered_kraken:
+		var state: Dictionary = _krakens.get(_hovered_kraken_cell, {}) as Dictionary
+		var data: KrakenData = state.get("data", null) as KrakenData
+		if data != null:
+			_draw_kraken_range(layer, _hovered_kraken_cell, data.capture_range)
+
+
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	if item_id == KRAKEN_ITEM_ID:
 		_register_kraken(cell)
+		queue_redraw()
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 	if item_id == KRAKEN_ITEM_ID:
 		_cancel_and_remove(cell)
+		if _has_hovered_kraken and _hovered_kraken_cell == cell:
+			_has_hovered_kraken = false
+		queue_redraw()
 
 
 func _register_kraken(cell: Vector2i) -> void:
@@ -297,6 +327,79 @@ func _release_target_reservation(state: Dictionary) -> void:
 	var target: Node2D = _target_from_state(state)
 	if target != null:
 		_reserved_target_ids.erase(target.get_instance_id())
+
+
+func _update_hovered_kraken() -> void:
+	var layer: TileMapLayer = _kraken_layer()
+	if layer == null:
+		return
+	var mouse_world_position: Vector2 = get_global_mouse_position()
+	var mouse_cell: Vector2i = layer.local_to_map(layer.to_local(mouse_world_position))
+	var has_hovered_kraken: bool = _krakens.has(mouse_cell)
+	if has_hovered_kraken == _has_hovered_kraken and (not has_hovered_kraken or mouse_cell == _hovered_kraken_cell):
+		return
+	_has_hovered_kraken = has_hovered_kraken
+	_hovered_kraken_cell = mouse_cell
+	queue_redraw()
+
+
+func _update_preview_kraken() -> void:
+	var has_preview_kraken: bool = false
+	var preview_cell: Vector2i = _preview_kraken_cell
+	if _build_system != null and _build_system.has_method("has_single_tile_preview") and bool(_build_system.call("has_single_tile_preview")):
+		has_preview_kraken = str(_build_system.call("get_preview_item_id")) == KRAKEN_ITEM_ID
+		if has_preview_kraken and _build_system.has_method("get_preview_cell"):
+			preview_cell = _build_system.call("get_preview_cell") as Vector2i
+	if has_preview_kraken == _has_preview_kraken and preview_cell == _preview_kraken_cell:
+		return
+	_has_preview_kraken = has_preview_kraken
+	_preview_kraken_cell = preview_cell
+	queue_redraw()
+
+
+func _draw_kraken_range(layer: TileMapLayer, cell: Vector2i, capture_range: float) -> void:
+	if capture_range <= 0.0:
+		return
+	var cells: Dictionary = {}
+	_collect_range_cells(layer, cell, capture_range, cells)
+	_fill_cells(layer, cells.keys(), capture_range_color)
+
+
+func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, capture_range: float, out_cells: Dictionary) -> void:
+	var tile_size: float = _tile_size_pixels(layer)
+	var radius_cells: int = ceili(capture_range / maxf(1.0, tile_size))
+	var origin: Vector2 = layer.to_global(layer.map_to_local(cell))
+	var range_squared: float = capture_range * capture_range
+	for y_offset: int in range(-radius_cells, radius_cells + 1):
+		for x_offset: int in range(-radius_cells, radius_cells + 1):
+			var target_cell: Vector2i = cell + Vector2i(x_offset, y_offset)
+			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
+			if origin.distance_squared_to(target_world) <= range_squared:
+				out_cells[target_cell] = true
+
+
+func _fill_cells(layer: TileMapLayer, cells: Array, color: Color) -> void:
+	var half_size: Vector2 = Vector2.ONE * (_tile_size_pixels(layer) * 0.5)
+	for raw_cell: Variant in cells:
+		var cell: Vector2i = raw_cell as Vector2i
+		var center: Vector2 = to_local(layer.to_global(layer.map_to_local(cell)))
+		draw_rect(Rect2(center - half_size, half_size * 2.0), color, true)
+
+
+func _kraken_layer() -> TileMapLayer:
+	return _building_objects.traversable_buildings if _building_objects != null else null
+
+
+func _tile_size_pixels(layer: TileMapLayer) -> float:
+	if layer == null or layer.tile_set == null:
+		return 32.0
+	var tile_size: Vector2i = layer.tile_set.tile_size
+	return float(maxi(tile_size.x, tile_size.y))
+
+
+func _kraken_capture_range() -> float:
+	var data: KrakenData = ItemCatalog.get_item_def(KRAKEN_ITEM_ID).get("kraken_data", null) as KrakenData
+	return data.capture_range if data != null else 0.0
 
 
 func _visual_from_state(state: Dictionary) -> KrakenVisual:
