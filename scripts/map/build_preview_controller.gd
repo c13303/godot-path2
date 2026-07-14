@@ -24,6 +24,9 @@ const DIRECTION_UP: Vector2i = Vector2i(0, -1)
 # clamped to it so the preview always stays within reach of the player.
 const MAX_BUILD_CURSOR_TILES_FROM_PLAYER: int = 10
 const FENCE_ITEM_ID: String = "fence"
+# Visible coverage tile drawn over each of a house's six presence cells in the preview (the same
+# player-wall atlas the wall build uses), tinted valid/invalid by the shared previewbuild.modulate.
+const HOUSE_PREVIEW_COVERAGE_ATLAS: Vector2i = Vector2i(11, 1)
 const FENCE_NEIGHBOR_NORTH: int = 1
 const FENCE_NEIGHBOR_EAST: int = 2
 const FENCE_NEIGHBOR_SOUTH: int = 4
@@ -73,7 +76,9 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 	if previewbuild == null:
 		return
 
-	if _has_turret_sprite_visual(placeable_def):
+	if ItemCatalog.is_house_placeable(item_id):
+		_draw_house_preview(previewbuild, cell, item_id)
+	elif _has_turret_sprite_visual(placeable_def):
 		var turret_cells: Array[Vector2i] = [cell]
 		_draw_turret_sprite_preview_cells(previewbuild, turret_cells, placeable_def)
 		_preview_cells.append(cell)
@@ -146,9 +151,45 @@ func draw_drag_build_preview(
 	return valid_cells
 
 
+# Draws the full house preview for a hovered entrance cell: six-cell coverage over the WWW/WEW
+# presence (entrance included, top visual-only row excluded) plus the complete house1.png sprite,
+# bottom-aligned via the SAME shared HouseManager positioning as the built house. The sprite is
+# tracked as a preview visual so it is tinted valid/invalid together with the footprint and cleaned
+# up on clear. Alignment is never recomputed here.
+func _draw_house_preview(previewbuild: TileMapLayer, entrance: Vector2i, item_id: String) -> void:
+	_clear_preview_visual()
+	var house_manager: HouseManager = _manager.get_house_manager()
+	if house_manager == null:
+		return
+	for cell: Vector2i in house_manager.get_presence_cells(entrance):
+		previewbuild.set_cell(cell, _atlas_source_id(), HOUSE_PREVIEW_COVERAGE_ATLAS)
+		_preview_cells.append(cell)
+	var texture: Texture2D = ItemCatalog.get_house_texture(item_id)
+	if texture == null:
+		return
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = "HousePreviewSprite"
+	sprite.texture = texture
+	sprite.centered = true
+	previewbuild.add_child(sprite)
+	house_manager.position_house_sprite(sprite, entrance)
+	# Draw the preview sprite on top of the map regardless of its y-sort z-index.
+	sprite.z_as_relative = false
+	sprite.z_index = PREVIEW_Z_INDEX
+	_preview_visuals.append(sprite)
+
+
 func refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 	var previewbuild: TileMapLayer = _preview_layer()
 	if previewbuild == null:
+		return
+	# Houses validate their whole six-cell footprint atomically: the coverage tiles and the sprite
+	# are tinted together, never a mix of valid and invalid cells.
+	if ItemCatalog.is_house_placeable(str(placeable_def.get("id", ""))):
+		var house_blocked: bool = not _manager._house_placement_valid(_hover_cell, placeable_def)
+		var house_color: Color = PREVIEW_FORBIDDEN_RANGE_COLOR if house_blocked else PREVIEW_NORMAL_COLOR
+		previewbuild.modulate = house_color
+		_set_preview_visual_modulate(house_color)
 		return
 	var blocker: Dictionary = _manager._turret_range_blocker_for_cell(_hover_cell, placeable_def)
 	var target_layer: TileMapLayer = _target_tile_layer(str(placeable_def.get("target_layer", "wallz")))

@@ -41,6 +41,8 @@ func try_remove_at_cell(cell: Vector2i) -> bool:
 
 
 func commit_removal(removal: Dictionary) -> bool:
+	if bool(removal.get("is_house", false)):
+		return _commit_house_removal(removal)
 	var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
 	var item_id: String = str(removal.get("item_id", ""))
 	var layer: TileMapLayer = removal.get("layer") as TileMapLayer
@@ -56,6 +58,51 @@ func commit_removal(removal: Dictionary) -> bool:
 	if game_ui and game_ui.has_method("refund_build"):
 		game_ui.call("refund_build", item_id, refund_world_position(cell), 1)
 	return true
+
+
+# Normal unbuild of one complete player-built house (resolved from any of its six presence cells).
+# HouseManager tears the whole house down atomically; one house item is refunded to the inventory
+# (never five wall items, never money). Authored houses are not player-built and never reach here.
+func _commit_house_removal(removal: Dictionary) -> bool:
+	var entrance: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+	var house_id: String = str(removal.get("house_id", ""))
+	var house_manager: HouseManager = _house_manager()
+	if house_manager == null:
+		return false
+	# Re-resolve against the live registry so a stale queued removal cannot fire twice.
+	var current: Dictionary = _house_removable_at_cell(entrance)
+	if current.is_empty() or str(current.get("house_id", "")) != house_id:
+		return false
+	if not house_manager.remove_player_built_house(entrance):
+		return false
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", "house", refund_world_position(entrance), 1)
+	return true
+
+
+# Resolves the complete logical house from any hovered presence cell (walls OR walkable entrance),
+# normalized to a single removal keyed by its entrance so five wall cells never queue five removals.
+# Only player-built, removable houses qualify (authored houses such as house_seedmerchant do not).
+func _house_removable_at_cell(cell: Vector2i) -> Dictionary:
+	var house_manager: HouseManager = _house_manager()
+	if house_manager == null:
+		return {}
+	var record: HouseManager.HouseRecord = house_manager.get_house_at_presence_cell(cell)
+	if record == null or not record.player_built or not record.removable:
+		return {}
+	return {
+		"item_id": record.item_id,
+		"cell": record.entrance_cell,
+		"is_house": true,
+		"house_id": String(record.id),
+	}
+
+
+func _house_manager() -> HouseManager:
+	if _manager != null and _manager.has_method("get_house_manager"):
+		return _manager.get_house_manager()
+	return null
 
 
 func refund_world_position(cell: Vector2i) -> Vector2:
@@ -154,6 +201,11 @@ func clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2
 
 
 func removable_at_cell(cell: Vector2i) -> Dictionary:
+	# Houses are resolved first and from any presence cell, since the entrance has no wall tile and
+	# the invisible blocker atlas must not identify the logical house (see AGENTS.md).
+	var house_removal: Dictionary = _house_removable_at_cell(cell)
+	if not house_removal.is_empty():
+		return house_removal
 	var logical_plant_removal: Dictionary = logical_plant_removable_at_cell(cell)
 	if not logical_plant_removal.is_empty():
 		return logical_plant_removal
@@ -202,6 +254,9 @@ func can_unbuild_tile(layer: TileMapLayer, item_id: String, atlas_coords: Vector
 func remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Dictionary]:
 	var removals: Array[Dictionary] = []
 	var seen_cells: Dictionary = {}
+	# One house is one logical removal even when several of its footprint cells fall in the rect,
+	# so it is refunded once, not once per wall cell.
+	var seen_houses: Dictionary = {}
 	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
 	var y_step: int = 1 if end_cell.y >= start_cell.y else -1
 	var y: int = start_cell.y
@@ -212,8 +267,14 @@ func remove_rectangle_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[D
 			if not seen_cells.has(cell):
 				var removal: Dictionary = removable_at_cell(cell)
 				if not removal.is_empty():
-					removals.append(removal)
 					seen_cells[cell] = true
+					if bool(removal.get("is_house", false)):
+						var house_id: String = str(removal.get("house_id", ""))
+						if not seen_houses.has(house_id):
+							seen_houses[house_id] = true
+							removals.append(removal)
+					else:
+						removals.append(removal)
 			if x == end_cell.x:
 				break
 			x += x_step

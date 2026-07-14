@@ -38,6 +38,11 @@ func clear_build_selection_if_unaffordable(item_id: String) -> void:
 
 
 func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
+	# Houses are multi-cell logical objects owned by HouseManager: route them before the generic
+	# one-tile commit path (which would validate/stamp/pay for a single cell).
+	if ItemCatalog.is_house_placeable(str(placeable_def.get("id", ""))):
+		_apply_house_placeable(placeable_def, cell)
+		return
 	if _atlas_source_id() < 0 and not is_logical_plant(placeable_def):
 		return
 	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
@@ -97,6 +102,66 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 		_refresh_fence_autotiles_around(cell)
 	_play_build_fx_at_cell(cell, target_layer)
 	clear_build_selection_if_unaffordable(item_id)
+
+
+# House placement commit: validate the whole six-cell footprint, consume exactly one owned house,
+# then ask HouseManager to build one runtime house. On an unexpected commit failure after the
+# inventory was consumed, the item is restored immediately. No currency is charged (inventory-backed).
+func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> void:
+	var item_id: String = str(placeable_def.get("id", ""))
+	var rejection: String = house_placement_rejection(entrance, placeable_def)
+	if rejection != "":
+		if not is_buildable_floor_cell(entrance):
+			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+			return
+		_notify("invalid construction")
+		return
+	if not can_afford(item_id):
+		_notify("can't afford")
+		return
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui == null or not game_ui.has_method("try_purchase_build"):
+		return
+	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
+		_notify("can't afford")
+		return
+	var house_manager: HouseManager = _manager.get_house_manager()
+	if house_manager == null or not house_manager.build_player_house(item_id, entrance):
+		# Commit failed after the inventory was consumed (e.g. the footprint changed this frame):
+		# restore the one consumed house so no stock is lost.
+		if game_ui.has_method("refund_build"):
+			game_ui.call("refund_build", item_id, _cell_world_position(entrance), 1)
+		_notify("invalid construction")
+		return
+	_play_build_fx_at_cell(entrance, _wallz())
+	clear_build_selection_if_unaffordable(item_id)
+
+
+# "" = the whole house footprint is valid to place with `entrance` as its anchor. Otherwise a
+# rejection reason. Combines HouseManager's structural rules (bounds, walkable entrance, overlap
+# with an existing house) with the same per-cell buildable/occupancy checks a wall must satisfy,
+# applied atomically to all six presence cells. Shared by the commit path and the live preview.
+func house_placement_rejection(entrance: Vector2i, placeable_def: Dictionary) -> String:
+	var house_manager: HouseManager = _manager.get_house_manager()
+	if house_manager == null:
+		return "house system unavailable"
+	var structural: String = house_manager.house_structural_rejection(entrance)
+	if structural != "":
+		return structural
+	var wallz: TileMapLayer = _wallz()
+	if wallz == null:
+		return "wall layer unavailable"
+	for cell: Vector2i in house_manager.get_presence_cells(entrance):
+		if not is_valid_placeable_cell(cell, wallz, placeable_def):
+			return "presence cell %s is blocked or not buildable" % str(cell)
+	return ""
+
+
+func _cell_world_position(cell: Vector2i) -> Vector2:
+	var layer: TileMapLayer = _wallz()
+	if layer == null:
+		return Vector2.ZERO
+	return layer.to_global(layer.map_to_local(cell))
 
 
 func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: Vector2i, end_cell: Vector2i) -> bool:
@@ -296,6 +361,13 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 	if blocking_buildings and blocking_buildings != target_layer and blocking_buildings.get_cell_source_id(cell) >= 0:
 		return true
 	if fences and fences != target_layer and fences.get_cell_source_id(cell) >= 0:
+		return true
+	# Reserve every house's six presence cells (five walls AND the walkable entrance) against all
+	# other placeables, so nothing can be built on a house wall or in its doorway. Covers authored
+	# houses (e.g. house_seedmerchant) and player-built houses. During a house's own placement the
+	# new house is not registered yet, so its cells are not reported occupied by this check.
+	var house_manager: HouseManager = _manager.get_house_manager()
+	if house_manager != null and house_manager.get_house_at_presence_cell(cell) != null:
 		return true
 	return is_occupied_by_group_node(cell, placeable_def)
 

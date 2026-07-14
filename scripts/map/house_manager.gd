@@ -42,10 +42,16 @@ const AUTHORED_SPOT_PAIRS: Dictionary = {
 ## One logical record per house (not one per blocking cell).
 class HouseRecord extends RefCounted:
 	var id: StringName = &""
+	## Catalog item id ("house"). Authored houses leave this empty (they are not inventory items).
+	var item_id: String = ""
 	var sprite: Sprite2D = null
 	var entrance_cell: Vector2i = Vector2i.ZERO
 	var blocking_cells: Array[Vector2i] = []
 	var authored: bool = false
+	## Player-built runtime houses are the only removable/refundable/destructible houses.
+	var player_built: bool = false
+	var removable: bool = false
+	var destructible: bool = false
 	var under_construction: bool = false
 
 
@@ -54,6 +60,12 @@ var _floor: TileMapLayer = null
 var _wallz: TileMapLayer = null
 var _houses: Array[HouseRecord] = []
 var _entrance_to_house: Dictionary = {}
+## Every one of a house's six presence cells (five blockers + the walkable entrance) maps to its
+## owning HouseRecord. Drives placement-conflict detection, hover/unbuild resolution from any
+## footprint cell, rectangle-removal dedup and durability validity. One house is one logical object.
+var _presence_to_house: Dictionary = {}
+## Monotonic counter for unique runtime (player-built) house ids.
+var _runtime_house_seq: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -153,7 +165,13 @@ func register_authored_houses() -> void:
 			push_warning("HouseManager: authored house '%s' has no prepared entrance metadata; not registered." % sprite.name)
 			continue
 		var entrance: Vector2i = sprite.get_meta(ENTRANCE_CELL_META) as Vector2i
-		_register_house_record(StringName(sprite.name), sprite, entrance, true, false)
+		# Authored houses reserve their full six-cell presence (so nothing can be built on their
+		# walls or walkable entrance) but are never player-built: not removable, not refundable,
+		# not destructible.
+		var record: HouseRecord = _register_house_record(StringName(sprite.name), "", sprite, entrance, true, false)
+		record.player_built = false
+		record.removable = false
+		record.destructible = false
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +183,7 @@ func register_authored_houses() -> void:
 ## invalid, then commits in one batch: sprite -> snap -> z-index -> five walls (one
 ## update_internals) -> immediate player collision -> registry -> a single hard-topology
 ## invalidation -> one construction visual. Returns true on success.
-func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: Node = null) -> bool:
+func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: Node = null, item_id: String = "house") -> bool:
 	var texture: Texture2D = _resolve_texture(source)
 	var rejection: String = _validate_runtime_house(entrance, texture)
 	if rejection != "":
@@ -187,13 +205,178 @@ func create_house(id: StringName, source: Variant, entrance: Vector2i, parent: N
 	for cell: Vector2i in footprint:
 		_manager.set_player_navigation_cell_blocked(cell, true)
 
-	var record: HouseRecord = _register_house_record(id, sprite, entrance, false, true)
+	var record: HouseRecord = _register_house_record(id, item_id, sprite, entrance, false, true)
+	record.player_built = true
+	record.removable = true
+	record.destructible = ItemCatalog.get_max_health(item_id) > 0
+	# One destructible target for the whole house (entrance-keyed on the logical "houses" layer),
+	# never five per-cell targets. Registered through BuildingManager's durability facade.
+	if record.destructible:
+		_manager.register_player_built_house_durability(entrance, item_id)
 	# Exactly one hard-topology invalidation for the whole house; the existing runtime system
 	# then batches the quiet window, budgeted walkability rebuild, garden/route updates and
 	# lazy flow-field recomputation.
 	_manager.get_building_invalidation_controller().after_walkability_changed("runtime_house_built")
 	_start_house_construction_visual(record)
 	return true
+
+
+## Player-build entry point used by BuildPlacementService after it has validated the footprint
+## and consumed one inventory unit. Owns the runtime id + catalog texture so the placement
+## service stays free of house geometry. Returns false (no mutation) if the atomic re-validation
+## inside create_house fails, letting the caller restore the consumed item.
+func build_player_house(item_id: String, entrance: Vector2i) -> bool:
+	var texture: Texture2D = ItemCatalog.get_house_texture(item_id)
+	if texture == null:
+		push_warning("HouseManager: item '%s' has no house texture; cannot build." % item_id)
+		return false
+	return create_house(_next_runtime_house_id(), texture, entrance, null, item_id)
+
+
+func _next_runtime_house_id() -> StringName:
+	_runtime_house_seq += 1
+	return StringName("house_runtime_%d" % _runtime_house_seq)
+
+
+# ---------------------------------------------------------------------------
+# Removal (normal unbuild + hostile destruction). Both tear the whole house down atomically.
+# ---------------------------------------------------------------------------
+
+## Normal player unbuild of one complete player-built house. Removes its single durability record,
+## then tears the house down. Returns true on success; the caller (BuildRemovalService) performs
+## the single inventory refund. Authored / non-player houses are rejected.
+func remove_player_built_house(entrance: Vector2i) -> bool:
+	var record: HouseRecord = _entrance_to_house.get(entrance, null) as HouseRecord
+	if record == null or not record.player_built or not record.removable:
+		return false
+	# Normal unbuild does not go through the durability destroy path, so drop the record here.
+	if record.destructible:
+		_manager.remove_house_durability_record(entrance)
+	_teardown_house(record)
+	return true
+
+
+## Hostile no-refund destruction of one complete player-built house. The durability service has
+## already erased its own record before dispatching here, so this only tears down geometry/sprite.
+func remove_player_built_house_no_refund(entrance: Vector2i) -> bool:
+	var record: HouseRecord = _entrance_to_house.get(entrance, null) as HouseRecord
+	if record == null or not record.player_built:
+		return false
+	_teardown_house(record)
+	return true
+
+
+## Atomic geometry/sprite teardown shared by normal unbuild and hostile destruction: erase the five
+## owned blocker cells (one update_internals), refresh player collision, free the sprite, drop every
+## registry/presence entry, and trigger exactly one hard-topology invalidation. Never refunds.
+func _teardown_house(record: HouseRecord) -> void:
+	var blockers: Array[Vector2i] = record.blocking_cells
+	for cell: Vector2i in blockers:
+		if _wallz.get_cell_source_id(cell) < 0:
+			continue
+		# Ownership safety: only erase a cell still holding this house's invisible blocker.
+		if _wallz.get_cell_atlas_coords(cell) != HOUSE_WALL_ATLAS:
+			push_warning("HouseManager: blocker cell %s no longer holds a house wall; leaving foreign content in place." % str(cell))
+			continue
+		_wallz.erase_cell(cell)
+	_wallz.update_internals()
+	for cell: Vector2i in blockers:
+		_manager.set_player_navigation_cell_blocked(cell, false)
+	if record.sprite != null and is_instance_valid(record.sprite):
+		record.sprite.queue_free()
+	record.sprite = null
+	_unregister_house_record(record)
+	_manager.get_building_invalidation_controller().after_walkability_changed("house_removed")
+
+
+# ---------------------------------------------------------------------------
+# Sprite positioning shared with the preview + health-bar anchoring for durability.
+# ---------------------------------------------------------------------------
+
+## Positions any house sprite (the real one OR a translucent preview sprite) exactly as it will
+## sit after placement: bottom-centre on the entrance cell's bottom edge, entrance-top-edge z-index.
+## Uses global coordinates, so a preview sprite parented under a different layer snaps identically.
+func position_house_sprite(sprite: Sprite2D, entrance: Vector2i) -> void:
+	if sprite == null or _floor == null:
+		return
+	_snap_house_sprite_to_entrance(sprite, entrance, _floor)
+
+
+## World point above the visible house sprite, used by the durability health bar so it floats over
+## the roof rather than over the walkable ground entrance. Falls back to the entrance centre.
+func get_house_health_bar_world_position(entrance: Vector2i) -> Vector2:
+	var record: HouseRecord = _entrance_to_house.get(entrance, null) as HouseRecord
+	if record == null or record.sprite == null or not is_instance_valid(record.sprite) or record.sprite.texture == null:
+		return _manager.cell_center(entrance)
+	var bottom_center: Vector2 = _sprite_bottom_center_world(record.sprite)
+	var tex_height: float = record.sprite.texture.get_size().y * absf(record.sprite.global_scale.y)
+	return bottom_center - Vector2(0.0, tex_height)
+
+
+# ---------------------------------------------------------------------------
+# Save / restore of player-built runtime houses (authored houses are recreated by level loading).
+# ---------------------------------------------------------------------------
+
+## Minimal save records for player-built houses only: catalog item id + entrance cell. The five
+## blockers are already serialized through wallz; the sprite and logical registry are rebuilt from
+## these on load. Construction progress is intentionally not saved (loaded houses are complete).
+func serialize_player_built_houses() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for record: HouseRecord in _houses:
+		if not record.player_built:
+			continue
+		out.append({
+			"item_id": record.item_id,
+			"entrance_x": record.entrance_cell.x,
+			"entrance_y": record.entrance_cell.y,
+		})
+	return out
+
+
+## Rebuilds player-built houses from saved records: recreates each sprite + six-cell registry
+## ownership, reusing the blocker cells already restored from the wallz layer (repairing any missing
+## one in a single batched update_internals). No per-house topology rebuild and no construction
+## visual — startup navigation reconstructs routing from the restored map. Durability is restored
+## separately, after this, so its "houses" records validate against the live registry.
+func restore_player_built_houses(records: Array) -> void:
+	var source_id: int = _wallz_atlas_source_id(_wallz)
+	var repaired_any: bool = false
+	for raw_record: Variant in records:
+		if not (raw_record is Dictionary):
+			continue
+		var entry: Dictionary = raw_record as Dictionary
+		var item_id: String = str(entry.get("item_id", "house"))
+		var entrance: Vector2i = Vector2i(int(entry.get("entrance_x", 0)), int(entry.get("entrance_y", 0)))
+		if _restore_one_player_house(item_id, entrance, source_id):
+			repaired_any = true
+	if repaired_any:
+		_wallz.update_internals()
+
+
+func _restore_one_player_house(item_id: String, entrance: Vector2i, source_id: int) -> bool:
+	if _presence_to_house.has(entrance) or has_house_at_entrance(entrance):
+		push_warning("HouseManager: saved house at %s conflicts with an existing house; skipping." % str(entrance))
+		return false
+	var texture: Texture2D = ItemCatalog.get_house_texture(item_id)
+	if texture == null:
+		push_warning("HouseManager: saved house item '%s' has no texture; skipping." % item_id)
+		return false
+	var repaired: bool = false
+	for cell: Vector2i in _footprint_cells(entrance):
+		if _wallz.get_cell_source_id(cell) < 0 and source_id >= 0:
+			_wallz.set_cell(cell, source_id, HOUSE_WALL_ATLAS)
+			repaired = true
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.texture = texture
+	sprite.centered = true
+	sprite.name = String(_next_runtime_house_id())
+	_runtime_house_container().add_child(sprite)
+	_snap_house_sprite_to_entrance(sprite, entrance, _floor)
+	var record: HouseRecord = _register_house_record(StringName(sprite.name), item_id, sprite, entrance, false, false)
+	record.player_built = true
+	record.removable = true
+	record.destructible = ItemCatalog.get_max_health(item_id) > 0
+	return repaired
 
 
 ## Non-empty string = rejection reason (validated before any mutation). "" = valid.
@@ -258,9 +441,10 @@ func _start_house_construction_visual(record: HouseRecord) -> void:
 # Registry + queries.
 # ---------------------------------------------------------------------------
 
-func _register_house_record(id: StringName, sprite: Sprite2D, entrance: Vector2i, authored: bool, under_construction: bool) -> HouseRecord:
+func _register_house_record(id: StringName, item_id: String, sprite: Sprite2D, entrance: Vector2i, authored: bool, under_construction: bool = false) -> HouseRecord:
 	var record: HouseRecord = HouseRecord.new()
 	record.id = id
+	record.item_id = item_id
 	record.sprite = sprite
 	record.entrance_cell = entrance
 	record.blocking_cells = _footprint_cells(entrance)
@@ -268,7 +452,20 @@ func _register_house_record(id: StringName, sprite: Sprite2D, entrance: Vector2i
 	record.under_construction = under_construction
 	_houses.append(record)
 	_entrance_to_house[entrance] = record
+	for cell: Vector2i in _presence_cells(entrance):
+		_presence_to_house[cell] = record
 	return record
+
+
+## Removes a record from every index (registry, entrance lookup, and all six presence cells).
+func _unregister_house_record(record: HouseRecord) -> void:
+	if record == null:
+		return
+	_houses.erase(record)
+	_entrance_to_house.erase(record.entrance_cell)
+	for cell: Vector2i in _presence_cells(record.entrance_cell):
+		if _presence_to_house.get(cell) == record:
+			_presence_to_house.erase(cell)
 
 
 func has_house_at_entrance(entrance: Vector2i) -> bool:
@@ -310,6 +507,56 @@ func _footprint_cells(entrance: Vector2i) -> Array[Vector2i]:
 	for offset: Vector2i in FOOTPRINT_OFFSETS:
 		cells.append(entrance + offset)
 	return cells
+
+
+## The complete six-cell reserved presence: the five blocking footprint cells plus the walkable
+## entrance. This is the single geometry authority for placement, preview, occupancy and removal.
+func _presence_cells(entrance: Vector2i) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = _footprint_cells(entrance)
+	cells.append(entrance)
+	return cells
+
+
+# ---------------------------------------------------------------------------
+# Public geometry / registry queries (shared by placement, preview, removal, durability, save).
+# ---------------------------------------------------------------------------
+
+## The six occupied presence cells (five walls + walkable entrance) for a hovered entrance cell.
+func get_presence_cells(entrance: Vector2i) -> Array[Vector2i]:
+	return _presence_cells(entrance)
+
+
+## The five navigation-blocking wall cells for an entrance cell (excludes the entrance).
+func get_blocking_cells(entrance: Vector2i) -> Array[Vector2i]:
+	return _footprint_cells(entrance)
+
+
+## The house owning `cell` (any of its six presence cells), or null. Used to resolve one logical
+## house from any hovered footprint cell during placement conflict checks and unbuild.
+func get_house_at_presence_cell(cell: Vector2i) -> HouseRecord:
+	return _presence_to_house.get(cell, null) as HouseRecord
+
+
+func has_player_built_house_at_entrance(entrance: Vector2i) -> bool:
+	var record: HouseRecord = _entrance_to_house.get(entrance, null) as HouseRecord
+	return record != null and record.player_built
+
+
+## House-specific structural rejection for placing a new house with `entrance` as its anchor.
+## Non-empty string = reason (no mutation happens). Complements the generic per-cell buildable
+## checks that BuildPlacementService runs on each presence cell; this owns the geometry-level
+## invariants (map bounds, walkable entrance, overlap with an existing house).
+func house_structural_rejection(entrance: Vector2i) -> String:
+	if _floor == null or _wallz == null:
+		return "map layers unavailable"
+	for cell: Vector2i in _presence_cells(entrance):
+		if not _manager.has_floor_cell(cell):
+			return "presence cell %s is outside the floor" % str(cell)
+		if _presence_to_house.has(cell):
+			return "presence cell %s already belongs to a house" % str(cell)
+	if not _manager.is_walkable_cell(entrance):
+		return "entrance %s is not a valid walkable floor cell" % str(entrance)
+	return ""
 
 
 ## Derives the entrance cell from an authored sprite: the sprite bottom-centre sits on the

@@ -72,7 +72,9 @@ func process(delta: float) -> void:
 	var cell: Vector2i = _hovered_cell()
 	var atlas_coords: Vector2i = _atlas_coords_from_placeable(placeable_def)
 	var item_id: String = str(placeable_def.get("id", ""))
-	if atlas_coords == Vector2i(-1, -1) or not _can_afford(item_id):
+	# Houses have no single tile atlas (they are a multi-cell logical object); their preview is
+	# drawn from HouseManager geometry, so they are allowed through the (-1,-1) atlas gate.
+	if (atlas_coords == Vector2i(-1, -1) and not ItemCatalog.is_house_placeable(item_id)) or not _can_afford(item_id):
 		_clear_hover()
 		return
 

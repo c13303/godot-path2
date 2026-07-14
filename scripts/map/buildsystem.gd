@@ -578,6 +578,21 @@ func _resolve_flow_field() -> Object:
 		_flow_field = scene.get_node_or_null("CPP/FlowFieldNative")
 	return _flow_field
 
+# Typed access to the house owner for the placement/preview services (houses are placed and
+# previewed as one logical object, not through the generic tile path).
+func get_house_manager() -> HouseManager:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("get_house_manager"):
+		return building_manager.call("get_house_manager") as HouseManager
+	return null
+
+
+# True when a house may be placed with `cell` as its entrance (whole six-cell footprint valid).
+# Shared by the placement commit and the live preview tint.
+func _house_placement_valid(cell: Vector2i, placeable_def: Dictionary) -> bool:
+	return _placement_service.house_placement_rejection(cell, placeable_def) == ""
+
+
 func _resolve_building_manager() -> Object:
 	if _building_manager and is_instance_valid(_building_manager):
 		return _building_manager

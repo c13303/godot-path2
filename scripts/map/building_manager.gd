@@ -740,23 +740,10 @@ func get_construction_overlay() -> BuildingConstructionOverlay:
 func _setup_house_manager() -> void:
 	_house_manager.setup(self)
 	_house_manager.register_authored_houses()
-	_setup_house_runtime_test_controller()
 
 
 func get_house_manager() -> HouseManager:
 	return _house_manager
-
-
-# =============================================================================
-# TEMPORARY HOUSE PASS 1 TEST WIRING
-# Remove together with scripts/debug/house_runtime_test_controller.gd once runtime house
-# placement is integrated into the real build system.
-# =============================================================================
-func _setup_house_runtime_test_controller() -> void:
-	var controller: HouseRuntimeTestController = HouseRuntimeTestController.new()
-	controller.name = "HouseRuntimeTestController"
-	add_child(controller)
-	controller.setup(_house_manager, floorz)
 
 
 # Immediately (before the next budgeted rebuild) toggles one cell's native player collision.
@@ -2269,6 +2256,38 @@ func serialize_player_placeable_durability() -> Array[Dictionary]:
 
 func restore_player_placeable_durability(saved: Array) -> void:
 	_durability.restore(saved)
+
+
+# --- Player-built house facade (all house logic stays in HouseManager) -------
+# Thin coordinators so BuildPlacementService / BuildRemovalService / Progression / the durability
+# service never reach into HouseManager privates. HouseManager owns geometry, sprites and registry;
+# the durability service owns health.
+func serialize_player_built_houses() -> Array[Dictionary]:
+	return _house_manager.serialize_player_built_houses()
+
+
+func restore_player_built_houses(records: Array) -> void:
+	_house_manager.restore_player_built_houses(records)
+
+
+func register_player_built_house_durability(entrance: Vector2i, item_id: String) -> void:
+	_durability.register_player_built_house(entrance, item_id)
+
+
+func remove_house_durability_record(entrance: Vector2i) -> void:
+	_durability.remove_house_target(entrance)
+
+
+func remove_player_built_house_no_refund(entrance: Vector2i) -> bool:
+	return _house_manager.remove_player_built_house_no_refund(entrance)
+
+
+func house_target_exists(entrance: Vector2i) -> bool:
+	return _house_manager.has_player_built_house_at_entrance(entrance)
+
+
+func house_health_bar_world_position(entrance: Vector2i) -> Vector2:
+	return _house_manager.get_house_health_bar_world_position(entrance)
 
 
 func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:

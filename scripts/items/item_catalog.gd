@@ -6,6 +6,7 @@ const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/tur
 const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_visual.tscn")
 const KRAKEN_DATA: Resource = preload("res://scripts/combat/kraken/kraken.tres")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
+const HOUSE_TEXTURE: Texture2D = preload("res://assets/sprites/house/house1.png")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
 const ITEM_DEFS: Dictionary = {
@@ -151,6 +152,36 @@ const ITEM_DEFS: Dictionary = {
 		"fixed_stock": true,
 		"max_health": 100,
 		"max_stack": 999,
+	},
+	# A multi-cell player-built house. Unlike normal placeables it is NOT routed through the
+	# generic one-cell placement path: HouseManager owns its 3x2 blocking footprint, its
+	# walkable entrance, sprite snapping and durability. The catalog entry only carries the
+	# shared item semantics (owned stock, wall-like consumption, menu icon) so the inventory,
+	# build menu, merchant, reward and editor systems treat it generically. `special_placement_kind`
+	# is the single flag every owner keys off (see is_house_placeable) instead of matching the id.
+	#
+	# inventory_backed + NOT fixed_stock: placing consumes one owned unit and normal unbuild
+	# returns one (wall-like), while remaining sellable at the seed merchant (a fixed-stock item
+	# could never be a merchant item). A zero merchant price still rejects the purchase, so the
+	# level author must author a positive price to sell it.
+	"house": {
+		"id": "house",
+		"name": "House",
+		"type": "placeable",
+		"category": "house",
+		# Menu/reward icon reuses the wall frame for now; the world object and preview use
+		# HOUSE_TEXTURE (house1.png) via HouseManager, not this frame.
+		"frame": 3,
+		"target_layer": "wallz",
+		"special_placement_kind": &"house",
+		"house_texture": HOUSE_TEXTURE,
+		"inventory_backed": true,
+		"fixed_stock": false,
+		"drag_buildable": false,
+		"max_health": 100,
+		"max_stack": 999,
+		"currency": &"money",
+		"price": 0,
 	},
 	"rose": {
 		"id": "rose",
@@ -448,6 +479,19 @@ static func is_placeable(item_id: String) -> bool:
 static func is_inventory_backed(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("inventory_backed", false))
 
+## True for the multi-cell house placeable, which HouseManager places/removes/destroys as one
+## logical object instead of through the generic one-cell tile path. Owners branch on this
+## single flag rather than matching item_id == "house" in many files.
+static func is_house_placeable(item_id: String) -> bool:
+	return StringName(get_item_def(item_id).get("special_placement_kind", &"")) == &"house"
+
+
+## The full house sprite texture (house1.png) used by the preview and the built world object.
+## Null for non-house items.
+static func get_house_texture(item_id: String) -> Texture2D:
+	return get_item_def(item_id).get("house_texture", null) as Texture2D
+
+
 ## Fixed-stock items are granted in finite quantities by the level/reward data and
 ## are never sold by either shop. They can still appear in the build picker so the
 ## player can place the owned stock.
@@ -525,9 +569,9 @@ static func get_hammer_shop_item_ids() -> Array[StringName]:
 		if str(item_def.get("type", "")) != "placeable":
 			continue
 		var category: String = str(item_def.get("category", ""))
-		if category == "shop_counter" or category == "wall" or category == "fence" or category == "furniture":
+		if category == "shop_counter" or category == "wall" or category == "house" or category == "fence" or category == "furniture":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"fence"])
+	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"house", &"fence"])
 
 static func get_tool_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = get_gardening_shop_item_ids()

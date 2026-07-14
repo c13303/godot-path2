@@ -10,7 +10,9 @@ const SAVE_PATH: String = "user://progression_save.json"
 const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 # v4 replaces the ambiguous day-phase flags with one canonical gameplay phase and
 # persists the dawn sub-stage needed to resume before clients correctly.
-const SAVE_VERSION: int = 4
+# Version 5 adds the "runtime_houses" section (player-built houses). Versions 1-4 are still
+# accepted and simply have no house section (treated as an empty list).
+const SAVE_VERSION: int = 5
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -549,6 +551,7 @@ func save_progression(
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
+	var runtime_houses: Array[Dictionary] = _get_runtime_houses(scene)
 	var gameplay_phase_state: Dictionary = _get_gameplay_phase_state(scene)
 	for raw_key: Variant in gameplay_phase_state_override.keys():
 		var key: String = str(raw_key)
@@ -565,6 +568,7 @@ func save_progression(
 		"counter_stock": counter_stock,
 		"ground_collectibles": ground_collectibles,
 		"player_placeable_durability": player_placeable_durability,
+		"runtime_houses": runtime_houses,
 		"runtime_agents": runtime_agents,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
@@ -817,6 +821,10 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_restore_plant_states(scene, data.get("plant_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
 	_restore_ground_collectibles(scene, data.get("ground_collectibles", []))
+	# Rebuild player-built houses (sprites + six-cell registry) from the restored wallz blockers,
+	# BEFORE durability so its entrance-keyed "houses" records validate against the live registry.
+	# Authored houses are recreated by normal level loading and are not saved here.
+	_restore_runtime_houses(scene, data.get("runtime_houses", []))
 	# Restore player-built durability/provenance after layers + PlantManager +
 	# BuildingObjectManager are reindexed, so every saved record can be validated
 	# against the live item at its layer/cell. Older saves have no section (no
@@ -1066,6 +1074,29 @@ func _restore_player_placeable_durability(scene: Node, raw_records: Variant) -> 
 	_log("Player-built durability restored: %d records" % records.size())
 
 
+func _get_runtime_houses(scene: Node) -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_player_built_houses"):
+		return records
+	var raw_records: Array = building_manager.call("serialize_player_built_houses") as Array
+	for raw_record: Variant in raw_records:
+		if raw_record is Dictionary:
+			records.append(raw_record as Dictionary)
+	return records
+
+
+func _restore_runtime_houses(scene: Node, raw_records: Variant) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_player_built_houses"):
+		return
+	var records: Array = []
+	if raw_records is Array:
+		records = raw_records as Array
+	building_manager.call("restore_player_built_houses", records)
+	_log("Player-built houses restored: %d records" % records.size())
+
+
 func _tantrum_blocks_save(scene: Node) -> bool:
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if building_manager == null or not building_manager.has_method("get_client_tantrum_controller"):
@@ -1164,9 +1195,9 @@ func _reindex_loaded_layers(scene: Node) -> void:
 
 func _validate_save(data: Dictionary) -> String:
 	var save_version: int = int(data.get("version", -1))
-	if save_version != 1 and save_version != 2 and save_version != 3 and save_version != 4:
+	if save_version < 1 or save_version > SAVE_VERSION:
 		return "unsupported save version"
-	if save_version == 4 and not data.has("gameplay_phase"):
+	if save_version >= 4 and not data.has("gameplay_phase"):
 		return "missing gameplay phase"
 	if not (data.get("layers") is Dictionary) or not (data.get("player") is Dictionary):
 		return "missing save sections"
@@ -1237,6 +1268,18 @@ func _validate_save(data: Dictionary) -> String:
 					return "invalid player placeable durability entry"
 			if int(entry["max_health"]) <= 0 or int(entry["health"]) < 0:
 				return "invalid player placeable durability health"
+	# Optional (version 5+): player-built houses. Old saves (1-4) simply omit it.
+	if data.has("runtime_houses"):
+		if not (data["runtime_houses"] is Array):
+			return "invalid runtime houses"
+		var runtime_houses: Array = data["runtime_houses"] as Array
+		for raw_entry: Variant in runtime_houses:
+			if not (raw_entry is Dictionary):
+				return "invalid runtime house entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["item_id", "entrance_x", "entrance_y"]:
+				if not entry.has(field):
+					return "invalid runtime house entry"
 	if data.has("plant_states"):
 		if not (data["plant_states"] is Array):
 			return "invalid plant states"

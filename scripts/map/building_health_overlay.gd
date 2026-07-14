@@ -40,12 +40,14 @@ func _draw() -> void:
 		return
 	for raw_record: Variant in _durability.damaged_records():
 		var record: Dictionary = raw_record as Dictionary
-		var cell: Vector2i = record.get("cell", Vector2i.ZERO) as Vector2i
 		var health: int = int(record.get("health", 0))
 		var max_health: int = int(record.get("max_health", 0))
 		if max_health <= 0 or health >= max_health:
 			continue
-		var local_center: Vector2 = to_local(building_manager.cell_center(cell))
+		# Ask durability where the bar belongs: cell centre for tile buildings, above the roof
+		# sprite for a multi-cell house (whose attack cell is the walkable ground entrance).
+		var anchor_world: Vector2 = _durability.health_bar_world_position(str(record.get("key", "")))
+		var local_center: Vector2 = to_local(anchor_world)
 		var bar_position: Vector2 = local_center + Vector2(-BAR_SIZE.x * 0.5, BAR_Y_OFFSET)
 		draw_rect(Rect2(bar_position, BAR_SIZE), BG_COLOR)
 		var ratio: float = float(health) / float(maxi(1, max_health))
