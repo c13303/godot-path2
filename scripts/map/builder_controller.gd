@@ -15,6 +15,9 @@ const STATE_TRAVELLING_TO_WORK: StringName = &"travelling_to_work"
 const STATE_WORKING: StringName = &"working"
 const STATE_RETURNING_IDLE: StringName = &"returning_idle"
 const STATE_LEAVING: StringName = &"leaving"
+const STALL_WARNING_SECONDS: float = 4.0
+const STALL_WARNING_REPEAT_SECONDS: float = 6.0
+const STALL_MOVEMENT_EPSILON_PIXELS: float = 2.0
 
 var _manager: BuildingManager
 var _desired_count: int = DEFAULT_BUILDER_COUNT
@@ -25,6 +28,9 @@ var _visitors_by_id: Dictionary = {}  # int -> DayVisitorMovementController
 var _state_by_builder_id: Dictionary = {}  # int -> StringName
 var _work_house_by_builder_id: Dictionary = {}  # int -> StringName
 var _next_builder_runtime_id: int = 1
+var _last_watch_position_by_builder_id: Dictionary = {}  # int -> Vector2
+var _stall_seconds_by_builder_id: Dictionary = {}  # int -> float
+var _stall_warning_cooldown_by_builder_id: Dictionary = {}  # int -> float
 
 
 func setup(manager: BuildingManager) -> void:
@@ -99,8 +105,9 @@ func process_arrivals() -> void:
 			_on_visitor_reached_target(visitor)
 
 
-func process_active_visitors() -> void:
+func process_active_visitors(delta: float = 0.0) -> void:
 	_clean_invalid_visitors()
+	_process_builder_motion_watchdog(delta)
 
 
 func on_agent_removed(agent: Node2D) -> void:
@@ -122,6 +129,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_visitors_by_id.clear()
 	_state_by_builder_id.clear()
 	_work_house_by_builder_id.clear()
+	_clear_motion_watch()
 
 
 func restore_state(raw_count: Variant) -> void:
@@ -151,17 +159,29 @@ func repath_for_walkability_change() -> void:
 		if builder_id >= 0 and _work_house_by_builder_id.has(builder_id):
 			continue
 		var target: Vector2i = visitor.target_cell()
-		if _claim_still_valid(visitor, target) and visitor.repath_to_current_target():
-			continue
+		if _claim_still_valid(visitor, target):
+			var repathed: bool = visitor.repath_to_current_target()
+			if builder_id >= 0:
+				_reset_builder_motion_watch(builder_id)
+			if repathed:
+				continue
 		_release_claim_for(visitor)
 		var replacement: Vector2i = _find_claim_for_visitor(visitor.source_spawner_cell(), visitor)
+		var replacement_builder_id: int = _builder_id_for_visitor(visitor)
 		if replacement == INVALID_CELL:
 			push_warning("BuilderController: no replacement Builder target near %s within radius %d; Builder kept at current safe position when possible." % [_builder_spot_cell(), BUILDER_SPOT_CLAIM_RADIUS])
+			if replacement_builder_id >= 0:
+				_reset_builder_motion_watch(replacement_builder_id)
 			continue
 		_claimed_cells[replacement] = visitor
 		if not visitor.repath_to_target(replacement):
 			_claimed_cells.erase(replacement)
 			push_warning("BuilderController: Builder replacement target %s became unreachable during repath." % replacement)
+			if replacement_builder_id >= 0:
+				_reset_builder_motion_watch(replacement_builder_id)
+			continue
+		if replacement_builder_id >= 0:
+			_reset_builder_motion_watch(replacement_builder_id)
 
 
 func _spawn_missing_builders() -> int:
@@ -263,7 +283,9 @@ func repath_builder_to_current_target(builder_id: int) -> bool:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	if visitor == null or not visitor.is_active() or visitor.is_leaving():
 		return false
-	return visitor.repath_to_current_target()
+	var repathed: bool = visitor.repath_to_current_target()
+	_reset_builder_motion_watch(builder_id)
+	return repathed
 
 
 func assign_builder_to_work_cell(builder_id: int, house_id: StringName, target_cell: Vector2i) -> bool:
@@ -279,9 +301,11 @@ func assign_builder_to_work_cell(builder_id: int, house_id: StringName, target_c
 		_claimed_cells.erase(target_cell)
 		if previous_target != INVALID_CELL and _is_candidate_available(previous_target, visitor):
 			_claimed_cells[previous_target] = visitor
+		_reset_builder_motion_watch(builder_id)
 		return false
 	_state_by_builder_id[builder_id] = STATE_TRAVELLING_TO_WORK
 	_work_house_by_builder_id[builder_id] = house_id
+	_reset_builder_motion_watch(builder_id)
 	return true
 
 
@@ -300,8 +324,10 @@ func request_builder_local_work_move(builder_id: int, target_cell: Vector2i) -> 
 		_claimed_cells.erase(target_cell)
 		if previous_target != INVALID_CELL and _is_candidate_available(previous_target, visitor):
 			_claimed_cells[previous_target] = visitor
+		_reset_builder_motion_watch(builder_id)
 		return false
 	_state_by_builder_id[builder_id] = STATE_WORKING
+	_reset_builder_motion_watch(builder_id)
 	return true
 
 
@@ -312,6 +338,7 @@ func release_builder_from_work(builder_id: int) -> void:
 	_work_house_by_builder_id.erase(builder_id)
 	if visitor != null and visitor.is_active() and not visitor.is_leaving():
 		_state_by_builder_id[builder_id] = STATE_IDLE if visitor.is_waiting() else STATE_RETURNING_IDLE
+	_reset_builder_motion_watch(builder_id)
 
 
 func return_builder_to_idle_area(builder_id: int) -> bool:
@@ -325,9 +352,11 @@ func return_builder_to_idle_area(builder_id: int) -> bool:
 	_claimed_cells[target_cell] = visitor
 	if not visitor.repath_to_target(target_cell):
 		_claimed_cells.erase(target_cell)
+		_reset_builder_motion_watch(builder_id)
 		return false
 	_work_house_by_builder_id.erase(builder_id)
 	_state_by_builder_id[builder_id] = STATE_RETURNING_IDLE
+	_reset_builder_motion_watch(builder_id)
 	return true
 
 
@@ -384,6 +413,100 @@ func _claim_still_valid(visitor: DayVisitorMovementController, cell: Vector2i) -
 	return _is_candidate_available(cell, visitor)
 
 
+func _process_builder_motion_watchdog(delta: float) -> void:
+	if delta <= 0.0:
+		return
+	var active_ids: Dictionary = {}
+	for visitor: DayVisitorMovementController in _visitors:
+		var builder_id: int = _builder_id_for_visitor(visitor)
+		if builder_id < 0:
+			continue
+		active_ids[builder_id] = true
+		if not _should_watch_builder_motion(builder_id, visitor):
+			_clear_builder_motion_watch(builder_id)
+			continue
+		_update_builder_motion_watch(builder_id, visitor, delta)
+	for raw_builder_id: Variant in _stall_seconds_by_builder_id.keys():
+		var watched_builder_id: int = int(raw_builder_id)
+		if not active_ids.has(watched_builder_id):
+			_clear_builder_motion_watch(watched_builder_id)
+
+
+func _should_watch_builder_motion(builder_id: int, visitor: DayVisitorMovementController) -> bool:
+	if visitor == null or not visitor.is_active() or visitor.is_leaving() or visitor.is_waiting():
+		return false
+	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
+	return state == STATE_ENTERING or state == STATE_TRAVELLING_TO_WORK or state == STATE_WORKING or state == STATE_RETURNING_IDLE
+
+
+func _update_builder_motion_watch(builder_id: int, visitor: DayVisitorMovementController, delta: float) -> void:
+	var current_position: Vector2 = visitor.get_agent_world_position()
+	if not _last_watch_position_by_builder_id.has(builder_id):
+		_last_watch_position_by_builder_id[builder_id] = current_position
+		_stall_seconds_by_builder_id[builder_id] = 0.0
+		_stall_warning_cooldown_by_builder_id[builder_id] = 0.0
+		return
+	var last_position: Vector2 = _last_watch_position_by_builder_id[builder_id] as Vector2
+	if last_position.distance_to(current_position) > STALL_MOVEMENT_EPSILON_PIXELS:
+		_last_watch_position_by_builder_id[builder_id] = current_position
+		_stall_seconds_by_builder_id[builder_id] = 0.0
+		_stall_warning_cooldown_by_builder_id[builder_id] = 0.0
+		return
+	var stalled_for: float = float(_stall_seconds_by_builder_id.get(builder_id, 0.0)) + delta
+	_stall_seconds_by_builder_id[builder_id] = stalled_for
+	var cooldown: float = maxf(0.0, float(_stall_warning_cooldown_by_builder_id.get(builder_id, 0.0)) - delta)
+	_stall_warning_cooldown_by_builder_id[builder_id] = cooldown
+	if stalled_for < STALL_WARNING_SECONDS or cooldown > 0.0:
+		return
+	push_warning(_builder_stall_warning(builder_id, visitor, current_position, stalled_for))
+	_stall_warning_cooldown_by_builder_id[builder_id] = STALL_WARNING_REPEAT_SECONDS
+
+
+func _builder_stall_warning(builder_id: int, visitor: DayVisitorMovementController, current_position: Vector2, stalled_for: float) -> String:
+	var current_cell: Vector2i = builder_current_cell(builder_id)
+	var target_cell: Vector2i = visitor.target_cell()
+	var house_id: StringName = StringName(_work_house_by_builder_id.get(builder_id, &""))
+	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
+	var nav_id: int = visitor.nav_id()
+	var builder_spot_cell: Vector2i = _builder_spot_cell()
+	var seed_merchant_spot_cell: Vector2i = _manager.seed_merchant_spot_cell_for_exact_spawner(SOURCE_SPAWNER_ID)
+	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s house=%s current_cell=%s target_cell=%s builder_spot=%s seed_merchant_spot=%s current_world=%s target_world=%s stalled_for=%.1fs." % [
+		builder_id,
+		nav_id,
+		String(state),
+		String(house_id),
+		current_cell,
+		target_cell,
+		builder_spot_cell,
+		seed_merchant_spot_cell,
+		current_position,
+		_manager.cell_center(target_cell) if target_cell != INVALID_CELL else Vector2.ZERO,
+		stalled_for,
+	]
+
+
+func _reset_builder_motion_watch(builder_id: int) -> void:
+	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
+	if visitor == null or not visitor.is_active():
+		_clear_builder_motion_watch(builder_id)
+		return
+	_last_watch_position_by_builder_id[builder_id] = visitor.get_agent_world_position()
+	_stall_seconds_by_builder_id[builder_id] = 0.0
+	_stall_warning_cooldown_by_builder_id[builder_id] = 0.0
+
+
+func _clear_builder_motion_watch(builder_id: int) -> void:
+	_last_watch_position_by_builder_id.erase(builder_id)
+	_stall_seconds_by_builder_id.erase(builder_id)
+	_stall_warning_cooldown_by_builder_id.erase(builder_id)
+
+
+func _clear_motion_watch() -> void:
+	_last_watch_position_by_builder_id.clear()
+	_stall_seconds_by_builder_id.clear()
+	_stall_warning_cooldown_by_builder_id.clear()
+
+
 func _source_binding() -> SpawnerBinding:
 	return _manager.level_spawner_binding(SOURCE_SPAWNER_ID)
 
@@ -410,6 +533,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_visitors_by_id.erase(builder_id)
 		_state_by_builder_id.erase(builder_id)
 		_work_house_by_builder_id.erase(builder_id)
+		_clear_builder_motion_watch(builder_id)
 		if _manager != null:
 			_manager.get_house_builder_work_controller().on_builder_removed(builder_id)
 	visitor.forget_agent()
@@ -456,6 +580,8 @@ func _on_visitor_reached_target(visitor: DayVisitorMovementController) -> void:
 	var state: StringName = StringName(_state_by_builder_id.get(builder_id, STATE_ENTERING))
 	if state == STATE_ENTERING or state == STATE_RETURNING_IDLE:
 		_state_by_builder_id[builder_id] = STATE_IDLE
+		_reset_builder_motion_watch(builder_id)
 		_manager.get_house_builder_work_controller().on_builder_became_idle(builder_id)
 	elif state == STATE_TRAVELLING_TO_WORK:
 		_state_by_builder_id[builder_id] = STATE_WORKING
+		_reset_builder_motion_watch(builder_id)

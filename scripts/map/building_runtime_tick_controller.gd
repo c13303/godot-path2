@@ -164,7 +164,7 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	_manager.get_seed_merchant_controller().process_proximity()
 	_manager.get_seed_merchant_controller().process_arrival()
 	_manager.get_builder_controller().process_arrivals()
-	_manager.get_builder_controller().process_active_visitors()
+	_manager.get_builder_controller().process_active_visitors(delta)
 	_manager.get_house_builder_work_controller().process(delta)
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,

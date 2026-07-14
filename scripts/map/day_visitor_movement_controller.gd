@@ -111,6 +111,10 @@ func get_agent_world_position() -> Vector2:
 	return Vector2.ZERO
 
 
+func nav_id() -> int:
+	return _nav_id
+
+
 func owns_agent(agent: Node2D) -> bool:
 	return agent != null and agent == _agent
 
