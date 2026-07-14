@@ -1402,11 +1402,6 @@ texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
-[node name="test_flyhouse" type="Sprite2D" parent="spawners" unique_id=1889072575]
-position = Vector2(2095, 3021)
-texture = ExtResource("7_wyhb5")
-metadata/id = ""
-
 [node name="house_seedmerchant" type="Sprite2D" parent="spawners" unique_id=1617665962]
 position = Vector2(1742, 2684)
 texture = ExtResource("10_l4uo6")
@@ -1465,6 +1460,11 @@ metadata/id = ""
 [node name="monster4_exit" type="Sprite2D" parent="spawners" unique_id=1545341588]
 position = Vector2(1006, 2273)
 texture = ExtResource("5_drkbx")
+metadata/id = ""
+
+[node name="builder_spot" type="Sprite2D" parent="spawners" unique_id=1020094794]
+position = Vector2(1742, 2710)
+texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="surface" type="Node" parent="." unique_id=1390524477]
