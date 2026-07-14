@@ -276,15 +276,15 @@ func destroy_target(key: String) -> void:
 		_destroy_plant_cell(cell)
 	elif str(rec.get("layer_name", "")) == RUNTIME_RESERVOIR_LAYER:
 		_destroy_runtime_reservoir(rec)
-		else:
-			if item_id == RESERVOIR_ITEM_ID:
-				# Authoritative reservoir-destroyed game-state path; the existing
-				# game-over UI polls GameState.is_reservoir_destroyed.
-				GameState.set_reservoir_destroyed(true)
-			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-			if bool(item_def.get("leaves_debris_on_destroy", false)) and _manager.has_method("leave_destroyed_placeable_debris"):
-				_manager.call("leave_destroyed_placeable_debris", cell, str(rec.get("layer_name", "")))
-			_destroy_structure_cell(cell, str(rec.get("layer_name", "")), item_id)
+	else:
+		if item_id == RESERVOIR_ITEM_ID:
+			# Authoritative reservoir-destroyed game-state path; the existing
+			# game-over UI polls GameState.is_reservoir_destroyed.
+			GameState.set_reservoir_destroyed(true)
+		var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+		if bool(item_def.get("leaves_debris_on_destroy", false)) and _manager.has_method("leave_destroyed_placeable_debris"):
+			_manager.call("leave_destroyed_placeable_debris", cell, str(rec.get("layer_name", "")))
+		_destroy_structure_cell(cell, str(rec.get("layer_name", "")), item_id)
 	_bump_target_revision_and_refresh()
 
 

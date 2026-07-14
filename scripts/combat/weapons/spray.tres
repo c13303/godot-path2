@@ -20,6 +20,7 @@ spray_aim_inertia = 0.05
 spray_projectile_speed = 600.0
 spray_projectile_lifetime = 0.27
 spray_projectile_radius = 6.0
+spray_projectile_damage = 1
 spray_projectile_direct_hit_only = true
 spray_projectile_spread_jitter_degrees = 3.0
 spray_waters_reactive_plants = true

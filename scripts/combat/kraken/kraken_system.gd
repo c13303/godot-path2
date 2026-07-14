@@ -218,7 +218,9 @@ func _on_eating_finished(cell: Vector2i) -> void:
 	if target == null or visual == null or data == null:
 		_cancel_attack(cell, state)
 		return
-	var drop_target: Vector2 = _building_manager.nearest_valid_dry_floor_world(visual.get_capture_anchor_global_position())
+	var death_position: Vector2 = visual.get_capture_anchor_global_position()
+	target.global_position = death_position
+	var drop_target: Vector2 = _building_manager.nearest_valid_dry_floor_world(death_position)
 	_building_manager.remove_dead_monster_with_forced_currency_drop(target, data.forced_drop_currency, drop_target)
 	_release_target_reservation(state)
 	state["target"] = null

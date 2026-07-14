@@ -2347,7 +2347,7 @@ func _leave_turret_debris(turret_cell: Vector2i) -> void:
 func leave_destroyed_placeable_debris(cell: Vector2i, layer_name: String) -> void:
 	if plantz == null:
 		return
-	var source_layer: TileMapLayer = _placeable_layer_for_name(layer_name)
+	var source_layer: TileMapLayer = _placeable_layer_for_name_for_debris(layer_name)
 	if source_layer == null:
 		return
 	var source_id: int = source_layer.get_cell_source_id(cell)
@@ -2360,6 +2360,21 @@ func leave_destroyed_placeable_debris(cell: Vector2i, layer_name: String) -> voi
 	plantz.set_cell(cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
 	_flush_plant_layer_visuals()
 	_sync_building_cell_speed(cell, "debris")
+
+
+func _placeable_layer_for_name_for_debris(layer_name: String) -> TileMapLayer:
+	match layer_name:
+		"wallz":
+			return wallz
+		"plantz":
+			return plantz
+		"traversable_buildings", "buildings":
+			return traversable_buildings
+		"blocking_buildings":
+			return blocking_buildings
+		"fences":
+			return fences
+	return null
 
 
 func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
