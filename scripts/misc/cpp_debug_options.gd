@@ -350,6 +350,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif _is_key(key_event, KEY_KP_0):
 		get_viewport().set_input_as_handled()
 		_spawn_dev_agents_from_spawners(&"client", &"basic")
+	elif _is_key(key_event, KEY_K):
+		get_viewport().set_input_as_handled()
+		_add_dev_builder()
 	elif key_event.keycode == KEY_F1 and not GameState.is_night:
 		get_viewport().set_input_as_handled()
 		_advance_dev_day()
@@ -386,6 +389,17 @@ func _grant_dev_currency() -> void:
 	_call_if_available(progression, "update_seeds", 100)
 	_call_if_available(progression, "update_gems", 100)
 	_call_if_available(progression, "update_money", 100)
+
+
+func _add_dev_builder() -> void:
+	var manager: Node = _get_building_manager()
+	if manager == null:
+		push_warning("dev_keys: BuildingManager node not found")
+		return
+	if not manager.has_method("add_builder_for_dev"):
+		push_warning("dev_keys: BuildingManager Builder command not found")
+		return
+	manager.call("add_builder_for_dev", 1)
 
 
 func _advance_dev_day() -> void:

@@ -10,6 +10,7 @@ class_name TurretEatingController
 
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const SPAWNER_KIND_BUILDER: StringName = &"builder"
 
 var _manager: BuildingManager
 # nav_id -> turret-eating state (node, timer, resume_state).
@@ -53,6 +54,8 @@ func evaluate_agent(agent: Node2D) -> void:
 	if turret_data == null:
 		return
 	var agent_kind: StringName = _manager._agent_kind(agent)
+	if agent_kind == SPAWNER_KIND_BUILDER:
+		return
 	if agent_kind != SPAWNER_KIND_CLIENT and agent_kind != SPAWNER_KIND_MERCHANT and not turret_data.eatable_by_monsters:
 		return
 	_consume_turret(agent, agent_cell, agent_kind)

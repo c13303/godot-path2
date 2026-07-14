@@ -172,6 +172,7 @@ var _spawn_playlist_config: SpawnPlaylistConfigService = SpawnPlaylistConfigServ
 var _client_counter_agents: Dictionary = _agent_navigation_phases.client_counter_agents()  # nav_id -> Dictionary
 var _damage_number_drawer: DamageNumberDrawer
 var _seed_merchant: SeedMerchantController = SeedMerchantController.new()
+var _builder: BuilderController = BuilderController.new()
 var _dawn_harvest: DawnHarvestController = DawnHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 # Generic player-built destructible system: provenance, health, target selection,
@@ -234,6 +235,7 @@ func _ready() -> void:
 	_agent_navigation_phases.setup(self)
 	_garden_topology.setup(self)
 	_seed_merchant.setup(self)
+	_builder.setup(self)
 	_dawn_harvest.setup(self)
 	_client_tantrum.setup(self)
 	_durability.setup(self)
@@ -355,6 +357,7 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale.mark_client_step_finished()
 		clear_client_counter_agents()
 		_seed_merchant.on_night_started()
+		_builder.on_night_started()
 		_dawn_harvest.clear_active()
 		# Counters normally empty the moment the last client of the sale leaves (see
 		# _dissolve_counter_piles_after_clients). This is only a fallback for days where no
@@ -675,6 +678,7 @@ func on_night_reveal_finished() -> void:
 	if not GameState.is_night:
 		return
 	_seed_merchant.start_pending_leave_if_needed()
+	_builder.start_pending_departures()
 
 
 func finish_client_preparation_success() -> void:
@@ -1201,6 +1205,7 @@ func _on_new_day_finished() -> void:
 		return
 	_day_start_pending = false
 	_begin_seed_merchant_phase()
+	_begin_builder_day()
 	_begin_dawn_harvest()
 
 
@@ -1254,6 +1259,7 @@ func has_grownup_roses_to_harvest() -> bool:
 
 
 func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_agents: bool) -> void:
+	_builder.restore_state(phase_state.get("builder_count", BuilderController.DEFAULT_BUILDER_COUNT))
 	if phase == "night":
 		_dawn_harvest.clear_active()
 		_reset_client_sale_state()
@@ -1307,6 +1313,7 @@ func serialize_gameplay_phase_state_for_save() -> Dictionary:
 	return {
 		"dawn_stage": dawn_stage,
 		"seed_merchant_active": _seed_merchant.is_active(),
+		"builder_count": _builder.builder_count(),
 		"client_step_pending": _client_sale.current_day_client_step_pending_or_active(),
 		"client_sale_start_requested": _client_sale_start_requested,
 	}
@@ -1326,6 +1333,10 @@ func _restore_seed_merchant_after_load() -> void:
 	await get_tree().process_frame
 	if not GameState.is_night and not _seed_merchant.is_active():
 		_begin_seed_merchant_phase()
+
+
+func _restore_builders_after_load() -> void:
+	await _builder.restore_after_load()
 
 
 func _check_dawn_harvest_finished() -> void:
@@ -1492,6 +1503,10 @@ func save_load_client_block_reason() -> String:
 
 func _begin_seed_merchant_phase() -> void:
 	_seed_merchant.begin_phase(_merchant_spawners)
+
+
+func _begin_builder_day() -> void:
+	_builder.begin_day()
 
 
 func _process_seed_merchant_arrival() -> void:
@@ -1702,6 +1717,10 @@ func get_client_sale_controller() -> ClientSaleController:
 
 func get_seed_merchant_controller() -> SeedMerchantController:
 	return _seed_merchant
+
+
+func get_builder_controller() -> BuilderController:
+	return _builder
 
 
 func get_sheep_controller() -> SheepController:
@@ -1923,6 +1942,21 @@ func seed_merchant_spot_cell(spawner_cell: Vector2i) -> Vector2i:
 	return _spawner_spot_cell_by_cell.get(spawner_cell, INVALID_CELL) as Vector2i
 
 
+func seed_merchant_spot_cell_for_exact_spawner(spawner_id: StringName) -> Vector2i:
+	var binding: SpawnerBinding = level_spawner_binding(spawner_id)
+	if binding == null:
+		return INVALID_CELL
+	return seed_merchant_spot_cell(binding.cell)
+
+
+func level_spawner_binding(spawner_id: StringName) -> SpawnerBinding:
+	return _spawn_playlist_config.level_spawner_binding(spawner_id)
+
+
+func named_authored_spot_cell(spot_id: StringName) -> Vector2i:
+	return _spawn_playlist_config.named_spot_cell(spot_id)
+
+
 func is_walkable_cell(cell: Vector2i) -> bool:
 	return _is_walkable(cell)
 
@@ -1945,6 +1979,14 @@ func path_cells_to_world(path_cells: PackedVector2Array, nav_id: int = -1, dispe
 
 func assign_agent_to_escape(agent: Node2D) -> bool:
 	return _assign_agent_to_escape(agent)
+
+
+func apply_builder_data(agent: Node) -> void:
+	_agent_definition_service.apply_builder_data(agent)
+
+
+func add_builder_for_dev(amount: int = 1) -> bool:
+	return _builder.add_builders_for_dev(amount)
 
 
 func grownup_rose_count() -> int:
@@ -2559,6 +2601,7 @@ func _is_seed_merchant_paused_agent(agent: Node2D) -> bool:
 
 func _remove_escaped_monster(agent: Node2D) -> void:
 	var is_merchant: bool = agent.is_in_group("merchants")
+	var is_builder: bool = agent.is_in_group("builders")
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager and agent_manager.has_method("unregister_agent"):
 		agent_manager.call("unregister_agent", nav_id)
@@ -2568,10 +2611,13 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	_unregister_desire_agent(agent)
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
+	agent.remove_from_group("builders")
 	agent.remove_from_group("monsters")
 	agent.queue_free()
 	if is_merchant:
 		_seed_merchant.on_agent_removed(agent)
+	if is_builder:
+		_builder.on_agent_removed(agent)
 
 func skip_current_night_for_dev() -> bool:
 	if not GameState.is_night:
@@ -2652,6 +2698,10 @@ func _on_removed_merchant_agent(agent: Node2D) -> void:
 	_seed_merchant.on_agent_removed(agent)
 
 
+func _on_removed_builder_agent(agent: Node2D) -> void:
+	_builder.on_agent_removed(agent)
+
+
 func _monster_death_drop_seed_chance_percent() -> int:
 	return _spawn_playlist_config.monster_drop_seed_chance_percent()
 
@@ -2677,10 +2727,10 @@ func _agent_within_tiles(agent: Node2D, cell: Vector2i, tiles: int) -> bool:
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []
-	for group_name in ["main_chars", "monsters", "clients", "merchants", "player"]:
-		for node in get_tree().get_nodes_in_group(group_name):
+	for group_name: StringName in [&"main_chars", &"monsters", &"clients", &"merchants", &"builders", &"player"]:
+		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if node is Node2D:
-				var unit: Node2D = node
+				var unit: Node2D = node as Node2D
 				occupied.append(floorz.local_to_map(floorz.to_local(unit.global_position)))
 	return occupied
 

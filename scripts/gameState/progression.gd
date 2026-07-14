@@ -1330,6 +1330,8 @@ func _validate_save(data: Dictionary) -> String:
 		return "invalid dawn stage"
 	if gameplay_phase_state.has("seed_merchant_active") and not (gameplay_phase_state["seed_merchant_active"] is bool):
 		return "invalid gameplay phase state"
+	if gameplay_phase_state.has("builder_count") and not (gameplay_phase_state["builder_count"] is int or gameplay_phase_state["builder_count"] is float):
+		return "invalid gameplay phase state"
 	if gameplay_phase_state.has("client_step_pending") and not (gameplay_phase_state["client_step_pending"] is bool):
 		return "invalid gameplay phase state"
 	if gameplay_phase_state.has("client_sale_start_requested") and not (gameplay_phase_state["client_sale_start_requested"] is bool):

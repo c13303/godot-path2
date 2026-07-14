@@ -8,7 +8,7 @@ const MONSTER_GROUP: StringName = &"monsters"
 # update so their trail is as reliable as a monster's — otherwise the bounded
 # random monster sample would almost never pick them. The player is deliberately
 # excluded (it lives in its own "player" group and never marks the ground).
-const PRIORITY_CREATURE_GROUPS: Array[StringName] = [&"clients", &"merchants"]
+const PRIORITY_CREATURE_GROUPS: Array[StringName] = [&"clients", &"merchants", &"builders"]
 
 @export var update_freq_min: float = 0.75
 @export var update_freq_max: float = 1.25

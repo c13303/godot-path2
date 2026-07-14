@@ -11,6 +11,7 @@ const DEFAULT_PLAYLIST_PATH_TEMPLATE: String = "res://scenes/levels/playlists/%s
 
 var playlist: LevelSpawnPlaylist = null
 var spawner_bindings: Array[SpawnerBinding] = []
+var named_spot_cells: Dictionary = {}
 var level_scene_path: String = ""
 var monster_drop_seed_chance_percent: int = 0
 
@@ -35,6 +36,8 @@ static func load_from_scene(scene: Node) -> LevelSpawnConfigLoader:
 			var binding: SpawnerBinding = raw_binding as SpawnerBinding
 			if binding != null:
 				result.spawner_bindings.append(binding)
+	if loader.has_method("get_loaded_named_spot_cells"):
+		result.named_spot_cells = loader.call("get_loaded_named_spot_cells") as Dictionary
 	return result
 
 static func _load_default_playlist(scene_path: String) -> LevelSpawnPlaylist:

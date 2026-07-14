@@ -54,6 +54,37 @@ Does not own:
 Notes:
 - BuildingManager exposes compatibility wrappers for older phase-related call sites.
 
+## DayVisitorMovementController
+Owns:
+- One passive daytime visitor's active node, native nav id, source spawner cell, target cell, arrival/wait/departure flags, A* arrival path assignment, bounded repath, pending night departure, and generic cleanup.
+
+Does not own:
+- Merchant interaction state, Builder roster state, claim allocation, save-file writing, generic pathfinding algorithms, or native route generation.
+
+Notes:
+- SeedMerchantController owns one instance. BuilderController owns one instance per active Builder.
+
+## SeedMerchantController
+Owns:
+- Seed merchant phase state, player proximity pause, shop/prompt positioning queries, purchase-phase closure, and merchant-specific save restoration.
+
+Does not own:
+- The reusable single-agent visitor movement details now handled by DayVisitorMovementController.
+
+Notes:
+- The seed merchant still uses its authored `seedmerchent_spot` via the existing `SpawnerBinding.spot_cell` path.
+
+## BuilderController
+Owns:
+- Persistent desired Builder count, temporary active Builder visitor collection, target-cell claims around `builder_spot`, day-start spawn batching, K-key roster increment handling through the manager facade, night departure orchestration, Builder save/load state, and Builder removal notifications.
+
+Does not own:
+- Debug keyboard input, generic save-file writing, native pathfinding algorithms, flow-field generation, merchant interaction, or future Builder gameplay.
+
+Notes:
+- Builder count persists independently from live Builder nodes. Builders spawn from the exact `seedmerchent` binding, reuse its `seedmerchent_exit` escape route through `spawner_cell` metadata, and claim deterministic unique tiles within the bounded Builder spot radius.
+- AgentDefinitionService owns `builder.png` visual setup. LevelLoader captures direct authored `_spot` children, including `builder_spot`, before the loaded level shell is freed. CppDebugOptions owns the K developer shortcut and delegates to `BuildingManager.add_builder_for_dev()`.
+
 ## GardenRetargetController
 Owns:
 - Retarget queue, plant-target reverse index, stale-target checks, retarget profiling.

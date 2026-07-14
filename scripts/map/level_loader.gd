@@ -48,6 +48,7 @@ const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_ru
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []
+var _loaded_named_spot_cells: Dictionary = {}  # StringName -> Vector2i
 # Authored map extent, captured from the level's mapBounds node before the shell is
 # freed. Cells drive the native flow field's size/origin; world drives the camera
 # scroll limits. Empty (zero size) when the level has no mapBounds node, in which case
@@ -167,6 +168,10 @@ func get_loaded_spawner_bindings() -> Array[SpawnerBinding]:
 	for binding: SpawnerBinding in _loaded_spawner_bindings:
 		bindings.append(binding)
 	return bindings
+
+
+func get_loaded_named_spot_cells() -> Dictionary:
+	return _loaded_named_spot_cells.duplicate()
 
 
 ## Authored map extent in tilemap cells (position = min cell, size = cell count).
@@ -533,6 +538,8 @@ func _same_string_name_array(left: Array[StringName], right: Array[StringName]) 
 
 
 func _capture_level_spawner_bindings(level_root: Node) -> void:
+	_loaded_spawner_bindings.clear()
+	_loaded_named_spot_cells.clear()
 	var floor_layer: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
 	if floor_layer == null:
 		push_warning("LevelLoader: level '%s' has no floor layer; spawner node cells cannot be derived." % _level_path_for_log())
@@ -544,6 +551,10 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		var spawner_node: Node2D = child as Node2D
 		if spawner_node == null:
 			continue
+		var child_name: String = String(spawner_node.name)
+		if child_name.ends_with("_spot"):
+			var spot_local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
+			_loaded_named_spot_cells[StringName(child_name)] = floor_layer.local_to_map(spot_local_pos)
 		if _is_spawner_marker_node(spawner_node):
 			continue
 		var spawner_id: StringName = StringName(spawner_node.name)

@@ -18,7 +18,7 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 	if not is_instance_valid(agent):
 		return
 	var is_client: bool = agent.is_in_group("clients")
-	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not agent.is_in_group("merchants")
+	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not agent.is_in_group("merchants") and not agent.is_in_group("builders")
 	var death_position: Vector2 = agent.global_position
 	if spawn_death_effects:
 		_manager.spawn_agent_death_burst(death_position)
@@ -45,6 +45,7 @@ func _spawn_monster_death_drop(world_position: Vector2) -> void:
 
 func _remove_dead_agent_without_drop(agent: Node2D) -> void:
 	var is_merchant: bool = agent.is_in_group("merchants")
+	var is_builder: bool = agent.is_in_group("builders")
 	var nav_id: int = int(agent.get("nav_id"))
 	_manager._clear_removed_agent_state(nav_id)
 	_manager._unregister_nav_agent(nav_id)
@@ -52,6 +53,9 @@ func _remove_dead_agent_without_drop(agent: Node2D) -> void:
 	agent.remove_from_group("monsters")
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
+	agent.remove_from_group("builders")
 	agent.queue_free()
 	if is_merchant:
 		_manager._on_removed_merchant_agent(agent)
+	if is_builder:
+		_manager._on_removed_builder_agent(agent)

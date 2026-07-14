@@ -167,6 +167,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	_runtime_rebuild_progress = 0.3
 	if ok:
 		_manager.get_seed_merchant_controller().repath_for_walkability_change()
+		_manager.get_builder_controller().repath_for_walkability_change()
 		if _runtime_rebuild_wants_gardens:
 			ok = bool(await _manager._build_gardens_from_plants_budgeted(token))
 			if ok:
@@ -205,6 +206,7 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager._rebuild_waterpool_directional_field()
 	_manager._rebuild_walkable_map_cache()
 	_manager.get_seed_merchant_controller().repath_for_walkability_change()
+	_manager.get_builder_controller().repath_for_walkability_change()
 	var topology: GardenTopologyService = _garden_topology
 	if topology.plant_zone_built():
 		_manager._rebuild_plant_zone_from_layer()

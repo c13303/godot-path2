@@ -11,6 +11,7 @@ const IDLE_GROUP: int = 0
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const SPAWNER_KIND_BUILDER: StringName = &"builder"
 
 var _manager: BuildingManager
 
@@ -54,6 +55,7 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 	var restored_agents: Array[Dictionary] = []
 	var agents: Array[Dictionary] = _agent_data_array(data.get("agents", []))
 	agents = _discard_merchant_agent_data(agents, "load")
+	agents = _discard_builder_agent_data(agents, "load")
 	if not GameState.is_night:
 		agents = _discard_day_phase_monster_agent_data(agents, "load")
 	for agent_data: Dictionary in agents:
@@ -121,6 +123,19 @@ func _discard_merchant_agent_data(agents: Array[Dictionary], context: String) ->
 		result.append(agent_data)
 	if removed > 0:
 		CppDebugOptions.save_log("[SAVE] AgentSaveService: skipped %d merchant agent(s) during %s" % [removed, context])
+	return result
+
+
+func _discard_builder_agent_data(agents: Array[Dictionary], context: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var removed: int = 0
+	for agent_data: Dictionary in agents:
+		if _agent_data_kind(agent_data) == SPAWNER_KIND_BUILDER:
+			removed += 1
+			continue
+		result.append(agent_data)
+	if removed > 0:
+		CppDebugOptions.save_log("[SAVE] AgentSaveService: skipped %d builder agent(s) during %s" % [removed, context])
 	return result
 
 
@@ -265,7 +280,7 @@ func _clear_existing_agents() -> void:
 	# pre-load agents survives; the restored agents re-register as they are recreated.
 	_manager.get_agent_cell_tracker().clear()
 	var seen_ids: Dictionary = {}
-	for group_name: StringName in [&"monsters", &"clients", &"merchants"]:
+	for group_name: StringName in [&"monsters", &"clients", &"merchants", &"builders"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
 			if agent == null:
@@ -276,6 +291,8 @@ func _clear_existing_agents() -> void:
 				_manager._unregister_nav_agent(nav_id)
 				seen_ids[nav_id] = true
 			_manager._unregister_desire_agent(agent)
+			if group_name == &"builders":
+				_manager._on_removed_builder_agent(agent)
 			agent.queue_free()
 
 

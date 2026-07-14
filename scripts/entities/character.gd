@@ -326,7 +326,7 @@ func _is_damage_immune_agent() -> bool:
 	if status == "angry":
 		return false
 	var agent_kind: StringName = StringName(str(get_meta("agent_kind")))
-	return agent_kind == &"client" or agent_kind == &"merchant"
+	return agent_kind == &"client" or agent_kind == &"merchant" or agent_kind == &"builder"
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

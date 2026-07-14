@@ -17,6 +17,8 @@ var _manager: BuildingManager
 
 var _level_spawn_playlist: LevelSpawnPlaylist
 var _level_spawner_bindings: Array[SpawnerBinding] = []
+var _level_spawner_bindings_by_id: Dictionary = {}  # StringName -> SpawnerBinding
+var _named_spot_cells: Dictionary = {}  # StringName -> Vector2i
 var _loaded_level_scene_path: String = ""
 var _monster_drop_seed_chance_percent: int = 0
 var _spawner_bindings_by_id: Dictionary = {}  # StringName -> Vector2i
@@ -34,8 +36,13 @@ func load_level_spawn_config() -> void:
 	var config: LevelSpawnConfigLoader = LevelSpawnConfigLoader.load_from_scene(_manager.get_tree().current_scene)
 	_level_spawn_playlist = config.playlist
 	_level_spawner_bindings = config.spawner_bindings
+	_named_spot_cells = config.named_spot_cells.duplicate()
 	_loaded_level_scene_path = config.level_scene_path
 	_monster_drop_seed_chance_percent = config.monster_drop_seed_chance_percent
+	_level_spawner_bindings_by_id.clear()
+	for binding: SpawnerBinding in _level_spawner_bindings:
+		if binding != null and binding.spawner_id != &"":
+			_level_spawner_bindings_by_id[binding.spawner_id] = binding
 
 
 func validate_after_spawner_scan() -> void:
@@ -181,6 +188,14 @@ func level_spawn_playlist() -> LevelSpawnPlaylist:
 
 func level_spawner_bindings() -> Array[SpawnerBinding]:
 	return _level_spawner_bindings
+
+
+func level_spawner_binding(spawner_id: StringName) -> SpawnerBinding:
+	return _level_spawner_bindings_by_id.get(spawner_id, null) as SpawnerBinding
+
+
+func named_spot_cell(spot_id: StringName) -> Vector2i:
+	return _named_spot_cells.get(spot_id, Vector2i(2147483647, 2147483647)) as Vector2i
 
 
 func _spawn_playlist_controller() -> SpawnPlaylistController:

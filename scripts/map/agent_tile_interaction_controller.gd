@@ -13,6 +13,7 @@ class_name AgentTileInteractionController
 const CATEGORY_MONSTERS: StringName = &"monsters"
 const CATEGORY_CLIENTS: StringName = &"clients"
 const CATEGORY_MERCHANTS: StringName = &"merchants"
+const CATEGORY_BUILDERS: StringName = &"builders"
 const CATEGORY_SHEEP: StringName = &"sheep"
 const KRAKEN_ITEM_ID: String = "kraken"
 const KRAKEN_LAYER_NAME: String = "traversable_buildings"
@@ -45,7 +46,7 @@ func evaluate(agent: Node2D, category: StringName, cell: Vector2i) -> void:
 		_manager.trample_pasteque_at_agent(agent)
 		if debug:
 			_debug_pasteque += 1
-	if category != CATEGORY_SHEEP:
+	if category != CATEGORY_SHEEP and category != CATEGORY_BUILDERS:
 		_manager.get_turret_eating_controller().evaluate_agent(agent)
 		if debug:
 			_debug_turret += 1
