@@ -8,12 +8,15 @@ const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
+const SPAWNER_KIND_CLIENT: StringName = &"client"
 const ROUTE_KIND_MONSTER_INBOUND: StringName = &"monster_inbound"
+const ROUTE_KIND_CLIENT_INBOUND: StringName = &"client_inbound"
 
 var _manager: BuildingManager
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
 var _prepared_upcoming_monster_routes: Dictionary = {}
+var _prepared_upcoming_client_routes: Dictionary = {}
 var _dirty_spawner_escapes: Dictionary = {}
 var _exit_wall_escapes: Dictionary = {}
 var _route_cache_hits: int = 0
@@ -64,15 +67,70 @@ func queued_flow_request_count() -> int:
 # monsters; PathPreview only reads them and never owns a flow group.
 func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 	_prepared_upcoming_monster_routes.clear()
-	if not _garden_topology().plant_zone_built():
+	var night_index: int = _preview_night_index()
+	if night_index < 0:
 		return
+	_prepare_preview_routes(
+		_prepared_upcoming_monster_routes,
+		_manager.night_active_spawner_cells(night_index),
+		SPAWNER_KIND_MONSTER,
+		topology_revision
+	)
+
+
+# Same contract for the clients served on the day after the upcoming night. Each client is
+# handed a random client spawner when the sale starts (ClientSaleController.activate), so
+# every client spawner is a possible origin and each one gets its own preview route. The
+# routes are the same ones the sale itself will ask for, so this warms that cache rather
+# than duplicating it. Nothing is prepared when that night serves no clients.
+func prepare_upcoming_client_routes(topology_revision: int) -> void:
+	_prepared_upcoming_client_routes.clear()
+	var night_index: int = _preview_night_index()
+	if night_index < 0:
+		return
+	if _manager.get_spawn_playlist_config().authored_night_client_count(night_index) <= 0:
+		return
+	var spawner_cells: Array[Vector2i] = []
+	for raw_spawner_cell: Variant in _manager.client_spawners().keys():
+		spawner_cells.append(raw_spawner_cell as Vector2i)
+	_prepare_preview_routes(
+		_prepared_upcoming_client_routes,
+		spawner_cells,
+		SPAWNER_KIND_CLIENT,
+		topology_revision
+	)
+
+
+func prepared_upcoming_monster_routes() -> Array[Dictionary]:
+	return _prepared_routes_snapshot(_prepared_upcoming_monster_routes)
+
+
+func prepared_upcoming_client_routes() -> Array[Dictionary]:
+	return _prepared_routes_snapshot(_prepared_upcoming_client_routes)
+
+
+# The night whose preview is currently meaningful, or -1 when there is nothing to preview.
+func _preview_night_index() -> int:
+	if not _garden_topology().plant_zone_built():
+		return -1
 	var night_index: int = _manager.upcoming_authored_night_index_for_preview()
 	if night_index < 0 or night_index >= _manager.authored_night_count():
-		return
-	var spawner_cells: Array[Vector2i] = _manager.night_active_spawner_cells(night_index)
+		return -1
+	return night_index
+
+
+# One descriptor per spawner that can reach a garden, keyed by spawner cell. route_kind and
+# block_fences are read back from the route this service actually built, so a descriptor
+# always reports the real navigation policy instead of assuming the monster one.
+func _prepare_preview_routes(
+	prepared: Dictionary,
+	spawner_cells: Array[Vector2i],
+	agent_kind: StringName,
+	topology_revision: int
+) -> void:
 	_sort_cells(spawner_cells)
 	for spawner_cell: Vector2i in spawner_cells:
-		var selected: Dictionary = _manager.select_garden_entry_for_route(spawner_cell, SPAWNER_KIND_MONSTER)
+		var selected: Dictionary = _manager.select_garden_entry_for_route(spawner_cell, agent_kind)
 		if selected.is_empty():
 			continue
 		var garden_id: int = int(selected.get("garden_id", 0))
@@ -83,7 +141,7 @@ func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 		var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 		if group_id <= IDLE_GROUP or entry_cell == INVALID_CELL:
 			continue
-		_prepared_upcoming_monster_routes[spawner_cell] = {
+		prepared[spawner_cell] = {
 			"spawner_cell": spawner_cell,
 			"garden_id": garden_id,
 			"entry_cell": entry_cell,
@@ -91,26 +149,26 @@ func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 			"group_id": group_id,
 			"ready": spawner_garden_route_flow_ready(route, spawner_cell),
 			"topology_revision": topology_revision,
-			"route_kind": ROUTE_KIND_MONSTER_INBOUND,
-			"block_fences": false,
+			"route_kind": route.get("route_kind", ROUTE_KIND_MONSTER_INBOUND) as StringName,
+			"block_fences": bool(route.get("block_fences", false)),
 		}
 
 
-func prepared_upcoming_monster_routes() -> Array[Dictionary]:
-	var prepared: Array[Dictionary] = []
+func _prepared_routes_snapshot(prepared: Dictionary) -> Array[Dictionary]:
+	var routes: Array[Dictionary] = []
 	if not _garden_topology().plant_zone_built():
-		return prepared
+		return routes
 	var spawner_cells: Array[Vector2i] = []
-	for raw_spawner_cell: Variant in _prepared_upcoming_monster_routes.keys():
+	for raw_spawner_cell: Variant in prepared.keys():
 		spawner_cells.append(raw_spawner_cell as Vector2i)
 	_sort_cells(spawner_cells)
 	for spawner_cell: Vector2i in spawner_cells:
-		var descriptor: Dictionary = _prepared_upcoming_monster_routes[spawner_cell] as Dictionary
+		var descriptor: Dictionary = prepared[spawner_cell] as Dictionary
 		var group_id: int = int(descriptor.get("group_id", IDLE_GROUP))
 		descriptor["ready"] = group_flow_is_ready_at_world(group_id, _cell_center(spawner_cell))
-		_prepared_upcoming_monster_routes[spawner_cell] = descriptor
-		prepared.append(descriptor.duplicate())
-	return prepared
+		prepared[spawner_cell] = descriptor
+		routes.append(descriptor.duplicate())
+	return routes
 
 
 func cancel_queued_group_flow_request(group_id: int) -> void:
@@ -264,6 +322,7 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 	_spawner_routes.erase(spawner_cell)
 	_spawner_garden_routes.erase(spawner_cell)
 	_prepared_upcoming_monster_routes.erase(spawner_cell)
+	_prepared_upcoming_client_routes.erase(spawner_cell)
 
 
 func drain_dirty_routes() -> void:
@@ -584,9 +643,14 @@ func release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> voi
 		_spawner_garden_routes.erase(spawner_cell)
 	else:
 		_spawner_garden_routes[spawner_cell] = routes
-	var prepared: Dictionary = _prepared_upcoming_monster_routes.get(spawner_cell, {}) as Dictionary
-	if int(prepared.get("garden_id", 0)) == garden_id:
-		_prepared_upcoming_monster_routes.erase(spawner_cell)
+	_erase_prepared_route_for_garden(spawner_cell, garden_id)
+
+
+func _erase_prepared_route_for_garden(spawner_cell: Vector2i, garden_id: int) -> void:
+	for prepared: Dictionary in [_prepared_upcoming_monster_routes, _prepared_upcoming_client_routes]:
+		var descriptor: Dictionary = prepared.get(spawner_cell, {}) as Dictionary
+		if int(descriptor.get("garden_id", 0)) == garden_id:
+			prepared.erase(spawner_cell)
 
 
 func garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
@@ -663,7 +727,7 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		"group_id": plant_group,
 		"ready": spawner_garden_route_flow_ready({"plant_group": plant_group}, spawner_cell),
 		"flow_requested": true,
-		"route_kind": ROUTE_KIND_MONSTER_INBOUND if not block_fences else &"client_inbound",
+		"route_kind": ROUTE_KIND_MONSTER_INBOUND if not block_fences else ROUTE_KIND_CLIENT_INBOUND,
 		"block_fences": block_fences,
 		"garden_version": int(garden.get("version", 0)),
 		"garden_epoch": int(garden.get("epoch", -1))

@@ -1,79 +1,81 @@
 extends Node2D
 class_name PathPreviewRunner
 
-const IDLE_GROUP: int = 0
-const GOAL_ROUTE_COST: float = 0.001
-const PROGRESS_DISTANCE: float = 0.25
-const FALLBACK_SAMPLE_DIRECTIONS: Array[Vector2] = [
-	Vector2.RIGHT,
-	Vector2.LEFT,
-	Vector2.DOWN,
-	Vector2.UP,
-	Vector2(0.70710678, 0.70710678),
-	Vector2(0.70710678, -0.70710678),
-	Vector2(-0.70710678, 0.70710678),
-	Vector2(-0.70710678, -0.70710678),
-]
+# One pooled preview arrow travelling a prepared route.
+#
+# This is a pure view. The chain of tile centers it walks is precomputed once per route by
+# PathPreviewRoutePlanner, so the runner never touches the flow field, never allocates while
+# running, and simply interpolates from one cell center to the next. It only ever changes
+# heading on a center, which is what makes the route read as "through the tiles" rather than
+# along their edges, and leftover travel carries into the next segment so a fast arrow
+# follows every turn instead of skipping past it.
 
-var _flow: Node = null
+const ARROW_TEXTURE: Texture2D = preload("res://assets/sprites/house/starpath_arrow.png")
+# Sheet is two 24x24 frames, each holding a 16x16 arrow inside 4px of padding. Drawing the
+# whole frame centered therefore centers the arrow itself.
+const ARROW_FRAME_SIZE: float = 24.0
+const ARROW_FRAME_CLIENT: int = 0
+const ARROW_FRAME_MONSTER: int = 1
+# The sheet's arrows point down (+Y), so a heading has to be turned back a quarter turn.
+const ARROW_HEADING_OFFSET: float = -PI * 0.5
+# Halo passes drawn under the arrow, largest and faintest first.
+const GLOW_SCALES: Array[float] = [2.5, 1.6]
+const GLOW_ALPHAS: Array[float] = [0.20, 0.35]
+const TRAIL_MIN_SPACING: float = 3.0
+const TRAIL_CORE_WIDTH: float = 2.0
+const TRAIL_GLOW_WIDTH: float = 5.0
+const TRAIL_CORE_ALPHA: float = 0.75
+const TRAIL_GLOW_ALPHA: float = 0.30
+
 var _active: bool = false
-var _group_id: int = IDLE_GROUP
+var _path: PackedVector2Array = PackedVector2Array()
+var _segment_index: int = 0
+var _segment_progress: float = 0.0
 var _world_position: Vector2 = Vector2.ZERO
-var _goal_world: Vector2 = Vector2.ZERO
-var _route_color: Color = Color.WHITE
-var _speed: float = 180.0
-var _arrival_radius: float = 12.0
-var _stalled_timeout: float = 5.0
-var _max_substep: float = 8.0
-var _max_substeps: int = 8
+var _heading: float = 0.0
+var _arrow_frame: int = ARROW_FRAME_MONSTER
+var _tint: Color = Color.WHITE
+var _speed: float = 380.0
+var _arrow_scale: float = 1.25
 var _trail_points: Array[Vector2] = []
-var _trail_point_limit: int = 8
-var _star_radius: float = 5.0
-var _stalled_seconds: float = 0.0
-var _last_progress_position: Vector2 = Vector2.ZERO
-var _best_distance_to_goal: float = INF
-var _best_route_cost: float = INF
+var _trail_point_limit: int = 18
 
 
-func configure(flow: Node, _preview_z_index: int) -> void:
-	_flow = flow
+func configure() -> void:
 	position = Vector2.ZERO
 	rotation = 0.0
 	scale = Vector2.ONE
+	# Additive blending is what turns the flat sprite into a glow, and the material is
+	# built once per pooled runner rather than per emitted arrow.
+	if material == null:
+		var glow_material: CanvasItemMaterial = CanvasItemMaterial.new()
+		glow_material.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		material = glow_material
 	set_process(false)
 	visible = false
 
 
 func start(
-	group_id: int,
-	start_world: Vector2,
-	goal_world: Vector2,
-	route_color: Color,
+	path: PackedVector2Array,
+	tint: Color,
+	arrow_frame: int,
 	speed: float,
-	arrival_radius: float,
-	stalled_timeout: float,
-	max_substep: float,
-	max_substeps: int,
-	trail_point_limit: int,
-	star_radius: float
+	arrow_scale: float,
+	trail_point_limit: int
 ) -> void:
-	_group_id = group_id
-	_goal_world = goal_world
-	_route_color = route_color
-	_speed = speed
-	_arrival_radius = arrival_radius
-	_stalled_timeout = maxf(1.0, stalled_timeout)
-	_max_substep = maxf(1.0, max_substep)
-	_max_substeps = maxi(1, max_substeps)
+	_path = path
+	_tint = tint
+	_arrow_frame = arrow_frame
+	_speed = maxf(1.0, speed)
+	_arrow_scale = maxf(0.05, arrow_scale)
 	_trail_point_limit = maxi(2, trail_point_limit)
-	_star_radius = maxf(1.0, star_radius)
-	_stalled_seconds = 0.0
+	_segment_index = 0
+	_segment_progress = 0.0
 	_trail_points.clear()
-	_world_position = start_world
-	_last_progress_position = start_world
-	_best_distance_to_goal = start_world.distance_to(goal_world)
-	_best_route_cost = _route_cost_at(start_world)
-	_active = group_id > IDLE_GROUP and _flow != null
+	_active = _path.size() >= 2
+	if _active:
+		_world_position = _path[0]
+		_heading = (_path[1] - _path[0]).angle()
 	visible = _active
 	set_process(_active)
 	queue_redraw()
@@ -81,7 +83,7 @@ func start(
 
 func recycle() -> void:
 	_active = false
-	_group_id = IDLE_GROUP
+	_path = PackedVector2Array()
 	_trail_points.clear()
 	visible = false
 	set_process(false)
@@ -95,139 +97,76 @@ func is_active() -> bool:
 func _process(delta: float) -> void:
 	if not _active:
 		return
-	if not _position_is_finite(_world_position):
-		_finish("non_finite_position")
-		return
-	if _world_position.distance_to(_goal_world) <= _arrival_radius:
-		_finish("arrival_distance")
-		return
-	if _flow == null:
-		_finish("missing_flow")
-		return
-	var route_cost: float = _route_cost_at(_world_position)
-	if not is_finite(route_cost):
-		_finish("unreachable_cost")
-		return
-
-	var remaining_distance: float = maxf(0.0, _speed * delta)
-	var substeps: int = mini(_max_substeps, maxi(1, ceili(remaining_distance / _max_substep)))
-	var step_distance: float = remaining_distance / float(substeps)
-	for _index: int in range(substeps):
-		var direction: Vector2 = _sample_direction()
-		if direction == Vector2.ZERO:
-			route_cost = _route_cost_at(_world_position)
-			if is_finite(route_cost) and route_cost <= GOAL_ROUTE_COST:
-				var remaining: float = _world_position.distance_to(_goal_world)
-				if remaining <= _arrival_radius:
-					_finish("arrival_at_goal_cell")
-					return
-				var direction_to_goal: Vector2 = _world_position.direction_to(_goal_world)
-				var movement: float = minf(step_distance, remaining)
-				_world_position += direction_to_goal * movement
-				if _world_position.distance_to(_goal_world) <= _arrival_radius:
-					_finish("arrival_after_goal_step")
-					return
-				continue
-			break
-		_world_position += direction * step_distance
-		if _world_position.distance_to(_goal_world) <= _arrival_radius:
-			_finish("arrival_after_step")
-			return
-
-	_update_stalled_watchdog(delta)
-	if not _active:
+	var remaining: float = maxf(0.0, _speed * delta)
+	while remaining > 0.0 and _segment_index < _path.size() - 1:
+		var from_point: Vector2 = _path[_segment_index]
+		var to_point: Vector2 = _path[_segment_index + 1]
+		var segment_length: float = from_point.distance_to(to_point)
+		if segment_length <= 0.0:
+			_segment_index += 1
+			continue
+		var travel: float = minf(remaining, segment_length - _segment_progress)
+		_segment_progress += travel
+		remaining -= travel
+		_world_position = from_point.lerp(to_point, clampf(_segment_progress / segment_length, 0.0, 1.0))
+		_heading = (to_point - from_point).angle()
+		if _segment_progress >= segment_length:
+			# Reached this cell's center: turn here, and let the unspent travel continue
+			# into the next segment so no route segment is ever jumped over.
+			_segment_index += 1
+			_segment_progress = 0.0
+	if _segment_index >= _path.size() - 1:
+		recycle()
 		return
 	_record_trail_point(_world_position)
 	queue_redraw()
 
 
-func _update_stalled_watchdog(delta: float) -> void:
-	var distance_to_goal: float = _world_position.distance_to(_goal_world)
-	var route_cost: float = _route_cost_at(_world_position)
-	var position_progress: bool = _last_progress_position.distance_to(_world_position) >= PROGRESS_DISTANCE
-	var distance_progress: bool = distance_to_goal <= _best_distance_to_goal - PROGRESS_DISTANCE
-	var cost_progress: bool = is_finite(route_cost) and route_cost < _best_route_cost - GOAL_ROUTE_COST
-	if position_progress or distance_progress or cost_progress:
-		_stalled_seconds = 0.0
-		_last_progress_position = _world_position
-		_best_distance_to_goal = minf(_best_distance_to_goal, distance_to_goal)
-		if is_finite(route_cost):
-			_best_route_cost = minf(_best_route_cost, route_cost)
-		return
-	_stalled_seconds += delta
-	if _stalled_seconds >= _stalled_timeout:
-		_finish("stalled")
-
-
-func _route_cost_at(world_pos: Vector2) -> float:
-	if _flow == null or not _flow.has_method("group_route_cost_at_world"):
-		return INF
-	return float(_flow.call("group_route_cost_at_world", _group_id, world_pos))
-
-
-func _sample_direction() -> Vector2:
-	var direction: Vector2 = Vector2.ZERO
-	if _flow.has_method("compute_group_flow_dir"):
-		var raw_dir: Variant = _flow.call("compute_group_flow_dir", _group_id, _world_position)
-		if raw_dir is Vector2:
-			direction = raw_dir as Vector2
-	else:
-		direction = _sample_cost_gradient_direction()
-	if not _position_is_finite(direction):
-		return Vector2.ZERO
-	if direction.length_squared() <= 0.0001:
-		return Vector2.ZERO
-	return direction.normalized()
-
-
-func _sample_cost_gradient_direction() -> Vector2:
-	var current_cost: float = _route_cost_at(_world_position)
-	if not is_finite(current_cost):
-		return Vector2.ZERO
-	var best_direction: Vector2 = Vector2.ZERO
-	var best_cost: float = current_cost
-	for sample_direction: Vector2 in FALLBACK_SAMPLE_DIRECTIONS:
-		var sample_pos: Vector2 = _world_position + sample_direction * _max_substep
-		var sample_cost: float = _route_cost_at(sample_pos)
-		if not is_finite(sample_cost):
-			continue
-		if sample_cost < best_cost:
-			best_cost = sample_cost
-			best_direction = sample_direction
-	return best_direction
-
-
 func _record_trail_point(world_pos: Vector2) -> void:
-	if not _trail_points.is_empty() and _trail_points[_trail_points.size() - 1].distance_to(world_pos) < 2.0:
+	if not _trail_points.is_empty() and _trail_points[_trail_points.size() - 1].distance_to(world_pos) < TRAIL_MIN_SPACING:
 		return
 	_trail_points.append(world_pos)
 	while _trail_points.size() > _trail_point_limit:
 		_trail_points.pop_front()
 
 
-func _finish(_reason: String) -> void:
-	recycle()
-
-
 func _draw() -> void:
 	if not _active:
 		return
+	_draw_trail()
+	_draw_arrow()
+
+
+func _draw_trail() -> void:
+	if _trail_points.size() < 2:
+		return
+	var last_index: int = _trail_points.size() - 1
 	for index: int in range(1, _trail_points.size()):
-		var alpha: float = float(index) / float(_trail_points.size())
-		var color: Color = Color(_route_color.r, _route_color.g, _route_color.b, _route_color.a * alpha * 0.45)
-		draw_line(to_local(_trail_points[index - 1]), to_local(_trail_points[index]), color, 2.0)
-	_draw_star(to_local(_world_position), _star_radius, _route_color)
+		# Oldest segment is nearly gone, newest is brightest, so the trail reads as a tail
+		# fading out behind the arrow.
+		var fade: float = float(index) / float(last_index)
+		var from_point: Vector2 = to_local(_trail_points[index - 1])
+		var to_point: Vector2 = to_local(_trail_points[index])
+		draw_line(from_point, to_point, _tint_with_alpha(fade * TRAIL_GLOW_ALPHA), TRAIL_GLOW_WIDTH)
+		draw_line(from_point, to_point, _tint_with_alpha(fade * TRAIL_CORE_ALPHA), TRAIL_CORE_WIDTH)
 
 
-func _draw_star(center: Vector2, radius: float, color: Color) -> void:
-	var points: PackedVector2Array = PackedVector2Array()
-	var inner_radius: float = radius * 0.45
-	for index: int in range(10):
-		var angle: float = -PI * 0.5 + float(index) * PI / 5.0
-		var point_radius: float = radius if index % 2 == 0 else inner_radius
-		points.append(center + Vector2(cos(angle), sin(angle)) * point_radius)
-	draw_colored_polygon(points, color)
+func _draw_arrow() -> void:
+	var region: Rect2 = Rect2(float(_arrow_frame) * ARROW_FRAME_SIZE, 0.0, ARROW_FRAME_SIZE, ARROW_FRAME_SIZE)
+	var frame_rect: Rect2 = Rect2(
+		Vector2(-ARROW_FRAME_SIZE, -ARROW_FRAME_SIZE) * 0.5,
+		Vector2(ARROW_FRAME_SIZE, ARROW_FRAME_SIZE)
+	)
+	var local_center: Vector2 = to_local(_world_position)
+	var arrow_rotation: float = _heading + ARROW_HEADING_OFFSET
+	for index: int in range(GLOW_SCALES.size()):
+		draw_set_transform(local_center, arrow_rotation, Vector2.ONE * (_arrow_scale * GLOW_SCALES[index]))
+		draw_texture_rect_region(ARROW_TEXTURE, frame_rect, region, _tint_with_alpha(GLOW_ALPHAS[index]))
+	# Core last so the arrow itself stays the brightest part of the glow.
+	draw_set_transform(local_center, arrow_rotation, Vector2.ONE * _arrow_scale)
+	draw_texture_rect_region(ARROW_TEXTURE, frame_rect, region, _tint)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func _position_is_finite(value: Vector2) -> bool:
-	return is_finite(value.x) and is_finite(value.y)
+func _tint_with_alpha(alpha: float) -> Color:
+	return Color(_tint.r, _tint.g, _tint.b, _tint.a * alpha)

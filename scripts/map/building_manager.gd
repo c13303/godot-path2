@@ -1646,18 +1646,10 @@ func planificator_anchor_night_index() -> int:
 	return _spawn_playlist_controller.current_night_index()
 
 
-# World-space centers of every spawner that has authored monster activity on the given
-# playlist night, distinct per spawner (one point per active spawner regardless of how
-# many waves it fires). Used by the night-warning arrows to flag the spawners that will
-# wake up next night. Returns an empty array for an out-of-range night or before the
-# spawner bindings are validated.
-func night_active_spawner_world_positions(night_index: int) -> Array[Vector2]:
-	var positions: Array[Vector2] = []
-	for cell: Vector2i in night_active_spawner_cells(night_index):
-		positions.append(cell_center(cell))
-	return positions
-
-
+# Cells of every spawner that has authored monster activity on the given playlist night,
+# distinct per spawner (one entry per active spawner regardless of how many waves it
+# fires). Returns an empty array for an out-of-range night or before the spawner bindings
+# are validated.
 func night_active_spawner_cells(night_index: int) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	var config: SpawnPlaylistConfigService = get_spawn_playlist_config()

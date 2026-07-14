@@ -142,6 +142,19 @@ func total_night_count() -> int:
 	return _level_spawn_playlist.get_night_count() if _level_spawn_playlist != null else 0
 
 
+## Clients authored on a playlist night, i.e. the clients served on the day that follows
+## it. Zero for a missing playlist or an out-of-range night.
+func authored_night_client_count(night_index: int) -> int:
+	if _level_spawn_playlist == null:
+		return 0
+	if night_index < 0 or night_index >= _level_spawn_playlist.nights.size():
+		return 0
+	var night: NightSpawnPlaylist = _level_spawn_playlist.nights[night_index]
+	if night == null:
+		return 0
+	return maxi(0, night.clients)
+
+
 func playlist_spawning_enabled() -> bool:
 	return _playlist_spawning_enabled
 

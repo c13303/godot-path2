@@ -8,7 +8,7 @@ class_name TutorialWorldArrow
 ##                          and oscillates.
 ##   - target off-screen -> a merchant-style green arrow clamps to the screen edge and
 ##                          points toward the target (same edge behaviour as the agent and
-##                          merchant off-screen arrows in arros.gd / spawner_warning_arrows.gd).
+##                          merchant off-screen arrows in arros.gd).
 ##
 ## It owns no tutorial logic: callers pick what to point at via point_at_node() /
 ## point_at_world_position() and call clear() when the step is done. This keeps it reusable

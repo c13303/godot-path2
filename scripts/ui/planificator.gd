@@ -205,20 +205,6 @@ func previewed_client_count() -> int:
 	return 0
 
 
-## Playlist night index previewed as the focused (big) slot when that slot is the
-## upcoming-night preview (TONIGHT), or -1 when the focus is anything else (a live
-## fight, a client day, or victory). Drives the night-warning spawner arrows so they
-## appear only while the big focus is a night and vanish the moment it stops being one.
-func focused_night_preview_index() -> int:
-	var slots: Array = _resolve_slots()
-	if slots.is_empty():
-		return -1
-	var focused: PlanificatorTimelineResolver.TimelineSlot = slots[0] as PlanificatorTimelineResolver.TimelineSlot
-	if focused == null or focused.kind != PlanificatorTimelineResolver.SLOT_TONIGHT:
-		return -1
-	return focused.night_index
-
-
 func _resolve_slots() -> Array:
 	var playlist: LevelSpawnPlaylist = _get_playlist()
 	var day_number: int = _get_day_number()

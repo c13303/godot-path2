@@ -304,3 +304,4 @@ func _apply_plant_layout_rebuild() -> void:
 func _bump_navigation_revision() -> void:
 	_navigation_revision += 1
 	_spawner_route_service.prepare_upcoming_monster_routes(_navigation_revision)
+	_spawner_route_service.prepare_upcoming_client_routes(_navigation_revision)
