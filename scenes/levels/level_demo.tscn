@@ -1408,7 +1408,7 @@ texture = ExtResource("4_drkbx")
 metadata/id = ""
 
 [node name="monster2_exit" type="Sprite2D" parent="spawners" unique_id=1311384222]
-position = Vector2(1810.7887, 5426.427)
+position = Vector2(2211, 3782)
 texture = ExtResource("5_drkbx")
 metadata/id = ""
 

@@ -29,7 +29,7 @@ const STAGE_WAITING: StringName = &"waiting_for_target"
 const STAGE_MOVING: StringName = &"moving"
 const STAGE_ATTACKING: StringName = &"attacking"
 
-const TANTRUM_CLIENT_HEALTH: int = 100
+const TANTRUM_CLIENT_HEALTH: int = 10
 # Staggered cadence: each client gets a deterministic per-nav interval in this band
 # plus a deterministic initial phase, so the assault reads as continuous instead of
 # army-wide 3s bursts. DPS is kept ~= the old 5 dmg / (3.0 + 0.31) ~= 1.51/s:

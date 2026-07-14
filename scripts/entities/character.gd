@@ -109,7 +109,8 @@ func _ready() -> void:
 		set_physics_process(false)
 
 func _process(delta: float) -> void:
-	z_index = int(position.y)
+	if not _external_capture_active:
+		z_index = int(position.y)
 	if _paused:
 		return
 	_process_damage_flash(delta)

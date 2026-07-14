@@ -8,6 +8,7 @@ class_name AgentDefinitionService
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
+const CLIENT_HEALTH: int = 10
 const CLIENT_SPRITE_HFRAMES: int = 7
 const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.225
@@ -72,6 +73,8 @@ func apply_client_data(agent: Node) -> void:
 		sprite.hframes = CLIENT_SPRITE_HFRAMES
 		sprite.frame = 0
 		sprite.flip_h = false
+	agent.set("max_health", CLIENT_HEALTH)
+	agent.set("health", CLIENT_HEALTH)
 	agent.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 
 

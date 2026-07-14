@@ -131,6 +131,9 @@ func _register_kraken(cell: Vector2i) -> void:
 		"resume_state": {},
 		"scan_timer": _initial_scan_offset(cell, data.target_scan_interval),
 		"captured": false,
+		"target_z_saved": false,
+		"target_z_as_relative": false,
+		"target_z_index": 0,
 	}
 
 
@@ -189,6 +192,8 @@ func _on_grab_contacted(cell: Vector2i) -> void:
 	state["resume_state"] = resume_state
 	state["captured"] = true
 	state["state"] = STATE_RETRACTING
+	_save_target_draw_order(state, target)
+	_apply_captured_target_draw_order(state, target)
 	target.global_position = visual.get_tip_global_position()
 	_krakens[cell] = state
 
@@ -227,6 +232,7 @@ func _on_eating_finished(cell: Vector2i) -> void:
 	state["target_nav_id"] = -1
 	state["resume_state"] = {}
 	state["captured"] = false
+	state["target_z_saved"] = false
 	state["state"] = STATE_DIGESTING
 	visual.play_digestion(data.digestion_seconds)
 	_krakens[cell] = state
@@ -287,6 +293,7 @@ func _pin_target_to_tip(state: Dictionary) -> void:
 	var target: Node2D = _target_from_state(state)
 	var visual: KrakenVisual = _visual_from_state(state)
 	if target != null and visual != null:
+		_apply_captured_target_draw_order(state, target)
 		target.global_position = visual.get_tip_global_position()
 
 
@@ -294,6 +301,7 @@ func _pin_target_to_capture_anchor(state: Dictionary) -> void:
 	var target: Node2D = _target_from_state(state)
 	var visual: KrakenVisual = _visual_from_state(state)
 	if target != null and visual != null:
+		_apply_captured_target_draw_order(state, target)
 		target.global_position = visual.get_capture_anchor_global_position()
 
 
@@ -302,6 +310,7 @@ func _cancel_attack(cell: Vector2i, state: Dictionary) -> void:
 	var nav_id: int = int(state.get("target_nav_id", -1))
 	if bool(state.get("captured", false)) and target != null and nav_id >= 0:
 		var resume_state: Dictionary = state.get("resume_state", {}) as Dictionary
+		_restore_target_draw_order(state, target)
 		_building_manager.resume_agent_after_external_capture(nav_id, target, resume_state)
 	_release_target_reservation(state)
 	var visual: KrakenVisual = _visual_from_state(state)
@@ -313,6 +322,7 @@ func _cancel_attack(cell: Vector2i, state: Dictionary) -> void:
 	state["target_nav_id"] = -1
 	state["resume_state"] = {}
 	state["captured"] = false
+	state["target_z_saved"] = false
 	state["scan_timer"] = maxf(0.02, data.target_scan_interval) if data != null else 0.1
 	_krakens[cell] = state
 
@@ -329,6 +339,29 @@ func _release_target_reservation(state: Dictionary) -> void:
 	var target: Node2D = _target_from_state(state)
 	if target != null:
 		_reserved_target_ids.erase(target.get_instance_id())
+
+
+func _save_target_draw_order(state: Dictionary, target: Node2D) -> void:
+	if bool(state.get("target_z_saved", false)):
+		return
+	state["target_z_saved"] = true
+	state["target_z_as_relative"] = target.z_as_relative
+	state["target_z_index"] = target.z_index
+
+
+func _apply_captured_target_draw_order(state: Dictionary, target: Node2D) -> void:
+	var visual: KrakenVisual = _visual_from_state(state)
+	if visual == null:
+		return
+	target.z_as_relative = false
+	target.z_index = visual.z_index - 1
+
+
+func _restore_target_draw_order(state: Dictionary, target: Node2D) -> void:
+	if not bool(state.get("target_z_saved", false)):
+		return
+	target.z_as_relative = bool(state.get("target_z_as_relative", target.z_as_relative))
+	target.z_index = int(state.get("target_z_index", target.z_index))
 
 
 func _update_hovered_kraken() -> void:
