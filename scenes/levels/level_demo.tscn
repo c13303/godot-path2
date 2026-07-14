@@ -1403,7 +1403,7 @@ metadata/id = ""
 metadata/frequency_client = 1.0
 
 [node name="house_seedmerchant" type="Sprite2D" parent="spawners" unique_id=1617665962]
-position = Vector2(1742, 2684)
+position = Vector2(2391, 2808)
 texture = ExtResource("10_l4uo6")
 
 [node name="seedmerchent_exit" type="Sprite2D" parent="spawners" unique_id=1151164943]
@@ -1412,7 +1412,7 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="seedmerchent_spot" type="Sprite2D" parent="spawners" unique_id=1455932304]
-position = Vector2(1742, 2710)
+position = Vector2(2558, 2697)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
@@ -1463,7 +1463,7 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="builder_spot" type="Sprite2D" parent="spawners" unique_id=1020094794]
-position = Vector2(1742, 2710)
+position = Vector2(2391, 2834)
 texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
