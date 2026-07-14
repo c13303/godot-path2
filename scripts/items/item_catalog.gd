@@ -362,6 +362,7 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_player_movement": false,
 		"blocks_projectiles": false,
 		"placement_surface": &"water_source",
+		"requires_cardinal_water_neighbors": true,
 		"drag_buildable": false,
 		"pad_skip_preview": true,
 		"runtime_id": "kraken",

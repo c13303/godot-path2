@@ -305,6 +305,8 @@ func is_valid_placeable_cell(cell: Vector2i, target_layer: TileMapLayer, placeab
 	if surface == PLACEMENT_SURFACE_WATER_SOURCE:
 		if not is_water_source_cell(cell):
 			return false
+		if bool(placeable_def.get("requires_cardinal_water_neighbors", false)) and not has_cardinal_water_neighbors(cell):
+			return false
 	else:
 		if is_water_source_cell(cell):
 			return false
@@ -386,6 +388,15 @@ func placement_attempt_has_non_buildable_floor(start_cell: Vector2i, end_cell: V
 func is_water_source_cell(cell: Vector2i) -> bool:
 	var watersources: TileMapLayer = _watersources()
 	return watersources != null and watersources.get_cell_source_id(cell) >= 0
+
+
+func has_cardinal_water_neighbors(cell: Vector2i) -> bool:
+	return (
+		is_water_source_cell(cell + Vector2i.RIGHT)
+		and is_water_source_cell(cell + Vector2i.LEFT)
+		and is_water_source_cell(cell + Vector2i.UP)
+		and is_water_source_cell(cell + Vector2i.DOWN)
+	)
 
 
 func turret_range_blocker_for_cell(cell: Vector2i, placeable_def: Dictionary) -> Dictionary:
