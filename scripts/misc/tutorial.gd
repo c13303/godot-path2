@@ -105,6 +105,7 @@ var _alert_remaining: float = 0.0
 var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
 var _tutorial_world_arrow: TutorialWorldArrow
+var _text_animator: TutorialTextAnimator = TutorialTextAnimator.new()
 var _has_planted_turret_epine: bool = false
 # True once the player has placed their first rose shop counter. Latches the one-time
 # "place the shop" dawn step off for the rest of the run. Re-derived from the world on
@@ -125,6 +126,7 @@ func _ready() -> void:
 	scroll_active = false
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_theme_font_size_override("normal_font_size", 26)
+	_text_animator.setup(self)
 	_resolve_nodes()
 	if not GameState.mode_changed.is_connected(_on_mode_changed):
 		GameState.mode_changed.connect(_on_mode_changed)
@@ -167,6 +169,39 @@ func _resolve_nodes() -> void:
 
 func _process(delta: float) -> void:
 	_refresh(delta)
+	_text_animator.update(delta)
+
+
+## Single entry point for every message the label shows. The animator ignores a request for
+## the message already on screen, so the paths below can keep asking for theirs every frame
+## without ever restarting the animation. `message_id` is the logical identity of the
+## message: two different steps that happen to share text still animate as a change.
+func _present_tutorial_message(message_id: String, message_text: String) -> void:
+	_text_animator.show_message(message_id, message_text)
+
+
+## Blanks the label and cancels any running animation, so the message animates again if it
+## comes back later.
+func _clear_tutorial_message() -> void:
+	_text_animator.clear_message()
+
+
+func _tutorial_message_id(key: String) -> String:
+	return "tutorial:%s" % key
+
+
+func _alert_message_id() -> String:
+	return "alert:%s:%d" % [_alert_key, _alert_count]
+
+
+func _hold_message_id(key: String) -> String:
+	return "hold:%s" % key
+
+
+## While the message is fresh the rainbow owns the colour: modulating the label red would
+## tint every glyph the same. The alert colour resumes once the fresh window ends.
+func _apply_alert_modulate() -> void:
+	modulate = Color.WHITE if _text_animator.is_fresh() else _current_alert_color()
 
 
 func _on_mode_changed(is_night: bool) -> void:
@@ -207,10 +242,10 @@ func _on_locale_changed(_locale: String) -> void:
 		_show_key_immediately(KEY_UNBUILD_SELECTION)
 		return
 	if _alert_key != "":
-		text = _alert_text()
+		_present_tutorial_message(_alert_message_id(), _alert_text())
 		return
 	if _displayed_key != "":
-		text = Translations.t(_displayed_key)
+		_present_tutorial_message(_tutorial_message_id(_displayed_key), Translations.t(_displayed_key))
 
 
 func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
@@ -224,8 +259,12 @@ func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 		_show_key_immediately(KEY_UNBUILD_SELECTION)
 		return
 	visible = true
-	text = _alert_text()
-	modulate = _current_alert_color()
+	_present_tutorial_message(_alert_message_id(), _alert_text())
+	if not persistent:
+		# A transient alert must outlive its own reveal: it stays up for at least as long as
+		# typing plus the fresh window, so it is never cut off mid-animation.
+		_alert_remaining = maxf(ALERT_DURATION, _text_animator.get_minimum_visible_duration())
+	_apply_alert_modulate()
 	_set_glow(false)
 	_update_tutorial_arrow("")
 
@@ -298,7 +337,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_update_background_night_hold(delta)
 		_displayed_key = ""
 		_pending_key = ""
-		text = ""
+		_clear_tutorial_message()
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
@@ -308,15 +347,15 @@ func _refresh(delta: float = 0.0) -> void:
 		_update_background_night_hold(delta)
 		if _alert_persistent:
 			visible = true
-			text = _alert_text()
-			modulate = _current_alert_color()
+			_present_tutorial_message(_alert_message_id(), _alert_text())
+			_apply_alert_modulate()
 			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
 		if _alert_remaining > 0.0:
 			visible = true
-			text = _alert_text()
-			modulate = _current_alert_color()
+			_present_tutorial_message(_alert_message_id(), _alert_text())
+			_apply_alert_modulate()
 			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
@@ -328,7 +367,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_reset_hold_progress()
 		_displayed_key = ""
 		_pending_key = ""
-		text = ""
+		_clear_tutorial_message()
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
@@ -338,7 +377,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_reset_hold_progress()
 		_displayed_key = ""
 		_pending_key = ""
-		text = ""
+		_clear_tutorial_message()
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
@@ -375,7 +414,7 @@ func _refresh(delta: float = 0.0) -> void:
 		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
 		_displayed_key = ""
-		text = ""
+		_clear_tutorial_message()
 		visible = false
 		modulate = Color.WHITE
 		_set_glow(false)
@@ -397,7 +436,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_pending_key = key
 		_pending_remaining = 0.0
 		_displayed_key = key
-		text = Translations.t(key)
+		_present_tutorial_message(_tutorial_message_id(key), Translations.t(key))
 	else:
 		# A change is needed: blank the label and (re)start the delay toward the
 		# newest target. The message only appears once it has held for CHANGE_DELAY.
@@ -405,12 +444,12 @@ func _refresh(delta: float = 0.0) -> void:
 			_pending_key = key
 			_pending_remaining = CHANGE_DELAY
 			_displayed_key = ""
-			text = ""
+			_clear_tutorial_message()
 		else:
 			_pending_remaining -= delta
 			if _pending_remaining <= 0.0:
 				_displayed_key = key
-				text = Translations.t(key)
+				_present_tutorial_message(_tutorial_message_id(key), Translations.t(key))
 
 	# Glow tracks the message actually on screen, so it stays in step with the text.
 	_set_glow(false)
@@ -521,7 +560,7 @@ func _show_key_immediately(key: String) -> void:
 	_displayed_key = key
 	_pending_key = key
 	_pending_remaining = 0.0
-	text = Translations.t(key)
+	_present_tutorial_message(_tutorial_message_id(key), Translations.t(key))
 	visible = true
 	modulate = Color.WHITE
 	_set_glow(false)
@@ -579,7 +618,7 @@ func _has_planted_roses_on_floor() -> bool:
 func _request_start_night_prompt() -> void:
 	_displayed_key = ""
 	_pending_key = ""
-	text = ""
+	_clear_tutorial_message()
 	visible = false
 	_set_glow(false)
 	_update_tutorial_arrow("")
@@ -618,7 +657,8 @@ func _show_hold_action(action: StringName, delta: float) -> void:
 	_pending_remaining = 0.0
 	visible = true
 	modulate = Color.WHITE
-	text = Translations.t(_hold_translation_key(action))
+	var hold_key: String = _hold_translation_key(action)
+	_present_tutorial_message(_hold_message_id(hold_key), Translations.t(hold_key))
 	_set_glow(false)
 	_update_tutorial_arrow("")
 	_advance_hold(action, delta)
