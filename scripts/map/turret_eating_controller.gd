@@ -36,40 +36,41 @@ func clear_agent(nav_id: int) -> void:
 # Single-agent turret-overlap check, invoked by AgentTileInteractionController when
 # an agent (re)enters a relevant cell. Skip while garden-eating, turret-eating or
 # drowning, then consume only turrets whose TurretData allows monster eating.
-func evaluate_agent(agent: Node2D) -> void:
+# Returns true when a turret was actually consumed.
+func evaluate_agent(agent: Node2D) -> bool:
 	if agent == null or not is_instance_valid(agent):
-		return
+		return false
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	if blocking_buildings == null:
-		return
+		return false
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
-		return
+		return false
 	var eating_agents: Dictionary = _manager._eating_agents
 	var drowning: DrowningController = _manager._drowning_controller
 	if eating_agents.has(nav_id) or _turret_eating_agents.has(nav_id) or drowning.is_drowning(nav_id):
-		return
+		return false
 	var agent_cell: Vector2i = blocking_buildings.local_to_map(blocking_buildings.to_local(agent.global_position))
 	var turret_data: TurretData = _turret_data_at_cell(agent_cell)
 	if turret_data == null:
-		return
+		return false
 	var agent_kind: StringName = _manager._agent_kind(agent)
 	if agent_kind == SPAWNER_KIND_BUILDER:
-		return
+		return false
 	if agent_kind != SPAWNER_KIND_CLIENT and agent_kind != SPAWNER_KIND_MERCHANT and not turret_data.eatable_by_monsters:
-		return
-	_consume_turret(agent, agent_cell, agent_kind)
+		return false
+	return _consume_turret(agent, agent_cell, agent_kind)
 
 
-func _consume_turret(agent: Node2D, turret_cell: Vector2i, agent_kind: StringName) -> void:
+func _consume_turret(agent: Node2D, turret_cell: Vector2i, agent_kind: StringName) -> bool:
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
-		return
+		return false
 	if agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT:
 		_manager._leave_turret_debris(turret_cell)
 		_manager._remove_turret_cell(turret_cell)
 		Sfx.play_sound(&"crunsh")
-		return
+		return true
 	var eating_time: float = _manager._eating_time
 	var resume_state: Dictionary = _manager._capture_agent_resume_state(nav_id, agent)
 	_turret_eating_agents[nav_id] = {
@@ -83,6 +84,7 @@ func _consume_turret(agent: Node2D, turret_cell: Vector2i, agent_kind: StringNam
 	Sfx.play_sound(&"crunsh")
 	if agent.has_method("start_eating"):
 		agent.call("start_eating", eating_time)
+	return true
 
 
 func _turret_data_at_cell(cell: Vector2i) -> TurretData:

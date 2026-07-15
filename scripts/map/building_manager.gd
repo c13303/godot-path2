@@ -1226,34 +1226,41 @@ func _process_dawn_harvest_walkover() -> void:
 # fires plant_removed, so any monster targeting that cell retargets synchronously.
 # Called per-agent by AgentTileInteractionController when the agent enters a new cell
 # (was a per-frame full-agent scan over clients/merchants).
-func trample_rose_at_agent(agent: Node2D) -> void:
+# Returns true when a plant was actually destroyed, so the caller can react to the
+# destruction (it drives the "people are trampling your plants" alert).
+func trample_rose_at_agent(agent: Node2D) -> bool:
 	if plant_manager == null or floorz == null:
-		return
+		return false
 	if not is_instance_valid(agent):
-		return
+		return false
 	if not plant_manager.has_method("has_plant") or not plant_manager.has_method("consume_plant"):
-		return
+		return false
 	var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	if bool(plant_manager.call("has_plant", cell)):
-		spawn_plant_parts_burst(cell_center(cell))
-		plant_manager.call("consume_plant", cell)
+	if not bool(plant_manager.call("has_plant", cell)):
+		return false
+	spawn_plant_parts_burst(cell_center(cell))
+	plant_manager.call("consume_plant", cell)
+	return true
 
 
 # Called per-agent by AgentTileInteractionController when the agent enters a new cell
 # (was a per-frame full-agent scan over monsters/clients).
-func trample_pasteque_at_agent(agent: Node2D) -> void:
+# Returns true when a pasteque was actually destroyed.
+func trample_pasteque_at_agent(agent: Node2D) -> bool:
 	if traversable_buildings == null or not is_instance_valid(agent):
-		return
+		return false
 	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
 	if not bool(pasteque_def.get("destroyed_by_creatures", false)):
-		return
+		return false
 	var building_objects: BuildingObjectManager = _get_building_object_manager()
 	if building_objects == null or not building_objects.has_method("get_building"):
-		return
+		return false
 	var cell: Vector2i = traversable_buildings.local_to_map(traversable_buildings.to_local(agent.global_position))
 	var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
-	if str(building_data.get("item_id", "")) == PASTEQUE_ITEM_ID:
-		_destroy_pasteque_cell(cell)
+	if str(building_data.get("item_id", "")) != PASTEQUE_ITEM_ID:
+		return false
+	_destroy_pasteque_cell(cell)
+	return true
 
 
 func has_grownup_roses_to_harvest() -> bool:
@@ -1431,6 +1438,14 @@ func _show_tutorial_alert(key: String) -> void:
 	var tutorial: Node = _tutorial_node()
 	if tutorial != null and tutorial.has_method("show_alert"):
 		tutorial.call("show_alert", key)
+
+
+## Alert for a repeating event: skipped while any alert is already showing, so it pops
+## once per burst instead of restarting on every occurrence.
+func show_tutorial_alert_once(key: String) -> void:
+	var tutorial: Node = _tutorial_node()
+	if tutorial != null and tutorial.has_method("show_alert_once"):
+		tutorial.call("show_alert_once", key)
 
 
 ## Dismisses an alert early. Only clears when `key` is the one currently showing, so an

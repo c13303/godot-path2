@@ -350,13 +350,19 @@ func dry_all_roses() -> void:
 		var cell: Vector2i = raw_cell as Vector2i
 		if not is_rose_cell(cell):
 			continue
-		var plant_data: Dictionary = _plants[cell] as Dictionary
-		plant_data["watered_once"] = false
-		plant_data["grownup"] = false
-		_plants[cell] = plant_data
-		_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
+		_reset_rose_to_dry(cell)
 	_flush_plant_layer_now()
 	_queue_plant_layer_flush()
+
+
+## Returns one rose to its dry, unwatered state, leaving the plot itself in place.
+## Visual flushing is the caller's job so bulk resets pay for a single flush.
+func _reset_rose_to_dry(cell: Vector2i) -> void:
+	var plant_data: Dictionary = _plants[cell] as Dictionary
+	plant_data["watered_once"] = false
+	plant_data["grownup"] = false
+	_plants[cell] = plant_data
+	_set_rose_atlas(cell, ROSE_DRY_ATLAS, false)
 
 func grownup_rose_count() -> int:
 	var count: int = 0
@@ -399,17 +405,34 @@ func get_grownup_rose_cells() -> Array[Vector2i]:
 	return cells
 
 
+## Harvesting collects the bloom but keeps the plot: a new dry rose immediately takes
+## the place of the picked one. Rose cells are therefore permanent and only need
+## re-watering, so no plant_removed is emitted and garden topology is untouched.
 func harvest_grownup_rose(cell: Vector2i) -> bool:
 	if not is_rose_grownup(cell):
 		return false
-	remove_plant(cell, true)
+	_reset_rose_to_dry(cell)
+	_queue_plant_layer_flush()
 	return true
 
+## Imperial plots survive harvesting the same way, restarting from the state a freshly
+## planted imperial gets in add_plant().
 func harvest_imperial_rose(cell: Vector2i) -> bool:
 	if not is_imperial_harvestable(cell):
 		return false
-	consume_plant(cell)
+	_reset_imperial_to_fresh(cell)
 	return true
+
+
+## Matches add_plant()'s fresh-imperial state: stage 0 and already watered, so the first
+## growth step is free exactly as it is for a newly planted one.
+func _reset_imperial_to_fresh(cell: Vector2i) -> void:
+	var plant_data: Dictionary = _plants[cell] as Dictionary
+	plant_data["stage"] = 0
+	plant_data["watered_once"] = true
+	plant_data["grownup"] = false
+	_plants[cell] = plant_data
+	_emit_visual_changed(cell)
 
 func set_rose_visual_hidden(cell: Vector2i, hidden: bool) -> void:
 	if not plantz or not is_rose_cell(cell):

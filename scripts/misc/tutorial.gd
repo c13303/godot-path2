@@ -267,6 +267,16 @@ func _on_locale_changed(_locale: String) -> void:
 		_present_tutorial_message(_tutorial_message_id(_displayed_key), Translations.t(_displayed_key))
 
 
+## Transient alert for a repeating event: ignored while any alert is already showing.
+## The event therefore pops the message once, lets it live out its full duration, and can
+## pop it again afterwards. It also never steals the label from a more urgent alert, in
+## particular the persistent tantrum one that runs during the same client sale phase.
+func show_alert_once(key: String) -> void:
+	if _alert_key != "":
+		return
+	show_alert(key)
+
+
 func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 	if key == "":
 		return

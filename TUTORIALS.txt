@@ -126,6 +126,14 @@ rose shortage -> clients turn hostile (PERSISTENT red alert, shows count)
     = "Pénurie de rose : des clients sont enragés" / "Rose shortage: clients are enraged"
                                                             [tutorial.tantrum]
 
+a client / merchant / builder destroys a plant, pasteque or turret by walking on it
+    = "Les gens écrasent vos plantes !" / "People are trampling your plants!"
+                                                            [tutorial.people_crush_plants]
+    (transient 3s alert. Pops once per burst: further crushes are ignored while it is
+     still showing, and it can pop again after it vanishes. Skipped entirely while any
+     other alert holds the label, so it never hides the persistent tantrum alert.
+     Monsters crushing plants never raise it — that is normal night gameplay.)
+
 --- SEED MERCHANT phase ---
 
 merchant present + you have an unclaimed night reward
