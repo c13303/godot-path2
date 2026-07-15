@@ -8,6 +8,7 @@ const SPAWN_FAILURE_WARN_INTERVAL_MS: int = 3000
 const DEBUG_PLANTFF_FRAME_LAG_MS_FALLBACK: float = 100.0
 const DEBUG_PLANTFF_FF_LAG_MS_FALLBACK: float = 10.0
 const DEBUG_GARDENS_LAG_MS_FALLBACK: float = 15.0
+const DEBUG_ROSE_HARVEST_WARN_MS_FALLBACK: float = 1.0
 
 var _manager: BuildingManager
 var _cpp_debug_options: Node = null
@@ -85,6 +86,54 @@ func over_garden_threshold_us(elapsed_us: int) -> bool:
 	if threshold_ms <= 0.0:
 		return false
 	return (float(elapsed_us) / 1000.0) > threshold_ms
+
+
+func rose_harvest_telemetry_enabled() -> bool:
+	if _debug_master_disabled():
+		return false
+	if _cpp_debug_options == null:
+		_cpp_debug_options = _find_cpp_debug_options()
+	if _cpp_debug_options == null:
+		return false
+	if not ("debug_rose_harvest_telemetry" in _cpp_debug_options):
+		return false
+	return bool(_cpp_debug_options.get("debug_rose_harvest_telemetry"))
+
+
+func rose_harvest_warn_threshold_ms() -> float:
+	if _cpp_debug_options == null:
+		_cpp_debug_options = _find_cpp_debug_options()
+	if _cpp_debug_options != null and "debug_rose_harvest_warn_ms" in _cpp_debug_options:
+		return maxf(0.0, float(_cpp_debug_options.get("debug_rose_harvest_warn_ms")))
+	return DEBUG_ROSE_HARVEST_WARN_MS_FALLBACK
+
+
+func log_rose_harvest_perf(data: Dictionary) -> void:
+	if not rose_harvest_telemetry_enabled():
+		return
+	var total_ms: float = float(data.get("total_us", 0)) / 1000.0
+	var threshold_ms: float = rose_harvest_warn_threshold_ms()
+	var slow: bool = threshold_ms > 0.0 and total_ms >= threshold_ms
+	var line: String = "[HARVEST_PERF] frame=%d total=%.2fms lookup=%.2f plant=%.2f stock=%.2f pile=%.2f notify=%.2f flight=%.2f finish=%.2f rose=%s counter=%s stock_change=%s created=%d freed=%d topology_rebuild=%s navigation_invalidation=%s slow=%s" % [
+		int(data.get("frame", 0)),
+		total_ms,
+		float(data.get("lookup_us", 0)) / 1000.0,
+		float(data.get("plant_us", 0)) / 1000.0,
+		float(data.get("stock_us", 0)) / 1000.0,
+		float(data.get("pile_us", 0)) / 1000.0,
+		float(data.get("notify_us", 0)) / 1000.0,
+		float(data.get("flight_us", 0)) / 1000.0,
+		float(data.get("finish_us", 0)) / 1000.0,
+		str(data.get("rose_cell", Vector2i.ZERO)),
+		str(data.get("counter_cell", Vector2i.ZERO)),
+		str(data.get("stock_change", "")),
+		int(data.get("bouquet_created", 0)),
+		int(data.get("bouquet_freed", 0)),
+		str(bool(data.get("topology_rebuild", false))),
+		str(bool(data.get("navigation_invalidation", false))),
+		str(slow),
+	]
+	CppDebugOptions.dlog(line)
 
 
 # Garden A* queries are synchronous and can arrive in a burst when several agents reach

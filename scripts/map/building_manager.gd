@@ -446,14 +446,6 @@ func get_progression() -> Node:
 	return _get_progression()
 
 
-func auto_save_after_rose_harvest() -> bool:
-	var progression_node: Node = _get_progression()
-	if progression_node == null or not progression_node.has_method("auto_save"):
-		CppDebugOptions.save_log("[SAVE] BuildingManager: rose-harvest auto-save blocked: progression node missing")
-		return false
-	return bool(progression_node.call("auto_save"))
-
-
 func get_plant_manager() -> Node:
 	return plant_manager
 
@@ -916,6 +908,7 @@ func _setup_counter_stock_manager() -> void:
 		Callable(self, "_is_walkable"),
 		Callable(self, "_has_plant_cell")
 	)
+	_counter_stock_manager.register_existing_counters()
 
 
 func _on_building_added(cell: Vector2i, item_id: String) -> void:
@@ -936,6 +929,7 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 		_agent_cell_tracker.invalidate_cell(cell)
 	if item_id != ROSE_SHOP_COUNTER_ID:
 		return
+	_counter_stock_manager.register_counter(cell)
 	_dawn_harvest.on_counter_capacity_added()
 
 
@@ -1189,8 +1183,6 @@ func _is_finite_world(p: Vector2) -> bool:
 	return abs(p.x) <= limit and abs(p.y) <= limit
 
 func _no_plants_remaining() -> bool:
-	if _total_counter_stock() > 0:
-		return false
 	if plant_manager and plant_manager.has_method("is_empty"):
 		return bool(plant_manager.call("is_empty"))
 	return true
@@ -1935,6 +1927,42 @@ func get_building_debug_telemetry() -> BuildingDebugTelemetry:
 	return _debug_telemetry
 
 
+func rose_harvest_telemetry_enabled() -> bool:
+	return _debug_telemetry.rose_harvest_telemetry_enabled()
+
+
+func record_rose_harvest_perf(data: Dictionary) -> void:
+	_debug_telemetry.log_rose_harvest_perf(data)
+
+
+func bouquet_sprites_created_count() -> int:
+	return _counter_stock_manager.bouquet_sprites_created_count() if _counter_stock_manager != null else 0
+
+
+func bouquet_sprites_freed_count() -> int:
+	return _counter_stock_manager.bouquet_sprites_freed_count() if _counter_stock_manager != null else 0
+
+
+func last_counter_stock_logic_us() -> int:
+	return _counter_stock_manager.last_stock_logic_us() if _counter_stock_manager != null else 0
+
+
+func last_counter_pile_sync_us() -> int:
+	return _counter_stock_manager.last_pile_sync_us() if _counter_stock_manager != null else 0
+
+
+func last_counter_notify_us() -> int:
+	return _counter_stock_manager.last_notify_us() if _counter_stock_manager != null else 0
+
+
+func navigation_revision() -> int:
+	return _building_invalidation_controller.navigation_revision()
+
+
+func navigation_or_plant_invalidation_pending() -> bool:
+	return _building_invalidation_controller.navigation_topology_dirty() or _building_invalidation_controller.plant_layout_dirty()
+
+
 func last_spawn_failure() -> String:
 	return _debug_telemetry.last_spawn_failure()
 
@@ -2212,6 +2240,10 @@ func _counter_stock(counter_cell: Vector2i) -> int:
 	return _counter_stock_manager.stock(counter_cell)
 
 
+func counter_stock(counter_cell: Vector2i) -> int:
+	return _counter_stock(counter_cell)
+
+
 func _add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
 	_counter_stock_manager.add_counter_stock(counter_cell, amount)
 
@@ -2230,26 +2262,8 @@ func _after_counter_stock_changed(previous: int, value: int) -> void:
 
 func notify_counter_stock_changed(previous: int, value: int) -> void:
 	counter_stock_changed.emit(previous, value)
-	# A counter gaining its first rose turns it into an edible garden, which requires
-	# folding its access tiles into the garden topology (a full rebuild). Depletion
-	# (positive -> 0) needs no rebuild: the access tiles simply stop being edible and
-	# the empty-garden machinery removes a counter-only garden like any other.
-	if previous == 0 and value > 0 and _garden_topology.plant_zone_built():
-		_rebuild_plant_zone_from_layer()
-	elif previous > 0 and value == 0 and _no_plants_remaining():
+	if previous > 0 and value == 0 and _no_plants_remaining():
 		_force_escape_for_all_monsters()
-
-
-func mark_counter_stock_restored_for_navigation() -> void:
-	_building_invalidation_controller.mark_after_counter_stock_restored()
-
-
-func counter_cell_for_access_cell(access_cell: Vector2i) -> Vector2i:
-	return _garden_topology.counter_access_cells()[access_cell] as Vector2i
-
-
-func start_agent_eating_counter_rose(agent: Node2D, access_cell: Vector2i) -> void:
-	_start_agent_eating(agent, _eating_time, access_cell)
 
 
 func queue_plant_zone_overlay_redraw() -> void:
@@ -2257,8 +2271,8 @@ func queue_plant_zone_overlay_redraw() -> void:
 		_zone_overlay.queue_redraw()
 
 
-# Populates _garden_topology.counter_access_cells() from every stocked counter and returns the access
-# tiles as an array to seed the garden clustering. An access tile is a walkable cell
+# Populates _garden_topology.counter_access_cells() from every physical counter and returns the
+# access tiles as an array to seed the garden clustering. An access tile is a walkable cell
 # 8-adjacent to the counter that does not already hold a plant (the flower keeps its
 # own cell). Called from _build_gardens_from_plants, which clears the map first.
 func _collect_counter_access_cells() -> Array[Vector2i]:
@@ -2269,11 +2283,6 @@ func _collect_counter_access_cells_into(counter_access_cells: Dictionary) -> Arr
 
 func _is_eatable_for_monster(cell: Vector2i) -> bool:
 	return _garden_topology.is_eatable_for_monster(cell)
-
-func _consume_counter_rose(eater: Node2D, _spawner_cell: Vector2i, access_cell: Vector2i) -> void:
-	_counter_stock_manager.consume_counter_rose(eater, access_cell)
-
-
 
 func _select_stocked_counter_target(from_cell: Vector2i) -> Dictionary:
 	return _counter_stock_manager.select_stocked_counter_target(from_cell)

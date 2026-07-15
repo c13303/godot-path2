@@ -33,12 +33,17 @@ const ROSE_ITEM_ID: String = "rose"
 const NIGHTFALL_DISSOLVE_SECONDS: float = 3.0
 
 var _stock_by_cell: Dictionary = {}  # Vector2i -> int
-var _pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Node2D]
+var _pile_nodes_by_cell: Dictionary = {}  # Vector2i -> Array[Sprite2D]
 var _pile_parent: Node
 var _cell_center: Callable
 var _is_walkable: Callable
 var _has_plant: Callable
 var _manager: BuildingManager
+var _bouquet_sprites_created: int = 0
+var _bouquet_sprites_freed: int = 0
+var _last_stock_logic_us: int = 0
+var _last_pile_sync_us: int = 0
+var _last_notify_us: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -58,6 +63,38 @@ func clear() -> void:
 
 
 func clear_counter(counter_cell: Vector2i) -> void:
+	unregister_counter(counter_cell)
+
+
+func register_existing_counters() -> void:
+	for counter_cell: Vector2i in rose_shop_counter_cells():
+		register_counter(counter_cell)
+
+
+func register_counter(counter_cell: Vector2i) -> void:
+	if _pile_nodes_by_cell.has(counter_cell):
+		_sync_pile_visibility(counter_cell, stock(counter_cell))
+		return
+	var counter_world: Vector2 = _call_vector2(_cell_center, counter_cell)
+	var nodes: Array[Sprite2D] = []
+	for index: int in range(MAX_STOCK_PER_COUNTER):
+		var sprite: Sprite2D = Sprite2D.new()
+		_bouquet_sprites_created += 1
+		sprite.texture = ROSE_TEXTURE
+		sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
+		sprite.frame = ROSE_TEXTURE_FRAME
+		sprite.centered = true
+		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
+		sprite.global_position = counter_world + _bouquet_offset(index)
+		sprite.z_index = _bouquet_z_index(counter_world, index)
+		sprite.visible = false
+		_resolve_pile_parent().add_child(sprite)
+		nodes.append(sprite)
+	_pile_nodes_by_cell[counter_cell] = nodes
+	_sync_pile_visibility(counter_cell, stock(counter_cell))
+
+
+func unregister_counter(counter_cell: Vector2i) -> void:
 	_stock_by_cell.erase(counter_cell)
 	clear_pile(counter_cell)
 
@@ -131,13 +168,20 @@ func add_stock(counter_cell: Vector2i, amount: int) -> Dictionary:
 
 
 func set_stock(counter_cell: Vector2i, amount: int) -> Dictionary:
+	var telemetry_enabled: bool = _manager != null and _manager.rose_harvest_telemetry_enabled()
+	var logic_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
 	var previous: int = stock(counter_cell)
 	var value: int = clampi(amount, 0, MAX_STOCK_PER_COUNTER)
 	if value <= 0:
 		_stock_by_cell.erase(counter_cell)
 	else:
 		_stock_by_cell[counter_cell] = value
-	rebuild_pile(counter_cell)
+	if telemetry_enabled:
+		_last_stock_logic_us = Time.get_ticks_usec() - logic_started_us
+	var pile_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
+	_sync_pile_visibility(counter_cell, value)
+	if telemetry_enabled:
+		_last_pile_sync_us = Time.get_ticks_usec() - pile_started_us
 	return {
 		"previous": previous,
 		"value": value,
@@ -145,15 +189,27 @@ func set_stock(counter_cell: Vector2i, amount: int) -> Dictionary:
 
 
 func add_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	_last_stock_logic_us = 0
+	_last_pile_sync_us = 0
+	_last_notify_us = 0
 	var change: Dictionary = add_stock(counter_cell, amount)
+	var notify_started_us: int = Time.get_ticks_usec() if _manager != null and _manager.rose_harvest_telemetry_enabled() else 0
 	after_counter_stock_changed(int(change.get("previous", 0)), int(change.get("value", 0)))
+	if notify_started_us > 0:
+		_last_notify_us = Time.get_ticks_usec() - notify_started_us
 
 
 func set_counter_stock(counter_cell: Vector2i, amount: int) -> void:
+	_last_stock_logic_us = 0
+	_last_pile_sync_us = 0
+	_last_notify_us = 0
 	var change: Dictionary = set_stock(counter_cell, amount)
 	var previous: int = int(change.get("previous", 0))
 	var value: int = int(change.get("value", 0))
+	var notify_started_us: int = Time.get_ticks_usec() if _manager != null and _manager.rose_harvest_telemetry_enabled() else 0
 	after_counter_stock_changed(previous, value)
+	if notify_started_us > 0:
+		_last_notify_us = Time.get_ticks_usec() - notify_started_us
 
 
 func after_counter_stock_changed(previous: int, value: int) -> void:
@@ -168,8 +224,6 @@ func serialize_counter_stock() -> Array[Dictionary]:
 
 func restore_counter_stock(saved_stock: Array) -> void:
 	restore(saved_stock, rose_shop_counter_cells())
-	if _manager != null:
-		_manager.mark_counter_stock_restored_for_navigation()
 
 
 func serialize(counter_cells: Array[Vector2i]) -> Array[Dictionary]:
@@ -188,7 +242,15 @@ func serialize(counter_cells: Array[Vector2i]) -> Array[Dictionary]:
 
 
 func restore(saved_stock: Array, counter_cells: Array[Vector2i]) -> void:
-	clear()
+	_stock_by_cell.clear()
+	var registered_cells: Array = _pile_nodes_by_cell.keys()
+	for raw_cell: Variant in registered_cells:
+		var registered_cell: Vector2i = raw_cell as Vector2i
+		if not counter_cells.has(registered_cell):
+			clear_pile(registered_cell)
+	for counter_cell: Vector2i in counter_cells:
+		register_counter(counter_cell)
+		_sync_pile_visibility(counter_cell, 0)
 	for raw_entry: Variant in saved_stock:
 		if not (raw_entry is Dictionary):
 			continue
@@ -198,7 +260,7 @@ func restore(saved_stock: Array, counter_cells: Array[Vector2i]) -> void:
 		if count <= 0 or not counter_cells.has(cell):
 			continue
 		_stock_by_cell[cell] = count
-		rebuild_pile(cell)
+		_sync_pile_visibility(cell, count)
 
 
 func stocked_counter_cells() -> Array[Vector2i]:
@@ -212,7 +274,7 @@ func stocked_counter_cells() -> Array[Vector2i]:
 
 func collect_access_cells(access_by_cell: Dictionary) -> Array[Vector2i]:
 	var access_cells: Array[Vector2i] = []
-	for counter_cell: Vector2i in stocked_counter_cells():
+	for counter_cell: Vector2i in rose_shop_counter_cells():
 		for dy: int in range(-1, 2):
 			for dx: int in range(-1, 2):
 				if dx == 0 and dy == 0:
@@ -283,15 +345,6 @@ func nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) ->
 				best_dist = manhattan
 				best_cell = cell
 	return best_cell
-
-
-func consume_counter_rose(eater: Node2D, access_cell: Vector2i) -> void:
-	if _manager == null:
-		return
-	var counter_cell: Vector2i = _manager.counter_cell_for_access_cell(access_cell)
-	_manager.start_agent_eating_counter_rose(eater, access_cell)
-	Sfx.play_sound(&"crunsh")
-	set_counter_stock(counter_cell, stock(counter_cell) - 1)
 
 
 func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> void:
@@ -370,32 +423,12 @@ func can_install_new_counter() -> bool:
 	return false
 
 
-func rebuild_pile(counter_cell: Vector2i) -> void:
-	clear_pile(counter_cell)
-	var count: int = stock(counter_cell)
-	if count <= 0:
-		return
-	var nodes: Array[Node2D] = []
-	var counter_world: Vector2 = _call_vector2(_cell_center, counter_cell)
-	for index: int in range(count):
-		var sprite: Sprite2D = Sprite2D.new()
-		sprite.texture = ROSE_TEXTURE
-		sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
-		sprite.frame = ROSE_TEXTURE_FRAME
-		sprite.centered = true
-		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
-		sprite.global_position = counter_world + _bouquet_offset(index)
-		sprite.z_index = _bouquet_z_index(counter_world, index)
-		_resolve_pile_parent().add_child.call_deferred(sprite)
-		nodes.append(sprite)
-	_pile_nodes_by_cell[counter_cell] = nodes
-
-
 func clear_pile(counter_cell: Vector2i) -> void:
 	var nodes: Array = _pile_nodes_by_cell.get(counter_cell, []) as Array
 	for raw_node: Variant in nodes:
 		var node: Node = raw_node as Node
 		if node != null and is_instance_valid(node):
+			_bouquet_sprites_freed += 1
 			node.queue_free()
 	_pile_nodes_by_cell.erase(counter_cell)
 
@@ -409,25 +442,24 @@ func clear_all_piles() -> void:
 
 
 # Every counter is emptied (triggered when the last client of the sale leaves). The
-# logical stock drops to zero immediately so monster garden clustering/targeting never
-# sees counter roses (the monster-eat mechanic is gone), while the already-built bouquet
-# sprites are detached and popped in reverse fill order for a visual "counters emptying"
-# effect. All counters pop in sync — one rose per tick, tick = total_seconds / fullest
-# bouquet — so the whole sequence always finishes in exactly total_seconds regardless of
-# how full each bouquet is (a 4-rose bouquet just runs out early).
+# logical stock drops to zero immediately while persistent bouquet slots hide in
+# reverse fill order for a visual "counters emptying" effect.
 func dissolve_all_piles(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> void:
-	var piles: Array = []  # Array[Array[Node2D]] - each bouquet in fill order (last == next removed)
+	var piles: Array = []  # Array[Array[Sprite2D]] - visible slots in fill order (last == next hidden)
 	var max_count: int = 0
 	for raw_cell: Variant in _pile_nodes_by_cell.keys():
-		var nodes: Array = _pile_nodes_by_cell[raw_cell] as Array
-		if nodes.is_empty():
+		var cell: Vector2i = raw_cell as Vector2i
+		var nodes: Array = _pile_nodes_by_cell[cell] as Array
+		var visible_nodes: Array[Sprite2D] = []
+		var count: int = mini(stock(cell), nodes.size())
+		for index: int in range(count):
+			var sprite: Sprite2D = nodes[index] as Sprite2D
+			if sprite != null and is_instance_valid(sprite) and sprite.visible:
+				visible_nodes.append(sprite)
+		if visible_nodes.is_empty():
 			continue
-		piles.append(nodes)
-		max_count = maxi(max_count, nodes.size())
-	# Hand the sprites over to the animation: detaching them from the manager (without
-	# freeing) means set_stock/clear_pile won't touch them mid-dissolve, and zeroing the
-	# stock makes the counters logically empty right now.
-	_pile_nodes_by_cell.clear()
+		piles.append(visible_nodes)
+		max_count = maxi(max_count, visible_nodes.size())
 	_stock_by_cell.clear()
 	if max_count <= 0:
 		return
@@ -443,10 +475,10 @@ func _pop_last_bouquet_slots(piles: Array) -> void:
 		var nodes: Array = raw_nodes as Array
 		if nodes.is_empty():
 			continue
-		var node: Node = nodes.pop_back() as Node
-		if node != null and is_instance_valid(node):
-			_refund_unsold_rose_seed(node as Node2D)
-			node.queue_free()
+		var sprite: Sprite2D = nodes.pop_back() as Sprite2D
+		if sprite != null and is_instance_valid(sprite):
+			_refund_unsold_rose_seed(sprite)
+			sprite.visible = false
 
 
 func _refund_unsold_rose_seed(rose_node: Node2D) -> void:
@@ -498,6 +530,38 @@ func _on_counter_rose_reached_client(sprite: Sprite2D, on_arrival: Callable) -> 
 		sprite.queue_free()
 	if not on_arrival.is_null():
 		on_arrival.call()
+
+
+func bouquet_sprites_created_count() -> int:
+	return _bouquet_sprites_created
+
+
+func bouquet_sprites_freed_count() -> int:
+	return _bouquet_sprites_freed
+
+
+func last_stock_logic_us() -> int:
+	return _last_stock_logic_us
+
+
+func last_pile_sync_us() -> int:
+	return _last_pile_sync_us
+
+
+func last_notify_us() -> int:
+	return _last_notify_us
+
+
+func _sync_pile_visibility(counter_cell: Vector2i, count: int) -> void:
+	if not _pile_nodes_by_cell.has(counter_cell):
+		return
+	var nodes: Array = _pile_nodes_by_cell[counter_cell] as Array
+	var visible_count: int = clampi(count, 0, mini(MAX_STOCK_PER_COUNTER, nodes.size()))
+	for index: int in range(nodes.size()):
+		var sprite: Sprite2D = nodes[index] as Sprite2D
+		if sprite == null or not is_instance_valid(sprite):
+			continue
+		sprite.visible = index < visible_count
 
 
 func _resolve_pile_parent() -> Node:

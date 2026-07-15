@@ -47,7 +47,6 @@ var _emitting_restored_phase_signals: bool = false
 
 const SELECTED_LEVEL_META: StringName = &"selected_level_scene_path"
 const STARTUP_SAVE_PATH_META: StringName = &"startup_save_path"
-const SKIP_STARTUP_AUTOSAVE_META: StringName = &"skip_startup_autosave"
 const FORCE_LEVEL_SELECTION_META: StringName = &"force_level_selection"
 
 
@@ -263,14 +262,6 @@ func consume_startup_save_load_path(default_save_path: String) -> String:
 	return ""
 
 
-func skip_startup_autosave_once() -> void:
-	set_meta(SKIP_STARTUP_AUTOSAVE_META, true)
-	# Every fresh start (reset, level select, game-over restart) routes through here,
-	# so this is the single place that clears carried-over night-reward claims.
-	reset_special_reward_claims()
-	reset_transient_run_state()
-
-
 func force_level_selection_once() -> void:
 	set_meta(FORCE_LEVEL_SELECTION_META, true)
 
@@ -344,10 +335,3 @@ func apply_special_reward_claim_save_data(data: Dictionary) -> void:
 
 func _special_reward_claim_key(night_index: int, reward_key: String) -> String:
 	return "%d:%s" % [night_index, reward_key]
-
-
-func consume_skip_startup_autosave() -> bool:
-	if not has_meta(SKIP_STARTUP_AUTOSAVE_META):
-		return false
-	remove_meta(SKIP_STARTUP_AUTOSAVE_META)
-	return true

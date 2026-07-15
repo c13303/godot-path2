@@ -13,10 +13,6 @@ extends Node
 # so the effective values are already in place when the earliest logs fire.
 static var logs_enabled: bool = false
 static var save_logs_enabled: bool = false
-## Mirror of the "Enable Auto-Save" option below, read by progression.gd. Static so
-## the autoloaded progression node can read it without a scene lookup, and so it
-## survives scene reloads. Refreshed in _apply_debug_settings().
-static var auto_save_enabled: bool = false
 
 ## Routine/informational log. Printed only while Debug Enabled is ON.
 static func dlog(message: String) -> void:
@@ -99,16 +95,6 @@ static var _force_debug_on_restart: bool = false
 		_apply_debug_settings()
 
 @export_group("Save")
-## Master switch for the rose-growth auto-save AND the startup auto-load. When OFF
-## (default), the game never writes the autosave slot and never restores it on
-## launch, so only the manual F5/F9 slot is used. Kept OFF to avoid autosave/manual
-## save conflicts (a stale autosave could otherwise resurrect a night monster into a
-## freshly reloaded day). Read by progression.gd via the static auto_save_enabled.
-@export var enable_auto_save: bool = false:
-	set(value):
-		enable_auto_save = value
-		_apply_debug_settings()
-
 ## Gates the "[SAVE] ..." save/progression console logs. When OFF, those lines
 ## are hidden even while Debug Enabled is ON. (When Debug Enabled is OFF they are
 ## hidden regardless, like every other debug log.)
@@ -118,6 +104,16 @@ static var _force_debug_on_restart: bool = false
 		_apply_debug_settings()
 
 @export_group("Gardens")
+@export var debug_rose_harvest_telemetry: bool = false:
+	set(value):
+		debug_rose_harvest_telemetry = value
+		_apply_debug_settings()
+
+@export_range(0.0, 100.0, 0.1, "or_greater") var debug_rose_harvest_warn_ms: float = 1.0:
+	set(value):
+		debug_rose_harvest_warn_ms = value
+		_apply_debug_settings()
+
 @export var show_gardens: bool = true:
 	set(value):
 		show_gardens = value
@@ -551,7 +547,6 @@ func _apply_debug_settings() -> void:
 	# Refresh the static console-log gates read by dlog()/save_log() everywhere.
 	logs_enabled = dbg
 	save_logs_enabled = save_debug_log
-	auto_save_enabled = enable_auto_save
 	var eff_world_hitboxes: bool = draw_world_hitboxes and dbg
 	var eff_combat_hitboxes: bool = draw_combat_hitboxes and dbg
 	var eff_bottleneck_zones: bool = draw_bottleneck_zones and dbg

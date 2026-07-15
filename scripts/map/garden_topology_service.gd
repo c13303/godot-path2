@@ -807,7 +807,7 @@ func mark_garden_empty(garden_id: int) -> void:
 
 func is_eatable_for_monster(cell: Vector2i) -> bool:
 	if _counter_access_cells.has(cell):
-		return _manager._counter_stock(_counter_access_cells[cell] as Vector2i) > 0
+		return false
 	var plant_manager: Node = _plant_manager()
 	return plant_manager != null and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell))
 

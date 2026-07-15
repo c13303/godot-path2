@@ -231,15 +231,12 @@ func process_plant_arrivals() -> void:
 		if counter_access_cells.has(plant_cell):
 			erase_astar_in_agent(nav_id)
 			var counter_cell: Vector2i = counter_access_cells[plant_cell] as Vector2i
-			if _counter_stock(counter_cell) <= 0:
-				if _agent_kind(agent) == SPAWNER_KIND_CLIENT:
-					handle_empty_counter_arrival(agent)
-				else:
-					_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
-			elif _agent_kind(agent) == SPAWNER_KIND_CLIENT:
-				start_client_counter_payment(agent, counter_cell)
+			if _agent_kind(agent) != SPAWNER_KIND_CLIENT:
+				_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
+			elif _counter_stock(counter_cell) <= 0:
+				handle_empty_counter_arrival(agent)
 			else:
-				_manager._consume_counter_rose(agent, spawner_cell, plant_cell)
+				start_client_counter_payment(agent, counter_cell)
 			continue
 		if _manager._plant_manager_can_check_plants() and not _manager._has_plant_cell(plant_cell):
 			erase_astar_in_agent(nav_id)
@@ -329,10 +326,11 @@ func process_client_counter_arrivals() -> void:
 # client here too.
 func handle_empty_counter_arrival(agent: Node2D) -> void:
 	var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
-	if _manager._total_counter_stock() > 0 or _manager.grownup_rose_count() > 0:
+	if _agent_kind(agent) == SPAWNER_KIND_CLIENT and (_manager._total_counter_stock() > 0 or _manager.grownup_rose_count() > 0):
 		_garden_retarget.retarget_agent_or_escape(agent, spawner_cell)
 		return
-	_manager.get_client_tantrum_controller().start_all_clients_without_rose()
+	if _agent_kind(agent) == SPAWNER_KIND_CLIENT:
+		_manager.get_client_tantrum_controller().start_all_clients_without_rose()
 
 
 func start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> void:

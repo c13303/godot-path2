@@ -89,7 +89,7 @@ func _on_restart_pressed() -> void:
 	if _progression != null and _progression.has_method("reset_game"):
 		_progression.call("reset_game")
 		return
-	GameState.skip_startup_autosave_once()
+	GameState.reset_special_reward_claims()
 	GameState.reset_transient_run_state()
 	var reload_error: Error = get_tree().reload_current_scene()
 	if reload_error != OK:

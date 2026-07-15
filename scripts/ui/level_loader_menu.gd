@@ -2,7 +2,6 @@ extends Control
 
 const LEVELS_DIR: String = "res://scenes/levels"
 const MAIN_RUN_SCENE: String = "res://mainRun.tscn"
-const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 const MANUAL_SAVE_PATH: String = "user://progression_save.json"
 const PAD_AXIS_DEADZONE: float = 0.45
 const PAD_REPEAT_INITIAL_DELAY: float = 0.28
@@ -66,9 +65,6 @@ func _unhandled_input(event: InputEvent) -> void:
 func _populate_choices() -> void:
 	var added_count: int = 0
 
-	if FileAccess.file_exists(AUTOSAVE_PATH):
-		_add_choice("Reload autosave", Callable(self, "_on_save_pressed").bind(AUTOSAVE_PATH))
-		added_count += 1
 	if FileAccess.file_exists(MANUAL_SAVE_PATH):
 		_add_choice("Reload F9", Callable(self, "_on_save_pressed").bind(MANUAL_SAVE_PATH))
 		added_count += 1
@@ -227,14 +223,14 @@ func _read_cpp_bool_option(scene_path: String, property_name: String) -> int:
 
 func _auto_load_default_level() -> void:
 	GameState.clear_selected_level_scene_path()
-	GameState.skip_startup_autosave_once()
+	GameState.reset_special_reward_claims()
 	GameState.reset_transient_run_state()
 	_load_main_run()
 
 
 func _on_level_pressed(level_path: String) -> void:
 	GameState.set_selected_level_scene_path(level_path)
-	GameState.skip_startup_autosave_once()
+	GameState.reset_special_reward_claims()
 	GameState.reset_transient_run_state()
 	_load_main_run()
 

@@ -1,11 +1,9 @@
 extends Node
 ## Game-flow / menu controller for the main run scene.
 ##
-## Owns the auto-save lifecycle and the in-scene confirmation prompts:
-##   - On launch the latest auto-save is restored.
-##   - The plant manager auto-saves once after overnight rose growth completes.
-##   - R asks to reset the game (wipe the save and start a fresh new game).
-##   - ESC asks to quit without touching the auto-save slot.
+## Owns the in-scene confirmation prompts:
+##   - R asks to reset the game and start a fresh new game.
+##   - ESC asks to quit.
 ##
 ## The prompt UI is premade and themed in mainRun.tscn under `Prompts`; this
 ## script only drives its message and YES/NO behaviour. The actual save / load /
@@ -36,11 +34,6 @@ func _ready() -> void:
 	_level_selection_button.pressed.connect(_on_level_selection_pressed)
 	_no_button.pressed.connect(_on_no_pressed)
 
-	# Restore the auto-save into the freshly loaded scene. Runs after the
-	# progression node's own _ready, so an F9 pending-load is not applied twice.
-	if _progression.has_method("load_on_start"):
-		_progression.call("load_on_start")
-
 	# With save-loading now resolved, place the player on the level's authored
 	# "player" spawn marker for a fresh start. A restored save keeps its own
 	# player position, so this is a no-op after a load. Still _ready-time, so the
@@ -66,10 +59,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	match key_event.keycode:
 		KEY_R:
 			get_viewport().set_input_as_handled()
-			_show_prompt("Reset game?\nThis erases your save.", _confirm_reset)
+			_show_prompt("Reset run?\nManual saves are kept.", _confirm_reset)
 		KEY_ESCAPE:
 			get_viewport().set_input_as_handled()
-			_show_prompt("Quit game?\nProgress will be saved.", _confirm_quit, "Return", "Quit", true)
+			_show_prompt("Quit game?\nUnsaved progress will be lost.", _confirm_quit, "Return", "Quit", true)
 
 
 ## Show the reusable prompt with `message`; `on_confirm` runs if YES is chosen.
@@ -116,13 +109,13 @@ func _on_level_selection_pressed() -> void:
 		push_error("Menus: failed to load %s (error %d)" % [LEVEL_MENU_SCENE, int(change_error)])
 
 
-## YES on the reset prompt: wipe the save and start a brand-new game.
+## YES on the reset prompt: start a brand-new game without touching the manual save.
 func _confirm_reset() -> void:
 	if _progression.has_method("reset_game"):
 		_progression.call("reset_game")
 
 
-## YES on the quit prompt: quit without touching the rose-growth auto-save slot.
+## YES on the quit prompt: quit without writing a save.
 func _confirm_quit() -> void:
 	get_tree().quit()
 

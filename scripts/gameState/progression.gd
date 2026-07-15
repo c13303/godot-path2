@@ -5,9 +5,6 @@ signal values_changed
 
 ## Manual save slot, written/read by the F5/F9 hotkeys.
 const SAVE_PATH: String = "user://progression_save.json"
-## Auto-save slot, written on each new day / on quit and restored on launch.
-## Kept separate from SAVE_PATH so auto-saving never clobbers a manual F5 save.
-const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 # v4 replaces the ambiguous day-phase flags with one canonical gameplay phase and
 # persists the dawn sub-stage needed to resume before clients correctly.
 # Version 5 adds the "runtime_houses" section (player-built houses). Versions 1-4 are still
@@ -120,8 +117,7 @@ var _seed_label_tween: Tween
 var _gem_label_tween: Tween
 var _money_label_tween: Tween
 var _water_reserve_tween: Tween
-# True once a save has been applied to this scene instance (pending-load during
-# _ready or startup auto-load). Prevents the auto-save from being applied twice.
+# True once a manual save has been applied to this scene instance during _ready.
 var _save_applied: bool = false
 
 
@@ -626,57 +622,6 @@ func load_progression() -> void:
 		_fail("Load failed: scene reload error %d" % int(reload_error))
 
 
-## Write the auto-save slot (separate file from the F5/F9 manual slot).
-## Skipped entirely while the Enable Auto-Save option is OFF; returns true so callers
-## that gate progression on "the save happened" still proceed (no file is written).
-func auto_save() -> bool:
-	if not CppDebugOptions.auto_save_enabled:
-		_log("Auto-save skipped: auto-save disabled")
-		return true
-	return save_progression(AUTOSAVE_PATH)
-
-
-func auto_save_after_rose_growth() -> bool:
-	# When auto-save is off, don't touch the autosave slot, but still report success:
-	# plant_manager only advances the new day when this returns true, so the day must
-	# keep progressing even though nothing is written.
-	if not CppDebugOptions.auto_save_enabled:
-		_log("Rose-growth auto-save skipped: auto-save disabled; day still advances")
-		return true
-	_log("Rose-growth auto-save requested")
-	return save_progression(AUTOSAVE_PATH, "dawn", {
-		"dawn_stage": "harvest",
-	})
-
-
-## Startup auto-load: restore the auto-save slot into the freshly loaded scene.
-## No scene reload happens here (the scene is already pristine on launch). Skips
-## silently when there is no auto-save, or when a pending-load already applied a
-## manual save during _ready (the F9 reload path).
-func load_on_start() -> void:
-	if _save_applied:
-		return
-	# Consume the one-shot skip flag regardless so it never leaks into a later launch.
-	var skip_requested: bool = GameState.consume_skip_startup_autosave()
-	# Auto-save off also means auto-load off: a fresh launch never restores the
-	# autosave slot, so a stale snapshot can't resurface (only manual F9 loads a save).
-	if not CppDebugOptions.auto_save_enabled:
-		_log("Startup auto-load skipped: auto-save disabled")
-		return
-	if skip_requested:
-		_log("Startup auto-load skipped for fresh selected level")
-		return
-	if not FileAccess.file_exists(AUTOSAVE_PATH):
-		_log("No auto-save found on start; beginning a fresh game")
-		return
-	var data: Dictionary = _read_save_data(AUTOSAVE_PATH)
-	if data.is_empty():
-		return
-	_log("Auto-loading save on start")
-	_log("Auto-load summary: %s" % _save_summary(data))
-	_apply_save_to_fresh_scene(data)
-
-
 ## Places the player on the level's authored "player" spawn marker. Only applies
 ## on a fresh start: when a save was restored the player keeps its saved position,
 ## so this is a no-op. Called during startup _ready (after save-loading is
@@ -716,21 +661,13 @@ func _find_player_spawn_marker() -> Node2D:
 	return null
 
 
-## Wipe the auto-save slot and restart a brand-new game (Day 1, defaults). The
-## fresh scene reload recreates progression at its defaults; skipping the next
-## startup auto-load keeps the post-reload load_on_start from restoring the lost
-## run. The manual F5 slot is intentionally left untouched.
+## Restart a brand-new game (Day 1, defaults). The manual F5 slot is intentionally
+## left untouched.
 func reset_game() -> void:
-	GameState.skip_startup_autosave_once()
-	if FileAccess.file_exists(AUTOSAVE_PATH):
-		var remove_error: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(AUTOSAVE_PATH))
-		if remove_error == OK:
-			_log("Auto-save deleted; resetting to a new game")
-		else:
-			_fail("Reset: could not delete save (error %d)" % int(remove_error))
 	# A leftover pending-load flag must never carry into the fresh game.
 	if GameState.has_meta(PENDING_LOAD_META):
 		GameState.remove_meta(PENDING_LOAD_META)
+	GameState.reset_special_reward_claims()
 	GameState.reset_transient_run_state()
 	_unregister_scene_agents()
 	var reload_error: Error = get_tree().reload_current_scene()

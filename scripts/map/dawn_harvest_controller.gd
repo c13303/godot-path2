@@ -140,17 +140,63 @@ func check_finished() -> void:
 func _harvest_grownup_rose(plant_manager: Node, rose_cell: Vector2i) -> void:
 	if not plant_manager.has_method("harvest_grownup_rose"):
 		return
+	var telemetry_enabled: bool = _manager.rose_harvest_telemetry_enabled()
+	var total_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
+	var lookup_started_us: int = total_started_us
 	var counter_cells: Array[Vector2i] = _manager.rose_shop_counter_cells_with_room()
 	if counter_cells.is_empty():
 		return
 	var target_counter: Vector2i = counter_cells[randi_range(0, counter_cells.size() - 1)]
+	var lookup_us: int = Time.get_ticks_usec() - lookup_started_us if telemetry_enabled else 0
 	var rose_world: Vector2 = _manager.cell_center(rose_cell)
+	var created_before: int = _manager.bouquet_sprites_created_count() if telemetry_enabled else 0
+	var freed_before: int = _manager.bouquet_sprites_freed_count() if telemetry_enabled else 0
+	var navigation_revision_before: int = _manager.navigation_revision() if telemetry_enabled else 0
+	var invalidation_before: bool = _manager.navigation_or_plant_invalidation_pending() if telemetry_enabled else false
+	var previous_stock: int = _manager.counter_stock(target_counter) if telemetry_enabled else 0
+	var plant_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
 	if not bool(plant_manager.call("harvest_grownup_rose", rose_cell)):
 		return
+	var plant_us: int = Time.get_ticks_usec() - plant_started_us if telemetry_enabled else 0
+	var stock_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
 	_manager.add_counter_stock(target_counter, 1)
+	var stock_call_us: int = Time.get_ticks_usec() - stock_started_us if telemetry_enabled else 0
+	var flight_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
 	_manager.animate_harvested_rose_to_counter(rose_world, target_counter)
-	_manager.auto_save_after_rose_harvest()
+	var flight_us: int = Time.get_ticks_usec() - flight_started_us if telemetry_enabled else 0
+	var finish_started_us: int = Time.get_ticks_usec() if telemetry_enabled else 0
 	check_finished()
+	var finish_us: int = Time.get_ticks_usec() - finish_started_us if telemetry_enabled else 0
+	if telemetry_enabled:
+		var stock_logic_us: int = _manager.last_counter_stock_logic_us()
+		var pile_us: int = _manager.last_counter_pile_sync_us()
+		var notify_us: int = _manager.last_counter_notify_us()
+		var stock_us: int = stock_logic_us
+		if stock_us <= 0:
+			stock_us = stock_call_us
+		var current_stock: int = _manager.counter_stock(target_counter)
+		var created_after: int = _manager.bouquet_sprites_created_count()
+		var freed_after: int = _manager.bouquet_sprites_freed_count()
+		var navigation_revision_after: int = _manager.navigation_revision()
+		var invalidation_after: bool = _manager.navigation_or_plant_invalidation_pending()
+		_manager.record_rose_harvest_perf({
+			"frame": Engine.get_process_frames(),
+			"rose_cell": rose_cell,
+			"counter_cell": target_counter,
+			"lookup_us": lookup_us,
+			"plant_us": plant_us,
+			"stock_us": stock_us,
+			"pile_us": pile_us,
+			"notify_us": notify_us,
+			"flight_us": flight_us,
+			"finish_us": finish_us,
+			"total_us": Time.get_ticks_usec() - total_started_us,
+			"stock_change": "%d->%d" % [previous_stock, current_stock],
+			"bouquet_created": created_after - created_before,
+			"bouquet_freed": freed_after - freed_before,
+			"topology_rebuild": navigation_revision_after != navigation_revision_before,
+			"navigation_invalidation": invalidation_after and not invalidation_before,
+		})
 
 
 func _harvest_imperial_rose(plant_manager: Node, imperial_cell: Vector2i) -> void:

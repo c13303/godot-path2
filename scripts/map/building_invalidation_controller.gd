@@ -95,12 +95,6 @@ func mark_after_blocking_building_removed() -> void:
 	after_walkability_changed("building_removed")
 
 
-func mark_after_counter_stock_restored() -> void:
-	_garden_topology.counter_access_cells().clear()
-	_garden_topology.set_plant_zone_built(false)
-	mark_plant_layout_dirty()
-
-
 # A plant was added/removed during the day (or while no runtime agents are active).
 # Invalidates the built plant-zone snapshot, restarts the shared topology quiet
 # period, and refreshes the zone overlay. The budgeted owner rebuilds later.
