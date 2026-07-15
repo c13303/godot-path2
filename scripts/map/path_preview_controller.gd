@@ -12,11 +12,11 @@ const IDLE_GROUP: int = 0
 @export var building_manager_path: NodePath = NodePath("../../BuildingManager")
 @export var flow_path: NodePath = NodePath("../../../CPP/FlowFieldNative")
 @export var preview_z_index: int = -50
-@export_range(30.0, 900.0, 5.0, "or_greater") var walker_speed: float = 380.0
-@export_range(0.05, 3.0, 0.05, "or_greater") var walker_departure_interval: float = 0.5
-@export_range(1.0, 96.0, 1.0, "or_greater") var footstep_pair_spacing_distance: float = 10.0
+@export_range(1.0, 128.0, 1.0, "or_greater") var footstep_stride_distance: float = 16.0
+@export_range(1.0, 128.0, 1.0, "or_greater") var walk_speed: float = 32.0
 @export_range(0.0, 24.0, 0.5, "or_greater") var footstep_side_offset: float = 6.0
-@export_range(0.1, 8.0, 0.05, "or_greater") var footstep_lifetime: float = 2.2
+@export_range(0.05, 2.0, 0.05, "or_greater") var footstep_fade_duration: float = 0.45
+@export_range(2, 12, 2, "or_greater") var steps_per_nominal_animation: int = 6
 @export_range(0.1, 4.0, 0.05, "or_greater") var footprint_scale: float = 1.0
 @export_range(0.1, 2.0, 0.05, "or_greater") var refresh_interval: float = 0.35
 
@@ -168,6 +168,8 @@ func _plan_route_path(route: Dictionary) -> Dictionary:
 
 
 func _rebuild_segment_ownership() -> void:
+	for runner: PathPreviewRunner in _runners:
+		runner.recycle()
 	var edge_owner: Dictionary = {}
 	for route_index: int in range(_routes.size()):
 		var route: Dictionary = _routes[route_index]
@@ -182,6 +184,7 @@ func _rebuild_segment_ownership() -> void:
 			if int(edge_owner.get(edge_key, -1)) == route_index:
 				owned_segments[segment_index] = true
 		route["owned_segments"] = owned_segments
+		route["walkers_started"] = false
 		_routes[route_index] = route
 
 
@@ -215,6 +218,11 @@ func _start_ready_route_walkers() -> void:
 			continue
 		if bool(route.get("walkers_started", false)):
 			continue
+		var owned_segments: Dictionary = route.get("owned_segments", {}) as Dictionary
+		if owned_segments.is_empty():
+			route["walkers_started"] = true
+			_routes[index] = route
+			continue
 		_start_route_walkers(route, path)
 		route["walkers_started"] = true
 		_routes[index] = route
@@ -224,22 +232,54 @@ func _start_route_walkers(route: Dictionary, path: PackedVector2Array) -> void:
 	var total_line_length: float = PathPreviewRunner.measure_path_length(path)
 	if total_line_length <= 0.0:
 		return
-	var walker_spacing: float = maxf(1.0, walker_speed * walker_departure_interval)
-	var walker_count: int = maxi(1, ceili(total_line_length / walker_spacing))
-	for walker_index: int in range(walker_count):
-		var walker_start_distance: float = total_line_length * float(walker_index) / float(walker_count)
+	var sections: Array[Dictionary] = _build_walk_animation_sections(total_line_length)
+	for section: Dictionary in sections:
 		var runner: PathPreviewRunner = _idle_runner()
 		runner.start(
 			path,
 			route.get("owned_segments", {}) as Dictionary,
 			int(route.get("footprint_frame", PathPreviewRunner.FOOTPRINT_FRAME_MONSTER)),
-			walker_speed,
-			footstep_pair_spacing_distance,
+			walk_speed,
+			footstep_stride_distance,
 			footstep_side_offset,
+			footstep_fade_duration,
 			footprint_scale,
-			footstep_lifetime,
-			walker_start_distance
+			float(section.get("start_distance", 0.0)),
+			float(section.get("boundary_distance", 0.0)),
+			int(section.get("step_count", 0))
 		)
+
+
+func _build_walk_animation_sections(total_line_length: float) -> Array[Dictionary]:
+	var sections: Array[Dictionary] = []
+	var stride_distance: float = maxf(1.0, footstep_stride_distance)
+	var nominal_section_length: float = stride_distance * float(maxi(2, steps_per_nominal_animation))
+	var full_step_count: int = int(floor(total_line_length / stride_distance))
+	var usable_step_count: int = full_step_count - (full_step_count % 2)
+	if usable_step_count < 2:
+		return sections
+	var total_pair_count: int = usable_step_count / 2
+	var wanted_animation_count: int = int(ceil(total_line_length / nominal_section_length))
+	var maximum_animation_count: int = maxi(1, total_pair_count / 2)
+	var animation_count: int = clampi(wanted_animation_count, 1, maximum_animation_count)
+	var base_pairs: int = total_pair_count / animation_count
+	var remainder_pairs: int = total_pair_count % animation_count
+	var start_distance: float = 0.0
+	for index: int in range(animation_count):
+		var pairs_for_animation: int = base_pairs
+		if index < remainder_pairs:
+			pairs_for_animation += 1
+		var steps_for_animation: int = pairs_for_animation * 2
+		var boundary_distance: float = start_distance + float(steps_for_animation) * stride_distance
+		if index == animation_count - 1:
+			boundary_distance = total_line_length
+		sections.append({
+			"start_distance": start_distance,
+			"boundary_distance": boundary_distance,
+			"step_count": steps_for_animation,
+		})
+		start_distance += float(steps_for_animation) * stride_distance
+	return sections
 
 
 func _idle_runner() -> PathPreviewRunner:

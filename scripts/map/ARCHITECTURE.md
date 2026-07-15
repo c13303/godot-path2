@@ -48,8 +48,9 @@ Notes:
 ## PathPreviewController / PathPreviewRunner
 Owns:
 - Preview-only client/monster route descriptors, temporary flow groups, route signatures, low-frequency refresh, runner pooling, and phase cleanup.
-- Distributed invisible preview walkers for each ready route, sized from actual polyline length and configured departure spacing.
-- Runner-owned stride stamping, alternating left/right footprint offsets, local tangent orientation, fade aging/removal, and end-to-start wrapping without counting the teleport as travelled distance.
+- Distributed invisible Walk Animation sections for each ready route, sized from actual polyline length, 16 px stride distance, and even step-pair allocation.
+- Runner-owned arc-length stamping, alternating left/right footprint offsets, local tangent orientation, bounded held/fading footprint slots per side, and section-boundary wrapping without counting the teleport as travelled distance.
+- Deterministic shared-edge ownership for preview routes: matching `(A, B)` / `(B, A)` edges are assigned once by stable route order, and runners may travel through every section but only print on owned segments.
 
 Does not own:
 - Gameplay spawning, normal spawner/garden route groups, native agent registration, steering, A* routes, or map topology state.
@@ -58,6 +59,7 @@ Notes:
 - Preview groups are allocated through AgentManager but never receive agents. Flow builds use SpawnerRouteService's normal one-request-per-frame queue with explicit policy: clients block fences, monsters ignore fences.
 - The preview consumes prepared tile-center polylines as path data only; it does not draw the line or alter route generation.
 - The footprint sheet uses authored client/monster colors directly, with alpha fading only.
+- Default Starpath cadence is 16 px stride at 32 px/s: one footprint every 0.5 s, same-side replacement every 1.0 s, 6 px lateral offset per side, and 0.45 s linear fade for replaced same-side footprints.
 - Runtime agents register with AgentCellTracker through runtime-agent tracking wrappers only.
 
 ## AgentNavigationPhaseController
