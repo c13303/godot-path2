@@ -48,9 +48,9 @@ Notes:
 ## PathPreviewController / PathPreviewRunner
 Owns:
 - Preview-only client/monster route descriptors, temporary flow groups, route signatures, low-frequency refresh, runner pooling, and phase cleanup.
-- Distributed invisible Walk Animation sections for each ready route, sized from actual polyline length, 16 px stride distance, and even step-pair allocation.
+- Distributed invisible Walk Animation sections for each ready route, sized from actual polyline length, 16 px stride distance, even step-pair allocation, and a 4x density reduction target.
 - Runner-owned arc-length stamping, alternating left/right footprint offsets, local tangent orientation, bounded held/fading footprint slots per side, and section-boundary wrapping without counting the teleport as travelled distance.
-- Deterministic shared-edge ownership for preview routes: matching `(A, B)` / `(B, A)` edges are assigned once by stable route order, and runners may travel through every section but only print on owned segments.
+- Deterministic shared-edge ownership for preview routes: matching `(A, B)` / `(B, A)` edges are assigned once by stable route order, and runners may travel through every section but only print on owned segments. A skipped unowned step retires that side's held footprint into its normal fade slot so route splits do not leave frozen fully-opaque stamps behind.
 
 Does not own:
 - Gameplay spawning, normal spawner/garden route groups, native agent registration, steering, A* routes, or map topology state.
@@ -59,7 +59,7 @@ Notes:
 - Preview groups are allocated through AgentManager but never receive agents. Flow builds use SpawnerRouteService's normal one-request-per-frame queue with explicit policy: clients block fences, monsters ignore fences.
 - The preview consumes prepared tile-center polylines as path data only; it does not draw the line or alter route generation.
 - The footprint sheet uses authored client/monster colors directly, with alpha fading only.
-- Default Starpath cadence is 16 px stride at 32 px/s: one footprint every 0.5 s, same-side replacement every 1.0 s, 6 px lateral offset per side, and 0.45 s linear fade for replaced same-side footprints.
+- Default Starpath cadence is 16 px stride at 64 px/s: one footprint every 0.25 s, same-side replacement every 0.5 s, 6 px lateral offset per side, and 0.45 s linear fade for replaced same-side footprints. The default section target is one Walk Animation per 384 px instead of one per 96 px.
 - Runtime agents register with AgentCellTracker through runtime-agent tracking wrappers only.
 
 ## AgentNavigationPhaseController

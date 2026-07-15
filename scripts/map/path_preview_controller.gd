@@ -13,10 +13,11 @@ const IDLE_GROUP: int = 0
 @export var flow_path: NodePath = NodePath("../../../CPP/FlowFieldNative")
 @export var preview_z_index: int = -50
 @export_range(1.0, 128.0, 1.0, "or_greater") var footstep_stride_distance: float = 16.0
-@export_range(1.0, 128.0, 1.0, "or_greater") var walk_speed: float = 32.0
+@export_range(1.0, 128.0, 1.0, "or_greater") var walk_speed: float = 128.0
 @export_range(0.0, 24.0, 0.5, "or_greater") var footstep_side_offset: float = 6.0
 @export_range(0.05, 2.0, 0.05, "or_greater") var footstep_fade_duration: float = 0.45
 @export_range(2, 12, 2, "or_greater") var steps_per_nominal_animation: int = 6
+@export_range(1, 8, 1, "or_greater") var walk_animation_density_reduction: int = 4
 @export_range(0.1, 4.0, 0.05, "or_greater") var footprint_scale: float = 1.0
 @export_range(0.1, 2.0, 0.05, "or_greater") var refresh_interval: float = 0.35
 
@@ -254,12 +255,13 @@ func _build_walk_animation_sections(total_line_length: float) -> Array[Dictionar
 	var sections: Array[Dictionary] = []
 	var stride_distance: float = maxf(1.0, footstep_stride_distance)
 	var nominal_section_length: float = stride_distance * float(maxi(2, steps_per_nominal_animation))
+	var target_section_length: float = nominal_section_length * float(maxi(1, walk_animation_density_reduction))
 	var full_step_count: int = int(floor(total_line_length / stride_distance))
 	var usable_step_count: int = full_step_count - (full_step_count % 2)
 	if usable_step_count < 2:
 		return sections
 	var total_pair_count: int = usable_step_count / 2
-	var wanted_animation_count: int = int(ceil(total_line_length / nominal_section_length))
+	var wanted_animation_count: int = int(ceil(total_line_length / target_section_length))
 	var maximum_animation_count: int = maxi(1, total_pair_count / 2)
 	var animation_count: int = clampi(wanted_animation_count, 1, maximum_animation_count)
 	var base_pairs: int = total_pair_count / animation_count

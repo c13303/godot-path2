@@ -21,7 +21,7 @@ var _cumulative_lengths: Array[float] = []
 var _total_length: float = 0.0
 var _owned_segments: Dictionary = {}
 var _footprint_frame: int = FOOTPRINT_FRAME_MONSTER
-var _walk_speed: float = 32.0
+var _walk_speed: float = 128.0
 var _stride_distance: float = 16.0
 var _side_offset: float = 6.0
 var _fade_duration: float = 0.45
@@ -180,8 +180,11 @@ func _try_stamp_next_step() -> void:
 	var step_distance: float = _next_step_path_distance()
 	var sample: Dictionary = _sample_path(step_distance)
 	var segment_index: int = int(sample.get("segment_index", -1))
+	var is_left: bool = _next_local_step_index % 2 == 0
 	if _owned_segments.has(segment_index):
 		_stamp_sample(sample, _next_local_step_index)
+	else:
+		_retire_held_footprint(is_left)
 	_next_local_step_index += 1
 
 
@@ -210,6 +213,19 @@ func _stamp_sample(sample: Dictionary, local_step_index: int) -> void:
 			_fading_right = _held_right
 			_fading_right["fade_age"] = 0.0
 		_held_right = footprint
+
+
+func _retire_held_footprint(is_left: bool) -> void:
+	if is_left:
+		if not _held_left.is_empty():
+			_fading_left = _held_left
+			_fading_left["fade_age"] = 0.0
+			_held_left = {}
+	else:
+		if not _held_right.is_empty():
+			_fading_right = _held_right
+			_fading_right["fade_age"] = 0.0
+			_held_right = {}
 
 
 func _age_fading_footprints(delta: float) -> void:
