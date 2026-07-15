@@ -27,6 +27,7 @@ const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
 const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.45
 
 var _manager: BuildingManager
+var _hammer_visual: BuilderHammerVisualController = BuilderHammerVisualController.new()
 var _visitors: Array[DayVisitorMovementController] = []
 var _claimed_cells: Dictionary = {}  # Vector2i -> DayVisitorMovementController
 var _visitor_ids: Dictionary = {}  # DayVisitorMovementController -> int
@@ -375,6 +376,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_idle_home_check_elapsed = 0.0
 	_fundamental_builder_id = -1
 	_fundamental_builder_paused = false
+	_hammer_visual.clear_all()
 	_clear_motion_watch()
 
 
@@ -596,20 +598,14 @@ func release_builder_from_work(builder_id: int) -> void:
 	_reset_builder_motion_watch(builder_id)
 
 
-# Visual-only delegation to the Builder agent's generic held-object API. Construction
-# timing stays with HouseBuilderWorkController; this only resolves the agent node.
-func play_builder_hammer_swing(builder_id: int, duration: float, swing_target_global: Vector2) -> void:
-	var agent: Node2D = _builder_agent_node(builder_id)
-	if agent == null or not agent.has_method("animate_held_object_full_rotation"):
-		return
-	agent.call("animate_held_object_full_rotation", duration, swing_target_global)
+# Visual-only delegation. Construction timing stays with HouseBuilderWorkController and the
+# swing itself with BuilderHammerVisualController; this only resolves the agent node.
+func play_builder_hammer_swing(builder_id: int, swing_target_global: Vector2) -> void:
+	_hammer_visual.play_swing(builder_id, _builder_agent_node(builder_id), swing_target_global)
 
 
 func stop_builder_hammer_swing(builder_id: int) -> void:
-	var agent: Node2D = _builder_agent_node(builder_id)
-	if agent == null or not agent.has_method("stop_held_object_animation"):
-		return
-	agent.call("stop_held_object_animation")
+	_hammer_visual.stop_swing(builder_id, _builder_agent_node(builder_id))
 
 
 func _builder_agent_node(builder_id: int) -> Node2D:
@@ -916,6 +912,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 			_fundamental_builder_id = -1
 		_clear_idle_return_state(builder_id)
 		_clear_builder_motion_watch(builder_id)
+		_hammer_visual.forget_builder(builder_id)
 		if _manager != null:
 			_manager.get_house_builder_work_controller().on_builder_removed(builder_id)
 	visitor.forget_agent()

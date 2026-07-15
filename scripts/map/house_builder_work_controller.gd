@@ -8,7 +8,6 @@ const WORK_PHASE_MOVE: StringName = &"move"
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PAUSE_DURATIONS: Array[float] = [0.8, 1.1, 1.4, 1.0]
 const HAMMER_SWING_INTERVAL_SECONDS: float = 1.0
-const HAMMER_SWING_DURATION_SECONDS: float = 0.3
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null
@@ -137,17 +136,14 @@ func _advance_work(builder_id: int, house_id: StringName, delta: float) -> void:
 	_process_builder_hammer_swing(builder_id, house_id, delta)
 
 
-# Visual cadence only: one full hammer turn per second of actual house progress, each turn
-# swinging out to the worked house and back so the target is unambiguous.
+# Visual cadence only: one hammer strike per second of actual house progress, each strike
+# aimed at the worked house so the target is unambiguous.
 func _process_builder_hammer_swing(builder_id: int, house_id: StringName, delta: float) -> void:
-	var remaining: float = float(
-		_hammer_swing_remaining_by_builder_id.get(builder_id, HAMMER_SWING_INTERVAL_SECONDS)
-	)
+	var remaining: float = float(_hammer_swing_remaining_by_builder_id.get(builder_id, 0.0))
 	remaining -= maxf(0.0, delta)
 	if remaining <= 0.0:
 		_builder.play_builder_hammer_swing(
 			builder_id,
-			HAMMER_SWING_DURATION_SECONDS,
 			_house_manager.get_house_center_world(house_id)
 		)
 		# A large frame delta is normalized without queuing several swings.
@@ -201,8 +197,9 @@ func _try_assign_builder_to_house(builder_id: int, house_id: StringName) -> bool
 			_house_by_builder_id[builder_id] = house_id
 			_builder_by_house_id[house_id] = builder_id
 			_phase_by_builder_id[builder_id] = WORK_PHASE_TRAVEL
-			# Counts down only from _advance_work(), so travel to the house never swings.
-			_hammer_swing_remaining_by_builder_id[builder_id] = HAMMER_SWING_INTERVAL_SECONDS
+			# Counts down only from _advance_work(), so travel to the house never swings and
+			# the first strike lands on the first frame of real work.
+			_hammer_swing_remaining_by_builder_id[builder_id] = 0.0
 			if not _work_seconds_by_house_id.has(house_id):
 				_work_seconds_by_house_id[house_id] = 0.0
 			return true
@@ -266,7 +263,7 @@ func _clear_assignment_state(builder_id: int, house_id: StringName) -> void:
 	_builder_by_house_id.erase(house_id)
 	_phase_by_builder_id.erase(builder_id)
 	_pause_remaining_by_builder_id.erase(builder_id)
-	# The hammer stays visible; only its rotation stops and resets.
+	# The hammer stays visible; only its swing stops and resets to the normal held pose.
 	_builder.stop_builder_hammer_swing(builder_id)
 	_hammer_swing_remaining_by_builder_id.erase(builder_id)
 

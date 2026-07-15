@@ -45,7 +45,7 @@ func is_active() -> bool:
 	return _visitor.is_active()
 
 
-func begin_phase(merchant_spawners: Dictionary) -> void:
+func begin_phase(_merchant_spawners: Dictionary) -> void:
 	if _visitor.is_active() and not GameState.is_night:
 		GameState.set_seed_merchant_phase(true)
 

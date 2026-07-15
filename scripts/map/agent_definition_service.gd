@@ -106,7 +106,7 @@ func _apply_builder_visuals(agent: Node, texture: Texture2D) -> void:
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false
-	# The hammer is part of the Builder's permanent look; construction only spins it.
+	# The hammer is part of the Builder's permanent look; construction only swings it.
 	if agent.has_method("set_held_object"):
 		agent.call("set_held_object", BUILDER_HAMMER_TEXTURE, 1, 0, BUILDER_HAMMER_SCALE)
 

@@ -48,7 +48,7 @@ func configure() -> void:
 
 
 func start(
-	route_key: String,
+	new_route_key: String,
 	path: PackedVector2Array,
 	owned_segments: Dictionary,
 	footprint_frame: int,
@@ -61,7 +61,7 @@ func start(
 	section_boundary_distance: float,
 	section_step_count: int
 ) -> void:
-	_route_key = route_key
+	_route_key = new_route_key
 	_path = path
 	_segment_lengths.clear()
 	_cumulative_lengths.clear()

@@ -5,8 +5,9 @@ extends RichTextLabel
 ## during the day it inspects the rose/seed economy. It shows the single most
 ## relevant next step, translated through the Translations singleton. Empty water
 ## stays visible at night; other hints are hidden at night. Once the phase owner says
-## the afternoon can end, a hold-to-confirm prompt is shown without waiting on optional
-## tutorial build/economy steps.
+## the afternoon can end, holding the confirm input ends the day from under any hint —
+## build/economy steps and Builder onboarding alike. The only exception is the Builder
+## intro prompt, which binds the same input to its own action.
 ##
 ## Priority order (most prioritary first):
 ##   1. fundamental Builder onboarding .............. allow entry / talk / build house
@@ -276,20 +277,25 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	_update_alert_timer(delta)
+	# The intro prompt binds the hold input to letting the Builder in, so it is the one
+	# onboarding step that owns the input. Every other onboarding step below is a hint only:
+	# the afternoon-end hold keeps running under it.
 	if _fundamental_builder_intro_prompt_active():
 		_show_hold_action(HOLD_ACTION_ALLOW_BUILDER, delta)
 		return
 	if not _is_spawner_reveal_cutscene_active() and not _is_dialog_open() and _fundamental_builder_dialog_pending():
-		_reset_hold_progress()
+		_update_background_night_hold(delta)
 		_show_key_immediately(KEY_TALK_BUILDER)
 		return
-	var forced_builder_key: String = _forced_builder_onboarding_key()
+	# At night the onboarding build steps are not the player's current step, so they must not
+	# take the hint over. This matters now that the hold can end the day mid-onboarding.
+	var forced_builder_key: String = "" if GameState.is_night else _forced_builder_onboarding_key()
 	if forced_builder_key != "":
-		_reset_hold_progress()
+		_update_background_night_hold(delta)
 		_show_key_immediately(forced_builder_key)
 		return
 	if _normal_tutorials_suppressed_by_builder_onboarding():
-		_reset_hold_progress()
+		_update_background_night_hold(delta)
 		_displayed_key = ""
 		_pending_key = ""
 		text = ""
@@ -299,11 +305,7 @@ func _refresh(delta: float = 0.0) -> void:
 		_update_tutorial_arrow("")
 		return
 	if _alert_key != "":
-		var alert_start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
-		if alert_start_night_skip_hold_active:
-			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
-		else:
-			_reset_hold_progress()
+		_update_background_night_hold(delta)
 		if _alert_persistent:
 			visible = true
 			text = _alert_text()
@@ -346,25 +348,15 @@ func _refresh(delta: float = 0.0) -> void:
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
 		return
-	var start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
-	# These are tutorial hints only; they must not withhold the afternoon end hold
-	# action once the phase owner has made night start available. The visible prompt
-	# appears only when it is the natural next message; holding the input before that
-	# is the explicit player action that skips the remaining tutorial hints.
 	if _unbuild_tool_selected():
-		if start_night_skip_hold_active:
-			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
-		else:
-			_reset_hold_progress()
+		_update_background_night_hold(delta)
 		_show_key_immediately(KEY_UNBUILD_SELECTION)
 		return
 	if _water_refill_needed():
-		if start_night_skip_hold_active:
-			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
-		else:
-			_reset_hold_progress()
+		_update_background_night_hold(delta)
 		_show_key_immediately(KEY_REFILL_WATER)
 		return
+	var start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
 	# The dawn harvest can be skipped straight to the client sale by holding space once
 	# the roses are grown up. The hold runs in the background so the harvest hint stays on
 	# screen; the progress circle only appears while the key is actually held.
@@ -605,6 +597,17 @@ func _current_hold_action() -> StringName:
 
 func _start_night_pre_prompt_hold_active() -> bool:
 	return _should_request_start_night_prompt() and _hold_input_pressed()
+
+
+## Runs the afternoon-end hold underneath a hint that owns the label. Every contextual hint
+## is advisory: once the phase owner says night may start, holding the input must end the day
+## even though the "hold to start night" prompt is not the current message. Clears the hold
+## when night is not available, so a key held for something else never accumulates progress.
+func _update_background_night_hold(delta: float) -> void:
+	if _start_night_pre_prompt_hold_active():
+		_advance_hold(HOLD_ACTION_START_NIGHT, delta)
+	else:
+		_reset_hold_progress()
 
 
 ## Shows the hold prompt as the on-screen hint and advances its progress. Used when the

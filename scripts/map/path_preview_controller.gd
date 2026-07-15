@@ -341,10 +341,13 @@ func _build_walk_animation_sections(total_line_length: float) -> Array[Dictionar
 	var usable_step_count: int = full_step_count - (full_step_count % 2)
 	if usable_step_count < 2:
 		return sections
+	@warning_ignore("integer_division")
 	var total_pair_count: int = usable_step_count / 2
 	var wanted_animation_count: int = int(ceil(total_line_length / target_section_length))
+	@warning_ignore("integer_division")
 	var maximum_animation_count: int = maxi(1, total_pair_count / 2)
 	var animation_count: int = clampi(wanted_animation_count, 1, maximum_animation_count)
+	@warning_ignore("integer_division")
 	var base_pairs: int = total_pair_count / animation_count
 	var remainder_pairs: int = total_pair_count % animation_count
 	var start_distance: float = 0.0
