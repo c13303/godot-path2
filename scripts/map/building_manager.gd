@@ -1588,6 +1588,14 @@ func should_suppress_normal_tutorials_for_builder_onboarding() -> bool:
 	return _fundamental_builder_onboarding.should_suppress_normal_tutorials()
 
 
+func is_waiting_for_onboarding_house_completion() -> bool:
+	return _fundamental_builder_onboarding.is_waiting_house_completion()
+
+
+func is_merchant_house_tutorial_active() -> bool:
+	return _fundamental_builder_onboarding.is_merchant_house_tutorial_active()
+
+
 func is_fundamental_builder_dialog_pending() -> bool:
 	return _fundamental_builder_onboarding.is_fundamental_builder_dialog_pending()
 

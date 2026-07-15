@@ -47,6 +47,8 @@ const KEY_ALLOW_BUILDER_SPACE: String = "tutorial.allow_builder_space"
 const KEY_ALLOW_BUILDER_PAD: String = "tutorial.allow_builder_pad"
 const KEY_TALK_BUILDER: String = "tutorial.talk_builder"
 const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
+const KEY_WAIT_BUILDER_BUILD: String = "tutorial.wait_builder_build"
+const KEY_BUILD_MERCHANT_HOUSE: String = "tutorial.build_merchant_house"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -73,6 +75,7 @@ const TURRET_EPINE_ITEM_ID: String = "turret_epine"
 const COUNTER_ITEM_ID: String = "rose_shop_counter"
 const WALL_ITEM_ID: String = "wall"
 const HOUSE_BUILDER_ITEM_ID: String = "house_builder"
+const HOUSE_MERCHANT_ITEM_ID: String = "house_merchant"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -280,6 +283,11 @@ func _refresh(delta: float = 0.0) -> void:
 		_reset_hold_progress()
 		_show_key_immediately(KEY_TALK_BUILDER)
 		return
+	var forced_builder_key: String = _forced_builder_onboarding_key()
+	if forced_builder_key != "":
+		_reset_hold_progress()
+		_show_key_immediately(forced_builder_key)
+		return
 	if _normal_tutorials_suppressed_by_builder_onboarding():
 		_reset_hold_progress()
 		_displayed_key = ""
@@ -433,6 +441,10 @@ func _current_message_key() -> String:
 		return KEY_TALK_BUILDER
 	if _builder_house_tutorial_active():
 		return KEY_BUILD_BUILDER_HOUSE
+	if _waiting_for_onboarding_house_completion():
+		return KEY_WAIT_BUILDER_BUILD
+	if _merchant_house_tutorial_active():
+		return KEY_BUILD_MERCHANT_HOUSE
 	# Sunrise transition after a night: dawn growth has not finished, so falling through
 	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
@@ -850,6 +862,28 @@ func _normal_tutorials_suppressed_by_builder_onboarding() -> bool:
 		and bool(_building_manager.call("should_suppress_normal_tutorials_for_builder_onboarding"))
 
 
+func _forced_builder_onboarding_key() -> String:
+	if _builder_house_tutorial_active():
+		return KEY_BUILD_BUILDER_HOUSE
+	if _waiting_for_onboarding_house_completion():
+		return KEY_WAIT_BUILDER_BUILD
+	if _merchant_house_tutorial_active():
+		return KEY_BUILD_MERCHANT_HOUSE
+	return ""
+
+
+func _waiting_for_onboarding_house_completion() -> bool:
+	return _building_manager != null \
+		and _building_manager.has_method("is_waiting_for_onboarding_house_completion") \
+		and bool(_building_manager.call("is_waiting_for_onboarding_house_completion"))
+
+
+func _merchant_house_tutorial_active() -> bool:
+	return _building_manager != null \
+		and _building_manager.has_method("is_merchant_house_tutorial_active") \
+		and bool(_building_manager.call("is_merchant_house_tutorial_active"))
+
+
 func _planted_rose_count() -> int:
 	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
 		return 0
@@ -919,17 +953,10 @@ func _update_tutorial_arrow(key: String) -> void:
 		_hide_tutorial_arrow()
 		return
 	if key == KEY_BUILD_BUILDER_HOUSE:
-		if _is_build_house_menu_open():
-			var house_rect: Rect2 = _visible_build_item_rect(HOUSE_BUILDER_ITEM_ID)
-			if house_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_right_at(house_rect, get_process_delta_time())
-				return
-		else:
-			var buildhouse_rect: Rect2 = _quick_slot_rect(BUILD_HOUSE_TOOL_ID)
-			if buildhouse_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_down_at(buildhouse_rect, get_process_delta_time())
-				return
-		_hide_tutorial_arrow()
+		_point_to_house_build_item(HOUSE_BUILDER_ITEM_ID)
+		return
+	if key == KEY_BUILD_MERCHANT_HOUSE:
+		_point_to_house_build_item(HOUSE_MERCHANT_ITEM_ID)
 		return
 	var item_id: String = _tutorial_item_for_key(key)
 	if item_id == "":
@@ -944,6 +971,22 @@ func _update_tutorial_arrow(key: String) -> void:
 		var tool_rect: Rect2 = _gardening_tool_rect()
 		if tool_rect.size != Vector2.ZERO:
 			_tutorial_arrow.point_down_at(tool_rect, get_process_delta_time())
+			return
+	_hide_tutorial_arrow()
+
+
+func _point_to_house_build_item(item_id: String) -> void:
+	if _tutorial_arrow == null:
+		return
+	if _is_build_house_menu_open():
+		var house_rect: Rect2 = _visible_build_item_rect(item_id)
+		if house_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_right_at(house_rect, get_process_delta_time())
+			return
+	else:
+		var buildhouse_rect: Rect2 = _quick_slot_rect(BUILD_HOUSE_TOOL_ID)
+		if buildhouse_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_down_at(buildhouse_rect, get_process_delta_time())
 			return
 	_hide_tutorial_arrow()
 

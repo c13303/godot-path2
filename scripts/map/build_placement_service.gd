@@ -139,7 +139,9 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 	if _manager != null and _manager.has_method("notify_player_house_placed"):
 		_manager.call("notify_player_house_placed", item_id)
 	_play_build_fx_at_cell(entrance, _wallz())
-	clear_build_selection_if_unaffordable(item_id)
+	# A house is placed one at a time (never dragged), so the tool always deselects after a
+	# successful placement and control returns to play mode, even when another one is affordable.
+	_clear_build_selection()
 
 
 # "" = the whole house footprint is valid to place with `entrance` as its anchor. Otherwise a
