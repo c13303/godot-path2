@@ -26,6 +26,7 @@ const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const ALLY_MARKER_NAMES: PackedStringArray = ["fundamental_builder_in", "fundamental_builder_spot", "fundamental_builder_out"]
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const ENEMY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/spawner.png"
 const FRIENDLY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/clientspawner.png"
@@ -552,7 +553,7 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 		if spawner_node == null:
 			continue
 		var child_name: String = String(spawner_node.name)
-		if child_name.ends_with("_spot"):
+		if child_name.ends_with("_spot") or ALLY_MARKER_NAMES.has(child_name):
 			var spot_local_pos: Vector2 = floor_layer.to_local(spawner_node.global_position)
 			_loaded_named_spot_cells[StringName(child_name)] = floor_layer.local_to_map(spot_local_pos)
 		if _is_spawner_marker_node(spawner_node):
@@ -588,7 +589,7 @@ func _capture_level_spawner_bindings(level_root: Node) -> void:
 
 func _is_spawner_marker_node(node: Node) -> bool:
 	var node_name: String = String(node.name)
-	return node_name.ends_with("_exit") or node_name.ends_with("_spot")
+	return node_name.ends_with("_exit") or node_name.ends_with("_spot") or ALLY_MARKER_NAMES.has(node_name)
 
 
 func _find_spawner_marker_node(spawner_container: Node, spawner_node: Node2D, spawner_id: StringName, marker_name: String) -> Node2D:

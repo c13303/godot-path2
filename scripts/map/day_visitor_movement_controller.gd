@@ -41,8 +41,11 @@ func spawn(
 		return false
 	if spawn_cell == INVALID_CELL or destination_cell == INVALID_CELL:
 		return false
-	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(spawn_cell, destination_cell)
-	if path_cells.is_empty():
+	var starts_at_destination: bool = spawn_cell == destination_cell
+	var path_cells: PackedVector2Array = PackedVector2Array()
+	if not starts_at_destination:
+		path_cells = _manager.find_path_on_walkable_map(spawn_cell, destination_cell)
+	if not starts_at_destination and path_cells.is_empty():
 		push_warning("BuildingManager: %s cannot path from %s to target %s." % [_diagnostic_label, spawn_cell, destination_cell])
 		return false
 	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
@@ -63,8 +66,9 @@ func spawn(
 	agent.set("nav_id", agent_nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", agent_nav_id, true)
-	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, agent_nav_id, true)
-	agent_manager.call("assign_agent_path", agent_nav_id, path_world)
+	if not starts_at_destination:
+		var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, agent_nav_id, true)
+		agent_manager.call("assign_agent_path", agent_nav_id, path_world)
 	_agent_kind = agent_kind
 	_scene_group = scene_group
 	_active = true
@@ -73,10 +77,10 @@ func spawn(
 	_source_spawner_cell = spawner_cell
 	_spawn_cell = spawn_cell
 	_target_cell = destination_cell
-	_waiting = false
+	_waiting = starts_at_destination
 	_leaving = false
 	_leave_at_night_pending = false
-	if agent.has_method("start_astar_in"):
+	if not starts_at_destination and agent.has_method("start_astar_in"):
 		agent.call("start_astar_in")
 	return true
 

@@ -7,6 +7,8 @@ const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_vis
 const KRAKEN_DATA: Resource = preload("res://scripts/combat/kraken/kraken.tres")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const HOUSE_TEXTURE: Texture2D = preload("res://assets/sprites/house/house1.png")
+const HOUSE_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_builder.png")
+const HOUSE_MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_merchant.png")
 const HOUSE_WIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/wiphouse.png")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
@@ -163,38 +165,62 @@ const ITEM_DEFS: Dictionary = {
 		"max_health": 100,
 		"max_stack": 999,
 	},
-	# A multi-cell player-built house. Unlike normal placeables it is NOT routed through the
-	# generic one-cell placement path: HouseManager owns its 3x2 blocking footprint, its
-	# walkable entrance, sprite snapping and durability. The catalog entry only carries the
-	# shared item semantics (owned stock, wall-like consumption, menu icon) so the inventory,
-	# build menu, merchant, reward and editor systems treat it generically. `special_placement_kind`
-	# is the single flag every owner keys off (see is_house_placeable) instead of matching the id.
-	#
-	# inventory_backed + NOT fixed_stock: placing consumes one owned unit and normal unbuild
-	# returns one (wall-like), while remaining sellable at the seed merchant (a fixed-stock item
-	# could never be a merchant item). A zero merchant price still rejects the purchase, so the
-	# level author must author a positive price to sell it.
+	# Legacy saves may still contain item_id "house"; normalize_house_item_id() maps it to
+	# house_merchant. Keep this definition out of house build lists by leaving it without
+	# special_placement_kind.
 	"house": {
 		"id": "house",
-		"name": "House",
-		"type": "placeable",
+		"name": "Legacy House",
+		"type": "legacy",
 		"category": "house",
-		# Menu/reward icon uses the house build icon; the world object and preview use
-		# HOUSE_TEXTURE (house1.png) via HouseManager, not this frame.
 		"frame": 27,
-		"target_layer": "wallz",
-		"special_placement_kind": &"house",
-		"house_texture": HOUSE_TEXTURE,
-		"house_completed_texture": HOUSE_TEXTURE,
+		"house_texture": HOUSE_MERCHANT_TEXTURE,
+		"house_completed_texture": HOUSE_MERCHANT_TEXTURE,
 		"house_wip_texture": HOUSE_WIP_TEXTURE,
 		"builder_work_seconds": 20.0,
-		"inventory_backed": true,
-		"fixed_stock": false,
+		"max_health": 100,
+	},
+	# Multi-cell player-built houses. Unlike normal placeables they are NOT routed through
+	# the generic one-cell placement path: HouseManager owns the 3x2 blocking footprint,
+	# walkable entrance, sprite snapping and durability. Both are direct gem purchases.
+	"house_builder": {
+		"id": "house_builder",
+		"name": "Builder House",
+		"type": "placeable",
+		"category": "house",
+		"frame": 28,
+		"target_layer": "wallz",
+		"special_placement_kind": &"house",
+		"house_resident_type": &"builder",
+		"house_texture": HOUSE_BUILDER_TEXTURE,
+		"house_completed_texture": HOUSE_BUILDER_TEXTURE,
+		"house_wip_texture": HOUSE_WIP_TEXTURE,
+		"builder_work_seconds": 20.0,
 		"drag_buildable": false,
 		"max_health": 100,
 		"max_stack": 999,
-		"currency": &"money",
-		"price": 0,
+		"currency": &"gem",
+		"price": 20,
+	},
+	"house_merchant": {
+		"id": "house_merchant",
+		"name": "Merchant House",
+		"type": "placeable",
+		"category": "house",
+		"frame": 29,
+		"target_layer": "wallz",
+		"special_placement_kind": &"house",
+		"house_resident_type": &"seed_merchant",
+		"unique_house_type": true,
+		"house_texture": HOUSE_MERCHANT_TEXTURE,
+		"house_completed_texture": HOUSE_MERCHANT_TEXTURE,
+		"house_wip_texture": HOUSE_WIP_TEXTURE,
+		"builder_work_seconds": 20.0,
+		"drag_buildable": false,
+		"max_health": 100,
+		"max_stack": 999,
+		"currency": &"gem",
+		"price": 20,
 	},
 	"rose": {
 		"id": "rose",
@@ -447,9 +473,16 @@ const ITEM_DEFS: Dictionary = {
 }
 
 static func get_item_def(item_id: String) -> Dictionary:
+	item_id = normalize_house_item_id(item_id)
 	if ITEM_DEFS.has(item_id):
 		return ITEM_DEFS[item_id]
 	return {}
+
+
+static func normalize_house_item_id(item_id: String) -> String:
+	if item_id == "house":
+		return "house_merchant"
+	return item_id
 
 static func get_turret_data(item_id: String) -> TurretData:
 	var item_def: Dictionary = get_item_def(item_id)
@@ -516,6 +549,14 @@ static func get_house_wip_texture(item_id: String) -> Texture2D:
 
 static func get_house_builder_work_seconds(item_id: String) -> float:
 	return maxf(0.0, float(get_item_def(item_id).get("builder_work_seconds", 20.0)))
+
+
+static func get_house_resident_type(item_id: String) -> StringName:
+	return StringName(get_item_def(item_id).get("house_resident_type", &""))
+
+
+static func is_unique_house_type(item_id: String) -> bool:
+	return bool(get_item_def(item_id).get("unique_house_type", false))
 
 
 ## Fixed-stock items are granted in finite quantities by the level/reward data and
@@ -603,12 +644,14 @@ static func get_house_build_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []
 	for raw_item_id: Variant in ITEM_DEFS.keys():
 		var item_id: String = str(raw_item_id)
+		if item_id == "house":
+			continue
 		var item_def: Dictionary = get_item_def(item_id)
 		if str(item_def.get("type", "")) != "placeable":
 			continue
 		if StringName(item_def.get("special_placement_kind", &"")) == &"house":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"house"])
+	return _ordered_known_first(ids, [&"house_builder", &"house_merchant"])
 
 static func get_tool_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = get_gardening_shop_item_ids()

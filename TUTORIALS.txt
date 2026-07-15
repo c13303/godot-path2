@@ -26,9 +26,6 @@ day 1 + all roses watered + turret_epine remaining
     = "Plantez des cracheuses pour défendre le jardin"
       / "Plant spitters to defend the garden"                [tutorial.plant_turret_epine]
 
-no rose_shop_counter placed yet
-    = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
-
 day 1 + ready to end day + fewer planted roses than the clients the planificator previews for tomorrow
     = "Plantez suffisament de roses pour satisfaire vos clients du lendemain"
       / "Plant enough roses to satisfy tomorrow's clients"   [tutorial.plant_more_roses]
@@ -83,6 +80,12 @@ sunrise transition, no phase started yet
     -> no hint shown (label stays blank until the morning phase begins)
 
 --- MORNING harvest phase ---
+
+never placed a rose_shop_counter yet + client sale not started
+    = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
+    (one-time step: dawn only, before the client phase — so first seen on day 2.
+     It never returns once the first counter is placed, and the afternoon build
+     phase never raises it.)
 
 no grown-up roses to sell
     = "Pas de roses, pas de clients aujourd'hui" / "No roses, No clients today"

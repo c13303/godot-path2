@@ -93,6 +93,10 @@ var _alert_persistent: bool = false
 var _tutorial_arrow: TutorialArrow
 var _tutorial_world_arrow: TutorialWorldArrow
 var _has_planted_turret_epine: bool = false
+# True once the player has placed their first rose shop counter. Latches the one-time
+# "place the shop" dawn step off for the rest of the run. Re-derived from the world on
+# _resolve_nodes, so a loaded save with counters already built never shows the step again.
+var _has_placed_rose_shop_counter: bool = false
 # Wall stock captured the first time the day-1 wall step is evaluated. The step is skipped
 # once the current stock drops below this, i.e. as soon as one starting wall is placed.
 var _wall_stock_baseline: int = -1
@@ -129,6 +133,9 @@ func _resolve_nodes() -> void:
 			if _building_object_manager.has_method("count_buildings_by_item_id") \
 					and int(_building_object_manager.call("count_buildings_by_item_id", TURRET_EPINE_ITEM_ID)) > 0:
 				_has_planted_turret_epine = true
+			if _building_object_manager.has_method("count_buildings_by_item_id") \
+					and int(_building_object_manager.call("count_buildings_by_item_id", COUNTER_ITEM_ID)) > 0:
+				_has_placed_rose_shop_counter = true
 			if _building_object_manager.has_signal("building_added") \
 					and not _building_object_manager.is_connected("building_added", Callable(self, "_on_building_added")):
 				_building_object_manager.connect("building_added", Callable(self, "_on_building_added"))
@@ -175,6 +182,9 @@ func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
 func _on_building_added(_cell: Vector2i, item_id: String) -> void:
 	if item_id == TURRET_EPINE_ITEM_ID:
 		_has_planted_turret_epine = true
+		_refresh()
+	elif item_id == COUNTER_ITEM_ID:
+		_has_placed_rose_shop_counter = true
 		_refresh()
 
 
@@ -389,16 +399,16 @@ func _current_message_key() -> String:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			if _has_counter_room_for_harvest():
 				return KEY_HARVEST_ROSE
-			# Counters all full: nudge to add more, but only once at least one counter
-			# exists. With no counter built yet the real next step is to place the shop.
-			if _rose_shop_counter_count() > 0:
-				return KEY_ADD_COUNTERS_TO_SELL_ROSES
-			return KEY_PLACE_SHOP
+			# Counters all full: nudge to add more, unless the player has never placed one,
+			# in which case the real next step is the one-time "place the shop" step.
+			if _should_prompt_place_shop():
+				return KEY_PLACE_SHOP
+			return KEY_ADD_COUNTERS_TO_SELL_ROSES
 		if _client_sale_requested_without_roses():
 			return KEY_NO_ROSES_NO_CLIENTS
 		if GameState.is_seed_merchant_phase and _has_active_night_reward():
 			return KEY_SEED_MERCHANT_REWARD
-		if not _client_sale_start_requested() and _rose_shop_counter_count() <= 0:
+		if not _client_sale_start_requested() and _should_prompt_place_shop():
 			return KEY_PLACE_SHOP
 		return ""
 	# Client sale in progress: only the water-empty hint (handled above) and the
@@ -429,8 +439,6 @@ func _current_message_key() -> String:
 			return KEY_PLANT_PASTEQUE
 		if _should_prompt_plant_turret_epine():
 			return KEY_PLANT_TURRET_EPINE
-	if _should_prompt_place_shop():
-		return KEY_PLACE_SHOP
 	# Day-1 guard: don't offer to end the day until enough roses are planted to satisfy the
 	# clients the planificator previews for tomorrow.
 	if _should_warn_plant_more_roses():
@@ -668,12 +676,6 @@ func _gardening_equipped() -> bool:
 	)
 
 
-func _rose_shop_counter_count() -> int:
-	if _building_object_manager != null and _building_object_manager.has_method("count_buildings_by_item_id"):
-		return int(_building_object_manager.call("count_buildings_by_item_id", "rose_shop_counter"))
-	return 0
-
-
 func _has_counter_room_for_harvest() -> bool:
 	if _building_manager != null and _building_manager.has_method("has_counter_room_for_harvest"):
 		return bool(_building_manager.call("has_counter_room_for_harvest"))
@@ -705,10 +707,11 @@ func _build_affordable_quantity(item_id: String) -> int:
 	return int(_game_ui.call("get_build_affordable_quantity", item_id))
 
 
+## One-time dawn step: the shop prompt runs until the player places their first rose
+## counter, then never comes back for the rest of the run. It belongs to dawn only,
+## before the client sale: the afternoon build phase must not raise it.
 func _should_prompt_place_shop() -> bool:
-	if _rose_shop_counter_count() > 0:
-		return false
-	return true
+	return not _has_placed_rose_shop_counter
 
 
 ## Day-1 only: any of the guided build steps (wall / watermelon / spitter) is still pending.

@@ -155,6 +155,9 @@ func _complete_assignment(builder_id: int, house_id: StringName) -> void:
 		_overlay.remove_progress(house_id)
 	_clear_assignment_state(builder_id, house_id)
 	_builder.release_builder_from_work(builder_id)
+	if _builder.is_builder_leaving(builder_id):
+		_mark_assignment_dirty()
+		return
 	if not _assign_builder_to_next_task(builder_id):
 		_builder.return_builder_to_idle_area(builder_id)
 	_mark_assignment_dirty()

@@ -148,6 +148,11 @@ func house_placement_rejection(entrance: Vector2i, placeable_def: Dictionary) ->
 	var house_manager: HouseManager = _manager.get_house_manager()
 	if house_manager == null:
 		return "house system unavailable"
+	var item_id: String = ItemCatalog.normalize_house_item_id(str(placeable_def.get("id", "")))
+	if not _manager.is_house_build_item_available(item_id):
+		return "house item '%s' is not available" % item_id
+	if ItemCatalog.is_unique_house_type(item_id) and house_manager.has_existing_house_type(item_id):
+		return "house item '%s' is unique and already exists" % item_id
 	var structural: String = house_manager.house_structural_rejection(entrance)
 	if structural != "":
 		return structural

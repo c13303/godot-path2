@@ -204,6 +204,7 @@ var _building_invalidation_controller: BuildingInvalidationController = Building
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 var _house_manager: HouseManager = HouseManager.new()
 var _house_builder_work: HouseBuilderWorkController = HouseBuilderWorkController.new()
+var _ally_housing: AllyHousingController = AllyHousingController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
@@ -283,6 +284,7 @@ func _ready() -> void:
 	_setup_construction_overlay()
 	_setup_house_manager()
 	_setup_house_builder_work()
+	_setup_ally_housing()
 	_setup_ground_drop_manager()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
@@ -344,9 +346,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_client_sale.reset()
 		_client_sale.mark_client_step_finished()
 		clear_client_counter_agents()
-		_seed_merchant.on_night_started()
 		_house_builder_work.on_night_started()
-		_builder.on_night_started()
+		_ally_housing.on_night_started()
 		_dawn_harvest.clear_active()
 		# Counters normally empty the moment the last client of the sale leaves (see
 		# _dissolve_counter_piles_after_clients). This is only a fallback for days where no
@@ -668,8 +669,7 @@ func finish_night_preparation_success() -> void:
 func on_night_reveal_finished() -> void:
 	if not GameState.is_night:
 		return
-	_seed_merchant.start_pending_leave_if_needed()
-	_builder.start_pending_departures()
+	_ally_housing.start_pending_departures()
 
 
 func finish_client_preparation_success() -> void:
@@ -743,6 +743,10 @@ func _setup_house_builder_work() -> void:
 	var overlay_parent: Node = floorz.get_parent() if floorz and floorz.get_parent() else self
 	overlay_parent.add_child(overlay)
 	_house_builder_work.setup(self, _house_manager, _builder, overlay)
+
+
+func _setup_ally_housing() -> void:
+	_ally_housing.setup(self, _house_manager, _builder, _seed_merchant)
 
 
 func get_house_manager() -> HouseManager:
@@ -1203,8 +1207,8 @@ func _on_new_day_finished() -> void:
 	if GameState.is_night:
 		return
 	_day_start_pending = false
+	_begin_ally_housing_day()
 	_begin_seed_merchant_phase()
-	_begin_builder_day()
 	_begin_dawn_harvest()
 
 
@@ -1258,7 +1262,7 @@ func has_grownup_roses_to_harvest() -> bool:
 
 
 func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_agents: bool) -> void:
-	_builder.restore_state(phase_state.get("builder_count", BuilderController.DEFAULT_BUILDER_COUNT))
+	_builder.restore_state(phase_state.get("builder_count", 0))
 	if phase == "night":
 		_dawn_harvest.clear_active()
 		_reset_client_sale_state()
@@ -1275,8 +1279,6 @@ func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_
 	_night_preparation_ready = false
 	_dawn_harvest.clear_active()
 	_reset_client_sale_state()
-	if bool(phase_state.get("seed_merchant_active", false)):
-		call_deferred("_restore_seed_merchant_after_load")
 	match phase:
 		"dawn":
 			_client_sale.begin_client_step()
@@ -1311,8 +1313,6 @@ func serialize_gameplay_phase_state_for_save() -> Dictionary:
 			dawn_stage = "pre_clients"
 	return {
 		"dawn_stage": dawn_stage,
-		"seed_merchant_active": _seed_merchant.is_active(),
-		"builder_count": _builder.builder_count(),
 		"client_step_pending": _client_sale.current_day_client_step_pending_or_active(),
 		"client_sale_start_requested": _client_sale_start_requested,
 	}
@@ -1323,15 +1323,6 @@ func _resume_dawn_growth_after_load() -> void:
 		return
 	if plant_manager != null and plant_manager.has_method("resume_dawn_growth_after_load"):
 		plant_manager.call("resume_dawn_growth_after_load")
-
-
-func _restore_seed_merchant_after_load() -> void:
-	# Runtime-agent restore clears all transient agents one frame after phase restore.
-	# Recreate the deliberately non-serialized merchant only after that cleanup.
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if not GameState.is_night and not _seed_merchant.is_active():
-		_begin_seed_merchant_phase()
 
 
 func _restore_builders_after_load() -> void:
@@ -1504,9 +1495,27 @@ func _begin_seed_merchant_phase() -> void:
 	_seed_merchant.begin_phase(_merchant_spawners)
 
 
-func _begin_builder_day() -> void:
+func _begin_ally_housing_day() -> void:
 	_builder.begin_day()
-	_house_builder_work.on_topology_changed()
+	_ally_housing.begin_day()
+
+
+func reconcile_ally_housing() -> void:
+	_ally_housing.reconcile_daytime_residents()
+
+
+func reconcile_ally_housing_after_scene_ready() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	reconcile_ally_housing()
+
+
+func is_house_build_item_available(item_id: String) -> bool:
+	return _ally_housing.is_house_build_item_available(item_id)
+
+
+func should_show_house_quickslot() -> bool:
+	return _ally_housing.should_show_house_quickslot()
 
 
 func _process_seed_merchant_arrival() -> void:
@@ -1938,6 +1947,7 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 	_agent_save_service.restore_state(data, false)
 	_purge_day_phase_monsters_after_load()
 	_notify_restored_phase()
+	call_deferred("reconcile_ally_housing_after_scene_ready")
 
 
 # Save/load safety net: monsters only exist at night, so any monster present after a
@@ -2014,6 +2024,10 @@ func apply_builder_data(agent: Node) -> void:
 
 func add_builder_for_dev(amount: int = 1) -> bool:
 	return _builder.add_builders_for_dev(amount)
+
+
+func complete_all_wip_houses_for_dev() -> int:
+	return _house_manager.complete_all_wip_houses_for_dev()
 
 
 func grownup_rose_count() -> int:

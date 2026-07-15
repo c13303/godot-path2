@@ -7,9 +7,15 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const MERCHANT_GROUP: StringName = &"merchants"
 const INTERACT_RADIUS_TILES: int = 2
+const FUNDAMENTAL_BUILDER_IN_ID: StringName = &"fundamental_builder_in"
+const FUNDAMENTAL_BUILDER_OUT_ID: StringName = &"fundamental_builder_out"
 
 var _manager: BuildingManager
 var _visitor: DayVisitorMovementController = DayVisitorMovementController.new()
+var _resident_house_id: StringName = &""
+var _home_entrance_cell: Vector2i = INVALID_CELL
+var _returning_home: bool = false
+var _evacuating: bool = false
 # True while the merchant is frozen because the player is within interaction range.
 # Mirrors the native per-agent pause; cleared when the player walks away.
 var _paused: bool = false
@@ -21,7 +27,13 @@ func setup(manager: BuildingManager) -> void:
 
 
 func on_night_started() -> void:
-	_visitor.mark_leave_pending()
+	if _paused:
+		_set_paused(false)
+	_evacuating = false
+	if _visitor.is_active() and _home_entrance_cell != INVALID_CELL and _visitor.repath_to_target(_home_entrance_cell):
+		_returning_home = true
+	else:
+		_visitor.mark_leave_pending()
 	GameState.set_seed_merchant_phase(false)
 
 
@@ -34,22 +46,8 @@ func is_active() -> bool:
 
 
 func begin_phase(merchant_spawners: Dictionary) -> void:
-	clear_phase(false)
-	if GameState.is_night:
-		return
-	if merchant_spawners.is_empty():
-		push_warning("BuildingManager: seed merchant phase skipped; no seedmerchent spawner node was registered.")
-		return
-	var merchant_cells: Array[Vector2i] = []
-	for raw_cell: Variant in merchant_spawners.keys():
-		merchant_cells.append(raw_cell as Vector2i)
-	if merchant_cells.is_empty():
-		push_warning("BuildingManager: seed merchant phase skipped; no usable seedmerchent spawner cell was registered.")
-		return
-	var spawner_cell: Vector2i = merchant_cells[randi_range(0, merchant_cells.size() - 1)]
-	if not _spawn_from(spawner_cell):
-		return
-	GameState.set_seed_merchant_phase(true)
+	if _visitor.is_active() and not GameState.is_night:
+		GameState.set_seed_merchant_phase(true)
 
 
 func process_arrival() -> void:
@@ -57,7 +55,8 @@ func process_arrival() -> void:
 	# (escape flow) or already parked at the spot there is nothing to arrive at here.
 	if not _visitor.is_active():
 		return
-	_visitor.process_arrival()
+	if _visitor.process_arrival() and (_returning_home or _evacuating):
+		clear_phase(true)
 
 
 func process_phase() -> void:
@@ -156,6 +155,10 @@ func start_leave_for_night() -> void:
 
 func clear_phase(free_agent: bool) -> void:
 	_visitor.clear(free_agent)
+	_resident_house_id = &""
+	_home_entrance_cell = INVALID_CELL
+	_returning_home = false
+	_evacuating = false
 	_paused = false
 	GameState.set_seed_merchant_phase(false)
 
@@ -168,32 +171,72 @@ func on_agent_removed(agent: Node2D) -> void:
 	if not _visitor.owns_agent(agent):
 		return
 	_visitor.forget_agent()
+	_resident_house_id = &""
+	_home_entrance_cell = INVALID_CELL
+	_returning_home = false
+	_evacuating = false
 	_paused = false
 	GameState.set_seed_merchant_phase(false)
 
 
-func _spawn_from(spawner_cell: Vector2i) -> bool:
-	var occupied: Array[Vector2i] = _manager.occupied_cells_for_spawning()
-	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(spawner_cell, occupied)
-	if spawn_cell == INVALID_CELL:
+func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
+	if GameState.is_night or _visitor.is_active():
 		return false
-	var target_cell: Vector2i = _manager.seed_merchant_spot_cell(spawner_cell)
-	if target_cell == INVALID_CELL:
-		push_warning("BuildingManager: seed merchant spawner %s has no authored spot child; merchant not spawned." % spawner_cell)
+	if entrance_cell == INVALID_CELL:
 		return false
+	var target_cell: Vector2i = entrance_cell
 	if not _manager.is_walkable_cell(target_cell):
-		push_warning("BuildingManager: seed merchant spot %s is not walkable; merchant not spawned." % target_cell)
+		push_warning("BuildingManager: seed merchant house entrance %s is not walkable; merchant not spawned." % target_cell)
+		return false
+	var source_cell: Vector2i = _manager.named_authored_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
+	if source_cell == INVALID_CELL:
+		push_warning("BuildingManager: seed merchant cannot enter; required marker '%s' is missing." % String(FUNDAMENTAL_BUILDER_IN_ID))
+		return false
+	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
+	if spawn_cell == INVALID_CELL:
+		push_warning("BuildingManager: seed merchant cannot enter; no free spawn cell near %s." % str(source_cell))
 		return false
 	_paused = false
-	return _visitor.spawn(
-		spawner_cell,
+	if not _visitor.spawn(
+		source_cell,
 		spawn_cell,
 		target_cell,
 		SPAWNER_KIND_MERCHANT,
 		MERCHANT_GROUP,
 		MERCHANT_GROUP,
 		Callable(_manager, "apply_merchant_data")
-	)
+	):
+		return false
+	_resident_house_id = house_id
+	_home_entrance_cell = entrance_cell
+	_returning_home = false
+	_evacuating = false
+	var agent: Node2D = _visitor.agent_node()
+	if agent != null:
+		agent.set_meta("resident_house_id", house_id)
+		agent.set_meta("home_entrance_cell", entrance_cell)
+	GameState.set_seed_merchant_phase(true)
+	return true
+
+
+func resident_house_id() -> StringName:
+	return _resident_house_id
+
+
+func evacuate() -> void:
+	if not _visitor.is_active():
+		clear_phase(false)
+		return
+	if _paused:
+		_set_paused(false)
+	GameState.set_seed_merchant_phase(false)
+	_returning_home = false
+	var out_cell: Vector2i = _manager.named_authored_spot_cell(FUNDAMENTAL_BUILDER_OUT_ID)
+	if out_cell != INVALID_CELL and _visitor.repath_to_target(out_cell):
+		_evacuating = true
+		return
+	_evacuating = false
+	_visitor.start_leave_for_night()
 
 
 func _set_paused(value: bool) -> void:

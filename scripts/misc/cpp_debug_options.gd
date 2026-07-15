@@ -327,7 +327,7 @@ func _is_game_paused() -> bool:
 ## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds/gems/money,
 ## fully refills the water reserve, and (if it is currently night) removes every
 ## monster and ends the night. Numpad 1/2/0 force-spawn one agent from each
-## registered enemy/client spawner.
+## registered enemy/client spawner. K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
 ## ² (top-left key) restarts the level with debug forced ON.
 func _unhandled_input(event: InputEvent) -> void:
@@ -352,7 +352,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_spawn_dev_agents_from_spawners(&"client", &"basic")
 	elif _is_key(key_event, KEY_K):
 		get_viewport().set_input_as_handled()
-		_add_dev_builder()
+		_complete_dev_wip_houses()
 	elif key_event.keycode == KEY_F1 and not GameState.is_night:
 		get_viewport().set_input_as_handled()
 		_advance_dev_day()
@@ -391,15 +391,16 @@ func _grant_dev_currency() -> void:
 	_call_if_available(progression, "update_money", 100)
 
 
-func _add_dev_builder() -> void:
+func _complete_dev_wip_houses() -> void:
 	var manager: Node = _get_building_manager()
 	if manager == null:
 		push_warning("dev_keys: BuildingManager node not found")
 		return
-	if not manager.has_method("add_builder_for_dev"):
-		push_warning("dev_keys: BuildingManager Builder command not found")
+	if not manager.has_method("complete_all_wip_houses_for_dev"):
+		push_warning("dev_keys: BuildingManager house completion command not found")
 		return
-	manager.call("add_builder_for_dev", 1)
+	var completed: int = int(manager.call("complete_all_wip_houses_for_dev"))
+	CppDebugOptions.dlog("dev_keys: completed %d WIP house(s)" % completed)
 
 
 func _advance_dev_day() -> void:

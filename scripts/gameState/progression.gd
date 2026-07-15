@@ -642,7 +642,6 @@ func auto_save_after_rose_growth() -> bool:
 	_log("Rose-growth auto-save requested")
 	return save_progression(AUTOSAVE_PATH, "dawn", {
 		"dawn_stage": "harvest",
-		"seed_merchant_active": true,
 	})
 
 
@@ -996,14 +995,15 @@ func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 	for raw_slot: Variant in saved_inventory:
 		if raw_slot is Dictionary:
 			var saved_slot: Dictionary = raw_slot as Dictionary
+			var saved_item_id: String = ItemCatalog.normalize_house_item_id(str(saved_slot.get("item_id", "")))
 			inventory.append({
-				"item_id": str(saved_slot.get("item_id", "")),
+				"item_id": saved_item_id,
 				"quantity": int(saved_slot.get("quantity", 0)),
 			})
 		else:
 			# Version 1 stored only item-id strings. Preserve those saves by
 			# restoring every occupied slot as one item.
-			var legacy_item_id: String = str(raw_slot)
+			var legacy_item_id: String = ItemCatalog.normalize_house_item_id(str(raw_slot))
 			inventory.append({
 				"item_id": legacy_item_id,
 				"quantity": 1 if legacy_item_id != "" else 0,

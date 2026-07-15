@@ -1,6 +1,10 @@
 class_name HouseManager
 extends RefCounted
 
+signal house_completed(snapshot)
+signal house_removing(snapshot)
+signal houses_restored
+
 ## Owns everything about houses: their fixed geometry, the authoritative registry, sprite
 ## snapping / Y-sorting, footprint-wall stamping, authored-house discovery, and generic
 ## runtime house creation. It is a focused domain owner instantiated and wired by
@@ -57,6 +61,17 @@ class HouseRecord extends RefCounted:
 	var under_construction: bool = false
 	var status: StringName = HOUSE_STATUS_COMPLETED
 	var construction_order: int = 0
+
+
+class HouseSnapshot extends RefCounted:
+	var id: StringName = &""
+	var item_id: String = ""
+	var resident_type: StringName = &""
+	var entrance_cell: Vector2i = Vector2i.ZERO
+	var entrance_world_position: Vector2 = Vector2.ZERO
+	var completed: bool = false
+	var player_built: bool = false
+	var authored: bool = false
 
 
 var _manager: BuildingManager = null
@@ -173,11 +188,18 @@ func register_authored_houses() -> void:
 		# Authored houses reserve their full six-cell presence (so nothing can be built on their
 		# walls or walkable entrance) but are never player-built: not removable, not refundable,
 		# not destructible.
-		var record: HouseRecord = _register_house_record(StringName(sprite.name), "", sprite, entrance, true, false)
+		var item_id: String = _authored_house_item_id(sprite.name)
+		var record: HouseRecord = _register_house_record(StringName(sprite.name), item_id, sprite, entrance, true, false)
 		record.player_built = false
 		record.removable = false
 		record.destructible = false
 		record.status = HOUSE_STATUS_COMPLETED
+
+
+func _authored_house_item_id(house_name: StringName) -> String:
+	if String(house_name) == "house_seedmerchant":
+		return "house_merchant"
+	return ""
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +216,11 @@ func create_house(
 		source: Variant,
 		entrance: Vector2i,
 		parent: Node = null,
-		item_id: String = "house",
+		item_id: String = "house_merchant",
 		status: StringName = HOUSE_STATUS_WIP,
 		construction_order: int = -1
 ) -> bool:
+	item_id = ItemCatalog.normalize_house_item_id(item_id)
 	var texture: Texture2D = _resolve_texture(source)
 	var rejection: String = _validate_runtime_house(entrance, texture)
 	if rejection != "":
@@ -235,6 +258,8 @@ func create_house(
 	_manager.get_building_invalidation_controller().after_walkability_changed("runtime_house_built")
 	if record.status == HOUSE_STATUS_WIP:
 		_manager.get_house_builder_work_controller().on_wip_house_added(record.id)
+	elif record.status == HOUSE_STATUS_COMPLETED:
+		house_completed.emit(_snapshot_for_record(record))
 	return true
 
 
@@ -243,6 +268,7 @@ func create_house(
 ## service stays free of house geometry. Returns false (no mutation) if the atomic re-validation
 ## inside create_house fails, letting the caller restore the consumed item.
 func build_player_house(item_id: String, entrance: Vector2i) -> bool:
+	item_id = ItemCatalog.normalize_house_item_id(item_id)
 	var texture: Texture2D = ItemCatalog.get_house_wip_texture(item_id)
 	if texture == null:
 		texture = ItemCatalog.get_house_completed_texture(item_id)
@@ -289,6 +315,7 @@ func remove_player_built_house_no_refund(entrance: Vector2i) -> bool:
 ## owned blocker cells (one update_internals), refresh player collision, free the sprite, drop every
 ## registry/presence entry, and trigger exactly one hard-topology invalidation. Never refunds.
 func _teardown_house(record: HouseRecord) -> void:
+	house_removing.emit(_snapshot_for_record(record))
 	if record.status == HOUSE_STATUS_WIP:
 		_manager.get_house_builder_work_controller().on_wip_house_removed(record.id)
 	var blockers: Array[Vector2i] = record.blocking_cells
@@ -369,7 +396,7 @@ func restore_player_built_houses(records: Array) -> void:
 		if not (raw_record is Dictionary):
 			continue
 		var entry: Dictionary = raw_record as Dictionary
-		var item_id: String = str(entry.get("item_id", "house"))
+		var item_id: String = ItemCatalog.normalize_house_item_id(str(entry.get("item_id", "house_merchant")))
 		var entrance: Vector2i = Vector2i(int(entry.get("entrance_x", 0)), int(entry.get("entrance_y", 0)))
 		var status: StringName = _normalized_status(StringName(str(entry.get("status", String(HOUSE_STATUS_COMPLETED)))))
 		var construction_order: int = int(entry.get("construction_order", -1))
@@ -377,6 +404,7 @@ func restore_player_built_houses(records: Array) -> void:
 			repaired_any = true
 	if repaired_any:
 		_wallz.update_internals()
+	houses_restored.emit()
 
 
 func _restore_one_player_house(
@@ -386,6 +414,7 @@ func _restore_one_player_house(
 		status: StringName,
 		construction_order: int
 ) -> bool:
+	item_id = ItemCatalog.normalize_house_item_id(item_id)
 	if _presence_to_house.has(entrance) or has_house_at_entrance(entrance):
 		push_warning("HouseManager: saved house at %s conflicts with an existing house; skipping." % str(entrance))
 		return false
@@ -456,6 +485,7 @@ func _make_runtime_sprite(source: Variant, texture: Texture2D, id: StringName) -
 
 
 func _texture_for_status(item_id: String, status: StringName) -> Texture2D:
+	item_id = ItemCatalog.normalize_house_item_id(item_id)
 	if _normalized_status(status) == HOUSE_STATUS_WIP:
 		var wip_texture: Texture2D = ItemCatalog.get_house_wip_texture(item_id)
 		if wip_texture != null:
@@ -583,7 +613,17 @@ func complete_house(house_id: StringName) -> bool:
 	record.status = HOUSE_STATUS_COMPLETED
 	if record.sprite != null and is_instance_valid(record.sprite):
 		record.sprite.texture = texture
+	house_completed.emit(_snapshot_for_record(record))
 	return true
+
+
+func complete_all_wip_houses_for_dev() -> int:
+	var completed: int = 0
+	for house_id: StringName in get_wip_house_ids_in_build_order():
+		_manager.get_house_builder_work_controller().on_wip_house_removed(house_id)
+		if complete_house(house_id):
+			completed += 1
+	return completed
 
 
 func house_work_seconds(house_id: StringName) -> float:
@@ -612,6 +652,65 @@ func get_house_blocking_cells(id: StringName) -> Array[Vector2i]:
 
 func house_count() -> int:
 	return _houses.size()
+
+
+func count_completed_houses(item_id: StringName) -> int:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var count: int = 0
+	for record: HouseRecord in _houses:
+		if record.item_id == normalized_id and record.status == HOUSE_STATUS_COMPLETED:
+			count += 1
+	return count
+
+
+func count_existing_houses(item_id: StringName) -> int:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var count: int = 0
+	for record: HouseRecord in _houses:
+		if record.item_id == normalized_id:
+			count += 1
+	return count
+
+
+func get_completed_house_ids(item_id: StringName) -> Array[StringName]:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var ids: Array[StringName] = []
+	for record: HouseRecord in _houses:
+		if record.item_id == normalized_id and record.status == HOUSE_STATUS_COMPLETED:
+			ids.append(record.id)
+	return ids
+
+
+func get_house_snapshot(house_id: StringName) -> HouseSnapshot:
+	var record: HouseRecord = find_house_by_name(house_id)
+	return _snapshot_for_record(record)
+
+
+func get_completed_house_snapshots() -> Array[HouseSnapshot]:
+	var snapshots: Array[HouseSnapshot] = []
+	for record: HouseRecord in _houses:
+		if record.status == HOUSE_STATUS_COMPLETED:
+			snapshots.append(_snapshot_for_record(record))
+	return snapshots
+
+
+func has_existing_house_type(item_id: String) -> bool:
+	return count_existing_houses(StringName(item_id)) > 0
+
+
+func _snapshot_for_record(record: HouseRecord) -> HouseSnapshot:
+	var snapshot: HouseSnapshot = HouseSnapshot.new()
+	if record == null:
+		return snapshot
+	snapshot.id = record.id
+	snapshot.item_id = record.item_id
+	snapshot.resident_type = ItemCatalog.get_house_resident_type(record.item_id)
+	snapshot.entrance_cell = record.entrance_cell
+	snapshot.entrance_world_position = _manager.cell_center(record.entrance_cell) if _manager != null else Vector2.ZERO
+	snapshot.completed = record.status == HOUSE_STATUS_COMPLETED
+	snapshot.player_built = record.player_built
+	snapshot.authored = record.authored
+	return snapshot
 
 
 # ---------------------------------------------------------------------------

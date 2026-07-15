@@ -84,24 +84,25 @@ Notes:
 
 ## SeedMerchantController
 Owns:
-- Seed merchant phase state, player proximity pause, shop/prompt positioning queries, purchase-phase closure, and merchant-specific save restoration.
+- One house-bound seed merchant runtime visitor, player proximity pause, shop/prompt positioning queries, purchase-phase closure, and home/evacuation requests.
 
 Does not own:
 - The reusable single-agent visitor movement details now handled by DayVisitorMovementController.
 
 Notes:
-- The seed merchant still uses its authored `seedmerchent_spot` via the existing `SpawnerBinding.spot_cell` path.
+- Seed merchant presence is granted by `AllyHousingController` from completed `house_merchant` records. The old unconditional `seedmerchent` spawner path is no longer authoritative.
 
 ## BuilderController
 Owns:
-- Persistent desired Builder count, temporary active Builder visitor collection, target-cell claims around `builder_spot` or a house work target, day-start spawn batching, K-key roster increment handling through the manager facade, night departure orchestration, Builder save/load state, Builder movement/lifecycle state, and Builder removal notifications.
+- Temporary active Builder visitor collection, target-cell claims around each builder's home entrance/spot or a house work target, house-bound Builder spawning, fundamental Builder spawning, night home/evacuation orchestration, Builder movement/lifecycle state, and Builder removal notifications.
 
 Does not own:
 - Debug keyboard input, generic save-file writing, native pathfinding algorithms, flow-field generation, merchant interaction, WIP house task assignment, or Builder work progress.
 
 Notes:
-- Builder count persists independently from live Builder nodes. Builders spawn from the exact `seedmerchent` binding, reuse its `seedmerchent_exit` escape route through `spawner_cell` metadata, and claim deterministic unique tiles within the bounded Builder spot radius.
-- AgentDefinitionService owns `builder.png` visual setup. LevelLoader captures direct authored `_spot` children, including `builder_spot`, before the loaded level shell is freed. CppDebugOptions owns the K developer shortcut and delegates to `BuildingManager.add_builder_for_dev()`.
+- Normal Builder presence is granted by `AllyHousingController` from completed `house_builder` records. Saved/desired builder counts and the dev roster increment are intentionally not authoritative.
+- The fundamental Builder uses explicit `fundamental_builder_in`, `fundamental_builder_spot`, and `fundamental_builder_out` ally markers captured by LevelLoader as named spots, not normal spawners.
+- AgentDefinitionService owns `builder.png` visual setup.
 - HouseBuilderWorkController uses focused BuilderController APIs to release idle claims, claim reachable work cells, assign normal A* paths, detect arrival, and return Builders to idle.
 
 ## GardenRetargetController
@@ -142,10 +143,10 @@ Notes:
 - Footprint blockers use the transparent wallz tile (15,0) — the same invisible blocker as the reservoir base — resolved from the live tile_set, never hardcoded source ids. The blocker atlas never identifies the logical house; that is always the presence registry.
 
 ## House build-system integration
-- ItemCatalog: `house` is one inventory-backed, non-fixed-stock placeable (wall icon frame 3, house1.png world/preview texture) flagged by `special_placement_kind == &"house"` (`is_house_placeable`). It flows automatically into starting-items, the merchant list (inventory-backed), and `NightReward.item_id`; it is added to the hammer menu category.
-- BuildPlacementService: routes house items before the generic one-tile path (`_apply_house_placeable`): full six-cell validation (`house_placement_rejection` = HouseManager structural + per-cell buildable/occupancy), consume exactly one inventory unit, `HouseManager.build_player_house`, and immediate refund rollback if the commit unexpectedly fails. Also reserves every house presence cell against all other placeables in `is_placeable_occupied`.
+- ItemCatalog: `house_builder` and `house_merchant` are direct gem-purchase house placeables flagged by `special_placement_kind == &"house"` (`is_house_placeable`). Legacy `house` IDs normalize to `house_merchant`.
+- BuildPlacementService: routes house items before the generic one-tile path (`_apply_house_placeable`): centralized housing availability + full six-cell validation (`house_placement_rejection` = HouseManager structural + per-cell buildable/occupancy), direct currency purchase, `HouseManager.build_player_house`, and immediate refund rollback if the commit unexpectedly fails. Also reserves every house presence cell against all other placeables in `is_placeable_occupied`.
 - BuildPreviewController: `_draw_house_preview` renders six-cell coverage + the full house1.png sprite (aligned via `HouseManager.position_house_sprite`), tinted valid/invalid as one atomic footprint.
-- BuildRemovalService: resolves one logical house from any presence cell, normalized/deduped by house id (`_house_removable_at_cell` / rectangle dedup), tears it down via HouseManager and refunds exactly one `house` item.
+- BuildRemovalService: resolves one logical house from any presence cell, normalized/deduped by house id (`_house_removable_at_cell` / rectangle dedup), tears it down via HouseManager and refunds the house item currency.
 - PlayerPlaceableDurabilityService: one entrance-keyed target on the logical `houses` layer per player-built house (never five wall targets); validity/destruction/health-bar position resolve through the BuildingManager house facade.
 - Progression: `runtime_houses` save section (save version 5; versions 1-4 load with no houses), restored after layers/reindex and before durability. Current records include WIP/completed status and construction order. Older records without status load as completed.
 

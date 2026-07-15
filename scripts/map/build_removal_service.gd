@@ -77,7 +77,7 @@ func _commit_house_removal(removal: Dictionary) -> bool:
 		return false
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui and game_ui.has_method("refund_build"):
-		game_ui.call("refund_build", "house", refund_world_position(entrance), 1)
+		game_ui.call("refund_build", str(current.get("item_id", "")), refund_world_position(entrance), 1)
 	return true
 
 

@@ -293,6 +293,8 @@ func _first_possessed_weapon_id() -> String:
 func _is_quickbar_slot_disabled(kind: String) -> bool:
 	if kind == WEAPON_SLOT_KIND:
 		return _first_possessed_weapon_id() == ""
+	if kind == BUILD_HOUSE_ID and not _should_show_house_quickslot():
+		return true
 	# Structural builds and unbuild removals are blocked at night, so their slots grey out.
 	return GameState.is_night and (kind == HAMMER_ID or kind == BUILD_HOUSE_ID or kind == UNBUILD_TOOL_ID)
 
@@ -673,6 +675,9 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 	return CurrencyCatalog.get_progression_key(currency)
 
 func is_build_item_available(item_id: String) -> bool:
+	item_id = ItemCatalog.normalize_house_item_id(item_id)
+	if ItemCatalog.is_house_placeable(item_id):
+		return _is_house_build_item_available(item_id)
 	var scene: Node = get_tree().current_scene
 	var loader: Node = scene.get_node_or_null("LevelLoader") if scene != null else null
 	# The level author can uncheck a buildable's "Available" box in the Rose Level editor;
@@ -710,6 +715,21 @@ func is_build_item_available(item_id: String) -> bool:
 					return true
 			return false
 	return item_id == "rose" or item_id == "wall" or item_id == "ronce" or item_id == "fence"
+
+
+func _is_house_build_item_available(item_id: String) -> bool:
+	var building_manager: Node = _building_manager()
+	return building_manager == null or not building_manager.has_method("is_house_build_item_available") or bool(building_manager.call("is_house_build_item_available", item_id))
+
+
+func _should_show_house_quickslot() -> bool:
+	var building_manager: Node = _building_manager()
+	return building_manager == null or not building_manager.has_method("should_show_house_quickslot") or bool(building_manager.call("should_show_house_quickslot"))
+
+
+func _building_manager() -> Node:
+	var scene: Node = get_tree().current_scene
+	return scene.get_node_or_null("Map/BuildingManager") if scene != null else null
 
 
 func _string_array_contains(values: Array, item_id: String) -> bool:
@@ -1648,6 +1668,8 @@ func _strip_non_backpack_items_from_inventory() -> void:
 		var item_id: String = _slot_item_id(inventory_slots[i])
 		if item_id in BUILD_TOOL_IDS or item_id == UNBUILD_TOOL_ID:
 			inventory_slots[i] = _empty_slot()
+		elif ItemCatalog.is_house_placeable(item_id) and not ItemCatalog.is_inventory_backed(item_id):
+			inventory_slots[i] = _empty_slot()
 
 func _normalize_unique_weapons() -> void:
 	var seen: Dictionary = {}
@@ -1678,6 +1700,7 @@ func _apply_toolbar_slot(slot: ItemSlot, index: int) -> void:
 	var item_id: String = get_equipped_weapon_id() if kind == WEAPON_SLOT_KIND else kind
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	slot.set_item(item_def if not item_def.is_empty() else {}, 0)
+	slot.visible = kind != BUILD_HOUSE_ID or _should_show_house_quickslot()
 	slot.set_disabled(_is_quickbar_slot_disabled(kind))
 	# Menu slots highlight while their drop-up is open; the unbuild tool has no menu, so its
 	# slot highlights whenever it is the equipped play-mode tool.
