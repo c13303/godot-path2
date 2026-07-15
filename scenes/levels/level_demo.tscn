@@ -6,7 +6,6 @@
 [ext_resource type="Texture2D" uid="uid://bpc14td2vod3s" path="res://assets/sprites/legval/clientspawner.png" id="5_u8kq7"]
 [ext_resource type="Texture2D" uid="uid://gbry66m75f1g" path="res://assets/sprites/legval/exitclient.png" id="6_5dxts"]
 [ext_resource type="Texture2D" uid="uid://bg6v2il1ebodj" path="res://assets/sprites/legval/merchentspot.png" id="7_wyhb5"]
-[ext_resource type="Texture2D" uid="uid://y6mkn3335wg0" path="res://assets/sprites/house/house1.png" id="10_l4uo6"]
 [ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
 [ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
 [ext_resource type="Script" uid="uid://cg6n61v6iuit1" path="res://scripts/spawning/level_spawn_config.gd" id="34_spawn_config"]
@@ -1396,24 +1395,20 @@ texture = ExtResource("5_drkbx")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
-[node name="seedmerchent" type="Sprite2D" parent="spawners" unique_id=655819204]
+[node name="fundamental_builder_in" type="Sprite2D" parent="spawners" unique_id=655819204]
 position = Vector2(2049, 3780)
 texture = ExtResource("5_u8kq7")
 metadata/id = ""
 metadata/frequency_client = 1.0
 
-[node name="house_seedmerchant" type="Sprite2D" parent="spawners" unique_id=1617665962]
-position = Vector2(2391, 2808)
-texture = ExtResource("10_l4uo6")
-
-[node name="seedmerchent_exit" type="Sprite2D" parent="spawners" unique_id=1151164943]
-position = Vector2(2107, 3780)
-texture = ExtResource("5_drkbx")
+[node name="fundamental_builder_spot" type="Sprite2D" parent="spawners" unique_id=1020094794]
+position = Vector2(2391, 2834)
+texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
-[node name="seedmerchent_spot" type="Sprite2D" parent="spawners" unique_id=1455932304]
-position = Vector2(2558, 2697)
-texture = ExtResource("7_wyhb5")
+[node name="fundamental_builder_out" type="Sprite2D" parent="spawners" unique_id=1151164943]
+position = Vector2(2107, 3780)
+texture = ExtResource("5_drkbx")
 metadata/id = ""
 
 [node name="sheep" type="Sprite2D" parent="spawners" unique_id=17673017]
@@ -1460,11 +1455,6 @@ metadata/id = ""
 [node name="monster4_exit" type="Sprite2D" parent="spawners" unique_id=1545341588]
 position = Vector2(1006, 2273)
 texture = ExtResource("5_drkbx")
-metadata/id = ""
-
-[node name="builder_spot" type="Sprite2D" parent="spawners" unique_id=1020094794]
-position = Vector2(2391, 2834)
-texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="surface" type="Node" parent="." unique_id=1390524477]

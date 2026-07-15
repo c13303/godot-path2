@@ -14,10 +14,10 @@ const IDLE_GROUP: int = 0
 @export var preview_z_index: int = -50
 @export_range(30.0, 900.0, 5.0, "or_greater") var walker_speed: float = 380.0
 @export_range(0.05, 3.0, 0.05, "or_greater") var walker_departure_interval: float = 0.5
-@export_range(4.0, 96.0, 1.0, "or_greater") var footprint_stride_distance: float = 28.0
-@export_range(0.0, 24.0, 0.5, "or_greater") var footprint_lateral_offset: float = 5.0
+@export_range(1.0, 96.0, 1.0, "or_greater") var footstep_pair_spacing_distance: float = 10.0
+@export_range(0.0, 24.0, 0.5, "or_greater") var footstep_side_offset: float = 6.0
+@export_range(0.1, 8.0, 0.05, "or_greater") var footstep_lifetime: float = 2.2
 @export_range(0.1, 4.0, 0.05, "or_greater") var footprint_scale: float = 1.0
-@export_range(0.1, 8.0, 0.05, "or_greater") var footprint_fade_seconds: float = 2.2
 @export_range(0.1, 2.0, 0.05, "or_greater") var refresh_interval: float = 0.35
 
 var _manager: BuildingManager = null
@@ -105,7 +105,9 @@ func _refresh_now() -> void:
 			"planned": false,
 			"walkers_started": false,
 			"path": PackedVector2Array(),
+			"owned_segments": {},
 		}))
+	_rebuild_segment_ownership()
 
 
 func _prepared_descriptors() -> Array[Dictionary]:
@@ -133,11 +135,17 @@ func _update_route_readiness(descriptors: Array[Dictionary]) -> void:
 	var ready_by_group: Dictionary = {}
 	for descriptor: Dictionary in descriptors:
 		ready_by_group[int(descriptor.get("group_id", IDLE_GROUP))] = bool(descriptor.get("ready", false))
+	var ownership_dirty: bool = false
 	for index: int in range(_routes.size()):
 		var route: Dictionary = _routes[index]
 		var group_id: int = int(route.get("group_id", IDLE_GROUP))
 		route["ready"] = bool(ready_by_group.get(group_id, false))
+		var was_planned: bool = bool(route.get("planned", false))
 		_routes[index] = _plan_route_path(route)
+		if not was_planned and bool((_routes[index] as Dictionary).get("planned", false)):
+			ownership_dirty = true
+	if ownership_dirty:
+		_rebuild_segment_ownership()
 
 
 # The chain of tile centers is planned once per route identity, on the first refresh where
@@ -157,6 +165,44 @@ func _plan_route_path(route: Dictionary) -> Dictionary:
 	)
 	route["walkers_started"] = false
 	return route
+
+
+func _rebuild_segment_ownership() -> void:
+	var edge_owner: Dictionary = {}
+	for route_index: int in range(_routes.size()):
+		var route: Dictionary = _routes[route_index]
+		var path: PackedVector2Array = route.get("path", PackedVector2Array()) as PackedVector2Array
+		var owned_segments: Dictionary = {}
+		for segment_index: int in range(path.size() - 1):
+			var edge_key: String = _canonical_edge_key(path[segment_index], path[segment_index + 1])
+			if edge_key == "":
+				continue
+			if not edge_owner.has(edge_key):
+				edge_owner[edge_key] = route_index
+			if int(edge_owner.get(edge_key, -1)) == route_index:
+				owned_segments[segment_index] = true
+		route["owned_segments"] = owned_segments
+		_routes[route_index] = route
+
+
+func _canonical_edge_key(first: Vector2, second: Vector2) -> String:
+	if first.is_equal_approx(second):
+		return ""
+	var first_cell_center: Vector2i = Vector2i(roundi(first.x), roundi(first.y))
+	var second_cell_center: Vector2i = Vector2i(roundi(second.x), roundi(second.y))
+	if _point_sorts_before(first_cell_center, second_cell_center):
+		return "%s|%s" % [_point_key(first_cell_center), _point_key(second_cell_center)]
+	return "%s|%s" % [_point_key(second_cell_center), _point_key(first_cell_center)]
+
+
+func _point_sorts_before(first: Vector2i, second: Vector2i) -> bool:
+	if first.x != second.x:
+		return first.x < second.x
+	return first.y < second.y
+
+
+func _point_key(point: Vector2i) -> String:
+	return "%d,%d" % [point.x, point.y]
 
 
 func _start_ready_route_walkers() -> void:
@@ -185,12 +231,13 @@ func _start_route_walkers(route: Dictionary, path: PackedVector2Array) -> void:
 		var runner: PathPreviewRunner = _idle_runner()
 		runner.start(
 			path,
+			route.get("owned_segments", {}) as Dictionary,
 			int(route.get("footprint_frame", PathPreviewRunner.FOOTPRINT_FRAME_MONSTER)),
 			walker_speed,
-			footprint_stride_distance,
-			footprint_lateral_offset,
+			footstep_pair_spacing_distance,
+			footstep_side_offset,
 			footprint_scale,
-			footprint_fade_seconds,
+			footstep_lifetime,
 			walker_start_distance
 		)
 

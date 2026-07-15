@@ -22,15 +22,17 @@ var _path: PackedVector2Array = PackedVector2Array()
 var _segment_lengths: Array[float] = []
 var _total_length: float = 0.0
 var _walker_distance: float = 0.0
-var _distance_since_stamp: float = 0.0
+var _distance_since_pair_stamp: float = 0.0
 var _next_foot_side: int = 1
+var _pair_stamp_count: int = 0
 var _footprints: Array[Dictionary] = []
+var _owned_segments: Dictionary = {}
 var _footprint_frame: int = FOOTPRINT_FRAME_MONSTER
 var _speed: float = 380.0
-var _stride_distance: float = 28.0
-var _lateral_offset: float = 5.0
+var _pair_spacing_distance: float = 10.0
+var _side_offset: float = 6.0
 var _footprint_scale: float = 1.0
-var _fade_seconds: float = 2.2
+var _footstep_lifetime: float = 2.2
 
 
 func configure() -> void:
@@ -44,30 +46,33 @@ func configure() -> void:
 
 func start(
 	path: PackedVector2Array,
+	owned_segments: Dictionary,
 	footprint_frame: int,
 	speed: float,
-	stride_distance: float,
-	lateral_offset: float,
+	pair_spacing_distance: float,
+	side_offset: float,
 	footprint_scale: float,
-	fade_seconds: float,
+	footstep_lifetime: float,
 	start_distance: float
 ) -> void:
 	_path = path
 	_segment_lengths.clear()
 	_footprints.clear()
+	_owned_segments = owned_segments.duplicate()
 	_total_length = _calculate_segment_lengths(_path, _segment_lengths)
 	_footprint_frame = footprint_frame
 	_speed = maxf(1.0, speed)
-	_stride_distance = maxf(1.0, stride_distance)
-	_lateral_offset = maxf(0.0, lateral_offset)
+	_pair_spacing_distance = maxf(1.0, pair_spacing_distance)
+	_side_offset = maxf(0.0, side_offset)
 	_footprint_scale = maxf(0.05, footprint_scale)
-	_fade_seconds = maxf(0.05, fade_seconds)
+	_footstep_lifetime = maxf(0.05, footstep_lifetime)
 	_walker_distance = clampf(start_distance, 0.0, maxf(0.0, _total_length - MIN_SEGMENT_LENGTH))
-	_distance_since_stamp = 0.0
-	_next_foot_side = 1
+	_distance_since_pair_stamp = 0.0
+	_next_foot_side = -1
+	_pair_stamp_count = 0
 	_active = _path.size() >= 2 and _total_length > MIN_SEGMENT_LENGTH
 	if _active:
-		_seed_recent_footprints()
+		_try_start_pair()
 	visible = _active
 	set_process(_active)
 	queue_redraw()
@@ -78,7 +83,9 @@ func recycle() -> void:
 	_path = PackedVector2Array()
 	_segment_lengths.clear()
 	_footprints.clear()
+	_owned_segments.clear()
 	_total_length = 0.0
+	_pair_stamp_count = 0
 	visible = false
 	set_process(false)
 	queue_redraw()
@@ -112,15 +119,6 @@ func _calculate_segment_lengths(path: PackedVector2Array, lengths: Array[float])
 	return total
 
 
-func _seed_recent_footprints() -> void:
-	var seed_distance: float = _walker_distance
-	var seed_age: float = 0.0
-	while seed_age < _fade_seconds and seed_distance >= 0.0:
-		_stamp_at_distance(seed_distance, seed_age)
-		seed_distance -= _stride_distance
-		seed_age += _stride_distance / _speed
-
-
 func _advance_walker(distance_to_travel: float) -> void:
 	var remaining: float = distance_to_travel
 	while remaining > 0.0:
@@ -138,40 +136,61 @@ func _advance_walker(distance_to_travel: float) -> void:
 func _move_along_route(distance_to_travel: float) -> void:
 	var remaining: float = distance_to_travel
 	while remaining > 0.0:
-		var distance_until_stamp: float = _stride_distance - _distance_since_stamp
+		if _pair_stamp_count == 0:
+			_try_start_pair()
+		var distance_until_stamp: float = remaining
+		if _pair_stamp_count == 1:
+			distance_until_stamp = maxf(0.0, _pair_spacing_distance - _distance_since_pair_stamp)
 		var step: float = minf(remaining, distance_until_stamp)
 		_walker_distance = minf(_walker_distance + step, _total_length)
-		_distance_since_stamp += step
+		if _pair_stamp_count == 1:
+			_distance_since_pair_stamp += step
 		remaining -= step
-		if _distance_since_stamp >= _stride_distance:
-			_stamp_at_distance(_walker_distance, 0.0)
-			_distance_since_stamp = 0.0
+		if _pair_stamp_count == 1 and _distance_since_pair_stamp >= _pair_spacing_distance:
+			if not _stamp_at_distance(_walker_distance, 0.0):
+				_pair_stamp_count = 2
+			_distance_since_pair_stamp = 0.0
 
 
 func _wrap_to_start() -> void:
 	_walker_distance = 0.0
-	_distance_since_stamp = 0.0
+	_distance_since_pair_stamp = 0.0
+	if _pair_stamp_count == 1:
+		_pair_stamp_count = 2
 
 
 func _age_footprints(delta: float) -> void:
 	for index: int in range(_footprints.size() - 1, -1, -1):
 		var footprint: Dictionary = _footprints[index]
 		var next_age: float = float(footprint.get("age", 0.0)) + delta
-		if next_age >= _fade_seconds:
+		if next_age >= _footstep_lifetime:
 			_footprints.remove_at(index)
 			continue
 		footprint["age"] = next_age
 		_footprints[index] = footprint
+	if _footprints.is_empty() and _pair_stamp_count >= 2:
+		_pair_stamp_count = 0
+		_distance_since_pair_stamp = 0.0
 
 
-func _stamp_at_distance(route_distance: float, age: float) -> void:
+func _try_start_pair() -> void:
+	if _pair_stamp_count != 0 or not _footprints.is_empty():
+		return
+	if _stamp_at_distance(_walker_distance, 0.0):
+		_distance_since_pair_stamp = 0.0
+
+
+func _stamp_at_distance(route_distance: float, age: float) -> bool:
 	var sample: Dictionary = _sample_path(route_distance)
+	var segment_index: int = int(sample.get("segment_index", -1))
+	if not _owned_segments.has(segment_index):
+		return false
 	var tangent: Vector2 = sample.get("tangent", Vector2.DOWN) as Vector2
 	if tangent.length_squared() <= 0.0:
-		return
-	var normal: Vector2 = tangent.orthogonal().normalized()
+		return false
+	var perpendicular: Vector2 = Vector2(-tangent.y, tangent.x).normalized()
 	var side: int = _next_foot_side
-	var center: Vector2 = (sample.get("position", Vector2.ZERO) as Vector2) + normal * _lateral_offset * float(side)
+	var center: Vector2 = (sample.get("position", Vector2.ZERO) as Vector2) + perpendicular * float(side) * _side_offset
 	_footprints.append({
 		"position": center,
 		"heading": tangent.angle(),
@@ -179,6 +198,8 @@ func _stamp_at_distance(route_distance: float, age: float) -> void:
 		"age": age,
 	})
 	_next_foot_side *= -1
+	_pair_stamp_count = mini(_pair_stamp_count + 1, 2)
+	return true
 
 
 func _sample_path(route_distance: float) -> Dictionary:
@@ -196,11 +217,13 @@ func _sample_path(route_distance: float) -> Dictionary:
 			return {
 				"position": from_point.lerp(to_point, progress),
 				"tangent": tangent,
+				"segment_index": index,
 			}
 		walked += segment_length
 	return {
 		"position": _path[_path.size() - 1],
 		"tangent": (_path[_path.size() - 1] - _path[_path.size() - 2]).normalized(),
+		"segment_index": _segment_lengths.size() - 1,
 	}
 
 
@@ -214,7 +237,7 @@ func _draw() -> void:
 	)
 	for footprint: Dictionary in _footprints:
 		var age: float = float(footprint.get("age", 0.0))
-		var alpha: float = clampf(1.0 - age / _fade_seconds, 0.0, 1.0)
+		var alpha: float = clampf(1.0 - age / _footstep_lifetime, 0.0, 1.0)
 		if alpha <= 0.0:
 			continue
 		var side: int = int(footprint.get("side", 1))
