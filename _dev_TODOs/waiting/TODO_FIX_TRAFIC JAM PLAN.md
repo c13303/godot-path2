@@ -1,4 +1,4 @@
-# Task: generic traffic right-of-way with physical jam breaking
+# Task: generic traffic right-of-way with physical jam breaking — revised for the current codebase
 
 ## Working rules
 
@@ -41,6 +41,19 @@ Do not modify generated or compiled files:
 Use explicit GDScript types. Avoid unsafe `:=` inference for dynamic values, calls, dictionaries, arrays, nullable values or mixed numeric expressions.
 
 Before editing, inspect the named files and verify that the current implementation still matches this prompt. Ask before proceeding if an important method, state transition or ownership boundary differs materially.
+
+## Current-codebase constraints already verified
+
+The current codebase has several navigation paths that must be covered explicitly:
+
+* normal A* entry calls `AgentNavigationPhaseController.start_astar_in()`;
+* local garden retarget assigns a path directly, then calls `AgentNavigationPhaseController.set_astar_in_agent()`;
+* temporary suspension recovery can restore a path directly, then calls the same `set_astar_in_agent()` registration method;
+* `AgentSuspendService` directly detaches and restores entry-flow, A*, escape and captured-agent navigation;
+* native lazy-flow freezing applies both to agents stamped with `waiting_flow_group` and to already-attached flow agents whose group is queued or computing;
+* the native smash implementation has one mutable pending impulse slot.
+
+The implementation must cover all of these paths. Do not assume that every A* transition passes through `start_astar_in()` or that every navigation detach/restore is owned only by `AgentNavigationPhaseController`.
 
 ---
 
@@ -322,24 +335,51 @@ Add to `AgentData`:
 ```cpp
 std::int64_t traffic_group_id = 0;
 int traffic_priority = 0;
+int pending_smash_priority = 0;
 ```
 
 Include `<cstdint>` where appropriate.
 
-Also add:
+Traffic state is runtime-derived and must not be serialized.
+
+## Pending-smash consistency requirement
+
+The current code has one pending smash slot composed of:
 
 ```cpp
-int pending_smash_priority = 0;
+pending_smash
+smash_pending
+smash_delay
+pending_smash_friction
+pending_smash_control_suppression
+pending_smash_control_suppression_duration
+pending_smash_priority
 ```
 
-Reset all three fields appropriately in:
+These fields must remain one coherent state.
+
+Use this invariant:
 
 ```text
-extensions/flowfield/steering/agent.cpp
-AgentData::reset()
+smash_pending == false:
+    pending_smash_priority == ImpulseQueuePriority::None
+
+smash_pending == true:
+    pending_smash_priority identifies the source currently stored in the pending slot
 ```
 
-Traffic state is runtime-derived and must not be serialized.
+In `AgentData::reset()`, reset the traffic fields and clear the complete pending-smash slot together. Do not reset only `pending_smash_priority` while leaving a pending impulse alive.
+
+Also reset `pending_smash_priority` to `None` everywhere the current pending slot is cleared, applied or cancelled, including:
+
+* `set_agent_position(..., clear_velocity = true)`;
+* `set_agent_phase(..., AgentPhase::Drowning, ...)`;
+* drowning cancellation in `SteeringSystem::update_all()`;
+* the branch that applies a pending smash;
+* `AgentData::reset()`;
+* any other existing explicit pending-smash cancellation found during inspection.
+
+Do not change public smash signatures.
 
 ---
 
@@ -416,7 +456,7 @@ The SCons script recursively includes `.cpp` files, so do not manually maintain 
 The new resolver owns:
 
 * traffic-contact candidate detection;
-* comparison of traffic priorities;
+* comparison of opaque traffic priorities and group IDs;
 * deterministic winner selection;
 * one traffic shove candidate per target;
 * per-target traffic cooldowns;
@@ -424,16 +464,19 @@ The new resolver owns:
 
 It does not own:
 
-* navigation;
+* navigation assignment;
 * flow fields;
 * paths;
-* agent phases;
+* group-flow loading state;
+* agent gameplay phases;
 * damage;
 * Godot bindings;
 * game-specific traffic policy;
 * general steering;
 * normal contact-push profiles;
 * smash movement integration.
+
+`SteeringSystem` remains responsible for determining the current generic lazy-flow-wait state because that information comes from `AgentManager` group state. Supply that state to the resolver through a narrow, allocation-safe mechanism.
 
 Do not place the full traffic algorithm directly in the already-large `steering_system.cpp`.
 
@@ -461,6 +504,7 @@ public:
         const std::vector<AgentData> &agents,
         const std::unordered_map<int, int> &id_to_index,
         SpatialGrid *grid,
+        const std::vector<std::uint8_t> &flow_waiting_by_agent_index,
         double max_world_radius,
         double base_push_force,
         std::vector<TrafficPushRequest> &out_requests);
@@ -474,7 +518,40 @@ private:
 
 Exact private helper names may differ.
 
-Keep the public responsibility this narrow.
+`SteeringSystem` should own reusable scratch storage for `flow_waiting_by_agent_index`; resize/reuse it rather than allocating a new container for every pair or query.
+
+Add a generic helper equivalent to:
+
+```cpp
+bool is_agent_waiting_for_flow(const AgentData &agent) const;
+```
+
+It must reproduce the current native freeze rule:
+
+```text
+wait_group = waiting_flow_group when present, otherwise current group
+
+flow-driven =
+    waiting_flow_group is present
+    OR
+    no active path and phase is FlowIn or FlowOut
+
+waiting =
+    flow-driven
+    AND valid wait group
+    AND AgentManager reports GROUP_FLOW_WAIT_QUEUED or GROUP_FLOW_WAIT_COMPUTING
+```
+
+Use this same helper for:
+
+* the existing movement freeze branch;
+* filling the resolver’s flow-waiting mask.
+
+Do not maintain two subtly different lazy-flow-wait predicates.
+
+An equivalent no-allocation callback design is acceptable, but do not perform dynamic allocation or `std::function` construction inside the neighbour-pair loop.
+
+Keep the resolver public responsibility narrow.
 
 ---
 
@@ -491,8 +568,16 @@ A pair is eligible only when:
 * neither is paused;
 * neither is already being propelled;
 * neither has a pending smash;
+* neither is currently waiting for a lazy flow field;
 * both are active;
 * the winning agent has a meaningful navigation intent.
+
+The lazy-flow-wait exclusion must cover both current native cases:
+
+1. a spawned agent stamped with `waiting_flow_group` while it has not yet joined the route group;
+2. an already-attached `FlowIn` or `FlowOut` agent whose current group flow is queued or computing.
+
+A frozen flow-waiting agent must neither shove nor be selected as the winner. It may be displaced only by existing non-traffic systems if those systems already permit it.
 
 Do not require the losing agent to currently move toward the winner. A stationary lower-priority blocker must still be movable.
 
@@ -643,7 +728,7 @@ Defaults:
 bool traffic_right_of_way_enabled = true;
 double traffic_push_force = 216.0;
 double traffic_push_cooldown = 0.18;
-double traffic_control_lock_seconds = 0.10;
+double traffic_control_lock_seconds = 0.18;
 ```
 
 Expose all four through:
@@ -681,6 +766,10 @@ double final_force = traffic_push_force * force_scale;
 This produces between 50% and 100% of the configured traffic force.
 
 Use the existing player contact-push value of `216.0` as the initial reference scale.
+
+The initial control lock is deliberately `0.18` seconds, not `0.10`. The current update order can decrement a newly applied suppression timer during the same frame; a severe frame spike near 100 ms could otherwise consume a `0.10` lock before useful displacement occurs.
+
+Do not alter the global propulsion implementation in this task.
 
 Do not introduce more traffic tuning parameters in this pass.
 
@@ -739,14 +828,7 @@ Do not create a permanent pair matrix.
 
 # Generic pending-impulse arbitration
 
-The current native smash queue has one mutable pending slot:
-
-```cpp
-pending_smash
-smash_pending
-pending_smash_friction
-pending_smash_control_suppression
-```
+The current native smash queue has one mutable pending slot.
 
 A traffic shove must never overwrite a stronger pending gameplay or contact impulse.
 
@@ -814,7 +896,7 @@ This is only a priority guard around the existing single pending slot.
 Assign:
 
 ```text
-apply_smash_impulse and gameplay/AoE paths:
+apply_smash_impulse and every gameplay/AoE/explosion path:
     Gameplay
 
 existing apply_contact_pushes:
@@ -824,12 +906,11 @@ new traffic pushes:
     Traffic
 ```
 
-Reset `pending_smash_priority` whenever the pending smash is:
+Do not miss internal callers that eventually write to the same pending slot.
 
-* applied;
-* cleared;
-* cancelled for drowning;
-* reset with the agent.
+Whenever an accepted impulse overwrites the pending slot, update `pending_smash_priority` at the same time.
+
+Whenever the pending slot is applied, cleared, reset or cancelled, reset `pending_smash_priority` to `None` at the same time.
 
 Existing public Godot smash method signatures must remain unchanged.
 
@@ -863,6 +944,7 @@ control suppression:
 
 control suppression duration:
     traffic_control_lock_seconds
+    default 0.18 seconds
 
 respect weapon immune:
     false
@@ -871,9 +953,7 @@ impulse queue priority:
     Traffic
 ```
 
-The default lock is only `0.10` seconds.
-
-This is enough to let the physical shove happen, after which navigation regains control.
+The lock exists only to let the physical displacement occur. Navigation regains control automatically afterward.
 
 Do not alter the global propulsion implementation.
 
@@ -889,9 +969,12 @@ Add one member:
 TrafficRightOfWayResolver traffic_right_of_way_resolver;
 ```
 
-Add one focused private method, for example:
+Add reusable scratch state for the generic flow-wait mask and request list if this avoids per-frame allocations.
+
+Add focused private methods equivalent to:
 
 ```cpp
+bool is_agent_waiting_for_flow(const AgentData &agent) const;
 void apply_traffic_right_of_way(double delta);
 ```
 
@@ -914,6 +997,14 @@ Therefore:
 * impulse priority still protects against accidental overwrites.
 
 Traffic resolution must happen before the pending-smash application loop.
+
+Before collecting traffic candidates:
+
+1. resolve the current `AgentManager` exactly as the existing lazy-flow freeze code does;
+2. fill the reusable `flow_waiting_by_agent_index` mask through the shared helper;
+3. pass that mask to the resolver.
+
+Replace the existing inline lazy-flow freeze predicate with the same shared helper so movement freezing and traffic eligibility cannot diverge.
 
 Do not integrate the traffic resolver into:
 
@@ -987,19 +1078,13 @@ to `BuildingManager`.
 
 # GDScript phase ownership
 
-Primary owner:
+Primary game-policy owner:
 
 ```text
 scripts/map/agent_navigation_phase_controller.gd
 ```
 
-This controller already owns:
-
-```text
-entry flow -> A* in -> eating -> escape flow
-```
-
-It therefore owns assigning and clearing the game-specific traffic state.
+This controller owns the game-specific traffic hierarchy and the public helper methods used by other navigation services.
 
 Add:
 
@@ -1021,17 +1106,17 @@ Add focused helpers equivalent to:
 ```gdscript
 func _agent_uses_stream_traffic(agent: Node2D) -> bool
 
-func _set_inbound_traffic(
+func set_inbound_traffic(
     agent: Node2D,
     plant_group: int
 ) -> void
 
-func _set_astar_inside_traffic(
+func set_astar_inside_traffic(
     agent: Node2D,
     nav_id: int
 ) -> void
 
-func _set_outbound_traffic(
+func set_outbound_traffic(
     agent: Node2D,
     escape_group: int
 ) -> void
@@ -1039,7 +1124,9 @@ func _set_outbound_traffic(
 func clear_agent_traffic(nav_id: int) -> void
 ```
 
-For a non-participating agent, every setter must resolve to:
+The three assignment helpers must be callable by `AgentSuspendService`, so do not make them inaccessible private-only helpers unless a clean narrow forwarding method already exists.
+
+For a non-participating agent, every assignment helper must resolve to:
 
 ```gdscript
 _manager.set_agent_traffic_state(
@@ -1053,11 +1140,21 @@ Do not store a game-side mirror dictionary of native traffic state.
 
 The native agent state is the source of truth.
 
+Secondary transition owner:
+
+```text
+scripts/map/agent_suspend_service.gd
+```
+
+`AgentSuspendService` already directly detaches and restores entry-flow, A*, escape and captured-agent navigation. It must therefore clear traffic while navigation is suspended and restore the correct traffic state only after navigation is restored.
+
+Do not move suspension logic into `BuildingManager`.
+
 ---
 
 # Required phase transitions
 
-## Waiting for lazy entry flow
+## Waiting for initial lazy entry flow
 
 In:
 
@@ -1067,7 +1164,7 @@ assign_agent_to_garden_entry_flow()
 
 when the route has a valid pending group but its flow is not ready:
 
-* clear traffic state;
+* clear traffic state before or while stamping `waiting_flow_group`;
 * keep the existing waiting-flow freeze and label behaviour;
 * do not allow a frozen waiting agent to shove traffic.
 
@@ -1079,7 +1176,7 @@ In:
 _attach_agent_to_entry_route()
 ```
 
-after successfully assigning `plant_group`:
+after validating the route and completing the native group assignment call for `plant_group`:
 
 ```text
 group:
@@ -1091,15 +1188,25 @@ priority:
 
 Set only for participating agents.
 
-## Starting A* toward a plant
+The current native/GDScript assignment APIs return `void`; do not redesign them solely to manufacture a success return. Treat the assignment boundary as reached only after all route data has been validated and the native call has completed.
 
-In:
+## Starting or restoring A* toward a plant
+
+Assign A* traffic in:
 
 ```gdscript
-start_astar_in()
+AgentNavigationPhaseController.set_astar_in_agent(nav_id, data)
 ```
 
-after a valid path has been found and assigned:
+Do not assign it only in `start_astar_in()`.
+
+This registration method is the current common path for:
+
+* normal `start_astar_in()` assignment;
+* `GardenRetargetController._try_local_retarget_agent()` direct local retarget;
+* `AgentSuspendService` A* restoration.
+
+After validating that `data["node"]` is a live `Node2D` and registering the A* record/target:
 
 ```text
 group:
@@ -1114,6 +1221,8 @@ Do not retain the inbound group through A*.
 Do not derive the A* traffic group from the target cell.
 
 Do not create target-cell traffic registries.
+
+Using one group per A* agent is intentional for this first implementation. It can also cause occasional arbitration between nearby same-direction A* agents; this is accepted provisionally and must be covered by a manual regression test.
 
 ## Eating
 
@@ -1136,7 +1245,7 @@ In:
 attach_agent_to_escape()
 ```
 
-after successfully assigning `escape_group`:
+after validating the escape route and completing the native group assignment call for `escape_group`:
 
 ```text
 group:
@@ -1147,6 +1256,8 @@ priority:
 ```
 
 Set only for participating agents.
+
+A failed `assign_agent_to_escape()` or invalid escape route must not invent outbound traffic state.
 
 ## Retarget waiting
 
@@ -1165,6 +1276,42 @@ _agent_navigation_phases.clear_agent_traffic(nav_id)
 
 A waiting agent must not retain stale right-of-way.
 
+## Temporary suspension and capture
+
+In:
+
+```text
+scripts/map/agent_suspend_service.gd
+```
+
+clear traffic state in all suspension entry points before or while navigation is detached:
+
+```gdscript
+suspend_agent_for_drowning()
+suspend_agent_for_turret_eating()
+suspend_agent_for_external_capture()
+```
+
+This is required even when the native phase changes to `Eating` or `Drowning`: native phase alone must not be relied on to clean game-side traffic assignment.
+
+Restore traffic only after the corresponding navigation restoration has succeeded:
+
+```text
+_resume_agent_entry_flow() succeeds:
+    restore inbound traffic from data["plant_group"]
+
+_resume_agent_path() succeeds for kind == "astar":
+    set_astar_in_agent() restores per-agent A* traffic centrally
+
+kind == "escape":
+    assign_agent_to_escape()/attach_agent_to_escape() restores outbound traffic centrally
+
+client_counter or other non-participating path:
+    traffic remains disabled
+```
+
+If restoration falls back to retarget/waiting status, traffic must remain cleared.
+
 ## Generic navigation cleanup
 
 In:
@@ -1181,18 +1328,28 @@ Native unregistration removes the agent and its resolver cooldown automatically,
 
 # Failure-path correctness
 
-Traffic state must never survive a transition where the associated navigation assignment failed.
+Traffic state must never survive a transition where the associated navigation assignment failed or was suspended.
 
 Ensure:
 
-* waiting for an entry flow has no traffic state;
-* failed entry assignment does not leave an old stream active;
+* waiting for an initial entry flow has no traffic state;
+* an already-attached flow agent whose group is queued/computing is excluded natively from traffic arbitration;
+* failed entry-route validation does not leave an old stream active;
+* local retarget A* receives A* traffic through `set_astar_in_agent()`;
+* resumed A* receives A* traffic through the same registration method;
 * retarget waiting clears the stream;
-* eating clears the stream;
+* normal eating clears the stream;
+* restored eating clears the stream;
+* turret-eating suspension clears the stream;
+* drowning suspension clears the stream;
+* external capture clears the stream;
+* failed suspension recovery leaves traffic disabled;
 * native unregistration removes resolver cooldown state;
 * a failed escape assignment does not invent an outbound stream.
 
-Do not assign traffic state until the corresponding path or flow assignment has succeeded.
+Do not assign traffic state before the associated route/path data has been validated and the corresponding native assignment call has completed.
+
+Do not add return-value redesign to the existing `void` native assignment APIs unless an actual existing failure channel is discovered during inspection.
 
 ---
 
@@ -1232,16 +1389,21 @@ scripts/map/ARCHITECTURE.md
 Add a concise section explaining:
 
 ```text
-AgentNavigationPhaseController owns game-specific traffic group and
-priority assignment during navigation phase transitions.
+AgentNavigationPhaseController owns game-specific traffic groups,
+priorities and the central assignment/clear helpers used by navigation
+phase transitions.
+
+AgentSuspendService clears traffic while navigation is temporarily
+suspended and restores it only after entry-flow, A* or escape navigation
+has been restored.
 
 TrafficRightOfWayResolver owns generic native arbitration between
 agents with opaque traffic groups and priorities.
 
-SteeringSystem submits accepted traffic requests to the existing
-smash propulsion pipeline.
+SteeringSystem supplies generic lazy-flow-wait eligibility and submits
+accepted traffic requests to the existing smash propulsion pipeline.
 
-BuildingManager only exposes a thin native forwarding method and owns
+BuildingManager exposes only a thin native forwarding method and owns
 no traffic state or algorithm.
 ```
 
@@ -1280,6 +1442,7 @@ Game-side:
 
 ```text
 scripts/map/agent_navigation_phase_controller.gd
+scripts/map/agent_suspend_service.gd
 scripts/map/garden_retarget_controller.gd
 scripts/map/building_manager.gd
 scripts/map/ARCHITECTURE.md
@@ -1318,12 +1481,20 @@ Preserve every invariant below:
 21. One target receives at most one traffic shove per resolver pass.
 22. Traffic cooldown storage is bounded by recently displaced agents, not pairs.
 23. Native resolution uses the spatial grid and is not O(total agents²).
-24. Eating agents have no active traffic state.
-25. Retarget-waiting agents have no active traffic state.
-26. Lazy-flow-waiting agents have no active traffic state.
-27. Existing player bulldozer/contact behaviour remains unchanged.
-28. Existing big-monster `smash_resist` remains effective.
-29. Future ordinary agent kinds can be integrated game-side without modifying the native resolver.
+24. Normal eating agents have no active traffic state.
+25. Restored eating agents have no active traffic state.
+26. Turret-eating suspended agents have no active traffic state.
+27. Drowning suspended agents have no active traffic state.
+28. Externally captured agents have no active traffic state.
+29. Retarget-waiting agents have no active traffic state.
+30. Initial lazy-entry-flow-waiting agents have no active traffic state.
+31. Already-attached agents whose flow group is queued/computing cannot act as traffic winners.
+32. Local-retarget A* agents receive per-agent A* traffic state.
+33. Resumed A* agents receive per-agent A* traffic state.
+34. Existing player bulldozer/contact behaviour remains unchanged.
+35. Existing big-monster `smash_resist` remains effective.
+36. Pending smash state and `pending_smash_priority` are always cleared together.
+37. Future ordinary agent kinds can be integrated game-side without modifying the native resolver.
 
 ---
 
@@ -1381,7 +1552,41 @@ Expected:
 * internal opposing movement eventually clears;
 * agents retain their paths after displacement.
 
-## Test 5: inbound against A*
+## Test 5: same-direction A* convoy regression
+
+Have a dense set of monsters follow broadly similar A* paths in the same direction.
+
+Expected:
+
+* occasional physical arbitration is acceptable because groups are per-agent;
+* agents retain their paths;
+* the convoy does not become materially less stable than the current behaviour;
+* agents are not continuously thrown sideways by repeated traffic shoves.
+
+If this fails badly, report it as a tuning/design issue. Do not silently add target reservations or a new traffic graph.
+
+## Test 6: local-retarget A* assignment
+
+Trigger `GardenRetargetController._try_local_retarget_agent()`.
+
+Expected debug snapshot after the local path is assigned:
+
+```text
+traffic_group_id == TRAFFIC_GROUP_ASTAR_BASE + nav_id
+traffic_priority == 200
+```
+
+## Test 7: resumed A* assignment
+
+Suspend an A* monster through turret eating or external capture, then resume it.
+
+Expected:
+
+* traffic is `0/0` during suspension;
+* after path restoration and `set_astar_in_agent()`, per-agent A* traffic is restored;
+* the path remains attached.
+
+## Test 8: inbound against A*
 
 Have incoming agents conflict with agents already navigating inside the garden.
 
@@ -1391,7 +1596,7 @@ Expected:
 * inbound agents are displaced;
 * the internal agents can continue toward plants.
 
-## Test 6: outbound against inbound
+## Test 9: outbound against inbound
 
 Have fed agents leave while new agents enter.
 
@@ -1401,7 +1606,7 @@ Expected:
 * inbound agents are displaced;
 * the exit stream clears.
 
-## Test 7: outbound against A*
+## Test 10: outbound against A*
 
 Create a conflict between exiting agents and internal A* agents.
 
@@ -1410,9 +1615,9 @@ Expected:
 * outbound agents win;
 * clearing the constrained exit remains the highest priority.
 
-## Test 8: eating
+## Test 11: normal and restored eating
 
-Inspect an eating agent’s debug snapshot.
+Inspect both a newly eating agent and an eating agent restored from save/runtime restoration.
 
 Expected:
 
@@ -1421,9 +1626,9 @@ traffic_group_id == 0
 traffic_priority == 0
 ```
 
-## Test 9: lazy flow wait
+## Test 12: initial lazy entry-flow wait
 
-Inspect an agent waiting for a queued/computing entry flow.
+Inspect an agent waiting for a queued/computing entry flow before it has joined the route group.
 
 Expected:
 
@@ -1434,7 +1639,17 @@ traffic_priority == 0
 
 It remains frozen and cannot shove anyone.
 
-## Test 10: retarget waiting
+## Test 13: attached flow rebuild wait
+
+Force a currently attached inbound or outbound group into `GROUP_FLOW_WAIT_QUEUED` or `GROUP_FLOW_WAIT_COMPUTING`.
+
+Expected:
+
+* the agent remains frozen by the existing native flow-wait behaviour;
+* it cannot become a traffic winner from stale `debug_desired_dir` or `debug_nav_dir`;
+* traffic does not make the frozen stream bulldoze another stream.
+
+## Test 14: retarget waiting
 
 Invalidate a garden while agents are queued for budgeted retargeting.
 
@@ -1445,7 +1660,30 @@ traffic_group_id == 0
 traffic_priority == 0
 ```
 
-## Test 11: player contact precedence
+## Test 15: turret-eating suspension
+
+Suspend an inbound, A* and outbound monster for turret eating.
+
+Expected during suspension for each:
+
+```text
+traffic_group_id == 0
+traffic_priority == 0
+```
+
+After resume, the correct inbound/A*/outbound state is restored only when navigation restoration succeeds.
+
+## Test 16: drowning and external capture
+
+Suspend agents through drowning and external capture.
+
+Expected:
+
+* traffic clears immediately;
+* failed recovery leaves traffic disabled;
+* successful recovery restores only the navigation-derived state appropriate to the recovered phase.
+
+## Test 17: player contact precedence
 
 Push agents with the player while traffic contact is also occurring.
 
@@ -1454,16 +1692,36 @@ Expected:
 * player contact behaviour remains unchanged;
 * an already-pending player/contact impulse is not replaced by traffic.
 
-## Test 12: combat precedence
+## Test 18: combat precedence
 
 Hit an agent with a weapon or explosion during a traffic conflict.
 
 Expected:
 
 * combat smash wins;
-* traffic never replaces the stronger pending gameplay impulse.
+* traffic never replaces the stronger pending gameplay impulse;
+* after the pending impulse is applied, `pending_smash_priority` returns to `None`.
 
-## Test 13: big monster
+## Test 19: pending-smash reset consistency
+
+Exercise:
+
+* teleport/set position with `clear_velocity = true`;
+* drowning phase entry;
+* drowning update cancellation;
+* normal pending-smash application;
+* agent reset/unregistration-reuse paths.
+
+Expected:
+
+```text
+smash_pending == false
+pending_smash_priority == None
+```
+
+No stale priority and no live pending impulse with priority `None`.
+
+## Test 20: big monster
 
 Place a big monster in a losing traffic stream.
 
@@ -1473,7 +1731,7 @@ Expected:
 * its existing higher `smash_resist` reduces physical displacement;
 * no big-monster-specific traffic rule exists.
 
-## Test 14: walls
+## Test 21: walls
 
 Create a jam beside walls.
 
@@ -1483,7 +1741,7 @@ Expected:
 * existing wall-safe smash integration prevents passage through walls;
 * paths and flows remain attached.
 
-## Test 15: largest crowd
+## Test 22: largest crowd
 
 Run the largest practical crowd.
 
@@ -1491,13 +1749,15 @@ Expected:
 
 * jams dissolve more often instead of remaining symmetric;
 * visible shoving is acceptable;
-* no flow rebuilds occur;
+* no flow rebuilds occur from traffic contact;
 * no A* recomputations are triggered by contact;
 * no continuous console spam;
 * no unbounded pair cooldown map;
-* no all-pairs scan.
+* no all-pairs scan;
+* no per-pair dynamic allocation;
+* no obvious frame-time regression from rebuilding temporary eligibility containers.
 
-## Test 16: future duck integration expectation
+## Test 23: future duck integration expectation
 
 Do not implement ducks now.
 
@@ -1525,16 +1785,19 @@ After implementation, report:
 4. The exact GDScript priorities and group namespaces.
 5. Every phase transition where traffic state is assigned.
 6. Every phase transition where traffic state is cleared.
-7. How A* agents receive per-agent traffic groups.
-8. How winner selection is made.
-9. How one shove per target is enforced.
-10. Where traffic cooldowns are owned and cleaned.
-11. How pending impulse priority prevents traffic from replacing contact/combat pushes.
-12. The exact traffic smash parameters used.
-13. Confirmation that flow/path assignments are preserved.
-14. Confirmation that `force_voisine()` and `movement_priority()` were not changed.
-15. Confirmation that no Godot, tests, compilation, SCons, export or build command was run.
-16. The complete manual test checklist above.
-17. Any uncertainty or codebase mismatch encountered.
+7. How local-retarget and suspension-restored A* agents reach the centralized `set_astar_in_agent()` assignment point.
+8. How A* agents receive per-agent traffic groups.
+9. How winner selection is made.
+10. How one shove per target is enforced.
+11. Where traffic cooldowns are owned and cleaned.
+12. How attached and unattached lazy-flow-waiting agents are excluded from arbitration.
+13. How pending impulse priority prevents traffic from replacing contact/combat pushes.
+14. Every place where the complete pending-smash slot and `pending_smash_priority` are cleared together.
+15. The exact traffic smash parameters used, including the `0.18` second default control lock.
+16. Confirmation that flow/path assignments are preserved.
+17. Confirmation that `force_voisine()` and `movement_priority()` were not changed.
+18. Confirmation that no Godot, tests, compilation, SCons, export or build command was run.
+19. The complete manual test checklist above.
+20. Any uncertainty or codebase mismatch encountered.
 
 Do not claim runtime correctness because runtime testing is performed manually by the user.
