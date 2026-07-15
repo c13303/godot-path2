@@ -1,336 +1,309 @@
-Read `AGENTS.md` first and follow it strictly.
+Implement the fundamental Builder introduction cutscene, dialog, and first Builder House tutorial.
 
-## Task
+Read and follow `AGENTS.md`. Do not run Godot, tests, compilation, export, or build commands.
 
-Fix the Builder performance and idle-home recovery implementation without redesigning unrelated navigation systems.
+## Relevant existing systems
 
-The current Builder behavior works, but repeatedly uses expensive global operations for tiny local movements.
+Inspect and reuse:
 
-Do not run Godot, tests, builds, compilation, or export.
+* `scripts/map/builder_controller.gd`
+* `scripts/map/ally_housing_controller.gd`
+* `scripts/map/spawner_reveal_cutscene_controller.gd`
+* `scripts/map/spawner_reveal_phase_controller.gd`
+* `scripts/map/agent_save_service.gd`
+* `scripts/map/house_manager.gd`
+* `scripts/map/building_manager.gd`
+* `scripts/ui/dialog.gd`
+* `scripts/ui/merchant_dialog_controller.gd`
+* `scripts/ui/merchant_prompt.gd`
+* `scripts/controls/player_controller.gd`
+* `scripts/misc/tutorial.gd`
+* `scripts/shop/toolbuild.gd`
+* `scripts/ui/game_ui.gd`
+* `scripts/map/agent_definition_service.gd`
+* `mainRun.tscn`
+* the project’s FR/EN translation files
 
-## Confirmed problems
+Do not put the feature logic directly into `BuildingManager`. Keep it as wiring and narrow façade methods.
 
-### 1. Construction shuffling uses the full global A* pipeline
+Use one focused onboarding owner for the fundamental Builder’s one-shot progression. Do not create a general interaction framework or perform an unrelated merchant refactor.
 
-Current chain:
+## Persistent onboarding state
+
+Persist exactly the progression needed for this feature:
+
+```gdscript
+intro_cutscene_played: bool
+builder_house_tutorial_state: int
+```
+
+Tutorial states:
+
+```gdscript
+NOT_STARTED
+ACTIVE
+COMPLETED
+```
+
+Fresh-game defaults:
+
+```gdscript
+intro_cutscene_played = false
+builder_house_tutorial_state = NOT_STARTED
+```
+
+Transitions:
+
+* The introduction cutscene successfully starts:
+
+  * `intro_cutscene_played = true`
+* The fundamental Builder dialog closes while the tutorial is `NOT_STARTED`:
+
+  * tutorial becomes `ACTIVE`
+* The player successfully places their first WIP `house_builder`:
+
+  * tutorial becomes `COMPLETED`
+
+Save/load requirements:
+
+* Include both values in the normal run save data, near the existing `spawner_reveal` one-shot state in `AgentSaveService`.
+* Loading restores the exact state.
+* A played cutscene must not replay after save/load.
+* A completed Builder House tutorial must not reactivate after save/load.
+* If saved while the tutorial is `ACTIVE`, it must still be active after loading.
+* Do not force an autosave.
+* Do not add speculative migration logic or a save-version change unless the current save validator actually requires it.
+
+Consume the cutscene only after the shared cutscene controller accepts and starts it. If starting fails, leave it pending.
+
+## Fundamental Builder camera introduction
+
+The trigger applies only to the fundamental Builder, not house-owned Builders.
+
+During the existing Builder runtime processing, detect when:
+
+* the Builder is `_fundamental_builder_id`;
+* its state is `STATE_ENTERING`;
+* `intro_cutscene_played` is false;
+* the live Builder is within 3 grid tiles of the authored `fundamental_builder_spot`.
+
+Reuse the project’s existing grid-distance convention for “within 3 tiles.” Do not add path-length computation or a separate watcher. If the codebase has no established convention, report that ambiguity instead of silently inventing another system.
+
+Emit or forward a one-shot request containing the live fundamental Builder node. Keep the check inside the existing active Builder processing; do not scan scene groups every frame.
+
+## Reuse the existing camera cutscene
+
+Reuse `SpawnerRevealCutsceneController`. Do not implement another camera lock, skip prompt, progress circle, or return-to-player system.
+
+Generalize it narrowly:
+
+* Add a public `is_active() -> bool`.
+* Allow a cutscene item to target either:
+
+  * the existing fixed `world_position`; or
+  * an optional live `target_node: Node2D`.
+* For `target_node`, resolve its valid current world position while scrolling so the moving Builder remains in view.
+* Preserve all existing spawner-reveal behavior.
+
+Use a distinct context:
+
+```gdscript
+&"fundamental_builder_intro"
+```
+
+This context has no spawning or reveal gameplay action. It only focuses the Builder.
+
+If another reveal cutscene is currently active, do not call `begin()` because the current implementation treats that as a skip request. Keep the Builder introduction pending and start it once the shared controller is idle.
+
+The introduction:
+
+1. Locks gameplay input through the existing cutscene system.
+2. Scrolls to the live fundamental Builder.
+3. Uses the existing focus pause and skip prompt.
+4. Returns to the player.
+5. Restores normal camera following and input.
+6. Does not pause, teleport, repath, or otherwise modify the Builder.
+
+## Faster generic skip return
+
+Improve skipped returns for all cutscenes using this shared controller.
+
+Keep the normal return duration unchanged:
+
+```gdscript
+NORMAL_RETURN_SECONDS = 1.0
+```
+
+Use:
+
+```gdscript
+SKIPPED_RETURN_SECONDS = 0.3
+```
+
+When the skip progress circle completes:
+
+* interrupt the current camera scroll or focus pause immediately;
+* preserve the existing reveal/spawn release behavior for monster and client cutscenes;
+* begin returning from the camera’s current position immediately;
+* complete that return in `0.3s`;
+* do not add another delay or focus pause;
+* keep gameplay input locked until the return finishes.
+
+Normal, non-skipped completion still returns over `1.0s`.
+
+## Fundamental Builder interaction and dialog
+
+Give the fundamental Builder an interaction equivalent to the seed merchant:
+
+* keyboard: `E`
+* gamepad: the same interaction button used by the merchant
+* show the existing `E-Y.png` interaction glyph above the Builder
+* use the same tile interaction radius as `SeedMerchantController.INTERACT_RADIUS_TILES`
+* show the prompt only after the fundamental Builder has reached its idle spot
+* do not show or allow it at night
+* do not show it while another dialog is open or during a camera cutscene
+
+Add narrow Builder queries through `BuilderController` and thin `BuildingManager` wrappers as needed:
+
+* fundamental Builder is active
+* fundamental Builder is idle at its spot
+* player is within interaction range
+* live fundamental Builder world position
+* live fundamental Builder node, when needed by the cutscene
+
+Do not expose the BuilderController’s private dictionaries.
+
+Create a small fundamental Builder dialog adapter modeled on `MerchantDialogController`, using the existing `DialogUI`.
+
+Use the first frame of:
 
 ```text
-HouseBuilderWorkController._try_start_local_move()
-→ BuilderController.request_builder_local_work_move()
-→ DayVisitorMovementController.repath_to_target()
-→ BuildingPathService.find_path_on_walkable_map()
-→ sync_pathfinder_zone_tiles()
+res://assets/sprites/legval/fundamental_builder.png
 ```
 
-`find_path_on_walkable_map()` resends the entire walkable map and scans blockers.
+as the portrait, following the merchant portrait approach.
 
-This currently happens every `0.8–1.4` seconds while a Builder moves between nearby cells around the same house.
+For the displayed speaker name, reuse an existing fundamental Builder/Builder translation if one exists. Do not invent a new character name. If no display name exists, report that single missing content decision.
 
-That is unacceptable for a tiny visual work movement.
+Dialog translations:
 
-### 2. Idle-home correction runs every frame
-
-`BuilderController.process_active_visitors()` currently calls:
-
-```gdscript
-_process_idle_home_correction()
-_process_builder_motion_watchdog(delta)
-```
-
-An idle house Builder displaced from its claimed cell can immediately request another full A* path. Under continuous pushing, this can repeatedly repath.
-
-The requirement is only:
-
-> A house Builder who is idling near its house and gets meaningfully pushed away must eventually return.
-
-This must be implemented lazily, not checked/repathed every frame.
-
-### 3. Candidate checks repeatedly scan every agent
-
-`BuilderController._is_candidate_available()` calls:
-
-```gdscript
-_manager.occupied_cells_for_spawning()
-```
-
-That recreates an array by scanning all nodes in:
+French:
 
 ```text
-main_chars
-monsters
-clients
-merchants
-builders
-player
+Salut ! Je peux construire des maisons avec toi, mais tu dois d'abord m'aider à construire la mienne.
 ```
 
-This can happen once per candidate cell and repeatedly during construction shuffling.
-
-### 4. Debug watchers
-
-* `BuilderController._process_builder_motion_watchdog()` runs every frame even when debug logging is disabled.
-* `agent_registration_consistency_watcher.gd` does not include the `builders` group, causing Builders to appear as false native-registration leaks.
-
----
-
-# Required implementation
-
-## A. Use a bounded local path for construction shuffling
-
-Modify the local construction movement only:
-
-```gdscript
-BuilderController.request_builder_local_work_move()
-```
-
-It must no longer call:
-
-```gdscript
-DayVisitorMovementController.repath_to_target()
-_manager.find_path_on_walkable_map()
-BuildingPathService.sync_pathfinder_zone_tiles()
-```
-
-Implement a small bounded local path search:
-
-* four-directional tile movement;
-* only inspect a small area around the current and destination cells;
-* use `BuildingManager.is_walkable_cell()` as the walkability source of truth;
-* never rebuild or synchronize the global PathfinderNative walkable map;
-* never scan all map walls/buildings;
-* return a short `PackedVector2Array` cell path.
-
-The local search must have a hard bounded scope. A maximum local search distance around `8–12` tiles is sufficient because work cells are generated within `HOUSE_WORK_CELL_SEARCH_RADIUS = 3`.
-
-Add one small explicit-path API to `DayVisitorMovementController`, for example:
-
-```gdscript
-func assign_cell_path(destination_cell: Vector2i, path_cells: PackedVector2Array) -> bool
-```
-
-It must:
-
-* convert the provided cells with the existing `path_cells_to_world()` behavior;
-* call native `assign_agent_path`;
-* update `_target_cell`;
-* update `_waiting`;
-* call `start_astar_in()` consistently with normal paths.
-
-Do not duplicate the native path-assignment code in `BuilderController`.
-
-If the bounded local path fails:
-
-* do not fall back to global A* for a construction shuffle;
-* leave the Builder at its current work position;
-* return it to the pause phase so it can try another candidate later.
-
-Full A* remains correct and allowed for:
-
-* initial travel from home to a WIP house;
-* returning to the home area;
-* entering/leaving the level;
-* night departure;
-* explicit topology-change repathing.
-
-Do not change those long-distance paths.
-
-## B. Cache house work-cell candidates
-
-`HouseBuilderWorkController._work_cell_candidates()` currently rebuilds the same ring candidates repeatedly.
-
-Cache the static candidate list by `house_id`.
-
-Invalidate that cache when:
-
-* the WIP house is removed;
-* navigation topology changes;
-* controller state is cleared/restored;
-* the house no longer exists.
-
-Dynamic occupancy must still be checked when selecting a candidate. Do not cache whether a cell is occupied.
-
-## C. Use `AgentCellTracker` for occupancy queries
-
-Do not call `occupied_cells_for_spawning()` from normal Builder candidate checks.
-
-Add a focused read-only query to `AgentCellTracker`, such as:
-
-```gdscript
-func is_cell_occupied(cell: Vector2i, excluded_agent: Node2D = null) -> bool
-```
-
-It must use the existing `_cell_to_agents` index.
-
-Requirements:
-
-* exclude the requesting Builder itself;
-* ignore invalid or queued-for-deletion nodes;
-* return immediately when a valid occupant is found;
-* do not allocate a complete occupied-cell array.
-
-Use this query from:
-
-```gdscript
-BuilderController._is_candidate_available()
-```
-
-Keep `occupied_cells_for_spawning()` for rare spawn-time operations; this task does not require refactoring all existing spawning systems.
-
-## D. Make idle-home correction lazy
-
-Replace the per-frame idle correction with a low-frequency check.
-
-Use approximately:
+English:
 
 ```text
-check interval: 0.5 seconds
-displacement grace: 1.0 second
-failed repath retry cooldown: 1.0 second
+Hi! I can help you build houses, but first you need to help me build mine.
 ```
 
-Only inspect Builders that are:
-
-* house-bound;
-* active;
-* daytime;
-* not working;
-* not leaving;
-* in `STATE_IDLE`;
-* currently waiting.
-
-Track the exact assigned target world position in `DayVisitorMovementController` so displacement is measured against the actual dispersed path endpoint, not merely the tile center.
-
-Add a read-only getter such as:
-
-```gdscript
-func target_world_position() -> Vector2
-```
-
-Update this position whenever a path or parked target is assigned.
-
-A Builder should be considered displaced only when its distance from that target exceeds a meaningful threshold, approximately `0.4–0.5` tile.
-
-It must remain displaced for the grace duration before requesting a return path.
-
-After requesting a return:
-
-* clear the displacement timer;
-* do not retry before the cooldown expires;
-* sustained pushing must not cause repeated path requests every frame.
-
-### Failed return handling
-
-`return_builder_to_idle_area()` currently calls `_park_builder_at_current_cell()` when no return target/path is available. This permanently turns the remote current cell into the Builder’s idle target.
-
-Fix this.
-
-A failed return may temporarily park the Builder, but it must preserve a pending “return to home area” intent and retry lazily after the cooldown.
-
-Do not permanently redefine the Builder’s home/idle area because one path attempt failed.
-
-Keep this retry state inside `BuilderController`; do not add it to `BuildingManager`.
-
-## E. Debug watchers
-
-### Builder motion watchdog
-
-Only execute `_process_builder_motion_watchdog(delta)` when:
-
-```gdscript
-CppDebugOptions.logs_enabled
-```
-
-When debug logging is disabled:
-
-* do not create `active_ids`;
-* do not iterate Builders for stall diagnostics;
-* clear stale watchdog dictionaries once when needed.
-
-Do not remove the warnings; just make the watcher genuinely debug-only.
-
-### Registration watcher
-
-In:
+Single button:
 
 ```text
-scripts/debug/agent_registration_consistency_watcher.gd
+OK
 ```
 
-add:
+The OK button closes the dialog. Standard generic dialog closing controls must continue to work.
 
-```gdscript
-&"builders"
-```
+Whenever this dialog closes, if the Builder House tutorial state is still `NOT_STARTED`, change it to `ACTIVE`.
 
-to `TRACKED_GROUPS`.
+The dialog itself remains interactable while the fundamental Builder is present. Do not add a separate persisted “dialog acknowledged” one-shot.
 
-Do not change the watcher’s diagnostic-only behavior.
+## Special Builder House tutorial
 
----
-
-# Behavior that must remain unchanged
-
-Preserve:
-
-* multiple Builders;
-* one Builder per completed Builder house;
-* the fundamental Builder fallback;
-* WIP house build order;
-* 20-second construction progress;
-* hammer animation cadence;
-* Builder movement around a WIP house;
-* night interruption and departure;
-* construction resuming on the next day;
-* house save/load behavior;
-* Builders being respawned from house state rather than saved individually.
-
-Do not modify:
-
-* the C++ extension;
-* general monster/client pathfinding;
-* flow fields;
-* general `BuildingPathService` behavior;
-* savegame format;
-* unrelated building systems.
-
-Do not move this logic into `BuildingManager`.
-
-## Expected files
-
-Primary files:
+Add a translation key such as:
 
 ```text
-scripts/map/builder_controller.gd
-scripts/map/house_builder_work_controller.gd
-scripts/map/day_visitor_movement_controller.gd
-scripts/map/agent_cell_tracker.gd
-scripts/debug/agent_registration_consistency_watcher.gd
+tutorial.build_builder_house
 ```
 
-Only modify additional files when strictly required.
+French:
 
-## Acceptance criteria
+```text
+Construisez une maison de bâtisseur
+```
 
-1. During ordinary construction, repeated local Builder shuffles never call `find_path_on_walkable_map()` or `sync_pathfinder_zone_tiles()`.
-2. Initial travel to a house still uses normal full A*.
-3. Builder work-cell candidates are not regenerated every pause cycle.
-4. `_is_candidate_available()` no longer creates a complete occupied-agent array.
-5. An idle house Builder pushed away returns after a short grace period.
-6. Continuous pushing does not generate per-frame path requests.
-7. A failed home return is retried later and does not permanently redefine the current remote cell as home.
-8. With debug disabled, the Builder stall watchdog performs no per-frame Builder scan.
-9. The registration consistency watcher recognizes Builders.
-10. Multiple Builders cannot claim the same work or idle cell.
-11. Wall/topology changes invalidate local candidate caches and preserve correct long-range repathing.
-12. No Builder, house, construction, dawn/night, or save/load regression.
+English:
+
+```text
+Build a Builder House
+```
+
+When the tutorial state is `ACTIVE`:
+
+* display this as the active tutorial instruction;
+* keep it active until the first WIP `house_builder` is successfully placed;
+* do not infer it from the day number or general economy conditions;
+* preserve existing cutscene suppression and alert behavior.
+
+Arrow behavior must match the existing multi-stage build tutorials:
+
+1. While the house menu is closed, point at the `buildhouse` quickslot.
+2. Once the `buildhouse` menu is open, point at the visible `house_builder` item icon.
+3. If the relevant target is temporarily unavailable or hidden, hide the arrow cleanly rather than pointing at an invalid rectangle.
+
+Reuse:
+
+* `GameUI.get_quick_slot_global_rect_for_kind("buildhouse")`
+* `Toolbuild.get_visible_build_item_global_rect("house_builder")`
+* the existing `TutorialArrow` behavior
+
+Do not duplicate arrow animation code.
+
+## Tutorial completion event
+
+The tutorial is completed only after a successful player placement of a WIP Builder House:
+
+```text
+item_id == "house_builder"
+status == WIP
+```
+
+Do not consume it when:
+
+* the item is selected;
+* the build preview appears;
+* payment is attempted;
+* placement validation fails;
+* a different house type is placed;
+* the house finishes construction;
+* a house is restored from save.
+
+Add a narrow success signal at the authoritative placement owner, preferably `HouseManager.build_player_house()` after `create_house()` succeeds. For example, emit a player-house-placement event containing the normalized item ID and status.
+
+The onboarding owner listens for that event and changes `ACTIVE` to `COMPLETED` for `house_builder`.
+
+Do not poll the world every frame to detect the house.
+
+## Acceptance checks
+
+Manually verify through code inspection:
+
+1. Fresh game: fundamental Builder approaches its spot.
+2. At 3 tiles, camera introduction plays exactly once.
+3. Holding skip completes the circle and immediately starts a `0.3s` return.
+4. Other monster/client reveal cutscenes retain their normal behavior.
+5. The Builder cutscene never interrupts an already active reveal cutscene.
+6. After reaching its spot, the Builder displays the E/gamepad tooltip.
+7. Interaction opens the generic dialog with the correct portrait and localized text.
+8. Closing it activates “Construisez une maison de bâtisseur”.
+9. Arrow points first to `buildhouse`, then to `house_builder`.
+10. Failed placement does not complete the tutorial.
+11. Successful WIP `house_builder` placement completes it permanently.
+12. Save/load after the introduction does not replay the cutscene.
+13. Save/load while the tutorial is active restores it as active.
+14. Save/load after placement does not reactivate the tutorial.
+15. No per-frame scene scan, duplicate skip system, or new feature logic is added to `BuildingManager`.
 
 At the end, report:
 
-* changed files;
-* the bounded-local-path algorithm and its hard limit;
-* every remaining situation where Builders use full global A*;
-* how idle return retry/debounce works;
-* cache invalidation points;
-* manual test scenarios.
+* files changed;
+* owner of the onboarding state;
+* exact save fields added;
+* exact event used to complete the tutorial;
+* any remaining ambiguity, without guessing.
 
-Do not perform broad cleanup outside this task.
+builder name = (FR/ENGLISH) 
+"Bâtisseur Nomade" (make the EN trans)
