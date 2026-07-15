@@ -162,6 +162,7 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	_manager._process_client_counter_arrivals()
 	_manager.get_client_tantrum_controller().process(delta)
 	_manager.get_seed_merchant_controller().process_proximity()
+	_manager._process_fundamental_builder_proximity()
 	_manager.get_seed_merchant_controller().process_arrival()
 	_manager.get_builder_controller().process_arrivals()
 	_manager.get_builder_controller().process_active_visitors(delta)

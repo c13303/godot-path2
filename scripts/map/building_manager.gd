@@ -1572,6 +1572,14 @@ func is_any_reveal_cutscene_active() -> bool:
 	return _spawner_reveal_cutscene.is_active()
 
 
+func is_fundamental_builder_intro_prompt_active() -> bool:
+	return _fundamental_builder_onboarding.is_intro_prompt_active()
+
+
+func request_fundamental_builder_intro_cutscene() -> bool:
+	return _fundamental_builder_onboarding.request_intro_cutscene()
+
+
 func is_builder_house_tutorial_active() -> bool:
 	return _fundamental_builder_onboarding.is_builder_house_tutorial_active()
 
@@ -1581,7 +1589,10 @@ func is_fundamental_builder_dialog_pending() -> bool:
 
 
 func accept_fundamental_builder_dialog() -> bool:
-	return _fundamental_builder_onboarding.accept_fundamental_builder_dialog()
+	var accepted: bool = _fundamental_builder_onboarding.accept_fundamental_builder_dialog()
+	if accepted:
+		_builder.set_fundamental_builder_paused(false)
+	return accepted
 
 
 func activate_builder_house_tutorial_from_dialog() -> void:
@@ -1602,6 +1613,13 @@ func notify_player_house_placed(item_id: String) -> void:
 
 func is_fundamental_builder_arrival_pending() -> bool:
 	return _ally_housing.is_fundamental_builder_arrival_pending()
+
+
+func _process_fundamental_builder_proximity() -> void:
+	_builder.process_fundamental_builder_proximity(
+		_fundamental_builder_onboarding.is_fundamental_builder_dialog_pending(),
+		SeedMerchantController.INTERACT_RADIUS_TILES
+	)
 
 
 func _process_seed_merchant_arrival() -> void:

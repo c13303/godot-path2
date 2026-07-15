@@ -64,8 +64,6 @@ func _is_builder_interactable() -> bool:
 		return false
 	if building_manager.has_method("is_fundamental_builder_active") and not bool(building_manager.call("is_fundamental_builder_active")):
 		return false
-	if building_manager.has_method("has_fundamental_builder_reached_spot") and not bool(building_manager.call("has_fundamental_builder_reached_spot")):
-		return false
 	if building_manager.has_method("is_player_near_fundamental_builder") and not bool(building_manager.call("is_player_near_fundamental_builder")):
 		return false
 	return true
@@ -78,6 +76,8 @@ func _on_choice_selected(choice_id: String, source_global_position: Vector2) -> 
 		return
 	var accepted: bool = bool(building_manager.call("accept_fundamental_builder_dialog"))
 	if accepted:
+		if game_ui != null and game_ui.has_method("refresh_quickbar_availability"):
+			game_ui.call("refresh_quickbar_availability")
 		_award_intro_gems(source_global_position)
 
 

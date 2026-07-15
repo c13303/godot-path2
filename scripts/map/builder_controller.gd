@@ -45,6 +45,7 @@ var _idle_home_check_elapsed: float = 0.0
 var _idle_displacement_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _idle_return_retry_cooldown_by_builder_id: Dictionary = {}  # int -> float
 var _pending_idle_return_by_builder_id: Dictionary = {}  # int -> true
+var _fundamental_builder_paused: bool = false
 
 
 func setup(manager: BuildingManager) -> void:
@@ -78,6 +79,7 @@ func begin_day() -> void:
 
 
 func on_night_started() -> void:
+	set_fundamental_builder_paused(false)
 	for visitor: DayVisitorMovementController in _visitors:
 		_release_claim_for(visitor)
 		var builder_id: int = _builder_id_for_visitor(visitor)
@@ -243,6 +245,25 @@ func fundamental_builder_idle_at_spot() -> bool:
 	return visitor != null and visitor.is_waiting()
 
 
+func process_fundamental_builder_proximity(dialog_pending: bool, interact_radius_tiles: int) -> void:
+	if not dialog_pending or GameState.is_night or not fundamental_builder_active():
+		set_fundamental_builder_paused(false)
+		return
+	var near: bool = is_player_near_fundamental_builder(interact_radius_tiles)
+	set_fundamental_builder_paused(near)
+
+
+func set_fundamental_builder_paused(value: bool) -> void:
+	if _fundamental_builder_paused == value:
+		return
+	_fundamental_builder_paused = value
+	var agent_manager: Node = _manager.get_agent_manager() if _manager != null else null
+	var agent: Node2D = fundamental_builder_node()
+	var nav_id: int = int(agent.get("nav_id")) if agent != null else -1
+	if nav_id >= 0 and agent_manager != null and agent_manager.has_method("set_agent_paused"):
+		agent_manager.call("set_agent_paused", nav_id, value)
+
+
 func fundamental_builder_world_position() -> Vector2:
 	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
 	return visitor.get_agent_world_position() if visitor != null else Vector2.ZERO
@@ -353,6 +374,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_pending_idle_return_by_builder_id.clear()
 	_idle_home_check_elapsed = 0.0
 	_fundamental_builder_id = -1
+	_fundamental_builder_paused = false
 	_clear_motion_watch()
 
 

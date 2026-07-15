@@ -57,8 +57,6 @@ func _should_show() -> bool:
 		return false
 	if manager.has_method("is_player_near_fundamental_builder") and not bool(manager.call("is_player_near_fundamental_builder")):
 		return false
-	if manager.has_method("has_fundamental_builder_reached_spot") and not bool(manager.call("has_fundamental_builder_reached_spot")):
-		return false
 	var dialog_ui: Node = _resolve_dialog_ui()
 	if dialog_ui != null and dialog_ui.has_method("is_open") and bool(dialog_ui.call("is_open")):
 		return false

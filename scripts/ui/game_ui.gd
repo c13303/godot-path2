@@ -504,7 +504,16 @@ func get_quick_slot_global_rect_for_kind(kind: String) -> Rect2:
 	var index: int = QUICK_SLOT_KINDS.find(kind)
 	if index < 0 or index >= _toolbar_slot_nodes.size():
 		return Rect2()
-	return _toolbar_slot_nodes[index].get_global_rect()
+	var slot: ItemSlot = _toolbar_slot_nodes[index]
+	if slot == null or not slot.visible:
+		return Rect2()
+	return slot.get_global_rect()
+
+
+func refresh_quickbar_availability() -> void:
+	for i in range(_toolbar_slot_nodes.size()):
+		_apply_toolbar_slot(_toolbar_slot_nodes[i], i)
+	call_deferred("_fit_toolbar_panel_to_slots")
 
 
 func animate_inventory_item_to_slot(

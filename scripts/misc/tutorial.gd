@@ -9,17 +9,18 @@ extends RichTextLabel
 ## tutorial build/economy steps.
 ##
 ## Priority order (most prioritary first):
-##   1. unbuild tool selected ....................... Select objects to dismantle
-##   2. empty water reserve ......................... Refill your water
-##   3. dawn harvest (grown roses) .................. Harvest / add counters / place shop
-##   4. client sale phase ........................... nothing (only the tantrum alert)
-##   5. seed merchant reward waiting ................ Merchant has a reward
-##   6. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
-##   7. seeds left, shop tool equipped .............. Plant roses
-##   8. planted roses still dry ..................... Water your roses
-##   9. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
-##  10. day 1 not enough roses for tomorrow ......... Plant more roses
-##  11. all roses watered, clients done ............. Hold to start night
+##   1. fundamental Builder onboarding .............. allow entry / talk / build house
+##   2. unbuild tool selected ....................... Select objects to dismantle
+##   3. empty water reserve ......................... Refill your water
+##   4. dawn harvest (grown roses) .................. Harvest / add counters / place shop
+##   5. client sale phase ........................... nothing (only the tantrum alert)
+##   6. seed merchant reward waiting ................ Merchant has a reward
+##   7. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
+##   8. seeds left, shop tool equipped .............. Plant roses
+##   9. planted roses still dry ..................... Water your roses
+##  10. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
+##  11. day 1 not enough roses for tomorrow ......... Plant more roses
+##  12. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -42,6 +43,8 @@ const KEY_TANTRUM: String = "tutorial.tantrum"
 const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
 const KEY_PLANT_MORE_ROSES: String = "tutorial.plant_more_roses"
 const KEY_BUILDER_IS_HERE: String = "tutorial.builder_is_here"
+const KEY_ALLOW_BUILDER_SPACE: String = "tutorial.allow_builder_space"
+const KEY_ALLOW_BUILDER_PAD: String = "tutorial.allow_builder_pad"
 const KEY_TALK_BUILDER: String = "tutorial.talk_builder"
 const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
@@ -51,6 +54,7 @@ const KEY_START_CLIENTS_PAD: String = "tutorial.hold_start_clients_pad"
 const KEY_UNBUILD_SELECTION: String = "tutorial.unbuild_selection"
 
 const HOLD_ACTION_NONE: StringName = &""
+const HOLD_ACTION_ALLOW_BUILDER: StringName = &"allow_builder"
 const HOLD_ACTION_START_CLIENTS: StringName = &"start_clients"
 const HOLD_ACTION_START_NIGHT: StringName = &"start_night"
 const INPUT_MODE_PAD: String = "pad"
@@ -269,6 +273,13 @@ func _refresh(delta: float = 0.0) -> void:
 	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
 		_resolve_nodes()
 	_update_alert_timer(delta)
+	if _fundamental_builder_intro_prompt_active():
+		_show_hold_action(HOLD_ACTION_ALLOW_BUILDER, delta)
+		return
+	if not _is_spawner_reveal_cutscene_active() and not _is_dialog_open() and _fundamental_builder_dialog_pending():
+		_reset_hold_progress()
+		_show_key_immediately(KEY_TALK_BUILDER)
+		return
 	if _alert_key != "":
 		var alert_start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
 		if alert_start_night_skip_hold_active:
@@ -646,10 +657,14 @@ func _trigger_hold_action(action: StringName) -> void:
 		_building_manager.call("begin_client_sale_phase")
 	elif action == HOLD_ACTION_START_NIGHT and _building_manager.has_method("try_start_night_after_clients"):
 		_building_manager.call("try_start_night_after_clients")
+	elif action == HOLD_ACTION_ALLOW_BUILDER and _building_manager.has_method("request_fundamental_builder_intro_cutscene"):
+		_building_manager.call("request_fundamental_builder_intro_cutscene")
 
 
 func _hold_translation_key(action: StringName) -> String:
 	var pad_mode: bool = _is_pad_mode()
+	if action == HOLD_ACTION_ALLOW_BUILDER:
+		return KEY_ALLOW_BUILDER_PAD if pad_mode else KEY_ALLOW_BUILDER_SPACE
 	if action == HOLD_ACTION_START_CLIENTS:
 		return KEY_START_CLIENTS_PAD if pad_mode else KEY_START_CLIENTS_SPACE
 	if action == HOLD_ACTION_START_NIGHT:
@@ -797,6 +812,12 @@ func _builder_house_tutorial_active() -> bool:
 		and bool(_building_manager.call("is_builder_house_tutorial_active"))
 
 
+func _fundamental_builder_intro_prompt_active() -> bool:
+	return _building_manager != null \
+		and _building_manager.has_method("is_fundamental_builder_intro_prompt_active") \
+		and bool(_building_manager.call("is_fundamental_builder_intro_prompt_active"))
+
+
 func _fundamental_builder_dialog_pending() -> bool:
 	if GameState.is_night:
 		return false
@@ -809,9 +830,6 @@ func _fundamental_builder_dialog_pending() -> bool:
 		return false
 	if _building_manager.has_method("is_fundamental_builder_active") \
 			and not bool(_building_manager.call("is_fundamental_builder_active")):
-		return false
-	if _building_manager.has_method("has_fundamental_builder_reached_spot") \
-			and not bool(_building_manager.call("has_fundamental_builder_reached_spot")):
 		return false
 	return true
 

@@ -13,7 +13,7 @@ var _manager: BuildingManager
 var _cutscene: SpawnerRevealCutsceneController
 var _intro_cutscene_played: bool = false
 var _builder_house_tutorial_state: int = TUTORIAL_NOT_STARTED
-var _intro_pending: bool = false
+var _intro_start_requested: bool = false
 
 
 func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) -> void:
@@ -26,7 +26,7 @@ func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) 
 
 
 func process(_delta: float) -> void:
-	_try_start_pending_intro()
+	_try_start_requested_intro()
 
 
 ## The fundamental Builder's arrival is introduced by a one-shot cutscene played when the
@@ -35,13 +35,12 @@ func process(_delta: float) -> void:
 ## is the cutscene's reveal, so AllyHousingController holds the Builder back until the
 ## cutscene has been spent (see `has_fundamental_builder_intro_cutscene_played`).
 ##
-## The request is armed here and started from process() so a cutscene that is still
-## running is waited out instead of being cut short.
+## The request is armed here, but the cutscene does not start until the player confirms
+## the tutorial prompt. This keeps day-2 afternoon under player control.
 func on_afternoon_started() -> void:
 	if _intro_cutscene_played:
 		return
-	_intro_pending = true
-	_try_start_pending_intro()
+	_intro_start_requested = false
 
 
 func intro_cutscene_played() -> bool:
@@ -54,6 +53,27 @@ func builder_house_tutorial_state() -> int:
 
 func is_builder_house_tutorial_active() -> bool:
 	return _builder_house_tutorial_state == TUTORIAL_ACTIVE
+
+
+func is_intro_prompt_active() -> bool:
+	return (
+		not _intro_cutscene_played
+		and not _intro_start_requested
+		and not GameState.is_night
+		and GameState.is_afternoon_phase
+		and _manager != null
+		and _manager.is_fundamental_builder_arrival_pending()
+	)
+
+
+func request_intro_cutscene() -> bool:
+	if _intro_cutscene_played or GameState.is_night:
+		return false
+	if _manager == null or not _manager.is_fundamental_builder_arrival_pending():
+		return false
+	_intro_start_requested = true
+	_try_start_requested_intro()
+	return true
 
 
 func is_fundamental_builder_dialog_pending() -> bool:
@@ -89,21 +109,21 @@ func serialize_state() -> Dictionary:
 func restore_state(data: Dictionary) -> void:
 	_intro_cutscene_played = bool(data.get("intro_cutscene_played", false))
 	_builder_house_tutorial_state = _valid_tutorial_state(int(data.get("builder_house_tutorial_state", TUTORIAL_NOT_STARTED)))
-	_intro_pending = false
+	_intro_start_requested = false
 
 
-func _try_start_pending_intro() -> void:
-	if _intro_cutscene_played or not _intro_pending:
+func _try_start_requested_intro() -> void:
+	if _intro_cutscene_played or not _intro_start_requested:
 		return
 	if _cutscene == null or _cutscene.is_active():
 		return
 	if GameState.is_night or not _manager.is_fundamental_builder_arrival_pending():
-		_intro_pending = false
+		_intro_start_requested = false
 		return
 	var spawner_cell: Vector2i = _manager.named_authored_spot_cell(BuilderController.FUNDAMENTAL_BUILDER_IN_ID)
 	if spawner_cell == INVALID_CELL:
 		push_warning("FundamentalBuilderOnboardingController: intro cutscene skipped; marker '%s' is missing." % String(BuilderController.FUNDAMENTAL_BUILDER_IN_ID))
-		_intro_pending = false
+		_intro_start_requested = false
 		return
 	var items: Array[Dictionary] = [{
 		"world_position": _manager.cell_center(spawner_cell),
@@ -111,7 +131,7 @@ func _try_start_pending_intro() -> void:
 	if not _cutscene.begin(CUTSCENE_CONTEXT, items, TUTORIAL_KEY_BUILDER_HERE):
 		return
 	_intro_cutscene_played = true
-	_intro_pending = false
+	_intro_start_requested = false
 
 
 ## Camera has reached the spawner: release the arrival. The latch above is already set, so
