@@ -1,10 +1,12 @@
 extends RefCounted
 class_name MonsterCatalog
 
-## Runtime-safe registry of spawnable monster definitions. The exported console
-## build can load .tres monster resources as plain Resource objects when their
-## script attachment is unavailable, so the current built-in entries are created
-## directly here instead of reading exported fields from those resources.
+## Runtime-safe registry of spawnable monster definitions, and the single authority
+## for monster stats: every entry is built in code below.
+##
+## Do not move these definitions back into .tres resources. The exported console
+## build loads them as plain Resource objects when their script attachment is
+## unavailable, so the exported fields cannot be read back there.
 
 const BASIC_ID: StringName = &"basic"
 const BIG_MONSTER_ID: StringName = &"bigmonster"

@@ -3,8 +3,9 @@ class_name MonsterData
 
 ## One entry in the "monster bible": a tunable definition for a spawnable monster
 ## type. Referenced by SpawnWave.monster_type (a StringName equal to `id`) and
-## enumerated by MonsterCatalog. Mirrors the WeaponData/.tres pattern used for
-## weapons — one .tres per monster under scripts/entities/monsters/.
+## enumerated by MonsterCatalog, which builds every entry in code — unlike
+## WeaponData, there are no monster .tres resources to edit. Tune stats in
+## MonsterCatalog._make_basic() / _make_bigmonster().
 
 ## Stable catalog ID. Must match the StringName used in SpawnWave.monster_type and
 ## be unique across the catalog.

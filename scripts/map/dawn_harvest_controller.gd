@@ -8,7 +8,10 @@ const ADD_COUNTERS_TUTORIAL_KEY: String = "tutorial.add_counters_to_sell_roses"
 
 var _manager: BuildingManager
 var _active: bool = false
-var _counter_room_alert_cell: Vector2i = INVALID_CELL
+# True once the "counters are full" alert has fired for the current blocked stretch. Keeps the
+# alert to a single 3s showing however long the player keeps walking over grown roses; it only
+# rearms once the block ends (counter room freed, or the player steps away from the roses).
+var _counter_room_alert_shown: bool = false
 
 
 func setup(manager: BuildingManager) -> void:
@@ -17,7 +20,7 @@ func setup(manager: BuildingManager) -> void:
 
 func clear_active() -> void:
 	_active = false
-	_counter_room_alert_cell = INVALID_CELL
+	_counter_room_alert_shown = false
 
 
 func is_active() -> bool:
@@ -97,7 +100,7 @@ func process_walkover() -> void:
 	if harvest_cell == INVALID_CELL:
 		_show_counter_room_alert_if_blocked(plant_manager)
 		return
-	_counter_room_alert_cell = INVALID_CELL
+	_counter_room_alert_shown = false
 	if plant_manager.has_method("is_imperial_harvestable") and bool(plant_manager.call("is_imperial_harvestable", harvest_cell)):
 		_harvest_imperial_rose(plant_manager, harvest_cell)
 		return
@@ -196,20 +199,18 @@ func _is_harvestable_plant_cell(plant_manager: Node, cell: Vector2i, roses_only:
 	return false
 
 
+## Fires the "counters are full, add more" alert once per blocked stretch. The player walking
+## from one grown rose to the next is the same block, not a new one, so the alert must not
+## restart on every rose cell.
 func _show_counter_room_alert_if_blocked(plant_manager: Node) -> void:
-	if _manager.has_counter_room_for_harvest():
-		_counter_room_alert_cell = INVALID_CELL
+	if _manager.has_counter_room_for_harvest() \
+			or _manager.rose_shop_counter_count() <= 0 \
+			or _player_grownup_rose_cell(plant_manager) == INVALID_CELL:
+		_counter_room_alert_shown = false
 		return
-	if _manager.rose_shop_counter_count() <= 0:
-		_counter_room_alert_cell = INVALID_CELL
+	if _counter_room_alert_shown:
 		return
-	var rose_cell: Vector2i = _player_grownup_rose_cell(plant_manager)
-	if rose_cell == INVALID_CELL:
-		_counter_room_alert_cell = INVALID_CELL
-		return
-	if rose_cell == _counter_room_alert_cell:
-		return
-	_counter_room_alert_cell = rose_cell
+	_counter_room_alert_shown = true
 	_manager.show_tutorial_alert(ADD_COUNTERS_TUTORIAL_KEY)
 
 
