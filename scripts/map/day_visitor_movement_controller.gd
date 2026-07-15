@@ -27,9 +27,9 @@ func setup(manager: BuildingManager, diagnostic_label: String) -> void:
 
 
 func spawn(
-		source_spawner_cell: Vector2i,
+		spawner_cell: Vector2i,
 		spawn_cell: Vector2i,
-		target_cell: Vector2i,
+		destination_cell: Vector2i,
 		agent_kind: StringName,
 		scene_group: StringName,
 		tracking_category: StringName,
@@ -39,11 +39,11 @@ func spawn(
 	var agent_manager: Node = _agent_manager()
 	if agent_manager == null or not agent_manager.has_method("spawn_agent") or not agent_manager.has_method("assign_agent_path"):
 		return false
-	if spawn_cell == INVALID_CELL or target_cell == INVALID_CELL:
+	if spawn_cell == INVALID_CELL or destination_cell == INVALID_CELL:
 		return false
-	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(spawn_cell, target_cell)
+	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(spawn_cell, destination_cell)
 	if path_cells.is_empty():
-		push_warning("BuildingManager: %s cannot path from %s to target %s." % [_diagnostic_label, spawn_cell, target_cell])
+		push_warning("BuildingManager: %s cannot path from %s to target %s." % [_diagnostic_label, spawn_cell, destination_cell])
 		return false
 	var agent: Node2D = AGENT_SCENE.instantiate() as Node2D
 	var configured_parent: Node = _parent_for_agents()
@@ -57,22 +57,22 @@ func spawn(
 	agent.add_to_group(scene_group)
 	_manager.register_runtime_agent(agent, tracking_category)
 	agent.set_meta("agent_kind", agent_kind)
-	agent.set_meta("spawner_cell", source_spawner_cell)
+	agent.set_meta("spawner_cell", spawner_cell)
 	visual_setup.call(agent)
-	var nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
-	agent.set("nav_id", nav_id)
+	var agent_nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
+	agent.set("nav_id", agent_nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
-		agent_manager.call("set_agent_never_rest", nav_id, true)
-	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, nav_id, true)
-	agent_manager.call("assign_agent_path", nav_id, path_world)
+		agent_manager.call("set_agent_never_rest", agent_nav_id, true)
+	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, agent_nav_id, true)
+	agent_manager.call("assign_agent_path", agent_nav_id, path_world)
 	_agent_kind = agent_kind
 	_scene_group = scene_group
 	_active = true
 	_agent = agent
-	_nav_id = nav_id
-	_source_spawner_cell = source_spawner_cell
+	_nav_id = agent_nav_id
+	_source_spawner_cell = spawner_cell
 	_spawn_cell = spawn_cell
-	_target_cell = target_cell
+	_target_cell = destination_cell
 	_waiting = false
 	_leaving = false
 	_leave_at_night_pending = false
@@ -178,7 +178,7 @@ func repath_to_current_target() -> bool:
 	return repath_to_target(_target_cell)
 
 
-func repath_to_target(target_cell: Vector2i) -> bool:
+func repath_to_target(destination_cell: Vector2i) -> bool:
 	if not _active or _leaving:
 		return false
 	if not is_instance_valid(_agent):
@@ -187,19 +187,19 @@ func repath_to_target(target_cell: Vector2i) -> bool:
 	if _nav_id < 0 or agent_manager == null or not agent_manager.has_method("assign_agent_path"):
 		return false
 	var floorz: TileMapLayer = _floorz()
-	if floorz == null or target_cell == INVALID_CELL or not _manager.is_walkable_cell(target_cell):
+	if floorz == null or destination_cell == INVALID_CELL or not _manager.is_walkable_cell(destination_cell):
 		return false
 	var current_cell: Vector2i = floorz.local_to_map(floorz.to_local(_agent.global_position))
 	if not _manager.is_walkable_cell(current_cell):
 		current_cell = _nearest_walkable_cell(current_cell, REPATH_START_SEARCH_RADIUS)
 		if current_cell == INVALID_CELL:
 			return false
-	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(current_cell, target_cell)
+	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(current_cell, destination_cell)
 	if path_cells.is_empty():
 		return false
 	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, _nav_id, true)
 	agent_manager.call("assign_agent_path", _nav_id, path_world)
-	_target_cell = target_cell
+	_target_cell = destination_cell
 	_waiting = false
 	if _agent.has_method("start_astar_in"):
 		_agent.call("start_astar_in")
