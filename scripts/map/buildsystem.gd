@@ -623,6 +623,15 @@ func notify_player_house_placed(item_id: String) -> void:
 		building_manager.call("notify_player_house_placed", item_id)
 
 
+# True on a cell holding a permanent authored world feature (bamboo), which nothing may be
+# built on. Placement/preview reach the owning controller only through this facade.
+func is_permanent_world_feature_cell(cell: Vector2i) -> bool:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("is_permanent_world_feature_cell"):
+		return bool(building_manager.call("is_permanent_world_feature_cell", cell))
+	return false
+
+
 # True when a house may be placed with `cell` as its entrance (whole six-cell footprint valid).
 # Shared by the placement commit and the live preview tint.
 func _house_placement_valid(cell: Vector2i, placeable_def: Dictionary) -> bool:

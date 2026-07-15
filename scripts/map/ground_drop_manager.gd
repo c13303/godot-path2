@@ -368,12 +368,20 @@ func _start_currency_pickup(currency: StringName, world_position: Vector2, recor
 	return bool(game_ui.call("collect_currency_from_world", currency, world_position, 1, finished))
 
 
+## The shared ground-currency pickup radius for a floor layer. Gems, coins and every other
+## loose drop are collected at this distance; BambooHarvestController reuses this helper so
+## bamboo harvests at exactly the same range instead of duplicating the constants.
+static func pickup_radius_for_floor(floor_layer: TileMapLayer) -> float:
+	if floor_layer == null or floor_layer.tile_set == null:
+		return PICKUP_RADIUS_FALLBACK
+	var tile_size: Vector2i = floor_layer.tile_set.tile_size
+	var tile_radius: float = float(maxi(tile_size.x, tile_size.y)) * PICKUP_RADIUS_TILE_MULTIPLIER
+	return maxf(PICKUP_RADIUS_FALLBACK, tile_radius)
+
+
 func _refresh_pickup_radius() -> void:
-	_pickup_radius = PICKUP_RADIUS_FALLBACK
-	if _manager != null and _manager.floorz != null and _manager.floorz.tile_set != null:
-		var tile_size: Vector2i = _manager.floorz.tile_set.tile_size
-		var tile_radius: float = float(maxi(tile_size.x, tile_size.y)) * PICKUP_RADIUS_TILE_MULTIPLIER
-		_pickup_radius = maxf(PICKUP_RADIUS_FALLBACK, tile_radius)
+	var floor_layer: TileMapLayer = _manager.floorz if _manager != null else null
+	_pickup_radius = pickup_radius_for_floor(floor_layer)
 	_pickup_radius_squared = _pickup_radius * _pickup_radius
 
 

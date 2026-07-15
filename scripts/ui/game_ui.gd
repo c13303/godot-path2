@@ -583,6 +583,37 @@ func collect_currency_from_world(
 	return started_any
 
 
+## Credit `count` units of `currency` in one go, then fly one visual-only icon per unit from
+## `world_position` to the HUD. Unlike collect_currency_from_world above — which loose ground
+## drops use, and which credits one unit per icon on arrival — the whole reward reaches
+## progression before the first icon moves. Persistent world sources need that: they mark
+## their own saved state as harvested immediately, so a save during the flight must never
+## persist the spent source without its reward.
+##
+## Returns false only when the currency or count is invalid, or the credit itself fails. A
+## missing HUD icon still keeps the credited reward and reports success.
+func grant_currency_from_world_immediate(
+	currency: StringName,
+	world_position: Vector2,
+	count: int
+) -> bool:
+	if not CurrencyCatalog.has_currency(currency) or count <= 0:
+		return false
+	if _progression_node == null or not _progression_node.has_method("update_currency"):
+		return false
+	if not bool(_progression_node.call("update_currency", currency, count)):
+		return false
+	var icon: Node = _currency_icon_node(currency)
+	if icon == null or not icon.has_method("animate_currency_flight_only"):
+		return true
+	# Same compressed stagger as currency rewards: the whole reward flies within ~1s
+	# regardless of the amount.
+	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
+	for i: int in range(count):
+		icon.call("animate_currency_flight_only", world_position, i, stagger)
+	return true
+
+
 func _animate_inventory_item_to_position(
 	item_id: String,
 	start_global_position: Vector2,

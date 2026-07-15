@@ -27,6 +27,30 @@ func animate_currency_harvest(
 	)
 
 
+## Visual-only flight: the icon flies to the HUD but nothing is credited when it lands. For
+## world sources that credit the whole reward up front — see
+## GameUI.grant_currency_from_world_immediate — so a save during the flight cannot lose it.
+func animate_currency_flight_only(
+	world_position: Vector2,
+	sequence_index: int = 0,
+	stagger_seconds: float = -1.0,
+	finished_callback: Callable = Callable()
+) -> bool:
+	return CurrencyHarvestAnimation.animate_harvest(
+		self,
+		world_position,
+		sequence_index,
+		delay_between_icons,
+		animation_speed,
+		curve_strength,
+		Callable(),
+		Callable(),
+		false,
+		stagger_seconds,
+		finished_callback
+	)
+
+
 func _credit_currency() -> void:
 	var scene: Node = get_tree().current_scene
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null

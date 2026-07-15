@@ -17,10 +17,28 @@ class_name BuildingNavigationSyncService
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 
 var _manager: BuildingManager
+# Terrain speed owned by permanent static world features (authored bamboo), keyed by cell.
+# These are not derived from any tile layer, so they survive layer save/restore and cannot be
+# cleared by build/removal logic. Kept generic: any permanent feature can register here, and
+# 1.0 clears an entry. Vector2i -> float.
+var _static_terrain_speed_by_cell: Dictionary = {}
 
 
 func setup(manager: BuildingManager) -> void:
 	_manager = manager
+
+
+## Registers (or clears) a permanent world feature's speed multiplier for one cell, then
+## refreshes only that cell's effective terrain speed. A multiplier at or above 1.0 removes
+## the entry. This never rebuilds a flow field: refresh_cell_speed writes the shared native
+## terrain-speed map that every steered agent reads live.
+func set_static_terrain_speed_multiplier(cell: Vector2i, multiplier: float) -> void:
+	var clamped_multiplier: float = clampf(multiplier, 0.01, 1.0)
+	if clamped_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER:
+		_static_terrain_speed_by_cell.erase(cell)
+	else:
+		_static_terrain_speed_by_cell[cell] = clamped_multiplier
+	refresh_cell_speed(cell)
 
 
 func sync_flow_extra_blocking_cells() -> void:
@@ -134,6 +152,10 @@ func effective_cell_speed_multiplier(cell: Vector2i) -> float:
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	# Permanent static features join the same minimum as logical plants and every speed-
+	# carrying layer, so the slowest thing on the cell always wins.
+	if _static_terrain_speed_by_cell.has(cell):
+		speed_multiplier = minf(speed_multiplier, float(_static_terrain_speed_by_cell[cell]))
 	var plant_manager: Node = _manager.plant_manager
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))

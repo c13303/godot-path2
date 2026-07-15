@@ -231,3 +231,33 @@ Owns:
 
 Notes:
 - The overlay ghosts per-cell wall/turret/fence tiles for technical navigation readiness. House Builder work uses HouseWorkProgressOverlay instead, so house gameplay construction is not mixed with topology readiness.
+
+## BambooHarvestController
+Owns the authored permanent bamboo plants: the cell registry captured by LevelLoader, per-plant maturity, the visual instances, player-proximity harvesting, dawn regrowth, the `bamboo_states` save section, and each cell's static terrain-speed registration.
+
+Does not own:
+- General plant state or growth (bamboo is never a PlantManager plant), flow-field rebuilding, build placement algorithms, global currency storage, or save-file orchestration.
+
+Notes:
+- Bamboo is authored and permanent: absent from PlantManager, BuildingObjectManager, PlayerPlaceableDurabilityService, BuildRemovalService, garden topology and every damage/target system. No health, collision or removal callbacks. A harvest changes only maturity.
+- The `0.5` slowdown belongs to the bamboo's presence, not its maturity: registered once per cell at setup and never touched again, so maturity changes never dirty navigation.
+- Harvest range and scan cadence are reused from GroundDropManager (`pickup_radius_for_floor`, `PICKUP_CHECK_INTERVAL`), never re-declared. No Area2D or physics body.
+- Reward is atomic: GameUI credits all five bamboo before the icons fly (`grant_currency_from_world_immediate`), so a save mid-flight cannot lose it. The controller never calls Progression directly.
+- Restored dawn signals are ignored (`GameState.is_emitting_restored_phase_signals`), so loading a dawn save does not re-mature harvested bamboo.
+- Set up synchronously in `BuildingManager._ready()`, which the scene orders ahead of `progression`, so the restore facade is always ready before Progression uses it.
+
+## BambooPlantVisual
+Owns only one bamboo's sprite, its frame (0 = immature, 1 = mature), its base-anchored idle dance, and its world-Y z_index. It owns no maturity rules, harvesting, currency, save state, dawn events, slowdown or build reservations.
+
+Notes:
+- bamboo.png is two horizontal frames; each frame is the artwork plus 4px of transparent padding on every side. The node origin is the cell centre (sort point), a pivot sits at the cell's bottom edge, and the centred sprite hangs half the artwork height above it — so the artwork's lower half covers the authored tile and its upper half rises above it. Offsets derive from the live texture and tile size, never hardcoded tile dimensions.
+- The dance transforms the pivot, so sway/breathe rotate around the planted base. Phases are randomized per plant; no tween is allocated per frame.
+
+## LevelLoader
+Captures the root-level `bamboo` container's direct Node2D children into stable floor cells (deduplicated, sorted by Y then X) before freeing the authored level shell. The markers are editor aids only: never mutated or reparented as gameplay visuals. A level with no container yields an empty list without error.
+
+## BuildingNavigationSyncService
+Owns generic static-world-feature terrain-speed multipliers (`set_static_terrain_speed_multiplier`) in addition to tile/placeable-derived speed. Static values join the same minimum as logical plants and every speed-carrying layer in `effective_cell_speed_multiplier`; `1.0` clears an entry. Writes the shared native terrain map, so no flow rebuild is involved.
+
+## Build placement
+`BuildPlacementService.is_placeable_occupied` rejects permanent world-feature cells (`BuildingManager.is_permanent_world_feature_cell`, reached from BuildSystem's resolver) before actor-displacement logic — that bypass would otherwise let most non-plant placeables skip group occupancy. Covers one-cell buildings, plants, fences, turrets, counters, every house presence cell, drag placement and both previews. Bamboo cells stay walkable.

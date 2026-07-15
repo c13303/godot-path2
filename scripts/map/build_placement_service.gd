@@ -393,6 +393,13 @@ func is_debris_cell(cell: Vector2i) -> bool:
 
 
 func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable_def: Dictionary) -> bool:
+	# Permanent authored world features (bamboo) reserve their cell against every placeable
+	# type, house presence cells included. Checked first because _placeable_displaces_actors
+	# below lets most non-plant placeables skip actor-group occupancy entirely, so a
+	# group-based reservation would not hold. Bamboo stays walkable — this only blocks
+	# building on it.
+	if _manager.is_permanent_world_feature_cell(cell):
+		return true
 	var wallz: TileMapLayer = _wallz()
 	var plantz: TileMapLayer = _plantz()
 	var traversable_buildings: TileMapLayer = _traversable_buildings()

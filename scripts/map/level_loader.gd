@@ -23,6 +23,8 @@ extends Node
 ## The authored layers a level provides, in the order they should be hosted.
 const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz", "fences"]
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
+## Root-level container whose direct Node2D children mark one permanent bamboo plant each.
+const BAMBOO_CONTAINER_NAME: String = "bamboo"
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
@@ -56,6 +58,10 @@ var _loaded_named_spot_cells: Dictionary = {}  # StringName -> Vector2i
 # native falls back to the floor used-rect and the camera stays unclamped.
 var _loaded_map_bounds_cells: Rect2i = Rect2i()
 var _loaded_map_bounds_world: Rect2 = Rect2()
+# Floor cells of the level's authored bamboo markers, captured before the shell is freed.
+# The markers themselves are editor-only and are never reparented as gameplay visuals;
+# BambooHarvestController creates the real plants from these cells.
+var _loaded_bamboo_cells: Array[Vector2i] = []
 var _loaded_starting_seeds: int = 20
 var _loaded_starting_gems: int = 1000
 var _loaded_starting_money: int = 0
@@ -113,6 +119,7 @@ func _load_level() -> void:
 	HouseManager.prepare_authored_houses(level_root)
 	_capture_level_spawner_bindings(level_root)
 	_capture_level_map_bounds(level_root)
+	_capture_level_bamboo_cells(level_root)
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
 		if layer == null:
@@ -179,6 +186,12 @@ func get_loaded_named_spot_cells() -> Dictionary:
 ## Zero size when the level has no mapBounds node.
 func get_loaded_map_bounds_cells() -> Rect2i:
 	return _loaded_map_bounds_cells
+
+
+## Floor cells of the level's authored bamboo markers, deduplicated and sorted by Y then X.
+## Empty when the level authors no `bamboo` container.
+func get_loaded_bamboo_cells() -> Array[Vector2i]:
+	return _loaded_bamboo_cells.duplicate()
 
 
 ## Authored map extent in world coordinates. Zero size when the level has no
@@ -598,6 +611,53 @@ func _find_spawner_marker_node(spawner_container: Node, spawner_node: Node2D, sp
 	if sibling_marker != null:
 		return sibling_marker
 	return spawner_node.get_node_or_null(NodePath(marker_name)) as Node2D
+
+
+# Reads the level's root-level `bamboo` container: every direct Node2D child marks one
+# permanent bamboo plant. Runs while the level's own floor layer is still present, because
+# the shell (markers included) is freed at the end of _load_level. The markers are editor
+# aids only — they are never mutated, reparented, or used as gameplay visuals; only their
+# derived floor cells survive, and BambooHarvestController builds the real plants from them.
+# A level with no container is normal and stays silent.
+func _capture_level_bamboo_cells(level_root: Node) -> void:
+	_loaded_bamboo_cells.clear()
+	var container: Node = level_root.get_node_or_null(NodePath(BAMBOO_CONTAINER_NAME))
+	if container == null:
+		return
+	var floor_layer: TileMapLayer = level_root.get_node_or_null("floor") as TileMapLayer
+	if floor_layer == null:
+		push_warning("LevelLoader: level '%s' has no floor layer; bamboo marker cells cannot be derived." % _level_path_for_log())
+		return
+	var marker_name_by_cell: Dictionary = {}  # Vector2i -> String
+	for child: Node in container.get_children():
+		var marker: Node2D = child as Node2D
+		if marker == null:
+			push_warning("LevelLoader: bamboo child '%s' in level '%s' is not a Node2D; ignored." % [
+				String(child.name), _level_path_for_log()
+			])
+			continue
+		# Same world-to-cell convention as spawner marker capture.
+		var local_position: Vector2 = floor_layer.to_local(marker.global_position)
+		var cell: Vector2i = floor_layer.local_to_map(local_position)
+		if floor_layer.get_cell_source_id(cell) < 0:
+			push_warning("LevelLoader: bamboo marker '%s' in level '%s' resolves to cell %s, which has no floor tile; ignored." % [
+				String(marker.name), _level_path_for_log(), str(cell)
+			])
+			continue
+		if marker_name_by_cell.has(cell):
+			push_warning("LevelLoader: bamboo markers '%s' and '%s' in level '%s' both resolve to cell %s; keeping one bamboo." % [
+				str(marker_name_by_cell[cell]), String(marker.name), _level_path_for_log(), str(cell)
+			])
+			continue
+		marker_name_by_cell[cell] = String(marker.name)
+		_loaded_bamboo_cells.append(cell)
+	_loaded_bamboo_cells.sort_custom(Callable(self, "_sort_cells_by_y_then_x"))
+
+
+func _sort_cells_by_y_then_x(a: Vector2i, b: Vector2i) -> bool:
+	if a.y != b.y:
+		return a.y < b.y
+	return a.x < b.x
 
 
 # Reads the level's mapBounds rectangle (a CollisionShape2D + RectangleShape2D used

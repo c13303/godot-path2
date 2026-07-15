@@ -12,7 +12,9 @@ const AUTOSAVE_PATH: String = "user://progression_autosave.json"
 # persists the dawn sub-stage needed to resume before clients correctly.
 # Version 5 adds the "runtime_houses" section (player-built houses). Versions 1-4 are still
 # accepted and simply have no house section (treated as an empty list).
-const SAVE_VERSION: int = 5
+# Version 6 adds authored bamboo maturity state.
+# Versions 1-5 remain accepted and default all authored bamboo to mature.
+const SAVE_VERSION: int = 6
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -547,6 +549,7 @@ func save_progression(
 
 	var gameplay_phase: String = gameplay_phase_override if gameplay_phase_override != "" else _get_gameplay_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
+	var bamboo_states: Array[Dictionary] = _get_bamboo_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
@@ -565,6 +568,7 @@ func save_progression(
 		"gameplay_phase_state": gameplay_phase_state,
 		"layers": layer_data,
 		"plant_states": plant_states,
+		"bamboo_states": bamboo_states,
 		"counter_stock": counter_stock,
 		"ground_collectibles": ground_collectibles,
 		"player_placeable_durability": player_placeable_durability,
@@ -818,6 +822,9 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_restore_inventory(game_ui, player_data)
 	_reindex_loaded_layers(scene)
 	_restore_plant_states(scene, data.get("plant_states", []))
+	# After the authored layers and normal plants, and before _restore_gameplay_phase emits the
+	# restored phase signals — a restored dawn must not re-mature bamboo saved as harvested.
+	_restore_bamboo_states(scene, data.get("bamboo_states", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
 	_restore_ground_collectibles(scene, data.get("ground_collectibles", []))
 	# Rebuild player-built houses (sprites + six-cell registry) from the restored wallz blockers,
@@ -937,6 +944,19 @@ func _get_plant_states(scene: Node) -> Array[Dictionary]:
 	if raw_states is Array:
 		var state_data: Array = raw_states as Array
 		for raw_entry: Variant in state_data:
+			if raw_entry is Dictionary:
+				states.append(raw_entry as Dictionary)
+	return states
+
+
+func _get_bamboo_states(scene: Node) -> Array[Dictionary]:
+	var states: Array[Dictionary] = []
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("serialize_bamboo_states_for_save"):
+		return states
+	var raw_states: Variant = building_manager.call("serialize_bamboo_states_for_save")
+	if raw_states is Array:
+		for raw_entry: Variant in (raw_states as Array):
 			if raw_entry is Dictionary:
 				states.append(raw_entry as Dictionary)
 	return states
@@ -1131,6 +1151,20 @@ func _restore_plant_states(scene: Node, raw_states: Variant) -> void:
 	_log("Plant states restored: %d entries" % states.size())
 
 
+## Bamboo is authored by the level, never created from a save: the controller applies saved
+## maturity onto its own registry and ignores cells this level does not author. Saves older
+## than version 6 have no section, which leaves every authored bamboo mature.
+func _restore_bamboo_states(scene: Node, raw_states: Variant) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
+	if building_manager == null or not building_manager.has_method("restore_bamboo_states_from_save"):
+		return
+	var states: Array = []
+	if raw_states is Array:
+		states = raw_states as Array
+	building_manager.call("restore_bamboo_states_from_save", states)
+	_log("Bamboo states restored: %d entries" % states.size())
+
+
 func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has_runtime_agents: bool, legacy_phase: String) -> void:
 	if phase == "":
 		return
@@ -1301,6 +1335,23 @@ func _validate_save(data: Dictionary) -> String:
 				return "invalid plant state kind"
 			if entry.has("stage") and int(entry["stage"]) < 0:
 				return "invalid plant state stage"
+	# Optional since save version 6; versions 1-5 legitimately omit it.
+	if data.has("bamboo_states"):
+		if not (data["bamboo_states"] is Array):
+			return "invalid bamboo states"
+		var bamboo_states: Array = data["bamboo_states"] as Array
+		for raw_entry: Variant in bamboo_states:
+			if not (raw_entry is Dictionary):
+				return "invalid bamboo state entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "mature"]:
+				if not entry.has(field):
+					return "invalid bamboo state entry"
+			if not (entry["mature"] is bool):
+				return "invalid bamboo state value"
+			for coordinate: String in ["x", "y"]:
+				if not (entry[coordinate] is int or entry[coordinate] is float):
+					return "invalid bamboo state coordinate"
 	if data.has("ground_collectibles"):
 		if not (data["ground_collectibles"] is Array):
 			return "invalid ground collectibles"
@@ -1386,7 +1437,11 @@ func _save_summary(data: Dictionary) -> String:
 	var raw_durability: Variant = data.get("player_placeable_durability", [])
 	if raw_durability is Array:
 		durability_count = (raw_durability as Array).size()
-	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d" % [
+	var bamboo_state_count: int = 0
+	var raw_bamboo_states: Variant = data.get("bamboo_states", [])
+	if raw_bamboo_states is Array:
+		bamboo_state_count = (raw_bamboo_states as Array).size()
+	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d bamboo_states=%d" % [
 		str(data.get("gameplay_phase", data.get("day_phase", "<missing>"))),
 		int(progression_data.get("nDays", 0)),
 		int(progression_data.get("seeds", 0)),
@@ -1401,6 +1456,7 @@ func _save_summary(data: Dictionary) -> String:
 		counter_total,
 		inventory_count,
 		durability_count,
+		bamboo_state_count,
 	]
 
 

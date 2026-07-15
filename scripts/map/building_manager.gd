@@ -27,6 +27,7 @@ const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/ma
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
 const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_service.gd")
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
+const BAMBOO_HARVEST_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/bamboo_harvest_controller.gd")
 const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_drop_manager.gd")
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_cutscene_controller.gd")
@@ -210,6 +211,7 @@ var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
 var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
+var _bamboo_harvest_controller: BambooHarvestController = BAMBOO_HARVEST_CONTROLLER_SCRIPT.new()
 var _spawner_reveal_cutscene: SpawnerRevealCutsceneController = SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT.new()
 var _spawner_reveal_phase: SpawnerRevealPhaseController = SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT.new()
 var _fundamental_builder_onboarding: FundamentalBuilderOnboardingController = FUNDAMENTAL_BUILDER_ONBOARDING_CONTROLLER_SCRIPT.new()
@@ -300,6 +302,7 @@ func _ready() -> void:
 	_setup_house_builder_work()
 	_setup_ally_housing()
 	_setup_ground_drop_manager()
+	_setup_bamboo_harvest_controller()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
@@ -742,6 +745,35 @@ func has_floor_cell(cell: Vector2i) -> bool:
 
 func has_wall_cell(cell: Vector2i) -> bool:
 	return _has_wall(cell)
+
+
+# Runs synchronously in _ready(), after _building_navigation_sync.setup() and
+# _resolve_level_layers(): the controller registers each bamboo cell's permanent slowdown
+# through the sync service at setup time. It must also complete before Progression._ready()
+# can call restore_bamboo_states_from_save — the scene orders Map (and so BuildingManager)
+# ahead of progression, which is the seam this relies on.
+func _setup_bamboo_harvest_controller() -> void:
+	_bamboo_harvest_controller.name = "BambooHarvestController"
+	add_child(_bamboo_harvest_controller)
+	var scene: Node = get_tree().current_scene
+	var level_loader: LevelLoader = scene.get_node_or_null("LevelLoader") as LevelLoader if scene != null else null
+	var game_ui: CanvasLayer = scene.get_node_or_null("GameUI") as CanvasLayer if scene != null else null
+	_bamboo_harvest_controller.setup(floorz, level_loader, _building_navigation_sync, game_ui)
+
+
+## True on a cell holding a permanent authored world feature (bamboo). Build placement
+## rejects these outright. Bamboo is never a removable or damageable object, so this is a
+## read-only query with no matching mutator.
+func is_permanent_world_feature_cell(cell: Vector2i) -> bool:
+	return _bamboo_harvest_controller.has_bamboo_at(cell)
+
+
+func serialize_bamboo_states_for_save() -> Array[Dictionary]:
+	return _bamboo_harvest_controller.serialize_state()
+
+
+func restore_bamboo_states_from_save(saved_states: Array) -> void:
+	_bamboo_harvest_controller.restore_state(saved_states)
 
 
 func _setup_ground_drop_manager() -> void:
