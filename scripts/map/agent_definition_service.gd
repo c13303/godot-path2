@@ -52,6 +52,7 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 		sprite.scale = data.sprite_scale
 		sprite.position = data.sprite_offset
 	agent.set_meta("monster_sprite_frame_layout", data.sprite_frame_layout)
+	agent.set_meta("monster_is_small", data.is_small)
 	# _ready() already ran (add_child), so override both the exported cap and the
 	# live pool.
 	agent.set("max_health", data.max_health)

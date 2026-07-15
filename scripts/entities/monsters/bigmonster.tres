@@ -7,6 +7,7 @@
 script = ExtResource("1_monster_data")
 id = &"bigmonster"
 display_name = "Big Monster"
+is_small = false
 texture = ExtResource("2_texture")
 sprite_frame_layout = &"directional_4_horizontal"
 sprite_offset = Vector2(0, -48)

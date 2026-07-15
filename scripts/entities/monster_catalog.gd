@@ -42,6 +42,7 @@ static func _make_basic() -> MonsterData:
 	var data: MonsterData = MonsterData.new()
 	data.id = BASIC_ID
 	data.display_name = "Monster"
+	data.is_small = true
 	data.texture = BASIC_TEXTURE
 	data.sprite_hframes = 4
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
@@ -61,6 +62,7 @@ static func _make_bigmonster() -> MonsterData:
 	var data: MonsterData = MonsterData.new()
 	data.id = BIG_MONSTER_ID
 	data.display_name = "Big Monster"
+	data.is_small = false
 	data.texture = BIG_MONSTER_TEXTURE
 	data.sprite_hframes = 4
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL

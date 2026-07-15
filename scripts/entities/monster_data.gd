@@ -26,6 +26,11 @@ class_name MonsterData
 ## sprite's feet sit on the agent's ground point (larger sprites need a lower offset).
 @export var sprite_offset: Vector2 = Vector2(0.0, -16.0)
 
+@export_group("Traits")
+## Small monsters can be grabbed and eaten whole by capture buildings (kraken).
+## Large monsters are too heavy to be lifted.
+@export var is_small: bool = true
+
 @export_group("Stats")
 @export_range(1, 100000, 1, "or_greater") var max_health: int = 100
 ## Movement speed as a fraction of the global agent speed. 1.0 = normal,

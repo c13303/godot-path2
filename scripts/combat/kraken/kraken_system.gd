@@ -273,6 +273,8 @@ func _is_target_still_eligible(agent: Node2D, nav_id: int, allow_own_reservation
 		return false
 	if not agent.is_in_group("monsters") or agent.is_in_group("clients") or agent.is_in_group("merchants"):
 		return false
+	if not _is_small_monster(agent):
+		return false
 	if nav_id < 0:
 		return false
 	var id: int = agent.get_instance_id()
@@ -287,6 +289,12 @@ func _is_target_still_eligible(agent: Node2D, nav_id: int, allow_own_reservation
 	if _building_manager.is_agent_eating_plant(nav_id):
 		return false
 	return true
+
+
+# Only monsters flagged small in the monster bible (MonsterData.is_small, stamped at
+# spawn by AgentDefinitionService) are light enough to be grabbed and swallowed.
+func _is_small_monster(agent: Node2D) -> bool:
+	return bool(agent.get_meta("monster_is_small", false))
 
 
 func _pin_target_to_tip(state: Dictionary) -> void:
