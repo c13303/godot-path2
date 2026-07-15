@@ -135,7 +135,7 @@ func _build_ui() -> void:
 	_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	# STOP so clicks anywhere behind the panel are swallowed (no world interaction).
 	_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
-	_backdrop.gui_input.connect(_on_backdrop_gui_input)
+	_backdrop.gui_input.connect(_on_dialog_surface_gui_input)
 	add_child(_backdrop)
 
 	# The panel is a fixed-size box centred in the viewport. CenterContainer sizes it to its
@@ -150,7 +150,7 @@ func _build_ui() -> void:
 	_panel = PanelContainer.new()
 	_panel.name = "Panel"
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_panel.gui_input.connect(_on_typewriter_skip_surface_gui_input)
+	_panel.gui_input.connect(_on_dialog_surface_gui_input)
 	_panel.add_theme_stylebox_override("panel", _panel_background_style())
 	center.add_child(_panel)
 
@@ -222,7 +222,7 @@ func _build_upper_section() -> HBoxContainer:
 	_body_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_body_scroll.custom_minimum_size = Vector2(BODY_WIDTH, UPPER_HEIGHT)
 	_body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body_scroll.gui_input.connect(_on_typewriter_skip_surface_gui_input)
+	_body_scroll.gui_input.connect(_on_dialog_surface_gui_input)
 	upper.add_child(_body_scroll)
 
 	_body_label = RichTextLabel.new()
@@ -248,7 +248,7 @@ func _build_choice_section() -> ScrollContainer:
 	_choice_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_choice_scroll.custom_minimum_size = Vector2(0.0, CHOICE_AREA_HEIGHT)
 	_choice_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_choice_scroll.gui_input.connect(_on_typewriter_skip_surface_gui_input)
+	_choice_scroll.gui_input.connect(_on_dialog_surface_gui_input)
 
 	_choice_list = VBoxContainer.new()
 	_choice_list.name = "ChoiceList"
@@ -273,6 +273,7 @@ func _build_close_button() -> void:
 	_close_button.add_theme_font_size_override("font_size", FONT_CLOSE)
 	_apply_close_button_style()
 	_close_button.pressed.connect(_on_close_button_pressed)
+	_close_button.gui_input.connect(_on_dialog_surface_gui_input)
 	# Added last to the root so it renders above the panel in its corner.
 	add_child(_close_button)
 
@@ -525,6 +526,7 @@ func _build_choice_row(choice: Choice) -> Button:
 	_apply_choice_row_style(button, false, choice.enabled)
 	button.pressed.connect(_on_choice_button_pressed.bind(choice.id))
 	button.mouse_entered.connect(_on_choice_button_hovered.bind(choice.id))
+	button.gui_input.connect(_on_dialog_surface_gui_input)
 
 	var row: HBoxContainer = HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -779,24 +781,25 @@ func _handle_pad_button(button_index: int) -> void:
 		get_viewport().set_input_as_handled()
 
 
-## Clicks that reach the backdrop (i.e. not on a choice or the close button) complete the
-## typewriter while typing. They never interact with the world (the backdrop swallows them).
-func _on_backdrop_gui_input(event: InputEvent) -> void:
-	_handle_typewriter_skip_click(event)
-
-
-func _on_typewriter_skip_surface_gui_input(event: InputEvent) -> void:
-	_handle_typewriter_skip_click(event)
-
-
-func _handle_typewriter_skip_click(event: InputEvent) -> void:
+## Mouse handling shared by every surface of the modal (backdrop, panel, body, choice rows,
+## close cross): right-click always closes, left-click completes the typewriter while typing.
+## It is connected to all of them because each one stops mouse events, so a surface without
+## it would silently swallow the right-click instead of closing. Clicks never reach the world.
+func _on_dialog_surface_gui_input(event: InputEvent) -> void:
 	if not _open or Engine.get_frames_drawn() == _open_frame:
 		return
-	if event is InputEventMouseButton:
-		var mb: InputEventMouseButton = event
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and _typing:
-			finish_typewriter()
-			accept_event()
+	if not (event is InputEventMouseButton):
+		return
+	var mb: InputEventMouseButton = event
+	if not mb.pressed:
+		return
+	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		accept_event()
+		close_dialog(&"cancel")
+		return
+	if mb.button_index == MOUSE_BUTTON_LEFT and _typing:
+		finish_typewriter()
+		accept_event()
 
 
 func _on_choice_button_pressed(id: String) -> void:

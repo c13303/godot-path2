@@ -1556,6 +1556,10 @@ func has_fundamental_builder_reached_spot() -> bool:
 	return _builder.fundamental_builder_idle_at_spot()
 
 
+func is_fundamental_builder_working() -> bool:
+	return _builder.fundamental_builder_working()
+
+
 func is_player_near_fundamental_builder() -> bool:
 	return _builder.is_player_near_fundamental_builder(SeedMerchantController.INTERACT_RADIUS_TILES)
 

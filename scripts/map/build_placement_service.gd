@@ -14,10 +14,12 @@ const PLACEMENT_SURFACE_WATER_SOURCE: StringName = &"water_source"
 const FENCE_ITEM_ID: String = "fence"
 
 var _manager: BuildSystem
+var _actor_displacement: BuildActorDisplacementService = BuildActorDisplacementService.new()
 
 
 func setup(manager: BuildSystem) -> void:
 	_manager = manager
+	_actor_displacement.setup(manager)
 
 
 func affordable_quantity(item_id: String) -> int:
@@ -96,6 +98,9 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	if not is_logical_plant(placeable_def):
 		_refresh_cell_terrain_speed(cell)
 	after_placeable_placed(cell, placeable_def)
+	if _placeable_displaces_actors(placeable_def):
+		var displaced_cells: Array[Vector2i] = [cell]
+		_actor_displacement.displace_from_cells(displaced_cells)
 	if is_logical_plant(placeable_def):
 		_refresh_cell_terrain_speed(cell)
 	if item_id == FENCE_ITEM_ID:
@@ -133,6 +138,7 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 			game_ui.call("refund_build", item_id, _cell_world_position(entrance), 1)
 		_notify("invalid construction")
 		return
+	_actor_displacement.displace_from_cells(house_manager.get_presence_cells(entrance))
 	if _manager != null and _manager.has_method("notify_player_house_placed"):
 		_manager.call("notify_player_house_placed", item_id)
 	_play_build_fx_at_cell(entrance, _wallz())
@@ -221,6 +227,8 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 			_refresh_cell_terrain_speed(cell)
 		_play_build_fx_at_cell(cell, target_layer)
 	target_layer.update_internals()
+	if _placeable_displaces_actors(placeable_def):
+		_actor_displacement.displace_from_cells(cells)
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_for_cells(cells)
 	if target_layer == _plantz():
@@ -390,6 +398,8 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 	var house_manager: HouseManager = _manager.get_house_manager()
 	if house_manager != null and house_manager.get_house_at_presence_cell(cell) != null:
 		return true
+	if _placeable_displaces_actors(placeable_def):
+		return false
 	return is_occupied_by_group_node(cell, placeable_def)
 
 
@@ -420,6 +430,14 @@ func placement_surface(placeable_def: Dictionary) -> StringName:
 
 func is_logical_plant(placeable_def: Dictionary) -> bool:
 	return bool(placeable_def.get("logical_plant", false))
+
+
+func _placeable_displaces_actors(placeable_def: Dictionary) -> bool:
+	if str(placeable_def.get("type", "")) != "placeable":
+		return false
+	if str(placeable_def.get("category", "")) == "plant":
+		return false
+	return bool(placeable_def.get("occupies_cell", true))
 
 
 func requires_grass_green_floor(placeable_def: Dictionary) -> bool:

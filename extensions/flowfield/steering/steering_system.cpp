@@ -1223,6 +1223,34 @@ void SteeringSystem::set_agent_profile(int id, const AgentProfile &profile)
     recompute_hitbox_query_extents();
 }
 
+void SteeringSystem::set_agent_position(int id, const Vec2 &position, bool clear_velocity)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y))
+        return;
+
+    AgentData &agent = agents[it->second];
+    Vec2 old_foot = agent_foot_point(agent);
+    agent.position = position;
+    if (clear_velocity)
+    {
+        agent.velocity = Vec2(0, 0);
+        agent.smash_velocity = Vec2(0, 0);
+        agent.is_propelled = false;
+    }
+    agent.was_in_t2 = false;
+    agent.target_radius_timer = 0.0;
+    agent.lost_timer = 0.0;
+    agent.active_bottleneck = -1;
+    agent.completed_bottleneck = -1;
+    agent.debug_in_bottleneck_state = false;
+    agent.debug_bottleneck_wait = false;
+    if (grid)
+        grid->update(agent.id, old_foot, agent_foot_point(agent));
+}
+
 void SteeringSystem::set_agent_control_mode(int id, int mode)
 {
     auto it = id_to_index.find(id);

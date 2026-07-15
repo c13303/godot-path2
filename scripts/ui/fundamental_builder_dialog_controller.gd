@@ -8,7 +8,7 @@ const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const CHOICE_OK: String = "ok"
 const BUILD_HOUSE_ID: String = "buildhouse"
 const HOUSE_MENU_ICON_PLACEHOLDER: String = "{house_menu_icon}"
-const INTRO_REWARD_GEMS: int = 20
+const INTRO_REWARD_GEMS: int = 40
 const GEM_CURRENCY: StringName = &"gem"
 
 @export var dialog: DialogUI
@@ -70,6 +70,8 @@ func _is_builder_interactable() -> bool:
 	if building_manager.has_method("is_any_reveal_cutscene_active") and bool(building_manager.call("is_any_reveal_cutscene_active")):
 		return false
 	if building_manager.has_method("is_fundamental_builder_active") and not bool(building_manager.call("is_fundamental_builder_active")):
+		return false
+	if building_manager.has_method("is_fundamental_builder_working") and bool(building_manager.call("is_fundamental_builder_working")):
 		return false
 	if building_manager.has_method("is_player_near_fundamental_builder") and not bool(building_manager.call("is_player_near_fundamental_builder")):
 		return false

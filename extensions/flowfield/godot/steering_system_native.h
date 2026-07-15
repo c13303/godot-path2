@@ -80,6 +80,7 @@ namespace godot
         void set_agent_input(int agent_id, const Vector2 &direction);
         void set_agent_manual_motion(int agent_id, double acceleration, double deceleration);
         void set_agent_profile(int agent_id, const Dictionary &profile);
+        void set_agent_position(int agent_id, const Vector2 &position, bool clear_velocity = true);
         Vector2 get_agent_position(int agent_id) const;
         Vector2 get_agent_velocity(int agent_id) const;
         void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);

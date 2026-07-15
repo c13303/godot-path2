@@ -6,9 +6,19 @@ const ROSE_TEXTURE_FRAME_COUNT: int = 3
 const ROSE_TEXTURE_FRAME: int = 0
 const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
 const COUNTER_PILE_ROSE_SCALE: float = 0.56
-const COUNTER_PILE_ROSE_FRAME_HEIGHT: float = 64.0
-const COUNTER_PILE_OVERLAP: float = 0.66
-const COUNTER_PILE_BASE_Y: float = -8.0
+const COUNTER_BOUQUET_BASE_OFFSET: Vector2 = Vector2(0.0, -8.0)
+const COUNTER_BOUQUET_SLOT_OFFSETS: Array[Vector2] = [
+	Vector2(0.0, 0.0),
+	Vector2(-13.0, -14.0),
+	Vector2(14.0, -15.0),
+	Vector2(-11.0, 12.0),
+	Vector2(12.0, 13.0),
+	Vector2(-17.0, 1.0),
+	Vector2(18.0, 2.0),
+	Vector2(-27.0, -5.0),
+	Vector2(28.0, -4.0),
+	Vector2(0.0, 25.0),
+]
 const MAX_STOCK_PER_COUNTER: int = 10
 const CLIENT_COUNTER_RADIUS_TILES: int = 2
 # Early fetching only succeeds within 1.25 tile widths of the selected target. A
@@ -294,7 +304,7 @@ func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> voi
 	sprite.global_position = start_world
 	sprite.z_index = int(start_world.y) + 10
 	_resolve_pile_parent().add_child(sprite)
-	var end_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _pile_offset(maxi(0, stock(counter_cell) - 1))
+	var end_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _bouquet_offset(maxi(0, stock(counter_cell) - 1))
 	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -64.0)
 	var tween: Tween = create_tween()
 	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -308,18 +318,18 @@ func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> voi
 	tween.tween_callback(Callable(sprite, "queue_free"))
 
 
-# Symmetric counterpart to animate_harvested_rose: a rose leaves the top of a counter
-# pile and flies to a client that just bought it. `pile_index` is the index the rose
-# occupied in the pile BEFORE it was removed (i.e. stock - 1 at purchase time), so the
-# sprite launches from exactly where the popped pile rose sat. The client is walking
-# away, so the flight endpoint tracks its live position every tick; `on_arrival` fires
-# once the rose catches up (the caller uses this to show the pinned rose sprite).
+# Symmetric counterpart to animate_harvested_rose: a rose leaves its filled bouquet
+# slot and flies to a client that just bought it. `pile_index` is the slot index the
+# rose occupied BEFORE it was removed (i.e. stock - 1 at purchase time), so the sprite
+# launches from exactly where the popped rose sat. The client is walking away, so the
+# flight endpoint tracks its live position every tick; `on_arrival` fires once the rose
+# catches up (the caller uses this to show the pinned rose sprite).
 func animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, target: Node2D, on_arrival: Callable) -> void:
 	if target == null or not is_instance_valid(target):
 		if not on_arrival.is_null():
 			on_arrival.call()
 		return
-	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _pile_offset(maxi(0, pile_index))
+	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _bouquet_offset(maxi(0, pile_index))
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.texture = ROSE_TEXTURE
 	sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
@@ -374,8 +384,8 @@ func rebuild_pile(counter_cell: Vector2i) -> void:
 		sprite.frame = ROSE_TEXTURE_FRAME
 		sprite.centered = true
 		sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
-		sprite.global_position = counter_world + _pile_offset(index)
-		sprite.z_index = int(counter_world.y) + index
+		sprite.global_position = counter_world + _bouquet_offset(index)
+		sprite.z_index = _bouquet_z_index(counter_world, index)
 		_resolve_pile_parent().add_child.call_deferred(sprite)
 		nodes.append(sprite)
 	_pile_nodes_by_cell[counter_cell] = nodes
@@ -400,13 +410,13 @@ func clear_all_piles() -> void:
 
 # Every counter is emptied (triggered when the last client of the sale leaves). The
 # logical stock drops to zero immediately so monster garden clustering/targeting never
-# sees counter roses (the monster-eat mechanic is gone), while the already-built pile
-# sprites are detached and popped top-to-bottom for a visual "counters emptying" effect.
-# All counters pop in sync — one rose per tick, tick = total_seconds / tallest pile — so
-# the whole sequence always finishes in exactly total_seconds regardless of how tall each
-# pile is (a 4-high pile just runs out early).
+# sees counter roses (the monster-eat mechanic is gone), while the already-built bouquet
+# sprites are detached and popped in reverse fill order for a visual "counters emptying"
+# effect. All counters pop in sync — one rose per tick, tick = total_seconds / fullest
+# bouquet — so the whole sequence always finishes in exactly total_seconds regardless of
+# how full each bouquet is (a 4-rose bouquet just runs out early).
 func dissolve_all_piles(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> void:
-	var piles: Array = []  # Array[Array[Node2D]] — each pile in bottom..top order (top == last)
+	var piles: Array = []  # Array[Array[Node2D]] - each bouquet in fill order (last == next removed)
 	var max_count: int = 0
 	for raw_cell: Variant in _pile_nodes_by_cell.keys():
 		var nodes: Array = _pile_nodes_by_cell[raw_cell] as Array
@@ -425,10 +435,10 @@ func dissolve_all_piles(total_seconds: float = NIGHTFALL_DISSOLVE_SECONDS) -> vo
 	var tween: Tween = create_tween()
 	for _step: int in range(max_count):
 		tween.tween_interval(interval)
-		tween.tween_callback(Callable(self, "_pop_pile_tops").bind(piles))
+		tween.tween_callback(Callable(self, "_pop_last_bouquet_slots").bind(piles))
 
 
-func _pop_pile_tops(piles: Array) -> void:
+func _pop_last_bouquet_slots(piles: Array) -> void:
 	for raw_nodes: Variant in piles:
 		var nodes: Array = raw_nodes as Array
 		if nodes.is_empty():
@@ -497,9 +507,14 @@ func _resolve_pile_parent() -> Node:
 	return scene if scene != null else self
 
 
-func _pile_offset(index: int) -> Vector2:
-	var step: float = COUNTER_PILE_ROSE_FRAME_HEIGHT * COUNTER_PILE_ROSE_SCALE * (1.0 - COUNTER_PILE_OVERLAP)
-	return Vector2(0.0, COUNTER_PILE_BASE_Y - float(index) * step)
+func _bouquet_offset(index: int) -> Vector2:
+	var slot_index: int = clampi(index, 0, COUNTER_BOUQUET_SLOT_OFFSETS.size() - 1)
+	return COUNTER_BOUQUET_BASE_OFFSET + COUNTER_BOUQUET_SLOT_OFFSETS[slot_index]
+
+
+func _bouquet_z_index(counter_world: Vector2, index: int) -> int:
+	var offset: Vector2 = _bouquet_offset(index)
+	return int(counter_world.y + offset.y) + index
 
 
 func _call_bool(callable: Callable, cell: Vector2i) -> bool:

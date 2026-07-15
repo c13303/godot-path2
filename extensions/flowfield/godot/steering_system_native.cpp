@@ -50,6 +50,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_input", "agent_id", "direction"), &SteeringSystemNative::set_agent_input);
     ClassDB::bind_method(D_METHOD("set_agent_manual_motion", "agent_id", "acceleration", "deceleration"), &SteeringSystemNative::set_agent_manual_motion);
     ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_id", "profile"), &SteeringSystemNative::set_agent_profile);
+    ClassDB::bind_method(D_METHOD("set_agent_position", "agent_id", "position", "clear_velocity"), &SteeringSystemNative::set_agent_position, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
     ClassDB::bind_method(D_METHOD("get_agent_velocity", "agent_id"), &SteeringSystemNative::get_agent_velocity);
     ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
@@ -386,6 +387,11 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.weapon_immune = bool(profile["weapon_immune"]);
 
     system.set_agent_profile(agent_id, native_profile);
+}
+
+void SteeringSystemNative::set_agent_position(int agent_id, const Vector2 &position, bool clear_velocity)
+{
+    system.set_agent_position(agent_id, ffcore::Vec2(position.x, position.y), clear_velocity);
 }
 
 Vector2 SteeringSystemNative::get_agent_position(int agent_id) const

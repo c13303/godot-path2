@@ -239,6 +239,14 @@ func fundamental_builder_active() -> bool:
 	return _fundamental_builder_id >= 0 and is_builder_active(_fundamental_builder_id)
 
 
+# True from the moment the fundamental Builder is assigned a house job until it is released,
+# so it covers both walking to the site and hammering on it.
+func fundamental_builder_working() -> bool:
+	if not fundamental_builder_active():
+		return false
+	return _work_house_by_builder_id.has(_fundamental_builder_id)
+
+
 func fundamental_builder_idle_at_spot() -> bool:
 	if not fundamental_builder_active():
 		return false
