@@ -273,8 +273,6 @@ func _ready() -> void:
 	_runtime_tick_controller.setup(self)
 	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
 	_fundamental_builder_onboarding.setup(self, _spawner_reveal_cutscene)
-	if not _builder.fundamental_builder_intro_requested.is_connected(_on_fundamental_builder_intro_requested):
-		_builder.fundamental_builder_intro_requested.connect(_on_fundamental_builder_intro_requested)
 	_plant_contact_dance_router.setup(self)
 	add_child(_spawner_reveal_cutscene)
 	_resolve_level_layers()
@@ -293,6 +291,7 @@ func _ready() -> void:
 	_setup_ground_drop_manager()
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
+	GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
 	_damage_number_drawer = DamageNumberDrawer.new()
 	add_child(_damage_number_drawer)
 	set_process_input(true)
@@ -332,6 +331,15 @@ func register_tracked_agent(agent: Node2D, category: StringName) -> void:
 
 func unregister_tracked_agent(agent: Node2D) -> void:
 	_agent_cell_tracker.unregister(agent)
+
+# The build phase starting is the seam the fundamental Builder's arrival cutscene hangs
+# off. A restored phase is not a real transition: the save already carries whether the
+# cutscene was spent.
+func _on_afternoon_phase_changed(is_afternoon_phase: bool) -> void:
+	if not is_afternoon_phase or GameState.is_emitting_restored_phase_signals():
+		return
+	_fundamental_builder_onboarding.on_afternoon_started()
+
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	if _suppress_next_restored_mode_signal:
@@ -1444,12 +1452,24 @@ func show_tutorial_alert(key: String) -> void:
 
 
 func _show_tutorial_alert(key: String) -> void:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return
-	var tutorial: Node = scene.get_node_or_null("GameUI/top anchor/tutorial")
+	var tutorial: Node = _tutorial_node()
 	if tutorial != null and tutorial.has_method("show_alert"):
 		tutorial.call("show_alert", key)
+
+
+## Dismisses an alert early. Only clears when `key` is the one currently showing, so an
+## unrelated alert that has taken the label over is left alone.
+func clear_tutorial_alert(key: String) -> void:
+	var tutorial: Node = _tutorial_node()
+	if tutorial != null and tutorial.has_method("clear_alert"):
+		tutorial.call("clear_alert", key)
+
+
+func _tutorial_node() -> Node:
+	var scene: Node = get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("GameUI/top anchor/tutorial")
 
 
 func try_finish_final_day() -> bool:
@@ -1572,8 +1592,8 @@ func notify_player_house_placed(item_id: String) -> void:
 	_fundamental_builder_onboarding.notify_player_house_placed(item_id)
 
 
-func _on_fundamental_builder_intro_requested(builder_node: Node2D) -> void:
-	_fundamental_builder_onboarding.request_intro_cutscene(builder_node)
+func is_fundamental_builder_arrival_pending() -> bool:
+	return _ally_housing.is_fundamental_builder_arrival_pending()
 
 
 func _process_seed_merchant_arrival() -> void:

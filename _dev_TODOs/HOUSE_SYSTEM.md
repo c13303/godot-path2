@@ -1,309 +1,237 @@
-Implement the fundamental Builder introduction cutscene, dialog, and first Builder House tutorial.
+Implement the builder tutorial arrow fix and change the fundamental builder’s house lifecycle.
 
-Read and follow `AGENTS.md`. Do not run Godot, tests, compilation, export, or build commands.
+Read and follow `AGENTS.md` and `ARCHITECTURE.md` before editing. Preserve the current architecture and reuse the existing builder housing, tutorial-arrow, save/load, destruction, and day/night systems. Do not add parallel systems or broad manager-level hacks.
 
-## Relevant existing systems
+Do not run Godot, tests, builds, exports, or compilation. The user will test manually.
 
-Inspect and reuse:
+## 1. Fix the missing builder tutorial arrows
 
-* `scripts/map/builder_controller.gd`
-* `scripts/map/ally_housing_controller.gd`
-* `scripts/map/spawner_reveal_cutscene_controller.gd`
-* `scripts/map/spawner_reveal_phase_controller.gd`
-* `scripts/map/agent_save_service.gd`
-* `scripts/map/house_manager.gd`
-* `scripts/map/building_manager.gd`
-* `scripts/ui/dialog.gd`
-* `scripts/ui/merchant_dialog_controller.gd`
-* `scripts/ui/merchant_prompt.gd`
-* `scripts/controls/player_controller.gd`
-* `scripts/misc/tutorial.gd`
-* `scripts/shop/toolbuild.gd`
-* `scripts/ui/game_ui.gd`
-* `scripts/map/agent_definition_service.gd`
-* `mainRun.tscn`
-* the project’s FR/EN translation files
+Current bug:
 
-Do not put the feature logic directly into `BuildingManager`. Keep it as wiring and narrow façade methods.
+After closing the fundamental builder’s introductory dialog, the tutorial text may activate, but the expected arrows do not appear:
 
-Use one focused onboarding owner for the fundamental Builder’s one-shot progression. Do not create a general interaction framework or perform an unrelated merchant refactor.
+1. Vertical arrow pointing to the House quickslot.
+2. Horizontal arrow pointing to the `house_builder` item inside the house selector.
 
-## Persistent onboarding state
+The tutorial currently appears to be filtered by phase logic, while this onboarding sequence occurs around dawn.
 
-Persist exactly the progression needed for this feature:
+Fix the gating so this specific one-shot tutorial can display immediately after the dialog closes, regardless of the normal afternoon-only tutorial filtering.
 
-```gdscript
-intro_cutscene_played: bool
-builder_house_tutorial_state: int
-```
+Required behavior:
 
-Tutorial states:
+* Closing the fundamental builder dialog activates the existing “Build a builder house” tutorial.
+* First arrow points to the House quickslot.
+* Once the House selector is open, the arrow points to `house_builder`.
+* Reuse the existing generic tutorial-arrow implementation used by comparable build tutorials, such as the turret tutorial.
+* Keep arrows hidden while:
 
-```gdscript
-NOT_STARTED
-ACTIVE
-COMPLETED
-```
+  * a dialog is open;
+  * a cutscene is active;
+  * it is night;
+  * the target UI element is not currently available or visible.
+* When the blocking state ends, the active tutorial must resume correctly.
+* Do not create a separate builder-specific arrow renderer.
+* Preserve the existing permanent consumption rule: the tutorial is completed forever once the player places their first builder house.
+* Preserve save/load behavior for the tutorial completion state.
+* Do not reactivate the tutorial in saves where it was already completed.
 
-Fresh-game defaults:
+## 2. Fundamental builder now occupies the first builder house
 
-```gdscript
-intro_cutscene_played = false
-builder_house_tutorial_state = NOT_STARTED
-```
+Current behavior to replace:
 
-Transitions:
+* The first completed builder house spawns a normal builder.
+* The fundamental builder leaves the map permanently.
 
-* The introduction cutscene successfully starts:
+New behavior:
 
-  * `intro_cutscene_played = true`
-* The fundamental Builder dialog closes while the tutorial is `NOT_STARTED`:
+* The first completed `house_builder` becomes the fundamental builder’s home.
+* Completing this first house must not spawn a normal builder.
+* The existing fundamental builder remains the same agent and becomes associated with that house.
+* Normal builders begin spawning only from the second completed builder house onward.
 
-  * tutorial becomes `ACTIVE`
-* The player successfully places their first WIP `house_builder`:
+Examples:
 
-  * tutorial becomes `COMPLETED`
+* 0 completed builder houses:
 
-Save/load requirements:
+  * Fundamental builder uses the original authored spot.
+  * 0 normal builders.
 
-* Include both values in the normal run save data, near the existing `spawner_reveal` one-shot state in `AgentSaveService`.
-* Loading restores the exact state.
-* A played cutscene must not replay after save/load.
-* A completed Builder House tutorial must not reactivate after save/load.
-* If saved while the tutorial is `ACTIVE`, it must still be active after loading.
-* Do not force an autosave.
-* Do not add speculative migration logic or a save-version change unless the current save validator actually requires it.
+* 1 completed builder house:
 
-Consume the cutscene only after the shared cutscene controller accepts and starts it. If starting fails, leave it pending.
+  * Fundamental builder lives in that house.
+  * 0 normal builders.
 
-## Fundamental Builder camera introduction
+* 2 completed builder houses:
 
-The trigger applies only to the fundamental Builder, not house-owned Builders.
+  * Fundamental builder lives in the first house.
+  * 1 normal builder lives in the second house.
 
-During the existing Builder runtime processing, detect when:
+* 3 completed builder houses:
 
-* the Builder is `_fundamental_builder_id`;
-* its state is `STATE_ENTERING`;
-* `intro_cutscene_played` is false;
-* the live Builder is within 3 grid tiles of the authored `fundamental_builder_spot`.
+  * Fundamental builder lives in the first house.
+  * 2 normal builders live in the later houses.
 
-Reuse the project’s existing grid-distance convention for “within 3 tiles.” Do not add path-length computation or a separate watcher. If the codebase has no established convention, report that ambiguity instead of silently inventing another system.
+Do not merely calculate `normal_builder_count = builder_house_count - 1` without tracking ownership. The system must know which specific house belongs to the fundamental builder.
 
-Emit or forward a one-shot request containing the live fundamental Builder node. Keep the check inside the existing active Builder processing; do not scan scene groups every frame.
+## 3. Durable house ownership
 
-## Reuse the existing camera cutscene
+Store the fundamental-builder assignment as part of the house’s saved state, not as independently saved agent state.
 
-Reuse `SpawnerRevealCutsceneController`. Do not implement another camera lock, skip prompt, progress circle, or return-to-player system.
-
-Generalize it narrowly:
-
-* Add a public `is_active() -> bool`.
-* Allow a cutscene item to target either:
-
-  * the existing fixed `world_position`; or
-  * an optional live `target_node: Node2D`.
-* For `target_node`, resolve its valid current world position while scrolling so the moving Builder remains in view.
-* Preserve all existing spawner-reveal behavior.
-
-Use a distinct context:
-
-```gdscript
-&"fundamental_builder_intro"
-```
-
-This context has no spawning or reveal gameplay action. It only focuses the Builder.
-
-If another reveal cutscene is currently active, do not call `begin()` because the current implementation treats that as a skip request. Keep the Builder introduction pending and start it once the shared controller is idle.
-
-The introduction:
-
-1. Locks gameplay input through the existing cutscene system.
-2. Scrolls to the live fundamental Builder.
-3. Uses the existing focus pause and skip prompt.
-4. Returns to the player.
-5. Restores normal camera following and input.
-6. Does not pause, teleport, repath, or otherwise modify the Builder.
-
-## Faster generic skip return
-
-Improve skipped returns for all cutscenes using this shared controller.
-
-Keep the normal return duration unchanged:
-
-```gdscript
-NORMAL_RETURN_SECONDS = 1.0
-```
-
-Use:
-
-```gdscript
-SKIPPED_RETURN_SECONDS = 0.3
-```
-
-When the skip progress circle completes:
-
-* interrupt the current camera scroll or focus pause immediately;
-* preserve the existing reveal/spawn release behavior for monster and client cutscenes;
-* begin returning from the camera’s current position immediately;
-* complete that return in `0.3s`;
-* do not add another delay or focus pause;
-* keep gameplay input locked until the return finishes.
-
-Normal, non-skipped completion still returns over `1.0s`.
-
-## Fundamental Builder interaction and dialog
-
-Give the fundamental Builder an interaction equivalent to the seed merchant:
-
-* keyboard: `E`
-* gamepad: the same interaction button used by the merchant
-* show the existing `E-Y.png` interaction glyph above the Builder
-* use the same tile interaction radius as `SeedMerchantController.INTERACT_RADIUS_TILES`
-* show the prompt only after the fundamental Builder has reached its idle spot
-* do not show or allow it at night
-* do not show it while another dialog is open or during a camera cutscene
-
-Add narrow Builder queries through `BuilderController` and thin `BuildingManager` wrappers as needed:
-
-* fundamental Builder is active
-* fundamental Builder is idle at its spot
-* player is within interaction range
-* live fundamental Builder world position
-* live fundamental Builder node, when needed by the cutscene
-
-Do not expose the BuilderController’s private dictionaries.
-
-Create a small fundamental Builder dialog adapter modeled on `MerchantDialogController`, using the existing `DialogUI`.
-
-Use the first frame of:
+Use a small explicit house-level role or equivalent existing metadata, for example:
 
 ```text
-res://assets/sprites/legval/fundamental_builder.png
+resident_role = fundamental_builder
 ```
 
-as the portrait, following the merchant portrait approach.
+The exact field name should fit the existing house data model.
 
-For the displayed speaker name, reuse an existing fundamental Builder/Builder translation if one exists. Do not invent a new character name. If no display name exists, report that single missing content decision.
+Requirements:
 
-Dialog translations:
+* Only houses continue to be persisted.
+* Runtime builder agents are still reconstructed from the loaded house situation.
+* Exactly one builder house may have the fundamental-builder role.
+* A normal builder house must not also spawn the fundamental builder.
+* A fundamental-builder house must not spawn a normal builder.
+* Avoid relying exclusively on array order or the current count of houses.
 
-French:
+Backward compatibility:
 
-```text
-Salut ! Je peux construire des maisons avec toi, mais tu dois d'abord m'aider à construire la mienne.
-```
+* Existing saves will not contain this new field.
+* When loading an older save:
 
-English:
+  * if there is at least one completed builder house;
+  * and none is marked as the fundamental builder’s house;
+  * assign the oldest completed builder house using the existing stable construction-order data.
+* Persist that resolved ownership on the next save.
+* Do not change unrelated save data or serialize runtime builder positions.
 
-```text
-Hi! I can help you build houses, but first you need to help me build mine.
-```
+## 4. First-house completion transition
 
-Single button:
+When the first builder house completes:
 
-```text
-OK
-```
+* Do not retire, despawn, replace, or duplicate the fundamental builder.
+* Bind the existing fundamental builder to the completed house.
+* Update its home/resident reference to that house.
+* The house must not request a normal builder spawn.
+* Release the builder cleanly from the completed construction task through the existing work-controller lifecycle.
+* Once idle, the fundamental builder should return to the same home position/entrance convention used by other builders.
 
-The OK button closes the dialog. Standard generic dialog closing controls must continue to work.
+Avoid any temporary state where:
 
-Whenever this dialog closes, if the Builder House tutorial state is still `NOT_STARTED`, change it to `ACTIVE`.
+* a normal builder is spawned for the first house;
+* the fundamental builder is simultaneously leaving;
+* two builders represent the same house.
 
-The dialog itself remains interactable while the fundamental Builder is present. Do not add a separate persisted “dialog acknowledged” one-shot.
+## 5. Destruction of the fundamental builder’s house
 
-## Special Builder House tutorial
+If the specific house occupied by the fundamental builder is destroyed:
 
-Add a translation key such as:
+* Clear that house association.
+* The fundamental builder becomes homeless again.
+* Restore its original authored spot as its home anchor.
+* Restore its previous lifecycle:
 
-```text
-tutorial.build_builder_house
-```
+  * during the day, it remains available as the fundamental builder;
+  * at night, it leaves through the existing night departure behavior;
+  * at dawn, it returns to its original authored spot.
+* Do not permanently delete or retire it.
+* Do not spawn a replacement normal builder for the destroyed house.
 
-French:
+Important:
 
-```text
-Construisez une maison de bâtisseur
-```
+Do not automatically transfer the fundamental builder into another surviving builder house.
 
-English:
+Example:
 
-```text
-Build a Builder House
-```
+* First house belongs to the fundamental builder.
+* Second and third houses belong to normal builders.
+* First house is destroyed.
+* The two normal builders keep their own houses.
+* The fundamental builder returns to its authored spot.
+* No surviving normal-builder house changes ownership.
 
-When the tutorial state is `ACTIVE`:
+If the fundamental builder is currently working on another WIP house when its home is destroyed:
 
-* display this as the active tutorial instruction;
-* keep it active until the first WIP `house_builder` is successfully placed;
-* do not infer it from the day number or general economy conditions;
-* preserve existing cutscene suppression and alert behavior.
+* immediately clear/replace its home reference;
+* do not unnecessarily cancel valid work already in progress;
+* once its current task releases it, it returns to the authored spot.
 
-Arrow behavior must match the existing multi-stage build tutorials:
+Use the existing destruction notification and builder reconciliation pathways. Do not introduce polling or per-frame house-validity watchers.
 
-1. While the house menu is closed, point at the `buildhouse` quickslot.
-2. Once the `buildhouse` menu is open, point at the visible `house_builder` item icon.
-3. If the relevant target is temporarily unavailable or hidden, hide the arrow cleanly rather than pointing at an invalid rectangle.
+## 6. Day/night reconciliation
 
-Reuse:
+Update the existing builder reconciliation logic so it derives the population from explicit house roles:
 
-* `GameUI.get_quick_slot_global_rect_for_kind("buildhouse")`
-* `Toolbuild.get_visible_build_item_global_rect("house_builder")`
-* the existing `TutorialArrow` behavior
+* one fundamental builder exists independently of normal builder houses;
+* it is either:
 
-Do not duplicate arrow animation code.
+  * assigned to its marked completed house; or
+  * assigned to its original authored spot;
+* each completed normal builder house produces exactly one normal builder;
+* WIP houses produce no resident;
+* destroyed houses produce no resident.
 
-## Tutorial completion event
+At load and dawn reconciliation:
 
-The tutorial is completed only after a successful player placement of a WIP Builder House:
+* recreate the fundamental builder in the correct state;
+* recreate normal builders only for completed houses without the fundamental role;
+* prevent duplicates if reconciliation runs more than once;
+* keep the existing lazy/event-driven architecture.
 
-```text
-item_id == "house_builder"
-status == WIP
-```
+The fundamental builder should use the same practical “living in a house” semantics already used by normal builders. Do not expand this task into a new visual system where builders visibly enter and emerge from interiors unless that already exists.
 
-Do not consume it when:
+## 7. Architecture constraints
 
-* the item is selected;
-* the build preview appears;
-* payment is attempted;
-* placement validation fails;
-* a different house type is placed;
-* the house finishes construction;
-* a house is restored from save.
+Before coding, identify:
 
-Add a narrow success signal at the authoritative placement owner, preferably `HouseManager.build_player_house()` after `create_house()` succeeds. For example, emit a player-house-placement event containing the normalized item ID and status.
+* the current owner of tutorial activation and arrow-target selection;
+* the current owner of builder-house resident reconciliation;
+* the current owner of house persistence;
+* the current house destruction notification path;
+* the current fundamental builder spawn/retirement path.
 
-The onboarding owner listens for that event and changes `ACTIVE` to `COMPLETED` for `house_builder`.
+Modify those owners rather than adding cross-domain state to an unrelated manager.
 
-Do not poll the world every frame to detect the house.
+Prefer:
 
-## Acceptance checks
+* one explicit resident role on house state;
+* one central reconciliation path;
+* event-driven updates on completion, destruction, dawn, and load;
+* small typed helper methods where they reduce duplicated branching.
 
-Manually verify through code inspection:
+Avoid:
 
-1. Fresh game: fundamental Builder approaches its spot.
-2. At 3 tiles, camera introduction plays exactly once.
-3. Holding skip completes the circle and immediately starts a `0.3s` return.
-4. Other monster/client reveal cutscenes retain their normal behavior.
-5. The Builder cutscene never interrupts an already active reveal cutscene.
-6. After reaching its spot, the Builder displays the E/gamepad tooltip.
-7. Interaction opens the generic dialog with the correct portrait and localized text.
-8. Closing it activates “Construisez une maison de bâtisseur”.
-9. Arrow points first to `buildhouse`, then to `house_builder`.
-10. Failed placement does not complete the tutorial.
-11. Successful WIP `house_builder` placement completes it permanently.
-12. Save/load after the introduction does not replay the cutscene.
-13. Save/load while the tutorial is active restores it as active.
-14. Save/load after placement does not reactivate the tutorial.
-15. No per-frame scene scan, duplicate skip system, or new feature logic is added to `BuildingManager`.
+* per-frame polling;
+* global singleton flags duplicating house state;
+* identifying the fundamental house only by current list index;
+* spawning then immediately deleting a normal builder;
+* silently promoting another house after destruction;
+* saving runtime agents;
+* broad refactors unrelated to this task.
+
+Keep strict GDScript typing. Avoid unsafe `:=` inference for dynamic values, dictionaries, arrays, nullable values, signal returns, and mixed numeric expressions.
+
+## Acceptance criteria
+
+1. Closing the fundamental builder dialog immediately shows the House quickslot tutorial arrow when the UI is available.
+2. Opening the House selector moves the arrow to `house_builder`.
+3. The tutorial remains one-shot and save-persistent.
+4. Completing the first builder house keeps the existing fundamental builder and spawns no normal builder.
+5. Completing the second builder house produces exactly one normal builder.
+6. Additional builder houses each produce one additional normal builder.
+7. Save/load restores the correct fundamental-house ownership and normal builder count.
+8. Older saves assign the oldest completed builder house to the fundamental builder.
+9. Destroying the fundamental house returns the fundamental builder to its original spot lifecycle.
+10. Other surviving builder houses keep their normal builders and are not promoted.
+11. Destroying a normal builder house removes only that house’s normal builder.
+12. Repeated dawn/load reconciliation does not duplicate builders.
+13. No polling, no parallel housing system, and no unrelated architectural expansion.
 
 At the end, report:
 
 * files changed;
-* owner of the onboarding state;
-* exact save fields added;
-* exact event used to complete the tutorial;
-* any remaining ambiguity, without guessing.
-
-builder name = (FR/ENGLISH) 
-"Bâtisseur Nomade" (make the EN trans)
+* the root cause of the missing arrows;
+* where fundamental-house ownership is stored;
+* the old-save migration rule;
+* how completion, destruction, dawn, and load trigger reconciliation;
+* any assumptions that could not be confirmed statically.

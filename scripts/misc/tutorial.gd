@@ -496,19 +496,22 @@ func _should_request_start_night_prompt() -> bool:
 	# start-night prompt. That request may only happen once the real day is under way.
 	if _sun_rising:
 		return false
+	# Player input is locked while a reveal cutscene plays, so a key held under it must not
+	# end the day. This one matters in the afternoon: that is when the fundamental Builder's
+	# arrival cutscene runs, and it is the phase the start-night hold belongs to.
+	if _is_spawner_reveal_cutscene_active():
+		return false
 	return _can_start_night_after_clients()
 
 
-## True while the night or client spawner-reveal cutscene is playing (camera scrolling
-## around the spawners with player input locked).
+## True while any reveal cutscene is playing (camera scrolling around the map with player
+## input locked): the night monsters, the clients, or the fundamental Builder's arrival.
 func _is_spawner_reveal_cutscene_active() -> bool:
-	if _building_manager == null:
-		return false
-	if _building_manager.has_method("is_night_start_cutscene_active") and bool(_building_manager.call("is_night_start_cutscene_active")):
-		return true
-	if _building_manager.has_method("is_client_reveal_cutscene_active") and bool(_building_manager.call("is_client_reveal_cutscene_active")):
-		return true
-	return false
+	return (
+		_building_manager != null
+		and _building_manager.has_method("is_any_reveal_cutscene_active")
+		and bool(_building_manager.call("is_any_reveal_cutscene_active"))
+	)
 
 
 func _can_start_night_after_clients() -> bool:

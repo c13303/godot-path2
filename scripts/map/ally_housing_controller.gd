@@ -153,8 +153,28 @@ func _retire_fundamental_builder() -> void:
 		_builder.retire_fundamental_builder()
 
 
+## True while the fundamental Builder is owed to the player but is not on the map yet.
+## Read by the onboarding controller, which owes the player an arrival cutscene the first
+## time this is true during a build phase.
+func is_fundamental_builder_arrival_pending() -> bool:
+	return not GameState.is_night and _fundamental_builder_due() and not _fundamental_builder_has_arrived()
+
+
 func _fundamental_builder_eligible() -> bool:
+	return _fundamental_builder_due() and _intro_cutscene_played()
+
+
+## The fundamental Builder shows up from day 2 and stays until the player has a Builder
+## house of their own to staff.
+func _fundamental_builder_due() -> bool:
 	return _current_day_number() >= 2 and _completed_builder_house_count() == 0
+
+
+## Its very first arrival is shown by the day-2 build-phase intro cutscene, which spawns it
+## on camera. Until that cutscene has been spent the Builder stays off the map, so it is
+## never already standing there when the camera goes to look for it.
+func _intro_cutscene_played() -> bool:
+	return _manager != null and _manager.has_fundamental_builder_intro_cutscene_played()
 
 
 func _fundamental_builder_has_arrived() -> bool:
