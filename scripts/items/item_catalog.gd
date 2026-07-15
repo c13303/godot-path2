@@ -366,7 +366,7 @@ const ITEM_DEFS: Dictionary = {
 		"requires_walkable_floor": true,
 		"runtime_id": "pasteque",
 		"drag_buildable": false,
-		"irrigation_radius_tiles": 6,
+		"irrigation_radius_tiles": 7,
 		"destroyed_by_creatures": true,
 		"restore_floor_atlas": FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS,
 		# Paid for at the seed merchant into the inventory; placing consumes one unit

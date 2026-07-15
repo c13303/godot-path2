@@ -1,19 +1,32 @@
 extends Node
 
+## Owns the wet-grass patches painted by the map's irrigation centers (reservoirs and
+## watermelons).
+##
+## Each center is an IrrigationSource: a wall-aware flood fill that grows one ring per
+## `ring_interval_seconds`, and shrinks the same way when its center is removed. This
+## node keeps the sources, ticks them, and paints the floor; IrrigationSource owns the
+## patch geometry.
+
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
 const RESERVOIR_GROUP: StringName = &"reservoirs"
 const RESERVOIR_ITEM_ID: String = "reservoir"
 const PASTEQUE_ITEM_ID: String = "pasteque"
-const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 6
+const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 7
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer
+@export var wallz: TileMapLayer
 @export var building_object_manager: Node
-@export var reservoir_irrigation_radius_tiles: int = 8
-@export var max_cells_per_frame: int = 24
+@export var reservoir_irrigation_radius_tiles: int = 9
+## Seconds a patch takes to grow (or shrink) by one tile of radius.
+@export var ring_interval_seconds: float = 0.25
 
-var _irrigation_queue: Array[Vector2i] = []
-var _queued_cells: Dictionary = {}
+# Irrigation centers keyed by center cell. Sources are kept after they finish animating:
+# they are the source of truth for whether a cell is still irrigated by someone else when
+# a neighbouring patch shrinks.
+var _sources: Dictionary = {}
+var _ring_timer: float = 0.0
 
 func _ready() -> void:
 	GameState.set_reservoir_destroyed(false)
@@ -30,26 +43,16 @@ func any_reservoir_destroyed() -> bool:
 			return true
 	return false
 
-func _process(_delta: float) -> void:
-	if _irrigation_queue.is_empty():
-		set_process(false)
+func _process(delta: float) -> void:
+	var interval: float = maxf(0.01, ring_interval_seconds)
+	_ring_timer += delta
+	if _ring_timer < interval:
 		return
-	var processed: int = 0
-	var budget: int = maxi(1, max_cells_per_frame)
-	var newly_grassed: Array[Vector2i] = []
-	while processed < budget and not _irrigation_queue.is_empty():
-		var cell: Vector2i = _irrigation_queue.pop_front()
-		_queued_cells.erase(cell)
-		if _irrigate_floor_cell(cell):
-			newly_grassed.append(cell)
-		processed += 1
-	# Beautify this batch (plus their neighbours). Cells whose neighbours only get
-	# grassed on a later frame are re-tiled then, via that frame's neighbour expansion.
-	if not newly_grassed.is_empty() and floorz != null:
-		GrassAutotile.beautify(floorz, newly_grassed)
-		floorz.update_internals()
-		floorz.queue_redraw()
-	if _irrigation_queue.is_empty():
+	# Reset rather than subtract: after a frame hitch the animation resumes at its normal
+	# pace instead of bursting through several rings to catch up.
+	_ring_timer = 0.0
+	_advance_sources()
+	if not _has_animating_source():
 		set_process(false)
 
 func irrigate_all_reservoirs() -> void:
@@ -77,14 +80,10 @@ func request_irrigation_from_cell(center_cell: Vector2i) -> void:
 	request_reservoir_irrigation_from_cell(center_cell)
 
 func request_reservoir_irrigation_from_cell(center_cell: Vector2i) -> void:
-	_queue_radius(center_cell, maxi(0, reservoir_irrigation_radius_tiles))
-	if not _irrigation_queue.is_empty():
-		set_process(true)
+	_register_source(center_cell, maxi(0, reservoir_irrigation_radius_tiles), _restore_floor_atlas_for(RESERVOIR_ITEM_ID))
 
 func request_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
-	_queue_radius(center_cell, _pasteque_irrigation_radius_tiles())
-	if not _irrigation_queue.is_empty():
-		set_process(true)
+	_register_source(center_cell, _pasteque_irrigation_radius_tiles(), _restore_floor_atlas_for(PASTEQUE_ITEM_ID))
 
 func request_irrigation_from_world_position(world_position: Vector2) -> void:
 	_resolve_level_nodes()
@@ -94,49 +93,100 @@ func request_irrigation_from_world_position(world_position: Vector2) -> void:
 	request_reservoir_irrigation_from_cell(center_cell)
 
 func clear_pasteque_irrigation_from_cell(center_cell: Vector2i) -> void:
+	var source: IrrigationSource = _sources.get(center_cell) as IrrigationSource
+	if source == null:
+		return
+	# -1 shrinks the patch away one ring per tick; the source is dropped once it is gone.
+	source.target_radius = -1
+	set_process(true)
+
+func _register_source(center_cell: Vector2i, radius: int, restore_atlas: Vector2i) -> void:
 	_resolve_level_nodes()
 	if floorz == null:
 		return
-	var radius: int = _pasteque_irrigation_radius_tiles()
-	var radius_squared: int = radius * radius
-	var restore_atlas: Vector2i = _pasteque_restore_floor_atlas()
-	var removed_cells: Array[Vector2i] = []
-	for y_offset: int in range(-radius, radius + 1):
-		for x_offset: int in range(-radius, radius + 1):
-			var distance_squared: int = x_offset * x_offset + y_offset * y_offset
-			if distance_squared > radius_squared:
-				continue
-			var cell: Vector2i = center_cell + Vector2i(x_offset, y_offset)
-			if _cell_has_other_irrigation_source(cell, center_cell):
-				continue
-			if _restore_floor_cell(cell, restore_atlas):
-				removed_cells.append(cell)
-	if not removed_cells.is_empty():
-		# Grass that remains around the removed patch needs its edges re-tiled.
-		GrassAutotile.beautify(floorz, removed_cells)
-		floorz.update_internals()
-		floorz.queue_redraw()
+	# Always a fresh fill: re-placing on a cell whose patch is still shrinking must grow
+	# back from the walls as they stand now, not resume a stale patch. Cells the old patch
+	# already painted stay grass until some source shrinks past them.
+	_sources[center_cell] = IrrigationSource.new(center_cell, radius, restore_atlas, _is_spread_blocked)
+	set_process(true)
+
+func _advance_sources() -> void:
+	var painted: Array[Vector2i] = []
+	var cleared: Array[Vector2i] = []
+	var finished_centers: Array[Vector2i] = []
+	for raw_center: Variant in _sources:
+		var center_cell: Vector2i = raw_center as Vector2i
+		var source: IrrigationSource = _sources[center_cell]
+		if source.current_radius < source.target_radius:
+			_irrigate_cells(source.grow_one_ring(), painted)
+		elif source.current_radius > source.target_radius:
+			_restore_cells(source, source.shrink_one_ring(), cleared)
+			if source.current_radius < 0:
+				finished_centers.append(center_cell)
+	for center_cell: Vector2i in finished_centers:
+		_sources.erase(center_cell)
+	_apply_floor_changes(painted, cleared)
+
+func _has_animating_source() -> bool:
+	for raw_center: Variant in _sources:
+		var source: IrrigationSource = _sources[raw_center as Vector2i]
+		if source.is_animating():
+			return true
+	return false
+
+func _irrigate_cells(cells: Array[Vector2i], painted: Array[Vector2i]) -> void:
+	for cell: Vector2i in cells:
+		if _irrigate_floor_cell(cell):
+			painted.append(cell)
+
+func _restore_cells(source: IrrigationSource, cells: Array[Vector2i], cleared: Array[Vector2i]) -> void:
+	for cell: Vector2i in cells:
+		if _is_covered_by_other_source(cell, source.center):
+			continue
+		if _restore_floor_cell(cell, source.restore_atlas):
+			cleared.append(cell)
+
+func _is_covered_by_other_source(cell: Vector2i, ignored_center_cell: Vector2i) -> bool:
+	for raw_center: Variant in _sources:
+		var center_cell: Vector2i = raw_center as Vector2i
+		if center_cell == ignored_center_cell:
+			continue
+		var source: IrrigationSource = _sources[center_cell]
+		if source.covers(cell):
+			return true
+	return false
+
+func _apply_floor_changes(painted: Array[Vector2i], cleared: Array[Vector2i]) -> void:
+	if floorz == null or (painted.is_empty() and cleared.is_empty()):
+		return
+	# Both added and removed cells need their neighbours re-tiled, so the patch's edges
+	# and corners match the ring it just gained or lost.
+	var touched: Array[Vector2i] = painted.duplicate()
+	touched.append_array(cleared)
+	GrassAutotile.beautify(floorz, touched)
+	floorz.update_internals()
+	floorz.queue_redraw()
 
 func _resolve_level_nodes() -> void:
 	if floorz == null:
 		floorz = get_node_or_null("../MonTilemap/floor") as TileMapLayer
 	if watersources == null:
 		watersources = get_node_or_null("../MonTilemap/watersources") as TileMapLayer
+	if wallz == null:
+		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
 	if building_object_manager == null:
 		building_object_manager = get_node_or_null("../BuildingObjectManager")
 
-func _queue_radius(center_cell: Vector2i, radius: int) -> void:
-	var radius_squared: int = radius * radius
-	for y_offset: int in range(-radius, radius + 1):
-		for x_offset: int in range(-radius, radius + 1):
-			var distance_squared: int = x_offset * x_offset + y_offset * y_offset
-			if distance_squared > radius_squared:
-				continue
-			var cell: Vector2i = center_cell + Vector2i(x_offset, y_offset)
-			if _queued_cells.has(cell):
-				continue
-			_queued_cells[cell] = true
-			_irrigation_queue.append(cell)
+# Grass spreads through open ground only: missing floor (off-map), a wall tile, or a
+# water tile stops the fill. That is what keeps a patch from appearing on the far side of
+# a wall, detached from its center blob. Floor tiles that simply cannot be grassed (paths
+# and such) do not block: the fill runs past them, they just never get painted.
+func _is_spread_blocked(cell: Vector2i) -> bool:
+	if floorz == null or floorz.get_cell_source_id(cell) < 0:
+		return true
+	if wallz != null and wallz.get_cell_tile_data(cell) != null:
+		return true
+	return watersources != null and watersources.get_cell_source_id(cell) >= 0
 
 func _irrigate_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null:
@@ -155,6 +205,8 @@ func _irrigate_floor_cell(cell: Vector2i) -> bool:
 	return true
 
 func _restore_floor_cell(cell: Vector2i, restore_atlas: Vector2i) -> bool:
+	if floorz == null:
+		return false
 	var source_id: int = floorz.get_cell_source_id(cell)
 	if source_id < 0:
 		return false
@@ -164,49 +216,14 @@ func _restore_floor_cell(cell: Vector2i, restore_atlas: Vector2i) -> bool:
 	floorz.set_cell(cell, source_id, restore_atlas, alternative_tile)
 	return true
 
-func _cell_has_other_irrigation_source(cell: Vector2i, ignored_center_cell: Vector2i) -> bool:
-	var reservoir_radius: int = maxi(0, reservoir_irrigation_radius_tiles)
-	var reservoir_radius_squared: int = reservoir_radius * reservoir_radius
-	for reservoir_node: Node in get_tree().get_nodes_in_group(RESERVOIR_GROUP):
-		var reservoir_2d: Node2D = reservoir_node as Node2D
-		if reservoir_2d == null or floorz == null:
-			continue
-		var reservoir_cell: Vector2i = floorz.local_to_map(floorz.to_local(reservoir_2d.global_position))
-		if reservoir_cell == ignored_center_cell:
-			continue
-		var reservoir_delta: Vector2i = cell - reservoir_cell
-		if reservoir_delta.x * reservoir_delta.x + reservoir_delta.y * reservoir_delta.y <= reservoir_radius_squared:
-			return true
-	if building_object_manager == null or not building_object_manager.has_method("get_building_cells_by_item_id"):
-		return false
-	var building_reservoir_cells: Array = building_object_manager.call("get_building_cells_by_item_id", RESERVOIR_ITEM_ID) as Array
-	for raw_building_reservoir_cell: Variant in building_reservoir_cells:
-		var building_reservoir_cell: Vector2i = raw_building_reservoir_cell as Vector2i
-		if building_reservoir_cell == ignored_center_cell:
-			continue
-		var building_reservoir_delta: Vector2i = cell - building_reservoir_cell
-		if building_reservoir_delta.x * building_reservoir_delta.x + building_reservoir_delta.y * building_reservoir_delta.y <= reservoir_radius_squared:
-			return true
-	var pasteque_radius: int = _pasteque_irrigation_radius_tiles()
-	var pasteque_radius_squared: int = pasteque_radius * pasteque_radius
-	var pasteque_cells: Array = building_object_manager.call("get_building_cells_by_item_id", PASTEQUE_ITEM_ID) as Array
-	for raw_pasteque_cell: Variant in pasteque_cells:
-		var pasteque_cell: Vector2i = raw_pasteque_cell as Vector2i
-		if pasteque_cell == ignored_center_cell:
-			continue
-		var pasteque_delta: Vector2i = cell - pasteque_cell
-		if pasteque_delta.x * pasteque_delta.x + pasteque_delta.y * pasteque_delta.y <= pasteque_radius_squared:
-			return true
-	return false
-
 func _pasteque_irrigation_radius_tiles() -> int:
 	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
 	return maxi(0, int(pasteque_def.get("irrigation_radius_tiles", PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES)))
 
-func _pasteque_restore_floor_atlas() -> Vector2i:
-	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
+func _restore_floor_atlas_for(item_id: String) -> Vector2i:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	return _atlas_coords_from_variant(
-		pasteque_def.get("restore_floor_atlas", FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS),
+		item_def.get("restore_floor_atlas", FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS),
 		FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS
 	)
 
