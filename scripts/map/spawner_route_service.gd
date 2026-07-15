@@ -108,17 +108,17 @@ func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 	)
 
 
-# Same contract for the clients served on the day after the upcoming night. Each client is
-# handed a random client spawner when the sale starts (ClientSaleController.activate), so
-# every client spawner is a possible origin and each one gets its own preview route. The
-# routes are the same ones the sale itself will ask for, so this warms that cache rather
-# than duplicating it. Nothing is prepared when that night serves no clients.
+# Same contract for the clients served by the currently meaningful client step. Before a
+# night, that is the day after the upcoming night; during Dawn/Morning, it is the day
+# after the just-completed night. Each client is handed a random client spawner when the
+# sale starts (ClientSaleController.activate), so every client spawner is a possible
+# origin and each one gets its own preview route.
 func prepare_upcoming_client_routes(topology_revision: int) -> void:
 	_prepared_upcoming_client_routes.clear()
 	_prepared_upcoming_client_outbound_routes.clear()
 	_prepared_client_revision = topology_revision
 	_prepared_client_deferred = false
-	var night_index: int = _preview_night_index()
+	var night_index: int = _client_preview_night_index()
 	if night_index < 0:
 		return
 	if _manager.get_spawn_playlist_config().authored_night_client_count(night_index) <= 0:
@@ -173,6 +173,16 @@ func _preview_night_index() -> int:
 	return night_index
 
 
+func _client_preview_night_index() -> int:
+	if not _garden_topology().plant_zone_built():
+		return -1
+	if _manager.current_day_client_step_pending_or_active():
+		var anchored_night_index: int = _manager.planificator_anchor_night_index()
+		if anchored_night_index >= 0 and anchored_night_index < _manager.authored_night_count():
+			return anchored_night_index
+	return _preview_night_index()
+
+
 # One descriptor per spawner that can reach a garden, keyed by spawner cell. route_kind and
 # block_fences are read back from the route this service actually built, so a descriptor
 # always reports the real navigation policy instead of assuming the monster one. Returns
@@ -211,6 +221,7 @@ func _prepare_preview_routes(
 			"group_id": group_id,
 			"ready": spawner_garden_route_flow_ready(route, spawner_cell),
 			"topology_revision": topology_revision,
+			"walkability_revision": _approach_generation,
 			"route_kind": route.get("route_kind", ROUTE_KIND_MONSTER_INBOUND) as StringName,
 			"block_fences": bool(route.get("block_fences", false)),
 		}
@@ -240,6 +251,7 @@ func _build_client_outbound_preview_descriptor(inbound: Dictionary, topology_rev
 		"group_id": escape_group,
 		"ready": group_flow_is_ready_at_world(escape_group, _cell_center(entry_cell)),
 		"topology_revision": topology_revision,
+		"walkability_revision": _approach_generation,
 		"route_kind": ROUTE_KIND_CLIENT_OUTBOUND,
 		"block_fences": true,
 	}

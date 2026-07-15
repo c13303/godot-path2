@@ -15,6 +15,7 @@ const FOOTPRINT_HEADING_OFFSET: float = -PI * 0.5
 const MIN_SEGMENT_LENGTH: float = 0.001
 
 var _active: bool = false
+var _route_key: String = ""
 var _path: PackedVector2Array = PackedVector2Array()
 var _segment_lengths: Array[float] = []
 var _cumulative_lengths: Array[float] = []
@@ -47,6 +48,7 @@ func configure() -> void:
 
 
 func start(
+	route_key: String,
 	path: PackedVector2Array,
 	owned_segments: Dictionary,
 	footprint_frame: int,
@@ -59,6 +61,7 @@ func start(
 	section_boundary_distance: float,
 	section_step_count: int
 ) -> void:
+	_route_key = route_key
 	_path = path
 	_segment_lengths.clear()
 	_cumulative_lengths.clear()
@@ -91,6 +94,7 @@ func start(
 
 func recycle() -> void:
 	_active = false
+	_route_key = ""
 	_path = PackedVector2Array()
 	_segment_lengths.clear()
 	_cumulative_lengths.clear()
@@ -109,6 +113,10 @@ func recycle() -> void:
 
 func is_active() -> bool:
 	return _active
+
+
+func route_key() -> String:
+	return _route_key
 
 
 static func measure_path_length(path: PackedVector2Array) -> float:

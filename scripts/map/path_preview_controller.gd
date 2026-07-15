@@ -54,6 +54,7 @@ func _process(delta: float) -> void:
 func _on_gameplay_phase_changed(_phase: int) -> void:
 	if not _ensure_dependencies_ready():
 		return
+	_prepare_descriptors_for_current_phase()
 	_refresh_now()
 
 
@@ -66,38 +67,77 @@ func _ensure_dependencies_ready() -> bool:
 		return false
 	_dependencies_ready = true
 	_refresh_timer = 0.0
+	_prepare_descriptors_for_current_phase()
 	_refresh_now()
 	return true
 
 
+func _prepare_descriptors_for_current_phase() -> void:
+	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
+	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
+	var revision: int = invalidation.navigation_revision() if invalidation != null else 0
+	match GameState.gameplay_phase:
+		GameState.GameplayPhase.AFTERNOON:
+			route_service.prepare_upcoming_monster_routes(revision)
+		GameState.GameplayPhase.NIGHT:
+			route_service.prepare_upcoming_monster_routes(revision)
+		GameState.GameplayPhase.DAWN:
+			route_service.prepare_upcoming_client_routes(revision)
+		GameState.GameplayPhase.MORNING:
+			if GameState.is_client_phase or _manager.current_day_client_step_pending_or_active():
+				route_service.prepare_upcoming_client_routes(revision)
+
+
 func _refresh_now() -> void:
 	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
-	if invalidation != null and (
-		invalidation.navigation_topology_dirty()
-		or invalidation.plant_layout_dirty()
-		or invalidation.runtime_rebuild_active()
-	):
-		_signature = ""
-		_clear_routes()
+	if invalidation != null and _route_refresh_blocked_by_rebuild(invalidation):
 		return
 	var descriptors: Array[Dictionary] = _prepared_descriptors()
 	var next_signature: String = _route_signature(descriptors)
 	if next_signature == _signature:
 		_update_route_readiness(descriptors)
 		return
-	_clear_routes()
 	_signature = next_signature
+	_sync_routes(descriptors)
+
+
+func _route_refresh_blocked_by_rebuild(invalidation: BuildingInvalidationController) -> bool:
+	# Plant-only changes rebuild garden metadata in the background. Keep the current
+	# preview visible until fresh descriptors are available, then replace selectively.
+	if invalidation.plant_layout_dirty():
+		return true
+	if invalidation.runtime_rebuild_active():
+		return true
+	if invalidation.navigation_topology_dirty():
+		return true
+	return false
+
+
+func _sync_routes(descriptors: Array[Dictionary]) -> void:
+	var previous_by_key: Dictionary = {}
+	for route: Dictionary in _routes:
+		previous_by_key[str(route.get("route_key", ""))] = route
+	var next_routes: Array[Dictionary] = []
+	var kept_keys: Dictionary = {}
 	for descriptor: Dictionary in descriptors:
 		var group_id: int = int(descriptor.get("group_id", IDLE_GROUP))
 		if group_id <= IDLE_GROUP:
+			continue
+		var route_key: String = _descriptor_signature_part(descriptor)
+		kept_keys[route_key] = true
+		if previous_by_key.has(route_key):
+			var kept_route: Dictionary = previous_by_key[route_key] as Dictionary
+			kept_route["ready"] = bool(descriptor.get("ready", false))
+			kept_route["group_id"] = group_id
+			next_routes.append(_plan_route_path(kept_route))
 			continue
 		var route_kind: StringName = descriptor.get("route_kind", SpawnerRouteService.ROUTE_KIND_MONSTER_INBOUND) as StringName
 		var is_client: bool = (
 			route_kind == SpawnerRouteService.ROUTE_KIND_CLIENT_INBOUND
 			or route_kind == SpawnerRouteService.ROUTE_KIND_CLIENT_OUTBOUND
 		)
-		_routes.append(_plan_route_path({
-			"route_key": _descriptor_signature_part(descriptor),
+		next_routes.append(_plan_route_path({
+			"route_key": route_key,
 			"group_id": group_id,
 			"spawner_cell": descriptor.get("spawner_cell", Vector2i.ZERO) as Vector2i,
 			"entry_cell": descriptor.get("entry_cell", Vector2i.ZERO) as Vector2i,
@@ -111,6 +151,11 @@ func _refresh_now() -> void:
 			"path": PackedVector2Array(),
 			"owned_segments": {},
 		}))
+	for route: Dictionary in _routes:
+		var old_key: String = str(route.get("route_key", ""))
+		if not kept_keys.has(old_key):
+			_recycle_runners_for_route(old_key)
+	_routes = next_routes
 	_rebuild_segment_ownership()
 
 
@@ -124,6 +169,10 @@ func _prepared_descriptors() -> Array[Dictionary]:
 			return route_service.prepared_upcoming_monster_routes()
 		GameState.GameplayPhase.DAWN:
 			return route_service.prepared_upcoming_client_routes()
+		GameState.GameplayPhase.MORNING:
+			if GameState.is_client_phase or _manager.current_day_client_step_pending_or_active():
+				return route_service.prepared_upcoming_client_routes()
+			return descriptors
 		_:
 			return descriptors
 
@@ -136,14 +185,14 @@ func _route_signature(descriptors: Array[Dictionary]) -> String:
 
 
 func _descriptor_signature_part(descriptor: Dictionary) -> String:
-	return "%s:%s:%s:%s:%d:%d:%d" % [
+	return "%s:%s:%s:%s:%s:%d:%s" % [
 		String(descriptor.get("route_kind", &"") as StringName),
 		str(descriptor.get("spawner_cell", Vector2i.ZERO)),
+		str(descriptor.get("entry_cell", Vector2i.ZERO)),
 		str(descriptor.get("start_cell", Vector2i.ZERO)),
 		str(descriptor.get("goal_cell", Vector2i.ZERO)),
-		int(descriptor.get("garden_id", 0)),
-		int(descriptor.get("topology_revision", -1)),
-		int(descriptor.get("group_id", IDLE_GROUP)),
+		int(descriptor.get("walkability_revision", -1)),
+		str(bool(descriptor.get("block_fences", false))),
 	]
 
 
@@ -154,7 +203,7 @@ func _update_route_readiness(descriptors: Array[Dictionary]) -> void:
 	var ownership_dirty: bool = false
 	for index: int in range(_routes.size()):
 		var route: Dictionary = _routes[index]
-		var route_key: String = String(route.get("route_key", ""))
+		var route_key: String = str(route.get("route_key", ""))
 		route["ready"] = bool(ready_by_key.get(route_key, false))
 		var was_planned: bool = bool(route.get("planned", false))
 		_routes[index] = _plan_route_path(route)
@@ -184,8 +233,6 @@ func _plan_route_path(route: Dictionary) -> Dictionary:
 
 
 func _rebuild_segment_ownership() -> void:
-	for runner: PathPreviewRunner in _runners:
-		runner.recycle()
 	var edge_owner: Dictionary = {}
 	for route_index: int in range(_routes.size()):
 		var route: Dictionary = _routes[route_index]
@@ -204,9 +251,22 @@ func _rebuild_segment_ownership() -> void:
 				edge_owner[edge_key] = route_index
 			if int(edge_owner.get(edge_key, -1)) == route_index:
 				owned_segments[segment_index] = true
+		var previous_owned_segments: Dictionary = route.get("owned_segments", {}) as Dictionary
+		var route_key: String = str(route.get("route_key", ""))
+		if not _segment_ownership_matches(previous_owned_segments, owned_segments):
+			_recycle_runners_for_route(route_key)
+			route["walkers_started"] = false
 		route["owned_segments"] = owned_segments
-		route["walkers_started"] = false
 		_routes[route_index] = route
+
+
+func _segment_ownership_matches(left: Dictionary, right: Dictionary) -> bool:
+	if left.size() != right.size():
+		return false
+	for raw_key: Variant in left.keys():
+		if not right.has(raw_key):
+			return false
+	return true
 
 
 func _canonical_edge_key(first: Vector2, second: Vector2) -> String:
@@ -257,6 +317,7 @@ func _start_route_walkers(route: Dictionary, path: PackedVector2Array) -> void:
 	for section: Dictionary in sections:
 		var runner: PathPreviewRunner = _idle_runner()
 		runner.start(
+			str(route.get("route_key", "")),
 			path,
 			route.get("owned_segments", {}) as Dictionary,
 			int(route.get("footprint_frame", PathPreviewRunner.FOOTPRINT_FRAME_MONSTER)),
@@ -319,3 +380,11 @@ func _clear_routes() -> void:
 	for runner: PathPreviewRunner in _runners:
 		runner.recycle()
 	_routes.clear()
+
+
+func _recycle_runners_for_route(route_key: String) -> void:
+	if route_key == "":
+		return
+	for runner: PathPreviewRunner in _runners:
+		if runner.route_key() == route_key:
+			runner.recycle()
