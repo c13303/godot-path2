@@ -1,10 +1,10 @@
 bamboo harvest feature.
 
-Now the level (we use level_demo.tscn) can have "bamboo" nodes. 
+Now the level (we use level_demo.tscn) have child nodes in "bamboo" nodes. They are the bamboo plants in the level.
 
-at level start, place matured bamboos on the tiles of those nodes.
+at level start (preloading), map those matured bamboos on the tiles of those nodes. 
 
-use bamboo.png. zindexed and the lower part of 32x64 sprite is on the tile. 
+use bamboo.png. zindexed and the lower part of 32x64 sprite is on the tile. snap them correctly 
 frame 0 : non mature
 frame 1 : matured
 

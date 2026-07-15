@@ -5,14 +5,72 @@ Owns:
 - Scene-facing exported references, setup, lifecycle, day/night orchestration.
 - Service/controller wiring and compatibility wrappers used by scenes, signals, saves, and older callers.
 - High-level dispatch for spawning, garden rebuilds, client/merchant phases, save/progression integration.
+- Exported `night_preparation_budget_ms`, sanitized during setup and passed to preparation/topology/route/runtime consumers.
+- Phase side-effect callbacks after preparation succeeds or aborts.
 
 Does not own:
 - Detailed garden topology data structures.
 - Build placement/removal/input behavior.
 - Spawner route caches and garden-access scoring internals.
+- Night/client preparation mode, readiness, or active preparation token.
+- Shared budgeted-work generation.
 
 Notes:
 - Still large by design as the coordinator/facade. Keep wrappers when external Godot calls may depend on them.
+- `is_night_preparation_ready()` remains as a public facade for save, spawning, merchant, and day-visitor callers.
+
+## BuildingPreparationController
+Owns:
+- Night/client preparation mode.
+- Night readiness.
+- Active preparation token reference.
+- Night/client preparation sequencing and stale-run checks.
+- Completion/failure lifecycle publication through narrow manager callbacks.
+
+Does not own:
+- Runtime rebuild active/progress state.
+- Work-token generation.
+- Garden topology data.
+- Spawner route caches.
+- Run-phase progression.
+- Exported scene configuration.
+
+Notes:
+- Uses focused services directly for scan, navigation sync, topology, invalidation, and route preparation.
+- Hard night-preparation failure is fail-closed: readiness is not published and the active work remains until an authoritative phase reset.
+
+## BuildingPreparationWorkGate
+Owns:
+- The single generation shared by budgeted topology/route work.
+- Active diagnostic purpose for the current budgeted operation.
+- Stale-token detection.
+
+Does not own:
+- Preparation mode or readiness.
+- Dirty flags.
+- Rebuild algorithms.
+- Phase transitions.
+
+Notes:
+- `finish_work(token)` clears the purpose, so a finished token is no longer current.
+- `cancel_current_work()` is reserved for authoritative seams such as phase reset, restore, and developer night skip.
+- Owners cancelling their own work use `cancel_if_current(token)`, which prevents stale runtime/preparation work from cancelling newer work.
+
+## BuildingInvalidationController
+Owns:
+- Navigation topology dirty state.
+- Plant-layout dirty state.
+- Runtime rebuild active/type/progress state.
+- Runtime rebuild id.
+- Active runtime work-token reference.
+
+Does not own:
+- Preparation mode or readiness.
+- Shared work-token generation.
+
+Notes:
+- The shared work token cancels budgeted topology/route operations across preparation and runtime rebuilds.
+- The runtime rebuild id still guards invalidation-controller active/progress fields from stale coroutines.
 
 ## GardenTopologyService
 Owns:

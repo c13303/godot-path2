@@ -22,6 +22,7 @@ signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, ite
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
 const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_access_resolver.gd")
 const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/agent_navigation_phase_controller.gd")
+const BUILDING_PREPARATION_WORK_GATE_SCRIPT: Script = preload("res://scripts/map/building_preparation_work_gate.gd")
 const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_preparation_controller.gd")
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
 const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_service.gd")
@@ -146,12 +147,8 @@ var _debug_check_retarget_index: bool = false:
 var _flow_ready: bool = false
 var _startup_loading_started: bool = false
 var _startup_ready: bool = false
-var _night_preparing: bool = false
-var _night_preparation_ready: bool = false
-var _night_preparation_token: int = 0
 var _suppress_next_restored_mode_signal: bool = false
 var _day_start_pending: bool = false
-var _client_preparing: bool = false
 var _client_sale_start_requested: bool = false
 var _night_start_requested: bool = false
 var _garden_topology: Variant = GARDEN_TOPOLOGY_SERVICE_SCRIPT.new()
@@ -207,7 +204,8 @@ var _house_manager: HouseManager = HouseManager.new()
 var _house_builder_work: HouseBuilderWorkController = HouseBuilderWorkController.new()
 var _ally_housing: AllyHousingController = AllyHousingController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
-var _building_preparation_controller: Variant = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
+var _preparation_work_gate: BuildingPreparationWorkGate = BUILDING_PREPARATION_WORK_GATE_SCRIPT.new()
+var _building_preparation_controller: BuildingPreparationController = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
 var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
@@ -235,8 +233,9 @@ func set_paused(value: bool) -> void:
 	_paused = value
 
 func _ready() -> void:
+	var preparation_budget_us: int = maxi(500, int(night_preparation_budget_ms * 1000.0))
 	_agent_navigation_phases.setup(self)
-	_garden_topology.setup(self)
+	_garden_topology.setup(self, _preparation_work_gate, preparation_budget_us)
 	_seed_merchant.setup(self)
 	_builder.setup(self)
 	_dawn_harvest.setup(self)
@@ -253,7 +252,7 @@ func _ready() -> void:
 	_agent_cell_tracker.setup(self)
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
-	_spawner_route_service.setup(self)
+	_spawner_route_service.setup(self, _preparation_work_gate, preparation_budget_us)
 	_building_path_service.setup(self)
 	_garden_access_resolver.setup(self)
 	_garden_retarget.setup(self)
@@ -263,14 +262,26 @@ func _ready() -> void:
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
 	_sheep_controller.setup(self)
-	_building_invalidation_controller.setup(self)
 	_building_navigation_sync.setup(self)
+	_building_invalidation_controller.setup(self, _preparation_work_gate, _building_navigation_sync)
 	_spawner_garden_selection_service.setup(self)
-	_building_preparation_controller.setup(self)
+	_building_preparation_controller.setup(
+		self,
+		_preparation_work_gate,
+		_building_scan,
+		_building_invalidation_controller,
+		_building_navigation_sync,
+		_garden_topology,
+		_spawner_route_service,
+		preparation_budget_us,
+		Callable(self, "_on_night_preparation_succeeded"),
+		Callable(self, "_on_client_preparation_succeeded"),
+		Callable(self, "_on_client_preparation_aborted")
+	)
 	_agent_spawn_service.setup(self)
 	_agent_save_service.setup(self)
 	_spawn_playlist_config.setup(self)
-	_runtime_tick_controller.setup(self)
+	_runtime_tick_controller.setup(self, preparation_budget_us)
 	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
 	_fundamental_builder_onboarding.setup(self, _spawner_reveal_cutscene)
 	_plant_contact_dance_router.setup(self)
@@ -348,7 +359,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	if GameState.is_emitting_restored_phase_signals():
 		return
 	_spawn_tick_controller.reset_empty_night()
-	_client_preparing = false
 	if is_night:
 		_client_sale_start_requested = false
 		_night_start_requested = false
@@ -376,11 +386,9 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		# planificator shows "NOW clients + TONIGHT next night" from the first post-night
 		# frame, with no one-slot flash while the transition settles.
 		_client_sale.begin_client_step()
-		_night_preparation_token += 1
-		_night_preparing = false
-		_night_preparation_ready = false
+		_building_preparation_controller.reset_for_phase_transition()
 		_spawn_tick_controller.clear_legacy_fallback()
-		_clear_waterpool_directional_field()
+		_building_navigation_sync.clear_waterpool_directional_field()
 		return
 	# Night visuals/build lock become active immediately, but spawning remains gated
 	# while all daytime topology is consumed by the capped preparation coroutine.
@@ -413,10 +421,8 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	elif not _spawn_playlist_config.playlist_spawning_enabled():
 		push_error("BuildingManager: no valid spawn playlist is enabled; monster spawning is disabled for this night.")
 	_spawn_tick_controller.clear_ready_queue()
-	_night_preparation_token += 1
-	_night_preparing = true
-	_night_preparation_ready = false
-	call_deferred("_run_night_preparation", _night_preparation_token)
+	var token: int = _building_preparation_controller.begin_night_preparation()
+	call_deferred("_run_night_preparation", token)
 
 
 func _get_playlist_night_index_from_progression() -> int:
@@ -561,24 +567,6 @@ func registered_spawner_count() -> int:
 func get_parent_for_agents() -> Node:
 	return parent_for_agents
 
-func _get_steering_system() -> Node:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return null
-	return scene.get_node_or_null("CPP/SteeringSystemNative")
-
-func _rebuild_waterpool_directional_field() -> void:
-	if watersources == null or not watersources.has_method("rebuild_waterpool_directional_field"):
-		return
-	var steering: Node = _get_steering_system()
-	watersources.call("rebuild_waterpool_directional_field", steering)
-
-func _clear_waterpool_directional_field() -> void:
-	if watersources == null or not watersources.has_method("clear_waterpool_directional_field"):
-		return
-	var steering: Node = _get_steering_system()
-	watersources.call("clear_waterpool_directional_field", steering)
-
 func _monster_count() -> int:
 	return get_tree().get_nodes_in_group("monsters").size()
 
@@ -616,25 +604,6 @@ func _run_startup_after_flow_ready() -> void:
 	startup_loading_progress.emit(1.0, "Ready")
 	startup_loading_finished.emit()
 
-func _night_preparation_is_current(token: int) -> bool:
-	if token != _night_preparation_token:
-		return false
-	# The runtime walkability rebuild (wall built mid-day/mid-night) reuses the
-	# budgeted preparation passes outside night/client preparation; while it is
-	# active its token is valid regardless of the game phase.
-	if _building_invalidation_controller != null and _building_invalidation_controller.runtime_rebuild_active():
-		return true
-	return GameState.is_night or (_client_preparing and not GameState.is_night)
-
-func _night_preparation_budget_us() -> int:
-	return maxi(500, int(night_preparation_budget_ms * 1000.0))
-
-# Claims a fresh preparation token, invalidating any in-flight budgeted pass
-# (night/client preparation or runtime walkability rebuild) at its next slice.
-func advance_preparation_token() -> int:
-	_night_preparation_token += 1
-	return _night_preparation_token
-
 func _flow_uses_async_requests() -> bool:
 	return _spawner_route_service.flow_uses_async_requests()
 
@@ -655,23 +624,13 @@ func _run_client_preparation(token: int) -> void:
 	await _building_preparation_controller.run_client_preparation(token)
 
 
-func _abort_client_preparation(token: int) -> void:
-	if token != _night_preparation_token:
-		return
-	if GameState.is_night:
-		return
-	_client_preparing = false
+func _on_client_preparation_aborted() -> void:
 	_client_sale.reset()
 	_client_sale_start_requested = true
 	GameState.start_dawn()
 
 
-# Preparation-success transitions. The manager owns these flags and the
-# tightly-coupled follow-up service call; the preparation controller requests
-# the transition instead of mutating the flags directly.
-func finish_night_preparation_success() -> void:
-	_night_preparing = false
-	_night_preparation_ready = true
+func _on_night_preparation_succeeded() -> void:
 	if _no_plants_remaining():
 		_show_tutorial_alert("tutorial.calm_night_no_roses")
 		_spawner_reveal_phase.consume_night_reveal()
@@ -689,8 +648,7 @@ func on_night_reveal_finished() -> void:
 	_ally_housing.start_pending_departures()
 
 
-func finish_client_preparation_success() -> void:
-	_client_preparing = false
+func _on_client_preparation_succeeded() -> void:
 	_client_sale.activate()
 	if not _client_sale.is_active():
 		return
@@ -1145,7 +1103,7 @@ func _register_spawner(cell: Vector2i, kind: StringName = SPAWNER_KIND_MONSTER, 
 		_merchant_spawners[cell] = true
 	else:
 		_merchant_spawners.erase(cell)
-	if is_new and GameState.is_night and _night_preparation_ready and _flow_ready and _garden_topology.plant_zone_built() and _startup_ready:
+	if is_new and GameState.is_night and is_night_preparation_ready() and _flow_ready and _garden_topology.plant_zone_built() and _startup_ready:
 		_initialize_spawner_route(cell)
 
 func _remove_missing_scanned_spawner(cell: Vector2i) -> void:
@@ -1284,16 +1242,12 @@ func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_
 		_dawn_harvest.clear_active()
 		_reset_client_sale_state()
 		_client_sale.mark_client_step_finished()
-		_night_preparing = false
-		_client_preparing = false
-		_night_preparation_ready = true
+		_building_preparation_controller.restore_prepared_night_state()
 		return
 	if GameState.is_night:
 		return
 	_day_start_pending = false
-	_night_preparing = false
-	_client_preparing = false
-	_night_preparation_ready = false
+	_building_preparation_controller.restore_unprepared_state()
 	_dawn_harvest.clear_active()
 	_reset_client_sale_state()
 	match phase:
@@ -1354,13 +1308,10 @@ func reset_client_state_for_dawn() -> void:
 	_reset_client_sale_state()
 
 
-# Single reset path for the manager-owned client-sale state: the deferred-preparation
-# flag (_client_preparing) plus the counter-agent registry (_client_counter_agents),
-# alongside the controller's own sale-local reset. Kept here (not in the controller)
-# because both pieces are owned by the manager per the client-sale boundary rules.
+# Single reset path for manager-owned client-sale/reveal/tantrum/counter state.
+# Preparation cancellation belongs to explicit phase/preparation seams.
 func _reset_client_sale_state() -> void:
 	_spawner_reveal_phase.abort_client_reveal()
-	_client_preparing = false
 	_client_sale_start_requested = false
 	_client_tantrum.end()
 	_client_sale.reset()
@@ -1395,10 +1346,8 @@ func _begin_client_sale_phase() -> void:
 		return
 	GameState.start_morning()
 	GameState.set_client_phase(true)
-	_night_preparation_token += 1
-	_client_preparing = true
-	_night_preparation_ready = false
-	call_deferred("_run_client_preparation", _night_preparation_token)
+	var token: int = _building_preparation_controller.begin_client_preparation()
+	call_deferred("_run_client_preparation", token)
 
 
 # Run-length + victory seam. The decisioning lives in RunCompletionController; these
@@ -1489,11 +1438,11 @@ func can_start_night_after_clients() -> bool:
 	# Gate on "no client sale is still pending" rather than "a client actually
 	# visited": on days with no counter stock the sale is skipped and no client ever
 	# spawns, yet the player must still be able to water their roses and end the day.
-	# _client_preparing covers the deferred window before clients spawn, so night
+	# Client preparation covers the deferred window before clients spawn, so night
 	# can't jump ahead of a sale that is genuinely coming.
 	return (
 		not _day_start_pending
-		and not _client_preparing
+		and not _building_preparation_controller.is_client_preparing()
 		and not _client_sale.current_day_client_step_pending_or_active()
 		and _client_sale.clients_finished_for_day()
 		and _client_sale.all_planted_roses_are_wet()
@@ -1501,11 +1450,11 @@ func can_start_night_after_clients() -> bool:
 
 
 func has_clients_for_save_load() -> bool:
-	return _client_preparing or not _client_sale.clients_finished_for_day()
+	return _building_preparation_controller.is_client_preparing() or not _client_sale.clients_finished_for_day()
 
 
 func save_load_client_block_reason() -> String:
-	if _client_preparing:
+	if _building_preparation_controller.is_client_preparing():
 		return "client preparation active"
 	if _client_sale.is_active():
 		return "client sale active"
@@ -1717,7 +1666,7 @@ func is_client_sale_active() -> bool:
 # Kept as a narrow public query for scene/script call sites that may still ask
 # whether the client phase has fully cleared.
 func day_clients_gone() -> bool:
-	return not _client_preparing and _client_sale.clients_finished_for_day()
+	return not _building_preparation_controller.is_client_preparing() and _client_sale.clients_finished_for_day()
 
 
 func remaining_planificator_client_count() -> int:
@@ -1871,7 +1820,7 @@ func should_skip_building_runtime_tick() -> bool:
 	# fields while gardens/routes are rebuilt over several budgeted frames.
 	if _building_invalidation_controller != null and _building_invalidation_controller.runtime_rebuild_active():
 		return true
-	return _night_preparing or _client_preparing
+	return _building_preparation_controller.is_preparing()
 
 
 func get_client_tantrum_controller() -> ClientTantrumController:
@@ -2019,7 +1968,7 @@ func client_frequency_by_cell() -> Dictionary:
 
 
 func is_night_preparation_ready() -> bool:
-	return _night_preparation_ready
+	return _building_preparation_controller.is_night_ready()
 
 
 func is_night_start_cutscene_active() -> bool:
@@ -2055,8 +2004,6 @@ func restore_ground_collectibles_from_save(saved_items: Array) -> void:
 
 
 func restore_runtime_agents_from_save(data: Dictionary) -> void:
-	_night_preparing = false
-	_client_preparing = false
 	# This restore suppresses _on_game_mode_changed (see _notify_restored_phase), which
 	# is where these transient prompt requests are normally cleared. Clear them here so a
 	# request set during the pre-restore load transition can't leak into the restored phase.
@@ -2064,25 +2011,25 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 	if not GameState.is_dawn_phase:
 		_client_sale_start_requested = false
 	if GameState.is_night:
-		_night_preparation_token += 1
-		_night_preparing = true
-		_night_preparation_ready = false
-		await _run_night_preparation(_night_preparation_token)
+		var night_token: int = _building_preparation_controller.begin_night_preparation()
+		var night_prepared: bool = await _building_preparation_controller.run_night_preparation(night_token)
+		if not night_prepared:
+			return
 		_agent_save_service.restore_state(data, true)
 		_notify_restored_phase()
 		return
 	if GameState.is_client_phase:
-		_night_preparation_token += 1
-		_client_preparing = true
-		_night_preparation_ready = false
-		await _run_client_preparation(_night_preparation_token)
+		var client_token: int = _building_preparation_controller.begin_client_preparation()
+		var client_prepared: bool = await _building_preparation_controller.run_client_preparation(client_token)
+		if not client_prepared:
+			return
 		_agent_save_service.restore_state(data, true)
 		_purge_day_phase_monsters_after_load()
 		# Tantrum state is never saved (saving is blocked during tantrum), so there are
 		# no live hostiles to restore here.
 		_notify_restored_phase()
 		return
-	_night_preparation_ready = false
+	_building_preparation_controller.restore_unprepared_state()
 	_agent_save_service.restore_state(data, false)
 	_purge_day_phase_monsters_after_load()
 	_notify_restored_phase()
@@ -2803,9 +2750,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 func skip_current_night_for_dev() -> bool:
 	if not GameState.is_night:
 		return false
-	_night_preparation_token += 1
-	_night_preparing = false
-	_night_preparation_ready = false
+	_building_preparation_controller.reset_for_phase_transition()
 	_spawn_tick_controller.reset_empty_night()
 	_spawn_tick_controller.clear_ready_queue()
 	_spawn_tick_controller.clear_legacy_fallback()

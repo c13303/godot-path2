@@ -119,7 +119,7 @@ func process(delta: float, playlist_enabled: bool) -> void:
 	# night is gone, the spawn passes flip back to day.
 	if not GameState.is_night:
 		return
-	if not _manager._night_preparation_ready:
+	if not _manager.is_night_preparation_ready():
 		return
 	if _manager.is_night_start_cutscene_active():
 		if playlist_enabled:

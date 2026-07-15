@@ -12,6 +12,8 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 
 var _manager: BuildingManager
+var _work_gate: BuildingPreparationWorkGate
+var _budget_us: int = 500
 var _gardens: Dictionary = {}
 var _garden_by_plant_cell: Dictionary = {}
 var _dirty_gardens: Dictionary = {}
@@ -28,8 +30,10 @@ var _plant_zone_built: bool = false
 var _counter_access_cells: Dictionary = {}
 
 
-func setup(manager: BuildingManager) -> void:
+func setup(manager: BuildingManager, work_gate: BuildingPreparationWorkGate, budget_us: int) -> void:
 	_manager = manager
+	_work_gate = work_gate
+	_budget_us = maxi(500, budget_us)
 
 
 func gardens() -> Dictionary:
@@ -100,11 +104,11 @@ func rebuild_walkable_map_cache_budgeted(token: int) -> bool:
 	var slice_started_us: int = Time.get_ticks_usec()
 	var floor_cells: Array[Vector2i] = floorz.get_used_cells()
 	for cell: Vector2i in floor_cells:
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		if _is_walkable(cell):
 			_walkable_map_tiles[cell] = true
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	return true
@@ -127,7 +131,7 @@ func build_gardens_from_plants_budgeted(token: int) -> bool:
 
 	var slice_started_us: int = Time.get_ticks_usec()
 	while not unassigned.is_empty():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var seed_cell: Vector2i = unassigned.keys()[0] as Vector2i
 		var garden_id: int = create_garden()
@@ -144,7 +148,7 @@ func build_gardens_from_plants_budgeted(token: int) -> bool:
 			var queue: Array[Vector2i] = [from_plant]
 			var head: int = 0
 			while head < queue.size():
-				if not _night_preparation_is_current(token):
+				if not _work_is_current(token):
 					return false
 				var cell: Vector2i = queue[head]
 				head += 1
@@ -167,7 +171,7 @@ func build_gardens_from_plants_budgeted(token: int) -> bool:
 								garden_plants[neighbor] = true
 								_garden_by_plant_cell[neighbor] = garden_id
 								frontier_plants.append(neighbor)
-				if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+				if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 					await _manager.get_tree().process_frame
 					slice_started_us = Time.get_ticks_usec()
 
@@ -185,7 +189,7 @@ func validate_gardens_budgeted(token: int) -> bool:
 	_dirty_gardens.clear()
 	_clear_garden_entry_resolve_cache("night_prepare_validate")
 	for raw_garden_id: Variant in dirty_ids:
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var garden_id: int = int(raw_garden_id)
 		if not _gardens.has(garden_id):
@@ -207,13 +211,13 @@ func validate_gardens_budgeted(token: int) -> bool:
 	var total_entry_points: int = 0
 	var slice_started_us: int = Time.get_ticks_usec()
 	for raw_garden_id: Variant in _gardens.keys():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			_gardens_iter_depth -= 1
 			return false
 		var garden_id: int = int(raw_garden_id)
 		apply_spawner_reachability(garden_id)
 		total_entry_points += (_gardens[garden_id] as Dictionary).get("entry_cells", []).size()
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	_gardens_iter_depth -= 1
@@ -244,7 +248,7 @@ func recompute_garden_geometry_budgeted(garden_id: int, token: int) -> bool:
 	var entry_inside: Dictionary = {}
 	var slice_started_us: int = Time.get_ticks_usec()
 	while head < queue.size():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var cell: Vector2i = queue[head]
 		head += 1
@@ -269,7 +273,7 @@ func recompute_garden_geometry_budgeted(garden_id: int, token: int) -> bool:
 						queue.append(neighbor)
 				else:
 					entry_inside[cell] = true
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 
@@ -310,7 +314,7 @@ func recompute_spawner_reachable_cells_budgeted(token: int) -> bool:
 				queue.append(candidate_cell)
 	var slice_started_us: int = Time.get_ticks_usec()
 	while head < queue.size():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var cell: Vector2i = queue[head]
 		head += 1
@@ -326,7 +330,7 @@ func recompute_spawner_reachable_cells_budgeted(token: int) -> bool:
 						continue
 				_spawner_reachable_cells[neighbor] = true
 				queue.append(neighbor)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	return true
@@ -337,7 +341,7 @@ func rebuild_plant_zone_compatibility_cache_budgeted(token: int) -> bool:
 	_plant_zone_margin_tiles.clear()
 	var slice_started_us: int = Time.get_ticks_usec()
 	for raw_garden: Variant in _gardens.values():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var garden: Dictionary = raw_garden as Dictionary
 		var zone_tiles: Dictionary = garden.get("zone_tiles", {}) as Dictionary
@@ -348,7 +352,7 @@ func rebuild_plant_zone_compatibility_cache_budgeted(token: int) -> bool:
 		for raw_cell: Variant in margin_tiles.keys():
 			var margin_cell: Vector2i = raw_cell as Vector2i
 			_plant_zone_margin_tiles[margin_cell] = true
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	return true
@@ -902,12 +906,12 @@ func _is_walkable(cell: Vector2i) -> bool:
 	return _manager._is_walkable(cell)
 
 
-func _night_preparation_is_current(token: int) -> bool:
-	return _manager._night_preparation_is_current(token)
+func _work_is_current(token: int) -> bool:
+	return _work_gate != null and _work_gate.is_current(token)
 
 
-func _night_preparation_budget_us() -> int:
-	return _manager._night_preparation_budget_us()
+func _work_budget_us() -> int:
+	return _budget_us
 
 
 func _spawner_route_service() -> SpawnerRouteService:

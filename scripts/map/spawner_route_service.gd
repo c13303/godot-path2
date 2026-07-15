@@ -28,6 +28,8 @@ const APPROACH_STATUS_PENDING: StringName = &"pending"
 const APPROACH_STATUS_UNAVAILABLE: StringName = &"unavailable"
 
 var _manager: BuildingManager
+var _work_gate: BuildingPreparationWorkGate
+var _budget_us: int = 500
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
 # Bumped on every hard walkability/topology rebuild. Descriptors, inbound garden
@@ -62,8 +64,10 @@ var _batch_start_us: int = 0
 var _batch_count: int = 0
 
 
-func setup(manager: BuildingManager) -> void:
+func setup(manager: BuildingManager, work_gate: BuildingPreparationWorkGate, budget_us: int) -> void:
 	_manager = manager
+	_work_gate = work_gate
+	_budget_us = maxi(500, budget_us)
 
 
 func route_cache_hits() -> int:
@@ -540,18 +544,18 @@ func initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: 
 
 	var slice_started_us: int = Time.get_ticks_usec()
 	for spawner_cell: Vector2i in spawner_cells:
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		ensure_spawner_approach_flow(spawner_cell)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 
 	for spawner_cell: Vector2i in spawner_cells:
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		initialize_spawner_route(spawner_cell)
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	return true
@@ -578,7 +582,7 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 
 	var slice_started_us: int = Time.get_ticks_usec()
 	for raw_exit_cell: Variant in current_exits.keys():
-		if not _night_preparation_is_current(token):
+		if not _work_is_current(token):
 			return false
 		var exit_cell: Vector2i = raw_exit_cell as Vector2i
 		var target_cell: Vector2i = _nearest_walkable_adjacent(exit_cell)
@@ -602,7 +606,7 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 		escape["escape_world"] = escape_world
 		escape["ready"] = true
 		_exit_wall_escapes[exit_cell] = escape
-		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+		if Time.get_ticks_usec() - slice_started_us >= _work_budget_us():
 			await _manager.get_tree().process_frame
 			slice_started_us = Time.get_ticks_usec()
 	return true
@@ -1096,12 +1100,12 @@ func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringN
 	return agent_kinds.has(spawner_kind)
 
 
-func _night_preparation_is_current(token: int) -> bool:
-	return _manager._night_preparation_is_current(token)
+func _work_is_current(token: int) -> bool:
+	return _work_gate != null and _work_gate.is_current(token)
 
 
-func _night_preparation_budget_us() -> int:
-	return _manager._night_preparation_budget_us()
+func _work_budget_us() -> int:
+	return _budget_us
 
 
 func _flow_is_ready() -> bool:

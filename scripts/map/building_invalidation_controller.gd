@@ -13,8 +13,10 @@ class_name BuildingInvalidationController
 # are preserved exactly as they were inline in BuildingManager.
 
 var _manager: BuildingManager
+var _work_gate: BuildingPreparationWorkGate
 var _garden_topology: GardenTopologyService
 var _spawner_route_service: SpawnerRouteService
+var _navigation_sync_service: BuildingNavigationSyncService
 var _debug_telemetry: BuildingDebugTelemetry
 var _navigation_topology_dirty: bool = true
 var _plant_layout_dirty: bool = false
@@ -27,6 +29,7 @@ var _walkability_quiet_seconds_remaining: float = 0.0
 var _runtime_rebuild_active: bool = false
 var _runtime_rebuild_is_plant_layout: bool = false
 var _runtime_rebuild_id: int = 0
+var _runtime_work_token: int = 0
 var _runtime_rebuild_wants_gardens: bool = false
 # Coarse 0..1 progress of the current runtime rebuild, advanced between the
 # budgeted passes. Read by BuildingConstructionOverlay for the progress bar.
@@ -36,10 +39,16 @@ var _navigation_revision: int = 0
 const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
 
-func setup(manager: BuildingManager) -> void:
+func setup(
+	manager: BuildingManager,
+	work_gate: BuildingPreparationWorkGate,
+	navigation_sync_service: BuildingNavigationSyncService
+) -> void:
 	_manager = manager
+	_work_gate = work_gate
 	_garden_topology = manager.get_garden_topology_service()
 	_spawner_route_service = manager.get_spawner_route_service()
+	_navigation_sync_service = navigation_sync_service
 	_debug_telemetry = manager.get_building_debug_telemetry()
 
 
@@ -60,7 +69,7 @@ func mark_plant_layout_dirty() -> void:
 	if _runtime_rebuild_active:
 		if not _runtime_rebuild_is_plant_layout:
 			_navigation_topology_dirty = true
-		_manager.advance_preparation_token()
+		_work_gate.cancel_if_current(_runtime_work_token)
 
 
 func clear_plant_layout_dirty() -> void:
@@ -113,10 +122,11 @@ func apply_navigation_topology_rebuild(delta: float = -1.0) -> void:
 		# now. Cancel the in-flight budgeted rebuild (its token goes stale at the
 		# next slice) and force the synchronous rebuild below so the caller never
 		# observes half-built gardens.
-		_manager.advance_preparation_token()
+		_work_gate.cancel_if_current(_runtime_work_token)
 		_runtime_rebuild_id += 1
 		_runtime_rebuild_active = false
 		_runtime_rebuild_is_plant_layout = false
+		_runtime_work_token = 0
 		_navigation_topology_dirty = true
 	if (_navigation_topology_dirty or _plant_layout_dirty) and delta > 0.0:
 		_walkability_quiet_seconds_remaining = maxf(0.0, _walkability_quiet_seconds_remaining - delta)
@@ -161,9 +171,9 @@ func mark_navigation_rebuild_completed() -> void:
 # Budgeted (multi-frame) mirror of _apply_walkability_topology_rebuild for live
 # gameplay: same step order, but the heavy passes (walkable cache, garden
 # clustering/validation, exit-wall escapes) are sliced across frames using the
-# night-preparation budget. Cancellation: the preparation token goes stale (night/
-# client prep start, sync rebuild, save/load) -> the budgeted passes return false
-# and the coroutine stops without touching further state.
+# configured preparation budget. Cancellation: the shared work token goes stale
+# (night/client prep start, sync rebuild, save/load) -> the budgeted passes return
+# false and the coroutine stops without touching further state.
 func _start_runtime_walkability_rebuild() -> void:
 	if _runtime_rebuild_active:
 		return
@@ -181,15 +191,16 @@ func _start_runtime_walkability_rebuild() -> void:
 		or _plant_layout_dirty
 		or _garden_topology.plant_zone_built()
 	)
-	_run_runtime_walkability_rebuild(_manager.advance_preparation_token(), _runtime_rebuild_id)
+	_runtime_work_token = _work_gate.begin_work(&"runtime_walkability_rebuild")
+	_run_runtime_walkability_rebuild(_runtime_work_token, _runtime_rebuild_id)
 
 
 func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	var started_us: int = Time.get_ticks_usec()
 	CppDebugOptions.dlog("walkability rebuild started (budgeted)")
 	_runtime_rebuild_progress = 0.0
-	_manager._sync_flow_extra_blocking_cells()
-	_manager._rebuild_waterpool_directional_field()
+	_navigation_sync_service.sync_flow_extra_blocking_cells()
+	_navigation_sync_service.rebuild_waterpool_directional_field()
 	# Hard walkability changed, so every approach field is stale: invalidate before the
 	# route caches below re-validate against it, otherwise an inbound route could stay
 	# "current" (unchanged garden version) while pointing at the entrance the old maze
@@ -226,9 +237,11 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 		CppDebugOptions.dlog("walkability rebuild completed in %dms (budgeted)" % elapsed_ms)
 	else:
 		CppDebugOptions.dlog("walkability rebuild aborted (superseded)")
+	_work_gate.finish_work(token)
 	if rebuild_id == _runtime_rebuild_id:
 		_runtime_rebuild_active = false
 		_runtime_rebuild_is_plant_layout = false
+		_runtime_work_token = 0
 
 
 func _apply_walkability_topology_rebuild() -> void:
@@ -238,8 +251,8 @@ func _apply_walkability_topology_rebuild() -> void:
 	# Keep the periodic scan's baseline in sync with the tiles we rebuild for so it does
 	# not re-detect this mutation and rebuild again (see resync_topology_signatures).
 	_manager.get_building_scan_service().resync_topology_signatures()
-	_manager._sync_flow_extra_blocking_cells()
-	_manager._rebuild_waterpool_directional_field()
+	_navigation_sync_service.sync_flow_extra_blocking_cells()
+	_navigation_sync_service.rebuild_waterpool_directional_field()
 	# Same reason as the budgeted path: refuse every approach answer from the old map
 	# before the route caches below decide what is still current.
 	_spawner_route_service.invalidate_spawner_approach_flows()
@@ -267,7 +280,7 @@ func _apply_walkability_topology_rebuild() -> void:
 
 
 # Plant placement does not change walkability. This uses the same quiet period,
-# preparation token, active-state gate, and per-frame budget as wall rebuilding,
+# shared work token, active-state gate, and per-frame budget as wall rebuilding,
 # while limiting work to garden topology and its real inbound spawner routes.
 #
 # Deliberately does NOT invalidate the spawner approach fields: a rose changes garden
@@ -282,7 +295,8 @@ func _start_runtime_plant_layout_rebuild() -> void:
 	_runtime_rebuild_active = true
 	_runtime_rebuild_is_plant_layout = true
 	_runtime_rebuild_id += 1
-	_run_runtime_plant_layout_rebuild(_manager.advance_preparation_token(), _runtime_rebuild_id)
+	_runtime_work_token = _work_gate.begin_work(&"runtime_plant_layout_rebuild")
+	_run_runtime_plant_layout_rebuild(_runtime_work_token, _runtime_rebuild_id)
 
 
 func _run_runtime_plant_layout_rebuild(token: int, rebuild_id: int) -> void:
@@ -304,9 +318,11 @@ func _run_runtime_plant_layout_rebuild(token: int, rebuild_id: int) -> void:
 		CppDebugOptions.dlog("plant layout rebuild completed in %dms (budgeted)" % elapsed_ms)
 	else:
 		CppDebugOptions.dlog("plant layout rebuild aborted (superseded)")
+	_work_gate.finish_work(token)
 	if rebuild_id == _runtime_rebuild_id:
 		_runtime_rebuild_active = false
 		_runtime_rebuild_is_plant_layout = false
+		_runtime_work_token = 0
 
 
 func _apply_plant_layout_rebuild() -> void:

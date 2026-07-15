@@ -50,6 +50,27 @@ func sync_flow_extra_blocking_cells() -> void:
 		flow.call("set_fence_blocking_cells", fence_cells)
 
 
+func rebuild_waterpool_directional_field() -> void:
+	var watersources: WaterSources = _manager.watersources
+	if watersources == null or not watersources.has_method("rebuild_waterpool_directional_field"):
+		return
+	watersources.call("rebuild_waterpool_directional_field", _get_steering_system())
+
+
+func clear_waterpool_directional_field() -> void:
+	var watersources: WaterSources = _manager.watersources
+	if watersources == null or not watersources.has_method("clear_waterpool_directional_field"):
+		return
+	watersources.call("clear_waterpool_directional_field", _get_steering_system())
+
+
+func _get_steering_system() -> Node:
+	var scene: Node = _manager.get_tree().current_scene
+	if scene == null:
+		return null
+	return scene.get_node_or_null("CPP/SteeringSystemNative")
+
+
 func building_item_blocks_player(item_id: String) -> bool:
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 	if item_def.is_empty():

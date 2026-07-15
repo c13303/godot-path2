@@ -7,8 +7,8 @@ class_name ClientSaleController
 # other manager-owned controllers (SeedMerchantController, etc.): it holds a typed
 # back-reference to BuildingManager and delegates the spawn primitive, spawner
 # registry, counter stock and cross-controller checks through narrow manager APIs.
-# It owns only the sale-local state; the night-preparation coupling
-# (_client_preparing and the phase gates) stays in the manager.
+# It owns only the sale-local state; preparation lifecycle stays in
+# BuildingPreparationController and phase gates stay in the manager.
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 # Client demand used only for legacy levels that ship no authored spawn playlist.

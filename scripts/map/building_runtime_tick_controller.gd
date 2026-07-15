@@ -6,14 +6,16 @@ class_name BuildingRuntimeTickController
 # Do not add new gameplay algorithms here; add them to the owning service/controller.
 
 var _manager: BuildingManager = null
+var _preparation_budget_us: int = 500
 # Countdown (seconds) gating the periodic building rescan cadence. Owned here because
 # this controller is the sole driver of the scan tick; starts at 0.0 so the first
 # eligible frame scans immediately, then resets to the 0.25s interval.
 var _scan_timer: float = 0.0
 
 
-func setup(manager: BuildingManager) -> void:
+func setup(manager: BuildingManager, preparation_budget_us: int) -> void:
 	_manager = manager
+	_preparation_budget_us = maxi(500, preparation_budget_us)
 
 
 func process(delta: float) -> void:
@@ -85,7 +87,7 @@ func _process_flow_request_queue(debug_telemetry: BuildingDebugTelemetry) -> voi
 		return
 	var queued_before: int = spawner_route_service.queued_flow_request_count()
 	var t: int = Time.get_ticks_usec()
-	var processed: int = spawner_route_service.process_queued_flow_requests(1, _manager._night_preparation_budget_us())
+	var processed: int = spawner_route_service.process_queued_flow_requests(1, _preparation_budget_us)
 	debug_telemetry.warn_garden_task_lag_us("_process_flow_request_queue", Time.get_ticks_usec() - t,
 		"processed=%d queued_before=%d queued_after=%d" % [
 			processed,

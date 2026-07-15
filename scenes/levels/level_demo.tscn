@@ -1346,11 +1346,27 @@ tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/water = true
 
-[node name="nativeplants" type="Node" parent="." unique_id=1130602985]
+[node name="bamboo" type="Node" parent="." unique_id=1130602985]
 
-[node name="bamboo" type="Sprite2D" parent="nativeplants" unique_id=17648519]
-position = Vector2(1193, 1422)
+[node name="bamboo2" type="Sprite2D" parent="bamboo" unique_id=48275036]
+position = Vector2(1648, 2642)
 texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo3" type="Sprite2D" parent="bamboo" unique_id=1203945091]
+position = Vector2(1687, 2678)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo4" type="Sprite2D" parent="bamboo" unique_id=535364765]
+position = Vector2(1688, 2639)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo1" type="Sprite2D" parent="bamboo" unique_id=17648519]
+position = Vector2(1649, 2684)
+texture = ExtResource("6_l4uo6")
+hframes = 2
 
 [node name="spawners" type="Node" parent="." unique_id=608668911]
 
