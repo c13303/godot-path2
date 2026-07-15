@@ -48,14 +48,17 @@ Notes:
 ## PathPreviewController / PathPreviewRunner
 Owns:
 - Preview-only client/monster route descriptors, temporary flow groups, route signatures, low-frequency refresh, runner pooling, and phase cleanup.
-- One moving procedural star plus its bounded fading trail per active runner.
+- Distributed invisible preview walkers for each ready route, sized from actual polyline length and configured departure spacing.
+- Runner-owned stride stamping, alternating left/right footprint offsets, local tangent orientation, fade aging/removal, and end-to-start wrapping without counting the teleport as travelled distance.
 
 Does not own:
 - Gameplay spawning, normal spawner/garden route groups, native agent registration, steering, A* routes, or map topology state.
 
 Notes:
 - Preview groups are allocated through AgentManager but never receive agents. Flow builds use SpawnerRouteService's normal one-request-per-frame queue with explicit policy: clients block fences, monsters ignore fences.
-- The old footstep/ground-stamp mechanic has been removed. Runtime agents now register with AgentCellTracker through runtime-agent tracking wrappers only.
+- The preview consumes prepared tile-center polylines as path data only; it does not draw the line or alter route generation.
+- The footprint sheet uses authored client/monster colors directly, with alpha fading only.
+- Runtime agents register with AgentCellTracker through runtime-agent tracking wrappers only.
 
 ## AgentNavigationPhaseController
 Owns:

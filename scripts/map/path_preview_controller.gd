@@ -4,7 +4,7 @@ class_name PathPreviewController
 # Shows where the upcoming night's monsters, and the clients of the day after it, will walk.
 # A pure consumer: SpawnerRouteService owns the routes and their flow groups, this node only
 # reads the prepared descriptors, turns each ready one into a chain of tile centers once,
-# and feeds pooled arrows along it.
+# and feeds pooled invisible footprint walkers along it.
 
 const RUNNER_SCRIPT: Script = preload("res://scripts/map/path_preview_runner.gd")
 const IDLE_GROUP: int = 0
@@ -12,14 +12,12 @@ const IDLE_GROUP: int = 0
 @export var building_manager_path: NodePath = NodePath("../../BuildingManager")
 @export var flow_path: NodePath = NodePath("../../../CPP/FlowFieldNative")
 @export var preview_z_index: int = -50
-# Tints multiply the sprite sheet's authored arrow colors, so values above 1 brighten the
-# arrow without shifting its hue. They are drawn additively (see PathPreviewRunner).
-@export var monster_tint: Color = Color(1.35, 1.1, 1.0, 1.0)
-@export var client_tint: Color = Color(1.1, 1.2, 1.35, 1.0)
-@export_range(30.0, 900.0, 5.0, "or_greater") var runner_speed: float = 380.0
-@export_range(0.05, 3.0, 0.05, "or_greater") var emission_interval: float = 0.5
-@export_range(0.1, 4.0, 0.05, "or_greater") var arrow_scale: float = 1.25
-@export_range(2, 64, 1, "or_greater") var trail_point_limit: int = 18
+@export_range(30.0, 900.0, 5.0, "or_greater") var walker_speed: float = 380.0
+@export_range(0.05, 3.0, 0.05, "or_greater") var walker_departure_interval: float = 0.5
+@export_range(4.0, 96.0, 1.0, "or_greater") var footprint_stride_distance: float = 28.0
+@export_range(0.0, 24.0, 0.5, "or_greater") var footprint_lateral_offset: float = 5.0
+@export_range(0.1, 4.0, 0.05, "or_greater") var footprint_scale: float = 1.0
+@export_range(0.1, 8.0, 0.05, "or_greater") var footprint_fade_seconds: float = 2.2
 @export_range(0.1, 2.0, 0.05, "or_greater") var refresh_interval: float = 0.35
 
 var _manager: BuildingManager = null
@@ -49,7 +47,7 @@ func _process(delta: float) -> void:
 	if _refresh_timer <= 0.0:
 		_refresh_timer = refresh_interval
 		_refresh_now()
-	_emit_due_runners(delta)
+	_start_ready_route_walkers()
 
 
 func _on_gameplay_phase_changed(_phase: int) -> void:
@@ -102,12 +100,11 @@ func _refresh_now() -> void:
 			"group_id": group_id,
 			"spawner_cell": descriptor.get("spawner_cell", Vector2i.ZERO) as Vector2i,
 			"entry_cell": descriptor.get("entry_cell", Vector2i.ZERO) as Vector2i,
-			"arrow_frame": PathPreviewRunner.ARROW_FRAME_CLIENT if is_client else PathPreviewRunner.ARROW_FRAME_MONSTER,
-			"tint": client_tint if is_client else monster_tint,
+			"footprint_frame": PathPreviewRunner.FOOTPRINT_FRAME_CLIENT if is_client else PathPreviewRunner.FOOTPRINT_FRAME_MONSTER,
 			"ready": bool(descriptor.get("ready", false)),
 			"planned": false,
+			"walkers_started": false,
 			"path": PackedVector2Array(),
-			"emit_timer": 0.0,
 		}))
 
 
@@ -144,8 +141,8 @@ func _update_route_readiness(descriptors: Array[Dictionary]) -> void:
 
 
 # The chain of tile centers is planned once per route identity, on the first refresh where
-# its flow group is ready, and then reused by every arrow that route emits. A route whose
-# flow is still computing has no path yet and emits nothing; one that plans to nothing stays
+# its flow group is ready, and then reused by that route's preview walkers. A route whose
+# flow is still computing has no path yet and shows nothing; one that plans to nothing stays
 # silent until the identity changes, rather than re-walking the field on every refresh.
 func _plan_route_path(route: Dictionary) -> Dictionary:
 	if bool(route.get("planned", false)) or not bool(route.get("ready", false)):
@@ -158,10 +155,11 @@ func _plan_route_path(route: Dictionary) -> Dictionary:
 		route.get("spawner_cell", Vector2i.ZERO) as Vector2i,
 		route.get("entry_cell", Vector2i.ZERO) as Vector2i
 	)
+	route["walkers_started"] = false
 	return route
 
 
-func _emit_due_runners(delta: float) -> void:
+func _start_ready_route_walkers() -> void:
 	for index: int in range(_routes.size()):
 		var route: Dictionary = _routes[index]
 		if not bool(route.get("ready", false)):
@@ -169,22 +167,32 @@ func _emit_due_runners(delta: float) -> void:
 		var path: PackedVector2Array = route.get("path", PackedVector2Array()) as PackedVector2Array
 		if path.size() < 2:
 			continue
-		var timer: float = maxf(0.0, float(route.get("emit_timer", 0.0)) - delta)
-		if timer > 0.0:
-			route["emit_timer"] = timer
-			_routes[index] = route
+		if bool(route.get("walkers_started", false)):
 			continue
+		_start_route_walkers(route, path)
+		route["walkers_started"] = true
+		_routes[index] = route
+
+
+func _start_route_walkers(route: Dictionary, path: PackedVector2Array) -> void:
+	var total_line_length: float = PathPreviewRunner.measure_path_length(path)
+	if total_line_length <= 0.0:
+		return
+	var walker_spacing: float = maxf(1.0, walker_speed * walker_departure_interval)
+	var walker_count: int = maxi(1, ceili(total_line_length / walker_spacing))
+	for walker_index: int in range(walker_count):
+		var walker_start_distance: float = total_line_length * float(walker_index) / float(walker_count)
 		var runner: PathPreviewRunner = _idle_runner()
 		runner.start(
 			path,
-			route.get("tint", Color.WHITE) as Color,
-			int(route.get("arrow_frame", PathPreviewRunner.ARROW_FRAME_MONSTER)),
-			runner_speed,
-			arrow_scale,
-			trail_point_limit
+			int(route.get("footprint_frame", PathPreviewRunner.FOOTPRINT_FRAME_MONSTER)),
+			walker_speed,
+			footprint_stride_distance,
+			footprint_lateral_offset,
+			footprint_scale,
+			footprint_fade_seconds,
+			walker_start_distance
 		)
-		route["emit_timer"] = emission_interval
-		_routes[index] = route
 
 
 func _idle_runner() -> PathPreviewRunner:
