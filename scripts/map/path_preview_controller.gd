@@ -71,10 +71,6 @@ func _ensure_dependencies_ready() -> bool:
 
 
 func _refresh_now() -> void:
-	if GameState.gameplay_phase != GameState.GameplayPhase.AFTERNOON:
-		_signature = ""
-		_clear_routes()
-		return
 	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
 	if invalidation != null and (
 		invalidation.navigation_topology_dirty()
@@ -96,11 +92,18 @@ func _refresh_now() -> void:
 		if group_id <= IDLE_GROUP:
 			continue
 		var route_kind: StringName = descriptor.get("route_kind", SpawnerRouteService.ROUTE_KIND_MONSTER_INBOUND) as StringName
-		var is_client: bool = route_kind == SpawnerRouteService.ROUTE_KIND_CLIENT_INBOUND
+		var is_client: bool = (
+			route_kind == SpawnerRouteService.ROUTE_KIND_CLIENT_INBOUND
+			or route_kind == SpawnerRouteService.ROUTE_KIND_CLIENT_OUTBOUND
+		)
 		_routes.append(_plan_route_path({
+			"route_key": _descriptor_signature_part(descriptor),
 			"group_id": group_id,
 			"spawner_cell": descriptor.get("spawner_cell", Vector2i.ZERO) as Vector2i,
 			"entry_cell": descriptor.get("entry_cell", Vector2i.ZERO) as Vector2i,
+			"start_cell": descriptor.get("start_cell", Vector2i.ZERO) as Vector2i,
+			"goal_cell": descriptor.get("goal_cell", Vector2i.ZERO) as Vector2i,
+			"route_kind": route_kind,
 			"footprint_frame": PathPreviewRunner.FOOTPRINT_FRAME_CLIENT if is_client else PathPreviewRunner.FOOTPRINT_FRAME_MONSTER,
 			"ready": bool(descriptor.get("ready", false)),
 			"planned": false,
@@ -113,34 +116,46 @@ func _refresh_now() -> void:
 
 func _prepared_descriptors() -> Array[Dictionary]:
 	var route_service: SpawnerRouteService = _manager.get_spawner_route_service()
-	var descriptors: Array[Dictionary] = route_service.prepared_upcoming_monster_routes()
-	descriptors.append_array(route_service.prepared_upcoming_client_routes())
-	return descriptors
+	var descriptors: Array[Dictionary] = []
+	match GameState.gameplay_phase:
+		GameState.GameplayPhase.AFTERNOON:
+			return route_service.prepared_upcoming_monster_routes()
+		GameState.GameplayPhase.NIGHT:
+			return route_service.prepared_upcoming_monster_routes()
+		GameState.GameplayPhase.DAWN:
+			return route_service.prepared_upcoming_client_routes()
+		_:
+			return descriptors
 
 
 func _route_signature(descriptors: Array[Dictionary]) -> String:
 	var parts: PackedStringArray = PackedStringArray()
 	for descriptor: Dictionary in descriptors:
-		parts.append("%s:%d:%s:%d:%d:%s" % [
-			str(descriptor.get("spawner_cell", Vector2i.ZERO)),
-			int(descriptor.get("garden_id", 0)),
-			str(descriptor.get("entry_cell", Vector2i.ZERO)),
-			int(descriptor.get("topology_revision", -1)),
-			int(descriptor.get("group_id", IDLE_GROUP)),
-			String(descriptor.get("route_kind", &"") as StringName),
-		])
+		parts.append(_descriptor_signature_part(descriptor))
 	return "|".join(parts)
 
 
+func _descriptor_signature_part(descriptor: Dictionary) -> String:
+	return "%s:%s:%s:%s:%d:%d:%d" % [
+		String(descriptor.get("route_kind", &"") as StringName),
+		str(descriptor.get("spawner_cell", Vector2i.ZERO)),
+		str(descriptor.get("start_cell", Vector2i.ZERO)),
+		str(descriptor.get("goal_cell", Vector2i.ZERO)),
+		int(descriptor.get("garden_id", 0)),
+		int(descriptor.get("topology_revision", -1)),
+		int(descriptor.get("group_id", IDLE_GROUP)),
+	]
+
+
 func _update_route_readiness(descriptors: Array[Dictionary]) -> void:
-	var ready_by_group: Dictionary = {}
+	var ready_by_key: Dictionary = {}
 	for descriptor: Dictionary in descriptors:
-		ready_by_group[int(descriptor.get("group_id", IDLE_GROUP))] = bool(descriptor.get("ready", false))
+		ready_by_key[_descriptor_signature_part(descriptor)] = bool(descriptor.get("ready", false))
 	var ownership_dirty: bool = false
 	for index: int in range(_routes.size()):
 		var route: Dictionary = _routes[index]
-		var group_id: int = int(route.get("group_id", IDLE_GROUP))
-		route["ready"] = bool(ready_by_group.get(group_id, false))
+		var route_key: String = String(route.get("route_key", ""))
+		route["ready"] = bool(ready_by_key.get(route_key, false))
 		var was_planned: bool = bool(route.get("planned", false))
 		_routes[index] = _plan_route_path(route)
 		if not was_planned and bool((_routes[index] as Dictionary).get("planned", false)):
@@ -161,8 +176,8 @@ func _plan_route_path(route: Dictionary) -> Dictionary:
 		_flow,
 		_manager,
 		int(route.get("group_id", IDLE_GROUP)),
-		route.get("spawner_cell", Vector2i.ZERO) as Vector2i,
-		route.get("entry_cell", Vector2i.ZERO) as Vector2i
+		route.get("start_cell", Vector2i.ZERO) as Vector2i,
+		route.get("goal_cell", Vector2i.ZERO) as Vector2i
 	)
 	route["walkers_started"] = false
 	return route
@@ -176,7 +191,12 @@ func _rebuild_segment_ownership() -> void:
 		var route: Dictionary = _routes[route_index]
 		var path: PackedVector2Array = route.get("path", PackedVector2Array()) as PackedVector2Array
 		var owned_segments: Dictionary = {}
+		var route_kind: StringName = route.get("route_kind", SpawnerRouteService.ROUTE_KIND_MONSTER_INBOUND) as StringName
+		var merge_shared_edges: bool = route_kind == SpawnerRouteService.ROUTE_KIND_MONSTER_INBOUND
 		for segment_index: int in range(path.size() - 1):
+			if not merge_shared_edges:
+				owned_segments[segment_index] = true
+				continue
 			var edge_key: String = _canonical_edge_key(path[segment_index], path[segment_index + 1])
 			if edge_key == "":
 				continue

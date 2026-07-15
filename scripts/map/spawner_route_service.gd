@@ -19,6 +19,7 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const ROUTE_KIND_MONSTER_INBOUND: StringName = &"monster_inbound"
 const ROUTE_KIND_CLIENT_INBOUND: StringName = &"client_inbound"
+const ROUTE_KIND_CLIENT_OUTBOUND: StringName = &"client_outbound"
 # Approach-cost query states. "pending" (field queued/computing) and "unavailable"
 # (no anchor / cell genuinely unreachable) must never collapse into one INF result:
 # pending is transient and must be retried, unavailable is a real answer.
@@ -36,6 +37,7 @@ var _spawner_garden_routes: Dictionary = {}
 var _approach_generation: int = 0
 var _prepared_upcoming_monster_routes: Dictionary = {}
 var _prepared_upcoming_client_routes: Dictionary = {}
+var _prepared_upcoming_client_outbound_routes: Dictionary = {}
 # Preview preparation defers any spawner whose approach field is still computing
 # rather than previewing a wrong route; these let the next snapshot re-select once
 # the field lands, without bumping the navigation revision.
@@ -113,6 +115,7 @@ func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 # than duplicating it. Nothing is prepared when that night serves no clients.
 func prepare_upcoming_client_routes(topology_revision: int) -> void:
 	_prepared_upcoming_client_routes.clear()
+	_prepared_upcoming_client_outbound_routes.clear()
 	_prepared_client_revision = topology_revision
 	_prepared_client_deferred = false
 	var night_index: int = _preview_night_index()
@@ -129,6 +132,17 @@ func prepare_upcoming_client_routes(topology_revision: int) -> void:
 		SPAWNER_KIND_CLIENT,
 		topology_revision
 	)
+	for spawner_cell: Vector2i in spawner_cells:
+		var inbound: Dictionary = _prepared_upcoming_client_routes.get(spawner_cell, {}) as Dictionary
+		if inbound.is_empty():
+			continue
+		if not has_spawner_route(spawner_cell):
+			_prepared_client_deferred = true
+			continue
+		var outbound: Dictionary = _build_client_outbound_preview_descriptor(inbound, topology_revision)
+		if outbound.is_empty():
+			continue
+		_prepared_upcoming_client_outbound_routes[spawner_cell] = outbound
 
 
 # Preparation runs when the navigation revision changes, which can be several frames
@@ -144,7 +158,9 @@ func prepared_upcoming_monster_routes() -> Array[Dictionary]:
 func prepared_upcoming_client_routes() -> Array[Dictionary]:
 	if _prepared_client_deferred:
 		prepare_upcoming_client_routes(_prepared_client_revision)
-	return _prepared_routes_snapshot(_prepared_upcoming_client_routes)
+	var routes: Array[Dictionary] = _prepared_routes_snapshot(_prepared_upcoming_client_routes)
+	routes.append_array(_prepared_routes_snapshot(_prepared_upcoming_client_outbound_routes))
+	return routes
 
 
 # The night whose preview is currently meaningful, or -1 when there is nothing to preview.
@@ -190,6 +206,8 @@ func _prepare_preview_routes(
 			"garden_id": garden_id,
 			"entry_cell": entry_cell,
 			"entry_world": route.get("entry_world", Vector2.ZERO) as Vector2,
+			"start_cell": spawner_cell,
+			"goal_cell": entry_cell,
 			"group_id": group_id,
 			"ready": spawner_garden_route_flow_ready(route, spawner_cell),
 			"topology_revision": topology_revision,
@@ -197,6 +215,34 @@ func _prepare_preview_routes(
 			"block_fences": bool(route.get("block_fences", false)),
 		}
 	return deferred
+
+
+func _build_client_outbound_preview_descriptor(inbound: Dictionary, topology_revision: int) -> Dictionary:
+	var spawner_cell: Vector2i = inbound.get("spawner_cell", INVALID_CELL) as Vector2i
+	var entry_cell: Vector2i = inbound.get("entry_cell", INVALID_CELL) as Vector2i
+	if spawner_cell == INVALID_CELL or entry_cell == INVALID_CELL:
+		return {}
+	var spawner_route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	if not bool(spawner_route.get("route_initialized", false)):
+		return {}
+	var escape_group: int = int(spawner_route.get("escape_group", IDLE_GROUP))
+	if escape_group <= IDLE_GROUP:
+		return {}
+	var escape_wall_target_cell: Vector2i = spawner_route.get("escape_wall_target_cell", INVALID_CELL) as Vector2i
+	if escape_wall_target_cell == INVALID_CELL or not _is_sane_cell(escape_wall_target_cell):
+		return {}
+	return {
+		"spawner_cell": spawner_cell,
+		"garden_id": int(inbound.get("garden_id", 0)),
+		"entry_cell": entry_cell,
+		"start_cell": entry_cell,
+		"goal_cell": escape_wall_target_cell,
+		"group_id": escape_group,
+		"ready": group_flow_is_ready_at_world(escape_group, _cell_center(entry_cell)),
+		"topology_revision": topology_revision,
+		"route_kind": ROUTE_KIND_CLIENT_OUTBOUND,
+		"block_fences": true,
+	}
 
 
 func _prepared_routes_snapshot(prepared: Dictionary) -> Array[Dictionary]:
@@ -210,7 +256,8 @@ func _prepared_routes_snapshot(prepared: Dictionary) -> Array[Dictionary]:
 	for spawner_cell: Vector2i in spawner_cells:
 		var descriptor: Dictionary = prepared[spawner_cell] as Dictionary
 		var group_id: int = int(descriptor.get("group_id", IDLE_GROUP))
-		descriptor["ready"] = group_flow_is_ready_at_world(group_id, _cell_center(spawner_cell))
+		var start_cell: Vector2i = descriptor.get("start_cell", spawner_cell) as Vector2i
+		descriptor["ready"] = group_flow_is_ready_at_world(group_id, _cell_center(start_cell))
 		prepared[spawner_cell] = descriptor
 		routes.append(descriptor.duplicate())
 	return routes
@@ -534,6 +581,7 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 	_spawner_garden_routes.erase(spawner_cell)
 	_prepared_upcoming_monster_routes.erase(spawner_cell)
 	_prepared_upcoming_client_routes.erase(spawner_cell)
+	_prepared_upcoming_client_outbound_routes.erase(spawner_cell)
 	# The entry cache is keyed by source cell, so a re-added spawner on the same tile
 	# must not inherit entries resolved from the dissolved approach field.
 	_manager.get_garden_access_resolver().clear_cache_for_source(spawner_cell)
@@ -863,7 +911,11 @@ func release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> voi
 
 
 func _erase_prepared_route_for_garden(spawner_cell: Vector2i, garden_id: int) -> void:
-	for prepared: Dictionary in [_prepared_upcoming_monster_routes, _prepared_upcoming_client_routes]:
+	for prepared: Dictionary in [
+		_prepared_upcoming_monster_routes,
+		_prepared_upcoming_client_routes,
+		_prepared_upcoming_client_outbound_routes,
+	]:
 		var descriptor: Dictionary = prepared.get(spawner_cell, {}) as Dictionary
 		if int(descriptor.get("garden_id", 0)) == garden_id:
 			prepared.erase(spawner_cell)
