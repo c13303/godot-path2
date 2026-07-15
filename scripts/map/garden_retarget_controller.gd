@@ -781,6 +781,14 @@ func _retarget_agent_or_escape_impl(agent: Node2D, spawner_cell: Vector2i) -> bo
 	_last_retarget_profile["entry_cache_hits"] = _manager._garden_entry_resolve_hits()
 	_last_retarget_profile["entry_cache_misses"] = _manager._garden_entry_resolve_misses()
 	_last_retarget_profile["entry_cache_size"] = _manager._garden_entry_resolve_cache_size()
+	if (pair.get("status", &"") as StringName) == SpawnerRouteService.APPROACH_STATUS_PENDING:
+		# A spawner approach field is still computing, so no garden entry can be resolved
+		# yet. This is a wait, not a dead end: returning false leaves the agent queued as
+		# "waiting_new_status" and it retargets once the field lands. Escaping it here
+		# would throw monsters off the map every time a wall is built.
+		_last_retarget_profile["resolve_us"] = Time.get_ticks_usec() - t_res
+		_last_retarget_profile["reason"] = "approach_pending"
+		return false
 	if pair.is_empty():
 		if spawner_cell == INVALID_CELL:
 			spawner_cell = _manager._nearest_spawner_cell(from_cell)

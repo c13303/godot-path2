@@ -25,7 +25,11 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 	# Select target garden: iterates all gardens, checks targetable / edible plants,
 	# and runs _nearest_garden_entry per garden. Prime suspect for select-garden lag.
 	var t_sel: int = Time.get_ticks_usec()
-	var garden_id: int = _manager._select_garden_for_client_spawner(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT else _manager._select_garden_for_spawner(spawner_cell)
+	var selection: Dictionary = (
+		_manager.select_garden_for_client_spawner_result(spawner_cell) if agent_kind == SPAWNER_KIND_CLIENT
+		else _manager.select_garden_for_spawner_result(spawner_cell)
+	)
+	var garden_id: int = int(selection.get("garden_id", 0))
 	var spawn_directly_into_tantrum: bool = (
 		agent_kind == SPAWNER_KIND_CLIENT
 		and _manager.total_counter_stock() <= 0
@@ -36,6 +40,15 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
 			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager.get_garden_topology_service().gardens().size(), garden_id])
 	if garden_id <= 0 and not spawn_directly_into_tantrum:
+		var selection_status: StringName = selection.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName
+		if selection_status == SpawnerRouteService.APPROACH_STATUS_PENDING:
+			# Transient, not a verdict: this spawner's approach field is still computing,
+			# so no garden can be scored yet. Refuse the attempt without consuming the
+			# spawn — the playlist / sale retry timer calls back and it resolves then.
+			# Never fall back to a geometric guess, and never cache "no reachable garden".
+			telemetry.log_expected_spawn_skip(
+				"spawner %s approach field still computing; spawn will retry" % spawner_cell)
+			return false
 		# Not an anomaly: every garden is eaten out, sold out, or walled off from this
 		# spawner (a normal defensive state). Recorded for reporting, logged debug-gated.
 		telemetry.log_expected_spawn_skip("spawner %s has no reachable garden" % spawner_cell)

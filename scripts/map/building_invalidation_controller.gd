@@ -190,6 +190,12 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	_runtime_rebuild_progress = 0.0
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
+	# Hard walkability changed, so every approach field is stale: invalidate before the
+	# route caches below re-validate against it, otherwise an inbound route could stay
+	# "current" (unchanged garden version) while pointing at the entrance the old maze
+	# made best. This only bumps the generation and queues one field per spawner; the
+	# shared queue drains them at its normal one-per-frame rate.
+	_spawner_route_service.invalidate_spawner_approach_flows()
 	var ok: bool = bool(await _manager._rebuild_walkable_map_cache_budgeted(token))
 	_runtime_rebuild_progress = 0.3
 	if ok:
@@ -234,6 +240,9 @@ func _apply_walkability_topology_rebuild() -> void:
 	_manager.get_building_scan_service().resync_topology_signatures()
 	_manager._sync_flow_extra_blocking_cells()
 	_manager._rebuild_waterpool_directional_field()
+	# Same reason as the budgeted path: refuse every approach answer from the old map
+	# before the route caches below decide what is still current.
+	_spawner_route_service.invalidate_spawner_approach_flows()
 	_manager._rebuild_walkable_map_cache()
 	_manager.get_seed_merchant_controller().repath_for_walkability_change()
 	_manager.get_builder_controller().repath_for_walkability_change()
@@ -260,6 +269,13 @@ func _apply_walkability_topology_rebuild() -> void:
 # Plant placement does not change walkability. This uses the same quiet period,
 # preparation token, active-state gate, and per-frame budget as wall rebuilding,
 # while limiting work to garden topology and its real inbound spawner routes.
+#
+# Deliberately does NOT invalidate the spawner approach fields: a rose changes garden
+# geometry, never the external maze, so the route cost from a spawner to a garden's
+# outside neighbours is exactly what it was. Garden entry caches and inbound routes
+# still refresh below (via the garden version), re-resolving against the approach
+# fields that are already computed — so planting queues no approach flow and adds no
+# rose-placement lag.
 func _start_runtime_plant_layout_rebuild() -> void:
 	if _runtime_rebuild_active:
 		return

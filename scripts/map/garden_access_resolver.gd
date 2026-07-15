@@ -4,11 +4,21 @@ class_name GardenAccessResolver
 # Owns garden access-cell scoring, garden-entry selection, and the memoized
 # entry-resolve cache. BuildingManager keeps the garden topology / walkability
 # source-of-truth state and low-level queries, reached through the callbacks at
-# the bottom of this file. Extracted from BuildingManager to keep that manager
-# lean; behavior is preserved exactly.
+# the bottom of this file.
+#
+# Two selection paths, deliberately different:
+#   * inbound (resolve_garden_entry_from_spawner) ranks entrances by the real route
+#     cost read from the spawner's approach field in SpawnerRouteService, so a maze
+#     between spawner and garden is understood. Local geometry only breaks ties.
+#   * outbound (nearest_garden_entry_to_exit) still scores against the escape flow
+#     through _select_scored_garden_entry, unchanged.
 
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+# Two approach costs within this margin count as tied, so the local entrance-quality
+# penalty below decides between them. Kept tiny on purpose: route cost is the primary
+# decision and a locally prettier entrance must never win a substantially longer route.
+const APPROACH_COST_TIE_EPSILON: float = 0.001
 
 # Garden access-cell scoring penalties. Distance / escape cost stays the main
 # driver; these only nudge selection away from obviously bad local geometry (a
@@ -31,19 +41,23 @@ const ACCESS_ENTER_NARROW_CONTINUATION_PENALTY: float = 10.0
 
 var _manager: BuildingManager
 
-# Memoizes the expensive scored garden-entry selection (nearest_garden_entry =
-# _select_scored_garden_entry in "enter" mode, no escape group). The chosen entry
-# depends only on (garden_id, source/spawner cell): scoring runs flow lookups +
-# per-candidate neighbor/walkability scans over every entry cell, and the retarget
-# path calls it once per (spawner, garden) pair for every agent, so many agents
-# targeting the same routes recompute identical results. Keyed by "spawner|garden"
-# so different spawners never share a (possibly far/bad) entry — the result is
-# source-dependent, never cached by garden_id alone. Value: the selected entry
-# Vector2i (may be INVALID_CELL — cached too, that "no entry" result is also reused).
+# Memoizes the scored garden-entry selection (resolve_garden_entry_from_spawner).
+# The chosen entry depends only on (garden_id, spawner cell) for a given approach
+# generation: scoring samples the spawner's approach field at every entry's outside
+# neighbours, and the retarget path asks once per (spawner, garden) pair for every
+# agent, so many agents targeting the same routes would recompute identical results.
+# Keyed by "spawner|garden" so different spawners never share a (possibly far/bad)
+# entry — the result is source-dependent, never cached by garden_id alone.
+#
+# Value: the structured resolve result, always carrying the approach_generation it was
+# computed under. The rules that keep it honest:
+#   * a PENDING result is never stored — a guess must never outlive the wait;
+#   * an entry resolved under an older approach generation is never reused;
+#   * a genuine "unreachable" is only trusted for the generation that produced it.
 # Invalidated wholesale on any topology/wall/entry rebuild (see clear_cache call
 # sites); plain plant eating that leaves the garden connected with the same entries
 # does NOT touch it.
-var _garden_entry_resolve_cache: Dictionary = {}  # "spawner|garden" -> Vector2i
+var _garden_entry_resolve_cache: Dictionary = {}  # "spawner|garden" -> result Dictionary
 # Retarget breakdown debug counters (read into the consolidated profile line).
 # Per-call flag set by nearest_garden_entry; per-resolve tallies accumulated by
 # BuildingManager._select_spawner_garden_for_agent (which calls nearest_garden_entry
@@ -61,32 +75,147 @@ func setup(manager: BuildingManager) -> void:
 # Public API.
 # ---------------------------------------------------------------------------
 
-func nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
-	# Memoized: the retarget path calls this once per (spawner, garden) for every
-	# agent, and the scored selection is the dominant cost in target_resolve.
-	var cache_key: String = _garden_entry_resolve_cache_key(garden_id, from_cell)
-	if _garden_entry_resolve_cache.has(cache_key):
-		var cached: Vector2i = _garden_entry_resolve_cache[cache_key] as Vector2i
-		# Cheap validation before trusting the cached entry. A real INVALID_CELL is a
-		# legitimate cached "no entry" result and is reused as-is; only a finite cell
-		# is re-checked for garden existence + membership + walkability.
-		if cached == INVALID_CELL:
+# Inbound entry selection for one (garden, spawner) pair, decided by the real
+# navigable route cost from that spawner's approach field. Returns one of:
+#   {"status": &"ready",       "entry_cell": Vector2i, "approach_cost": float}
+#   {"status": &"pending",     "entry_cell": INVALID_CELL, "approach_cost": INF}
+#   {"status": &"unavailable", "entry_cell": INVALID_CELL, "approach_cost": INF}
+# PENDING is transient (the approach field is queued/computing) and the caller must
+# retry; UNAVAILABLE means no entrance of this garden is reachable from this spawner.
+func resolve_garden_entry_from_spawner(garden_id: int, spawner_cell: Vector2i) -> Dictionary:
+	var route_service: SpawnerRouteService = _spawner_route_service()
+	var generation: int = route_service.spawner_approach_generation()
+	var cache_key: String = _garden_entry_resolve_cache_key(garden_id, spawner_cell)
+	var cached: Dictionary = _garden_entry_resolve_cache.get(cache_key, {}) as Dictionary
+	if not cached.is_empty():
+		if int(cached.get("approach_generation", -1)) == generation and _cached_result_still_valid(garden_id, cached):
 			_garden_entry_resolve_cache_hit = true
-			return cached
-		var gardens: Dictionary = _gardens()
-		if gardens.has(garden_id):
-			var garden: Dictionary = gardens[garden_id] as Dictionary
-			var entry_cells: Array = garden.get("entry_cells", []) as Array
-			if entry_cells.has(cached) and _is_walkable(cached):
-				_garden_entry_resolve_cache_hit = true
-				return cached
-		# Stale (garden gone, entry no longer listed, or no longer walkable): drop it
-		# and fall through to recompute.
+			return cached.duplicate()
+		# Stale (older approach generation, garden gone, entry no longer listed, or no
+		# longer walkable): drop it and fall through to recompute.
 		_garden_entry_resolve_cache.erase(cache_key)
 	_garden_entry_resolve_cache_hit = false
-	var entry: Vector2i = _select_scored_garden_entry(garden_id, from_cell, "enter")
-	_garden_entry_resolve_cache[cache_key] = entry
-	return entry
+	var result: Dictionary = _resolve_entry_from_approach_cost(garden_id, spawner_cell, route_service)
+	if (result.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName) == SpawnerRouteService.APPROACH_STATUS_PENDING:
+		# Never cached: the field is still computing and any answer now would be a guess.
+		return result
+	result["approach_generation"] = generation
+	_garden_entry_resolve_cache[cache_key] = result
+	return result.duplicate()
+
+
+# Compatibility wrapper for the callers that only need the entry cell (route creation,
+# retarget meta, spawner-side proximity selection). Returns INVALID_CELL while the
+# approach field is pending, so callers that must tell "wait" from "unreachable" have
+# to use resolve_garden_entry_from_spawner() instead.
+func nearest_garden_entry(garden_id: int, from_cell: Vector2i) -> Vector2i:
+	var result: Dictionary = resolve_garden_entry_from_spawner(garden_id, from_cell)
+	if (result.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName) != SpawnerRouteService.APPROACH_STATUS_READY:
+		return INVALID_CELL
+	return result.get("entry_cell", INVALID_CELL) as Vector2i
+
+
+# A cached READY entry must still be a walkable entry of that garden. UNAVAILABLE
+# results carry no cell, so for the generation that produced them they stay valid.
+func _cached_result_still_valid(garden_id: int, cached: Dictionary) -> bool:
+	if (cached.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName) != SpawnerRouteService.APPROACH_STATUS_READY:
+		return true
+	var gardens: Dictionary = _gardens()
+	if not gardens.has(garden_id):
+		return false
+	var garden: Dictionary = gardens[garden_id] as Dictionary
+	var entry_cells: Array = garden.get("entry_cells", []) as Array
+	var entry_cell: Vector2i = cached.get("entry_cell", INVALID_CELL) as Vector2i
+	return entry_cells.has(entry_cell) and _is_walkable(entry_cell)
+
+
+# Scores every entry of the garden against the one approach field of this spawner.
+# Lexicographic: real route cost first, then the local entrance-quality penalty, then
+# the old Manhattan distance, then stable coordinate order.
+func _resolve_entry_from_approach_cost(
+	garden_id: int,
+	spawner_cell: Vector2i,
+	route_service: SpawnerRouteService
+) -> Dictionary:
+	var approach_status: StringName = route_service.spawner_approach_status(spawner_cell)
+	if approach_status != SpawnerRouteService.APPROACH_STATUS_READY:
+		# Either still computing (retry) or this spawner has no approach anchor at all.
+		return _entry_result(approach_status, INVALID_CELL, INF)
+	var gardens: Dictionary = _gardens()
+	if not gardens.has(garden_id):
+		return _entry_result(SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE, INVALID_CELL, INF)
+	var garden: Dictionary = gardens[garden_id] as Dictionary
+	var entry_cells: Array = garden.get("entry_cells", []) as Array
+
+	var best_cell: Vector2i = INVALID_CELL
+	var best_cost: float = INF
+	var best_penalty: float = INF
+	var best_tiebreak: int = 2147483647
+	for raw_cell: Variant in entry_cells:
+		var cell: Vector2i = raw_cell as Vector2i
+		if not _is_walkable(cell):
+			continue
+		# The route arrives at the outside neighbour, not at the interior entry cell:
+		# sampling the interior tile would read a cost that already crossed the door.
+		var outside_neighbors: Array[Vector2i] = _garden_access_outside_neighbors(garden, cell)
+		if outside_neighbors.is_empty():
+			continue
+		var cell_cost: float = INF
+		var cell_outside: Vector2i = INVALID_CELL
+		for neighbor: Vector2i in outside_neighbors:
+			var sample: Dictionary = route_service.spawner_approach_cost_at_cell(spawner_cell, neighbor)
+			if (sample.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName) != SpawnerRouteService.APPROACH_STATUS_READY:
+				continue
+			var cost: float = float(sample.get("cost", INF))
+			if cost < cell_cost:
+				cell_cost = cost
+				cell_outside = neighbor
+		if not is_finite(cell_cost) or cell_outside == INVALID_CELL:
+			# No outside neighbour of this entrance is on any route from the spawner.
+			continue
+		var penalty: float = _enter_local_penalty(cell, cell_outside)
+		var tiebreak: int = _manhattan_cell(cell, spawner_cell)
+		if _entry_is_better(cell, cell_cost, penalty, tiebreak, best_cell, best_cost, best_penalty, best_tiebreak):
+			best_cell = cell
+			best_cost = cell_cost
+			best_penalty = penalty
+			best_tiebreak = tiebreak
+
+	if best_cell == INVALID_CELL:
+		return _entry_result(SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE, INVALID_CELL, INF)
+	if _debug_logs() and CppDebugOptions.logs_enabled:
+		print("BuildingManager: garden %d enter access %s approach_cost=%.1f penalty=%.1f spawner=%s" % [
+			garden_id, str(best_cell), best_cost, best_penalty, str(spawner_cell)
+		])
+	return _entry_result(SpawnerRouteService.APPROACH_STATUS_READY, best_cell, best_cost)
+
+
+func _entry_result(status: StringName, entry_cell: Vector2i, approach_cost: float) -> Dictionary:
+	return {
+		"status": status,
+		"entry_cell": entry_cell,
+		"approach_cost": approach_cost,
+	}
+
+
+# Lexicographic comparison. Costs closer than APPROACH_COST_TIE_EPSILON are treated as
+# equal so the secondary keys can break genuine ties (symmetric geometry) without ever
+# letting them override a real route-cost difference.
+func _entry_is_better(
+	cell: Vector2i, cost: float, penalty: float, tiebreak: int,
+	best_cell: Vector2i, best_cost: float, best_penalty: float, best_tiebreak: int
+) -> bool:
+	if best_cell == INVALID_CELL:
+		return true
+	if not is_equal_approx(cost, best_cost) and absf(cost - best_cost) > APPROACH_COST_TIE_EPSILON:
+		return cost < best_cost
+	if not is_equal_approx(penalty, best_penalty):
+		return penalty < best_penalty
+	if tiebreak != best_tiebreak:
+		return tiebreak < best_tiebreak
+	if cell.y != best_cell.y:
+		return cell.y < best_cell.y
+	return cell.x < best_cell.x
 
 
 func nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
@@ -104,6 +233,17 @@ func nearest_garden_entry_to_exit(garden_id: int, spawner_cell: Vector2i) -> Vec
 # clear); the optional reason is only for tracing if we ever log it.
 func clear_cache(_reason: String = "") -> void:
 	_garden_entry_resolve_cache.clear()
+
+
+# Drops every cached entry resolved from one source cell. Used when a spawner route is
+# released, so a spawner re-added on the same tile cannot inherit entries chosen by the
+# approach field that was just dissolved.
+func clear_cache_for_source(from_cell: Vector2i) -> void:
+	var prefix: String = "%s|" % str(from_cell)
+	for raw_key: Variant in _garden_entry_resolve_cache.keys():
+		var key: String = String(raw_key)
+		if key.begins_with(prefix):
+			_garden_entry_resolve_cache.erase(key)
 
 
 # True if the most recent nearest_garden_entry served a cache hit. Read
@@ -307,20 +447,28 @@ func _score_garden_access_cell(
 		# Kept tiny so it can never dominate a real door's distance advantage.
 		score += float(_blocked_cardinal_count(outside_neighbor)) * ACCESS_BLOCKED_CARDINAL_PENALTY
 	else:
-		# Enter mode: agent heads inward, so outside continuation matters less and
-		# we do not penalize "outside farther than inside" (direction is reversed).
-		var enter_continuations: int = 0
-		for cont in _valid_walkable_neighbors_no_corner_cut(outside_neighbor):
-			if cont == access_cell:
-				continue
-			enter_continuations += 1
-		if enter_continuations == 0:
-			score += ACCESS_ENTER_DEAD_CONTINUATION_PENALTY
-		elif enter_continuations == 1:
-			score += ACCESS_ENTER_NARROW_CONTINUATION_PENALTY
-		score += float(_blocked_cardinal_count(outside_neighbor)) * ACCESS_BLOCKED_CARDINAL_PENALTY
+		score += _enter_local_penalty(access_cell, outside_neighbor)
 
 	return score
+
+
+# Local entrance-quality penalty for an inbound access cell reached via outside_neighbor.
+# The agent heads inward, so outside continuation matters less than for exits and we do
+# not penalize "outside farther than inside" (that direction is reversed). This is only a
+# tie-breaker between entrances of comparable route cost — never a substitute for it.
+func _enter_local_penalty(access_cell: Vector2i, outside_neighbor: Vector2i) -> float:
+	var penalty: float = 0.0
+	var continuations: int = 0
+	for cont: Vector2i in _valid_walkable_neighbors_no_corner_cut(outside_neighbor):
+		if cont == access_cell:
+			continue
+		continuations += 1
+	if continuations == 0:
+		penalty += ACCESS_ENTER_DEAD_CONTINUATION_PENALTY
+	elif continuations == 1:
+		penalty += ACCESS_ENTER_NARROW_CONTINUATION_PENALTY
+	penalty += float(_blocked_cardinal_count(outside_neighbor)) * ACCESS_BLOCKED_CARDINAL_PENALTY
+	return penalty
 
 # Count of the 4 cardinal neighbors of `cell` that are not walkable.
 func _blocked_cardinal_count(cell: Vector2i) -> int:
@@ -339,6 +487,10 @@ func _blocked_cardinal_count(cell: Vector2i) -> int:
 # candidate, and returns the lowest-scoring one, tie-broken by old Manhattan
 # distance to target_cell for predictable behavior. If every candidate scores INF
 # (or scoring finds nothing usable), falls back to the old pure-Manhattan logic.
+#
+# Inbound selection no longer comes through here — it uses the spawner approach field
+# via resolve_garden_entry_from_spawner(). This now serves exit selection, which reads
+# the real escape flow and is deliberately left as it was.
 func _select_scored_garden_entry(
 	garden_id: int,
 	target_cell: Vector2i,
@@ -397,9 +549,11 @@ func _nearest_garden_entry_manhattan(garden_id: int, from_cell: Vector2i, forbid
 	return best_cell
 
 func _garden_entry_resolve_cache_key(garden_id: int, from_cell: Vector2i) -> String:
-	# Source cell + garden fully determine the scored "enter" entry, so the key
-	# includes the spawner/source context (never garden_id alone — that would let
-	# monsters from different spawners share a far/bad entry).
+	# Spawner + garden fully determine the inbound entry for one approach generation, so
+	# the key includes the spawner/source context (never garden_id alone — spawners on
+	# opposite sides of a garden legitimately pick different entrances, and sharing the
+	# result between them is exactly the bug this cache must not reintroduce).
+	# clear_cache_for_source() depends on this "<cell>|<garden>" shape.
 	return "%s|%d" % [str(from_cell), garden_id]
 
 

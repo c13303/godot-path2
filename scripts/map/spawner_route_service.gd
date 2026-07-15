@@ -1,8 +1,16 @@
 extends RefCounted
 class_name SpawnerRouteService
 
-# Owns spawner escape routes, spawner-to-garden route flow groups, and exit-wall
-# escape flow groups. BuildingManager keeps spawner/garden source-of-truth state.
+# Owns spawner escape routes, spawner-to-garden route flow groups, exit-wall
+# escape flow groups, and the per-spawner approach flow. BuildingManager keeps
+# spawner/garden source-of-truth state.
+#
+# Approach flow: one reverse cost field per physical spawner, whose goal is that
+# spawner's own walkable anchor. Because movement connectivity is symmetric, the
+# field's route cost at any cell is the real navigable distance from the spawner to
+# that cell — maze included. Garden entrances query it instead of guessing with
+# Manhattan distance. Scaling is O(spawners), never O(spawners x gardens/entrances):
+# every garden and every entrance of a spawner reads the same one field.
 
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
@@ -11,12 +19,30 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const ROUTE_KIND_MONSTER_INBOUND: StringName = &"monster_inbound"
 const ROUTE_KIND_CLIENT_INBOUND: StringName = &"client_inbound"
+# Approach-cost query states. "pending" (field queued/computing) and "unavailable"
+# (no anchor / cell genuinely unreachable) must never collapse into one INF result:
+# pending is transient and must be retried, unavailable is a real answer.
+const APPROACH_STATUS_READY: StringName = &"ready"
+const APPROACH_STATUS_PENDING: StringName = &"pending"
+const APPROACH_STATUS_UNAVAILABLE: StringName = &"unavailable"
 
 var _manager: BuildingManager
 var _spawner_routes: Dictionary = {}
 var _spawner_garden_routes: Dictionary = {}
+# Bumped on every hard walkability/topology rebuild. Descriptors, inbound garden
+# routes, and GardenAccessResolver's entry cache all carry the generation they were
+# resolved under, so anything computed against an older map is refused rather than
+# silently reused. Plant-only edits never touch it (see BuildingInvalidationController).
+var _approach_generation: int = 0
 var _prepared_upcoming_monster_routes: Dictionary = {}
 var _prepared_upcoming_client_routes: Dictionary = {}
+# Preview preparation defers any spawner whose approach field is still computing
+# rather than previewing a wrong route; these let the next snapshot re-select once
+# the field lands, without bumping the navigation revision.
+var _prepared_monster_revision: int = -1
+var _prepared_client_revision: int = -1
+var _prepared_monster_deferred: bool = false
+var _prepared_client_deferred: bool = false
 var _dirty_spawner_escapes: Dictionary = {}
 var _exit_wall_escapes: Dictionary = {}
 var _route_cache_hits: int = 0
@@ -67,10 +93,12 @@ func queued_flow_request_count() -> int:
 # monsters; PathPreview only reads them and never owns a flow group.
 func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 	_prepared_upcoming_monster_routes.clear()
+	_prepared_monster_revision = topology_revision
+	_prepared_monster_deferred = false
 	var night_index: int = _preview_night_index()
 	if night_index < 0:
 		return
-	_prepare_preview_routes(
+	_prepared_monster_deferred = _prepare_preview_routes(
 		_prepared_upcoming_monster_routes,
 		_manager.night_active_spawner_cells(night_index),
 		SPAWNER_KIND_MONSTER,
@@ -85,6 +113,8 @@ func prepare_upcoming_monster_routes(topology_revision: int) -> void:
 # than duplicating it. Nothing is prepared when that night serves no clients.
 func prepare_upcoming_client_routes(topology_revision: int) -> void:
 	_prepared_upcoming_client_routes.clear()
+	_prepared_client_revision = topology_revision
+	_prepared_client_deferred = false
 	var night_index: int = _preview_night_index()
 	if night_index < 0:
 		return
@@ -93,7 +123,7 @@ func prepare_upcoming_client_routes(topology_revision: int) -> void:
 	var spawner_cells: Array[Vector2i] = []
 	for raw_spawner_cell: Variant in _manager.client_spawners().keys():
 		spawner_cells.append(raw_spawner_cell as Vector2i)
-	_prepare_preview_routes(
+	_prepared_client_deferred = _prepare_preview_routes(
 		_prepared_upcoming_client_routes,
 		spawner_cells,
 		SPAWNER_KIND_CLIENT,
@@ -101,11 +131,19 @@ func prepare_upcoming_client_routes(topology_revision: int) -> void:
 	)
 
 
+# Preparation runs when the navigation revision changes, which can be several frames
+# before the approach fields it depends on finish draining. Rather than previewing a
+# guess, deferred spawners are re-selected here on the reader's own refresh cadence,
+# and stop being re-selected as soon as none are pending.
 func prepared_upcoming_monster_routes() -> Array[Dictionary]:
+	if _prepared_monster_deferred:
+		prepare_upcoming_monster_routes(_prepared_monster_revision)
 	return _prepared_routes_snapshot(_prepared_upcoming_monster_routes)
 
 
 func prepared_upcoming_client_routes() -> Array[Dictionary]:
+	if _prepared_client_deferred:
+		prepare_upcoming_client_routes(_prepared_client_revision)
 	return _prepared_routes_snapshot(_prepared_upcoming_client_routes)
 
 
@@ -121,16 +159,22 @@ func _preview_night_index() -> int:
 
 # One descriptor per spawner that can reach a garden, keyed by spawner cell. route_kind and
 # block_fences are read back from the route this service actually built, so a descriptor
-# always reports the real navigation policy instead of assuming the monster one.
+# always reports the real navigation policy instead of assuming the monster one. Returns
+# true when at least one spawner was skipped because its approach field is still computing,
+# so the caller knows this preparation is incomplete rather than final.
 func _prepare_preview_routes(
 	prepared: Dictionary,
 	spawner_cells: Array[Vector2i],
 	agent_kind: StringName,
 	topology_revision: int
-) -> void:
+) -> bool:
+	var deferred: bool = false
 	_sort_cells(spawner_cells)
 	for spawner_cell: Vector2i in spawner_cells:
 		var selected: Dictionary = _manager.select_garden_entry_for_route(spawner_cell, agent_kind)
+		if (selected.get("status", APPROACH_STATUS_UNAVAILABLE) as StringName) == APPROACH_STATUS_PENDING:
+			deferred = true
+			continue
 		if selected.is_empty():
 			continue
 		var garden_id: int = int(selected.get("garden_id", 0))
@@ -152,6 +196,7 @@ func _prepare_preview_routes(
 			"route_kind": route.get("route_kind", ROUTE_KIND_MONSTER_INBOUND) as StringName,
 			"block_fences": bool(route.get("block_fences", false)),
 		}
+	return deferred
 
 
 func _prepared_routes_snapshot(prepared: Dictionary) -> Array[Dictionary]:
@@ -180,12 +225,158 @@ func cancel_queued_group_flow_request(group_id: int) -> void:
 	_reindex_queued_flow_groups()
 
 
+# True once initialize_spawner_route() has resolved this spawner's escape route.
+# Asks for that explicitly rather than for a _spawner_routes entry, because an
+# approach descriptor can be stored for a spawner before its escape route exists
+# (preparation requests every approach field before any escape field).
 func has_spawner_route(spawner_cell: Vector2i) -> bool:
-	return _spawner_routes.has(spawner_cell)
+	return bool((_spawner_routes.get(spawner_cell, {}) as Dictionary).get("route_initialized", false))
 
 
 func get_spawner_route(spawner_cell: Vector2i) -> Dictionary:
 	return (_spawner_routes.get(spawner_cell, {}) as Dictionary).duplicate()
+
+
+# ---------------------------------------------------------------------------
+# Per-spawner approach flow.
+# ---------------------------------------------------------------------------
+
+func spawner_approach_generation() -> int:
+	return _approach_generation
+
+
+# Ensures this spawner has an approach field for the current generation, queueing it
+# on the shared lazy flow request queue if it is missing, stale, or built under the
+# wrong fence policy. Idempotent and cheap once the descriptor is current.
+func ensure_spawner_approach_flow(spawner_cell: Vector2i) -> void:
+	_ensure_approach_flow(spawner_cell)
+
+
+func spawner_approach_flow_ready(spawner_cell: Vector2i) -> bool:
+	return spawner_approach_status(spawner_cell) == APPROACH_STATUS_READY
+
+
+# READY: the field is computed and can be sampled. PENDING: transient — queued,
+# computing, or the flow/agent manager is not up yet; the caller must retry.
+# UNAVAILABLE: no walkable approach anchor exists for this spawner.
+func spawner_approach_status(spawner_cell: Vector2i) -> StringName:
+	var route: Dictionary = _ensure_approach_flow(spawner_cell)
+	if route.is_empty():
+		return APPROACH_STATUS_PENDING
+	if not bool(route.get("approach_ready", false)):
+		return APPROACH_STATUS_UNAVAILABLE
+	var approach_group: int = int(route.get("approach_group", IDLE_GROUP))
+	if approach_group <= IDLE_GROUP:
+		return APPROACH_STATUS_UNAVAILABLE
+	if not group_flow_id_is_ready(approach_group):
+		return APPROACH_STATUS_PENDING
+	return APPROACH_STATUS_READY
+
+
+# Real navigable route cost from spawner_cell to cell, via the spawner's approach
+# field. {"status": <one of the three above>, "cost": float}. cost is only meaningful
+# when status is READY.
+func spawner_approach_cost_at_cell(spawner_cell: Vector2i, cell: Vector2i) -> Dictionary:
+	var status: StringName = spawner_approach_status(spawner_cell)
+	if status != APPROACH_STATUS_READY:
+		return {"status": status, "cost": INF}
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var approach_group: int = int(route.get("approach_group", IDLE_GROUP))
+	var flow: Node = _flow()
+	if flow == null or not flow.has_method("group_route_cost_at_world"):
+		return {"status": APPROACH_STATUS_UNAVAILABLE, "cost": INF}
+	var world_pos: Vector2 = _cell_center(cell)
+	if not _is_finite_world(world_pos):
+		return {"status": APPROACH_STATUS_UNAVAILABLE, "cost": INF}
+	var cost: float = float(flow.call("group_route_cost_at_world", approach_group, world_pos))
+	if not is_finite(cost):
+		return {"status": APPROACH_STATUS_UNAVAILABLE, "cost": INF}
+	return {"status": APPROACH_STATUS_READY, "cost": cost}
+
+
+# Re-requests one spawner's approach field (its descriptor is dropped and resolved
+# again against the current map).
+func rebuild_spawner_approach_flow(spawner_cell: Vector2i) -> void:
+	if _spawner_routes.has(spawner_cell):
+		var route: Dictionary = _spawner_routes[spawner_cell] as Dictionary
+		route["approach_generation"] = -1
+		_spawner_routes[spawner_cell] = route
+	_ensure_approach_flow(spawner_cell)
+
+
+# A hard walkability change can move the best entrance even when no garden changed,
+# so every approach answer computed against the old map must be refused: bump the
+# generation (which invalidates cached costs, entry resolutions, and inbound garden
+# routes) and queue exactly one new field per known spawner.
+func invalidate_spawner_approach_flows() -> void:
+	_approach_generation += 1
+	_clear_garden_entry_resolve_cache("approach_generation")
+	for raw_spawner_cell: Variant in _spawner_routes.keys().duplicate():
+		_ensure_approach_flow(raw_spawner_cell as Vector2i)
+
+
+# Returns the descriptor for spawner_cell, (re)building it when the stored one is
+# missing, from an older generation, or built under a different fence policy.
+# Returns {} when the approach field cannot be resolved *yet* (flow/agent manager not
+# up, group allocation failed) — a transient state the caller reports as PENDING.
+# A descriptor with approach_ready == false is the opposite: a real "this spawner has
+# no walkable approach anchor" answer for this generation.
+func _ensure_approach_flow(spawner_cell: Vector2i) -> Dictionary:
+	if not _flow_is_ready() or not _spawners().has(spawner_cell):
+		return {}
+	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
+	var block_fences: bool = _route_blocks_fences(spawner_cell)
+	var generation_current: bool = int(route.get("approach_generation", -1)) == _approach_generation
+	var policy_current: bool = (
+		route.has("approach_block_fences")
+		and bool(route["approach_block_fences"]) == block_fences
+	)
+	if generation_current and policy_current:
+		return route
+
+	var agent_manager: Node = _agent_manager()
+	if agent_manager == null or not agent_manager.has_method("create_group"):
+		return {}
+	# The field's goal must be a real walkable anchor: prefer the spawner tile itself,
+	# and only fall back to the shared goal resolution when it is not walkable.
+	var target_cell: Vector2i = spawner_cell
+	if not _is_walkable(target_cell):
+		target_cell = _resolve_walkable_goal(spawner_cell, "approach@%s" % str(spawner_cell))
+	if target_cell == INVALID_CELL or not _is_sane_cell(target_cell):
+		return _store_unavailable_approach(spawner_cell, route)
+	var target_world: Vector2 = _cell_center(target_cell)
+	if not _is_finite_world(target_world):
+		push_warning("LOST-AGENT-GUARD: insane approach_target_world %s (cell %s) for spawner %s" % [
+			target_world, target_cell, spawner_cell
+		])
+		return _store_unavailable_approach(spawner_cell, route)
+	var approach_group: int = int(route.get("approach_group", IDLE_GROUP))
+	if approach_group <= IDLE_GROUP:
+		approach_group = int(agent_manager.call("create_group"))
+	if approach_group <= IDLE_GROUP:
+		push_error("BuildingManager: spawner %s could not allocate approach group" % spawner_cell)
+		return {}
+	# Same navigation policy as the agents that leave this spawner, straight from
+	# _route_blocks_fences: monsters walk through fences, clients/merchants do not.
+	request_group_flow_rebuild_with_policy(approach_group, target_world, block_fences,
+		"spawner %s approach" % str(spawner_cell))
+	route["approach_group"] = approach_group
+	route["approach_target_cell"] = target_cell
+	route["approach_target_world"] = target_world
+	route["approach_block_fences"] = block_fences
+	route["approach_ready"] = true
+	route["approach_generation"] = _approach_generation
+	_spawner_routes[spawner_cell] = route
+	return route
+
+
+func _store_unavailable_approach(spawner_cell: Vector2i, route: Dictionary) -> Dictionary:
+	route["approach_target_cell"] = INVALID_CELL
+	route["approach_block_fences"] = _route_blocks_fences(spawner_cell)
+	route["approach_ready"] = false
+	route["approach_generation"] = _approach_generation
+	_spawner_routes[spawner_cell] = route
+	return route
 
 
 func mark_spawner_escape_dirty(spawner_cell: Vector2i) -> void:
@@ -236,15 +427,31 @@ func group_flow_is_ready_at_world(group_id: int, world_pos: Vector2) -> bool:
 	return is_finite(cost)
 
 
+# Two passes, deliberately: every relevant approach field is queued before any escape
+# field. Garden and entrance selection cannot resolve at all until a spawner's approach
+# field is ready, whereas escapes are only needed once agents leave, so interleaving
+# them would push the critical fields behind the optional ones in a queue that drains
+# one request per frame. The drain rate itself is unchanged.
 func initialize_spawner_routes_for_kinds(agent_kinds: Array[StringName], token: int) -> bool:
+	var spawner_cells: Array[Vector2i] = []
+	for raw_spawner_cell: Variant in _spawners().keys():
+		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
+		if _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
+			spawner_cells.append(spawner_cell)
+	_sort_cells(spawner_cells)
+
 	var slice_started_us: int = Time.get_ticks_usec()
-	var spawners: Dictionary = _spawners()
-	for raw_spawner_cell: Variant in spawners.keys():
+	for spawner_cell: Vector2i in spawner_cells:
 		if not _night_preparation_is_current(token):
 			return false
-		var spawner_cell: Vector2i = raw_spawner_cell as Vector2i
-		if not _spawner_is_one_of_kinds(spawner_cell, agent_kinds):
-			continue
+		ensure_spawner_approach_flow(spawner_cell)
+		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
+			await _manager.get_tree().process_frame
+			slice_started_us = Time.get_ticks_usec()
+
+	for spawner_cell: Vector2i in spawner_cells:
+		if not _night_preparation_is_current(token):
+			return false
 		initialize_spawner_route(spawner_cell)
 		if Time.get_ticks_usec() - slice_started_us >= _night_preparation_budget_us():
 			await _manager.get_tree().process_frame
@@ -306,11 +513,15 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 func release_spawner_route(spawner_cell: Vector2i) -> void:
 	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
 	var escape_group: int = int(route.get("escape_group", -1))
+	var approach_group: int = int(route.get("approach_group", -1))
 	var agent_manager: Node = _agent_manager()
 	if agent_manager and agent_manager.has_method("dissolve_group"):
 		if escape_group > IDLE_GROUP:
 			cancel_queued_group_flow_request(escape_group)
 			agent_manager.call("dissolve_group", escape_group)
+		if approach_group > IDLE_GROUP:
+			cancel_queued_group_flow_request(approach_group)
+			agent_manager.call("dissolve_group", approach_group)
 		if _spawner_garden_routes.has(spawner_cell):
 			var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
 			for raw_route: Variant in garden_routes.values():
@@ -323,6 +534,9 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 	_spawner_garden_routes.erase(spawner_cell)
 	_prepared_upcoming_monster_routes.erase(spawner_cell)
 	_prepared_upcoming_client_routes.erase(spawner_cell)
+	# The entry cache is keyed by source cell, so a re-added spawner on the same tile
+	# must not inherit entries resolved from the dissolved approach field.
+	_manager.get_garden_access_resolver().clear_cache_for_source(spawner_cell)
 
 
 func drain_dirty_routes() -> void:
@@ -382,6 +596,7 @@ func initialize_spawner_route(spawner_cell: Vector2i) -> void:
 					escape_world, escape_wall_target_cell, spawner_cell
 				])
 				route["escape_ready"] = false
+				route["route_initialized"] = true
 				_spawner_routes[spawner_cell] = route
 				return
 			request_group_flow_rebuild(escape_group, escape_world, "spawner %s escape" % str(spawner_cell))
@@ -394,6 +609,7 @@ func initialize_spawner_route(spawner_cell: Vector2i) -> void:
 	else:
 		route["escape_ready"] = false
 
+	route["route_initialized"] = true
 	_spawner_routes[spawner_cell] = route
 	_debug_telemetry().log("initialized spawner=%s exit_wall=%s escape_target=%s" % [
 		spawner_cell, exit_wall_cell, escape_wall_target_cell
@@ -664,6 +880,11 @@ func garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 		return false
 	if int(route.get("garden_version", -1)) != int(garden.get("version", 0)):
 		return false
+	# A wall can move the best entrance without touching the garden at all, so the
+	# garden's own epoch/version cannot be the only thing keeping a route "current":
+	# a route selected against a superseded approach field is stale by definition.
+	if int(route.get("approach_generation", -1)) != _approach_generation:
+		return false
 	var spawner_cell: Vector2i = route.get("spawner_cell", INVALID_CELL) as Vector2i
 	if spawner_cell == INVALID_CELL:
 		return false
@@ -730,7 +951,8 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		"route_kind": ROUTE_KIND_MONSTER_INBOUND if not block_fences else ROUTE_KIND_CLIENT_INBOUND,
 		"block_fences": block_fences,
 		"garden_version": int(garden.get("version", 0)),
-		"garden_epoch": int(garden.get("epoch", -1))
+		"garden_epoch": int(garden.get("epoch", -1)),
+		"approach_generation": _approach_generation,
 	}
 	routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = routes

@@ -2906,6 +2906,16 @@ func _select_garden_for_client_spawner(spawner_cell: Vector2i) -> int:
 	return _spawner_garden_selection_service.select_garden_for_client_spawner(spawner_cell)
 
 
+# Structured variants: AgentSpawnService needs to tell a still-computing spawner
+# approach field (retry the spawn) from a genuinely unreachable map (skip it).
+func select_garden_for_spawner_result(spawner_cell: Vector2i) -> Dictionary:
+	return _spawner_garden_selection_service.select_garden_for_spawner_result(spawner_cell)
+
+
+func select_garden_for_client_spawner_result(spawner_cell: Vector2i) -> Dictionary:
+	return _spawner_garden_selection_service.select_garden_for_client_spawner_result(spawner_cell)
+
+
 func select_garden_entry_for_route(spawner_cell: Vector2i, agent_kind: StringName) -> Dictionary:
 	return _spawner_garden_selection_service.select_garden_entry_for_route(spawner_cell, agent_kind)
 
