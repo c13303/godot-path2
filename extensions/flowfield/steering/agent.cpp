@@ -48,6 +48,22 @@ void AgentData::reset()
     path_index = 0;
     path_active = false;
     path_arrived = false;
+    traffic_group_id = 0;
+    traffic_priority = 0;
+    smash_force = Vec2(0, 0);
+    is_propelled = false;
+    propelled_timer = 0.0;
+    smash_just_reset = false;
+    smash_friction = -1.0;
+    smash_control_suppression = 1.0;
+    smash_control_suppression_timer = 0.0;
+    pending_smash = Vec2(0, 0);
+    smash_delay = 0.0;
+    pending_smash_friction = -1.0;
+    pending_smash_control_suppression = 1.0;
+    pending_smash_control_suppression_duration = 0.0;
+    pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
+    smash_pending = false;
 }
 
     void AgentData::update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state)

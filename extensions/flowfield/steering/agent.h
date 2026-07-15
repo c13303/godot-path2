@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.h"
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -36,6 +37,14 @@ namespace ffcore
     constexpr int SMASH_CLASS_PLAYER = 1 << 0;
     constexpr int SMASH_CLASS_MAIN_CHAR = 1 << 1;
     constexpr int SMASH_CLASS_MONSTER = 1 << 2;
+
+    enum class ImpulseQueuePriority : int
+    {
+        None = 0,
+        Traffic = 10,
+        Contact = 50,
+        Gameplay = 100,
+    };
 
     struct AgentProfile
     {
@@ -92,8 +101,11 @@ namespace ffcore
         double pending_smash_friction = -1.0;
         double pending_smash_control_suppression = 1.0;
         double pending_smash_control_suppression_duration = 0.0;
+        int pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
         bool smash_pending = false;
         bool was_in_t2 = false;
+        std::int64_t traffic_group_id = 0;
+        int traffic_priority = 0;
 
         Vec2i last_logged_tile = Vec2i(-999999, -999999);
         bool moving = false;

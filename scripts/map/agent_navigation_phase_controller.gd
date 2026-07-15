@@ -12,6 +12,13 @@ const HELD_ROSE_DEFAULT_FRAME: int = 0
 const HELD_ROSE_WET_FRAME: int = 1
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
+const TRAFFIC_PRIORITY_NONE: int = 0
+const TRAFFIC_PRIORITY_INBOUND: int = 100
+const TRAFFIC_PRIORITY_ASTAR_INSIDE: int = 200
+const TRAFFIC_PRIORITY_OUTBOUND: int = 300
+const TRAFFIC_GROUP_INBOUND_BASE: int = 1_000_000_000_000
+const TRAFFIC_GROUP_ASTAR_BASE: int = 2_000_000_000_000
+const TRAFFIC_GROUP_OUTBOUND_BASE: int = 3_000_000_000_000
 
 var _manager: BuildingManager
 # Manager-owned services that are created once and never reassigned.
@@ -248,11 +255,17 @@ func set_astar_in_agent(nav_id: int, data: Dictionary) -> void:
 	_astar_in_agents[nav_id] = data
 	var target_cell: Vector2i = data.get("plant_cell", INVALID_CELL) as Vector2i
 	_garden_retarget.register_astar_in_target(nav_id, target_cell)
+	var raw_agent: Variant = data.get("node", null)
+	if is_instance_valid(raw_agent) and raw_agent is Node2D:
+		set_astar_inside_traffic(raw_agent as Node2D, nav_id)
+	else:
+		clear_agent_traffic(nav_id)
 
 
 func erase_astar_in_agent(nav_id: int) -> void:
 	_astar_in_agents.erase(nav_id)
 	_garden_retarget.unregister_astar_in_target(nav_id)
+	clear_agent_traffic(nav_id)
 
 
 func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i) -> void:
@@ -367,6 +380,7 @@ func clear_agent_navigation_records(nav_id: int) -> void:
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_waiting_entry_flow_agents.erase(nav_id)
+	clear_agent_traffic(nav_id)
 
 
 func process_eating_agents(delta: float) -> void:
@@ -466,6 +480,7 @@ func start_agent_eating(agent: Node2D, seconds: float, plant_cell: Vector2i = IN
 		"held_rose_frame": held_rose_frame,
 	}
 	_show_monster_held_rose(agent, seconds, held_rose_frame)
+	clear_agent_traffic(nav_id)
 	_manager.detach_agent_flow(nav_id)
 	_manager.detach_agent_path(nav_id)
 	_entry_path_agents.erase(nav_id)
@@ -493,6 +508,7 @@ func restore_agent_eating(agent: Node2D, seconds_left: float, plant_cell: Vector
 		"held_rose_frame": restored_held_rose_frame,
 	}
 	_show_monster_held_rose(agent, seconds_left, restored_held_rose_frame)
+	clear_agent_traffic(nav_id)
 	_manager.detach_agent_flow(nav_id)
 	_manager.detach_agent_path(nav_id)
 	_entry_path_agents.erase(nav_id)
@@ -577,6 +593,7 @@ func attach_agent_to_escape(agent: Node2D, escape_group: int, escape_target_cell
 	_manager.set_agent_never_rest(nav_id, true)
 	if spawner_cell != INVALID_CELL:
 		agent.set_meta("spawner_cell", spawner_cell)
+	set_outbound_traffic(agent, escape_group)
 	_escaping_agents[nav_id] = {
 		"node": agent,
 		"target_cell": escape_target_cell,
@@ -621,16 +638,20 @@ func process_escape_arrivals() -> void:
 func assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, garden_id: int, entry_cell: Vector2i) -> bool:
 	if not is_instance_valid(agent):
 		return false
+	var nav_id: int = int(agent.get("nav_id"))
 	if entry_cell == INVALID_CELL or not _manager._is_sane_cell(entry_cell):
+		clear_agent_traffic(nav_id)
 		return false
 	if not _manager.can_assign_agent_navigation():
+		clear_agent_traffic(nav_id)
 		return false
-	var nav_id: int = int(agent.get("nav_id"))
 	var route: Dictionary = _spawner_route_service.get_or_create_spawner_garden_route(spawner_cell, garden_id)
 	if not bool(route.get("ready", false)):
 		var pending_group: int = int(route.get("plant_group", -1))
 		if pending_group <= IDLE_GROUP:
+			clear_agent_traffic(nav_id)
 			return false
+		clear_agent_traffic(nav_id)
 		_waiting_entry_flow_agents[nav_id] = {
 			"node": agent,
 			"spawner_cell": spawner_cell,
@@ -650,13 +671,15 @@ func assign_agent_to_garden_entry_flow(agent: Node2D, spawner_cell: Vector2i, ga
 func _attach_agent_to_entry_route(agent: Node2D, spawner_cell: Vector2i, garden_id: int, route: Dictionary) -> bool:
 	if not is_instance_valid(agent):
 		return false
+	var nav_id: int = int(agent.get("nav_id"))
 	var plant_group: int = int(route.get("plant_group", -1))
 	if plant_group <= IDLE_GROUP:
+		clear_agent_traffic(nav_id)
 		return false
 	var entry_cell: Vector2i = route.get("entry_cell", INVALID_CELL) as Vector2i
 	if entry_cell == INVALID_CELL:
+		clear_agent_traffic(nav_id)
 		return false
-	var nav_id: int = int(agent.get("nav_id"))
 	_manager.detach_agent_flow(nav_id)
 	_manager.detach_agent_path(nav_id)
 	_manager.assign_agent_to_group(agent, plant_group)
@@ -669,6 +692,7 @@ func _attach_agent_to_entry_route(agent: Node2D, spawner_cell: Vector2i, garden_
 	}
 	erase_astar_in_agent(nav_id)
 	_escaping_agents.erase(nav_id)
+	set_inbound_traffic(agent, plant_group)
 	agent.set_meta("spawner_cell", spawner_cell)
 	agent.set_meta("garden_id", garden_id)
 	agent.set_meta("garden_entry_cell", entry_cell)
@@ -683,6 +707,49 @@ func _counter_stock(counter_cell: Vector2i) -> int:
 
 func _agent_kind(agent: Node2D) -> StringName:
 	return _manager._agent_kind(agent)
+
+
+func _agent_uses_stream_traffic(agent: Node2D) -> bool:
+	return _agent_kind(agent) == SPAWNER_KIND_MONSTER
+
+
+func set_inbound_traffic(agent: Node2D, plant_group: int) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	if not _agent_uses_stream_traffic(agent):
+		clear_agent_traffic(nav_id)
+		return
+	_manager.set_agent_traffic_state(
+		nav_id,
+		TRAFFIC_GROUP_INBOUND_BASE + plant_group,
+		TRAFFIC_PRIORITY_INBOUND
+	)
+
+
+func set_astar_inside_traffic(agent: Node2D, nav_id: int) -> void:
+	if not _agent_uses_stream_traffic(agent):
+		clear_agent_traffic(nav_id)
+		return
+	_manager.set_agent_traffic_state(
+		nav_id,
+		TRAFFIC_GROUP_ASTAR_BASE + nav_id,
+		TRAFFIC_PRIORITY_ASTAR_INSIDE
+	)
+
+
+func set_outbound_traffic(agent: Node2D, escape_group: int) -> void:
+	var nav_id: int = int(agent.get("nav_id"))
+	if not _agent_uses_stream_traffic(agent):
+		clear_agent_traffic(nav_id)
+		return
+	_manager.set_agent_traffic_state(
+		nav_id,
+		TRAFFIC_GROUP_OUTBOUND_BASE + escape_group,
+		TRAFFIC_PRIORITY_OUTBOUND
+	)
+
+
+func clear_agent_traffic(nav_id: int) -> void:
+	_manager.set_agent_traffic_state(nav_id, 0, TRAFFIC_PRIORITY_NONE)
 
 
 func _floorz() -> TileMapLayer:

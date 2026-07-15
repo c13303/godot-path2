@@ -4,8 +4,10 @@
 #include "../core/global_config.h"
 #include "../grid/spatial_grid.h"
 #include "agent.h"
+#include "traffic_right_of_way_resolver.h"
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -123,6 +125,7 @@ namespace ffcore
         void set_agent_manual_motion(int id, double acceleration, double deceleration);
         void set_agent_profile(int id, const AgentProfile &profile);
         void set_agent_position(int id, const Vec2 &position, bool clear_velocity = true);
+        void set_agent_traffic_state(int id, std::int64_t traffic_group_id, int traffic_priority);
         void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
         void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
@@ -297,11 +300,17 @@ namespace ffcore
         SpatialGrid *grid = nullptr;
 
         AgentManager *agent_manager = nullptr;
+        TrafficRightOfWayResolver traffic_right_of_way_resolver;
+        std::vector<std::uint8_t> flow_waiting_by_agent_index_scratch;
+        std::vector<TrafficPushRequest> traffic_push_requests_scratch;
 
         double movement_priority(const AgentData &agent) const;
         void update_contact_push_cooldowns(double delta);
         void apply_contact_pushes(double delta);
-        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune);
+        void apply_traffic_right_of_way(double delta);
+        bool is_agent_waiting_for_flow(const AgentData &agent) const;
+        void clear_pending_smash_slot(AgentData &agent);
+        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority);
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);

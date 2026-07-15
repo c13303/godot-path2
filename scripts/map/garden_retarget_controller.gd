@@ -263,6 +263,7 @@ func queue_agent_for_garden_retarget(nav_id: int, agent: Node2D, intent: String,
 		return false
 	_manager.detach_agent_path(nav_id)
 	_manager.detach_agent_flow(nav_id)
+	_agent_navigation_phases.clear_agent_traffic(nav_id)
 	_entry_path_agents().erase(nav_id)
 	_agent_navigation_phases.erase_astar_in_agent(nav_id)
 	_escaping_agents().erase(nav_id)

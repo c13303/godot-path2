@@ -242,6 +242,7 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     id_to_index.erase(it);
     g_goal_cooldown.erase(id);
     contact_push_cooldowns.erase(id);
+    traffic_right_of_way_resolver.remove_agent(id);
     for (auto &entry : contact_push_cooldowns)
         entry.second.erase(id);
     recompute_hitbox_query_extents();
@@ -757,10 +758,61 @@ void SteeringSystem::apply_contact_pushes(double delta)
             double force = std::abs(net_pressure);
             double cooldown = std::max(agent.profile.contact_push_cooldown, neighbor.profile.contact_push_cooldown);
 
-            queue_smash_impulse(target_id, impulse_dir, force, 0.65, 0.0, false, 0.0, 0.0, false);
+            queue_smash_impulse(target_id, impulse_dir, force, 0.65, 0.0, false, 0.0, 0.0, false, static_cast<int>(ImpulseQueuePriority::Contact));
             contact_push_cooldowns[agent.id][neighbor.id] = cooldown;
             contact_push_cooldowns[neighbor.id][agent.id] = cooldown;
         }
+    }
+}
+
+bool SteeringSystem::is_agent_waiting_for_flow(const AgentData &agent) const
+{
+    GroupID wait_group = (agent.waiting_flow_group != INVALID_GROUP) ? agent.waiting_flow_group : agent.group;
+    bool flow_driven = (agent.waiting_flow_group != INVALID_GROUP)
+        || (!agent.path_active && (agent.phase == AgentPhase::FlowIn || agent.phase == AgentPhase::FlowOut));
+    AgentManager *wait_mgr = agent_manager ? agent_manager : ffcore::get_global_agent_manager();
+    return flow_driven
+        && wait_group != INVALID_GROUP
+        && wait_mgr
+        && wait_mgr->get_group_flow_wait(wait_group) != GROUP_FLOW_WAIT_NONE;
+}
+
+void SteeringSystem::apply_traffic_right_of_way(double delta)
+{
+    (void)delta;
+    const auto &cfg = globalconfig();
+    if (!cfg.traffic_right_of_way_enabled || cfg.traffic_push_force <= 0.0 || !grid)
+        return;
+
+    flow_waiting_by_agent_index_scratch.resize(agents.size());
+    for (int i = 0; i < static_cast<int>(agents.size()); ++i)
+        flow_waiting_by_agent_index_scratch[i] = is_agent_waiting_for_flow(agents[i]) ? 1 : 0;
+
+    traffic_right_of_way_resolver.collect_push_requests(
+        agents,
+        id_to_index,
+        grid,
+        flow_waiting_by_agent_index_scratch,
+        max_world_radius,
+        cfg.traffic_push_force,
+        traffic_push_requests_scratch);
+
+    for (const TrafficPushRequest &request : traffic_push_requests_scratch)
+    {
+        queue_smash_impulse(
+            request.target_agent_id,
+            request.direction,
+            request.force,
+            0.65,
+            0.0,
+            false,
+            1.0,
+            cfg.traffic_control_lock_seconds,
+            false,
+            static_cast<int>(ImpulseQueuePriority::Traffic));
+        traffic_right_of_way_resolver.mark_target_pushed(
+            request.target_agent_id,
+            cfg.traffic_push_cooldown);
     }
 }
 
@@ -1252,9 +1304,7 @@ void SteeringSystem::set_agent_position(int id, const Vec2 &position, bool clear
     {
         agent.velocity = Vec2(0, 0);
         agent.smash_force = Vec2(0, 0);
-        agent.pending_smash = Vec2(0, 0);
-        agent.smash_pending = false;
-        agent.smash_delay = 0.0;
+        clear_pending_smash_slot(agent);
         agent.is_propelled = false;
         agent.propelled_timer = 0.0;
     }
@@ -1267,6 +1317,24 @@ void SteeringSystem::set_agent_position(int id, const Vec2 &position, bool clear
     agent.debug_bottleneck_wait = false;
     if (grid)
         grid->update(agent.id, old_foot, agent_foot_point(agent));
+}
+
+void SteeringSystem::set_agent_traffic_state(int id, std::int64_t traffic_group_id, int traffic_priority)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+
+    AgentData &agent = agents[it->second];
+    if (traffic_group_id <= 0)
+    {
+        agent.traffic_group_id = 0;
+        agent.traffic_priority = 0;
+        return;
+    }
+
+    agent.traffic_group_id = traffic_group_id;
+    agent.traffic_priority = std::max(0, traffic_priority);
 }
 
 void SteeringSystem::set_agent_control_mode(int id, int mode)
@@ -1313,16 +1381,30 @@ void SteeringSystem::set_agent_manual_motion(int id, double acceleration, double
 
 void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
 {
-    queue_smash_impulse(id, direction, force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration, true);
+    queue_smash_impulse(id, direction, force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration, true, static_cast<int>(ImpulseQueuePriority::Gameplay));
 }
 
-void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune)
+void SteeringSystem::clear_pending_smash_slot(AgentData &agent)
+{
+    agent.pending_smash = Vec2(0, 0);
+    agent.smash_pending = false;
+    agent.smash_delay = 0.0;
+    agent.pending_smash_friction = -1.0;
+    agent.pending_smash_control_suppression = 1.0;
+    agent.pending_smash_control_suppression_duration = 0.0;
+    agent.pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
+}
+
+void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority)
 {
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
         return;
 
     AgentData &agent = agents[it->second];
+    int sanitized_priority = std::max(static_cast<int>(ImpulseQueuePriority::None), impulse_priority);
+    if (agent.smash_pending && sanitized_priority < agent.pending_smash_priority)
+        return;
     if (respect_weapon_immune && agent.profile.weapon_immune)
         return;
     if (is_drowning_agent(agent))
@@ -1350,6 +1432,7 @@ void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double f
     agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
     agent.pending_smash_control_suppression = std::clamp(control_suppression, 0.0, 1.0);
     agent.pending_smash_control_suppression_duration = std::max(0.0, control_suppression_duration);
+    agent.pending_smash_priority = sanitized_priority;
     agent.smash_pending = true;
     agent.smash_force = Vec2(0, 0);
     agent.smash_just_reset = false;
@@ -1708,12 +1791,7 @@ void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seco
     a.eating_seconds = eating_seconds;
     if (phase == AgentPhase::Drowning)
     {
-        a.pending_smash = Vec2(0, 0);
-        a.smash_pending = false;
-        a.smash_delay = 0.0;
-        a.pending_smash_friction = -1.0;
-        a.pending_smash_control_suppression = 1.0;
-        a.pending_smash_control_suppression_duration = 0.0;
+        clear_pending_smash_slot(a);
         a.smash_force = Vec2(0, 0);
         a.smash_friction = -1.0;
         a.smash_control_suppression = 1.0;
@@ -1934,15 +2012,15 @@ void SteeringSystem::update_all(double delta)
                       active_aoes.end());
 
     update_contact_push_cooldowns(delta);
+    traffic_right_of_way_resolver.update_cooldowns(delta);
     apply_contact_pushes(delta);
+    apply_traffic_right_of_way(delta);
 
     for (auto &a : agents)
     {
         if (is_drowning_agent(a))
         {
-            a.pending_smash = Vec2(0, 0);
-            a.smash_pending = false;
-            a.smash_delay = 0.0;
+            clear_pending_smash_slot(a);
             a.smash_force = Vec2(0, 0);
             a.smash_just_reset = false;
             a.is_propelled = false;
@@ -1958,14 +2036,10 @@ void SteeringSystem::update_all(double delta)
             if (a.smash_delay <= 0.0)
             {
                 a.smash_force = a.pending_smash;
-                a.pending_smash = Vec2(0, 0);
                 a.smash_friction = a.pending_smash_friction;
-                a.pending_smash_friction = -1.0;
                 a.smash_control_suppression = a.pending_smash_control_suppression;
-                a.pending_smash_control_suppression = 1.0;
                 a.smash_control_suppression_timer = a.pending_smash_control_suppression_duration;
-                a.pending_smash_control_suppression_duration = 0.0;
-                a.smash_pending = false;
+                clear_pending_smash_slot(a);
                 a.smash_just_reset = true;
             }
         }
@@ -2057,12 +2131,7 @@ void SteeringSystem::update_all(double delta)
         // group/flow yet, stamped via waiting_flow_group) and agents actively on a flow.
         // A*-path followers and eating agents (flow detached) are unaffected.
         {
-            GroupID wait_group = (a.waiting_flow_group != INVALID_GROUP) ? a.waiting_flow_group : a.group;
-            bool flow_driven = (a.waiting_flow_group != INVALID_GROUP)
-                || (!a.path_active && (a.phase == AgentPhase::FlowIn || a.phase == AgentPhase::FlowOut));
-            AgentManager *wait_mgr = agent_manager ? agent_manager : ffcore::get_global_agent_manager();
-            if (flow_driven && wait_group != INVALID_GROUP && wait_mgr
-                && wait_mgr->get_group_flow_wait(wait_group) != GROUP_FLOW_WAIT_NONE)
+            if (is_agent_waiting_for_flow(a))
             {
                 a.velocity = Vec2(0, 0);
                 a.update_motion_state(delta, cfg);

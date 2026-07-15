@@ -78,6 +78,14 @@ namespace godot
         void set_bottleneck_lateral_push_ratio(double v);
         double get_priority_separation_bias() const;
         void set_priority_separation_bias(double v);
+        bool get_traffic_right_of_way_enabled() const;
+        void set_traffic_right_of_way_enabled(bool v);
+        double get_traffic_push_force() const;
+        void set_traffic_push_force(double v);
+        double get_traffic_push_cooldown() const;
+        void set_traffic_push_cooldown(double v);
+        double get_traffic_control_lock_seconds() const;
+        void set_traffic_control_lock_seconds(double v);
 
         double get_separation_strength() const;
         void set_separation_strength(double v);

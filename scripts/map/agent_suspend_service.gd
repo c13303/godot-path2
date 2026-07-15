@@ -16,6 +16,7 @@ func setup(manager: BuildingManager) -> void:
 
 
 func suspend_agent_for_drowning(nav_id: int) -> void:
+	_manager.get_agent_navigation_phase_controller().clear_agent_traffic(nav_id)
 	_detach_agent_navigation(nav_id)
 	_entry_path_agents().erase(nav_id)
 	_manager._erase_astar_in_agent(nav_id)
@@ -30,6 +31,7 @@ func resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dicti
 
 func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionary:
 	var resume_state: Dictionary = capture_agent_resume_state(nav_id, agent)
+	_manager.get_agent_navigation_phase_controller().clear_agent_traffic(nav_id)
 	_detach_agent_navigation(nav_id)
 	_entry_path_agents().erase(nav_id)
 	_manager._erase_astar_in_agent(nav_id)
@@ -91,6 +93,7 @@ func capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 
 
 func suspend_agent_for_turret_eating(nav_id: int) -> void:
+	_manager.get_agent_navigation_phase_controller().clear_agent_traffic(nav_id)
 	_detach_agent_navigation(nav_id)
 	_entry_path_agents().erase(nav_id)
 	_manager._erase_astar_in_agent(nav_id)
@@ -106,6 +109,10 @@ func resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: 
 			_entry_path_agents()[nav_id] = data
 			_manager._erase_astar_in_agent(nav_id)
 			_escaping_agents().erase(nav_id)
+			_manager.get_agent_navigation_phase_controller().set_inbound_traffic(
+				agent,
+				int(data.get("plant_group", -1))
+			)
 			if agent.has_method("start_flow_in"):
 				agent.call("start_flow_in")
 			return

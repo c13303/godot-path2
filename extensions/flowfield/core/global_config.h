@@ -84,6 +84,13 @@ namespace ffcore
         double static_obstacle_repulsion_strength = 400.0;
         double static_obstacle_query_padding = tile_size; // extra query radius around the agent
 
+        // Generic traffic right-of-way: game-side assigns opaque groups/priorities;
+        // native code only arbitrates overlaps and submits non-damaging smash pushes.
+        bool traffic_right_of_way_enabled = true;
+        double traffic_push_force = 216.0;
+        double traffic_push_cooldown = 0.18;
+        double traffic_control_lock_seconds = 0.18;
+
         double lerp_general = 0.02;
 
         /* target radius = flow field stop system */

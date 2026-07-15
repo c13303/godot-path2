@@ -14,6 +14,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include "../flow/flow_field.h"
 #include "../core/global_config.h"
+#include <cstdint>
 #include <cmath>
 #include <vector>
 #include <algorithm>
@@ -681,6 +682,8 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["control_mode"] = static_cast<int>(a->control_mode);
     d["group"] = a->group;
     d["waiting_flow_group"] = a->waiting_flow_group;
+    d["traffic_group_id"] = static_cast<std::int64_t>(a->traffic_group_id);
+    d["traffic_priority"] = a->traffic_priority;
     d["has_flow"] = a->flow != nullptr;
     d["flow_ready"] = a->flow ? a->flow->is_ready() : false;
     d["path_active"] = a->path_active;
@@ -708,6 +711,7 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["is_propelled"] = a->is_propelled;
     d["propelled_timer"] = a->propelled_timer;
     d["smash_pending"] = a->smash_pending;
+    d["pending_smash_priority"] = a->pending_smash_priority;
     d["smash_delay"] = a->smash_delay;
     d["smash_control_suppression"] = a->smash_control_suppression;
     d["smash_control_suppression_timer"] = a->smash_control_suppression_timer;

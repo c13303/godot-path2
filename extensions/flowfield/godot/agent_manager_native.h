@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "../agent_manager/agent_manager.h"
@@ -84,6 +85,7 @@ namespace godot
         void set_agent_paused(int agent_id, bool value);
         void set_agent_waiting_flow_group(int agent_id, int group_id);
         void set_agent_phase(int agent_id, int phase, float eating_seconds);
+        void set_agent_traffic_state(int agent_id, std::int64_t traffic_group_id, int traffic_priority);
         void detach_agent_flow(int agent_id);
 
         void assign_agent_path(int agent_id, const PackedVector2Array &waypoints_world);

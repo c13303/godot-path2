@@ -93,6 +93,7 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_paused", "agent_id", "value"), &AgentManagerNative::set_agent_paused);
     ClassDB::bind_method(D_METHOD("set_agent_waiting_flow_group", "agent_id", "group_id"), &AgentManagerNative::set_agent_waiting_flow_group);
     ClassDB::bind_method(D_METHOD("set_agent_phase", "agent_id", "phase", "eating_seconds"), &AgentManagerNative::set_agent_phase);
+    ClassDB::bind_method(D_METHOD("set_agent_traffic_state", "agent_id", "traffic_group_id", "traffic_priority"), &AgentManagerNative::set_agent_traffic_state);
     ClassDB::bind_method(D_METHOD("detach_agent_flow", "agent_id"), &AgentManagerNative::detach_agent_flow);
     ClassDB::bind_method(D_METHOD("assign_agent_path", "agent_id", "waypoints_world"), &AgentManagerNative::assign_agent_path);
     ClassDB::bind_method(D_METHOD("detach_agent_path", "agent_id"), &AgentManagerNative::detach_agent_path);
@@ -404,6 +405,13 @@ void AgentManagerNative::set_agent_phase(int agent_id, int phase, float eating_s
     if (!steering)
         return;
     steering->set_agent_phase(agent_id, static_cast<ffcore::AgentPhase>(phase), eating_seconds);
+}
+
+void AgentManagerNative::set_agent_traffic_state(int agent_id, std::int64_t traffic_group_id, int traffic_priority)
+{
+    if (!steering)
+        return;
+    steering->set_agent_traffic_state(agent_id, static_cast<std::int64_t>(traffic_group_id), traffic_priority);
 }
 
 void AgentManagerNative::detach_agent_flow(int agent_id)

@@ -66,12 +66,15 @@ Notes:
 ## AgentNavigationPhaseController
 Owns:
 - Runtime agent phase dictionaries for entry flow, A* in, eating/counter work, and escape.
+- Game-specific traffic right-of-way groups/priorities and the central assignment/clear helpers used by navigation phase transitions.
 
 Does not own:
 - Garden topology or route cache state.
+- Native traffic arbitration, cooldowns, or physical shove application.
 
 Notes:
 - BuildingManager exposes compatibility wrappers for older phase-related call sites.
+- AgentSuspendService clears traffic while navigation is temporarily suspended and restores it only after entry-flow, A*, or escape navigation has been restored. TrafficRightOfWayResolver owns generic native arbitration between opaque traffic groups/priorities; SteeringSystem supplies lazy-flow-wait eligibility and submits accepted traffic requests to the existing smash pipeline. BuildingManager only forwards traffic state to native code and owns no traffic state or algorithm. Future agent kinds such as ducks are integrated game-side by assigning traffic state during their navigation phases; native traffic code should not need species-specific changes.
 
 ## DayVisitorMovementController
 Owns:

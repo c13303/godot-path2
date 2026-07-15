@@ -75,6 +75,14 @@ void GlobalConfigNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_bottleneck_lateral_push_ratio", "value"), &GlobalConfigNative::set_bottleneck_lateral_push_ratio);
     ClassDB::bind_method(D_METHOD("get_priority_separation_bias"), &GlobalConfigNative::get_priority_separation_bias);
     ClassDB::bind_method(D_METHOD("set_priority_separation_bias", "value"), &GlobalConfigNative::set_priority_separation_bias);
+    ClassDB::bind_method(D_METHOD("get_traffic_right_of_way_enabled"), &GlobalConfigNative::get_traffic_right_of_way_enabled);
+    ClassDB::bind_method(D_METHOD("set_traffic_right_of_way_enabled", "value"), &GlobalConfigNative::set_traffic_right_of_way_enabled);
+    ClassDB::bind_method(D_METHOD("get_traffic_push_force"), &GlobalConfigNative::get_traffic_push_force);
+    ClassDB::bind_method(D_METHOD("set_traffic_push_force", "value"), &GlobalConfigNative::set_traffic_push_force);
+    ClassDB::bind_method(D_METHOD("get_traffic_push_cooldown"), &GlobalConfigNative::get_traffic_push_cooldown);
+    ClassDB::bind_method(D_METHOD("set_traffic_push_cooldown", "value"), &GlobalConfigNative::set_traffic_push_cooldown);
+    ClassDB::bind_method(D_METHOD("get_traffic_control_lock_seconds"), &GlobalConfigNative::get_traffic_control_lock_seconds);
+    ClassDB::bind_method(D_METHOD("set_traffic_control_lock_seconds", "value"), &GlobalConfigNative::set_traffic_control_lock_seconds);
 
     ClassDB::bind_method(D_METHOD("get_separation_strength"), &GlobalConfigNative::get_separation_strength);
     ClassDB::bind_method(D_METHOD("set_separation_strength", "value"), &GlobalConfigNative::set_separation_strength);
@@ -148,6 +156,10 @@ void GlobalConfigNative::_bind_methods()
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_backward_push_ratio"), "set_bottleneck_backward_push_ratio", "get_bottleneck_backward_push_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bottleneck_lateral_push_ratio"), "set_bottleneck_lateral_push_ratio", "get_bottleneck_lateral_push_ratio");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "priority_separation_bias"), "set_priority_separation_bias", "get_priority_separation_bias");
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "traffic_right_of_way_enabled"), "set_traffic_right_of_way_enabled", "get_traffic_right_of_way_enabled");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "traffic_push_force"), "set_traffic_push_force", "get_traffic_push_force");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "traffic_push_cooldown"), "set_traffic_push_cooldown", "get_traffic_push_cooldown");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "traffic_control_lock_seconds"), "set_traffic_control_lock_seconds", "get_traffic_control_lock_seconds");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "separation_strength"), "set_separation_strength", "get_separation_strength");
     ADD_PROPERTY(PropertyInfo(Variant::INT, "max_neighbors"), "set_max_neighbors", "get_max_neighbors");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lerp_general"), "set_lerp_general", "get_lerp_general");
@@ -240,6 +252,14 @@ double GlobalConfigNative::get_bottleneck_lateral_push_ratio() const { return cf
 void GlobalConfigNative::set_bottleneck_lateral_push_ratio(double v) { cfg().bottleneck_lateral_push_ratio = std::clamp(v, 0.0, 3.0); }
 double GlobalConfigNative::get_priority_separation_bias() const { return cfg().priority_separation_bias; }
 void GlobalConfigNative::set_priority_separation_bias(double v) { cfg().priority_separation_bias = std::clamp(v, 0.0, 1.0); }
+bool GlobalConfigNative::get_traffic_right_of_way_enabled() const { return cfg().traffic_right_of_way_enabled; }
+void GlobalConfigNative::set_traffic_right_of_way_enabled(bool v) { cfg().traffic_right_of_way_enabled = v; }
+double GlobalConfigNative::get_traffic_push_force() const { return cfg().traffic_push_force; }
+void GlobalConfigNative::set_traffic_push_force(double v) { cfg().traffic_push_force = std::max(0.0, v); }
+double GlobalConfigNative::get_traffic_push_cooldown() const { return cfg().traffic_push_cooldown; }
+void GlobalConfigNative::set_traffic_push_cooldown(double v) { cfg().traffic_push_cooldown = std::max(0.0, v); }
+double GlobalConfigNative::get_traffic_control_lock_seconds() const { return cfg().traffic_control_lock_seconds; }
+void GlobalConfigNative::set_traffic_control_lock_seconds(double v) { cfg().traffic_control_lock_seconds = std::max(0.0, v); }
 
 double GlobalConfigNative::get_separation_strength() const { return cfg().separation_strength; }
 void GlobalConfigNative::set_separation_strength(double v) { cfg().separation_strength = std::max(0.0, v); }

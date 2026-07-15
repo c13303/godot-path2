@@ -551,6 +551,10 @@ func set_agent_waiting_flow_group(nav_id: int, group_id: int) -> void:
 	if agent_manager != null and agent_manager.has_method("set_agent_waiting_flow_group"):
 		agent_manager.call("set_agent_waiting_flow_group", nav_id, group_id)
 
+func set_agent_traffic_state(nav_id: int, traffic_group_id: int, traffic_priority: int) -> void:
+	if agent_manager != null and agent_manager.has_method("set_agent_traffic_state"):
+		agent_manager.call("set_agent_traffic_state", nav_id, traffic_group_id, traffic_priority)
+
 func registered_spawner_count() -> int:
 	return _spawners.size()
 
