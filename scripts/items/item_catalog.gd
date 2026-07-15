@@ -576,6 +576,12 @@ static func get_max_health(item_id: String) -> int:
 static func is_destructible_placeable(item_id: String) -> bool:
 	return is_placeable(item_id)
 
+## True for placeables the catalog files under the "plant" category (rose, imperial_seed, and
+## any plant added later). The nighttime placement ban keys off this category so a new plant
+## is covered by the rule the moment it is added to the catalog.
+static func is_plant_placeable(item_id: String) -> bool:
+	return is_placeable(item_id) and str(get_item_def(item_id).get("category", "")) == "plant"
+
 ## True for placeables that live on the plant layer and are destroyed instantly on contact
 ## (roses, imperial plants, future plant-layer placeables) rather than taking repeated hits.
 static func is_instant_destroy_placeable(item_id: String) -> bool:

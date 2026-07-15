@@ -1017,20 +1017,19 @@ func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
 func refresh_runtime_cell_speed(cell: Vector2i) -> void:
 	_building_navigation_sync.refresh_cell_speed(cell)
 
+# Plant additions are phase-agnostic: they only dirty the plant layout, and the budgeted
+# invalidation pipeline rebuilds garden topology and retargets agents later (see
+# BuildingInvalidationController._start_runtime_plant_layout_rebuild, which runs every frame
+# in every phase). Freshly planted roses are not valid client targets, so this must never
+# rebuild every existing garden per rose during rectangle placement. Player plant placement is
+# blocked at night (GameUI.is_item_disabled_for_placement), but scripted events, debug tools
+# and restore code can still add plants then — they take this same deferred path rather than a
+# synchronous full rebuild inside the signal callback.
 func _on_plant_added(_cell: Vector2i) -> void:
 	# A rose just appeared: re-check any client/merchant already standing on the cell
 	# so a stationary agent still tramples it (agent-movement alone would miss this).
 	_agent_cell_tracker.invalidate_cell(_cell)
-	if not GameState.is_night:
-		# Day/client placement only dirties the next prepared snapshot. Freshly planted
-		# roses are not valid client targets, so client sale must not rebuild every
-		# existing garden per rose during rectangle placement.
-		_building_invalidation_controller.after_plant_layout_changed("plant_added")
-		return
-	_add_plant_to_gardens(_cell)
-	_retarget_agents_for_garden_topology_change(_cell)
-	if _zone_overlay:
-		_zone_overlay.queue_redraw()
+	_building_invalidation_controller.after_plant_layout_changed("plant_added")
 
 # Runtime plant removal (an agent ate a plant, or a plant was removed at runtime).
 # This is CONTENT-ONLY: it never recomputes garden entry/access points and never
@@ -2403,9 +2402,6 @@ func _start_astar_in(agent: Node2D, spawner_cell: Vector2i) -> void:
 func _process_plant_arrivals() -> void:
 	_agent_navigation_phases.process_plant_arrivals()
 
-func _retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
-	_garden_retarget.retarget_agents_for_garden_topology_change(changed_cell)
-
 # --- _astar_in_agents mutation funnel + target-plant reverse index --------------
 # All inserts into / erasures from _astar_in_agents go through these two helpers so
 # GardenRetargetController's target-plant reverse index stays in lock-step.
@@ -2984,9 +2980,6 @@ func _rebuild_plant_zone_from_layer() -> void:
 
 func _build_gardens_from_plants() -> void:
 	_garden_topology.build_gardens_from_plants()
-
-func _add_plant_to_gardens(cell: Vector2i) -> void:
-	_garden_topology.add_plant_to_gardens(cell)
 
 func _remove_plant_from_garden_content_only(cell: Vector2i) -> Dictionary:
 	return _garden_topology.remove_plant_from_garden_content_only(cell)

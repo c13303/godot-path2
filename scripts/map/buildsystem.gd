@@ -160,6 +160,12 @@ func _on_game_mode_changed(is_night: bool) -> void:
 	# Removal stays forbidden at night because it can change blocker topology while
 	# monster flow fields are active.
 	_cancel_removal()
+	# Night can forbid the buildable being dragged (a rose rectangle, a house). The selected
+	# def goes empty for a phase-disabled item, so drop the gesture, its rectangle and the
+	# selection now instead of waiting for the next frame's drag tick to notice: a release in
+	# this same frame must not commit the stale rectangle.
+	if _drag_controller.is_build_drag_active() and _selected_placeable_def().is_empty():
+		_cancel_drag_build()
 
 # Godot input/tick callbacks are thin wrappers: BuildInputController owns build-mode
 # input routing (mouse/keyboard press/release/motion/wheel, hover preview dispatch,

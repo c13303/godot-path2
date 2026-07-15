@@ -583,7 +583,7 @@ func _on_afternoon_phase_changed(is_afternoon_phase: bool) -> void:
 # --- Selection ---------------------------------------------------------------
 
 func _on_item_pressed(item_id: String) -> void:
-	if _toolbuild_column == null or not _toolbuild_column.visible or _item_blocked_by_night(item_id):
+	if _toolbuild_column == null or not _toolbuild_column.visible:
 		return
 	if _is_item_locked(item_id) or not _should_show_item(item_id):
 		return
@@ -609,7 +609,7 @@ func activate_pad_selection() -> bool:
 			return true
 	# Gamepad: confirming while the build menu is open commits the highlighted buildable.
 	if _toolbuild_column != null and _toolbuild_column.visible and _selected_item_id != "":
-		if _item_blocked_by_night(_selected_item_id):
+		if _is_item_locked(_selected_item_id):
 			return false
 		_commit_item(_selected_item_id)
 		return true
@@ -628,15 +628,6 @@ func get_visible_build_item_global_rect(item_id: String) -> Rect2:
 
 func _tool_blocked_by_night(tool_id: String) -> bool:
 	return GameState.is_night and (tool_id == HAMMER_TOOL_ID or tool_id == BUILD_HOUSE_TOOL_ID)
-
-
-func _item_blocked_by_night(item_id: String) -> bool:
-	if not GameState.is_night:
-		return false
-	return (
-		item_id in _string_names_to_strings(ItemCatalog.get_hammer_shop_item_ids())
-		or item_id in _string_names_to_strings(ItemCatalog.get_house_build_item_ids())
-	)
 
 
 func _step_build_pad_selection(direction: int) -> void:
@@ -740,8 +731,12 @@ func _affordable_quantity(item_id: String) -> int:
 	return 0
 
 
-func _is_item_locked(_item_id: String) -> bool:
-	return false
+## True when a buildable is shown in the column but cannot be picked right now. The phase rule
+## itself is owned by game_ui (is_item_disabled_for_placement); this only asks it. Plants lock
+## at night: the row stays visible and greys out, mouse/pad activation is refused, and the
+## default/remembered-selection logic skips to the next usable buildable.
+func _is_item_locked(item_id: String) -> bool:
+	return game_ui != null and game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id))
 
 
 ## True while the shop should force the counter to the front of the selection: the

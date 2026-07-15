@@ -411,12 +411,6 @@ func build_gardens_from_plants() -> void:
 	_plant_zone_built = true
 
 
-func add_plant_to_gardens(cell: Vector2i) -> void:
-	if _garden_by_plant_cell.has(cell):
-		return
-	rebuild_plant_zone_from_layer()
-
-
 func remove_plant_from_garden_content_only(cell: Vector2i) -> Dictionary:
 	if not _garden_by_plant_cell.has(cell):
 		return {

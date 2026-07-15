@@ -115,8 +115,9 @@ func _setup_day_toggle() -> void:
 
 func _on_game_mode_changed(is_night: bool) -> void:
 	_update_day_toggle_icon(is_night)
-	# Night disables structural construction only. Gardening stays available.
-	if is_night and _selected_build_item_is_structural():
+	# Night forbids plants and structural builds. Drop a now-forbidden selection so no stale
+	# preview survives the transition; BuildSystem cancels the matching drag gesture.
+	if is_night and is_item_disabled_for_placement(selected_build_item_id):
 		deactivate_quickbar()
 		clear_build_selection()
 		if equipped_weapon_id == "":
@@ -341,13 +342,20 @@ func consume_inventory_item(item_id: String, quantity: int) -> bool:
 	_refresh_all_slots()
 	return true
 
+## The authoritative phase-availability rule for a concrete placeable: the single owner of
+## "may this item be selected, previewed, dragged, purchased or placed right now". Night
+## blocks plants (any catalog `category == "plant"`, so rose/imperial_seed and future plants
+## are covered without an id list), houses, and hammer buildables. Lower layers (build
+## picker, build-mode state, placement service, hover info) call this instead of re-deriving
+## the policy, so the rule lives in exactly one place.
 func is_item_disabled_for_placement(item_id: String) -> bool:
-	return GameState.is_night and (item_id in _hammer_buildable_ids() or item_id in _house_buildable_ids())
-
-func _selected_build_item_is_structural() -> bool:
-	if selected_build_item_id == "":
+	if not GameState.is_night:
 		return false
-	return selected_build_item_id in _hammer_buildable_ids() or selected_build_item_id in _house_buildable_ids()
+	return (
+		ItemCatalog.is_plant_placeable(item_id)
+		or ItemCatalog.is_house_placeable(item_id)
+		or item_id in _hammer_buildable_ids()
+	)
 
 # --- Build menu state --------------------------------------------------------
 
@@ -431,6 +439,10 @@ func select_build_item_for_tool(tool_id: String, item_id: String) -> bool:
 	if index < 0 or _is_quickbar_slot_disabled(tool_id):
 		return false
 	if not _tool_offers_build_item(tool_id, item_id):
+		return false
+	# The gardening slot stays open at night for its non-plant items, so the concrete item
+	# needs its own phase check: reject before any selection state changes.
+	if is_item_disabled_for_placement(item_id):
 		return false
 	if not is_build_item_available(item_id) or not can_afford_build(item_id, 1):
 		return false

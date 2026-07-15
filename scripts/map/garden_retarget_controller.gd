@@ -110,32 +110,6 @@ func remove_queued_agent(nav_id: int) -> void:
 			_garden_retarget_queue.remove_at(index)
 
 
-func retarget_agents_for_garden_topology_change(changed_cell: Vector2i) -> void:
-	var astar_ids: Array = _astar_in_agents().keys()
-	for raw_nav_id in astar_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _astar_in_agents().has(nav_id):
-			continue
-		var astar_data: Dictionary = _astar_in_agents()[nav_id] as Dictionary
-		var plant_cell: Vector2i = astar_data.get("plant_cell", INVALID_CELL) as Vector2i
-		var garden_id: int = int(astar_data.get("garden_id", 0))
-		if plant_cell != changed_cell and not _garden_target_is_stale(garden_id):
-			continue
-		_clear_stale_garden_path(nav_id, astar_data)
-
-	var entry_ids: Array = _entry_path_agents().keys()
-	for raw_nav_id in entry_ids:
-		var nav_id: int = int(raw_nav_id)
-		if not _entry_path_agents().has(nav_id):
-			continue
-		var entry_data: Dictionary = _entry_path_agents()[nav_id] as Dictionary
-		var garden_id: int = int(entry_data.get("garden_id", 0))
-		if not _garden_target_is_stale(garden_id):
-			continue
-		_clear_stale_garden_path(nav_id, entry_data)
-	_garden_topology.drain_pending_empty_gardens()
-
-
 func retarget_agents_targeting_removed_plant_only(cell: Vector2i, garden_id: int) -> void:
 	_last_plant_retarget_astar_in = _astar_in_agents().size()
 	_last_plant_retarget_bucket = 0
@@ -365,32 +339,6 @@ func accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, blocker
 		a["max_single_call_to"] = to_tile
 	if zone_tiles > int(a.get("max_zone_tiles", 0)):
 		a["max_zone_tiles"] = zone_tiles
-
-
-func _garden_target_is_stale(garden_id: int) -> bool:
-	if garden_id <= 0:
-		return true
-	if not _gardens().has(garden_id):
-		return true
-	return not bool(_garden_topology.garden_has_edible_plants(garden_id))
-
-
-func _clear_stale_garden_path(nav_id: int, data: Dictionary) -> void:
-	_entry_path_agents().erase(nav_id)
-	_agent_navigation_phases.erase_astar_in_agent(nav_id)
-	_manager.detach_agent_path(nav_id)
-	var raw_agent: Variant = data.get("node", null)
-	if not is_instance_valid(raw_agent):
-		return
-	var agent: Node2D = raw_agent as Node2D
-	if agent == null:
-		return
-	if agent.has_method("stop_astar_in"):
-		agent.call("stop_astar_in")
-	var spawner_cell: Vector2i = data.get("spawner_cell", INVALID_CELL) as Vector2i
-	if spawner_cell == INVALID_CELL and agent.has_meta("spawner_cell"):
-		spawner_cell = agent.get_meta("spawner_cell") as Vector2i
-	retarget_agent_or_escape(agent, spawner_cell)
 
 
 func _assert_retarget_index_matches_scan(cell: Vector2i) -> void:
