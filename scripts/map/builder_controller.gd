@@ -142,17 +142,63 @@ func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> i
 
 
 func spawn_fundamental_builder() -> int:
+	var spot_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)
+	return _spawn_fundamental_builder_at_anchor(&"", spot_cell, true)
+
+
+func spawn_fundamental_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> int:
+	if house_id == &"":
+		return spawn_fundamental_builder()
+	return _spawn_fundamental_builder_at_anchor(house_id, entrance_cell, false)
+
+
+func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Vector2i) -> void:
+	if not fundamental_builder_active() or house_id == &"":
+		return
+	var previous_house_id: StringName = StringName(_house_id_by_builder_id.get(_fundamental_builder_id, &""))
+	if previous_house_id != &"":
+		_builder_id_by_house_id.erase(previous_house_id)
+	_house_id_by_builder_id[_fundamental_builder_id] = house_id
+	_builder_id_by_house_id[house_id] = _fundamental_builder_id
+	_home_cell_by_builder_id[_fundamental_builder_id] = entrance_cell
+	var agent: Node2D = fundamental_builder_node()
+	if agent != null:
+		agent.set_meta("fundamental_builder", true)
+		agent.set_meta("resident_house_id", house_id)
+		agent.set_meta("home_entrance_cell", entrance_cell)
+	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
+		return_builder_to_idle_area(_fundamental_builder_id)
+
+
+func clear_fundamental_builder_house_assignment() -> void:
+	if _fundamental_builder_id < 0:
+		return
+	var previous_house_id: StringName = StringName(_house_id_by_builder_id.get(_fundamental_builder_id, &""))
+	if previous_house_id != &"":
+		_builder_id_by_house_id.erase(previous_house_id)
+	_house_id_by_builder_id.erase(_fundamental_builder_id)
+	var spot_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)
+	_home_cell_by_builder_id[_fundamental_builder_id] = spot_cell
+	var agent: Node2D = fundamental_builder_node()
+	if agent != null:
+		agent.set_meta("fundamental_builder", true)
+		agent.remove_meta("resident_house_id")
+		agent.set_meta("home_entrance_cell", spot_cell)
+	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
+		return_builder_to_idle_area(_fundamental_builder_id)
+
+
+func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, include_anchor: bool) -> int:
 	if GameState.is_night or _fundamental_builder_id >= 0:
 		return -1
 	var source_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
-	var spot_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)
-	if source_cell == INVALID_CELL or spot_cell == INVALID_CELL:
+	if source_cell == INVALID_CELL or anchor_cell == INVALID_CELL:
 		push_warning("BuilderController: fundamental Builder markers are missing.")
 		return -1
 	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		return -1
-	var target_cell: Vector2i = _find_claim_near_anchor(spot_cell, null, spawn_cell)
+	var target_cell: Vector2i = _find_claim_near_anchor(anchor_cell, null, spawn_cell, include_anchor)
 	if target_cell == INVALID_CELL:
 		return -1
 	var visitor: DayVisitorMovementController = DayVisitorMovementController.new()
@@ -173,10 +219,16 @@ func spawn_fundamental_builder() -> int:
 	var builder_id: int = _register_visitor_id(visitor)
 	_state_by_builder_id[builder_id] = STATE_ENTERING
 	_fundamental_builder_id = builder_id
-	_home_cell_by_builder_id[builder_id] = spot_cell
+	_home_cell_by_builder_id[builder_id] = anchor_cell
+	if house_id != &"":
+		_house_id_by_builder_id[builder_id] = house_id
+		_builder_id_by_house_id[house_id] = builder_id
 	var agent: Node2D = visitor.agent_node()
 	if agent != null:
 		agent.set_meta("fundamental_builder", true)
+		agent.set_meta("home_entrance_cell", anchor_cell)
+		if house_id != &"":
+			agent.set_meta("resident_house_id", house_id)
 	return builder_id
 
 

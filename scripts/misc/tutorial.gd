@@ -299,6 +299,16 @@ func _refresh(delta: float = 0.0) -> void:
 		_set_glow(false)
 		_update_tutorial_arrow("")
 		return
+	if _is_dialog_open():
+		_reset_hold_progress()
+		_displayed_key = ""
+		_pending_key = ""
+		text = ""
+		visible = false
+		modulate = Color.WHITE
+		_set_glow(false)
+		_update_tutorial_arrow("")
+		return
 	var hold_action: StringName = _current_hold_action()
 	if hold_action != HOLD_ACTION_NONE:
 		_show_hold_action(hold_action, delta)
@@ -394,6 +404,8 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
+	if _builder_house_tutorial_active():
+		return KEY_BUILD_BUILDER_HOUSE
 	# Sunrise transition after a night: dawn growth has not finished, so falling through
 	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
@@ -424,8 +436,6 @@ func _current_message_key() -> String:
 		return KEY_NO_ROSES_NO_CLIENTS
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
-	if _builder_house_tutorial_active():
-		return KEY_BUILD_BUILDER_HOUSE
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
 	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
@@ -512,6 +522,13 @@ func _is_spawner_reveal_cutscene_active() -> bool:
 		and _building_manager.has_method("is_any_reveal_cutscene_active")
 		and bool(_building_manager.call("is_any_reveal_cutscene_active"))
 	)
+
+
+func _is_dialog_open() -> bool:
+	for node: Node in get_tree().get_nodes_in_group(&"dialog_ui"):
+		if node != null and node.has_method("is_open") and bool(node.call("is_open")):
+			return true
+	return false
 
 
 func _can_start_night_after_clients() -> bool:

@@ -33,6 +33,8 @@ const HOUSE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
 const AUTHORED_HOUSE_PREFIX: String = "house_"
 const HOUSE_STATUS_WIP: StringName = &"wip"
 const HOUSE_STATUS_COMPLETED: StringName = &"completed"
+const RESIDENT_ROLE_NONE: StringName = &""
+const RESIDENT_ROLE_FUNDAMENTAL_BUILDER: StringName = &"fundamental_builder"
 ## Set on a prepared authored house sprite so the runtime registry reads the resolved
 ## entrance cell instead of re-deriving it (which could drift after reparenting).
 const ENTRANCE_CELL_META: StringName = &"house_entrance_cell"
@@ -61,12 +63,14 @@ class HouseRecord extends RefCounted:
 	var under_construction: bool = false
 	var status: StringName = HOUSE_STATUS_COMPLETED
 	var construction_order: int = 0
+	var resident_role: StringName = RESIDENT_ROLE_NONE
 
 
 class HouseSnapshot extends RefCounted:
 	var id: StringName = &""
 	var item_id: String = ""
 	var resident_type: StringName = &""
+	var resident_role: StringName = &""
 	var entrance_cell: Vector2i = Vector2i.ZERO
 	var entrance_world_position: Vector2 = Vector2.ZERO
 	var completed: bool = false
@@ -380,6 +384,7 @@ func serialize_player_built_houses() -> Array[Dictionary]:
 			"entrance_y": record.entrance_cell.y,
 			"status": String(record.status),
 			"construction_order": record.construction_order,
+			"resident_role": String(record.resident_role),
 		})
 	return out
 
@@ -392,16 +397,21 @@ func serialize_player_built_houses() -> Array[Dictionary]:
 func restore_player_built_houses(records: Array) -> void:
 	var source_id: int = _wallz_atlas_source_id(_wallz)
 	var repaired_any: bool = false
+	var saw_resident_role_field: bool = false
 	for raw_record: Variant in records:
 		if not (raw_record is Dictionary):
 			continue
 		var entry: Dictionary = raw_record as Dictionary
+		if entry.has("resident_role"):
+			saw_resident_role_field = true
 		var item_id: String = ItemCatalog.normalize_house_item_id(str(entry.get("item_id", "house_merchant")))
 		var entrance: Vector2i = Vector2i(int(entry.get("entrance_x", 0)), int(entry.get("entrance_y", 0)))
 		var status: StringName = _normalized_status(StringName(str(entry.get("status", String(HOUSE_STATUS_COMPLETED)))))
 		var construction_order: int = int(entry.get("construction_order", -1))
-		if _restore_one_player_house(item_id, entrance, source_id, status, construction_order):
+		var resident_role: StringName = _normalized_resident_role(StringName(str(entry.get("resident_role", ""))))
+		if _restore_one_player_house(item_id, entrance, source_id, status, construction_order, resident_role):
 			repaired_any = true
+	_normalize_fundamental_builder_house_role(not saw_resident_role_field)
 	if repaired_any:
 		_wallz.update_internals()
 	houses_restored.emit()
@@ -412,7 +422,8 @@ func _restore_one_player_house(
 		entrance: Vector2i,
 		source_id: int,
 		status: StringName,
-		construction_order: int
+		construction_order: int,
+		resident_role: StringName
 ) -> bool:
 	item_id = ItemCatalog.normalize_house_item_id(item_id)
 	if _presence_to_house.has(entrance) or has_house_at_entrance(entrance):
@@ -439,6 +450,7 @@ func _restore_one_player_house(
 	record.destructible = ItemCatalog.get_max_health(item_id) > 0
 	record.status = _normalized_status(status)
 	record.construction_order = _assign_construction_order(construction_order)
+	record.resident_role = _normalized_resident_role(resident_role)
 	if record.status == HOUSE_STATUS_WIP:
 		_manager.get_house_builder_work_controller().on_wip_house_added(record.id)
 	return repaired
@@ -497,6 +509,12 @@ func _normalized_status(status: StringName) -> StringName:
 	if status == HOUSE_STATUS_WIP:
 		return HOUSE_STATUS_WIP
 	return HOUSE_STATUS_COMPLETED
+
+
+func _normalized_resident_role(role: StringName) -> StringName:
+	if role == RESIDENT_ROLE_FUNDAMENTAL_BUILDER:
+		return RESIDENT_ROLE_FUNDAMENTAL_BUILDER
+	return RESIDENT_ROLE_NONE
 
 
 func _assign_construction_order(saved_order: int) -> int:
@@ -624,6 +642,8 @@ func complete_house(house_id: StringName) -> bool:
 		push_warning("HouseManager: completed texture missing for house '%s' item '%s'." % [String(house_id), record.item_id])
 		return false
 	record.status = HOUSE_STATUS_COMPLETED
+	if record.item_id == "house_builder" and _fundamental_builder_house_record() == null:
+		record.resident_role = RESIDENT_ROLE_FUNDAMENTAL_BUILDER
 	if record.sprite != null and is_instance_valid(record.sprite):
 		record.sprite.texture = texture
 	house_completed.emit(_snapshot_for_record(record))
@@ -694,6 +714,25 @@ func get_completed_house_ids(item_id: StringName) -> Array[StringName]:
 	return ids
 
 
+func get_completed_normal_resident_house_ids(item_id: StringName) -> Array[StringName]:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var ids: Array[StringName] = []
+	for record: HouseRecord in _houses:
+		if record.item_id == normalized_id and record.status == HOUSE_STATUS_COMPLETED and record.resident_role == RESIDENT_ROLE_NONE:
+			ids.append(record.id)
+	return ids
+
+
+func fundamental_builder_house_id() -> StringName:
+	var record: HouseRecord = _fundamental_builder_house_record()
+	return record.id if record != null else &""
+
+
+func is_fundamental_builder_house(house_id: StringName) -> bool:
+	var record: HouseRecord = find_house_by_name(house_id)
+	return record != null and record.resident_role == RESIDENT_ROLE_FUNDAMENTAL_BUILDER
+
+
 func get_house_snapshot(house_id: StringName) -> HouseSnapshot:
 	var record: HouseRecord = find_house_by_name(house_id)
 	return _snapshot_for_record(record)
@@ -718,12 +757,58 @@ func _snapshot_for_record(record: HouseRecord) -> HouseSnapshot:
 	snapshot.id = record.id
 	snapshot.item_id = record.item_id
 	snapshot.resident_type = ItemCatalog.get_house_resident_type(record.item_id)
+	snapshot.resident_role = record.resident_role
 	snapshot.entrance_cell = record.entrance_cell
 	snapshot.entrance_world_position = _manager.cell_center(record.entrance_cell) if _manager != null else Vector2.ZERO
 	snapshot.completed = record.status == HOUSE_STATUS_COMPLETED
 	snapshot.player_built = record.player_built
 	snapshot.authored = record.authored
 	return snapshot
+
+
+func _normalize_fundamental_builder_house_role(assign_oldest_when_missing: bool) -> void:
+	var selected: HouseRecord = null
+	for record: HouseRecord in _houses:
+		if record.resident_role != RESIDENT_ROLE_FUNDAMENTAL_BUILDER:
+			continue
+		if not _is_completed_builder_house(record):
+			record.resident_role = RESIDENT_ROLE_NONE
+			continue
+		if selected == null or _construction_order_less(record, selected):
+			if selected != null:
+				selected.resident_role = RESIDENT_ROLE_NONE
+			selected = record
+		else:
+			record.resident_role = RESIDENT_ROLE_NONE
+	if selected != null:
+		return
+	if not assign_oldest_when_missing:
+		return
+	var oldest: HouseRecord = null
+	for record: HouseRecord in _houses:
+		if not _is_completed_builder_house(record):
+			continue
+		if oldest == null or _construction_order_less(record, oldest):
+			oldest = record
+	if oldest != null:
+		oldest.resident_role = RESIDENT_ROLE_FUNDAMENTAL_BUILDER
+
+
+func _fundamental_builder_house_record() -> HouseRecord:
+	for record: HouseRecord in _houses:
+		if _is_completed_builder_house(record) and record.resident_role == RESIDENT_ROLE_FUNDAMENTAL_BUILDER:
+			return record
+	return null
+
+
+func _is_completed_builder_house(record: HouseRecord) -> bool:
+	return record != null and record.item_id == "house_builder" and record.status == HOUSE_STATUS_COMPLETED
+
+
+func _construction_order_less(a: HouseRecord, b: HouseRecord) -> bool:
+	if a.construction_order == b.construction_order:
+		return String(a.id) < String(b.id)
+	return a.construction_order < b.construction_order
 
 
 # ---------------------------------------------------------------------------
