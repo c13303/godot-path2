@@ -19,6 +19,7 @@
 	"tutorial.clients_coming": "clients are coming to buy roses",
 	"tutorial.no_roses_no_clients": "No roses, No clients today",
 	"tutorial.builder_is_here": "The Builder is here",
+	"tutorial.talk_builder": "Talk to the Builder",
 	"tutorial.build_builder_house": "Build a Builder House",
 	"builder.fundamental.greeting": "Hi! I can help you build houses, but first you need to help me build mine.",
 	"alert.needs_grass": "This plants needs grass!",

@@ -1576,6 +1576,14 @@ func is_builder_house_tutorial_active() -> bool:
 	return _fundamental_builder_onboarding.is_builder_house_tutorial_active()
 
 
+func is_fundamental_builder_dialog_pending() -> bool:
+	return _fundamental_builder_onboarding.is_fundamental_builder_dialog_pending()
+
+
+func accept_fundamental_builder_dialog() -> bool:
+	return _fundamental_builder_onboarding.accept_fundamental_builder_dialog()
+
+
 func activate_builder_house_tutorial_from_dialog() -> void:
 	_fundamental_builder_onboarding.activate_builder_house_tutorial_from_dialog()
 

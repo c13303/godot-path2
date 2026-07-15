@@ -56,9 +56,19 @@ func is_builder_house_tutorial_active() -> bool:
 	return _builder_house_tutorial_state == TUTORIAL_ACTIVE
 
 
-func activate_builder_house_tutorial_from_dialog() -> void:
+func is_fundamental_builder_dialog_pending() -> bool:
+	return _intro_cutscene_played and _builder_house_tutorial_state == TUTORIAL_NOT_STARTED
+
+
+func accept_fundamental_builder_dialog() -> bool:
 	if _builder_house_tutorial_state == TUTORIAL_NOT_STARTED:
 		_builder_house_tutorial_state = TUTORIAL_ACTIVE
+		return true
+	return false
+
+
+func activate_builder_house_tutorial_from_dialog() -> void:
+	accept_fundamental_builder_dialog()
 
 
 func notify_player_house_placed(item_id: String) -> void:

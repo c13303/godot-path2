@@ -1,552 +1,254 @@
-Implement the following Starpath phase and route update in the attached Godot project.
+## Task: Fix Starpath invalidation on rose harvest and keep Starpaths visible during active phases
 
-Read `AGENTS.md` first and follow it. Do not run Godot, tests, builds, exports, or compilation.
+Read `AGENTS.md` first and preserve the existing architecture. Do not solve this by adding another broad watcher, polling loop, or manager-level special case.
 
-## Objective
+Do not run Godot, tests, compilation, export, or build commands. The user will test manually.
 
-Correct Starpath behavior by separating monster and client previews by gameplay phase.
+### Current problem
 
-Required behavior:
+During Dawn, harvesting a rose triggers the plant-layout invalidation pipeline.
 
-1. **Monster Starpath**
+The current sequence appears to be:
 
-   * Visible during `AFTERNOON`.
-   * Must remain visible for the entire `NIGHT`.
-   * Continue using only the upcoming/current authored night’s active monster spawners.
-   * Monster routes must retain the current shared-edge merging behavior.
+* rose removal marks the plant layout dirty;
+* `path_preview_controller` sees `plant_layout_dirty()` and clears all routes immediately;
+* after the debounced garden rebuild, the global navigation/topology revision changes;
+* that revision is part of each preview-route signature;
+* all Starpaths are therefore destroyed and rebuilt, even when their actual path is unchanged.
 
-2. **Client Starpath**
+The visible result is that client Starpaths blink, disappear, restart, and are unnecessarily recomputed after ordinary rose harvesting.
 
-   * Visible during `DAWN` only.
-   * Hidden during `AFTERNOON`, `NIGHT`, and `MORNING`.
-   * For every client spawner, display both:
+This is too coarse.
 
-     * its real client **FF IN** route;
-     * its real client **FF OUT** route.
-   * Client routes must never be merged with one another.
-   * This includes:
-
-     * routes from different client spawners;
-     * the IN and OUT routes belonging to the same client spawner;
-     * identical or partially overlapping edges;
-     * edges traversed in opposite directions.
-
-Do not alter the existing footprint visuals, stride, animation cadence, runner behavior, route-center reconstruction, or pooling unless strictly required for this task.
+A rose edit can change garden membership or a destination in exceptional cases, but it does not change the external walkable maze in the same way that walls or blocking structures do.
 
 ---
 
-# Existing implementation to preserve
+## Required behavior
 
-Relevant files:
+### 1. Do not blank Starpaths during plant-only rebuilds
 
-* `scripts/map/path_preview_controller.gd`
-* `scripts/map/path_preview_route_planner.gd`
-* `scripts/map/path_preview_runner.gd`
-* `scripts/map/spawner_route_service.gd`
-* `scripts/map/ARCHITECTURE.md`
+When the plant layout becomes dirty:
 
-Current architecture:
+* keep the currently displayed Starpaths alive;
+* do not call a blanket `_clear_routes()`;
+* do not stop or restart unchanged runners;
+* let the debounced garden-layout rebuild complete in the background of the existing preview.
 
-* `SpawnerRouteService` owns the real route groups and prepared preview descriptors.
-* `PathPreviewController` consumes descriptors and builds tile-center paths.
-* `PathPreviewRoutePlanner.build_cell_center_path()` follows the native FF route costs from a start cell to a goal cell.
-* `PathPreviewRunner` renders the existing animated footprints.
-* `_rebuild_segment_ownership()` currently merges shared edges globally.
+A plant-only edit must not create a visible blank interval.
 
-Keep those ownership boundaries.
+### 2. Selectively update routes after the garden rebuild
 
-Do not move this logic into `BuildingManager`.
+Once the garden topology/descriptors have been rebuilt:
 
-Do not add a new framework or generic event system.
+* prepare the new route descriptors;
+* compare each new descriptor with the currently active route;
+* only replan or replace routes whose meaningful routing identity changed;
+* preserve unchanged route instances and their current animation progress.
 
-Do not touch the native C++ extension.
+Meaningful descriptor changes include at least:
 
----
+* route start cell changed;
+* destination garden changed;
+* destination entry cell changed;
+* route became available or unavailable;
+* route type changed;
+* relevant flow-field/group identity changed.
 
-# 1. Make preview selection phase-specific
+Do not restart every Starpath because an unrelated global revision counter changed.
 
-In `path_preview_controller.gd`, replace the current `AFTERNOON`-only gate and combined descriptor list with explicit phase behavior.
+### 3. Separate walkability invalidation from plant-layout invalidation
 
-The descriptor source must be:
+The preview system must distinguish:
 
-```text
-AFTERNOON -> prepared monster routes only
-NIGHT     -> prepared monster routes only
-DAWN      -> prepared client IN + OUT routes only
-MORNING   -> no routes
-```
+#### External walkability changes
 
-Expected transitions:
+Examples:
 
-```text
-AFTERNOON -> NIGHT
-Keep the same monster preview alive.
+* wall added or removed;
+* blocking building added or removed;
+* door or equivalent navigation obstacle changed;
+* any edit that changes the actual cost field or traversable external maze.
 
-NIGHT -> DAWN
-Remove monster runners and replace them with client runners.
+These changes must force route replanning, even when the route keeps the same:
 
-DAWN -> MORNING
-Clear all client runners immediately.
-
-MORNING -> AFTERNOON
-Show the next authored night’s monster preview.
-```
-
-Do not clear and rebuild the monster preview merely because the phase changes from `AFTERNOON` to `NIGHT` when its route signature is unchanged.
-
-The existing signature comparison and runner reuse should make this possible once both phases consume the same monster descriptors.
-
-The invalidation checks must remain:
-
-* navigation topology dirty;
-* plant layout dirty;
-* runtime rebuild active.
-
-During invalidation, show no stale route. Rebuild from the prepared real routes once they are valid again.
-
----
-
-# 2. Generalize preview descriptors to explicit start and goal cells
-
-The current controller assumes every preview path is:
-
-```text
-spawner_cell -> entry_cell
-```
-
-That is insufficient for client FF OUT.
-
-Prepared descriptors must expose explicit generic route endpoints:
-
-```gdscript
-"start_cell": Vector2i
-"goal_cell": Vector2i
-```
-
-Keep existing semantic fields such as `spawner_cell`, `entry_cell`, `garden_id`, and `route_kind` where useful for debugging and route ownership.
-
-For existing inbound descriptors:
-
-```text
-start_cell = spawner_cell
-goal_cell = entry_cell
-```
-
-`PathPreviewController._plan_route_path()` must call:
-
-```gdscript
-PathPreviewRoutePlanner.build_cell_center_path(
-    flow,
-    manager,
-    group_id,
-    start_cell,
-    goal_cell
-)
-```
-
-Do not reverse an already generated polyline. Always follow the correct FF group downhill from its real start cell to its real goal.
-
-Update the route signature so that it includes at least:
-
-* route kind;
-* source/client spawner identity;
 * start cell;
-* goal cell;
+* destination cell;
 * garden ID;
-* topology revision;
 * group ID.
 
-IN and OUT descriptors must never accidentally share the same signature.
+Use the existing appropriate navigation/walkability revision if one already exists, or introduce a narrowly owned revision representing external route-field contents.
 
-Readiness must be checked at the descriptor’s `start_cell`, not always at `spawner_cell`.
+#### Plant or garden-layout changes
 
----
+Examples:
 
-# 3. Add explicit client outbound descriptors
+* rose harvested;
+* rose added or removed;
+* plant cluster metadata rebuilt;
+* garden destination metadata changed without changing the external maze.
 
-In `spawner_route_service.gd`, add:
+These must only cause descriptor refresh and selective replacement.
 
-```gdscript
-const ROUTE_KIND_CLIENT_OUTBOUND: StringName = &"client_outbound"
-```
+Do not use one coarse global revision as the identity of every preview route.
 
-The existing route kinds remain:
+### 4. Do not blindly remove revision protection
 
-```gdscript
-ROUTE_KIND_MONSTER_INBOUND
-ROUTE_KIND_CLIENT_INBOUND
-```
+Do not merely delete `topology_revision` from the route signature unless it is replaced with a revision that correctly represents external walkability changes.
 
-For every prepared client inbound descriptor, also prepare a corresponding outbound descriptor using that client spawner’s real runtime escape FF.
+Otherwise this bug would be introduced:
 
-## Client FF IN descriptor
+* a wall changes the route field;
+* start and destination remain the same;
+* group ID remains the same;
+* the preview incorrectly reuses the obsolete polyline.
 
-Use the existing client route:
+The final solution must retain correctness for wall/building topology changes.
 
-```text
-group_id   = spawner-to-garden plant_group
-start_cell = client spawner cell
-goal_cell  = selected garden entry_cell
-route_kind = client_inbound
-```
+### 5. Replace changed routes atomically
 
-This is the existing client route behavior, generalized with explicit endpoints.
+When a route genuinely requires replanning:
 
-## Client FF OUT descriptor
+* keep the old route visible while the replacement is prepared where practical;
+* switch to the replacement only when it is ready;
+* avoid globally clearing all routes before rebuilding them;
+* do not restart unrelated runners.
 
-Use the actual per-spawner runtime escape route stored in `_spawner_routes`.
-
-The outbound descriptor must use:
-
-```text
-group_id   = escape_group
-start_cell = the same selected garden entry_cell used by FF IN
-goal_cell  = escape_wall_target_cell
-route_kind = client_outbound
-```
-
-Also retain:
-
-```text
-spawner_cell
-garden_id
-entry_cell
-topology_revision
-```
-
-This represents the real `FlowOut` field associated with that client spawner and its bound exit.
-
-Do not:
-
-* generate a reversed IN route;
-* perform A*;
-* fabricate a straight line;
-* allocate a second preview-only escape FF;
-* create a new native group solely for the preview;
-* use a monster route as fallback.
-
-The client spawners in the authored levels have bound exits. Still handle missing or unavailable runtime escape data safely:
-
-* invalid `escape_group`: omit the OUT descriptor;
-* invalid `escape_wall_target_cell`: omit it;
-* uninitialized spawner route: omit it until initialized;
-* flow not ready at `entry_cell`: keep the descriptor but mark it unready so the controller retries normally;
-* unreachable route: planner returns an empty path and nothing is drawn.
-
-Do not spam warnings every refresh for temporarily unready flows.
-
-A small helper dedicated to building the client outbound descriptor is preferable to duplicating the descriptor assembly logic.
+The preview should remain visually continuous.
 
 ---
 
-# 4. Store both client IN and client OUT descriptors cleanly
+## Starpath visibility lifecycle
 
-The existing `_prepared_upcoming_client_routes` dictionary is keyed once per spawner and therefore cannot directly contain both route legs.
+Starpaths must not disappear merely because agents have started moving.
 
-Use a minimal, readable structure. Recommended approach:
+### Monster Starpaths
 
-```gdscript
-var _prepared_upcoming_client_routes: Dictionary = {}
-var _prepared_upcoming_client_outbound_routes: Dictionary = {}
-```
+Monster Starpaths must:
 
-Both may remain keyed by client spawner cell.
+* be visible during their preview period;
+* remain visible throughout the Night while monsters are actively moving;
+* disappear only when the monster phase is actually over or the routes are otherwise no longer relevant.
 
-`prepared_upcoming_client_routes()` should return one flat `Array[Dictionary]` containing:
+If they already remain visible at Night, preserve that behavior and verify that this fix does not regress it.
 
-1. all client inbound descriptors;
-2. all client outbound descriptors.
+### Client Starpaths
 
-Keep deterministic spawner ordering.
+Client Starpaths must:
 
-Update all cleanup paths accordingly:
+* be visible at Dawn when client routes are previewed;
+* remain visible while clients are actively walking during the client-sale phase;
+* disappear only once the client movement/sale phase is actually over or the routes are no longer relevant.
 
-* route preparation clear;
-* spawner route release;
-* garden route release;
-* prepared-route invalidation;
-* topology rebuild;
-* descriptor snapshot refresh.
+Do not tie visibility only to the passive preview phase if that causes them to disappear as soon as clients spawn.
 
-When a prepared inbound route for a garden is removed, remove its associated outbound descriptor as well.
-
-Do not leave stale outbound descriptors referencing a dissolved garden route or old entry cell.
+Preserve the existing distinction between client routes and monster routes. Do not merge unrelated client Starpaths together as part of this task.
 
 ---
 
-# 5. Keep preview-night selection correct across phase changes
+## Expected implementation approach
 
-The day number advances on the `NIGHT -> DAWN` transition.
-
-Therefore, blindly using:
-
-```gdscript
-current_day_number() - 1
-```
-
-for client preview preparation during Dawn can select the next night instead of the night whose clients are about to arrive.
-
-Track or resolve the target authored night explicitly.
-
-Required mapping:
-
-```text
-AFTERNOON:
-monster target = current day’s upcoming night
-client warmup target = current day’s upcoming night
-
-NIGHT:
-monster target = the currently active night
-client warmup target = that same night
-
-DAWN:
-client target = the just-completed night
-
-MORNING:
-client target may remain the just-completed night, although previews are hidden
-
-Next AFTERNOON:
-monster/client warmup target advances to the next authored night
-```
-
-Given that `nDays` increments when night ends, the client target during Dawn/Morning is effectively:
-
-```gdscript
-current_day_number() - 2
-```
-
-while during Afternoon/Night it is:
-
-```gdscript
-current_day_number() - 1
-```
-
-Clamp and validate against the authored night count.
-
-Do not rely exclusively on navigation revision changes to refresh prepared descriptors.
-
-Store the prepared target night index for both monster and client descriptor sets, or otherwise ensure that `prepared_upcoming_monster_routes()` and `prepared_upcoming_client_routes()` reprepare when their expected authored night index changes.
-
-This prevents:
-
-* the previous night’s monster paths appearing next afternoon;
-* next night’s client count suppressing the current Dawn preview;
-* deferred client preparation switching to the wrong authored night after the day increment.
-
-Client descriptors should only be prepared when the relevant authored night has a client count greater than zero.
-
----
-
-# 6. Disable shared-edge merging for every client route
-
-Current `_rebuild_segment_ownership()` assigns each canonical edge to one route globally.
-
-Preserve that exact behavior for monsters.
-
-Add an explicit route policy, for example:
-
-```gdscript
-"merge_shared_segments": true  # monsters
-"merge_shared_segments": false # all client IN and OUT routes
-```
-
-Equivalent clear naming is acceptable.
-
-Ownership behavior:
-
-## Monster route
-
-For a merge-enabled monster route:
-
-* use the existing canonical undirected edge key;
-* first deterministic route owns the shared edge;
-* subsequent monster routes do not print on that edge.
-
-## Client route
-
-For a non-merged client route:
-
-* mark every valid segment in its polyline as owned;
-* do not consult or modify the shared `edge_owner` map;
-* do not remove segments shared with another client route;
-* do not remove segments shared between its own IN and OUT paths.
-
-Every client descriptor must independently start its normal set of route runners.
-
-Do not solve this by adding positional offsets or changing footprint appearance. The requirement is independent route rendering, not visual lane separation.
-
-Since monster and client previews are phase-separated, no special monster-versus-client collision rule is needed.
-
----
-
-# 7. Route classification in the controller
-
-Both client route kinds must use the client footprint frame:
-
-```text
-client_inbound  -> FOOTPRINT_FRAME_CLIENT
-client_outbound -> FOOTPRINT_FRAME_CLIENT
-monster_inbound -> FOOTPRINT_FRAME_MONSTER
-```
-
-Do not classify a route as client only by testing equality with `ROUTE_KIND_CLIENT_INBOUND`, because that would incorrectly render `client_outbound` as a monster route.
-
-Use an explicit helper such as:
-
-```gdscript
-func _route_is_client(route_kind: StringName) -> bool:
-```
-
-or an explicit `match`.
-
-Keep route classification local and obvious.
-
----
-
-# 8. Preserve current performance characteristics
-
-The preview must remain read-only with respect to pathfinding.
-
-Required:
-
-* no route-cost walk per frame;
-* no FF recomputation initiated by a runner;
-* no A* for Starpath;
-* no native agent assignment;
-* no per-footprint path query;
-* path polyline built once per route identity when its flow becomes ready;
-* low-frequency descriptor refresh retained;
-* runner pool retained;
-* invalid routes remain silent.
-
-Adding client OUT should add one route descriptor and one cached polyline per valid client spawner, not continuous computation.
-
-Do not change the one-flow-request-per-frame lazy queue.
-
----
-
-# 9. Update comments and architecture documentation
-
-Update outdated comments in:
+Inspect the ownership and existing APIs around at least:
 
 * `path_preview_controller.gd`;
+* `building_invalidation_controller.gd`;
 * `spawner_route_service.gd`;
-* `scripts/map/ARCHITECTURE.md`.
+* `garden_topology_service.gd`;
+* the phase/state owner controlling Dawn, client sale, and Night visibility;
+* plant removal and plant-layout rebuild completion callbacks.
 
-Documentation must state:
+Before editing, identify:
 
-* monster preview is shown during Afternoon and Night;
-* client preview is shown during Dawn only;
-* clients display both inbound and outbound FF routes;
-* monster shared edges are merged;
-* client routes have full independent segment ownership and are never merged;
-* preview consumes real runtime flow groups and does not alter gameplay navigation.
+* which component owns preview-route identity;
+* which component owns external navigation revisions;
+* which component emits completion of plant-layout rebuilds;
+* which component decides whether client and monster Starpaths should currently be visible.
 
-Do not perform unrelated documentation cleanup.
+Keep these responsibilities separated.
 
----
+Prefer a model similar to:
 
-# Files expected to change
+* `walkability_revision` invalidates actual planned geometry;
+* descriptor equality detects destination changes;
+* plant-layout dirty state does not clear existing previews;
+* phase visibility determines whether each route family remains displayed.
 
-Primary:
-
-```text
-scripts/map/path_preview_controller.gd
-scripts/map/spawner_route_service.gd
-scripts/map/ARCHITECTURE.md
-```
-
-Only change this if the generic endpoint support genuinely requires it:
-
-```text
-scripts/map/path_preview_route_planner.gd
-```
-
-`path_preview_runner.gd` should not require behavioral changes.
-
-Avoid modifying:
-
-```text
-scripts/map/building_manager.gd
-scripts/map/agent_navigation_phase_controller.gd
-scripts/map/building_preparation_controller.gd
-native extension files
-```
-
-A tiny public façade/helper in `BuildingManager` is acceptable only if there is no clean existing public query, but do not place preview logic there.
+Do not add route-specific logic to `building_manager.gd` if the existing preview/invalidation services can own it cleanly.
 
 ---
 
-# Manual acceptance checklist
+## Important edge cases
 
-The user will test manually.
+Handle these explicitly:
 
-## Phase behavior
+1. Harvesting one ordinary rose:
 
-1. During Afternoon:
+   * existing client Starpaths remain visible;
+   * no runner restarts if route identity and geometry are unchanged.
 
-   * red monster footprints are visible;
-   * no client footprints are visible.
+2. Harvesting several roses rapidly:
 
-2. Transition Afternoon → Night:
+   * existing debounce remains effective;
+   * no repeated clear/restart flicker;
+   * ideally one descriptor refresh after the quiet period.
 
-   * the red Monster Starpath remains visible;
-   * it continues animating during the full night;
-   * it does not disappear simply because Night began.
+3. Removing the last relevant rose from a garden:
 
-3. Transition Night → Dawn:
+   * routes whose destination becomes invalid are removed or redirected correctly;
+   * unrelated routes remain untouched.
 
-   * monster footprints disappear;
-   * client footprints appear;
-   * no next-night monster preview is shown during Dawn.
+4. A plant edit changes garden grouping or selected entry:
 
-4. During Morning/client sale:
+   * only affected routes are rebuilt.
 
-   * all Starpath previews are hidden.
+5. Adding or removing a wall:
 
-5. During the following Afternoon:
+   * affected route geometry is definitely replanned;
+   * an old route is not retained solely because start and destination IDs match.
 
-   * monster paths correspond to the next authored night, not the previous one.
+6. During Night:
 
-## Client route behavior
+   * monster Starpaths remain visible while monsters move.
 
-For every client spawner during Dawn:
+7. During the client-sale phase:
 
-1. A client-colored FF IN route travels:
+   * client Starpaths remain visible while clients walk.
 
-   * from that client spawner;
-   * to its selected garden entry.
+8. End of the relevant phase:
 
-2. A client-colored FF OUT route travels:
+   * obsolete route family is cleaned up normally;
+   * no permanent stale preview remains.
 
-   * from that selected garden entry;
-   * toward that same client spawner’s configured escape target.
+9. Save/load or level reset:
 
-3. Two client spawners sharing part of a path both retain their complete animated paths.
-
-4. A client IN route and client OUT route sharing or reversing an edge both retain that edge.
-
-5. No client route disappears merely because another client descriptor was processed first.
-
-## Existing behavior
-
-* Monster overlapping routes still merge exactly as before.
-* Footprint spacing, fading, speed, scale, direction, and density remain unchanged.
-* Building a wall still invalidates and refreshes Starpath through the existing lazy system.
-* No synchronous lag is introduced when placing plants or walls.
-* Unready/blocked routes show nothing rather than a fake route.
-* Restoring a save shows only the preview valid for the restored gameplay phase.
+   * no stale route instances or revision state survive incorrectly.
 
 ---
 
-# Final report
+## Performance constraints
 
-Report:
+* No per-frame descriptor rebuilding.
+* No per-frame full-route comparison using large arrays if avoidable.
+* No polling watcher.
+* Reuse the existing debounced/budgeted plant-layout rebuild.
+* Preserve current route runners when unchanged.
+* Do not recompute every route after every rose harvest.
+* Do not add expensive byte-for-byte polyline comparison if stable semantic identity plus a correct walkability revision is sufficient.
 
-1. files changed;
-2. exact phase visibility rules implemented;
-3. how client FF OUT descriptors are derived;
-4. how monster merging was preserved;
-5. how client merging was disabled;
-6. how authored-night index changes across Dawn were handled;
-7. confirmation that Godot/tests/builds were not run.
+The goal is less work than the current implementation, not a more complex invalidation layer that costs more every frame.
+
+---
+
+## Deliverable
+
+Implement the fix and then report:
+
+1. root cause confirmed in the actual code;
+2. files changed;
+3. how plant-layout invalidation is now distinguished from external walkability invalidation;
+4. how unchanged runners are preserved;
+5. how Night monster-Starpath visibility is maintained;
+6. how client Starpaths remain visible while clients are walking;
+7. any unavoidable edge case or architectural caveat.
+
+Do not report success based only on code inspection. Clearly state what the user must manually verify in Godot.

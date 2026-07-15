@@ -41,6 +41,8 @@ const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
 const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
 const KEY_PLANT_MORE_ROSES: String = "tutorial.plant_more_roses"
+const KEY_BUILDER_IS_HERE: String = "tutorial.builder_is_here"
+const KEY_TALK_BUILDER: String = "tutorial.talk_builder"
 const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
@@ -254,6 +256,8 @@ func _clear_elapsed_alert() -> void:
 
 
 func _current_alert_color() -> Color:
+	if _alert_key == KEY_BUILDER_IS_HERE:
+		return Color.WHITE
 	if _alert_persistent:
 		return ALERT_DARK_RED.lerp(ALERT_LIGHT_RED, 0.5)
 	var elapsed: float = ALERT_DURATION - _alert_remaining
@@ -404,6 +408,8 @@ func _current_message_key() -> String:
 
 	if water_reserve <= 0:
 		return KEY_REFILL_WATER
+	if _fundamental_builder_dialog_pending():
+		return KEY_TALK_BUILDER
 	if _builder_house_tutorial_active():
 		return KEY_BUILD_BUILDER_HOUSE
 	# Sunrise transition after a night: dawn growth has not finished, so falling through
@@ -789,6 +795,25 @@ func _builder_house_tutorial_active() -> bool:
 	return _building_manager != null \
 		and _building_manager.has_method("is_builder_house_tutorial_active") \
 		and bool(_building_manager.call("is_builder_house_tutorial_active"))
+
+
+func _fundamental_builder_dialog_pending() -> bool:
+	if GameState.is_night:
+		return false
+	if _building_manager == null:
+		return false
+	if _building_manager.has_method("is_any_reveal_cutscene_active") and bool(_building_manager.call("is_any_reveal_cutscene_active")):
+		return false
+	if not _building_manager.has_method("is_fundamental_builder_dialog_pending") \
+			or not bool(_building_manager.call("is_fundamental_builder_dialog_pending")):
+		return false
+	if _building_manager.has_method("is_fundamental_builder_active") \
+			and not bool(_building_manager.call("is_fundamental_builder_active")):
+		return false
+	if _building_manager.has_method("has_fundamental_builder_reached_spot") \
+			and not bool(_building_manager.call("has_fundamental_builder_reached_spot")):
+		return false
+	return true
 
 
 func _planted_rose_count() -> int:
