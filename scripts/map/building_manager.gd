@@ -30,6 +30,7 @@ const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_dro
 const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_cutscene_controller.gd")
 const SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_phase_controller.gd")
+const FUNDAMENTAL_BUILDER_ONBOARDING_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/fundamental_builder_onboarding_controller.gd")
 const PLANT_CONTACT_DANCE_ROUTER_SCRIPT: Script = preload("res://scripts/map/plant_contact_dance_router.gd")
 const EATING_COOLDOWN: float = 5.0
 const IDLE_GROUP: int = 0
@@ -213,6 +214,7 @@ var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.
 var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
 var _spawner_reveal_cutscene: SpawnerRevealCutsceneController = SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT.new()
 var _spawner_reveal_phase: SpawnerRevealPhaseController = SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT.new()
+var _fundamental_builder_onboarding: FundamentalBuilderOnboardingController = FUNDAMENTAL_BUILDER_ONBOARDING_CONTROLLER_SCRIPT.new()
 var _plant_contact_dance_router: PlantContactDanceRouter = PLANT_CONTACT_DANCE_ROUTER_SCRIPT.new()
 var _counter_stock_manager: CounterStockManager
 var _zone_overlay: Node2D
@@ -270,6 +272,9 @@ func _ready() -> void:
 	_spawn_playlist_config.setup(self)
 	_runtime_tick_controller.setup(self)
 	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
+	_fundamental_builder_onboarding.setup(self, _spawner_reveal_cutscene)
+	if not _builder.fundamental_builder_intro_requested.is_connected(_on_fundamental_builder_intro_requested):
+		_builder.fundamental_builder_intro_requested.connect(_on_fundamental_builder_intro_requested)
 	_plant_contact_dance_router.setup(self)
 	add_child(_spawner_reveal_cutscene)
 	_resolve_level_layers()
@@ -812,6 +817,7 @@ func _process(delta: float) -> void:
 	if _runtime_tick_controller == null:
 		return
 	_runtime_tick_controller.process(delta)
+	_fundamental_builder_onboarding.process(delta)
 
 func _load_tile_definitions() -> void:
 	_building_scan.load_tile_definitions()
@@ -1516,6 +1522,58 @@ func is_house_build_item_available(item_id: String) -> bool:
 
 func should_show_house_quickslot() -> bool:
 	return _ally_housing.should_show_house_quickslot()
+
+
+func has_fundamental_builder_intro_cutscene_played() -> bool:
+	return _fundamental_builder_onboarding.intro_cutscene_played()
+
+
+func is_fundamental_builder_active() -> bool:
+	return _builder.fundamental_builder_active()
+
+
+func has_fundamental_builder_reached_spot() -> bool:
+	return _builder.fundamental_builder_idle_at_spot()
+
+
+func is_player_near_fundamental_builder() -> bool:
+	return _builder.is_player_near_fundamental_builder(SeedMerchantController.INTERACT_RADIUS_TILES)
+
+
+func get_fundamental_builder_world_position() -> Vector2:
+	return _builder.fundamental_builder_world_position()
+
+
+func get_fundamental_builder_node() -> Node2D:
+	return _builder.fundamental_builder_node()
+
+
+func is_any_reveal_cutscene_active() -> bool:
+	return _spawner_reveal_cutscene.is_active()
+
+
+func is_builder_house_tutorial_active() -> bool:
+	return _fundamental_builder_onboarding.is_builder_house_tutorial_active()
+
+
+func activate_builder_house_tutorial_from_dialog() -> void:
+	_fundamental_builder_onboarding.activate_builder_house_tutorial_from_dialog()
+
+
+func serialize_fundamental_builder_onboarding() -> Dictionary:
+	return _fundamental_builder_onboarding.serialize_state()
+
+
+func restore_fundamental_builder_onboarding(data: Dictionary) -> void:
+	_fundamental_builder_onboarding.restore_state(data)
+
+
+func notify_player_house_placed(item_id: String) -> void:
+	_fundamental_builder_onboarding.notify_player_house_placed(item_id)
+
+
+func _on_fundamental_builder_intro_requested(builder_node: Node2D) -> void:
+	_fundamental_builder_onboarding.request_intro_cutscene(builder_node)
 
 
 func _process_seed_merchant_arrival() -> void:

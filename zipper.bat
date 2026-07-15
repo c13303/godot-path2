@@ -11,7 +11,7 @@ powershell -NoProfile -Command ^
   "$staging = '%STAGING%';" ^
   "New-Item -ItemType Directory -Path $staging -Force | Out-Null;" ^
   "try {" ^
-  "  Copy-Item -Path '.\extensions', '.\scripts', '.\scenes', '.\AGENTS.md', '.\mainRun.tscn' -Destination $staging -Recurse -Force;" ^
+  "  Copy-Item -Path '.\extensions', '.\scripts', '.\scenes', '.\AGENTS.md', '.\ARCHITECTURE.md', '.\mainRun.tscn' -Destination $staging -Recurse -Force;" ^
   "  Get-ChildItem -Path $staging -Recurse -Directory -Filter 'bin' | Remove-Item -Recurse -Force;" ^
   "  Get-ChildItem -Path $staging -Recurse -File -Filter '*.dll' | Remove-Item -Force;" ^
   "  Compress-Archive -Path (Join-Path $staging '*') -DestinationPath '%ARCHIVE%' -CompressionLevel Optimal;" ^

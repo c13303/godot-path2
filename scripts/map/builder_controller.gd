@@ -1,7 +1,10 @@
 extends RefCounted
 class_name BuilderController
 
+signal fundamental_builder_intro_requested(builder_node: Node2D)
+
 const BUILDER_SPOT_CLAIM_RADIUS: int = 6
+const FUNDAMENTAL_BUILDER_INTRO_RADIUS_TILES: int = 3
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const AGENT_KIND_BUILDER: StringName = &"builder"
 const BUILDER_GROUP: StringName = &"builders"
@@ -45,6 +48,7 @@ var _idle_home_check_elapsed: float = 0.0
 var _idle_displacement_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _idle_return_retry_cooldown_by_builder_id: Dictionary = {}  # int -> float
 var _pending_idle_return_by_builder_id: Dictionary = {}  # int -> true
+var _fundamental_builder_intro_requested: bool = false
 
 
 func setup(manager: BuildingManager) -> void:
@@ -173,6 +177,7 @@ func spawn_fundamental_builder() -> int:
 	var builder_id: int = _register_visitor_id(visitor)
 	_state_by_builder_id[builder_id] = STATE_ENTERING
 	_fundamental_builder_id = builder_id
+	_fundamental_builder_intro_requested = _fundamental_builder_intro_played()
 	_home_cell_by_builder_id[builder_id] = spot_cell
 	var agent: Node2D = visitor.agent_node()
 	if agent != null:
@@ -184,12 +189,43 @@ func fundamental_builder_active() -> bool:
 	return _fundamental_builder_id >= 0 and is_builder_active(_fundamental_builder_id)
 
 
+func fundamental_builder_idle_at_spot() -> bool:
+	if not fundamental_builder_active():
+		return false
+	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
+	return visitor != null and visitor.is_waiting()
+
+
+func fundamental_builder_world_position() -> Vector2:
+	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
+	return visitor.get_agent_world_position() if visitor != null else Vector2.ZERO
+
+
+func fundamental_builder_node() -> Node2D:
+	return _builder_agent_node(_fundamental_builder_id) if _fundamental_builder_id >= 0 else null
+
+
+func is_player_near_fundamental_builder(interact_radius_tiles: int) -> bool:
+	var agent: Node2D = fundamental_builder_node()
+	if agent == null:
+		return false
+	var player: Node2D = _manager.get_tree().get_first_node_in_group("player") as Node2D
+	var floorz: TileMapLayer = _manager.get_floorz()
+	if player == null or floorz == null:
+		return false
+	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
+	var builder_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var delta: Vector2i = player_cell - builder_cell
+	return abs(delta.x) <= interact_radius_tiles and abs(delta.y) <= interact_radius_tiles
+
+
 func retire_fundamental_builder() -> void:
 	if _fundamental_builder_id < 0:
 		return
 	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
 	if visitor == null:
 		_fundamental_builder_id = -1
+		_fundamental_builder_intro_requested = _fundamental_builder_intro_played()
 		return
 	_release_claim_for(visitor)
 	_work_house_by_builder_id.erase(_fundamental_builder_id)
@@ -240,6 +276,7 @@ func process_arrivals() -> void:
 
 func process_active_visitors(delta: float = 0.0) -> void:
 	_clean_invalid_visitors()
+	_process_fundamental_builder_intro_request()
 	_process_idle_home_correction(delta)
 	_process_builder_motion_watchdog(delta)
 
@@ -271,6 +308,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_pending_idle_return_by_builder_id.clear()
 	_idle_home_check_elapsed = 0.0
 	_fundamental_builder_id = -1
+	_fundamental_builder_intro_requested = false
 	_clear_motion_watch()
 
 
@@ -511,6 +549,35 @@ func stop_builder_hammer_swing(builder_id: int) -> void:
 func _builder_agent_node(builder_id: int) -> Node2D:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	return visitor.agent_node() if visitor != null else null
+
+
+func _process_fundamental_builder_intro_request() -> void:
+	if _fundamental_builder_intro_requested or _fundamental_builder_id < 0:
+		return
+	if _fundamental_builder_intro_played():
+		_fundamental_builder_intro_requested = true
+		return
+	if StringName(_state_by_builder_id.get(_fundamental_builder_id, &"")) != STATE_ENTERING:
+		return
+	var agent: Node2D = fundamental_builder_node()
+	var floorz: TileMapLayer = _manager.get_floorz()
+	if agent == null or floorz == null:
+		return
+	var current_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
+	var spot_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)
+	if spot_cell == INVALID_CELL:
+		return
+	var delta: Vector2i = current_cell - spot_cell
+	if abs(delta.x) > FUNDAMENTAL_BUILDER_INTRO_RADIUS_TILES or abs(delta.y) > FUNDAMENTAL_BUILDER_INTRO_RADIUS_TILES:
+		return
+	_fundamental_builder_intro_requested = true
+	fundamental_builder_intro_requested.emit(agent)
+
+
+func _fundamental_builder_intro_played() -> bool:
+	return _manager != null \
+		and _manager.has_method("has_fundamental_builder_intro_cutscene_played") \
+		and bool(_manager.call("has_fundamental_builder_intro_cutscene_played"))
 
 
 func return_builder_to_idle_area(builder_id: int) -> bool:
@@ -801,6 +868,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_home_cell_by_builder_id.erase(builder_id)
 		if _fundamental_builder_id == builder_id:
 			_fundamental_builder_id = -1
+			_fundamental_builder_intro_requested = _fundamental_builder_intro_played()
 		_clear_idle_return_state(builder_id)
 		_clear_builder_motion_watch(builder_id)
 		if _manager != null:

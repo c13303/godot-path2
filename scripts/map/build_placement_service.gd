@@ -136,6 +136,8 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 			game_ui.call("refund_build", item_id, _cell_world_position(entrance), 1)
 		_notify("invalid construction")
 		return
+	if _manager != null and _manager.has_method("notify_player_house_placed"):
+		_manager.call("notify_player_house_placed", item_id)
 	_play_build_fx_at_cell(entrance, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 

@@ -7,7 +7,8 @@ signal completed(context: StringName, release_spawning: bool)
 const SKIP_PROMPT_SCRIPT: Script = preload("res://scripts/ui/cutscene_skip_prompt.gd")
 const SCROLL_SECONDS: float = 2.0
 const SPAWNER_PAUSE_SECONDS: float = 1.0
-const RETURN_SECONDS: float = 1.0
+const NORMAL_RETURN_SECONDS: float = 1.0
+const SKIPPED_RETURN_SECONDS: float = 0.3
 const SKIP_HOLD_SECONDS: float = 0.5
 
 var _camera: CameraController
@@ -71,6 +72,10 @@ func is_active_context(context: StringName) -> bool:
 	return _active and _context == context
 
 
+func is_active() -> bool:
+	return _active
+
+
 func _input(event: InputEvent) -> void:
 	if not _active or _skip_requested:
 		return
@@ -123,8 +128,7 @@ func _run_cutscene(run_id: int) -> void:
 		if _skip_requested:
 			break
 		var item: Dictionary = _items[index]
-		var target_position: Vector2 = item.get("world_position", Vector2.ZERO) as Vector2
-		await _move_camera_to(target_position, SCROLL_SECONDS, true)
+		await _move_camera_to_item(item, SCROLL_SECONDS, true)
 		if run_id != _run_id:
 			return
 		if _skip_requested:
@@ -136,12 +140,12 @@ func _run_cutscene(run_id: int) -> void:
 			return
 	if _skip_requested:
 		_reveal_remaining_items()
-		await _move_camera_to(_player.global_position, RETURN_SECONDS, false)
+		await _move_camera_to(_player.global_position, SKIPPED_RETURN_SECONDS, false)
 		if run_id != _run_id:
 			return
 		_finish(true)
 		return
-	await _move_camera_to(_player.global_position, RETURN_SECONDS, false)
+	await _move_camera_to(_player.global_position, NORMAL_RETURN_SECONDS, false)
 	if run_id != _run_id:
 		return
 	_finish(true)
@@ -174,6 +178,29 @@ func _move_camera_to(target_position: Vector2, duration: float, allow_skip_inter
 		_camera.global_position = start_position.lerp(target_position, eased_amount)
 	if not allow_skip_interrupt or not _skip_requested:
 		_camera.global_position = target_position
+
+
+func _move_camera_to_item(item: Dictionary, duration: float, allow_skip_interrupt: bool) -> void:
+	if _camera == null:
+		return
+	var start_position: Vector2 = _camera.global_position
+	var elapsed: float = 0.0
+	var safe_duration: float = maxf(duration, 0.001)
+	while elapsed < safe_duration and (not allow_skip_interrupt or not _skip_requested):
+		await get_tree().process_frame
+		elapsed += get_process_delta_time()
+		var amount: float = clampf(elapsed / safe_duration, 0.0, 1.0)
+		var eased_amount: float = amount * amount * (3.0 - 2.0 * amount)
+		_camera.global_position = start_position.lerp(_item_world_position(item), eased_amount)
+	if not allow_skip_interrupt or not _skip_requested:
+		_camera.global_position = _item_world_position(item)
+
+
+func _item_world_position(item: Dictionary) -> Vector2:
+	var target_node: Node2D = item.get("target_node", null) as Node2D
+	if target_node != null and is_instance_valid(target_node):
+		return target_node.global_position
+	return item.get("world_position", Vector2.ZERO) as Vector2
 
 
 func _wait_or_skip(duration: float) -> void:

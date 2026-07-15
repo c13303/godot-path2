@@ -6,7 +6,7 @@ for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss
 set "ARCHIVE=project_%TIMESTAMP%.zip"
 
 powershell -NoProfile -Command ^
-  "Compress-Archive -Path '.\scripts', '.\scenes', '.\AGENTS.md', '.\mainRun.tscn' -DestinationPath '%ARCHIVE%' -CompressionLevel Optimal"
+  "Compress-Archive -Path '.\scripts', '.\scenes', '.\AGENTS.md', '.\ARCHITECTURE.md', '.\mainRun.tscn' -DestinationPath '%ARCHIVE%' -CompressionLevel Optimal"
 
 if errorlevel 1 (
     echo.

@@ -41,6 +41,7 @@ const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
 const KEY_TANTRUM: String = "tutorial.tantrum"
 const KEY_NO_ROSES_NO_CLIENTS: String = "tutorial.no_roses_no_clients"
 const KEY_PLANT_MORE_ROSES: String = "tutorial.plant_more_roses"
+const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -59,11 +60,13 @@ const ALERT_DARK_RED: Color = Color(0.55, 0.0, 0.0)
 const ALERT_FLASH_SPEED: float = 8.0
 const GARDENING_TOOL_ID: String = "gardening"
 const HAMMER_TOOL_ID: String = "hammer"
+const BUILD_HOUSE_TOOL_ID: String = "buildhouse"
 const ROSE_ITEM_ID: String = "rose"
 const PASTEQUE_ITEM_ID: String = "pasteque"
 const TURRET_EPINE_ITEM_ID: String = "turret_epine"
 const COUNTER_ITEM_ID: String = "rose_shop_counter"
 const WALL_ITEM_ID: String = "wall"
+const HOUSE_BUILDER_ITEM_ID: String = "house_builder"
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -421,6 +424,8 @@ func _current_message_key() -> String:
 		return KEY_NO_ROSES_NO_CLIENTS
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
+	if _builder_house_tutorial_active():
+		return KEY_BUILD_BUILDER_HOUSE
 	# Seeds buy (and directly place) roses; that outranks watering. The player must
 	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
 	if seeds > 0:
@@ -760,6 +765,12 @@ func _should_warn_plant_more_roses() -> bool:
 	return _planted_rose_count() < _next_day_client_demand()
 
 
+func _builder_house_tutorial_active() -> bool:
+	return _building_manager != null \
+		and _building_manager.has_method("is_builder_house_tutorial_active") \
+		and bool(_building_manager.call("is_builder_house_tutorial_active"))
+
+
 func _planted_rose_count() -> int:
 	if _plant_manager == null or not _plant_manager.has_method("rose_count"):
 		return 0
@@ -825,6 +836,19 @@ func _update_tutorial_arrow(key: String) -> void:
 			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
 			if hammer_rect.size != Vector2.ZERO:
 				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
+				return
+		_hide_tutorial_arrow()
+		return
+	if key == KEY_BUILD_BUILDER_HOUSE:
+		if _is_build_house_menu_open():
+			var house_rect: Rect2 = _visible_build_item_rect(HOUSE_BUILDER_ITEM_ID)
+			if house_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_right_at(house_rect, get_process_delta_time())
+				return
+		else:
+			var buildhouse_rect: Rect2 = _quick_slot_rect(BUILD_HOUSE_TOOL_ID)
+			if buildhouse_rect.size != Vector2.ZERO:
+				_tutorial_arrow.point_down_at(buildhouse_rect, get_process_delta_time())
 				return
 		_hide_tutorial_arrow()
 		return
@@ -917,6 +941,12 @@ func _is_hammer_menu_open() -> bool:
 		and _game_ui.has_method("get_selected_build_tool_id")
 		and str(_game_ui.call("get_selected_build_tool_id")) == HAMMER_TOOL_ID
 	)
+
+
+func _is_build_house_menu_open() -> bool:
+	return _game_ui != null \
+		and _game_ui.has_method("get_selected_build_tool_id") \
+		and str(_game_ui.call("get_selected_build_tool_id")) == BUILD_HOUSE_TOOL_ID
 
 
 func _visible_build_item_rect(item_id: String) -> Rect2:

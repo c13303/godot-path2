@@ -611,6 +611,12 @@ func is_house_build_item_available(item_id: String) -> bool:
 	return true
 
 
+func notify_player_house_placed(item_id: String) -> void:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("notify_player_house_placed"):
+		building_manager.call("notify_player_house_placed", item_id)
+
+
 # True when a house may be placed with `cell` as its entrance (whole six-cell footprint valid).
 # Shared by the placement commit and the live preview tint.
 func _house_placement_valid(cell: Vector2i, placeable_def: Dictionary) -> bool:

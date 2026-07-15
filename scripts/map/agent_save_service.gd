@@ -39,6 +39,7 @@ func serialize_state() -> Dictionary:
 		# Not part of the day-phase spawn-state discard above: the one-shot reveal latches
 		# describe the whole run, so they must survive a day save just like a night one.
 		"spawner_reveal": _manager.get_spawner_reveal_phase_controller().serialize_state(),
+		"fundamental_builder_onboarding": _manager.serialize_fundamental_builder_onboarding(),
 		"night_preparation_ready": _manager.is_night_preparation_ready(),
 	}
 
@@ -59,6 +60,7 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 	# this restore may itself have requested (and so consumed) a reveal, and the saved run is
 	# what decides whether the one-shot cutscenes are still pending.
 	_manager.get_spawner_reveal_phase_controller().restore_state(_dict_from_value(data.get("spawner_reveal", {})))
+	_manager.restore_fundamental_builder_onboarding(_dict_from_value(data.get("fundamental_builder_onboarding", {})))
 	var restored_agents: Array[Dictionary] = []
 	var agents: Array[Dictionary] = _agent_data_array(data.get("agents", []))
 	agents = _discard_merchant_agent_data(agents, "load")

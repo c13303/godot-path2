@@ -16,6 +16,7 @@ const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var toolbuild: Control = $"../../GameUI/Toolbuild"
 @onready var merchant_dialog_controller: Node = $"../../GameUI/MerchantDialogController"
+@onready var fundamental_builder_dialog_controller: Node = $"../../GameUI/FundamentalBuilderDialogController"
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
@@ -108,8 +109,8 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_Y:
 			if joy_button_event.pressed:
-				# At the merchant, Y opens/closes the shop; else it rotates the build preview.
-				if not _try_toggle_merchant_shop():
+				# At interactable NPCs, Y opens their dialog; else it rotates the build preview.
+				if not _try_toggle_merchant_shop() and not _try_toggle_fundamental_builder_dialog():
 					_handle_pad_rotate_build()
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
@@ -127,7 +128,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_E:
-			if _try_toggle_merchant_shop():
+			if _try_toggle_merchant_shop() or _try_toggle_fundamental_builder_dialog():
 				get_viewport().set_input_as_handled()
 				return
 
@@ -352,12 +353,21 @@ func _step_pad_shop_selection(direction: int) -> void:
 func _is_merchant_shop_open() -> bool:
 	return merchant_dialog_controller != null and merchant_dialog_controller.has_method("is_shop_open") and bool(merchant_dialog_controller.call("is_shop_open"))
 
+
+func _is_fundamental_builder_dialog_open() -> bool:
+	return fundamental_builder_dialog_controller != null \
+		and fundamental_builder_dialog_controller.has_method("is_dialog_open") \
+		and bool(fundamental_builder_dialog_controller.call("is_dialog_open"))
+
+
 func _should_pad_open_quickbar_from_dpad() -> bool:
 	if _paused or _cutscene_input_locked or _is_inventory_open():
 		return false
 	if _is_quickbar_active():
 		return false
 	if _is_merchant_shop_open():
+		return false
+	if _is_fundamental_builder_dialog_open():
 		return false
 	return game_ui != null and game_ui.has_method("activate_last_quickbar_slot")
 
@@ -801,6 +811,14 @@ func _try_toggle_merchant_shop() -> bool:
 	if merchant_dialog_controller == null or not merchant_dialog_controller.has_method("request_shop_toggle"):
 		return false
 	return bool(merchant_dialog_controller.call("request_shop_toggle"))
+
+
+func _try_toggle_fundamental_builder_dialog() -> bool:
+	if _paused or _is_inventory_open():
+		return false
+	if fundamental_builder_dialog_controller == null or not fundamental_builder_dialog_controller.has_method("request_dialog_toggle"):
+		return false
+	return bool(fundamental_builder_dialog_controller.call("request_dialog_toggle"))
 
 
 func _deactivate_quickbar() -> void:
