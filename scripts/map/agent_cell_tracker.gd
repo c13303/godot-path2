@@ -130,6 +130,32 @@ func registered_count() -> int:
 	return _agents.size()
 
 
+func is_cell_occupied(cell: Vector2i, excluded_agent: Node2D = null) -> bool:
+	if cell == INVALID_CELL or not _cell_to_agents.has(cell):
+		return false
+	var excluded_id: int = excluded_agent.get_instance_id() if excluded_agent != null and is_instance_valid(excluded_agent) else -1
+	var dead: Array[int] = []
+	var bucket: Dictionary = _cell_to_agents[cell] as Dictionary
+	for raw_id: Variant in bucket.keys():
+		var id: int = int(raw_id)
+		if id == excluded_id:
+			continue
+		if _suspended.has(id):
+			continue
+		var record: Dictionary = _agents.get(id, {}) as Dictionary
+		if record.is_empty():
+			dead.append(id)
+			continue
+		var agent: Node2D = (record["ref"] as WeakRef).get_ref() as Node2D
+		if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():
+			dead.append(id)
+			continue
+		return true
+	for id: int in dead:
+		_remove_id(id)
+	return false
+
+
 func process(delta: float) -> void:
 	if _manager == null:
 		return

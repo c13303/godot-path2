@@ -20,6 +20,11 @@ const STATE_LEAVING: StringName = &"leaving"
 const STALL_WARNING_SECONDS: float = 4.0
 const STALL_WARNING_REPEAT_SECONDS: float = 6.0
 const STALL_MOVEMENT_EPSILON_PIXELS: float = 2.0
+const LOCAL_WORK_MOVE_MAX_DISTANCE: int = 10
+const IDLE_HOME_CHECK_INTERVAL_SECONDS: float = 0.5
+const IDLE_HOME_DISPLACEMENT_GRACE_SECONDS: float = 1.0
+const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
+const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.45
 
 var _manager: BuildingManager
 var _visitors: Array[DayVisitorMovementController] = []
@@ -36,6 +41,10 @@ var _next_builder_runtime_id: int = 1
 var _last_watch_position_by_builder_id: Dictionary = {}  # int -> Vector2
 var _stall_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _stall_warning_cooldown_by_builder_id: Dictionary = {}  # int -> float
+var _idle_home_check_elapsed: float = 0.0
+var _idle_displacement_seconds_by_builder_id: Dictionary = {}  # int -> float
+var _idle_return_retry_cooldown_by_builder_id: Dictionary = {}  # int -> float
+var _pending_idle_return_by_builder_id: Dictionary = {}  # int -> true
 
 
 func setup(manager: BuildingManager) -> void:
@@ -231,6 +240,7 @@ func process_arrivals() -> void:
 
 func process_active_visitors(delta: float = 0.0) -> void:
 	_clean_invalid_visitors()
+	_process_idle_home_correction(delta)
 	_process_builder_motion_watchdog(delta)
 
 
@@ -256,6 +266,10 @@ func clear_active_builders(free_agents: bool) -> void:
 	_house_id_by_builder_id.clear()
 	_builder_id_by_house_id.clear()
 	_home_cell_by_builder_id.clear()
+	_idle_displacement_seconds_by_builder_id.clear()
+	_idle_return_retry_cooldown_by_builder_id.clear()
+	_pending_idle_return_by_builder_id.clear()
+	_idle_home_check_elapsed = 0.0
 	_fundamental_builder_id = -1
 	_clear_motion_watch()
 
@@ -316,9 +330,12 @@ func available_idle_builder_ids() -> Array[int]:
 
 func is_builder_available_for_work(builder_id: int) -> bool:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
-	if visitor == null or not visitor.is_active() or visitor.is_leaving():
+	if visitor == null or not visitor.is_active() or is_builder_leaving(builder_id):
 		return false
-	return StringName(_state_by_builder_id.get(builder_id, &"")) == STATE_IDLE and visitor.is_waiting()
+	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
+	if state == STATE_IDLE and visitor.is_waiting():
+		return true
+	return state == STATE_RETURNING_IDLE
 
 
 func is_builder_active(builder_id: int) -> bool:
@@ -380,6 +397,7 @@ func assign_builder_to_work_cell(builder_id: int, house_id: StringName, target_c
 		return false
 	_state_by_builder_id[builder_id] = STATE_TRAVELLING_TO_WORK
 	_work_house_by_builder_id[builder_id] = house_id
+	_clear_idle_return_state(builder_id)
 	_reset_builder_motion_watch(builder_id)
 	return true
 
@@ -392,10 +410,14 @@ func request_builder_local_work_move(builder_id: int, target_cell: Vector2i) -> 
 		return false
 	if not _is_candidate_available(target_cell, visitor):
 		return false
+	var current_cell: Vector2i = builder_current_cell(builder_id)
+	var path_cells: PackedVector2Array = _find_bounded_local_work_path(current_cell, target_cell)
+	if path_cells.is_empty():
+		return false
 	var previous_target: Vector2i = visitor.target_cell()
 	_release_claim_for(visitor)
 	_claimed_cells[target_cell] = visitor
-	if not visitor.repath_to_target(target_cell):
+	if not visitor.assign_cell_path(target_cell, path_cells):
 		_claimed_cells.erase(target_cell)
 		if previous_target != INVALID_CELL and _is_candidate_available(previous_target, visitor):
 			_claimed_cells[previous_target] = visitor
@@ -404,6 +426,58 @@ func request_builder_local_work_move(builder_id: int, target_cell: Vector2i) -> 
 	_state_by_builder_id[builder_id] = STATE_WORKING
 	_reset_builder_motion_watch(builder_id)
 	return true
+
+
+func _find_bounded_local_work_path(from_cell: Vector2i, to_cell: Vector2i) -> PackedVector2Array:
+	var empty_path: PackedVector2Array = PackedVector2Array()
+	if from_cell == INVALID_CELL or to_cell == INVALID_CELL:
+		return empty_path
+	if not _manager.is_walkable_cell(from_cell) or not _manager.is_walkable_cell(to_cell):
+		return empty_path
+	if abs(from_cell.x - to_cell.x) > LOCAL_WORK_MOVE_MAX_DISTANCE or abs(from_cell.y - to_cell.y) > LOCAL_WORK_MOVE_MAX_DISTANCE:
+		return empty_path
+	var queue: Array[Vector2i] = [from_cell]
+	var visited: Dictionary = {from_cell: true}
+	var came_from: Dictionary = {}
+	var directions: Array[Vector2i] = [
+		Vector2i.RIGHT,
+		Vector2i.LEFT,
+		Vector2i.DOWN,
+		Vector2i.UP,
+	]
+	var head: int = 0
+	while head < queue.size():
+		var cell: Vector2i = queue[head]
+		head += 1
+		if cell == to_cell:
+			return _reconstruct_local_work_path(from_cell, to_cell, came_from)
+		for direction: Vector2i in directions:
+			var next_cell: Vector2i = cell + direction
+			if visited.has(next_cell):
+				continue
+			if abs(next_cell.x - from_cell.x) > LOCAL_WORK_MOVE_MAX_DISTANCE or abs(next_cell.y - from_cell.y) > LOCAL_WORK_MOVE_MAX_DISTANCE:
+				continue
+			if not _manager.is_walkable_cell(next_cell):
+				continue
+			visited[next_cell] = true
+			came_from[next_cell] = cell
+			queue.append(next_cell)
+	return empty_path
+
+
+func _reconstruct_local_work_path(from_cell: Vector2i, to_cell: Vector2i, came_from: Dictionary) -> PackedVector2Array:
+	var reversed_cells: Array[Vector2i] = [to_cell]
+	var cell: Vector2i = to_cell
+	while cell != from_cell:
+		if not came_from.has(cell):
+			return PackedVector2Array()
+		cell = came_from[cell] as Vector2i
+		reversed_cells.append(cell)
+	var path: PackedVector2Array = PackedVector2Array()
+	for index: int in range(reversed_cells.size() - 1, -1, -1):
+		var path_cell: Vector2i = reversed_cells[index]
+		path.append(Vector2(float(path_cell.x), float(path_cell.y)))
+	return path
 
 
 func release_builder_from_work(builder_id: int) -> void:
@@ -445,17 +519,34 @@ func return_builder_to_idle_area(builder_id: int) -> bool:
 		return false
 	var target_cell: Vector2i = _find_claim_for_visitor(visitor.source_spawner_cell(), visitor)
 	if target_cell == INVALID_CELL:
+		_mark_idle_return_pending(builder_id)
+		_park_builder_at_current_cell(builder_id, visitor)
 		return false
 	_release_claim_for(visitor)
 	_claimed_cells[target_cell] = visitor
 	if not visitor.repath_to_target(target_cell):
 		_claimed_cells.erase(target_cell)
+		_mark_idle_return_pending(builder_id)
+		_park_builder_at_current_cell(builder_id, visitor)
 		_reset_builder_motion_watch(builder_id)
 		return false
 	_work_house_by_builder_id.erase(builder_id)
 	_state_by_builder_id[builder_id] = STATE_RETURNING_IDLE
+	_clear_idle_return_state(builder_id)
 	_reset_builder_motion_watch(builder_id)
 	return true
+
+
+func _park_builder_at_current_cell(builder_id: int, visitor: DayVisitorMovementController) -> void:
+	var current_cell: Vector2i = builder_current_cell(builder_id)
+	if current_cell == INVALID_CELL or not _manager.is_walkable_cell(current_cell):
+		return
+	_release_claim_for(visitor)
+	_claimed_cells[current_cell] = visitor
+	_work_house_by_builder_id.erase(builder_id)
+	_state_by_builder_id[builder_id] = STATE_IDLE
+	visitor.park_at_current_cell(current_cell)
+	_reset_builder_motion_watch(builder_id)
 
 
 func _find_claim_for_visitor(source_cell: Vector2i, visitor: DayVisitorMovementController) -> Vector2i:
@@ -509,15 +600,96 @@ func _is_candidate_available(cell: Vector2i, visitor: DayVisitorMovementControll
 		return false
 	if visitor != null and visitor.target_cell() == cell:
 		return true
-	var occupied: Array[Vector2i] = _manager.occupied_cells_for_spawning()
-	return not occupied.has(cell)
+	var excluded_agent: Node2D = visitor.agent_node() if visitor != null else null
+	return not _manager.get_agent_cell_tracker().is_cell_occupied(cell, excluded_agent)
 
 
 func _claim_still_valid(visitor: DayVisitorMovementController, cell: Vector2i) -> bool:
 	return _is_candidate_available(cell, visitor)
 
 
+func _process_idle_home_correction(delta: float) -> void:
+	if delta <= 0.0 or GameState.is_night:
+		return
+	_idle_home_check_elapsed += delta
+	if _idle_home_check_elapsed < IDLE_HOME_CHECK_INTERVAL_SECONDS:
+		return
+	var elapsed: float = _idle_home_check_elapsed
+	_idle_home_check_elapsed = 0.0
+	for raw_builder_id: Variant in _idle_return_retry_cooldown_by_builder_id.keys():
+		var cooldown_builder_id: int = int(raw_builder_id)
+		var cooldown: float = maxf(0.0, float(_idle_return_retry_cooldown_by_builder_id.get(cooldown_builder_id, 0.0)) - elapsed)
+		if cooldown <= 0.0:
+			_idle_return_retry_cooldown_by_builder_id.erase(cooldown_builder_id)
+		else:
+			_idle_return_retry_cooldown_by_builder_id[cooldown_builder_id] = cooldown
+	for visitor: DayVisitorMovementController in _visitors:
+		var builder_id: int = _builder_id_for_visitor(visitor)
+		if builder_id < 0 or not _house_id_by_builder_id.has(builder_id):
+			if builder_id >= 0:
+				_clear_idle_return_state(builder_id)
+			continue
+		if not _eligible_for_idle_home_correction(builder_id, visitor):
+			_idle_displacement_seconds_by_builder_id.erase(builder_id)
+			continue
+		if _idle_return_retry_cooldown_by_builder_id.has(builder_id):
+			continue
+		if _pending_idle_return_by_builder_id.has(builder_id):
+			_request_idle_home_return(builder_id)
+			continue
+		if not _is_idle_builder_meaningfully_displaced(visitor):
+			_idle_displacement_seconds_by_builder_id.erase(builder_id)
+			continue
+		var displaced_for: float = float(_idle_displacement_seconds_by_builder_id.get(builder_id, 0.0)) + elapsed
+		_idle_displacement_seconds_by_builder_id[builder_id] = displaced_for
+		if displaced_for >= IDLE_HOME_DISPLACEMENT_GRACE_SECONDS:
+			_request_idle_home_return(builder_id)
+
+
+func _eligible_for_idle_home_correction(builder_id: int, visitor: DayVisitorMovementController) -> bool:
+	if visitor == null or not visitor.is_active() or visitor.is_leaving():
+		return false
+	if GameState.is_night or is_builder_leaving(builder_id):
+		return false
+	if _work_house_by_builder_id.has(builder_id):
+		return false
+	if StringName(_state_by_builder_id.get(builder_id, &"")) != STATE_IDLE:
+		return false
+	return visitor.is_waiting()
+
+
+func _is_idle_builder_meaningfully_displaced(visitor: DayVisitorMovementController) -> bool:
+	if visitor.target_cell() == INVALID_CELL:
+		return false
+	var tile_size: Vector2 = _manager.tile_size()
+	var threshold: float = maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR
+	return visitor.get_agent_world_position().distance_to(visitor.target_world_position()) > threshold
+
+
+func _request_idle_home_return(builder_id: int) -> void:
+	_idle_displacement_seconds_by_builder_id.erase(builder_id)
+	if return_builder_to_idle_area(builder_id):
+		_clear_idle_return_state(builder_id)
+		return
+	_mark_idle_return_pending(builder_id)
+
+
+func _mark_idle_return_pending(builder_id: int) -> void:
+	_pending_idle_return_by_builder_id[builder_id] = true
+	_idle_return_retry_cooldown_by_builder_id[builder_id] = IDLE_HOME_RETRY_COOLDOWN_SECONDS
+
+
+func _clear_idle_return_state(builder_id: int) -> void:
+	_idle_displacement_seconds_by_builder_id.erase(builder_id)
+	_idle_return_retry_cooldown_by_builder_id.erase(builder_id)
+	_pending_idle_return_by_builder_id.erase(builder_id)
+
+
 func _process_builder_motion_watchdog(delta: float) -> void:
+	if not CppDebugOptions.logs_enabled:
+		if not _last_watch_position_by_builder_id.is_empty() or not _stall_seconds_by_builder_id.is_empty() or not _stall_warning_cooldown_by_builder_id.is_empty():
+			_clear_motion_watch()
+		return
 	if delta <= 0.0:
 		return
 	var active_ids: Dictionary = {}
@@ -629,6 +801,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_home_cell_by_builder_id.erase(builder_id)
 		if _fundamental_builder_id == builder_id:
 			_fundamental_builder_id = -1
+		_clear_idle_return_state(builder_id)
 		_clear_builder_motion_watch(builder_id)
 		if _manager != null:
 			_manager.get_house_builder_work_controller().on_builder_removed(builder_id)
@@ -676,6 +849,7 @@ func _on_visitor_reached_target(visitor: DayVisitorMovementController) -> void:
 	var state: StringName = StringName(_state_by_builder_id.get(builder_id, STATE_ENTERING))
 	if state == STATE_ENTERING or state == STATE_RETURNING_IDLE:
 		_state_by_builder_id[builder_id] = STATE_IDLE
+		_clear_idle_return_state(builder_id)
 		_reset_builder_motion_watch(builder_id)
 		_manager.get_house_builder_work_controller().on_builder_became_idle(builder_id)
 	elif state == STATE_TRAVELLING_TO_WORK:

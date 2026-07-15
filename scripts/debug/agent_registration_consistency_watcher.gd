@@ -29,6 +29,7 @@ const TRACKED_GROUPS: Array[StringName] = [
 	&"monsters",
 	&"clients",
 	&"merchants",
+	&"builders",
 	&"sheep",
 ]
 

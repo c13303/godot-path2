@@ -22,6 +22,7 @@ var _phase_by_builder_id: Dictionary = {}  # int -> StringName
 var _pause_remaining_by_builder_id: Dictionary = {}  # int -> float
 var _pause_index_by_builder_id: Dictionary = {}  # int -> int
 var _hammer_swing_remaining_by_builder_id: Dictionary = {}  # int -> float
+var _work_cell_candidates_by_house_id: Dictionary = {}  # StringName -> Array[Vector2i]
 var _assignment_dirty: bool = false
 
 
@@ -35,6 +36,7 @@ func setup(
 	_house_manager = house_manager
 	_builder = builder
 	_overlay = overlay
+	_work_cell_candidates_by_house_id.clear()
 
 
 func process(delta: float) -> void:
@@ -49,6 +51,7 @@ func process(delta: float) -> void:
 
 
 func on_wip_house_added(house_id: StringName) -> void:
+	_work_cell_candidates_by_house_id.erase(house_id)
 	if not _work_seconds_by_house_id.has(house_id):
 		_work_seconds_by_house_id[house_id] = 0.0
 	_mark_assignment_dirty()
@@ -57,6 +60,7 @@ func on_wip_house_added(house_id: StringName) -> void:
 func on_wip_house_removed(house_id: StringName) -> void:
 	_cancel_house_assignment(house_id, true)
 	_work_seconds_by_house_id.erase(house_id)
+	_work_cell_candidates_by_house_id.erase(house_id)
 	if _overlay != null:
 		_overlay.remove_progress(house_id)
 	_mark_assignment_dirty()
@@ -79,6 +83,7 @@ func on_night_started() -> void:
 
 
 func on_topology_changed() -> void:
+	_work_cell_candidates_by_house_id.clear()
 	for raw_builder_id: Variant in _house_by_builder_id.keys():
 		var builder_id: int = int(raw_builder_id)
 		var house_id: StringName = StringName(str(_house_by_builder_id.get(builder_id, &"")))
@@ -267,8 +272,11 @@ func _mark_assignment_dirty() -> void:
 
 
 func _work_cell_candidates(house_id: StringName) -> Array[Vector2i]:
+	if _work_cell_candidates_by_house_id.has(house_id):
+		return _work_cell_candidates_by_house_id[house_id] as Array[Vector2i]
 	var entrance: Vector2i = _house_manager.get_house_entrance(house_id)
 	if entrance == INVALID_CELL:
+		_work_cell_candidates_by_house_id.erase(house_id)
 		return []
 	var presence: Array[Vector2i] = _house_manager.get_presence_cells(entrance)
 	var presence_set: Dictionary = {}
@@ -296,4 +304,5 @@ func _work_cell_candidates(house_id: StringName) -> Array[Vector2i]:
 				if not _manager.has_floor_cell(candidate) or not _manager.is_walkable_cell(candidate):
 					continue
 				candidates.append(candidate)
+	_work_cell_candidates_by_house_id[house_id] = candidates
 	return candidates

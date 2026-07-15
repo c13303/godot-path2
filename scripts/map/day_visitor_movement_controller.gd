@@ -16,6 +16,7 @@ var _nav_id: int = -1
 var _source_spawner_cell: Vector2i = INVALID_CELL
 var _spawn_cell: Vector2i = INVALID_CELL
 var _target_cell: Vector2i = INVALID_CELL
+var _target_world_position: Vector2 = Vector2.ZERO
 var _waiting: bool = false
 var _leaving: bool = false
 var _leave_at_night_pending: bool = false
@@ -66,8 +67,9 @@ func spawn(
 	agent.set("nav_id", agent_nav_id)
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", agent_nav_id, true)
+	var path_world: PackedVector2Array = PackedVector2Array()
 	if not starts_at_destination:
-		var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, agent_nav_id, true)
+		path_world = _manager.path_cells_to_world(path_cells, agent_nav_id, true)
 		agent_manager.call("assign_agent_path", agent_nav_id, path_world)
 	_agent_kind = agent_kind
 	_scene_group = scene_group
@@ -77,6 +79,7 @@ func spawn(
 	_source_spawner_cell = spawner_cell
 	_spawn_cell = spawn_cell
 	_target_cell = destination_cell
+	_target_world_position = agent.global_position if starts_at_destination else path_world[path_world.size() - 1]
 	_waiting = starts_at_destination
 	_leaving = false
 	_leave_at_night_pending = false
@@ -103,6 +106,10 @@ func agent_node() -> Node2D:
 
 func target_cell() -> Vector2i:
 	return _target_cell
+
+
+func target_world_position() -> Vector2:
+	return _target_world_position
 
 
 func source_spawner_cell() -> Vector2i:
@@ -182,6 +189,28 @@ func repath_to_current_target() -> bool:
 	return repath_to_target(_target_cell)
 
 
+func assign_cell_path(destination_cell: Vector2i, path_cells: PackedVector2Array) -> bool:
+	if not _active or _leaving:
+		return false
+	if not is_instance_valid(_agent):
+		return false
+	var agent_manager: Node = _agent_manager()
+	if _nav_id < 0 or agent_manager == null or not agent_manager.has_method("assign_agent_path"):
+		return false
+	if destination_cell == INVALID_CELL or path_cells.is_empty():
+		return false
+	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, _nav_id, true)
+	if path_world.is_empty():
+		return false
+	agent_manager.call("assign_agent_path", _nav_id, path_world)
+	_target_cell = destination_cell
+	_target_world_position = path_world[path_world.size() - 1]
+	_waiting = false
+	if _agent.has_method("start_astar_in"):
+		_agent.call("start_astar_in")
+	return true
+
+
 func repath_to_target(destination_cell: Vector2i) -> bool:
 	if not _active or _leaving:
 		return false
@@ -201,13 +230,20 @@ func repath_to_target(destination_cell: Vector2i) -> bool:
 	var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(current_cell, destination_cell)
 	if path_cells.is_empty():
 		return false
-	var path_world: PackedVector2Array = _manager.path_cells_to_world(path_cells, _nav_id, true)
-	agent_manager.call("assign_agent_path", _nav_id, path_world)
-	_target_cell = destination_cell
-	_waiting = false
-	if _agent.has_method("start_astar_in"):
-		_agent.call("start_astar_in")
-	return true
+	return assign_cell_path(destination_cell, path_cells)
+
+
+func park_at_current_cell(cell: Vector2i) -> void:
+	if not _active or _leaving or not is_instance_valid(_agent):
+		return
+	var agent_manager: Node = _agent_manager()
+	if _nav_id >= 0 and agent_manager != null and agent_manager.has_method("detach_agent_path"):
+		agent_manager.call("detach_agent_path", _nav_id)
+	if _agent.has_method("stop_astar_in"):
+		_agent.call("stop_astar_in")
+	_target_cell = cell
+	_target_world_position = _agent.global_position
+	_waiting = true
 
 
 func clear(free_agent: bool) -> void:
@@ -241,6 +277,7 @@ func _reset_state() -> void:
 	_source_spawner_cell = INVALID_CELL
 	_spawn_cell = INVALID_CELL
 	_target_cell = INVALID_CELL
+	_target_world_position = Vector2.ZERO
 	_waiting = false
 	_leaving = false
 	_leave_at_night_pending = false
