@@ -21,6 +21,10 @@ class_name DialogUI
 ##   "visible": bool              - whether the row is shown at all (default true)
 ##   "enabled": bool              - whether activating it does anything (default true)
 ##   "close_on_select": bool      - close the dialog after the handler runs (default false)
+##
+## Options dictionary fields:
+##   "blocks_gameplay_input": bool
+##   "body_icons": Dictionary     - text placeholder String -> inline Texture2D
 
 const GROUP_NAME: StringName = &"dialog_ui"
 
@@ -146,6 +150,7 @@ func _build_ui() -> void:
 	_panel = PanelContainer.new()
 	_panel.name = "Panel"
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_panel.gui_input.connect(_on_typewriter_skip_surface_gui_input)
 	_panel.add_theme_stylebox_override("panel", _panel_background_style())
 	center.add_child(_panel)
 
@@ -217,6 +222,7 @@ func _build_upper_section() -> HBoxContainer:
 	_body_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_body_scroll.custom_minimum_size = Vector2(BODY_WIDTH, UPPER_HEIGHT)
 	_body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body_scroll.gui_input.connect(_on_typewriter_skip_surface_gui_input)
 	upper.add_child(_body_scroll)
 
 	_body_label = RichTextLabel.new()
@@ -242,6 +248,7 @@ func _build_choice_section() -> ScrollContainer:
 	_choice_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_choice_scroll.custom_minimum_size = Vector2(0.0, CHOICE_AREA_HEIGHT)
 	_choice_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_choice_scroll.gui_input.connect(_on_typewriter_skip_surface_gui_input)
 
 	_choice_list = VBoxContainer.new()
 	_choice_list.name = "ChoiceList"
@@ -311,7 +318,7 @@ func open_dialog(
 
 	_portrait.texture = portrait
 	_name_label.text = speaker_name
-	_body_label.text = body_text
+	_set_body_content(body_text, options.get("body_icons", {}) as Dictionary)
 	_total_chars = _body_label.get_total_character_count()
 	_body_label.visible_characters = 0
 
@@ -376,6 +383,34 @@ func finish_typewriter() -> void:
 	_typing = false
 	_body_label.visible_characters = -1
 	_reveal_choices()
+
+
+func _set_body_content(body_text: String, body_icons: Dictionary) -> void:
+	if body_icons.is_empty():
+		_body_label.text = body_text
+		return
+	_body_label.clear()
+	var remaining: String = body_text
+	while remaining != "":
+		var match_key: String = ""
+		var match_index: int = -1
+		for raw_key: Variant in body_icons.keys():
+			var key: String = str(raw_key)
+			if key == "":
+				continue
+			var index: int = remaining.find(key)
+			if index >= 0 and (match_index < 0 or index < match_index):
+				match_index = index
+				match_key = key
+		if match_index < 0:
+			_body_label.append_text(remaining)
+			break
+		if match_index > 0:
+			_body_label.append_text(remaining.substr(0, match_index))
+		var texture: Texture2D = body_icons.get(match_key, null) as Texture2D
+		if texture != null:
+			_body_label.add_image(texture, 32, 32)
+		remaining = remaining.substr(match_index + match_key.length())
 
 
 # --- Typewriter --------------------------------------------------------------
@@ -747,6 +782,14 @@ func _handle_pad_button(button_index: int) -> void:
 ## Clicks that reach the backdrop (i.e. not on a choice or the close button) complete the
 ## typewriter while typing. They never interact with the world (the backdrop swallows them).
 func _on_backdrop_gui_input(event: InputEvent) -> void:
+	_handle_typewriter_skip_click(event)
+
+
+func _on_typewriter_skip_surface_gui_input(event: InputEvent) -> void:
+	_handle_typewriter_skip_click(event)
+
+
+func _handle_typewriter_skip_click(event: InputEvent) -> void:
 	if not _open or Engine.get_frames_drawn() == _open_frame:
 		return
 	if event is InputEventMouseButton:

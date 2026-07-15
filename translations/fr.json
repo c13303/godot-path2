@@ -24,6 +24,7 @@
 	"tutorial.talk_builder": "Parlez au bâtisseur",
 	"tutorial.build_builder_house": "Construisez une maison de bâtisseur",
 	"builder.fundamental.greeting": "Salut ! Je peux construire des maisons avec toi, mais tu dois d'abord m'aider à construire la mienne.",
+	"builder.fundamental.after_first_house": "Je peux construire d'autres maisons pour attirer d'autres animaux. Regarde dans le menu {house_menu_icon}",
 	"alert.needs_grass": "cette plante a besoin d'herbe !",
 	"alert.non_buildable_floor": "Sol non constructible",
 	"alert.needs_water": "Doit être construit dans l'eau",

@@ -2,8 +2,12 @@ extends Node
 
 const CONTEXT: StringName = &"fundamental_builder"
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
+const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const BUILDER_FRAME_COUNT: float = 4.0
+const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const CHOICE_OK: String = "ok"
+const BUILD_HOUSE_ID: String = "buildhouse"
+const HOUSE_MENU_ICON_PLACEHOLDER: String = "{house_menu_icon}"
 const INTRO_REWARD_GEMS: int = 20
 const GEM_CURRENCY: StringName = &"gem"
 
@@ -41,7 +45,7 @@ func _open_dialog() -> void:
 	dialog.open_dialog(
 		CONTEXT,
 		_speaker_name(),
-		Translations.t("builder.fundamental.greeting"),
+		_body_text(),
 		_portrait,
 		[{
 			"id": CHOICE_OK,
@@ -51,7 +55,10 @@ func _open_dialog() -> void:
 		}],
 		_on_choice_selected,
 		_on_closed,
-		{"blocks_gameplay_input": true}
+		{
+			"blocks_gameplay_input": true,
+			"body_icons": _body_icons(),
+		}
 	)
 
 
@@ -72,7 +79,13 @@ func _is_builder_interactable() -> bool:
 func _on_choice_selected(choice_id: String, source_global_position: Vector2) -> void:
 	if choice_id != CHOICE_OK:
 		return
-	if building_manager == null or not building_manager.has_method("accept_fundamental_builder_dialog"):
+	if building_manager == null:
+		return
+	if _followup_dialog_pending():
+		if building_manager.has_method("accept_fundamental_builder_followup_dialog"):
+			building_manager.call("accept_fundamental_builder_followup_dialog")
+		return
+	if not building_manager.has_method("accept_fundamental_builder_dialog"):
 		return
 	var accepted: bool = bool(building_manager.call("accept_fundamental_builder_dialog"))
 	if accepted:
@@ -101,6 +114,43 @@ func _speaker_name() -> String:
 	var key: String = "item.house_builder"
 	var translated: String = Translations.t(key)
 	return translated if translated != key else "Builder House"
+
+
+func _body_text() -> String:
+	if _should_show_followup_text():
+		return Translations.t("builder.fundamental.after_first_house")
+	return Translations.t("builder.fundamental.greeting")
+
+
+func _body_icons() -> Dictionary:
+	if not _should_show_followup_text():
+		return {}
+	return {
+		HOUSE_MENU_ICON_PLACEHOLDER: _item_frame_texture(BUILD_HOUSE_ID),
+	}
+
+
+func _followup_dialog_pending() -> bool:
+	return building_manager != null \
+		and building_manager.has_method("is_fundamental_builder_followup_dialog_pending") \
+		and bool(building_manager.call("is_fundamental_builder_followup_dialog_pending"))
+
+
+func _should_show_followup_text() -> bool:
+	return building_manager != null \
+		and building_manager.has_method("should_show_fundamental_builder_followup_dialog_text") \
+		and bool(building_manager.call("should_show_fundamental_builder_followup_dialog_text"))
+
+
+func _item_frame_texture(item_id: String) -> Texture2D:
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var frame: int = int(item_def.get("frame", -1))
+	if frame < 0:
+		return null
+	var atlas: AtlasTexture = AtlasTexture.new()
+	atlas.atlas = ITEMS_TEXTURE
+	atlas.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
+	return atlas
 
 
 func _build_portrait_texture() -> Texture2D:

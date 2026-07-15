@@ -280,6 +280,16 @@ func _refresh(delta: float = 0.0) -> void:
 		_reset_hold_progress()
 		_show_key_immediately(KEY_TALK_BUILDER)
 		return
+	if _normal_tutorials_suppressed_by_builder_onboarding():
+		_reset_hold_progress()
+		_displayed_key = ""
+		_pending_key = ""
+		text = ""
+		visible = false
+		modulate = Color.WHITE
+		_set_glow(false)
+		_update_tutorial_arrow("")
+		return
 	if _alert_key != "":
 		var alert_start_night_skip_hold_active: bool = _start_night_pre_prompt_hold_active()
 		if alert_start_night_skip_hold_active:
@@ -832,6 +842,12 @@ func _fundamental_builder_dialog_pending() -> bool:
 			and not bool(_building_manager.call("is_fundamental_builder_active")):
 		return false
 	return true
+
+
+func _normal_tutorials_suppressed_by_builder_onboarding() -> bool:
+	return _building_manager != null \
+		and _building_manager.has_method("should_suppress_normal_tutorials_for_builder_onboarding") \
+		and bool(_building_manager.call("should_suppress_normal_tutorials_for_builder_onboarding"))
 
 
 func _planted_rose_count() -> int:

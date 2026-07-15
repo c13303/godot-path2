@@ -90,6 +90,8 @@ func _on_houses_restored() -> void:
 func _on_house_completed(snapshot: HouseManager.HouseSnapshot) -> void:
 	if snapshot == null or not snapshot.completed:
 		return
+	if _manager != null and _manager.has_method("notify_player_house_completed"):
+		_manager.call("notify_player_house_completed", snapshot.item_id)
 	if GameState.is_night:
 		return
 	_reconcile_fundamental_builder()

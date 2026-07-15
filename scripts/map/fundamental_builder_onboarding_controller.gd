@@ -5,7 +5,9 @@ const CUTSCENE_CONTEXT: StringName = &"fundamental_builder_intro"
 const TUTORIAL_KEY_BUILDER_HERE: String = "tutorial.builder_is_here"
 const TUTORIAL_NOT_STARTED: int = 0
 const TUTORIAL_ACTIVE: int = 1
-const TUTORIAL_COMPLETED: int = 2
+const TUTORIAL_WAITING_HOUSE_COMPLETION: int = 2
+const TUTORIAL_FOLLOWUP_DIALOG_PENDING: int = 3
+const TUTORIAL_COMPLETED: int = 4
 const HOUSE_BUILDER_ITEM_ID: String = "house_builder"
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 
@@ -55,6 +57,13 @@ func is_builder_house_tutorial_active() -> bool:
 	return _builder_house_tutorial_state == TUTORIAL_ACTIVE
 
 
+func should_suppress_normal_tutorials() -> bool:
+	return (
+		_builder_house_tutorial_state == TUTORIAL_WAITING_HOUSE_COMPLETION
+		or _builder_house_tutorial_state == TUTORIAL_FOLLOWUP_DIALOG_PENDING
+	)
+
+
 func is_intro_prompt_active() -> bool:
 	return (
 		not _intro_cutscene_played
@@ -80,9 +89,27 @@ func is_fundamental_builder_dialog_pending() -> bool:
 	return _intro_cutscene_played and _builder_house_tutorial_state == TUTORIAL_NOT_STARTED
 
 
+func is_followup_dialog_pending() -> bool:
+	return _builder_house_tutorial_state == TUTORIAL_FOLLOWUP_DIALOG_PENDING
+
+
+func should_show_followup_dialog_text() -> bool:
+	return (
+		_builder_house_tutorial_state == TUTORIAL_FOLLOWUP_DIALOG_PENDING
+		or _builder_house_tutorial_state == TUTORIAL_COMPLETED
+	)
+
+
 func accept_fundamental_builder_dialog() -> bool:
 	if _builder_house_tutorial_state == TUTORIAL_NOT_STARTED:
 		_builder_house_tutorial_state = TUTORIAL_ACTIVE
+		return true
+	return false
+
+
+func accept_followup_dialog() -> bool:
+	if _builder_house_tutorial_state == TUTORIAL_FOLLOWUP_DIALOG_PENDING:
+		_builder_house_tutorial_state = TUTORIAL_COMPLETED
 		return true
 	return false
 
@@ -93,7 +120,12 @@ func activate_builder_house_tutorial_from_dialog() -> void:
 
 func notify_player_house_placed(item_id: String) -> void:
 	if _builder_house_tutorial_state == TUTORIAL_ACTIVE and item_id == HOUSE_BUILDER_ITEM_ID:
-		_builder_house_tutorial_state = TUTORIAL_COMPLETED
+		_builder_house_tutorial_state = TUTORIAL_WAITING_HOUSE_COMPLETION
+
+
+func notify_house_completed(item_id: String) -> void:
+	if _builder_house_tutorial_state == TUTORIAL_WAITING_HOUSE_COMPLETION and item_id == HOUSE_BUILDER_ITEM_ID:
+		_builder_house_tutorial_state = TUTORIAL_FOLLOWUP_DIALOG_PENDING
 
 
 ## Only the one-shot latch is saved; the pending flag is deliberately left out. A cutscene
@@ -151,6 +183,9 @@ func _on_cutscene_completed(context: StringName, _release_spawning: bool) -> voi
 
 
 func _valid_tutorial_state(value: int) -> int:
-	if value == TUTORIAL_ACTIVE or value == TUTORIAL_COMPLETED:
+	if value == TUTORIAL_WAITING_HOUSE_COMPLETION \
+			or value == TUTORIAL_ACTIVE \
+			or value == TUTORIAL_FOLLOWUP_DIALOG_PENDING \
+			or value == TUTORIAL_COMPLETED:
 		return value
 	return TUTORIAL_NOT_STARTED

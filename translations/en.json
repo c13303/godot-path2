@@ -24,6 +24,7 @@
 	"tutorial.talk_builder": "Talk to the Builder",
 	"tutorial.build_builder_house": "Build a Builder House",
 	"builder.fundamental.greeting": "Hi! I can help you build houses, but first you need to help me build mine.",
+	"builder.fundamental.after_first_house": "I can build more houses to attract other animals. Look in the {house_menu_icon} menu.",
 	"alert.needs_grass": "This plants needs grass!",
 	"alert.non_buildable_floor": "Non-buildable floor",
 	"alert.needs_water": "Must be built in water",

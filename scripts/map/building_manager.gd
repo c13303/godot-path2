@@ -1584,8 +1584,20 @@ func is_builder_house_tutorial_active() -> bool:
 	return _fundamental_builder_onboarding.is_builder_house_tutorial_active()
 
 
+func should_suppress_normal_tutorials_for_builder_onboarding() -> bool:
+	return _fundamental_builder_onboarding.should_suppress_normal_tutorials()
+
+
 func is_fundamental_builder_dialog_pending() -> bool:
 	return _fundamental_builder_onboarding.is_fundamental_builder_dialog_pending()
+
+
+func is_fundamental_builder_followup_dialog_pending() -> bool:
+	return _fundamental_builder_onboarding.is_followup_dialog_pending()
+
+
+func should_show_fundamental_builder_followup_dialog_text() -> bool:
+	return _fundamental_builder_onboarding.should_show_followup_dialog_text()
 
 
 func accept_fundamental_builder_dialog() -> bool:
@@ -1593,6 +1605,10 @@ func accept_fundamental_builder_dialog() -> bool:
 	if accepted:
 		_builder.set_fundamental_builder_paused(false)
 	return accepted
+
+
+func accept_fundamental_builder_followup_dialog() -> bool:
+	return _fundamental_builder_onboarding.accept_followup_dialog()
 
 
 func activate_builder_house_tutorial_from_dialog() -> void:
@@ -1609,6 +1625,10 @@ func restore_fundamental_builder_onboarding(data: Dictionary) -> void:
 
 func notify_player_house_placed(item_id: String) -> void:
 	_fundamental_builder_onboarding.notify_player_house_placed(item_id)
+
+
+func notify_player_house_completed(item_id: String) -> void:
+	_fundamental_builder_onboarding.notify_house_completed(item_id)
 
 
 func is_fundamental_builder_arrival_pending() -> bool:
