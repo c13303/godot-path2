@@ -36,6 +36,9 @@ func serialize_state() -> Dictionary:
 		"client_sale": _manager.get_client_sale_controller().serialize_state(),
 		"spawn_tick": spawn_tick_state,
 		"spawn_playlist": spawn_playlist_state,
+		# Not part of the day-phase spawn-state discard above: the one-shot reveal latches
+		# describe the whole run, so they must survive a day save just like a night one.
+		"spawner_reveal": _manager.get_spawner_reveal_phase_controller().serialize_state(),
 		"night_preparation_ready": _manager.is_night_preparation_ready(),
 	}
 
@@ -52,6 +55,10 @@ func restore_state(data: Dictionary, navigation_prepared: bool = false) -> void:
 	_manager.get_spawn_playlist_controller().restore_state(spawn_playlist_state)
 	_manager.get_spawn_tick_controller().restore_state(spawn_tick_state)
 	_manager.get_client_sale_controller().restore_state(_dict_from_value(data.get("client_sale", {})))
+	# Restored last-word on the reveal latches: the night/client preparation that ran before
+	# this restore may itself have requested (and so consumed) a reveal, and the saved run is
+	# what decides whether the one-shot cutscenes are still pending.
+	_manager.get_spawner_reveal_phase_controller().restore_state(_dict_from_value(data.get("spawner_reveal", {})))
 	var restored_agents: Array[Dictionary] = []
 	var agents: Array[Dictionary] = _agent_data_array(data.get("agents", []))
 	agents = _discard_merchant_agent_data(agents, "load")

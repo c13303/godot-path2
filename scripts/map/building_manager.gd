@@ -656,10 +656,12 @@ func finish_night_preparation_success() -> void:
 	_night_preparation_ready = true
 	if _no_plants_remaining():
 		_show_tutorial_alert("tutorial.calm_night_no_roses")
+		_spawner_reveal_phase.consume_night_reveal()
 		on_night_reveal_finished()
 		return
 	if _spawn_playlist_config.playlist_spawning_enabled() and _spawner_reveal_phase.begin_night_reveal():
 		return
+	_spawner_reveal_phase.consume_night_reveal()
 	on_night_reveal_finished()
 
 
@@ -1770,6 +1772,10 @@ func get_spawn_tick_controller() -> SpawnTickController:
 
 func get_spawn_playlist_controller() -> SpawnPlaylistController:
 	return _spawn_playlist_controller
+
+
+func get_spawner_reveal_phase_controller() -> SpawnerRevealPhaseController:
+	return _spawner_reveal_phase
 
 
 func get_counter_stock_manager() -> CounterStockManager:

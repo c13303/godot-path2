@@ -12,6 +12,12 @@ var _cutscene: SpawnerRevealCutsceneController
 var _night_reveal_active: bool = false
 var _client_reveal_active: bool = false
 var _released_keys_by_context: Dictionary = {}
+# One-shot reveals. Each cutscene plays once per run: on the first night for the monsters
+# and on the first client sale for the clients. The latch is consumed as soon as the reveal
+# is requested, even on a night that reveals nothing (no roses, playlist spawning off), and
+# is saved with the run so loading a mid-run save never replays it.
+var _night_reveal_consumed: bool = false
+var _client_reveal_consumed: bool = false
 
 
 func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) -> void:
@@ -24,6 +30,9 @@ func setup(manager: BuildingManager, cutscene: SpawnerRevealCutsceneController) 
 
 
 func begin_night_reveal() -> bool:
+	if _night_reveal_consumed:
+		return false
+	_night_reveal_consumed = true
 	_clear_released_keys(REVEAL_CONTEXT_NIGHT)
 	var playlist: SpawnPlaylistController = _manager.get_spawn_playlist_controller()
 	var reveal_items: Array[Dictionary] = _night_reveal_items(playlist.get_initial_ready_spawn_requests())
@@ -35,6 +44,9 @@ func begin_night_reveal() -> bool:
 
 
 func begin_client_reveal() -> bool:
+	if _client_reveal_consumed:
+		return false
+	_client_reveal_consumed = true
 	_clear_released_keys(REVEAL_CONTEXT_CLIENTS)
 	var client_sale: ClientSaleController = _manager.get_client_sale_controller()
 	var reveal_items: Array[Dictionary] = _client_reveal_items(client_sale.get_initial_reveal_spawner_cells())
@@ -43,6 +55,13 @@ func begin_client_reveal() -> bool:
 		return true
 	_client_reveal_active = false
 	return false
+
+
+## Burns the one-shot night reveal without playing it. Called for nights that start but
+## never request a reveal (no roses left, playlist spawning disabled): the first night of
+## the run is still the reveal night, so a calm one spends it. Idempotent.
+func consume_night_reveal() -> void:
+	_night_reveal_consumed = true
 
 
 func abort_night_reveal() -> void:
@@ -73,6 +92,21 @@ func released_night_track_indices() -> Dictionary:
 
 func released_client_spawner_cells() -> Dictionary:
 	return _released_keys(REVEAL_CONTEXT_CLIENTS)
+
+
+## Only the one-shot latches are saved; the active-reveal flags and released keys are
+## deliberately left out. A cutscene is not resumable across a save, so a save taken while
+## one plays reloads with the reveal already spent and the night/sale running normally.
+func serialize_state() -> Dictionary:
+	return {
+		"night_reveal_consumed": _night_reveal_consumed,
+		"client_reveal_consumed": _client_reveal_consumed,
+	}
+
+
+func restore_state(data: Dictionary) -> void:
+	_night_reveal_consumed = bool(data.get("night_reveal_consumed", false))
+	_client_reveal_consumed = bool(data.get("client_reveal_consumed", false))
 
 
 func _on_cutscene_reveal_item(context: StringName, _item_index: int, item: Dictionary) -> void:
