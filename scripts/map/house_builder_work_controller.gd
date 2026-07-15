@@ -7,6 +7,8 @@ const WORK_PHASE_PAUSE: StringName = &"pause"
 const WORK_PHASE_MOVE: StringName = &"move"
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const PAUSE_DURATIONS: Array[float] = [0.8, 1.1, 1.4, 1.0]
+const HAMMER_SWING_INTERVAL_SECONDS: float = 1.0
+const HAMMER_SWING_DURATION_SECONDS: float = 0.3
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null
@@ -19,6 +21,7 @@ var _builder_by_house_id: Dictionary = {}  # StringName -> int
 var _phase_by_builder_id: Dictionary = {}  # int -> StringName
 var _pause_remaining_by_builder_id: Dictionary = {}  # int -> float
 var _pause_index_by_builder_id: Dictionary = {}  # int -> int
+var _hammer_swing_remaining_by_builder_id: Dictionary = {}  # int -> float
 var _assignment_dirty: bool = false
 
 
@@ -125,6 +128,22 @@ func _advance_work(builder_id: int, house_id: StringName, delta: float) -> void:
 		_overlay.show_progress(house_id, sprite, current / required)
 	if current >= required:
 		_complete_assignment(builder_id, house_id)
+		return
+	_process_builder_hammer_swing(builder_id, delta)
+
+
+# Visual cadence only: one full hammer turn per second of actual house progress.
+func _process_builder_hammer_swing(builder_id: int, delta: float) -> void:
+	var remaining: float = float(
+		_hammer_swing_remaining_by_builder_id.get(builder_id, HAMMER_SWING_INTERVAL_SECONDS)
+	)
+	remaining -= maxf(0.0, delta)
+	if remaining <= 0.0:
+		_builder.play_builder_hammer_swing(builder_id, HAMMER_SWING_DURATION_SECONDS)
+		# A large frame delta is normalized without queuing several swings.
+		while remaining <= 0.0:
+			remaining += HAMMER_SWING_INTERVAL_SECONDS
+	_hammer_swing_remaining_by_builder_id[builder_id] = remaining
 
 
 func _complete_assignment(builder_id: int, house_id: StringName) -> void:
@@ -169,6 +188,8 @@ func _try_assign_builder_to_house(builder_id: int, house_id: StringName) -> bool
 			_house_by_builder_id[builder_id] = house_id
 			_builder_by_house_id[house_id] = builder_id
 			_phase_by_builder_id[builder_id] = WORK_PHASE_TRAVEL
+			# Counts down only from _advance_work(), so travel to the house never swings.
+			_hammer_swing_remaining_by_builder_id[builder_id] = HAMMER_SWING_INTERVAL_SECONDS
 			if not _work_seconds_by_house_id.has(house_id):
 				_work_seconds_by_house_id[house_id] = 0.0
 			return true
@@ -232,6 +253,9 @@ func _clear_assignment_state(builder_id: int, house_id: StringName) -> void:
 	_builder_by_house_id.erase(house_id)
 	_phase_by_builder_id.erase(builder_id)
 	_pause_remaining_by_builder_id.erase(builder_id)
+	# The hammer stays visible; only its rotation stops and resets.
+	_builder.stop_builder_hammer_swing(builder_id)
+	_hammer_swing_remaining_by_builder_id.erase(builder_id)
 
 
 func _mark_assignment_dirty() -> void:

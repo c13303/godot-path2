@@ -9,6 +9,8 @@ const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/builder.png")
+const BUILDER_HAMMER_TEXTURE: Texture2D = preload("res://assets/sprites/house/marto.png")
+const BUILDER_HAMMER_SCALE: Vector2 = Vector2(0.56, 0.56)
 const CLIENT_HEALTH: int = 10
 const CLIENT_SPRITE_HFRAMES: int = 7
 const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
@@ -95,6 +97,9 @@ func apply_builder_data(agent: Node) -> void:
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false
+	# The hammer is part of the Builder's permanent look; construction only spins it.
+	if agent.has_method("set_held_object"):
+		agent.call("set_held_object", BUILDER_HAMMER_TEXTURE, 1, 0, BUILDER_HAMMER_SCALE)
 
 
 func _apply_bigmonster_animation(agent: Node) -> void:

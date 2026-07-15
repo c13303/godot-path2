@@ -341,6 +341,27 @@ func release_builder_from_work(builder_id: int) -> void:
 	_reset_builder_motion_watch(builder_id)
 
 
+# Visual-only delegation to the Builder agent's generic held-object API. Construction
+# timing stays with HouseBuilderWorkController; this only resolves the agent node.
+func play_builder_hammer_swing(builder_id: int, duration: float) -> void:
+	var agent: Node2D = _builder_agent_node(builder_id)
+	if agent == null or not agent.has_method("animate_held_object_full_rotation"):
+		return
+	agent.call("animate_held_object_full_rotation", duration)
+
+
+func stop_builder_hammer_swing(builder_id: int) -> void:
+	var agent: Node2D = _builder_agent_node(builder_id)
+	if agent == null or not agent.has_method("stop_held_object_animation"):
+		return
+	agent.call("stop_held_object_animation")
+
+
+func _builder_agent_node(builder_id: int) -> Node2D:
+	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
+	return visitor.agent_node() if visitor != null else null
+
+
 func return_builder_to_idle_area(builder_id: int) -> bool:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	if visitor == null or not visitor.is_active() or visitor.is_leaving():

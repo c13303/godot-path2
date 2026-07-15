@@ -80,8 +80,6 @@ const HELD_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.p
 const HELD_ROSE_TEXTURE_FRAME_COUNT: int = 3
 const HELD_ROSE_TEXTURE_FRAME: int = 0
 const HELD_ROSE_SCALE: Vector2 = Vector2(0.56, 0.56)
-const HELD_ROSE_Z_ABOVE: int = 1
-const HELD_ROSE_Z_BELOW: int = -1
 const FACING_CHANGE_MIN_SECONDS: float = 0.14
 const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
@@ -91,7 +89,11 @@ const MONSTER_FRAME_EATING: int = 1
 const MONSTER_FRAME_DROWNING: int = 3
 const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
-var _held_rose_sprite: Sprite2D
+var _held_object_visual: AgentHeldObjectVisual = AgentHeldObjectVisual.new()
+# Set while the generic held object is being driven by the legacy rose metadata bridge,
+# so the bridge can never clear an object another system put in the agent's hand.
+var _legacy_rose_held: bool = false
+var _legacy_rose_frame: int = -1
 var _facing_frame: int = MONSTER_FRAME_SOUTH
 var _facing_west: bool = false
 var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
@@ -101,6 +103,7 @@ var _last_facing_position: Vector2 = Vector2.ZERO
 func _ready() -> void:
 	health = max(1, max_health)
 	_setup_flash_material()
+	_held_object_visual.setup(self)
 	_facing_state.min_change_interval = FACING_CHANGE_MIN_SECONDS
 	_facing_state.diagonal_hysteresis_ratio = FACING_DIAGONAL_HYSTERESIS_RATIO
 	_last_facing_position = global_position
@@ -117,7 +120,7 @@ func _process(delta: float) -> void:
 	_process_eating_status(delta)
 	_update_directional_facing(delta)
 	_update_monster_frame()
-	_update_held_rose_pin()
+	_update_held_object()
 	_last_facing_position = global_position
 
 func take_damage(amount: int) -> bool:
@@ -214,7 +217,14 @@ func _update_monster_frame() -> void:
 
 
 func _update_directional_facing(delta: float) -> void:
-	if not _uses_directional_monster_frames() and not _uses_directional_client_frames():
+	# Agents without a directional body sheet still need facing while they hold a
+	# generic object: the held-object pin and z-index are direction-dependent.
+	var needs_facing: bool = (
+		_uses_directional_monster_frames()
+		or _uses_directional_client_frames()
+		or _held_object_visual.is_visible()
+	)
+	if not needs_facing:
 		return
 	var direction: Vector2 = global_position - _last_facing_position
 	if not _facing_state.face_direction(direction, delta):
@@ -257,22 +267,68 @@ func _directional_client_tantrum_frame() -> int:
 	return CLIENT_FRAME_TANTRUM_SOUTH
 
 
-func _update_held_rose_pin() -> void:
+# Generic held-object API. Valid for any FlowAgent regardless of agent_kind; these
+# only delegate to AgentHeldObjectVisual.
+func set_held_object(
+		texture: Texture2D,
+		hframes: int = 1,
+		frame: int = 0,
+		object_scale: Vector2 = Vector2.ONE
+) -> void:
+	_held_object_visual.show_object(texture, hframes, frame, object_scale)
+
+
+func set_held_object_frame(frame: int) -> void:
+	_held_object_visual.set_frame(frame)
+
+
+func clear_held_object() -> void:
+	_held_object_visual.clear_object()
+
+
+func animate_held_object_full_rotation(duration: float) -> void:
+	_held_object_visual.rotate_full_turn(duration)
+
+
+func stop_held_object_animation() -> void:
+	_held_object_visual.stop_animation(true)
+
+
+func _update_held_object() -> void:
+	_update_legacy_rose_bridge()
+	if not _held_object_visual.is_visible():
+		return
+	if not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
+		return
+	var render_behind: bool = _facing_frame == MONSTER_FRAME_NORTH
+	_held_object_visual.update_attachment(_held_object_pin_position(), render_behind)
+
+
+# Keeps the client/monster rose driven by its existing metadata contract while the
+# rose itself is rendered through the generic held-object system. It may only clear
+# an object it put there itself, so a Builder's permanent hammer is never touched.
+func _update_legacy_rose_bridge() -> void:
 	var rose_visible: bool = (
 		(_is_client_agent() and bool(get_meta("client_rose_visible", false)))
 		or (_is_monster_agent() and bool(get_meta("monster_rose_visible", false)))
 	)
 	if not rose_visible:
-		if is_instance_valid(_held_rose_sprite):
-			_held_rose_sprite.visible = false
+		if _legacy_rose_held:
+			_legacy_rose_held = false
+			_legacy_rose_frame = -1
+			_held_object_visual.clear_object()
 		return
-	var rose_sprite: Sprite2D = _ensure_held_rose_sprite()
-	if rose_sprite == null or not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
+	if not is_instance_valid(_monster_sprite) or _monster_sprite.texture == null:
 		return
-	rose_sprite.visible = true
-	rose_sprite.frame = _held_rose_frame()
-	rose_sprite.position = _held_rose_pin_position()
-	rose_sprite.z_index = HELD_ROSE_Z_BELOW if _facing_frame == MONSTER_FRAME_NORTH else HELD_ROSE_Z_ABOVE
+	var frame: int = _held_rose_frame()
+	if not _legacy_rose_held:
+		set_held_object(HELD_ROSE_TEXTURE, HELD_ROSE_TEXTURE_FRAME_COUNT, frame, HELD_ROSE_SCALE)
+		_legacy_rose_held = true
+		_legacy_rose_frame = frame
+		return
+	if frame != _legacy_rose_frame:
+		set_held_object_frame(frame)
+		_legacy_rose_frame = frame
 
 
 func _held_rose_frame() -> int:
@@ -281,23 +337,7 @@ func _held_rose_frame() -> int:
 	return HELD_ROSE_TEXTURE_FRAME
 
 
-func _ensure_held_rose_sprite() -> Sprite2D:
-	if is_instance_valid(_held_rose_sprite):
-		return _held_rose_sprite
-	var sprite: Sprite2D = Sprite2D.new()
-	sprite.name = "HeldRoseSprite2D"
-	sprite.texture = HELD_ROSE_TEXTURE
-	sprite.hframes = HELD_ROSE_TEXTURE_FRAME_COUNT
-	sprite.frame = HELD_ROSE_TEXTURE_FRAME
-	sprite.centered = true
-	sprite.scale = HELD_ROSE_SCALE
-	sprite.visible = false
-	add_child(sprite)
-	_held_rose_sprite = sprite
-	return _held_rose_sprite
-
-
-func _held_rose_pin_position() -> Vector2:
+func _held_object_pin_position() -> Vector2:
 	var frame_width: float = float(_monster_sprite.texture.get_width()) / float(maxi(1, _monster_sprite.hframes))
 	var frame_height: float = float(_monster_sprite.texture.get_height()) / float(maxi(1, _monster_sprite.vframes))
 	var half_width: float = frame_width * absf(_monster_sprite.scale.x) * 0.5
