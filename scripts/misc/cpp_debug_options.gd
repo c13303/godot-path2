@@ -32,7 +32,8 @@ static func save_log(message: String) -> void:
 		_apply_debug_settings()
 
 ## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, and money
-## during the day, and skips the night without granting anything at night.
+## during the day, and at night skips the night while paying out the loot the
+## night's remaining monsters would have dropped.
 @export var dev_keys: bool = false:
 	set(value):
 		dev_keys = value
@@ -322,9 +323,9 @@ func _is_game_paused() -> bool:
 
 
 ## Dev cheat keys, gated behind dev_keys. Numpad + fully refills the water
-## reserve and, during the day, grants 100 seeds/gems/money. At night it acts as
-## a night-skip only (removes every monster, ends the night) and grants no
-## currency, so skipping nights does not inflate the economy.
+## reserve and, during the day, grants 100 seeds/gems/money. At night it skips
+## the night (removes every monster, ends the night) and pays out the loot the
+## night would still have produced, so skipping does not cost the run its drops.
 ## Numpad 1/2/0 force-spawn one agent from each
 ## registered enemy/client spawner. K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
@@ -337,7 +338,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if key_event.keycode == KEY_KP_ADD:
 		get_viewport().set_input_as_handled()
-		if not GameState.is_night:
+		# The night loot must be counted before _end_dev_night() clears the monsters.
+		if GameState.is_night:
+			_grant_skipped_night_loot()
+		else:
 			_grant_dev_currency()
 		_refill_dev_water_reserve()
 		_end_dev_night()
@@ -380,15 +384,55 @@ func _restart_level_with_debug() -> void:
 	get_tree().reload_current_scene()
 
 
-func _grant_dev_currency() -> void:
+func _get_progression() -> Node:
 	var scene: Node = get_tree().current_scene if is_inside_tree() else null
-	var progression: Node = scene.get_node_or_null("progression") if scene else null
+	return scene.get_node_or_null("progression") if scene else null
+
+
+func _grant_dev_currency() -> void:
+	var progression: Node = _get_progression()
 	if progression == null:
 		push_warning("dev_keys: progression node not found")
 		return
 	_call_if_available(progression, "update_seeds", 100)
 	_call_if_available(progression, "update_gems", 100)
 	_call_if_available(progression, "update_money", 100)
+
+
+## Pays out the loot the current night would still have produced, so a skipped
+## night is worth the same as a fought one. A monster drops exactly one seed or
+## gem when it dies, so the payout is one drop per remaining monster: those alive
+## on the map plus those the playlist has not spawned yet.
+##
+## Unlike a real death, the seed/gem mix is a deterministic split on the night's
+## seed-drop chance instead of a per-monster roll, so the key pays the same every
+## time. Currency is credited directly rather than dropped as collectibles.
+##
+## Must be called before the night is ended, while the monsters still exist.
+func _grant_skipped_night_loot() -> void:
+	var manager: Node = _get_building_manager()
+	if manager == null:
+		push_warning("dev_keys: BuildingManager node not found")
+		return
+	if not manager.has_method("remaining_planificator_enemy_count") \
+		or not manager.has_method("monster_death_drop_seed_chance_percent"):
+		push_warning("dev_keys: BuildingManager night-loot queries not found")
+		return
+	var monster_count: int = int(manager.call("remaining_planificator_enemy_count"))
+	if monster_count <= 0:
+		return
+	var progression: Node = _get_progression()
+	if progression == null:
+		push_warning("dev_keys: progression node not found")
+		return
+	var seed_chance_percent: int = clampi(int(manager.call("monster_death_drop_seed_chance_percent")), 0, 100)
+	var seed_count: int = monster_count * seed_chance_percent / 100
+	var gem_count: int = monster_count - seed_count
+	if seed_count > 0:
+		_call_if_available(progression, "update_seeds", seed_count)
+	if gem_count > 0:
+		_call_if_available(progression, "update_gems", gem_count)
+	CppDebugOptions.dlog("dev_keys: night skip paid %d seed(s) + %d gem(s) for %d remaining monster(s)" % [seed_count, gem_count, monster_count])
 
 
 func _complete_dev_wip_houses() -> void:
@@ -404,8 +448,7 @@ func _complete_dev_wip_houses() -> void:
 
 
 func _advance_dev_day() -> void:
-	var scene: Node = get_tree().current_scene if is_inside_tree() else null
-	var progression: Node = scene.get_node_or_null("progression") if scene else null
+	var progression: Node = _get_progression()
 	if progression == null:
 		push_warning("dev_keys: progression node not found")
 		return

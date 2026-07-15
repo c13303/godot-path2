@@ -37,7 +37,7 @@ func remove_dead_monster_with_forced_currency_drop(agent: Node2D, currency: Stri
 
 
 func _spawn_monster_death_drop(world_position: Vector2) -> void:
-	var seed_chance_percent: int = _manager._monster_death_drop_seed_chance_percent()
+	var seed_chance_percent: int = _manager.monster_death_drop_seed_chance_percent()
 	var seed_chance: float = float(clampi(seed_chance_percent, 0, 100)) / 100.0
 	var drop_type: StringName = MONSTER_DEATH_DROP_SEED if randf() < seed_chance else MONSTER_DEATH_DROP_GEM
 	_manager.spawn_collectible_currency(drop_type, world_position)

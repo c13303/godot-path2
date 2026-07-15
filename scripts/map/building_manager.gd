@@ -2869,7 +2869,7 @@ func _on_removed_builder_agent(agent: Node2D) -> void:
 	_builder.on_agent_removed(agent)
 
 
-func _monster_death_drop_seed_chance_percent() -> int:
+func monster_death_drop_seed_chance_percent() -> int:
 	return _spawn_playlist_config.monster_drop_seed_chance_percent()
 
 func _nearest_spawner_cell(from_cell: Vector2i) -> Vector2i:
