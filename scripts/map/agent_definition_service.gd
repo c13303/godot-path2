@@ -9,6 +9,7 @@ const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/builder.png")
+const FUNDAMENTAL_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
 const BUILDER_HAMMER_TEXTURE: Texture2D = preload("res://assets/sprites/house/marto.png")
 const BUILDER_HAMMER_SCALE: Vector2 = Vector2(0.56, 0.56)
 const CLIENT_HEALTH: int = 10
@@ -91,9 +92,17 @@ func apply_merchant_data(agent: Node) -> void:
 
 
 func apply_builder_data(agent: Node) -> void:
+	_apply_builder_visuals(agent, BUILDER_TEXTURE)
+
+
+func apply_fundamental_builder_data(agent: Node) -> void:
+	_apply_builder_visuals(agent, FUNDAMENTAL_BUILDER_TEXTURE)
+
+
+func _apply_builder_visuals(agent: Node, texture: Texture2D) -> void:
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
-		sprite.texture = BUILDER_TEXTURE
+		sprite.texture = texture
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false

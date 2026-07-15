@@ -80,6 +80,9 @@ const HELD_ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.p
 const HELD_ROSE_TEXTURE_FRAME_COUNT: int = 3
 const HELD_ROSE_TEXTURE_FRAME: int = 0
 const HELD_ROSE_SCALE: Vector2 = Vector2(0.56, 0.56)
+## How far (pixels, ~a third of a tile) a held object travels toward its swing target at the
+## peak of a full-rotation swing.
+const HELD_OBJECT_SWING_DISTANCE: float = 6.0
 const FACING_CHANGE_MIN_SECONDS: float = 0.14
 const FACING_DIAGONAL_HYSTERESIS_RATIO: float = 1.20
 
@@ -286,8 +289,11 @@ func clear_held_object() -> void:
 	_held_object_visual.clear_object()
 
 
-func animate_held_object_full_rotation(duration: float) -> void:
-	_held_object_visual.rotate_full_turn(duration)
+## Spins the held object one full turn. When swing_target_global is a real world point, the
+## object also travels out toward it and back over the same turn, showing what is being worked
+## on; pass Vector2.INF (the default) to spin in place.
+func animate_held_object_full_rotation(duration: float, swing_target_global: Vector2 = Vector2.INF) -> void:
+	_held_object_visual.rotate_full_turn(duration, _held_object_swing_offset(swing_target_global))
 
 
 func stop_held_object_animation() -> void:
@@ -335,6 +341,17 @@ func _held_rose_frame() -> int:
 	if _is_monster_agent() and has_meta("monster_rose_frame"):
 		return clampi(int(get_meta("monster_rose_frame")), 0, HELD_ROSE_TEXTURE_FRAME_COUNT - 1)
 	return HELD_ROSE_TEXTURE_FRAME
+
+
+# to_local() already yields the agent-origin -> target vector, so its direction is the
+# swing direction in the held sprite's own parent space.
+func _held_object_swing_offset(swing_target_global: Vector2) -> Vector2:
+	if not swing_target_global.is_finite():
+		return Vector2.ZERO
+	var direction: Vector2 = to_local(swing_target_global)
+	if direction.length_squared() <= 0.0001:
+		return Vector2.ZERO
+	return direction.normalized() * HELD_OBJECT_SWING_DISTANCE
 
 
 func _held_object_pin_position() -> Vector2:

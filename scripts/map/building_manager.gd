@@ -2022,6 +2022,10 @@ func apply_builder_data(agent: Node) -> void:
 	_agent_definition_service.apply_builder_data(agent)
 
 
+func apply_fundamental_builder_data(agent: Node) -> void:
+	_agent_definition_service.apply_fundamental_builder_data(agent)
+
+
 func add_builder_for_dev(amount: int = 1) -> bool:
 	return _builder.add_builders_for_dev(amount)
 

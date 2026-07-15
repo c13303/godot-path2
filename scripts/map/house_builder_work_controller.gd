@@ -134,17 +134,22 @@ func _advance_work(builder_id: int, house_id: StringName, delta: float) -> void:
 	if current >= required:
 		_complete_assignment(builder_id, house_id)
 		return
-	_process_builder_hammer_swing(builder_id, delta)
+	_process_builder_hammer_swing(builder_id, house_id, delta)
 
 
-# Visual cadence only: one full hammer turn per second of actual house progress.
-func _process_builder_hammer_swing(builder_id: int, delta: float) -> void:
+# Visual cadence only: one full hammer turn per second of actual house progress, each turn
+# swinging out to the worked house and back so the target is unambiguous.
+func _process_builder_hammer_swing(builder_id: int, house_id: StringName, delta: float) -> void:
 	var remaining: float = float(
 		_hammer_swing_remaining_by_builder_id.get(builder_id, HAMMER_SWING_INTERVAL_SECONDS)
 	)
 	remaining -= maxf(0.0, delta)
 	if remaining <= 0.0:
-		_builder.play_builder_hammer_swing(builder_id, HAMMER_SWING_DURATION_SECONDS)
+		_builder.play_builder_hammer_swing(
+			builder_id,
+			HAMMER_SWING_DURATION_SECONDS,
+			_house_manager.get_house_center_world(house_id)
+		)
 		# A large frame delta is normalized without queuing several swings.
 		while remaining <= 0.0:
 			remaining += HAMMER_SWING_INTERVAL_SECONDS

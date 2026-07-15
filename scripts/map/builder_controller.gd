@@ -165,7 +165,7 @@ func spawn_fundamental_builder() -> int:
 			AGENT_KIND_BUILDER,
 			BUILDER_GROUP,
 			VISITOR_CATEGORY,
-			Callable(_manager, "apply_builder_data")
+			Callable(_manager, "apply_fundamental_builder_data")
 	):
 		_claimed_cells.erase(target_cell)
 		return -1
@@ -494,11 +494,11 @@ func release_builder_from_work(builder_id: int) -> void:
 
 # Visual-only delegation to the Builder agent's generic held-object API. Construction
 # timing stays with HouseBuilderWorkController; this only resolves the agent node.
-func play_builder_hammer_swing(builder_id: int, duration: float) -> void:
+func play_builder_hammer_swing(builder_id: int, duration: float, swing_target_global: Vector2) -> void:
 	var agent: Node2D = _builder_agent_node(builder_id)
 	if agent == null or not agent.has_method("animate_held_object_full_rotation"):
 		return
-	agent.call("animate_held_object_full_rotation", duration)
+	agent.call("animate_held_object_full_rotation", duration, swing_target_global)
 
 
 func stop_builder_hammer_swing(builder_id: int) -> void:

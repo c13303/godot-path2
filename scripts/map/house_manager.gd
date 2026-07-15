@@ -573,6 +573,19 @@ func get_house_sprite(id: StringName) -> Sprite2D:
 	return record.sprite
 
 
+## Ground-plane middle of the six-cell house presence, for visuals that must point at the house
+## itself (the sprite centre sits up in the roof overhang instead). Vector2.INF when unknown.
+func get_house_center_world(id: StringName) -> Vector2:
+	var record: HouseRecord = find_house_by_name(id)
+	if record == null or _manager == null:
+		return Vector2.INF
+	var cells: Array[Vector2i] = _presence_cells(record.entrance_cell)
+	var sum: Vector2 = Vector2.ZERO
+	for cell: Vector2i in cells:
+		sum += _manager.cell_center(cell)
+	return sum / float(cells.size())
+
+
 func house_status(house_id: StringName) -> StringName:
 	var record: HouseRecord = find_house_by_name(house_id)
 	return record.status if record != null else &""
