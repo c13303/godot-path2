@@ -12,7 +12,7 @@ const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog
 const RESERVOIR_GROUP: StringName = &"reservoirs"
 const RESERVOIR_ITEM_ID: String = "reservoir"
 const PASTEQUE_ITEM_ID: String = "pasteque"
-const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 7
+const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 9
 
 @export var floorz: TileMapLayer
 @export var watersources: TileMapLayer

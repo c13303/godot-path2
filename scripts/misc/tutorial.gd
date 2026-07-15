@@ -16,8 +16,8 @@ extends RichTextLabel
 ##   4. dawn harvest (grown roses) .................. Harvest / add counters / place shop
 ##   5. client sale phase ........................... nothing (only the tantrum alert)
 ##   6. seed merchant reward waiting ................ Merchant has a reward
-##   7. seeds left, shop tool not equipped .......... Buy roses (equip the tool)
-##   8. seeds left, shop tool equipped .............. Plant roses
+##   7. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
+##   8. seeds left, day 2+ ......................... Plant roses, once per day
 ##   9. planted roses still dry ..................... Water your roses
 ##  10. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
 ##  11. day 1 not enough roses for tomorrow ......... Plant more roses
@@ -118,6 +118,10 @@ var _wall_stock_baseline: int = -1
 # dawn harvest have not finished starting. Set when night turns off, cleared once
 # the new day finishes growing / any real phase starts.
 var _sun_rising: bool = false
+# Day number whose rose step has already been answered, i.e. the day the player planted
+# their first rose. Day 2 onward the rose step latches off for the rest of that day, so it
+# plays once instead of nagging while seeds remain. -1 means no rose planted yet this run.
+var _rose_step_done_day: int = -1
 
 
 func _ready() -> void:
@@ -142,6 +146,9 @@ func _resolve_nodes() -> void:
 		if _plant_manager != null and _plant_manager.has_signal("new_day_finished") \
 				and not _plant_manager.is_connected("new_day_finished", Callable(self, "_on_new_day_finished")):
 			_plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
+		if _plant_manager != null and _plant_manager.has_signal("plant_added") \
+				and not _plant_manager.is_connected("plant_added", Callable(self, "_on_plant_added")):
+			_plant_manager.connect("plant_added", Callable(self, "_on_plant_added"))
 		_building_manager = scene.get_node_or_null("Map/BuildingManager")
 		_building_object_manager = scene.get_node_or_null("Map/BuildingObjectManager")
 		if _building_object_manager != null:
@@ -224,6 +231,18 @@ func _on_afternoon_phase_changed(_is_afternoon_phase: bool) -> void:
 
 
 func _on_seed_merchant_phase_changed(_is_seed_merchant_phase: bool) -> void:
+	_refresh()
+
+
+## The player planted a plant. A rose answers the day's rose step, which from day 2 on
+## latches it off until tomorrow. Save restore rebuilds the plant layer through its own
+## path and never emits this, so loading a garden does not answer the step.
+func _on_plant_added(cell: Vector2i) -> void:
+	if _plant_manager == null or not _plant_manager.has_method("is_rose_cell"):
+		return
+	if not bool(_plant_manager.call("is_rose_cell", cell)):
+		return
+	_rose_step_done_day = _current_day_number()
 	_refresh()
 
 
@@ -506,12 +525,11 @@ func _current_message_key() -> String:
 		return KEY_NO_ROSES_NO_CLIENTS
 	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
 		return KEY_SEED_MERCHANT_REWARD
-	# Seeds buy (and directly place) roses; that outranks watering. The player must
-	# first equip the shop tool (KEY_BUY_ROSES); once equipped, prompt them to plant.
+	# Seeds buy (and directly place) roses; that outranks watering.
 	if seeds > 0:
-		if _gardening_equipped():
-			return KEY_PLANT_ROSES
-		return KEY_BUY_ROSES
+		var rose_key: String = _rose_step_key()
+		if rose_key != "":
+			return rose_key
 	# Some planted roses are still dry.
 	if unwatered > 0:
 		return KEY_WATER_ROSES
@@ -615,13 +633,10 @@ func _has_planted_roses_on_floor() -> bool:
 	return int(_plant_manager.call("rose_count")) > 0
 
 
+## Asks the phase owner to open the night-after-clients window. Called every frame while the
+## start-night prompt is the current step, so it must not touch the label: the caller shows the
+## hold prompt right after, and blanking the message here would restart its reveal each frame.
 func _request_start_night_prompt() -> void:
-	_displayed_key = ""
-	_pending_key = ""
-	_clear_tutorial_message()
-	visible = false
-	_set_glow(false)
-	_update_tutorial_arrow("")
 	if _building_manager != null and _building_manager.has_method("request_night_after_clients"):
 		_building_manager.call("request_night_after_clients")
 
@@ -800,16 +815,33 @@ func _has_active_night_reward() -> bool:
 	return not reward_info.is_empty()
 
 
-func _is_day_one() -> bool:
+func _current_day_number() -> int:
 	if _progression == null or not _progression.has_method("get_value"):
-		return false
-	return int(_progression.call("get_value", &"nDays")) == 1
+		return -1
+	return int(_progression.call("get_value", &"nDays"))
+
+
+func _is_day_one() -> bool:
+	return _current_day_number() == 1
 
 
 func _is_day_two() -> bool:
-	if _progression == null or not _progression.has_method("get_value"):
-		return false
-	return int(_progression.call("get_value", &"nDays")) == 2
+	return _current_day_number() == 2
+
+
+## The afternoon rose step, or "" when it has nothing left to say.
+##
+## Day 1 walks the player through the two substeps and keeps nagging while seeds remain:
+## equip the gardening tool, then plant. From day 2 on they know the tool, so both collapse
+## into a single "plant roses" hint shown whatever is equipped, and it plays only once:
+## planting the first rose of the day latches it off, letting the next step through even
+## though seeds are left.
+func _rose_step_key() -> String:
+	if _is_day_one():
+		return KEY_PLANT_ROSES if _gardening_equipped() else KEY_BUY_ROSES
+	if _rose_step_done_day >= 0 and _rose_step_done_day == _current_day_number():
+		return ""
+	return KEY_PLANT_ROSES
 
 
 func _build_affordable_quantity(item_id: String) -> int:

@@ -8,12 +8,18 @@ water reserve empty
     (only hint allowed to stay visible during the NIGHT)
 
 
-seeds > 0  +  gardening tool NOT equipped
+day 1 + seeds > 0  +  gardening tool NOT equipped
     = "Equipez la pelle pour planter des roses" / "Buy roses with the GARDENING tool"
                                                             [tutorial.buy_roses]
 
-seeds > 0  +  gardening tool equipped
+day 1 + seeds > 0  +  gardening tool equipped
     = "Plantez des roses" / "Plant roses"                   [tutorial.plant_roses]
+
+day 2+ + seeds > 0, whatever is equipped
+    = "Plantez des roses" / "Plant roses"                   [tutorial.plant_roses]
+    (the "equip the pelle" step is gone from day 2 on: the player knows the tool.
+     Plays once per day — planting the first rose of the day drops the step for the
+     rest of that day even if seeds remain, and the next hint takes over)
 
 planted roses still dry (unwatered > 0)
     = "Arrosez vos roses" / "Water your roses"              [tutorial.water_roses]
