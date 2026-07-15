@@ -22,7 +22,7 @@
 	"tutorial.allow_builder_space": "Appuyez sur ESPACE pour laisser entrer le bâtisseur",
 	"tutorial.allow_builder_pad": "Appuyez sur X pour laisser entrer le bâtisseur",
 	"tutorial.talk_builder": "Parlez au bâtisseur",
-	"tutorial.build_builder_house": "Construisez une maison de bâtisseur",
+	"tutorial.build_builder_house": "Construisez une maison de bâtisseur sur le sol sec",
 	"tutorial.wait_builder_build": "Laissez le bâtisseur construire",
 	"tutorial.build_merchant_house": "Construisez une maison pour le marchand",
 	"builder.fundamental.greeting": "Salut ! Je peux construire des maisons avec toi, mais tu dois d'abord m'aider à construire la mienne.",

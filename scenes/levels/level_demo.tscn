@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" uid="uid://d32dojhmc8fdl" path="res://assets/sprites/legval/exitmonster.png" id="5_drkbx"]
 [ext_resource type="Texture2D" uid="uid://bpc14td2vod3s" path="res://assets/sprites/legval/clientspawner.png" id="5_u8kq7"]
 [ext_resource type="Texture2D" uid="uid://gbry66m75f1g" path="res://assets/sprites/legval/exitclient.png" id="6_5dxts"]
+[ext_resource type="Texture2D" uid="uid://bomf6bh2wxn23" path="res://assets/sprites/plants/bamboo.png" id="6_l4uo6"]
 [ext_resource type="Texture2D" uid="uid://bg6v2il1ebodj" path="res://assets/sprites/legval/merchentspot.png" id="7_wyhb5"]
 [ext_resource type="Texture2D" uid="uid://d1s8ye3mtykmr" path="res://assets/sprites/tilesets/tileset32x32.png" id="13_1kyii"]
 [ext_resource type="Script" uid="uid://bdjg575rouknx" path="res://scripts/map/watersources.gd" id="33_watersources"]
@@ -1344,6 +1345,12 @@ z_index = -50
 tile_set = SubResource("TileSet_8wl7c")
 navigation_enabled = false
 metadata/water = true
+
+[node name="nativeplants" type="Node" parent="." unique_id=1130602985]
+
+[node name="bamboo" type="Sprite2D" parent="nativeplants" unique_id=17648519]
+position = Vector2(1193, 1422)
+texture = ExtResource("6_l4uo6")
 
 [node name="spawners" type="Node" parent="." unique_id=608668911]
 

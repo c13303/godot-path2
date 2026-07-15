@@ -386,10 +386,13 @@ func finish_typewriter() -> void:
 	_reveal_choices()
 
 
+## Rebuilds the body label from `body_text`, substituting each placeholder in `body_icons`
+## with an inline image. Always goes through the append path: assigning `text` instead would
+## be skipped when the new text equals the previous dialog's text, and `clear()` does not
+## reset that property, so the label would keep showing the previously appended content.
 func _set_body_content(body_text: String, body_icons: Dictionary) -> void:
-	if body_icons.is_empty():
-		_body_label.text = body_text
-		return
+	# Empty the `text` property as well as the tag stack, so the next dialog is never a no-op.
+	_body_label.text = ""
 	_body_label.clear()
 	var remaining: String = body_text
 	while remaining != "":
