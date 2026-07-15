@@ -84,6 +84,8 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::request_flow_to_group, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("are_async_flows_idle"), &FlowFieldNative::are_async_flows_idle);
     ClassDB::bind_method(D_METHOD("is_group_flow_request_ready", "group_id"), &FlowFieldNative::is_group_flow_request_ready);
+    ClassDB::bind_method(D_METHOD("cancel_group_flow_request", "group_id"), &FlowFieldNative::cancel_group_flow_request);
+    ClassDB::bind_method(D_METHOD("get_flow_pool_debug_snapshot"), &FlowFieldNative::get_flow_pool_debug_snapshot);
     ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::assign_flow_to_group, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("group_route_cost_at_world", "group_id", "world_pos"), &FlowFieldNative::group_route_cost_at_world);
     ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
@@ -1186,6 +1188,7 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     AsyncFlowResult result;
     result.group_id = request.group_id;
     result.serial = request.serial;
+    result.group_generation = request.group_generation;
 
     const AsyncFlowSnapshot &snapshot = request.snapshot;
     const Rect2i &used = snapshot.used;
@@ -1555,7 +1558,11 @@ void FlowFieldNative::mark_group_flow_queued(int group_id)
     if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
         return;
     if (auto *mgr = ffcore::get_global_agent_manager())
+    {
+        if (!mgr->get_groups()[group_id].active)
+            return;
         mgr->set_group_flow_wait(group_id, ffcore::GROUP_FLOW_WAIT_QUEUED);
+    }
 }
 
 void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool block_fences)
@@ -1568,6 +1575,16 @@ void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool blo
 
     AsyncFlowRequest request;
     request.group_id = group_id;
+    if (auto *mgr = ffcore::get_global_agent_manager())
+    {
+        if (!mgr->get_groups()[group_id].active)
+            return;
+        request.group_generation = mgr->get_group_generation(group_id);
+    }
+    else
+    {
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(async_mutex);
@@ -1620,6 +1637,104 @@ bool FlowFieldNative::is_group_flow_request_ready(int group_id) const
            requested->second == applied->second;
 }
 
+void FlowFieldNative::cancel_group_flow_request(int group_id)
+{
+    if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
+        return;
+
+    std::lock_guard<std::mutex> lock(async_mutex);
+    for (auto it = pending_requests.begin(); it != pending_requests.end();)
+    {
+        if (it->group_id == group_id)
+            it = pending_requests.erase(it);
+        else
+            ++it;
+    }
+    for (auto it = completed_results.begin(); it != completed_results.end();)
+    {
+        if (it->group_id == group_id)
+            it = completed_results.erase(it);
+        else
+            ++it;
+    }
+    latest_request_serial_by_group.erase(group_id);
+    latest_applied_serial_by_group.erase(group_id);
+}
+
+Dictionary FlowFieldNative::get_flow_pool_debug_snapshot() const
+{
+    Dictionary snapshot;
+    auto *fm = ffcore::flowfields();
+    snapshot["used_flowfield_slots"] = fm ? fm->used_count() : 0;
+    snapshot["flowfield_capacity"] = fm ? fm->capacity() : 0;
+    snapshot["group_capacity"] = ffcore::MAX_GROUPS - 1;
+
+    Array occupied_fields;
+    int zero_ref_occupied = 0;
+    if (fm)
+    {
+        std::vector<ffcore::FlowFieldID> ids;
+        fm->collect_occupied_ids(ids);
+        for (ffcore::FlowFieldID id : ids)
+        {
+            const ffcore::FlowField *ff = fm->get(id);
+            Dictionary field_info;
+            field_info["field_id"] = (int)id;
+            field_info["refcount"] = ff ? ff->refcount : 0;
+            if (ff && ff->refcount <= 0)
+                ++zero_ref_occupied;
+            occupied_fields.append(field_info);
+        }
+    }
+    snapshot["occupied_fields"] = occupied_fields;
+    snapshot["zero_refcount_occupied_fields"] = zero_ref_occupied;
+
+    Array groups;
+    int active_group_count = 0;
+    int suspicious_group_count = 0;
+    if (auto *mgr = ffcore::get_global_agent_manager())
+    {
+        for (ffcore::GroupID group = 1; group < ffcore::MAX_GROUPS; group++)
+        {
+            const ffcore::AgentGroup &g = mgr->get_groups()[group];
+            if (!g.active)
+                continue;
+            ++active_group_count;
+            Dictionary group_info;
+            group_info["group_id"] = (int)group;
+            group_info["field_id"] = g.flow ? (int)g.flow->id : 0;
+            group_info["flow_wait"] = g.flow_wait;
+            group_info["has_order"] = g.has_order;
+            group_info["field_refcount"] = g.flow ? g.flow->refcount : 0;
+            group_info["member_count"] = mgr->count_group_members(group);
+            group_info["generation"] = (int64_t)g.lifecycle_generation;
+            bool suspicious = (g.flow == nullptr && (g.flow_wait != ffcore::GROUP_FLOW_WAIT_NONE || g.has_order));
+            group_info["suspicious_no_field_while_ready_or_waiting"] = suspicious;
+            if (suspicious)
+                ++suspicious_group_count;
+            groups.append(group_info);
+        }
+    }
+    snapshot["active_native_groups"] = active_group_count;
+    snapshot["groups"] = groups;
+    snapshot["groups_without_field_while_waiting"] = suspicious_group_count;
+    return snapshot;
+}
+
+void FlowFieldNative::print_flow_pool_diagnostics(const char *reason, int group_id) const
+{
+    Dictionary snapshot = get_flow_pool_debug_snapshot();
+    UtilityFunctions::printerr(
+        "FlowFieldNative pool diagnostic reason=", reason,
+        " group=", group_id,
+        " used=", snapshot["used_flowfield_slots"],
+        " capacity=", snapshot["flowfield_capacity"],
+        " active_groups=", snapshot["active_native_groups"],
+        " zero_ref_occupied=", snapshot["zero_refcount_occupied_fields"],
+        " no_field_waiting=", snapshot["groups_without_field_while_waiting"],
+        " groups=", snapshot["groups"]);
+}
+
 void FlowFieldNative::process_async_results()
 {
     std::deque<AsyncFlowResult> results;
@@ -1634,6 +1749,8 @@ void FlowFieldNative::process_async_results()
 
 void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
 {
+    if (result.group_id == ffcore::INVALID_GROUP || result.group_id >= ffcore::MAX_GROUPS)
+        return;
     {
         std::lock_guard<std::mutex> lock(async_mutex);
         auto it = latest_request_serial_by_group.find(result.group_id);
@@ -1641,44 +1758,24 @@ void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
             return;
     }
 
+    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+    if (!mgr)
+        return;
+    if (!mgr->get_groups()[result.group_id].active ||
+        mgr->get_group_generation((ffcore::GroupID)result.group_id) != result.group_generation)
+        return;
+
     if (!result.ok)
     {
         // The worker rejected the request (e.g. the goal cell turned out to be
         // coverage-blocked). The field will never build, so don't leave the group's
         // agents frozen in "ff being computed"; mirrors the snapshot-failure path.
-        if (auto *mgr = ffcore::get_global_agent_manager())
-            mgr->set_group_flow_wait(result.group_id, ffcore::GROUP_FLOW_WAIT_NONE);
+        mgr->set_group_flow_wait(result.group_id, ffcore::GROUP_FLOW_WAIT_NONE);
         return;
     }
 
-    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
-    if (!mgr)
+    if (!install_computed_flow_to_group(result.group_id, result.group_generation, result.field, "apply_async_result"))
         return;
-    if (!mgr->get_groups()[result.group_id].active)
-        return;
-
-    auto *fm = ffcore::flowfields();
-    ffcore::FlowFieldID fid = fm->register_copy(result.field);
-    ffcore::FlowField *new_flow = fm->get(fid);
-    if (fid == ffcore::INVALID_FLOWFIELD || !new_flow)
-    {
-        UtilityFunctions::printerr("FlowFieldNative.apply_async_result: flowfield pool exhausted for group ", result.group_id);
-        return;
-    }
-
-    int agent_count = mgr->count_group_members(result.group_id);
-    double target_radius = 0.0;
-    if (agent_count > 1)
-    {
-        double denominator = double(std::max(0, agent_count - 1));
-        target_radius = std::ceil(std::sqrt(denominator / FLOWFIELD_TARGET_RADIUS_PI));
-    }
-    double world_radius = (target_radius + 1) * new_flow->tile_size();
-    new_flow->set_ff_target_radius(world_radius);
-    mgr->set_group_flow(result.group_id, new_flow);
-    // This is the latest requested field for the group (older serials were rejected
-    // above), so the group is current again: agents unfreeze and resume flow in/out.
-    mgr->set_group_flow_wait(result.group_id, ffcore::GROUP_FLOW_WAIT_NONE);
 
     {
         std::lock_guard<std::mutex> lock(async_mutex);
@@ -1688,6 +1785,53 @@ void FlowFieldNative::apply_async_result(const AsyncFlowResult &result)
     field.copy_from(result.field);
     current_group_id = result.group_id;
     queue_redraw();
+}
+
+bool FlowFieldNative::install_computed_flow_to_group(int group_id, uint64_t group_generation, const ffcore::FlowField &computed_field, const char *source_label)
+{
+    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+    if (!mgr)
+        return false;
+    if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
+        return false;
+    if (!mgr->get_groups()[group_id].active ||
+        mgr->get_group_generation((ffcore::GroupID)group_id) != group_generation)
+        return false;
+
+    ffcore::FlowField *target_flow = mgr->get_group_flow((ffcore::GroupID)group_id);
+    if (target_flow && mgr->count_groups_referencing_flow(target_flow) <= 1)
+    {
+        target_flow->copy_from(computed_field);
+    }
+    else
+    {
+        auto *fm = ffcore::flowfields();
+        ffcore::FlowFieldID fid = fm ? fm->register_copy(computed_field) : ffcore::INVALID_FLOWFIELD;
+        target_flow = fm ? fm->get(fid) : nullptr;
+        if (fid == ffcore::INVALID_FLOWFIELD || !target_flow)
+        {
+            UtilityFunctions::printerr(
+                "FlowFieldNative.", source_label, ": flowfield pool exhausted for group ", group_id,
+                " used=", fm ? fm->used_count() : 0,
+                " capacity=", fm ? fm->capacity() : 0);
+            print_flow_pool_diagnostics(source_label, group_id);
+            mgr->set_group_flow_wait((ffcore::GroupID)group_id, ffcore::GROUP_FLOW_WAIT_NONE);
+            return false;
+        }
+    }
+
+    int agent_count = mgr->count_group_members((ffcore::GroupID)group_id);
+    double target_radius = 0.0;
+    if (agent_count > 1)
+    {
+        double denominator = double(std::max(0, agent_count - 1));
+        target_radius = std::ceil(std::sqrt(denominator / FLOWFIELD_TARGET_RADIUS_PI));
+    }
+    double world_radius = (target_radius + 1) * target_flow->tile_size();
+    target_flow->set_ff_target_radius(world_radius);
+    mgr->set_group_flow((ffcore::GroupID)group_id, target_flow);
+    mgr->set_group_flow_wait((ffcore::GroupID)group_id, ffcore::GROUP_FLOW_WAIT_NONE);
+    return true;
 }
 
 Vector2 FlowFieldNative::compute_flow_dir(Vector2 world_pos) const
@@ -1816,7 +1960,14 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
         return;
     }
 
+    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
+    if (!mgr)
+        return;
+    if (!mgr->get_groups()[group_id].active)
+        return;
+
     uint64_t serial = 0;
+    uint64_t group_generation = mgr->get_group_generation((ffcore::GroupID)group_id);
     {
         std::lock_guard<std::mutex> lock(async_mutex);
         serial = next_request_serial++;
@@ -1833,6 +1984,7 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
         AsyncFlowRequest request;
         request.group_id = group_id;
         request.serial = serial;
+        request.group_generation = group_generation;
         if (!build_async_snapshot(goal, request.snapshot, true))
         {
             if (auto *m = ffcore::get_global_agent_manager())
@@ -1859,34 +2011,8 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
         computed_field.copy_from(field);
     }
 
-    ffcore::AgentManager *mgr = ffcore::get_global_agent_manager();
-    if (!mgr)
+    if (!install_computed_flow_to_group(group_id, group_generation, computed_field, "assign_flow_to_group"))
         return;
-
-    auto *fm = ffcore::flowfields();
-    ffcore::FlowFieldID fid = fm->register_copy(computed_field);
-    ffcore::FlowField *new_flow = fm->get(fid);
-    if (fid == ffcore::INVALID_FLOWFIELD || !new_flow)
-    {
-        UtilityFunctions::printerr("FlowFieldNative.assign_flow_to_group: flowfield pool exhausted for group ", group_id);
-        mgr->set_group_flow_wait(group_id, ffcore::GROUP_FLOW_WAIT_NONE);
-        return;
-    }
-    int agent_count = mgr->count_group_members(group_id);
-    double target_radius = 0.0;
-    if (agent_count > 1)
-    {
-        double denominator = double(std::max(0, agent_count - 1));
-        target_radius = std::ceil(std::sqrt(denominator / FLOWFIELD_TARGET_RADIUS_PI));
-    }
-    auto goal_tile = new_flow->get_goal_cell();
-    double world_radius = (target_radius + 1) * new_flow->tile_size();
-  /*   godot::UtilityFunctions::print(
-        "Flow target radius (tiles):", target_radius, "mapped world radius:", world_radius,
-        "agents:", agent_count, "goal_tile:", goal_tile.x, goal_tile.y, "tile_size:", new_flow->tile_size()); */
-    new_flow->set_ff_target_radius(world_radius);
-    mgr->set_group_flow(group_id, new_flow);
-    mgr->set_group_flow_wait(group_id, ffcore::GROUP_FLOW_WAIT_NONE);
 
     {
         std::lock_guard<std::mutex> lock(async_mutex);

@@ -6,6 +6,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/tile_map_layer.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 #include "../flow/flow_field.h"
@@ -95,6 +96,7 @@ namespace godot
         {
             int group_id = ffcore::INVALID_GROUP;
             uint64_t serial = 0;
+            uint64_t group_generation = 0;
             AsyncFlowSnapshot snapshot;
         };
 
@@ -102,6 +104,7 @@ namespace godot
         {
             int group_id = ffcore::INVALID_GROUP;
             uint64_t serial = 0;
+            uint64_t group_generation = 0;
             bool ok = false;
             ffcore::FlowField field;
         };
@@ -176,6 +179,8 @@ namespace godot
         void process_async_results();
         AsyncFlowResult compute_async_request(const AsyncFlowRequest &request) const;
         void apply_async_result(const AsyncFlowResult &result);
+        bool install_computed_flow_to_group(int group_id, uint64_t group_generation, const ffcore::FlowField &computed_field, const char *source_label);
+        void print_flow_pool_diagnostics(const char *reason, int group_id) const;
 
     protected:
         static void _bind_methods();
@@ -227,6 +232,8 @@ namespace godot
         void request_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
         bool are_async_flows_idle() const;
         bool is_group_flow_request_ready(int group_id) const;
+        void cancel_group_flow_request(int group_id);
+        Dictionary get_flow_pool_debug_snapshot() const;
         void _draw() override;
         static double move_cost_for_dir(int dir_index);
 

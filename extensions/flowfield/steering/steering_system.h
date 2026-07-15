@@ -141,6 +141,7 @@ namespace ffcore
         // is waiting on, so it freezes and shows "ff wait"/"ff being computed" until ready.
         // INVALID_GROUP clears it. See AgentData::waiting_flow_group.
         void set_agent_waiting_flow_group(int id, GroupID group);
+        int count_agents_waiting_flow_group(GroupID group) const;
         void set_agent_phase(int id, AgentPhase phase, float eating_seconds);
         double get_max_fight_query_padding() const { return max_fight_query_padding; }
 

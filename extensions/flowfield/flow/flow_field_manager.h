@@ -17,6 +17,9 @@ namespace ffcore
 
         FlowFieldID create_field(int width, int height, double tile_size);
         FlowFieldID register_copy(const FlowField &src);
+        int used_count() const;
+        int capacity() const;
+        void collect_occupied_ids(std::vector<FlowFieldID> &out) const;
 
     private:
         std::vector<FlowField *> fields;

@@ -29,6 +29,10 @@ namespace ffcore
         bool has_order = false;
         // See GroupFlowWait. Set by FlowFieldNative as a rebuild is queued/computed/applied.
         int flow_wait = GROUP_FLOW_WAIT_NONE;
+        // Bumped every time this numeric group id starts or ends a lifecycle. Async
+        // flow-field requests carry this so stale results from a dissolved/reused id
+        // cannot install into the new group.
+        std::uint64_t lifecycle_generation = 0;
     };
 
     struct AgentEntry
@@ -51,6 +55,7 @@ namespace ffcore
         void set_group_flow(GroupID group, FlowField *flow);
         void set_group_flow_wait(GroupID group, int state);
         int get_group_flow_wait(GroupID group) const;
+        std::uint64_t get_group_generation(GroupID group) const;
         void create_agent_entry(int agent_id, const Vec2 &pos, GroupID group);
         static const GroupID GROUP_IDLE = 0;
         void dissolve_group(GroupID group);
@@ -61,6 +66,7 @@ namespace ffcore
         void mark_group_finished(GroupID g);
         void mark_group_has_order(GroupID g);
         int count_group_members(GroupID g) const;
+        int count_groups_referencing_flow(const FlowField *flow) const;
         FormationFootprint compute_group_footprint(GroupID g) const;
 
         // Read-only debug introspection. Fills `out` with every currently

@@ -284,6 +284,45 @@ func cancel_queued_group_flow_request(group_id: int) -> void:
 	_reindex_queued_flow_groups()
 
 
+func _release_route_group(group_id: int) -> bool:
+	if group_id <= IDLE_GROUP:
+		return true
+	if _group_has_native_members(group_id):
+		return false
+	cancel_queued_group_flow_request(group_id)
+	var flow: Node = _flow()
+	if flow != null and flow.has_method("cancel_group_flow_request"):
+		flow.call("cancel_group_flow_request", group_id)
+	var agent_manager: Node = _agent_manager()
+	if agent_manager == null:
+		return false
+	agent_manager.call("dissolve_group", group_id)
+	_flow_group_labels.erase(group_id)
+	return true
+
+
+func _group_has_native_members(group_id: int) -> bool:
+	var agent_manager: Node = _agent_manager()
+	if agent_manager == null:
+		return false
+	if agent_manager.has_method("count_group_route_references"):
+		return int(agent_manager.call("count_group_route_references", group_id)) > 0
+	if not agent_manager.has_method("count_group_members"):
+		return false
+	return int(agent_manager.call("count_group_members", group_id)) > 0
+
+
+func _group_request_pending_or_computing(group_id: int) -> bool:
+	if group_id <= IDLE_GROUP:
+		return false
+	if _queued_flow_group_ids.has(group_id):
+		return true
+	var agent_manager: Node = _agent_manager()
+	if agent_manager == null or not agent_manager.has_method("get_group_flow_wait"):
+		return false
+	return int(agent_manager.call("get_group_flow_wait", group_id)) != 0
+
+
 # True once initialize_spawner_route() has resolved this spawner's escape route.
 # Asks for that explicitly rather than for a _spawner_routes entry, because an
 # approach descriptor can be stored for a spawner before its escape route exists
@@ -573,22 +612,14 @@ func release_spawner_route(spawner_cell: Vector2i) -> void:
 	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
 	var escape_group: int = int(route.get("escape_group", -1))
 	var approach_group: int = int(route.get("approach_group", -1))
-	var agent_manager: Node = _agent_manager()
-	if agent_manager and agent_manager.has_method("dissolve_group"):
-		if escape_group > IDLE_GROUP:
-			cancel_queued_group_flow_request(escape_group)
-			agent_manager.call("dissolve_group", escape_group)
-		if approach_group > IDLE_GROUP:
-			cancel_queued_group_flow_request(approach_group)
-			agent_manager.call("dissolve_group", approach_group)
-		if _spawner_garden_routes.has(spawner_cell):
-			var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
-			for raw_route: Variant in garden_routes.values():
-				var garden_route: Dictionary = raw_route as Dictionary
-				var plant_group: int = int(garden_route.get("plant_group", -1))
-				if plant_group > IDLE_GROUP:
-					cancel_queued_group_flow_request(plant_group)
-					agent_manager.call("dissolve_group", plant_group)
+	_release_route_group(escape_group)
+	_release_route_group(approach_group)
+	if _spawner_garden_routes.has(spawner_cell):
+		var garden_routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+		for raw_route: Variant in garden_routes.values():
+			var garden_route: Dictionary = raw_route as Dictionary
+			var plant_group: int = int(garden_route.get("plant_group", -1))
+			_release_route_group(plant_group)
 	_spawner_routes.erase(spawner_cell)
 	_spawner_garden_routes.erase(spawner_cell)
 	_prepared_upcoming_monster_routes.erase(spawner_cell)
@@ -771,10 +802,8 @@ func release_exit_wall_escape(exit_cell: Vector2i) -> void:
 		return
 	var escape: Dictionary = _exit_wall_escapes[exit_cell] as Dictionary
 	var escape_group: int = int(escape.get("escape_group", -1))
-	var agent_manager: Node = _agent_manager()
-	if escape_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
-		agent_manager.call("dissolve_group", escape_group)
-	_exit_wall_escapes.erase(exit_cell)
+	if _release_route_group(escape_group):
+		_exit_wall_escapes.erase(exit_cell)
 
 
 func nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
@@ -910,10 +939,8 @@ func release_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) -> voi
 		return
 	var route: Dictionary = routes[garden_id] as Dictionary
 	var plant_group: int = int(route.get("plant_group", -1))
-	var agent_manager: Node = _agent_manager()
-	if plant_group > IDLE_GROUP and agent_manager and agent_manager.has_method("dissolve_group"):
-		cancel_queued_group_flow_request(plant_group)
-		agent_manager.call("dissolve_group", plant_group)
+	if not _release_route_group(plant_group):
+		return
 	routes.erase(garden_id)
 	if routes.is_empty():
 		_spawner_garden_routes.erase(spawner_cell)
@@ -971,6 +998,7 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		existing_route["ready"] = spawner_garden_route_flow_ready(existing_route, spawner_cell)
 		routes[garden_id] = existing_route
 		_spawner_garden_routes[spawner_cell] = routes
+		_prune_unused_spawner_garden_routes(spawner_cell, garden_id)
 		_route_cache_hits += 1
 		return existing_route
 	_route_cache_misses += 1
@@ -1020,7 +1048,47 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 	}
 	routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = routes
+	_prune_unused_spawner_garden_routes(spawner_cell, garden_id)
 	return route
+
+
+func _prune_unused_spawner_garden_routes(spawner_cell: Vector2i, selected_garden_id: int) -> void:
+	if not _spawner_garden_routes.has(spawner_cell):
+		return
+	var routes: Dictionary = _spawner_garden_routes[spawner_cell] as Dictionary
+	for raw_garden_id: Variant in routes.keys().duplicate():
+		var garden_id: int = int(raw_garden_id)
+		if garden_id == selected_garden_id:
+			continue
+		if not routes.has(garden_id):
+			continue
+		var route: Dictionary = routes[garden_id] as Dictionary
+		var plant_group: int = int(route.get("plant_group", IDLE_GROUP))
+		if _spawner_garden_route_still_needed(spawner_cell, garden_id, plant_group):
+			continue
+		if _release_route_group(plant_group):
+			routes.erase(garden_id)
+			_erase_prepared_route_for_garden(spawner_cell, garden_id)
+	if routes.is_empty():
+		_spawner_garden_routes.erase(spawner_cell)
+	else:
+		_spawner_garden_routes[spawner_cell] = routes
+
+
+func _spawner_garden_route_still_needed(spawner_cell: Vector2i, garden_id: int, plant_group: int) -> bool:
+	if _group_has_native_members(plant_group):
+		return true
+	if _group_request_pending_or_computing(plant_group):
+		return true
+	for prepared: Dictionary in [
+		_prepared_upcoming_monster_routes,
+		_prepared_upcoming_client_routes,
+		_prepared_upcoming_client_outbound_routes,
+	]:
+		var descriptor: Dictionary = prepared.get(spawner_cell, {}) as Dictionary
+		if int(descriptor.get("garden_id", 0)) == garden_id:
+			return true
+	return false
 
 
 func _spawner_is_one_of_kinds(spawner_cell: Vector2i, agent_kinds: Array[StringName]) -> bool:

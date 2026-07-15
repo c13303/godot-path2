@@ -61,7 +61,11 @@ namespace godot
 
         void set_current_selected_group(ffcore::GroupID group);
         void cleanup_groups();
+        void dissolve_group(ffcore::GroupID group);
         void mark_group_has_order(ffcore::GroupID group);
+        int count_group_members(ffcore::GroupID group) const;
+        int count_group_route_references(ffcore::GroupID group) const;
+        int get_group_flow_wait(ffcore::GroupID group) const;
 
         void update_godot_agent(Node2D *node, int agent_id);
         Node2D *find_node_by_agent(int agent_id);

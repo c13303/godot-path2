@@ -307,6 +307,20 @@ void SteeringSystem::set_agent_waiting_flow_group(int id, GroupID group)
     agents[it->second].waiting_flow_group = group;
 }
 
+int SteeringSystem::count_agents_waiting_flow_group(GroupID group) const
+{
+    if (group == INVALID_GROUP)
+        return 0;
+
+    int count = 0;
+    for (const AgentData &agent : agents)
+    {
+        if (agent.waiting_flow_group == group)
+            ++count;
+    }
+    return count;
+}
+
 int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double max_speed, FlowField *flow)
 {
     if (!std::isfinite(pos.x) || !std::isfinite(pos.y))
@@ -1237,8 +1251,12 @@ void SteeringSystem::set_agent_position(int id, const Vec2 &position, bool clear
     if (clear_velocity)
     {
         agent.velocity = Vec2(0, 0);
-        agent.smash_velocity = Vec2(0, 0);
+        agent.smash_force = Vec2(0, 0);
+        agent.pending_smash = Vec2(0, 0);
+        agent.smash_pending = false;
+        agent.smash_delay = 0.0;
         agent.is_propelled = false;
+        agent.propelled_timer = 0.0;
     }
     agent.was_in_t2 = false;
     agent.target_radius_timer = 0.0;

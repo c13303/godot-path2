@@ -2,6 +2,7 @@
 #include "../core/nav_services.h"
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/variant/utility_functions.hpp>
+#include <algorithm>
 
 namespace ffcore
 {
@@ -67,6 +68,32 @@ namespace ffcore
 		}
 		f->id = fid;
 		return fid;
+	}
+
+	int FlowFieldManager::used_count() const
+	{
+		int count = 0;
+		for (FlowFieldID i = 1; i < fields.size(); i++)
+		{
+			if (fields[i] != nullptr)
+				++count;
+		}
+		return count;
+	}
+
+	int FlowFieldManager::capacity() const
+	{
+		return std::max(0, (int)fields.size() - 1);
+	}
+
+	void FlowFieldManager::collect_occupied_ids(std::vector<FlowFieldID> &out) const
+	{
+		out.clear();
+		for (FlowFieldID i = 1; i < fields.size(); i++)
+		{
+			if (fields[i] != nullptr)
+				out.push_back(i);
+		}
 	}
 
 	void cleanup_flow_if_unused(FlowField *ff)

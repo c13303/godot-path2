@@ -79,7 +79,11 @@ void AgentManagerNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("assign_agent", "agent", "group"), &AgentManagerNative::assign_agent);
     ClassDB::bind_method(D_METHOD("set_current_selected_group", "group_id"), &AgentManagerNative::set_current_selected_group);
     ClassDB::bind_method(D_METHOD("cleanup_groups"), &AgentManagerNative::cleanup_groups);
+    ClassDB::bind_method(D_METHOD("dissolve_group", "group_id"), &AgentManagerNative::dissolve_group);
     ClassDB::bind_method(D_METHOD("mark_group_has_order", "group_id"), &AgentManagerNative::mark_group_has_order);
+    ClassDB::bind_method(D_METHOD("count_group_members", "group_id"), &AgentManagerNative::count_group_members);
+    ClassDB::bind_method(D_METHOD("count_group_route_references", "group_id"), &AgentManagerNative::count_group_route_references);
+    ClassDB::bind_method(D_METHOD("get_group_flow_wait", "group_id"), &AgentManagerNative::get_group_flow_wait);
     ClassDB::bind_method(D_METHOD("update_godot_agent", "node", "agent_id"), &AgentManagerNative::update_godot_agent);
     ClassDB::bind_method(D_METHOD("find_node_by_agent", "agent_id"), &AgentManagerNative::find_node_by_agent);
     ClassDB::bind_method(D_METHOD("unregister_agent", "agent_id"), &AgentManagerNative::unregister_agent);
@@ -337,12 +341,41 @@ void AgentManagerNative::cleanup_groups()
     }
 }
 
+void AgentManagerNative::dissolve_group(ffcore::GroupID group)
+{
+    if (!core_mgr)
+        return;
+    core_mgr->dissolve_group(group);
+}
+
 void AgentManagerNative::mark_group_has_order(ffcore::GroupID group)
 {
     if (!core_mgr)
         return;
 
     core_mgr->mark_group_has_order(group);
+}
+
+int AgentManagerNative::count_group_members(ffcore::GroupID group) const
+{
+    if (!core_mgr)
+        return 0;
+    return core_mgr->count_group_members(group);
+}
+
+int AgentManagerNative::count_group_route_references(ffcore::GroupID group) const
+{
+    int count = core_mgr ? core_mgr->count_group_members(group) : 0;
+    if (steering)
+        count += steering->count_agents_waiting_flow_group(group);
+    return count;
+}
+
+int AgentManagerNative::get_group_flow_wait(ffcore::GroupID group) const
+{
+    if (!core_mgr)
+        return ffcore::GROUP_FLOW_WAIT_NONE;
+    return core_mgr->get_group_flow_wait(group);
 }
 
 void AgentManagerNative::set_agent_never_rest(int agent_id, bool value)

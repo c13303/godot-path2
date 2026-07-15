@@ -30,12 +30,15 @@ namespace ffcore
             groups[i].flow = nullptr;
             groups[i].has_order = false;
             groups[i].flow_wait = GROUP_FLOW_WAIT_NONE;
+            groups[i].lifecycle_generation = 0;
         }
 
         groups[GROUP_IDLE].id = GROUP_IDLE;
         groups[GROUP_IDLE].active = true; // ← empêche create_group() de l’utiliser
         groups[GROUP_IDLE].flow = nullptr;
         groups[GROUP_IDLE].has_order = false;
+        groups[GROUP_IDLE].flow_wait = GROUP_FLOW_WAIT_NONE;
+        groups[GROUP_IDLE].lifecycle_generation = 0;
     }
 
     AgentManager *get_global_agent_manager()
@@ -64,6 +67,7 @@ namespace ffcore
                 groups[i].flow = nullptr;
                 groups[i].has_order = false;
                 groups[i].flow_wait = GROUP_FLOW_WAIT_NONE;
+                ++groups[i].lifecycle_generation;
 
                 return i;
             }
@@ -210,6 +214,7 @@ namespace ffcore
         groups[group].active = false;
         groups[group].has_order = false;
         groups[group].flow_wait = GROUP_FLOW_WAIT_NONE;
+        ++groups[group].lifecycle_generation;
     }
 
     void AgentManager::set_group_flow_wait(GroupID group, int state)
@@ -224,6 +229,13 @@ namespace ffcore
         if (group == INVALID_GROUP || group >= MAX_GROUPS)
             return GROUP_FLOW_WAIT_NONE;
         return groups[group].flow_wait;
+    }
+
+    std::uint64_t AgentManager::get_group_generation(GroupID group) const
+    {
+        if (group == INVALID_GROUP || group >= MAX_GROUPS)
+            return 0;
+        return groups[group].lifecycle_generation;
     }
 
     static GroupID current_selected_group = GROUP_IDLE;
@@ -282,6 +294,20 @@ namespace ffcore
         for (const auto &a : agents)
             if (a.group == g)
                 ++count;
+        return count;
+    }
+
+    int AgentManager::count_groups_referencing_flow(const FlowField *flow) const
+    {
+        if (!flow)
+            return 0;
+
+        int count = 0;
+        for (GroupID group = 1; group < MAX_GROUPS; group++)
+        {
+            if (groups[group].active && groups[group].flow == flow)
+                ++count;
+        }
         return count;
     }
 
