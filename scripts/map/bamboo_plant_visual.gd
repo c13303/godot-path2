@@ -2,7 +2,7 @@ extends Node2D
 class_name BambooPlantVisual
 
 ## One authored bamboo plant's visual: its sprite, its immature/mature frame, its
-## base-anchored idle dance, and its world-Y z_index. Nothing else — maturity rules,
+## base-anchored idle dance (mature plants only), and its world-Y z_index. Nothing else — maturity rules,
 ## harvesting, currency, save state, dawn events, terrain slowdown and build reservations
 ## all belong to BambooHarvestController.
 ##
@@ -62,14 +62,20 @@ func setup(cell_center_world: Vector2, tile_size: Vector2) -> void:
 	_breathe_phase = randf() * TAU
 	_warn_if_artwork_unexpected()
 	_build_sprite()
+	# Matches _build_sprite's mature default frame; set_mature owns processing from here on.
 	set_process(true)
 
 
-## The only state this visual accepts: which frame to show.
+## The only state this visual accepts: which frame to show. An immature plant stands still:
+## the dance belongs to the grown bamboo, so it stops and returns to rest until maturity
+## comes back. The phase is kept, so a regrown plant resumes its own desynced sway.
 func set_mature(value: bool) -> void:
 	if _sprite == null:
 		return
 	_sprite.frame = FRAME_MATURE if value else FRAME_IMMATURE
+	set_process(value)
+	if not value:
+		_rest_pivot()
 
 
 func _build_sprite() -> void:
@@ -104,6 +110,15 @@ func _process(delta: float) -> void:
 	_pivot.rotation = angle
 	_pivot.scale = Vector2(scale_x, scale_y)
 	_pivot.position = Vector2(0.0, _base_offset_y + bob)
+
+
+## Undoes the last danced frame, so a plant frozen mid-sway does not stay leaning.
+func _rest_pivot() -> void:
+	if _pivot == null:
+		return
+	_pivot.rotation = 0.0
+	_pivot.scale = Vector2.ONE
+	_pivot.position = Vector2(0.0, _base_offset_y)
 
 
 func _frame_size() -> Vector2:

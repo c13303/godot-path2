@@ -35,16 +35,11 @@ script = ExtResource("4_rk5yt")
 currency = "gem"
 amount = 10
 
-[sub_resource type="Resource" id="Resource_lh4ow"]
-script = ExtResource("4_rk5yt")
-currency = "bamboo"
-amount = 20
-
 [sub_resource type="Resource" id="Resource_1hais"]
 script = ExtResource("2_night_playlist")
 spawner_tracks = Array[ExtResource("3_track")]([SubResource("Resource_0k8ip"), SubResource("Resource_5vf1s")])
 clients = 15
-special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_night1_seed_reward"), SubResource("Resource_yn215"), SubResource("Resource_lh4ow")])
+special_rewards = Array[ExtResource("4_rk5yt")]([SubResource("Resource_night1_seed_reward"), SubResource("Resource_yn215")])
 special_reward_one_time = true
 
 [sub_resource type="Resource" id="Resource_sn0du"]

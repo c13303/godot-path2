@@ -31,7 +31,8 @@ static func save_log(message: String) -> void:
 		debug_enabled = value
 		_apply_debug_settings()
 
-## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, and money.
+## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, and money
+## during the day, and skips the night without granting anything at night.
 @export var dev_keys: bool = false:
 	set(value):
 		dev_keys = value
@@ -320,9 +321,11 @@ func _is_game_paused() -> bool:
 	return false
 
 
-## Dev cheat keys, gated behind dev_keys. Numpad + grants 100 seeds/gems/money,
-## fully refills the water reserve, and (if it is currently night) removes every
-## monster and ends the night. Numpad 1/2/0 force-spawn one agent from each
+## Dev cheat keys, gated behind dev_keys. Numpad + fully refills the water
+## reserve and, during the day, grants 100 seeds/gems/money. At night it acts as
+## a night-skip only (removes every monster, ends the night) and grants no
+## currency, so skipping nights does not inflate the economy.
+## Numpad 1/2/0 force-spawn one agent from each
 ## registered enemy/client spawner. K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
 ## ² (top-left key) restarts the level with debug forced ON.
@@ -334,7 +337,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if key_event.keycode == KEY_KP_ADD:
 		get_viewport().set_input_as_handled()
-		_grant_dev_currency()
+		if not GameState.is_night:
+			_grant_dev_currency()
 		_refill_dev_water_reserve()
 		_end_dev_night()
 	elif _is_key(key_event, KEY_KP_1):

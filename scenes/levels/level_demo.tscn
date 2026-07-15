@@ -1353,6 +1353,26 @@ position = Vector2(1648, 2642)
 texture = ExtResource("6_l4uo6")
 hframes = 2
 
+[node name="bamboo5" type="Sprite2D" parent="bamboo" unique_id=110972847]
+position = Vector2(1649, 2602)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo6" type="Sprite2D" parent="bamboo" unique_id=871817656]
+position = Vector2(1688, 2599)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo7" type="Sprite2D" parent="bamboo" unique_id=103363835]
+position = Vector2(1685, 2555)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
+[node name="bamboo8" type="Sprite2D" parent="bamboo" unique_id=851459007]
+position = Vector2(1646, 2558)
+texture = ExtResource("6_l4uo6")
+hframes = 2
+
 [node name="bamboo3" type="Sprite2D" parent="bamboo" unique_id=1203945091]
 position = Vector2(1687, 2678)
 texture = ExtResource("6_l4uo6")
