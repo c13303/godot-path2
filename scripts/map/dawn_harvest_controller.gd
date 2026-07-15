@@ -70,13 +70,21 @@ func begin_phase() -> void:
 	_active = true
 	if _manager.grownup_rose_count() > 0 and harvestable_imperials <= 0 and not _manager.has_counter_room_for_harvest() and not _manager.can_install_new_counter():
 		if _manager.rose_shop_counter_count() <= 0:
-			_manager.auto_select_hammer()
+			# Stay active and wait for the player to build their first counter.
 			return
 		_active = false
 		_manager.request_client_sale_start()
 		return
-	if _manager.grownup_rose_count() > 0 and not _manager.has_counter_room_for_harvest():
+	if _manager.grownup_rose_count() > 0 and not _manager.has_counter_room_for_harvest() and _may_auto_select_hammer():
 		_manager.auto_select_hammer()
+
+
+## The dawn "place the shop" tutorial step owns the moment until the player has placed their
+## first counter: it guides them with its own quickslot arrows (hammer slot, then the counter
+## item inside the menu). Auto-opening the hammer menu would skip past the first arrow, so the
+## convenience shortcut is limited to the later "counters are full, add more" case.
+func _may_auto_select_hammer() -> bool:
+	return _manager.rose_shop_counter_count() > 0
 
 
 func process_walkover() -> void:
