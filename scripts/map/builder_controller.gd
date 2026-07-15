@@ -88,7 +88,7 @@ func on_night_started() -> void:
 		if builder_id >= 0:
 			_work_house_by_builder_id.erase(builder_id)
 			if _house_id_by_builder_id.has(builder_id):
-				var home_cell: Vector2i = _home_cell_by_builder_id.get(builder_id, INVALID_CELL) as Vector2i
+				var home_cell: Vector2i = _builder_home_cell(builder_id)
 				if home_cell != INVALID_CELL and visitor.repath_to_target(home_cell):
 					_state_by_builder_id[builder_id] = STATE_RETURNING_HOME
 					continue
@@ -629,9 +629,18 @@ func _find_claim_for_visitor(source_cell: Vector2i, visitor: DayVisitorMovementC
 	return _find_claim_from_spawn(from_cell, visitor)
 
 
+# The cell a Builder idles on when it has nothing to do. House-bound Builders anchor on
+# their house entrance, the fundamental Builder on its authored spot. Any Builder with an
+# anchor is walked back to it after being pushed off.
+func _builder_home_cell(builder_id: int) -> Vector2i:
+	return _home_cell_by_builder_id.get(builder_id, INVALID_CELL) as Vector2i
+
+
 func _find_claim_from_spawn(spawn_cell: Vector2i, visitor: DayVisitorMovementController) -> Vector2i:
 	var builder_id: int = _builder_id_for_visitor(visitor)
 	var anchor: Vector2i = _home_cell_by_builder_id.get(builder_id, _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)) as Vector2i
+	# A house entrance is a doorway the Builder waits next to; an authored spot is meant to
+	# be stood on.
 	var include_anchor: bool = builder_id < 0 or not _house_id_by_builder_id.has(builder_id)
 	return _find_claim_near_anchor(anchor, visitor, spawn_cell, include_anchor)
 
@@ -692,7 +701,7 @@ func _process_idle_home_correction(delta: float) -> void:
 			_idle_return_retry_cooldown_by_builder_id[cooldown_builder_id] = cooldown
 	for visitor: DayVisitorMovementController in _visitors:
 		var builder_id: int = _builder_id_for_visitor(visitor)
-		if builder_id < 0 or not _house_id_by_builder_id.has(builder_id):
+		if builder_id < 0 or _builder_home_cell(builder_id) == INVALID_CELL:
 			if builder_id >= 0:
 				_clear_idle_return_state(builder_id)
 			continue
@@ -811,7 +820,7 @@ func _builder_stall_warning(builder_id: int, visitor: DayVisitorMovementControll
 	var house_id: StringName = StringName(_work_house_by_builder_id.get(builder_id, &""))
 	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
 	var nav_id: int = visitor.nav_id()
-	var home_cell: Vector2i = _home_cell_by_builder_id.get(builder_id, INVALID_CELL) as Vector2i
+	var home_cell: Vector2i = _builder_home_cell(builder_id)
 	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s house=%s current_cell=%s target_cell=%s home=%s current_world=%s target_world=%s stalled_for=%.1fs." % [
 		builder_id,
 		nav_id,
