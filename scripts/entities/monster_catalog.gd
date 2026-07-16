@@ -50,7 +50,7 @@ static func _make_basic() -> MonsterData:
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
 	data.sprite_scale = Vector2(0.75, 0.75)
 	data.sprite_offset = Vector2(0.0, -16.0)
-	data.max_health = 100
+	data.max_health = 500
 	data.speed_scale = 1.0
 	data.crowd_resist_scale = 1.0
 	data.contact_push_power = 0.0
@@ -71,7 +71,7 @@ static func _make_bigmonster() -> MonsterData:
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
 	data.sprite_scale = BIG_MONSTER_SPRITE_SCALE
 	data.sprite_offset = BIG_MONSTER_SPRITE_OFFSET
-	data.max_health = 200
+	data.max_health = 1000
 	data.speed_scale = 0.5
 	data.crowd_resist_scale = 2.0
 	data.contact_push_power = 520.0

@@ -118,9 +118,14 @@ func _monster_resume_token(agent: Node2D, spawner_cell: Vector2i, roses_eaten: i
 	var monster_type: StringName = MonsterCatalog.BASIC_ID
 	if agent.has_meta("monster_type"):
 		monster_type = StringName(str(agent.get_meta("monster_type")))
+	# Runtime-form token: spawner_cell stays a Vector2i and monster_type a
+	# StringName so it matches SpawnTickController's live _resume_monster_queue
+	# tokens. SpawnTickController.serialize_state() runs every token through
+	# _serialized_resume_token(), which casts spawner_cell "as Vector2i"; handing
+	# it an already-serialized {x,y} dict here crashes the night save.
 	return {
-		"spawner_cell": {"x": spawner_cell.x, "y": spawner_cell.y},
-		"monster_type": String(monster_type),
+		"spawner_cell": spawner_cell,
+		"monster_type": monster_type,
 		"health": int(agent.get("health")),
 		"max_health": int(agent.get("max_health")),
 		"roses_eaten": maxi(0, roses_eaten),
