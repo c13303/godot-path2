@@ -5,8 +5,8 @@ class_name HouseResidentRole
 ##
 ## HouseResidentController owns the shared movement/lifecycle (spawn, arrival, night return,
 ## evacuation, repath, removal). A role layers role-specific side effects on top of those
-## lifecycle events — e.g. the seed merchant's shop-phase flag and interaction pause — without
-## re-implementing any movement. Ordinary villagers with no special behaviour register no role.
+## lifecycle events — e.g. the seed merchant's shop-phase flag — without re-implementing any
+## movement. Ordinary villagers with no special behaviour register no role.
 ##
 ## All hooks default to no-ops. The `resident` argument is the owning HouseResidentController,
 ## so a role can read the live agent node / world position / waiting state through it.
@@ -41,7 +41,7 @@ func on_cleared() -> void:
 	pass
 
 
-## Per-frame agent-pass hook (interaction proximity / pause).
+## Per-frame agent-pass hook (role-specific interaction proximity).
 func process(_resident: HouseResidentController) -> void:
 	pass
 

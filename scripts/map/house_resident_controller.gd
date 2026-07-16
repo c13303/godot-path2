@@ -13,8 +13,8 @@ class_name HouseResidentController
 ##   * canonical resident identity (group + metadata) for generic systems.
 ##
 ## It reuses DayVisitorMovementController for all movement (never re-implements pathing) and
-## delegates every role-specific side effect (shop phase, interaction pause, dialogs, purchases,
-## ...) to an optional HouseResidentRole. No shop/dialog/invention/Builder/tutorial logic lives
+## delegates every role-specific side effect (shop phase, dialogs, purchases, ...) to an
+## optional HouseResidentRole. No shop/dialog/invention/Builder/tutorial logic lives
 ## here. One HouseResidentController instance is registered per ordinary resident_type in
 ## AllyHousingController.
 
@@ -41,6 +41,7 @@ var _idle_home_check_elapsed: float = 0.0
 var _idle_displacement_seconds: float = 0.0
 var _idle_return_retry_cooldown: float = 0.0
 var _idle_return_pending: bool = false
+var _interaction_held: bool = false
 
 
 func setup(manager: BuildingManager, house_manager: HouseManager, config: HouseResidentConfig) -> void:
@@ -76,6 +77,7 @@ func process(_delta: float) -> void:
 	if _config.role != null:
 		_config.role.process(self)
 	_process_arrival()
+	_process_interaction_hold()
 	_process_idle_home_correction(_delta)
 
 
@@ -85,6 +87,7 @@ func process_phase(_delta: float) -> void:
 
 
 func on_night_started() -> void:
+	_set_interaction_hold(false)
 	if _config.role != null:
 		_config.role.on_night_started(self)
 	_evacuating = false
@@ -129,6 +132,7 @@ func on_house_removing(snapshot: HouseManager.HouseSnapshot) -> void:
 func on_agent_removed(agent: Node2D) -> void:
 	if not _visitor.owns_agent(agent):
 		return
+	_set_interaction_hold(false)
 	_visitor.forget_agent()
 	_reset_state()
 	if _config.role != null:
@@ -140,6 +144,7 @@ func owns_agent(agent: Node2D) -> bool:
 
 
 func clear(free_agents: bool) -> void:
+	_set_interaction_hold(false)
 	_visitor.clear(free_agents)
 	_reset_state()
 	if _config.role != null:
@@ -198,6 +203,7 @@ func evacuate() -> void:
 	if not _visitor.is_active():
 		clear(false)
 		return
+	_set_interaction_hold(false)
 	if _config.role != null:
 		_config.role.on_leaving(self)
 	_returning_home = false
@@ -242,6 +248,10 @@ func resident_house_id() -> StringName:
 ## (e.g. a villager's dialog/interaction controller reaching its live agent).
 func resident_type() -> StringName:
 	return _config.resident_type
+
+
+func is_interaction_held() -> bool:
+	return _interaction_held
 
 
 ## Generic Chebyshev-distance proximity test in tile space between the player and this resident.
@@ -334,6 +344,26 @@ func _clear_idle_return_state() -> void:
 	_idle_return_pending = false
 
 
+func _process_interaction_hold() -> void:
+	if _config.interaction_hold_radius_tiles <= 0:
+		_set_interaction_hold(false)
+		return
+	if not _visitor.is_active() or GameState.is_night or _visitor.is_leaving() or _evacuating or _returning_home:
+		_set_interaction_hold(false)
+		return
+	if not _interaction_held and not has_reached_idle_spot():
+		_set_interaction_hold(false)
+		return
+	_set_interaction_hold(is_player_near(_config.interaction_hold_radius_tiles))
+
+
+func _set_interaction_hold(value: bool) -> void:
+	if _interaction_held == value:
+		return
+	_interaction_held = value
+	_visitor.set_autonomous_paused(value)
+
+
 ## Canonical house-resident identity so generic systems can tell an agent is house-owned, which
 ## house owns it, its role, that it is reconstructed (not serialized), and how to evacuate it.
 func _stamp_identity() -> void:
@@ -347,6 +377,7 @@ func _stamp_identity() -> void:
 
 
 func _reset_state() -> void:
+	_interaction_held = false
 	_resident_house_id = &""
 	_home_entrance_cell = INVALID_CELL
 	_returning_home = false

@@ -777,7 +777,20 @@ void SteeringSystem::apply_contact_pushes(double delta)
             double force = std::abs(net_pressure);
             double cooldown = std::max(agent.profile.contact_push_cooldown, neighbor.profile.contact_push_cooldown);
 
-            queue_smash_impulse(target_id, impulse_dir, force, 0.65, 0.0, false, 0.0, 0.0, false, static_cast<int>(ImpulseQueuePriority::Contact));
+            // The contact cooldown is also the short autonomous-control suppression window;
+            // this prevents path/flow steering from cancelling the physical contact impulse
+            // before the next contact may be generated.
+            queue_smash_impulse(
+                target_id,
+                impulse_dir,
+                force,
+                0.65,
+                0.0,
+                false,
+                1.0,
+                cooldown,
+                false,
+                static_cast<int>(ImpulseQueuePriority::Contact));
             contact_push_cooldowns[agent.id][neighbor.id] = cooldown;
             contact_push_cooldowns[neighbor.id][agent.id] = cooldown;
         }

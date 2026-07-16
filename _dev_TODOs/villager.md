@@ -1,681 +1,602 @@
-# TASK — Fix and complete shared basic agent/villager behavior
+# Task: Make player contact pushes consistent for villagers and all navigating agents
 
-Read `AGENTS.md` first.
+Read `AGENTS.md` before changing code.
 
-Do not run Godot, tests, builds, exports, or compilation. The user will test manually.
+Do not run Godot, tests, compilation, SCons, export, or the game. The user will test manually.
 
 ## Objective
 
-Investigate and fix the inconsistent basic behavior between:
+Player contact pushing must work consistently regardless of the target agent’s current navigation state.
 
-* Fundamental Builder
-* normal Builders
-* Seed Merchant
-* Inventor
-* clients
-* monsters
-* player, where applicable
+In particular:
 
-The current problems suggest that shared agent behavior is only partially generic and that several systems still rely on hardcoded role names.
+* The fundamental builder currently feels correct and must remain correct.
+* Normal builders, the merchant, the inventor, and future villagers must behave consistently with the fundamental builder.
+* A villager must remain physically pushable while:
 
-Fix the architecture cleanly without creating one giant agent controller.
+  * parked;
+  * returning to its idle/home position;
+  * following an A* path;
+  * waiting near its house;
+  * held for interaction.
+* Clients and small monsters must also receive consistent player contact pushes while following flow fields or A* paths.
+* Do not implement villager-specific force hacks.
+* Do not detach paths or flow fields when contact pushing.
+* After the temporary displacement, navigation must naturally regain control.
 
 ---
 
-# Core health rule — must be preserved exactly
+# Confirmed diagnosis
 
-## Every agent has health
+There are two related inconsistencies.
 
-All agents retain a health/life model:
+## 1. Generic contact pushes currently have no control suppression
 
-* player
-* clients
-* villagers
-* builders
-* Merchant
-* Inventor
-* monsters
-* future agent types
+In:
 
-Do not remove health from peaceful agents.
-
-## Generic health-bar visibility
-
-The health bar must follow one universal rule:
-
-```gdscript
-visible only when health < max_health
+```text
+extensions/flowfield/steering/steering_system.cpp
 ```
 
-Therefore:
+`SteeringSystem::apply_contact_pushes()` queues contact impulses approximately like this:
 
-* a full-health monster shows no health bar;
-* a full-health villager shows no health bar;
-* a full-health client shows no health bar;
-* a full-health player shows no health bar;
-* a damaged agent shows its health bar;
-* if restored to full health, the bar hides again.
+```cpp
+queue_smash_impulse(
+    target_id,
+    impulse_dir,
+    force,
+    0.65,
+    0.0,
+    false,
+    0.0,
+    0.0,
+    false,
+    static_cast<int>(ImpulseQueuePriority::Contact)
+);
+```
 
-Health-bar visibility must not depend on `agent_kind`, role groups, damage immunity, hostility, or whether the agent is peaceful.
+The two zero values mean:
 
-Remove any role-specific health-bar visibility whitelist.
+```text
+control_suppression = 0.0
+control_suppression_duration = 0.0
+```
 
-## Current gameplay consequence
+Later, both the A* path-following branch and flow-field branch contain logic that cancels propulsion when the impulse velocity opposes the autonomous target velocity and no control suppression is active.
 
-In the current game, there is no normal way to damage:
+Relevant areas are around:
 
+```text
+steering_system.cpp:2292
+steering_system.cpp:2721
+```
+
+Therefore, a contact push can appear to work when aligned with navigation, but be cancelled when the player pushes sideways or away from the agent’s destination.
+
+This affects any navigating agent, including:
+
+* villagers returning to idle;
 * clients;
-* villagers;
-* Builders;
-* Merchant;
-* Inventor;
-* player.
+* small monsters;
+* other flow-field or A*-driven agents.
 
-Therefore, their health bars should never appear during current gameplay because their health remains full.
+The apparent behavior can vary according to the agent’s current direction and movement branch.
 
-This is a consequence of the generic full-health rule—not a special rule that permanently hides their bars.
+## 2. The fundamental builder uses native pause; ordinary villagers do not
 
-Do not remove their health fields and do not make their health bars role-disabled.
+The fundamental builder calls the native:
 
-## Buildings
+```text
+set_agent_paused()
+```
 
-Buildings use their separate building durability and health overlay.
+through `BuilderController.set_fundamental_builder_paused()` when appropriate.
 
-The same visibility principle applies:
+The native paused branch intentionally freezes autonomous navigation while still allowing contact propulsion:
 
-* full-health building: no health bar;
-* damaged building: health bar visible.
+```text
+extensions/flowfield/steering/steering_system.cpp:2133-2157
+```
 
-The bar currently seen around the Inventor house must be investigated precisely:
+This is why the fundamental builder feels substantially better when interacting with the player.
 
-* determine whether it belongs to the Inventor agent or the house;
-* fix the underlying owner/visibility issue;
-* do not merely hide the symptom.
+Ordinary villagers do not consistently reproduce this:
+
+* `SeedMerchantController` tracks a logical `_paused` boolean but deliberately does not call native pause.
+* The inventor has no movement role and therefore has no equivalent interaction hold.
+* The comment claiming that native pause would prevent contact movement is incorrect: the native paused branch explicitly preserves contact propulsion.
 
 ---
 
-# Reported problems
+# Required implementation
 
-## 1. Dialog tooltip missing on non-Fundamental villagers
-
-Agents with a valid dialog should use the same basic interaction-tooltip behavior.
-
-Currently, the Fundamental Builder receives an interaction tooltip, while other dialog villagers may not.
-
-Known relevant scripts may include:
-
-* `fundamental_builder_prompt.gd`
-* `merchant_prompt.gd`
-* `inventor_prompt.gd`
-* `InteractionRouter`
-* the corresponding dialog controllers
-
-Investigate whether prompts are:
-
-* duplicated per villager;
-* wired to different controllers;
-* checking role-specific BuildingManager state;
-* missing scene references;
-* using inconsistent interaction eligibility methods.
-
-## 2. Villagers cannot be pushed by the player
-
-Merchant, Inventor, and other villagers appear physically immovable compared with the Fundamental Builder.
-
-Investigate:
-
-* native contact/push profiles;
-* agent registration metadata;
-* role-specific `agent_kind` handling;
-* paused-agent behavior;
-* steering pause;
-* contact displacement;
-* collision groups;
-* push resistance;
-* player-to-agent contact;
-* whether ordinary villagers are omitted from a shared group.
-
-Villagers must not behave like static walls.
-
-## 3. Unexpected full health bar
-
-All agents have health, but no agent health bar should appear at full health.
-
-The Inventor likely exposes a role-specific health-bar exclusion bug because it was not added to an old hardcoded agent-kind list.
-
-Do not solve this by adding `"inventor"` to another whitelist.
-
-Replace the underlying visibility logic with the universal `health < max_health` rule.
+Implement both sections below. The interaction-pause parity is not a replacement for fixing generic contact suppression.
 
 ---
 
-# Required architecture
+## Part 1 — Give generic contact pushes control suppression
 
-## A. Introduce an explicit shared villager identity
+Modify:
 
-Create or standardize one canonical group:
-
-```gdscript
-const VILLAGERS_GROUP: StringName = &"villagers"
+```text
+extensions/flowfield/steering/steering_system.cpp
 ```
 
-This group represents peaceful villager/person identity.
+### Required behavior
 
-It should include:
+When `apply_contact_pushes()` queues a contact impulse:
 
-* Fundamental Builder
-* normal Builders
-* Seed Merchant
-* Inventor
-* future villagers
+* use full autonomous control suppression:
 
-Keep other semantic groups separately:
+  * `control_suppression = 1.0`;
+* use the effective contact cooldown as the suppression duration:
 
-* `house_residents` still means agents associated with a house;
-* `builders` still means Builder-specific behavior;
-* `merchants` still means Merchant-specific behavior;
-* `inventors` may remain for Inventor-specific behavior.
+  * `control_suppression_duration = cooldown`;
+* keep:
 
-Fundamental Builder must belong to `villagers` even when it is not currently assigned to a house.
+  * `detach_flow = false`;
+  * `ImpulseQueuePriority::Contact`;
+  * the existing contact resistance calculation;
+  * the existing pressure comparison;
+  * the existing pair cooldown;
+  * the existing smash resistance;
+  * the existing impulse friction.
 
-Do not replace every specialized group with `villagers`. Use the canonical group only where the intended concept is genuinely “all villagers.”
+Conceptually:
+
+```cpp
+queue_smash_impulse(
+    target_id,
+    impulse_dir,
+    force,
+    0.65,
+    0.0,
+    false,
+    1.0,
+    cooldown,
+    false,
+    static_cast<int>(ImpulseQueuePriority::Contact)
+);
+```
+
+Use the already calculated effective pair cooldown. Do not introduce an unrelated magic duration.
+
+### Why
+
+During the short contact window:
+
+* autonomous flow/A* steering must yield;
+* the contact impulse must not be immediately cancelled;
+* the path or flow assignment must remain intact;
+* when suppression expires, the existing navigation naturally resumes.
+
+### Important constraints
+
+Do not:
+
+* special-case the player;
+* special-case villagers;
+* special-case clients;
+* remove the opposing-velocity cancellation globally;
+* detach flow fields;
+* detach A* paths;
+* modify contact push power values;
+* modify contact resistance values;
+* convert contact pushes into gameplay/weapon impulses;
+* change `ImpulseQueuePriority`.
+
+The contact system is symmetric. The same generic rule must also continue to support cases such as a big monster physically pushing the player.
+
+Add a concise comment explaining that the contact cooldown is also the short autonomous-control suppression window, preventing path/flow steering from cancelling the physical contact impulse before the next contact may be generated.
 
 ---
 
-## B. Add one shared villager-trait setup path
+## Part 2 — Reuse the fundamental builder’s native-pause behavior for ordinary villagers
 
-In the appropriate agent-definition/configuration service, create one focused shared helper, for example:
+The fundamental builder’s behavior should be reproduced through the shared visitor movement system, not copied independently into every villager role.
 
-```gdscript
-func _apply_villager_traits(agent: Node) -> void:
+### 2.1 Add a focused pause API to `DayVisitorMovementController`
+
+Modify:
+
+```text
+scripts/map/day_visitor_movement_controller.gd
 ```
 
-Call it from the setup paths for:
+This controller already owns:
 
-* normal Builder;
-* Fundamental Builder;
-* Merchant;
-* Inventor.
+* the native navigation ID;
+* access to `agent_manager`;
+* visitor movement/path assignment.
 
-Shared traits should include only behavior genuinely shared by all villagers:
+Add a small public API such as:
 
-* canonical `villagers` group;
-* common player-contact push profile;
-* peaceful-agent damage policy, if such a policy already exists;
-* common native contact metadata;
-* any common person-agent defaults currently duplicated.
+```gdscript
+func set_autonomous_paused(value: bool) -> void
+func is_autonomous_paused() -> bool
+```
 
-Do not put these into the shared helper:
+Naming may vary slightly, but it must clearly mean native autonomous-navigation pause, not pausing the scene tree or gameplay globally.
 
-* dialog content;
-* Merchant shop logic;
-* Inventor logic;
-* Builder construction;
-* house ownership;
-* tutorials;
-* cutscenes;
-* hammer animation.
+Requirements:
 
-Normal and Fundamental Builders must share the same base villager traits before applying their Builder-specific behavior.
+* Cache the current pause state so repeated calls are idempotent.
+* Call native `agent_manager.set_agent_paused(_nav_id, value)` when the native agent is valid.
+* Do not detach its path.
+* Do not change `_waiting`, `_leaving`, or its target.
+* Ensure an old visitor is unpaused before its movement state is cleared/reset when a valid native agent still exists.
+* Initialize the pause state correctly for newly spawned visitors.
+* Keep strict GDScript typing.
+
+This becomes the single shared GDScript entry point for pausing a `DayVisitorMovementController`.
 
 ---
 
-# Health and health-bar implementation
+### 2.2 Route the fundamental builder through the shared API
 
-## C. Make agent health-bar rendering fully generic
+Modify:
 
-Find the agent health-bar rendering path, likely in or around `character.gd`.
-
-Refactor it so visibility is determined only by health state:
-
-```gdscript
-func should_show_health_bar() -> bool:
-    return max_health > 0 and health < max_health
+```text
+scripts/map/builder_controller.gd
 ```
 
-Use the project’s actual typed conventions and existing naming.
+Update `set_fundamental_builder_paused()` so it obtains the fundamental builder’s `DayVisitorMovementController` and calls the new shared pause API.
 
-Required behavior:
+Do not change when the fundamental builder becomes paused or unpaused.
 
-```gdscript
-health >= max_health
+Preserve its exact current gameplay behavior. This change is ownership cleanup only:
+
+```text
+BuilderController decides when.
+DayVisitorMovementController performs the native movement pause.
 ```
 
-means hidden.
-
-```gdscript
-health < max_health
-```
-
-means visible.
-
-Clamp health safely if necessary:
-
-```gdscript
-health = clampi(health, 0, max_health)
-```
-
-Do not use:
-
-* `agent_kind` checks;
-* `villagers` checks;
-* `monsters` checks;
-* damage-immunity checks;
-* hostility checks;
-* role whitelists.
-
-Health-bar rendering and damage eligibility are separate concerns.
-
-## D. Preserve health for all agents
-
-Do not remove:
-
-* health;
-* maximum health;
-* damage API;
-* healing compatibility;
-* future ability to damage peaceful agents.
-
-Clients, villagers, and player still possess health even though current gameplay does not damage them.
-
-## E. Audit all health-bar implementations
-
-Search for every agent health-bar path:
-
-* custom `_draw()` health bars;
-* child health-bar controls;
-* overlays;
-* scripts toggling bar visibility;
-* role-specific exceptions;
-* initialization code showing full bars;
-* bars attached to agents but positioned over nearby houses.
-
-Ensure there is exactly one authoritative rule for agent health-bar visibility.
-
-If multiple agent bar implementations exist, either unify them or make them consume one shared predicate.
-
-## F. Preserve separate building health bars
-
-Do not merge agent and building health systems.
-
-Buildings should continue using their existing durability and overlay system.
-
-Confirm:
-
-* full-health houses show no bar;
-* damaged houses show a bar;
-* the bar is positioned relative to the building;
-* removing a building removes its bar;
-* an agent bar cannot visually appear attached to a nearby house.
+Do not add ordinary-villager logic to `BuilderController`.
 
 ---
 
-# Generic interaction prompt
+### 2.3 Make interaction hold generic for ordinary house residents
 
-## G. Replace role-specific prompt behavior with one reusable implementation
+Modify:
 
-The dialog controllers already appear to implement a common interaction contract such as:
+```text
+scripts/map/house_resident_config.gd
+scripts/map/house_resident_controller.gd
+scripts/map/building_manager.gd
+```
+
+Add an explicit optional configuration value to `HouseResidentConfig`, for example:
 
 ```gdscript
-can_interact() -> bool
-get_interaction_world_position() -> Vector2
-request_interaction() -> bool
-is_interaction_open() -> bool
+var interaction_hold_radius_tiles: int = 0
 ```
 
-Use that existing contract.
+Semantics:
 
-Create one reusable interaction prompt script or scene, for example:
+* `0` means the resident has no automatic proximity interaction hold.
+* A positive value means the ordinary resident pauses autonomous movement when the player is within that tile radius.
 
-```txt
-scripts/ui/interaction_prompt.gd
-```
+Set this value to `2` for:
 
-Each prompt instance should receive a target controller through a configured `NodePath` or another clean dependency.
+* the merchant;
+* the inventor.
 
-The reusable prompt owns only:
+Do this where their `HouseResidentConfig` objects are constructed in `BuildingManager._setup_ally_housing()`.
 
-* displaying the E/Y interaction glyph;
-* keyboard/gamepad glyph switching;
-* icon size and shadow;
-* world-to-screen positioning;
-* hiding when the target cannot interact;
-* hiding while the target dialog is open;
-* hiding while the shared Dialog UI is occupied;
-* following the target interaction position.
+Future ordinary villagers with dialogs should be able to opt into the same behavior by setting this one configuration value.
 
-The prompt must not know about:
+### HouseResidentController ownership
 
-* Merchant;
-* Inventor;
-* Fundamental Builder;
-* Builder work state;
-* house residence;
-* tutorials;
-* cutscenes;
-* role-specific BuildingManager queries.
+`HouseResidentController` must own the ordinary resident’s interaction-hold state.
 
-Those rules belong in each dialog controller’s `can_interact()` implementation.
-
-Wire the existing prompt nodes to:
-
-* Fundamental Builder → `FundamentalBuilderDialogController`
-* Merchant → `MerchantDialogController`
-* Inventor → `InventorDialogController`
-
-Delete obsolete duplicated prompt scripts only after verifying there are no remaining references.
-
-Do not alter the generic `InteractionRouter` unless a real defect is found.
-
----
-
-# Player push/contact behavior
-
-## H. Make every villager pushable through the same base contact profile
-
-Expected behavior:
-
-* player contact can visibly displace every villager;
-* Merchant and Inventor do not behave like immovable objects;
-* normal Builders and Fundamental Builder use the same underlying response;
-* dialog or idle pausing does not create infinite push resistance;
-* no role-specific push string checks are introduced.
-
-Use the Fundamental Builder’s current physical response as the reference behavior.
-
-Do not invent arbitrary push values before inspecting the existing effective configuration.
-
-Trace:
-
-* native registration defaults;
-* contact push power;
-* contact resistance;
-* contact cooldown;
-* weight/mass equivalents;
-* movement integration;
-* external displacement;
-* player collision/contact handling;
-* agent paused state.
-
-## I. Inspect native paused-agent semantics
-
-Merchant or other villagers may be paused while available for dialog.
-
-Determine whether `set_agent_paused()` currently:
-
-1. pauses only autonomous navigation/steering; or
-2. skips all movement integration, including external contact displacement.
-
-If pause currently blocks player push, separate these concepts cleanly:
-
-* autonomous movement can remain paused;
-* valid external contact displacement should still be applied.
-
-Do not solve it by:
-
-* teleporting the villager from GDScript;
-* moving it manually every frame;
-* disabling dialog pause without understanding its purpose;
-* adding Merchant/Inventor special cases in C++.
-
-The native implementation must remain generic and profile/capability-driven.
-
-## J. Apply the shared profile before native registration
-
-If native registration reads metadata or properties during `spawn_agent()`, ensure shared villager contact traits are applied before registration.
-
-Inspect actual spawn order.
-
-Do not add a post-registration correction unless the native API requires it.
-
----
-
-# Audit hardcoded role lists
-
-## K. Search for incomplete villager enumeration
-
-Search the project for hardcoded combinations involving:
+Add focused state/query methods, for example:
 
 ```gdscript
-builders
-merchants
-inventors
-house_residents
-fundamental_builder
+var _interaction_held: bool = false
+
+func is_interaction_held() -> bool
+func _set_interaction_hold(value: bool) -> void
+func _process_interaction_hold() -> void
 ```
 
-Where the actual intended concept is “all villagers,” replace role enumeration with the canonical `villagers` group.
+`_set_interaction_hold()` must delegate to:
 
-Inspect at minimum:
+```gdscript
+_visitor.set_autonomous_paused(value)
+```
 
-* build-placement actor displacement;
-* occupied-cell queries;
-* spawn-cell validation;
-* player-contact eligibility;
-* native registration consistency watchers;
-* debug watchers;
-* cleanup/unregister logic;
-* agent-cell tracking;
-* house destruction displacement;
-* any generic scene-tree group scan.
+### Required interaction-hold behavior
 
-Known likely files include:
+An ordinary resident may enter interaction hold only when:
 
-* `build_actor_displacement_service.gd`
-* `building_manager.gd`
-* `agent_registration_consistency_watcher.gd`
+* it is active;
+* it is daytime;
+* it is not leaving;
+* it is not evacuating;
+* it is not returning home for the night;
+* it has initially reached/parked at its idle spot;
+* the player is within its configured interaction radius.
 
-Do not replace a specialized list where specialized role behavior is intentional.
+Once the hold has started, it must remain active while the player remains near, even if:
 
-## L. Avoid per-frame scene-tree scans
+* the player pushes the resident away;
+* idle-home correction assigns a return A* path;
+* `_visitor.is_waiting()` becomes false because that return path was assigned.
 
-The fix must not introduce repeated `get_nodes_in_group()` scans inside per-frame agent movement.
+This detail is essential.
 
-Use:
+The intended sequence is:
 
-* existing registries;
-* cached agent trackers;
-* spawn/despawn registration;
-* event-driven updates.
+1. Resident is parked.
+2. Player approaches.
+3. Native autonomous movement is paused.
+4. Player pushes the resident.
+5. Idle-home correction may assign a path back home.
+6. The path remains assigned, but native pause prevents the resident from fighting the player.
+7. Contact pushes continue moving it through the native paused branch.
+8. Player leaves the interaction radius.
+9. Native pause is released.
+10. The already-assigned path naturally returns the resident home.
 
-Scene-tree group queries are acceptable for infrequent setup, reconciliation, or explicit build-placement operations where already appropriate.
+Do not continuously require `has_reached_idle_spot()` after the hold has already begun.
 
----
+A suitable condition is conceptually:
 
-# Responsibility boundaries
+```gdscript
+if not _interaction_held and not has_reached_idle_spot():
+    return
+```
 
-Maintain the existing modular ownership.
+Then update the held state from player proximity.
 
-## Agent definition/configuration service
+### Mandatory release cases
 
-Owns:
+Release the native interaction hold immediately before or during:
 
-* common villager traits;
-* role-specific visual/stat configuration;
-* shared native contact metadata.
-
-## `HouseResidentController`
-
-Owns:
-
-* ordinary resident lifecycle;
-* house association;
-* arrival;
-* night return;
+* night transition;
 * evacuation;
-* removal.
+* house destruction/removal;
+* resident clearing;
+* agent-removal cleanup;
+* departure;
+* any lifecycle transition where autonomous movement must resume.
 
-## `BuilderController`
+In particular, release it before assigning the night return path.
 
-Owns:
+Never leave a native agent paused after its resident controller has been reset.
 
-* construction work;
-* Builder claims;
-* hammer behavior;
-* Fundamental Builder special lifecycle;
-* Builder-specific idle correction.
+### Processing order
 
-## Dialog controllers
+Process interaction hold after arrival state has been updated but before idle-home correction, so a newly parked resident can enter the hold and a displaced held resident can safely receive an idle-return path.
 
-Own:
-
-* role-specific interaction eligibility;
-* role-specific dialog content;
-* role-specific dialog actions.
-
-## Generic interaction prompt
-
-Owns only shared prompt presentation.
-
-## Native movement/contact extension
-
-Owns:
-
-* player/agent physical contact;
-* push response;
-* paused movement integration;
-* contact profiles.
-
-## Agent health system
-
-Owns:
-
-* health;
-* maximum health;
-* damage;
-* healing compatibility;
-* generic health-bar state.
-
-## Building health system
-
-Remains separate from agent health.
-
-Do not create a large `VillagerManager` or general-purpose agent god object.
+Keep the existing resident tick consolidated. Do not add a new global per-frame scan.
 
 ---
 
-# Static verification requirements
+### 2.4 Remove merchant-specific duplicate pause ownership
 
-Because Godot must not be run, verify by code inspection that:
+Modify:
 
-1. Every agent type still has health and maximum health.
-2. Agent health-bar visibility uses only `health < max_health`.
-3. Full-health monsters show no bar.
-4. Full-health villagers show no bar.
-5. Full-health clients show no bar.
-6. Full-health player shows no bar.
-7. Damaged agents would show their bar regardless of role.
-8. No agent-kind health-bar whitelist remains.
-9. Health-bar visibility is independent from damage immunity.
-10. Full-health houses show no building bar.
-11. Damaged houses show their building bar.
-12. The Inventor’s unexpected bar owner is identified precisely.
-13. Fundamental Builder, Builders, Merchant, and Inventor all receive the same shared villager traits.
-14. Merchant and Inventor receive the same base player-contact response as the Fundamental Builder.
-15. Paused villagers can still receive valid external player displacement.
-16. All dialog villagers use the reusable interaction prompt.
-17. The prompt consumes the generic interaction contract.
-18. Generic villager systems no longer require editing for every future villager role.
-19. No new per-frame group scan was introduced.
-20. Houses remain the saved source of truth for ordinary resident spawning.
+```text
+scripts/map/seed_merchant_controller.gd
+```
 
----
+The merchant role must no longer own a separate `_paused` state or implement its own proximity movement hold.
 
-# Manual acceptance tests
+Its role should continue owning only merchant-specific concerns such as:
 
-## Health bars
+* seed merchant phase;
+* purchase/phase behavior;
+* shop-specific lifecycle side effects.
 
-### Full health
+The generic `HouseResidentController` now owns interaction hold and native pause.
 
-Test:
+There is an existing compatibility/query method:
 
-* monster;
-* client;
-* Fundamental Builder;
-* normal Builder;
-* Merchant;
-* Inventor;
-* player.
+```gdscript
+func is_paused_agent(agent: Node2D) -> bool
+```
 
-Expected:
+It is referenced indirectly by existing navigation code. Do not casually delete it.
 
-* no health bar is visible while health is full.
+Keep it as a thin compatibility wrapper if still required, but make it delegate to the resident controller’s canonical state:
 
-### Damaged health
+```gdscript
+return (
+    _resident != null
+    and _resident.owns_agent(agent)
+    and _resident.is_interaction_held()
+)
+```
 
-Using an existing debug or controlled damage path where available:
+Update stale comments that currently state native pause would prevent contact movement.
 
-* damage a monster;
-* optionally damage another agent through debug tooling if supported.
-
-Expected:
-
-* bar appears immediately when health becomes lower than maximum;
-* bar updates as health changes;
-* bar hides again if health is restored to maximum.
-
-Do not add a new gameplay damage source for peaceful agents solely for this test.
-
-### Buildings
-
-Expected:
-
-* full-health Inventor house shows no bar;
-* damaged Inventor house shows its building bar;
-* bar is visually attached to the house, not the resident.
-
-## Dialog prompts
-
-For Fundamental Builder, Merchant, and Inventor:
-
-1. Enter interaction range.
-2. Correct E/Y prompt appears.
-3. Switch input device; glyph updates.
-4. Open dialog; prompt hides.
-5. Close dialog; prompt returns if still interactable.
-6. Leave range; prompt hides.
-7. During unavailable states, prompt stays hidden.
-
-## Push behavior
-
-For Fundamental Builder, normal Builder, Merchant, and Inventor:
-
-1. Walk directly into the agent.
-2. Agent is visibly displaced.
-3. Response is approximately consistent between villager roles.
-4. Agent does not behave like a static wall.
-5. Dialog-paused Merchant can still be displaced.
-6. No jitter loop, teleporting, or unstable contact occurs.
-
-## Lifecycle regression
-
-Verify manually that:
-
-* residents still spawn correctly;
-* residents associate with the correct houses;
-* residents still return home or leave at night;
-* destroyed houses evacuate residents;
-* native navigation unregistering still occurs;
-* `AgentCellTracker` cleanup still occurs;
-* no duplicate residents spawn during reconciliation;
-* Builder-specific behavior remains unchanged.
+Do not add merchant-specific native movement calls.
 
 ---
 
-# Final report
+### 2.5 Inventor must use the generic behavior
 
-Report precisely:
+Do not create an `InventorMovementController` or inventor-specific pause role.
 
-* why the non-Fundamental dialog prompts were missing;
-* why Merchant/Inventor could not be pushed;
-* whether native pause semantics caused or contributed to the push bug;
-* whether the unexpected bar belonged to the Inventor or the house;
-* where the full-health bar was being shown incorrectly;
-* the final universal health-bar visibility rule;
-* the shared villager identity/profile introduced;
-* duplicated prompt scripts removed;
-* hardcoded villager lists corrected;
-* every file changed;
-* any remaining role-specific hardcoding and why it is intentional.
+The inventor must receive the behavior solely from:
 
-Do not claim runtime verification because Godot was not run.
+```text
+HouseResidentConfig.interaction_hold_radius_tiles = 2
+HouseResidentController
+DayVisitorMovementController
+```
+
+Its existing dialog controller should remain focused on dialog concerns.
+
+Do not duplicate proximity pause logic inside:
+
+```text
+scripts/ui/inventor_dialog_controller.gd
+```
+
+unless a minor compatibility adjustment proves strictly necessary.
+
+---
+
+# Preserve existing behavior
+
+Do not change:
+
+* villager contact push power;
+* villager contact resistance;
+* player push power;
+* monster data;
+* big-monster resistance/pushing behavior;
+* villager health;
+* health-bar rules;
+* house ownership;
+* resident spawn/reconstruction;
+* night departure rules;
+* idle-home delay or displacement thresholds;
+* dialog text;
+* interaction radius;
+* builder work behavior;
+* flow-field target assignment;
+* A* path generation;
+* save format.
+
+Do not add contact-push configuration to every villager definition. The fix belongs to the generic contact impulse system and generic resident interaction lifecycle.
+
+---
+
+# Performance requirements
+
+The game may contain hundreds of agents.
+
+* Do not add a GDScript per-frame loop over all native agents.
+* Native contact processing already scans relevant spatial neighbors; keep using it.
+* Ordinary-resident proximity processing must remain inside the existing small registered resident tick.
+* Do not trigger flow-field rebuilds or navigation invalidation when an agent is contact-pushed.
+* Do not recalculate paths on every contact frame.
+* Keep the existing lazy idle-home correction interval.
+
+---
+
+# Required code review checks
+
+Before finishing, inspect all call sites of:
+
+```text
+set_agent_paused
+queue_smash_impulse
+is_paused_agent
+HouseResidentConfig
+DayVisitorMovementController.clear
+DayVisitorMovementController.forget_agent
+```
+
+Check for:
+
+* dynamic `call()` usage;
+* compatibility wrappers;
+* stale comments;
+* duplicate pause state;
+* lifecycle paths that might leave an agent paused.
+
+Do not perform unrelated cleanup.
+
+---
+
+# Acceptance criteria
+
+## Fundamental builder
+
+* Fundamental builder behavior is unchanged.
+* Approaching it in the existing interaction situation still pauses autonomous navigation.
+* The player can push it while it is natively paused.
+* Moving away releases it correctly.
+
+## Merchant
+
+* The merchant reaches its house spot normally.
+* When the player enters the configured radius, autonomous navigation is natively paused.
+* The player can push it from every direction.
+* If idle correction assigns a path while the player remains near, it does not become immovable.
+* It resumes its path when the player moves away.
+* Its shop, prompt, phase, and night behavior remain unchanged.
+
+## Inventor
+
+* The inventor receives the same physical behavior as the merchant without an inventor-specific movement controller.
+* It remains pushable while the player is nearby.
+* Its dialog still opens and closes normally.
+* It resumes returning home after the player leaves.
+
+## Normal builders
+
+* Normal builders remain pushable while idle and while walking back to their claimed idle cells.
+* No builder-specific contact-force workaround is introduced.
+
+## Clients
+
+Test contact pushing during:
+
+* flow-field entry;
+* A* movement, where applicable;
+* flow-field exit.
+
+Push from:
+
+* behind;
+* in front;
+* either side.
+
+A contact push must visibly displace the client before navigation regains control.
+
+## Monsters
+
+* Small monsters remain pushable from every direction while following a flow field.
+* Big monsters retain their existing high resistance and contact pressure.
+* Big-monster/player contact remains symmetric according to existing pressure and resistance values.
+
+## General native behavior
+
+* Contact pushes do not detach paths or flow fields.
+* Contact pushes are not immediately cancelled by opposing navigation.
+* Autonomous movement resumes after the short suppression window.
+* Weapon/gameplay impulses retain their existing suppression values and priorities.
+* Traffic impulses retain their existing priority.
+* Contact cooldown is not consumed by an impulse that produces no visible displacement due to immediate steering cancellation.
+
+---
+
+# Manual test scenarios to report
+
+Do not run these tests. Include them in the final report for the user:
+
+1. Push the fundamental builder from all four directions.
+2. Push the merchant while parked.
+3. Keep standing near the merchant until idle-return correction assigns a path; continue pushing it.
+4. Move away and verify the merchant returns home.
+5. Repeat with the inventor.
+6. Push a normal builder away from its idle claim and during its return.
+7. Push a client while entering and leaving.
+8. Push a small monster forward, backward, and sideways relative to its flow direction.
+9. Contact a big monster and verify its existing weight/resistance remains apparent.
+10. Start night while standing near a held resident and verify it unpauses and leaves correctly.
+11. Destroy a held resident’s house and verify evacuation is not frozen.
+12. Check for new warnings or errors.
+
+---
+
+# Final report requirements
+
+Report:
+
+1. Every changed file.
+2. The exact native contact-suppression behavior added.
+3. How `DayVisitorMovementController` now owns native visitor pause calls.
+4. How fundamental-builder behavior was preserved.
+5. How merchant/inventor interaction hold is now shared.
+6. Any compatibility wrapper retained.
+7. Any stale or duplicated logic removed.
+8. Production-quality concerns noticed but intentionally left outside this task.
+9. The manual tests the user should perform.
+
+Do not claim tests passed because no runtime/build/test commands are authorized.

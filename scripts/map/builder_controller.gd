@@ -273,11 +273,9 @@ func set_fundamental_builder_paused(value: bool) -> void:
 	if _fundamental_builder_paused == value:
 		return
 	_fundamental_builder_paused = value
-	var agent_manager: Node = _manager.get_agent_manager() if _manager != null else null
-	var agent: Node2D = fundamental_builder_node()
-	var nav_id: int = int(agent.get("nav_id")) if agent != null else -1
-	if nav_id >= 0 and agent_manager != null and agent_manager.has_method("set_agent_paused"):
-		agent_manager.call("set_agent_paused", nav_id, value)
+	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
+	if visitor != null:
+		visitor.set_autonomous_paused(value)
 
 
 func fundamental_builder_world_position() -> Vector2:

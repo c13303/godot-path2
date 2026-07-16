@@ -738,6 +738,7 @@ func _setup_ally_housing() -> void:
 	merchant_config.tracking_category = &"merchants"
 	merchant_config.visual_setup = Callable(self, "apply_merchant_data")
 	merchant_config.role = _seed_merchant
+	merchant_config.interaction_hold_radius_tiles = 2
 	_merchant_resident.setup(self, _house_manager, merchant_config)
 	_seed_merchant.set_resident(_merchant_resident)
 	# The Inventor: same registration shape as the merchant, but with no role. Its identity/lifecycle
@@ -750,6 +751,7 @@ func _setup_ally_housing() -> void:
 	inventor_config.tracking_category = &"inventors"
 	inventor_config.visual_setup = Callable(self, "apply_inventor_data")
 	inventor_config.role = null
+	inventor_config.interaction_hold_radius_tiles = 2
 	_inventor_resident.setup(self, _house_manager, inventor_config)
 	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident, _inventor_resident]
 	_ally_housing.setup(self, _house_manager, _builder, ordinary_residents)

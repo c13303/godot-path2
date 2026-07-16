@@ -20,6 +20,7 @@ var _target_world_position: Vector2 = Vector2.ZERO
 var _waiting: bool = false
 var _leaving: bool = false
 var _leave_at_night_pending: bool = false
+var _autonomous_paused: bool = false
 
 
 func setup(manager: BuildingManager, diagnostic_label: String) -> void:
@@ -65,6 +66,7 @@ func spawn(
 	visual_setup.call(agent)
 	var agent_nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
 	agent.set("nav_id", agent_nav_id)
+	_autonomous_paused = false
 	if agent_manager.has_method("set_agent_never_rest"):
 		agent_manager.call("set_agent_never_rest", agent_nav_id, true)
 	var path_world: PackedVector2Array = PackedVector2Array()
@@ -128,6 +130,19 @@ func nav_id() -> int:
 
 func owns_agent(agent: Node2D) -> bool:
 	return agent != null and agent == _agent
+
+
+func set_autonomous_paused(value: bool) -> void:
+	if _autonomous_paused == value:
+		return
+	_autonomous_paused = value
+	var agent_manager: Node = _agent_manager()
+	if _nav_id >= 0 and agent_manager != null and agent_manager.has_method("set_agent_paused"):
+		agent_manager.call("set_agent_paused", _nav_id, value)
+
+
+func is_autonomous_paused() -> bool:
+	return _autonomous_paused
 
 
 func process_arrival() -> bool:
@@ -247,12 +262,14 @@ func park_at_current_cell(cell: Vector2i) -> void:
 
 
 func clear(free_agent: bool) -> void:
+	set_autonomous_paused(false)
 	if free_agent and is_instance_valid(_agent):
 		_manager.remove_dead_monster(_agent, false)
 	_reset_state()
 
 
 func forget_agent() -> void:
+	set_autonomous_paused(false)
 	_reset_state()
 
 
@@ -281,6 +298,7 @@ func _reset_state() -> void:
 	_waiting = false
 	_leaving = false
 	_leave_at_night_pending = false
+	_autonomous_paused = false
 
 
 func _agent_manager() -> Node:
