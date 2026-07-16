@@ -557,7 +557,14 @@ func set_velocity_len(value: float) -> void:
 	_velocity_len = value
 
 func _update_sprite_tint() -> void:
-	_set_sprite_tint_recursive(self, Color(1, 0, 0, 1) if _controls_impaired else Color(1, 1, 1, 1))
+	# Contact shoves briefly suppress autonomous control but do not hurt clients or villagers.
+	# Keep their real take_damage() shader flash, while avoiding a false damage-looking red tint.
+	var show_impaired_tint: bool = (
+		_controls_impaired
+		and not _is_client_agent()
+		and not is_in_group(AgentDefinitionService.VILLAGERS_GROUP)
+	)
+	_set_sprite_tint_recursive(self, Color(1, 0, 0, 1) if show_impaired_tint else Color(1, 1, 1, 1))
 
 func _set_sprite_tint_recursive(node: Node, color: Color) -> void:
 	if node is Sprite2D:

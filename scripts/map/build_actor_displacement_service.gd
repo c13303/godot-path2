@@ -15,6 +15,12 @@ func setup(manager: BuildSystem) -> void:
 	_manager = manager
 
 
+## Shared actor-occupancy query for placement rules that must keep a cell free instead of
+## displacing whoever stands there. Uses the same complete actor set as displacement.
+func is_actor_in_cell(cell: Vector2i) -> bool:
+	return _actor_cell_has_actor(cell)
+
+
 func displace_from_cells(cells: Array[Vector2i]) -> void:
 	if cells.is_empty() or _manager == null:
 		return

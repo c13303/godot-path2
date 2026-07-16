@@ -34,17 +34,6 @@ func _ready() -> void:
 	_portrait = _build_portrait_texture()
 	_money_icon = _build_money_icon_texture()
 	add_to_group(&"interaction_targets")
-	set_process(true)
-
-
-func _process(_delta: float) -> void:
-	# Close the conversation if the Inventor stops being interactable while it is open (night falls
-	# and it walks home, or the house is destroyed and it is removed). The player is input-locked
-	# while the dialog is open, so this never fires merely because the player moved.
-	if dialog == null or not dialog.is_open_for(CONTEXT):
-		return
-	if not _is_inventor_active():
-		dialog.close_dialog(&"inventor_unavailable")
 
 
 # --- InteractionRouter contract ----------------------------------------------

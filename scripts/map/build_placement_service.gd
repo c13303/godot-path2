@@ -222,6 +222,11 @@ func house_placement_rejection(entrance: Vector2i, placeable_def: Dictionary) ->
 			return "presence cell %s is not on buildable floor" % str(cell)
 		if not is_valid_placeable_cell(cell, wallz, placeable_def):
 			return "presence cell %s is blocked or not buildable" % str(cell)
+	var idle_cell: Vector2i = house_manager.get_resident_idle_cell(entrance)
+	if is_placeable_occupied(idle_cell, wallz, placeable_def):
+		return "resident idle cell %s is occupied" % str(idle_cell)
+	if _actor_displacement.is_actor_in_cell(idle_cell):
+		return "resident idle cell %s is occupied by an actor" % str(idle_cell)
 	return ""
 
 
@@ -460,12 +465,11 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 		return true
 	if fences and fences != target_layer and fences.get_cell_source_id(cell) >= 0:
 		return true
-	# Reserve every house's six presence cells (five walls AND the walkable entrance) against all
-	# other placeables, so nothing can be built on a house wall or in its doorway. Covers authored
-	# houses (e.g. house_seedmerchant) and player-built houses. During a house's own placement the
-	# new house is not registered yet, so its cells are not reported occupied by this check.
+	# Reserve every house's six presence cells plus its resident idle tile against all other
+	# placeables. Covers authored and player-built houses. During a house's own placement the new
+	# house is not registered yet, so its cells are not reported occupied by this check.
 	var house_manager: HouseManager = _manager.get_house_manager()
-	if house_manager != null and house_manager.get_house_at_presence_cell(cell) != null:
+	if house_manager != null and house_manager.get_house_reserving_cell(cell) != null:
 		return true
 	if _placeable_displaces_actors(placeable_def):
 		return false

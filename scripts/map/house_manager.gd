@@ -17,16 +17,18 @@ signal houses_restored
 ##
 ##     WWW      (-1,-1) ( 0,-1) ( 1,-1)
 ##     WEW      (-1, 0)  E(0,0)  ( 1, 0)
+##      I                    I(0,1)
 ##
 ## The five W cells block navigation; the visual sprite is 3x3 (an extra purely-visual row
-## above the WWW row) and never creates blockers there. Orientation, rotation and alternate
-## footprints are intentionally out of scope.
+## above the WWW row) and never creates blockers there. I is the resident's reserved walkable
+## idle tile. Orientation, rotation and alternate footprints are intentionally out of scope.
 
 ## Blocking footprint cells relative to the entrance (0,0). The entrance itself is never here.
 const FOOTPRINT_OFFSETS: Array[Vector2i] = [
 	Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1),
 	Vector2i(-1, 0), Vector2i(1, 0),
 ]
+const RESIDENT_IDLE_OFFSET: Vector2i = Vector2i(0, 1)
 ## Fully transparent wallz atlas tile: blocks navigation/building/placement, renders nothing.
 ## Houses still use a real wallz footprint; runtime reservoirs no longer use this marker.
 const HOUSE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
@@ -40,8 +42,8 @@ const RESIDENT_ROLE_FUNDAMENTAL_BUILDER: StringName = &"fundamental_builder"
 const ENTRANCE_CELL_META: StringName = &"house_entrance_cell"
 const RUNTIME_HOUSE_CONTAINER_NAME: String = "Houses"
 
-## Test-specific authored house -> companion spot-marker pairings. The geometry helpers stay
-## generic (snap_node_to_house_entrance); only this table knows the merchant's spot node name.
+## Test-specific authored house -> companion spot-marker pairings. Only this table knows the
+## merchant's spot node name; paired spots are aligned to the resident idle tile below entrance.
 const AUTHORED_SPOT_PAIRS: Dictionary = {
 	"house_seedmerchant": "seedmerchent_spot",
 }
@@ -87,6 +89,9 @@ var _entrance_to_house: Dictionary = {}
 ## owning HouseRecord. Drives placement-conflict detection, hover/unbuild resolution from any
 ## footprint cell, rectangle-removal dedup and durability validity. One house is one logical object.
 var _presence_to_house: Dictionary = {}
+## The walkable tile directly below each entrance is reserved for that house's resident.
+## It is not part of the removable/visual house presence, so hovering it never selects the house.
+var _resident_idle_to_house: Dictionary = {}
 ## Monotonic counter for unique runtime (player-built) house ids.
 var _runtime_house_seq: int = 0
 var _next_construction_order: int = 1
@@ -169,7 +174,7 @@ static func _snap_paired_spot(spawner_container: Node, house_name: String, entra
 		return
 	var spot: Node2D = spawner_container.get_node_or_null(NodePath(spot_name)) as Node2D
 	if spot != null:
-		snap_node_to_house_entrance(spot, entrance, floor_layer)
+		snap_node_to_house_entrance(spot, entrance + RESIDENT_IDLE_OFFSET, floor_layer)
 
 
 ## Registers the already-prepared live authored house nodes into the authoritative registry.
@@ -189,9 +194,8 @@ func register_authored_houses() -> void:
 			push_warning("HouseManager: authored house '%s' has no prepared entrance metadata; not registered." % sprite.name)
 			continue
 		var entrance: Vector2i = sprite.get_meta(ENTRANCE_CELL_META) as Vector2i
-		# Authored houses reserve their full six-cell presence (so nothing can be built on their
-		# walls or walkable entrance) but are never player-built: not removable, not refundable,
-		# not destructible.
+		# Authored houses reserve their six-cell presence and resident idle tile but are never
+		# player-built: not removable, not refundable, not destructible.
 		var item_id: String = _authored_house_item_id(sprite.name)
 		var record: HouseRecord = _register_house_record(StringName(sprite.name), item_id, sprite, entrance, true, false)
 		record.player_built = false
@@ -466,13 +470,22 @@ func _validate_runtime_house(entrance: Vector2i, texture: Texture2D) -> String:
 		return "wall atlas source could not be resolved"
 	if has_house_at_entrance(entrance):
 		return "entrance already used by a house"
+	if get_house_reserving_cell(entrance) != null:
+		return "entrance is reserved by a house"
 	if not _manager.is_walkable_cell(entrance):
 		return "entrance is not a valid walkable floor cell"
+	var idle_cell: Vector2i = get_resident_idle_cell(entrance)
+	if not _manager.is_walkable_cell(idle_cell):
+		return "resident idle cell %s is not walkable" % str(idle_cell)
+	if get_house_reserving_cell(idle_cell) != null:
+		return "resident idle cell %s is reserved by a house" % str(idle_cell)
 	for cell: Vector2i in _footprint_cells(entrance):
 		if not _manager.has_floor_cell(cell):
 			return "footprint cell %s is outside the floor" % str(cell)
 		if _manager.has_wall_cell(cell):
 			return "footprint cell %s is already blocked" % str(cell)
+		if get_house_reserving_cell(cell) != null:
+			return "footprint cell %s is reserved by a house" % str(cell)
 	return ""
 
 
@@ -554,10 +567,11 @@ func _register_house_record(id: StringName, item_id: String, sprite: Sprite2D, e
 	_entrance_to_house[entrance] = record
 	for cell: Vector2i in _presence_cells(entrance):
 		_presence_to_house[cell] = record
+	_resident_idle_to_house[get_resident_idle_cell(entrance)] = record
 	return record
 
 
-## Removes a record from every index (registry, entrance lookup, and all six presence cells).
+## Removes a record from every index (registry, entrance, presence, and resident idle tile).
 func _unregister_house_record(record: HouseRecord) -> void:
 	if record == null:
 		return
@@ -566,6 +580,9 @@ func _unregister_house_record(record: HouseRecord) -> void:
 	for cell: Vector2i in _presence_cells(record.entrance_cell):
 		if _presence_to_house.get(cell) == record:
 			_presence_to_house.erase(cell)
+	var idle_cell: Vector2i = get_resident_idle_cell(record.entrance_cell)
+	if _resident_idle_to_house.get(idle_cell) == record:
+		_resident_idle_to_house.erase(idle_cell)
 
 
 func has_house_at_entrance(entrance: Vector2i) -> bool:
@@ -839,6 +856,11 @@ func get_presence_cells(entrance: Vector2i) -> Array[Vector2i]:
 	return _presence_cells(entrance)
 
 
+## The resident's exact daytime idle tile: one tile below the house entrance.
+func get_resident_idle_cell(entrance: Vector2i) -> Vector2i:
+	return entrance + RESIDENT_IDLE_OFFSET
+
+
 ## The five navigation-blocking wall cells for an entrance cell (excludes the entrance).
 func get_blocking_cells(entrance: Vector2i) -> Array[Vector2i]:
 	return _footprint_cells(entrance)
@@ -848,6 +870,15 @@ func get_blocking_cells(entrance: Vector2i) -> Array[Vector2i]:
 ## house from any hovered footprint cell during placement conflict checks and unbuild.
 func get_house_at_presence_cell(cell: Vector2i) -> HouseRecord:
 	return _presence_to_house.get(cell, null) as HouseRecord
+
+
+## Placement reservation query. Unlike get_house_at_presence_cell(), this also includes the
+## resident idle tile without making that tile select the house for removal.
+func get_house_reserving_cell(cell: Vector2i) -> HouseRecord:
+	var presence_house: HouseRecord = _presence_to_house.get(cell, null) as HouseRecord
+	if presence_house != null:
+		return presence_house
+	return _resident_idle_to_house.get(cell, null) as HouseRecord
 
 
 func has_player_built_house_at_entrance(entrance: Vector2i) -> bool:
@@ -865,10 +896,15 @@ func house_structural_rejection(entrance: Vector2i) -> String:
 	for cell: Vector2i in _presence_cells(entrance):
 		if not _manager.has_floor_cell(cell):
 			return "presence cell %s is outside the floor" % str(cell)
-		if _presence_to_house.has(cell):
-			return "presence cell %s already belongs to a house" % str(cell)
+		if get_house_reserving_cell(cell) != null:
+			return "presence cell %s is reserved by a house" % str(cell)
 	if not _manager.is_walkable_cell(entrance):
 		return "entrance %s is not a valid walkable floor cell" % str(entrance)
+	var idle_cell: Vector2i = get_resident_idle_cell(entrance)
+	if not _manager.is_walkable_cell(idle_cell):
+		return "resident idle cell %s is not walkable" % str(idle_cell)
+	if get_house_reserving_cell(idle_cell) != null:
+		return "resident idle cell %s is reserved by a house" % str(idle_cell)
 	return ""
 
 

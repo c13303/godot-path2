@@ -35,6 +35,8 @@ var _config: HouseResidentConfig = null
 var _visitor: DayVisitorMovementController = DayVisitorMovementController.new()
 var _resident_house_id: StringName = &""
 var _home_entrance_cell: Vector2i = INVALID_CELL
+var _idle_cell: Vector2i = INVALID_CELL
+var _has_reached_idle_spot: bool = false
 var _returning_home: bool = false
 var _evacuating: bool = false
 var _idle_home_check_elapsed: float = 0.0
@@ -91,7 +93,7 @@ func on_night_started() -> void:
 	if _config.role != null:
 		_config.role.on_night_started(self)
 	_evacuating = false
-	if _visitor.is_active() and _home_entrance_cell != INVALID_CELL and _visitor.repath_to_target(_home_entrance_cell):
+	if _visitor.is_active() and _idle_cell != INVALID_CELL and _visitor.repath_to_target(_idle_cell):
 		_returning_home = true
 	else:
 		_visitor.mark_leave_pending()
@@ -155,17 +157,18 @@ func clear(free_agents: bool) -> void:
 # Spawn / reconcile.
 # ---------------------------------------------------------------------------
 
-## Spawns the resident for its house: walks in from the shared town entrance to the house
-## entrance and stamps canonical identity. Returns false (no spawn) on any failure. Refuses to
+## Spawns the resident for its house: walks in from the shared town entrance to the exact idle
+## tile below the house entrance and stamps canonical identity. Returns false on any failure. Refuses to
 ## create a duplicate while a resident is already active.
 func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
 	if GameState.is_night or _visitor.is_active():
 		return false
 	if entrance_cell == INVALID_CELL:
 		return false
-	if not _manager.is_walkable_cell(entrance_cell):
-		push_warning("HouseResidentController: %s house entrance %s is not walkable; resident not spawned." % [
-			String(_config.resident_type), entrance_cell])
+	var idle_cell: Vector2i = _house_manager.get_resident_idle_cell(entrance_cell)
+	if not _manager.is_walkable_cell(idle_cell):
+		push_warning("HouseResidentController: %s house idle cell %s is not walkable; resident not spawned." % [
+			String(_config.resident_type), idle_cell])
 		return false
 	var source_cell: Vector2i = _manager.named_authored_spot_cell(ENTER_MARKER_ID)
 	if source_cell == INVALID_CELL:
@@ -180,7 +183,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
 	if not _visitor.spawn(
 			source_cell,
 			spawn_cell,
-			entrance_cell,
+			idle_cell,
 			_config.agent_kind,
 			_config.scene_group,
 			_config.tracking_category,
@@ -189,6 +192,8 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
 		return false
 	_resident_house_id = house_id
 	_home_entrance_cell = entrance_cell
+	_idle_cell = idle_cell
+	_has_reached_idle_spot = _visitor.is_waiting()
 	_returning_home = false
 	_evacuating = false
 	_stamp_identity()
@@ -229,7 +234,7 @@ func is_leaving() -> bool:
 
 ## True once the resident has parked at its idle spot (interaction prompt waits for this).
 func has_reached_idle_spot() -> bool:
-	return _visitor.is_waiting()
+	return _visitor.is_active() and _has_reached_idle_spot
 
 
 func agent_node() -> Node2D:
@@ -283,6 +288,7 @@ func _process_arrival() -> void:
 	if _returning_home or _evacuating:
 		clear(true)
 	else:
+		_has_reached_idle_spot = true
 		_clear_idle_return_state()
 
 
@@ -314,7 +320,7 @@ func _process_idle_home_correction(delta: float) -> void:
 func _eligible_for_idle_home_correction() -> bool:
 	if _returning_home or _evacuating:
 		return false
-	if _home_entrance_cell == INVALID_CELL:
+	if _idle_cell == INVALID_CELL:
 		return false
 	if not _visitor.is_active() or _visitor.is_leaving() or not _visitor.is_waiting():
 		return false
@@ -331,7 +337,7 @@ func _is_idle_resident_meaningfully_displaced() -> bool:
 
 func _request_idle_home_return() -> void:
 	_idle_displacement_seconds = 0.0
-	if _visitor.repath_to_target(_home_entrance_cell):
+	if _visitor.repath_to_target(_idle_cell):
 		_clear_idle_return_state()
 		return
 	_idle_return_pending = true
@@ -374,12 +380,15 @@ func _stamp_identity() -> void:
 	agent.set_meta("resident_type", _config.resident_type)
 	agent.set_meta("resident_house_id", _resident_house_id)
 	agent.set_meta("home_entrance_cell", _home_entrance_cell)
+	agent.set_meta("resident_idle_cell", _idle_cell)
 
 
 func _reset_state() -> void:
 	_interaction_held = false
 	_resident_house_id = &""
 	_home_entrance_cell = INVALID_CELL
+	_idle_cell = INVALID_CELL
+	_has_reached_idle_spot = false
 	_returning_home = false
 	_evacuating = false
 	_idle_home_check_elapsed = 0.0

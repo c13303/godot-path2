@@ -116,9 +116,10 @@ func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> i
 	if spawn_cell == INVALID_CELL:
 		push_warning("BuilderController: house-bound Builder cannot enter; no free spawn cell near %s." % str(source_cell))
 		return -1
-	var target_cell: Vector2i = _find_claim_near_anchor(entrance_cell, null, spawn_cell, false)
+	var idle_cell: Vector2i = entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET
+	var target_cell: Vector2i = _find_claim_near_anchor(idle_cell, null, spawn_cell, true, 0)
 	if target_cell == INVALID_CELL:
-		push_warning("BuilderController: no idle cell available for house-bound Builder at %s." % str(entrance_cell))
+		push_warning("BuilderController: exact idle cell below house entrance %s is unavailable." % str(entrance_cell))
 		return -1
 	var visitor: DayVisitorMovementController = DayVisitorMovementController.new()
 	visitor.setup(_manager, "house Builder")
@@ -139,7 +140,7 @@ func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> i
 	_state_by_builder_id[builder_id] = STATE_ENTERING
 	_house_id_by_builder_id[builder_id] = house_id
 	_builder_id_by_house_id[house_id] = builder_id
-	_home_cell_by_builder_id[builder_id] = entrance_cell
+	_home_cell_by_builder_id[builder_id] = target_cell
 	var agent: Node2D = visitor.agent_node()
 	if agent != null:
 		agent.add_to_group(HOUSE_RESIDENTS_GROUP)
@@ -151,13 +152,13 @@ func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> i
 
 func spawn_fundamental_builder() -> int:
 	var spot_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)
-	return _spawn_fundamental_builder_at_anchor(&"", spot_cell, true)
+	return _spawn_fundamental_builder_at_anchor(&"", spot_cell, false)
 
 
 func spawn_fundamental_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> int:
 	if house_id == &"":
 		return spawn_fundamental_builder()
-	return _spawn_fundamental_builder_at_anchor(house_id, entrance_cell, false)
+	return _spawn_fundamental_builder_at_anchor(house_id, entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET, true)
 
 
 func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Vector2i) -> void:
@@ -168,7 +169,8 @@ func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Ve
 		_builder_id_by_house_id.erase(previous_house_id)
 	_house_id_by_builder_id[_fundamental_builder_id] = house_id
 	_builder_id_by_house_id[house_id] = _fundamental_builder_id
-	_home_cell_by_builder_id[_fundamental_builder_id] = entrance_cell
+	var idle_cell: Vector2i = entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET
+	_home_cell_by_builder_id[_fundamental_builder_id] = idle_cell
 	var agent: Node2D = fundamental_builder_node()
 	if agent != null:
 		agent.set_meta("fundamental_builder", true)
@@ -196,7 +198,7 @@ func clear_fundamental_builder_house_assignment() -> void:
 		return_builder_to_idle_area(_fundamental_builder_id)
 
 
-func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, include_anchor: bool) -> int:
+func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, exact_anchor: bool) -> int:
 	if GameState.is_night or _fundamental_builder_id >= 0:
 		return -1
 	var source_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
@@ -206,7 +208,11 @@ func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vec
 	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		return -1
-	var target_cell: Vector2i = _find_claim_near_anchor(anchor_cell, null, spawn_cell, include_anchor)
+	var target_cell: Vector2i = anchor_cell
+	if exact_anchor:
+		target_cell = _find_claim_near_anchor(anchor_cell, null, spawn_cell, true, 0)
+	else:
+		target_cell = _find_claim_near_anchor(anchor_cell, null, spawn_cell, true)
 	if target_cell == INVALID_CELL:
 		return -1
 	var visitor: DayVisitorMovementController = DayVisitorMovementController.new()
@@ -431,7 +437,7 @@ func repath_for_walkability_change() -> void:
 		var replacement_builder_id: int = _builder_id_for_visitor(visitor)
 		if replacement == INVALID_CELL:
 			var home_cell: Vector2i = _home_cell_by_builder_id.get(replacement_builder_id, INVALID_CELL) as Vector2i
-			push_warning("BuilderController: no replacement Builder target near %s within radius %d; Builder kept at current safe position when possible." % [home_cell, BUILDER_SPOT_CLAIM_RADIUS])
+			push_warning("BuilderController: no reachable idle target is available at %s; Builder kept at current safe position when possible." % str(home_cell))
 			if replacement_builder_id >= 0:
 				_reset_builder_motion_watch(replacement_builder_id)
 			continue
@@ -684,8 +690,8 @@ func _find_claim_for_visitor(source_cell: Vector2i, visitor: DayVisitorMovementC
 	return _find_claim_from_spawn(from_cell, visitor)
 
 
-# The cell a Builder idles on when it has nothing to do. House-bound Builders anchor on
-# their house entrance, the fundamental Builder on its authored spot. Any Builder with an
+# The cell a Builder idles on when it has nothing to do. House-bound Builders use the exact tile
+# below their house entrance; the unassigned fundamental Builder uses its authored spot. Any Builder with an
 # anchor is walked back to it after being pushed off.
 func _builder_home_cell(builder_id: int) -> Vector2i:
 	return _home_cell_by_builder_id.get(builder_id, INVALID_CELL) as Vector2i
@@ -694,14 +700,13 @@ func _builder_home_cell(builder_id: int) -> Vector2i:
 func _find_claim_from_spawn(spawn_cell: Vector2i, visitor: DayVisitorMovementController) -> Vector2i:
 	var builder_id: int = _builder_id_for_visitor(visitor)
 	var anchor: Vector2i = _home_cell_by_builder_id.get(builder_id, _named_spot_cell(FUNDAMENTAL_BUILDER_SPOT_ID)) as Vector2i
-	# A house entrance is a doorway the Builder waits next to; an authored spot is meant to
-	# be stood on.
-	var include_anchor: bool = builder_id < 0 or not _house_id_by_builder_id.has(builder_id)
-	return _find_claim_near_anchor(anchor, visitor, spawn_cell, include_anchor)
+	if builder_id >= 0 and _house_id_by_builder_id.has(builder_id):
+		return _find_claim_near_anchor(anchor, visitor, spawn_cell, true, 0)
+	return _find_claim_near_anchor(anchor, visitor, spawn_cell, true)
 
 
-func _find_claim_near_anchor(anchor: Vector2i, visitor: DayVisitorMovementController, spawn_cell: Vector2i, include_anchor: bool = true) -> Vector2i:
-	for candidate: Vector2i in _target_candidates(anchor, include_anchor):
+func _find_claim_near_anchor(anchor: Vector2i, visitor: DayVisitorMovementController, spawn_cell: Vector2i, include_anchor: bool = true, search_radius: int = BUILDER_SPOT_CLAIM_RADIUS) -> Vector2i:
+	for candidate: Vector2i in _target_candidates(anchor, include_anchor, search_radius):
 		if not _is_candidate_available(candidate, visitor):
 			continue
 		var path_cells: PackedVector2Array = _manager.find_path_on_walkable_map(spawn_cell, candidate)
@@ -711,11 +716,11 @@ func _find_claim_near_anchor(anchor: Vector2i, visitor: DayVisitorMovementContro
 	return INVALID_CELL
 
 
-func _target_candidates(anchor: Vector2i, include_anchor: bool = true) -> Array[Vector2i]:
+func _target_candidates(anchor: Vector2i, include_anchor: bool = true, search_radius: int = BUILDER_SPOT_CLAIM_RADIUS) -> Array[Vector2i]:
 	var candidates: Array[Vector2i] = []
 	if include_anchor:
 		candidates.append(anchor)
-	for radius: int in range(1, BUILDER_SPOT_CLAIM_RADIUS + 1):
+	for radius: int in range(1, search_radius + 1):
 		for y: int in range(anchor.y - radius, anchor.y + radius + 1):
 			for x: int in range(anchor.x - radius, anchor.x + radius + 1):
 				if abs(x - anchor.x) != radius and abs(y - anchor.y) != radius:

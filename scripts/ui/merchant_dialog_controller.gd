@@ -3,9 +3,9 @@ extends Node
 ## Seed-merchant adapter for the generic DialogUI. It owns everything merchant-specific:
 ## deciding when the shop may open, converting the merchant inventory (and any active night
 ## reward) into generic dialog choices, purchasing, reward claiming, purchase animations,
-## refreshing rows after a purchase, and closing when the merchant phase ends or the player
-## leaves interaction range. All economy/inventory logic stays in game_ui.gd; this controller
-## only calls it.
+## and refreshing rows after a purchase. Once opened, only the player's dialog commands close
+## it; merchant movement, range, phase, and lifecycle changes never close it automatically. All
+## economy/inventory logic stays in game_ui.gd; this controller only calls it.
 
 const CONTEXT: StringName = &"seed_merchant"
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
@@ -40,9 +40,6 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	if dialog == null or not dialog.is_open_for(CONTEXT):
-		return
-	if not _is_merchant_active():
-		dialog.close_dialog(&"merchant_unavailable")
 		return
 	var signature: String = _offer_signature()
 	if signature != _last_signature:
