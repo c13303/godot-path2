@@ -253,6 +253,15 @@ Notes:
 - bamboo.png is two horizontal frames; each frame is the artwork plus 4px of transparent padding on every side. The node origin is the cell centre (sort point), a pivot sits at the cell's bottom edge, and the centred sprite hangs half the artwork height above it — so the artwork's lower half covers the authored tile and its upper half rises above it. Offsets derive from the live texture and tile size, never hardcoded tile dimensions.
 - The dance transforms the pivot, so sway/breathe rotate around the planted base. Phases are randomized per plant; no tween is allocated per frame.
 
+## WorldDepthSort / placeable visual depth
+`WorldDepthSort` owns the shared static-world depth rule: `z_index = int(world_base_y)`, with `z_as_relative = false`. Agents use the same world-Y convention, so plants and placeable runtime scenes sort from their logical base cell rather than from sprite dimensions.
+
+Notes:
+- Plant-bearing TileMapLayer visuals are configured for world-depth tile sorting by their owner (`PlantManager` for `plantz`, `BuildingObjectManager` for traversable plant/placeable tiles such as ronce and pasteque). Static plant z-index is assigned when the visual or layer is created, not every frame.
+- Scene-based placeable visuals must use the scene root as the ground/base position. Child sprites may extend upward or sideways and should normally keep relative local depth; use child z offsets only for deliberate local layering such as foreground effects.
+- Do not derive world depth from texture size, visual centre, or item-specific z-index constants. A future 32x64 plant should work by placing its root at the base cell and letting `WorldDepthSort` assign the root depth.
+- Health bars, particles, held items, construction overlays, water fill, and other deliberate foreground/background effects keep their own local or absolute depth rules.
+
 ## LevelLoader
 Captures the root-level `bamboo` container's direct Node2D children into stable floor cells (deduplicated, sorted by Y then X) before freeing the authored level shell. The markers are editor aids only: never mutated or reparented as gameplay visuals. A level with no container yields an empty list without error.
 

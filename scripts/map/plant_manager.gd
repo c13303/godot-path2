@@ -103,6 +103,7 @@ func mark_build_phase_rose_dry_handled_for_current_day() -> void:
 		_last_build_phase_rose_dry_day = current_day
 
 func initialize_from_layer() -> void:
+	_configure_plant_layer_depth_sorting()
 	_plants.clear()
 	_plant_tiles.clear()
 	_buckets.clear()
@@ -816,3 +817,6 @@ func _plant_layer_source_id() -> int:
 	if source_count <= 0:
 		return -1
 	return plantz.tile_set.get_source_id(0)
+
+func _configure_plant_layer_depth_sorting() -> void:
+	WorldDepthSort.configure_world_depth_tile_layer(plantz)

@@ -67,6 +67,7 @@ func _resolve_level_layers() -> void:
 		fences = get_node_or_null("../MonTilemap/fences") as TileMapLayer
 
 func initialize_from_layer() -> void:
+	_configure_world_depth_layers()
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
 	_clear_static_obstacles()
@@ -233,6 +234,7 @@ func serialize_runtime_placeables() -> Array[Dictionary]:
 
 
 func restore_runtime_placeables(saved_records: Array) -> void:
+	_configure_world_depth_layers()
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
 	_clear_static_obstacles()
@@ -409,9 +411,8 @@ func _register_turret_sprite_runtime(cell: Vector2i, runtime_id: String, item_de
 	var runtime_node: Node2D = Node2D.new()
 	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
 	runtime_node.script = TURRET_SPRITE_VISUAL_SCRIPT
-	runtime_node.z_as_relative = false
 	runtime_node.global_position = _cell_center(cell)
-	runtime_node.z_index = int(runtime_node.global_position.y)
+	WorldDepthSort.apply_world_depth(runtime_node, runtime_node.global_position)
 	parent.add_child(runtime_node)
 	runtime_node.call("setup", visual_def, direction)
 	_runtime_nodes_by_cell[cell] = runtime_node
@@ -428,9 +429,8 @@ func _register_building_visual_scene_runtime(cell: Vector2i, runtime_id: String,
 	if runtime_node == null:
 		return
 	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
-	runtime_node.z_as_relative = false
 	runtime_node.global_position = _cell_center(cell)
-	runtime_node.z_index = int(runtime_node.global_position.y)
+	WorldDepthSort.apply_world_depth(runtime_node, runtime_node.global_position)
 	parent.add_child(runtime_node)
 	if runtime_node.has_method("setup_placeable"):
 		runtime_node.call("setup_placeable", _make_placeable_context(cell, item_def))
@@ -458,6 +458,9 @@ func _reference_layer() -> TileMapLayer:
 	if fences:
 		return fences
 	return blocking_buildings
+
+func _configure_world_depth_layers() -> void:
+	WorldDepthSort.configure_world_depth_tile_layer(traversable_buildings)
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _reference_layer()

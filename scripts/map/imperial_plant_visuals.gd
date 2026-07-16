@@ -162,7 +162,6 @@ func _apply_visual(cell: Vector2i, stage: int, watered: bool) -> void:
 		sprite.vframes = 1
 		sprite.centered = true
 		sprite.offset = VISUAL_OFFSET_FROM_SORT_POINT
-		sprite.z_as_relative = false
 		add_child(sprite)
 		_sprites_by_cell[cell] = sprite
 	else:
@@ -177,7 +176,7 @@ func _apply_visual(cell: Vector2i, stage: int, watered: bool) -> void:
 		sprite.frame = clampi(stage, 0, FRAME_COUNT - 1)
 	var world_center: Vector2 = _plantz.to_global(_plantz.map_to_local(cell))
 	sprite.global_position = world_center
-	sprite.z_index = int(world_center.y)
+	WorldDepthSort.apply_world_depth(sprite, world_center)
 	if should_pop:
 		_play_pop(cell, sprite, world_center)
 

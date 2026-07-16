@@ -51,11 +51,9 @@ var _time: float = 0.0
 ## floor tile size; the sprite offset is never derived from a hardcoded tile dimension.
 func setup(cell_center_world: Vector2, tile_size: Vector2) -> void:
 	global_position = cell_center_world
-	# World-Y ordering, the same rule agents use (z_index = int(position.y)), so an agent
-	# standing above a bamboo draws behind it and one below draws in front. Bamboo must not
-	# sit on a fixed decorative layer that ignores agent Y.
-	z_as_relative = false
-	z_index = int(cell_center_world.y)
+	# World-Y ordering, the same rule agents use, so an agent standing above a
+	# bamboo draws behind it and one below draws in front.
+	WorldDepthSort.apply_world_depth(self, cell_center_world)
 	_base_offset_y = tile_size.y * 0.5
 	# Desync every plant so the grove never sways in unison.
 	_sway_phase = randf() * TAU

@@ -2,14 +2,13 @@ extends Node2D
 class_name GrownupRoseDance
 
 ## Gentle "ready to harvest" animation for full-bloom roses. Grownup rose tiles are
-## redrawn on top of the plantz TileMapLayer with a subtle base-anchored sway plus a
-## breathing squash/stretch, so each ready rose slightly balances and dances — the
-## same "alive" idle feel the characters get from CharacterAnimation. Each rose is
-## desynced by a random phase so the garden doesn't pulse in unison.
+## represented by one Sprite2D copy per rose, with a subtle base-anchored sway plus
+## a breathing squash/stretch, so each ready rose slightly balances and dances.
+## Each rose is desynced by a random phase so the garden doesn't pulse in unison.
 ##
-## Roses are TileMapLayer cells and so can't carry a per-tile transform; this node
-## draws a copy of the grownup tile and animates that copy. It only reads which cells
-## are grownup (from PlantManager) and never mutates the tilemap or plant state.
+## Roses are TileMapLayer cells and so can't carry a per-tile transform. This node
+## asks PlantManager to hide only the source visual for animated roses, while the
+## logical plant state and tile metadata remain owned by PlantManager.
 
 @export var plant_manager_path: NodePath
 @export var plantz_path: NodePath
@@ -48,8 +47,8 @@ var _plantz: TileMapLayer
 var _texture: Texture2D
 var _region: Rect2
 var _tile_size: Vector2
-var _dancers: Dictionary = {}  # cell -> {"sway_phase": float, "breathe_phase": float, "pop_started_at": float}
-var _contact_dancers: Dictionary = {}  # key -> {"layer": TileMapLayer, "cell": Vector2i, "region": Rect2, "until": float, "source_id": int, "atlas_coords": Vector2i, "alternative_tile": int}
+var _dancers: Dictionary = {}  # cell -> {"sprite": Sprite2D, "sway_phase": float, "breathe_phase": float, "pop_started_at": float}
+var _contact_dancers: Dictionary = {}  # key -> {"sprite": Sprite2D, "layer": TileMapLayer, "cell": Vector2i, "until": float, "source_id": int, "atlas_coords": Vector2i, "alternative_tile": int}
 var _time: float = 0.0
 
 
@@ -140,16 +139,16 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 		var existing: Dictionary = _contact_dancers[key] as Dictionary
 		existing["until"] = maxf(float(existing.get("until", 0.0)), _time + maxf(0.0, duration))
 		_contact_dancers[key] = existing
-		queue_redraw()
+		_update_contact_dancer_visual(key)
 		return
 	var alternative_tile: int = layer.get_cell_alternative_tile(cell)
+	var region: Rect2 = Rect2(src.get_tile_texture_region(atlas_coords))
 	_contact_dancers[key] = {
+		"sprite": _create_region_sprite(src.texture, region, "Contact_%s" % key),
 		"layer_name": layer_name,
 		"layer": layer,
 		"cell": cell,
 		"item_id": item_id,
-		"texture": src.texture,
-		"region": Rect2(src.get_tile_texture_region(atlas_coords)),
 		"until": _time + maxf(0.0, duration),
 		"source_id": source_id,
 		"atlas_coords": atlas_coords,
@@ -163,7 +162,7 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 		layer.erase_cell(cell)
 		layer.update_internals()
 		layer.queue_redraw()
-	queue_redraw()
+	_update_contact_dancer_visual(key)
 
 
 func _add_dancer(cell: Vector2i, play_pop: bool) -> void:
@@ -175,21 +174,27 @@ func _add_dancer(cell: Vector2i, play_pop: bool) -> void:
 			var existing_phases: Dictionary = _dancers[cell] as Dictionary
 			existing_phases["pop_started_at"] = pop_started_at
 			_dancers[cell] = existing_phases
-			queue_redraw()
+			_update_dancer_visual(cell)
 		return
 	_dancers[cell] = {
+		"sprite": _create_region_sprite(_texture, _region, "Rose_%d_%d" % [cell.x, cell.y]),
 		"sway_phase": randf() * TAU,
 		"breathe_phase": randf() * TAU,
 		"pop_started_at": pop_started_at,
 	}
 	_set_source_visual_hidden(cell, true)
-	queue_redraw()
+	_update_dancer_visual(cell)
 
 
 func _remove_dancer(cell: Vector2i) -> void:
-	if _dancers.erase(cell):
-		_set_source_visual_hidden(cell, false)
-		queue_redraw()
+	if not _dancers.has(cell):
+		return
+	var data: Dictionary = _dancers[cell] as Dictionary
+	_dancers.erase(cell)
+	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+	if is_instance_valid(sprite):
+		sprite.queue_free()
+	_set_source_visual_hidden(cell, false)
 
 
 func _remove_contact_dancer(key: String) -> void:
@@ -197,6 +202,9 @@ func _remove_contact_dancer(key: String) -> void:
 		return
 	var data: Dictionary = _contact_dancers[key] as Dictionary
 	_contact_dancers.erase(key)
+	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+	if is_instance_valid(sprite):
+		sprite.queue_free()
 	var layer_name: StringName = data.get("layer_name", &"") as StringName
 	var cell: Vector2i = data.get("cell", Vector2i.ZERO) as Vector2i
 	if layer_name == &"plantz" and _plant_manager != null and _plant_manager.has_method("set_rose_visual_hidden"):
@@ -205,7 +213,6 @@ func _remove_contact_dancer(key: String) -> void:
 		var layer: TileMapLayer = data.get("layer", null) as TileMapLayer
 		var item_id: String = str(data.get("item_id", ""))
 		if item_id != "" and not _building_still_exists(cell, item_id):
-			queue_redraw()
 			return
 		if layer != null and is_instance_valid(layer) and layer.get_cell_source_id(cell) < 0:
 			layer.set_cell(
@@ -216,7 +223,6 @@ func _remove_contact_dancer(key: String) -> void:
 			)
 			layer.update_internals()
 			layer.queue_redraw()
-	queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -224,67 +230,99 @@ func _process(delta: float) -> void:
 		return
 	_time += delta
 	_expire_contact_dancers()
-	queue_redraw()
+	_update_dancer_visuals()
+	_update_contact_dancer_visuals()
 
 
-func _draw() -> void:
-	if _texture == null:
+func _create_region_sprite(texture: Texture2D, region: Rect2, node_name: String) -> Sprite2D:
+	var atlas: AtlasTexture = AtlasTexture.new()
+	atlas.atlas = texture
+	atlas.region = region
+	var sprite: Sprite2D = Sprite2D.new()
+	sprite.name = node_name.replace(":", "_")
+	sprite.texture = atlas
+	sprite.centered = false
+	var half: Vector2 = _tile_size * 0.5
+	sprite.offset = Vector2(-half.x, -_tile_size.y)
+	add_child(sprite)
+	return sprite
+
+
+func _update_dancer_visuals() -> void:
+	for raw_cell: Variant in _dancers.keys():
+		_update_dancer_visual(raw_cell as Vector2i)
+
+
+func _update_dancer_visual(cell: Vector2i) -> void:
+	if not _dancers.has(cell):
+		return
+	if not _is_logical_grownup(cell):
+		return
+	var data: Dictionary = _dancers[cell] as Dictionary
+	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+	if sprite == null or not is_instance_valid(sprite):
+		return
+	var sway_phase: float = float(data.get("sway_phase", 0.0))
+	var breathe_phase: float = float(data.get("breathe_phase", 0.0))
+	var pop_started_at: float = float(data.get("pop_started_at", -1.0))
+	_apply_dance_transform(sprite, _plantz, cell, sway_phase, breathe_phase, pop_started_at)
+
+
+func _update_contact_dancer_visuals() -> void:
+	for raw_key: Variant in _contact_dancers.keys():
+		_update_contact_dancer_visual(str(raw_key))
+
+
+func _update_contact_dancer_visual(key: String) -> void:
+	if not _contact_dancers.has(key):
+		return
+	var data: Dictionary = _contact_dancers[key] as Dictionary
+	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+	var layer: TileMapLayer = data.get("layer", null) as TileMapLayer
+	if sprite == null or not is_instance_valid(sprite) or layer == null or not is_instance_valid(layer):
+		return
+	var cell: Vector2i = data.get("cell", Vector2i.ZERO) as Vector2i
+	var sway_phase: float = float(data.get("sway_phase", 0.0))
+	var breathe_phase: float = float(data.get("breathe_phase", 0.0))
+	_apply_dance_transform(sprite, layer, cell, sway_phase, breathe_phase, -1.0)
+
+
+func _apply_dance_transform(
+	sprite: Sprite2D,
+	layer: TileMapLayer,
+	cell: Vector2i,
+	sway_phase: float,
+	breathe_phase: float,
+	pop_started_at: float
+) -> void:
+	if layer == null:
 		return
 	var half: Vector2 = _tile_size * 0.5
+	var cell_center_world: Vector2 = WorldDepthSort.cell_center_world(layer, cell)
+	var base_world: Vector2 = cell_center_world + Vector2(0.0, half.y)
 	var sway_rad: float = deg_to_rad(sway_degrees)
 	var sway_omega: float = sway_speed * TAU
 	var breathe_omega: float = breathe_speed * TAU
-	# Draw the tile so its bottom-centre sits at the transform origin (the planted
-	# base): sway rotates and breathe scales pivot from the base, like a stem swaying
-	# in the breeze, so the copy stays anchored to the ground it grew from.
-	var rect: Rect2 = Rect2(-half.x, -_tile_size.y, _tile_size.x, _tile_size.y)
-	for raw_cell in _dancers.keys():
-		var cell: Vector2i = raw_cell as Vector2i
-		if not _is_logical_grownup(cell):
-			continue
-		var phases: Dictionary = _dancers[cell] as Dictionary
-		var sway_phase: float = float(phases["sway_phase"])
-		var breathe_phase: float = float(phases["breathe_phase"])
-		var pop_started_at: float = float(phases.get("pop_started_at", -1.0))
-		var base: Vector2 = _cell_center_local(cell) + Vector2(0.0, half.y)
-		var angle: float = sway_rad * sin(_time * sway_omega + sway_phase)
-		var sy: float = 1.0 + breathe_amount * sin(_time * breathe_omega + breathe_phase)
-		var sx: float = (1.0 / sy) if preserve_volume else 1.0
-		var bob: float = -bob_pixels * absf(sin(_time * breathe_omega * 0.5 + sway_phase))
-		var pop_scale: Vector2 = Vector2.ONE
-		var pop_angle: float = 0.0
-		var pop_jump: float = 0.0
-		if pop_started_at >= 0.0 and pop_duration > 0.0:
-			var pop_t: float = clampf((_time - pop_started_at) / pop_duration, 0.0, 1.0)
-			var pop_out: float = 1.0 - pow(1.0 - pop_t, 3.0)
-			var pop_ring: float = sin(pop_t * PI)
-			var scale_value: float = lerpf(pop_start_scale, 1.0, pop_out) + (pop_ring * pop_overshoot)
-			var squash_value: float = 1.0 - (pop_ring * 0.18)
-			pop_scale = Vector2(scale_value / squash_value, scale_value * squash_value)
-			pop_angle = deg_to_rad(pop_twist_degrees) * (1.0 - pop_out) * sin(pop_t * TAU)
-			pop_jump = -pop_jump_pixels * pop_ring
-		draw_set_transform(base + Vector2(0.0, bob + pop_jump), angle + pop_angle, Vector2(sx, sy) * pop_scale)
-		draw_texture_rect_region(_texture, rect, _region)
-	for raw_key: Variant in _contact_dancers.keys():
-		var data: Dictionary = _contact_dancers[str(raw_key)] as Dictionary
-		var layer: TileMapLayer = data.get("layer", null) as TileMapLayer
-		if layer == null or not is_instance_valid(layer):
-			continue
-		var texture: Texture2D = data.get("texture", null) as Texture2D
-		if texture == null:
-			continue
-		var cell: Vector2i = data.get("cell", Vector2i.ZERO) as Vector2i
-		var contact_region: Rect2 = data.get("region", Rect2()) as Rect2
-		var sway_phase_contact: float = float(data.get("sway_phase", 0.0))
-		var breathe_phase_contact: float = float(data.get("breathe_phase", 0.0))
-		var base_contact: Vector2 = _cell_center_local_for_layer(layer, cell) + Vector2(0.0, half.y)
-		var angle_contact: float = sway_rad * sin(_time * sway_omega + sway_phase_contact)
-		var sy_contact: float = 1.0 + breathe_amount * sin(_time * breathe_omega + breathe_phase_contact)
-		var sx_contact: float = (1.0 / sy_contact) if preserve_volume else 1.0
-		var bob_contact: float = -bob_pixels * absf(sin(_time * breathe_omega * 0.5 + sway_phase_contact))
-		draw_set_transform(base_contact + Vector2(0.0, bob_contact), angle_contact, Vector2(sx_contact, sy_contact))
-		draw_texture_rect_region(texture, rect, contact_region)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var angle: float = sway_rad * sin(_time * sway_omega + sway_phase)
+	var scale_y: float = 1.0 + breathe_amount * sin(_time * breathe_omega + breathe_phase)
+	var scale_x: float = (1.0 / scale_y) if preserve_volume else 1.0
+	var bob: float = -bob_pixels * absf(sin(_time * breathe_omega * 0.5 + sway_phase))
+	var pop_scale: Vector2 = Vector2.ONE
+	var pop_angle: float = 0.0
+	var pop_jump: float = 0.0
+	if pop_started_at >= 0.0 and pop_duration > 0.0:
+		var pop_t: float = clampf((_time - pop_started_at) / pop_duration, 0.0, 1.0)
+		var pop_out: float = 1.0 - pow(1.0 - pop_t, 3.0)
+		var pop_ring: float = sin(pop_t * PI)
+		var scale_value: float = lerpf(pop_start_scale, 1.0, pop_out) + (pop_ring * pop_overshoot)
+		var squash_value: float = 1.0 - (pop_ring * 0.18)
+		pop_scale = Vector2(scale_value / squash_value, scale_value * squash_value)
+		pop_angle = deg_to_rad(pop_twist_degrees) * (1.0 - pop_out) * sin(pop_t * TAU)
+		pop_jump = -pop_jump_pixels * pop_ring
+	sprite.global_position = base_world + Vector2(0.0, bob + pop_jump)
+	sprite.rotation = angle + pop_angle
+	sprite.scale = Vector2(scale_x, scale_y) * pop_scale
+	WorldDepthSort.apply_world_depth(sprite, cell_center_world)
 
 
 func _expire_contact_dancers() -> void:
@@ -314,21 +352,6 @@ func _set_source_visual_hidden(cell: Vector2i, is_hidden: bool) -> void:
 	if _plant_manager == null or not _plant_manager.has_method("set_rose_visual_hidden"):
 		return
 	_plant_manager.call("set_rose_visual_hidden", cell, is_hidden)
-
-
-func _cell_center_local(cell: Vector2i) -> Vector2:
-	return _cell_center_local_for_layer(_plantz, cell)
-
-
-func _cell_center_local_for_layer(layer: TileMapLayer, cell: Vector2i) -> Vector2:
-	if layer == null:
-		return Vector2.ZERO
-	var center_map: Vector2 = _plantz.map_to_local(cell)
-	if layer != _plantz:
-		center_map = layer.map_to_local(cell)
-	if get_parent() == layer:
-		return center_map
-	return to_local(layer.to_global(center_map))
 
 
 func _contact_layer(layer_name: StringName) -> TileMapLayer:
