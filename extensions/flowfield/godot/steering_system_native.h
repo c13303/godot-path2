@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <unordered_map>
 
@@ -83,6 +84,12 @@ namespace godot
         void set_agent_position(int agent_id, const Vector2 &position, bool clear_velocity = true);
         Vector2 get_agent_position(int agent_id) const;
         Vector2 get_agent_velocity(int agent_id) const;
+        void set_terrain_speed_cell(const Vector2i &cell, double multiplier, int channel = 0);
+        void set_terrain_speed_cells(const PackedVector2Array &cells, const PackedFloat32Array &multipliers, int channel = 0);
+        void clear_terrain_speed_cell(const Vector2i &cell, int channel = 0);
+        void clear_terrain_speed_cells(const PackedVector2Array &cells, int channel = 0);
+        void replace_terrain_speed_channel(const PackedVector2Array &cells, const PackedFloat32Array &multipliers, int channel = 0);
+        void clear_terrain_speed_channel(int channel = 0);
         void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
         void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vector2 &position, double radius, const Vector2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);

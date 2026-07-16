@@ -58,18 +58,6 @@ namespace godot
         // block_fences = true (client/merchant groups). Monsters ignore fences entirely
         // and are merely slowed by their per-cell speed multiplier.
         std::unordered_set<Vector2i, Vector2iHash> fence_blocking_cells;
-        // Absolute-cell record of every terrain slowdown, carrying both the all-agent and
-        // the player-specific multiplier. This is what re-seeds the shared steering map on
-        // every (re)build, so it must keep the pair: dropping the player value here would
-        // silently restore the player slowdown on the next field rebuild.
-        std::unordered_map<Vector2i, ffcore::TerrainSpeed, Vector2iHash> cell_speed_multipliers;
-
-        struct CellSpeedModifier
-        {
-            Vector2i cell;
-            double multiplier = 1.0;
-        };
-
         struct AsyncFlowSnapshot
         {
             Rect2i used;
@@ -85,7 +73,6 @@ namespace godot
             int bottleneck_zone_radius_tiles = 0;
             double flow_field_wall_clearance = 0.0;
             bool block_fences = false;
-            std::vector<CellSpeedModifier> speed_modifiers;
             // Raw inputs for the worker-side coverage filter. A zero threshold or an
             // empty nav_coverage_cells list disables filtering.
             double coverage_threshold = 0.0;
@@ -149,13 +136,6 @@ namespace godot
         void apply_physics_passability(ffcore::FlowField &target_field,
                                        const Rect2i &used,
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
-        void apply_cell_speed_multipliers(ffcore::FlowField &target_field, const Rect2i &used) const;
-        // Reconcile the shared steering terrain-speed map (the single source of truth agents
-        // read) from this node's absolute-cell record. Order-independent seeding.
-        void seed_terrain_speed_to_steering() const;
-        void apply_cell_speed_modifiers(ffcore::FlowField &target_field,
-                                        const Rect2i &used,
-                                        const std::vector<CellSpeedModifier> &modifiers) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
                            std::unordered_map<Vector2i, double, Vector2iHash> &costs);
@@ -224,9 +204,6 @@ namespace godot
         // (clients/merchants). They never affect the default field or monster flow builds.
         void set_fence_blocking_cells(const PackedVector2Array &cells);
         void clear_fence_blocking_cells();
-        void set_cell_speed_multiplier(Vector2i map_cell, double multiplier, double player_multiplier);
-        void clear_cell_speed_multipliers();
-
         bool rebuild_async(Vector2 goal);
         // Lazy flow fields: GDScript calls this the moment it enqueues a group's rebuild,
         // before it is submitted for computation, so agents waiting on that group show

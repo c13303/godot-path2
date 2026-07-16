@@ -4,8 +4,10 @@ class_name BuildSystem
 signal build_preview_changed(is_active: bool)
 
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
+const TERRAIN_SPEED_MODIFIER_SERVICE: Script = preload("res://scripts/map/terrain_speed_modifier_service.gd")
 const BUILD_FX_Z_INDEX: int = -62
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
+const TERRAIN_SPEED_SOURCE_PREFIX: String = "buildsystem:"
 # DIRECTION_* are fence-adjacency neighbor offsets used by the fence autotiler below.
 # Build orientation rules (facing rotation, direction -> tile alternative) live in
 # BuildDirectionRules, not here.
@@ -61,6 +63,8 @@ var _atlas_source_id: int = -1
 # Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
+var _steering_system: Node = null
+var _terrain_speed: RefCounted = TERRAIN_SPEED_MODIFIER_SERVICE.new()
 var _building_manager: Object = null
 var _build_preview: BuildPreviewController = null
 var _placement_service: BuildPlacementService = null
@@ -485,24 +489,26 @@ func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 	return bool(item_def.get("blocks_movement", false)) or bool(item_def.get("isWall", false))
 
 func _sync_terrain_speed_cells() -> void:
-	var ff: Object = _resolve_flow_field()
-	if ff == null:
+	var steering: Node = _resolve_steering_system()
+	if steering == null:
 		return
-	if ff.has_method("clear_cell_speed_multipliers"):
-		ff.call("clear_cell_speed_multipliers")
-	if not ff.has_method("set_cell_speed_multiplier"):
+	if not steering.has_method("replace_terrain_speed_channel"):
 		return
+	_terrain_speed.setup(steering)
+	_terrain_speed.clear_local_contributions()
+	_terrain_speed.clear_all_native_channels()
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null:
 			continue
 		for raw_cell: Variant in layer.get_used_cells():
 			var cell: Vector2i = raw_cell as Vector2i
-			_refresh_cell_terrain_speed(cell)
+			_refresh_cell_terrain_speed(cell, false)
 	if plant_manager != null and plant_manager.has_method("get_plant_cells"):
 		var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
 		for raw_cell: Variant in plant_cells:
 			var cell: Vector2i = raw_cell as Vector2i
-			_refresh_cell_terrain_speed(cell)
+			_refresh_cell_terrain_speed(cell, false)
+	_terrain_speed.upload_all_channels()
 
 # Startup terrain-speed seed for one cell. Pushes both the all-agent and the player
 # multiplier (a rose slows every agent but never the player -- see
@@ -510,10 +516,11 @@ func _sync_terrain_speed_cells() -> void:
 # than reusing BuildingNavigationSyncService: BuildSystem._ready() runs before
 # BuildingManager's (it is the earlier sibling under Map), so the service does not exist
 # yet at seed time. The "who does a def slow" rule is shared, only the walk is duplicated.
-func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
-	var ff: Object = _resolve_flow_field()
-	if ff == null or not ff.has_method("set_cell_speed_multiplier"):
+func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
+	var steering: Node = _resolve_steering_system()
+	if steering == null or not steering.has_method("set_terrain_speed_cell"):
 		return
+	_terrain_speed.set_steering(steering)
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
@@ -531,7 +538,7 @@ func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
 		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
 		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
-	ff.call("set_cell_speed_multiplier", cell, speed_multiplier, player_speed_multiplier)
+	_terrain_speed.set_cell_contribution_pair(cell, StringName(TERRAIN_SPEED_SOURCE_PREFIX + str(cell)), speed_multiplier, player_speed_multiplier, upload)
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
 	var touched: Dictionary = {}
@@ -588,6 +595,15 @@ func _resolve_flow_field() -> Object:
 	if scene:
 		_flow_field = scene.get_node_or_null("CPP/FlowFieldNative")
 	return _flow_field
+
+
+func _resolve_steering_system() -> Node:
+	if _steering_system and is_instance_valid(_steering_system):
+		return _steering_system
+	var scene: Node = get_tree().get_current_scene()
+	if scene:
+		_steering_system = scene.get_node_or_null("CPP/SteeringSystemNative")
+	return _steering_system
 
 # Typed access to the house owner for the placement/preview services (houses are placed and
 # previewed as one logical object, not through the generic tile path).

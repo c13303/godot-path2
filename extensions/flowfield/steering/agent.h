@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.h"
+#include "terrain_speed_grid.h"
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -63,6 +64,7 @@ namespace ffcore
         double fight_half_w = 32.0;
         double fight_half_h = 32.0;
         int smash_class = SMASH_CLASS_MAIN_CHAR;
+        int terrain_speed_channel = DEFAULT_TERRAIN_SPEED_CHANNEL;
         bool weapon_immune = false;
     };
 

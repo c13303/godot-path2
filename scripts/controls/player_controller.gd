@@ -3,6 +3,7 @@ class_name PlayerController
 
 const CONTROL_MODE_MANUAL: int = 1
 const SMASH_CLASS_PLAYER: int = 1
+const PLAYER_TERRAIN_SPEED_CHANNEL: int = 1
 const RUSH_BLOCKED_PROGRESS_EPSILON: float = 0.5
 const INPUT_MODE_PAD: String = "pad"
 const INPUT_MODE_KMOUSE: String = "kmouse"
@@ -520,6 +521,7 @@ func _setup_player() -> void:
 			"fight_half_w": fight_half_size.x,
 			"fight_half_h": fight_half_size.y,
 			"smash_class": SMASH_CLASS_PLAYER,
+			"terrain_speed_channel": PLAYER_TERRAIN_SPEED_CHANNEL,
 		}
 		# Player max_speed > 0 overrides the global agent_max_speed; 0 means inherit.
 		# We resolve the effective speed and multiply it explicitly so the player

@@ -1,359 +1,502 @@
-Fix nighttime rose/plant construction correctly: disable it at every entry point and remove the obsolete unoptimized nighttime plant-processing branch.
+# Remove autosaves and eliminate rose-harvest frame hitches
 
-Read and follow `AGENTS.md` and `ARCHITECTURE.md`.
+Read `AGENTS.md` and `ARCHITECTURE.md` first.
 
-Do not run Godot, tests, builds, exports, or compilation. The user will test.
+Do not run Godot, tests, builds, exports, or compilation. I will test manually.
 
-## Problem
+## Objective
 
-Placing roses during night causes a massive frame freeze.
+Make rose harvesting allocation-light and free of synchronous global rebuilds.
 
-The current plant-added flow behaves differently depending on the phase:
+Also hard-remove the entire autosave feature for now. Manual F5/F9 save/load must remain fully functional.
 
-* During day, plant-layout changes use the deferred/coalesced/budgeted invalidation pipeline.
-* During night, `BuildingManager._on_plant_added()` directly calls garden rebuild and monster retarget logic synchronously.
+Do not merely hide the autosave option or add another guard. Remove the runtime autosave system and its dead compatibility wiring.
 
-The problematic branch is approximately:
+---
+
+## Verified current situation
+
+### Autosave
+
+The in-game autosave option is disabled, so `progression.auto_save()` currently returns before serialization. Therefore, autosave is not the current harvest hitch.
+
+However, obsolete autosave calls, UI, state flags and comments remain throughout the project and must be removed.
+
+### Counter bouquet
+
+`CounterStockManager.set_stock()` calls `rebuild_pile()` on every stock mutation.
+
+`rebuild_pile()` currently:
+
+1. queues every existing bouquet sprite for deletion;
+2. creates every bouquet sprite again;
+3. performs deferred scene-tree insertion.
+
+Adding roses from stock 0 to 10 therefore creates 55 bouquet sprites instead of 10.
+
+This scene-tree churn occurs during harvesting and must be eliminated.
+
+### Counter topology
+
+`BuildingManager.notify_counter_stock_changed()` performs a synchronous:
 
 ```gdscript
-if not GameState.is_night:
-    _building_invalidation_controller.after_plant_layout_changed(...)
-    return
-
-_add_plant_to_gardens(cell)
-_retarget_agents_for_garden_topology_change(cell)
+_rebuild_plant_zone_from_layer()
 ```
 
-This nighttime branch can cause:
+when counter stock changes from `0` to positive.
 
-* complete garden topology rebuilding;
-* garden ID/cache invalidation;
-* flow-field and route invalidation;
-* scanning and retargeting active monsters;
-* one full rebuild per individual rose during rectangle placement.
+This means the first harvested rose placed into an empty counter can synchronously rebuild the complete garden topology, route caches and retargeting state.
 
-`imperial_seed` is also a real plant placeable and reaches the same `plant_added` path.
+Counters are also still partially represented as monster-edible garden content even though the monster counter-eating mechanic is supposed to be gone.
 
-The gameplay decision is now:
+---
 
-* real plants cannot be built during night;
-* houses cannot be built during night;
-* the obsolete synchronous nighttime plant-addition implementation must also be removed so future scripts or mechanics cannot reintroduce the freeze.
+# Part 1 — Hard-remove autosaves
 
-## Required result
-
-During night:
-
-* `rose` cannot be selected, previewed, dragged, purchased, or placed.
-* `imperial_seed` cannot be selected, previewed, purchased, or placed.
-* Any current or future placeable whose catalog category is `"plant"` must follow the same restriction.
-* Houses cannot be selected, previewed, purchased, or placed.
-* The house quick slot remains visible whenever its existing visibility conditions say it should be visible, but it is greyed and disabled.
-* The gardening quick slot remains usable because it contains non-plant items that may still be valid at night.
-* Existing valid nighttime gardening/build items retain their current behavior.
-
-When night starts while a forbidden preview or drag is active:
-
-* cancel the drag;
-* clear the preview;
-* clear the concrete selected build item;
-* do not spend resources;
-* do not place anything;
-* restore normal weapon/tool control cleanly.
-
-When day returns:
-
-* plants and houses regain their normal availability automatically.
-
-## Part 1 — Remove the obsolete nighttime plant-addition path
-
-Inspect `BuildingManager._on_plant_added()` and the related garden topology / invalidation services.
-
-Remove the phase-specific direct calls that synchronously rebuild garden topology and retarget agents during night.
-
-Plant additions must have one consistent architecture regardless of phase:
+Preserve only the manual save slot:
 
 ```text
-plant mutation
-    → mark plant layout/topology dirty
-    → coalesce repeated changes
-    → process through the existing budgeted invalidation pipeline
+user://progression_save.json
 ```
 
-Do not keep an unreachable legacy branch “just in case.”
+Manual F5 save and F9 load must work exactly as before.
 
-The result must ensure that any legitimate non-player plant addition at night, such as:
+Remove all runtime support for:
 
-* scripted events;
-* debug tools;
-* future mechanics;
-* restoration code;
-* internal calls to `PlantManager.add_plant()`;
+```text
+user://progression_autosave.json
+```
 
-does not trigger the old immediate full garden rebuild.
+## Required cleanup
 
-Reuse the existing daytime plant-layout invalidation path. Do not create a second asynchronous system.
+### `scripts/gameState/progression.gd`
 
-### Preserve semantic correctness
+Remove:
 
-If a plant is added internally at night despite player placement being disabled:
+* `AUTOSAVE_PATH`;
+* `auto_save()`;
+* `auto_save_after_rose_growth()`;
+* startup autosave loading;
+* autosave deletion during reset;
+* autosave-specific comments and logs.
 
-* topology must eventually update;
-* garden routes must eventually become correct;
-* affected agents must be retargeted through the normal queued/budgeted mechanism;
-* no synchronous global rebuild may occur inside the `plant_added` signal callback.
+Manual pending-load application in `_ready()` must remain. F9 loading already uses this path and must not be broken.
 
-If the current invalidation controller assumes daytime-only processing, fix that assumption narrowly so queued plant topology work can safely progress during night.
+`reset_game()` must simply reset transient run state and reload a fresh scene. It must not delete or overwrite the manual F5 save.
 
-Do not simply ignore internal nighttime plant additions.
+Update `_save_applied` comments so they refer only to manual save restoration.
 
-## Part 2 — Add one authoritative phase-availability rule
+Remove `load_on_start()` if it has no remaining responsibility after autosave removal.
 
-Create or consolidate one authoritative query for concrete placeable availability, preferably in the existing `GameUI` placement-selection ownership.
+### `scripts/map/dawn_harvest_controller.gd`
+
+Remove:
+
+```gdscript
+_manager.auto_save_after_rose_harvest()
+```
+
+### `scripts/map/building_manager.gd`
+
+Remove the `auto_save_after_rose_harvest()` façade wrapper.
+
+### `scripts/map/plant_manager.gd`
+
+After delayed dawn growth completes, directly continue the dawn sequence:
+
+```gdscript
+new_day_finished.emit()
+day_seed_harvest_finished.emit()
+```
+
+Do not gate dawn progression on a save operation.
+
+Remove autosave-specific logs and method checks.
+
+Keep the existing stale-day and stale-night guards.
+
+### `scripts/misc/cpp_debug_options.gd`
+
+Remove:
+
+* static `auto_save_enabled`;
+* exported `enable_auto_save`;
+* associated setup propagation;
+* autosave-related comments.
+
+### `scripts/gameState/gameState.gd`
+
+Remove:
+
+* `SKIP_STARTUP_AUTOSAVE_META`;
+* `skip_startup_autosave_once()`;
+* `consume_skip_startup_autosave()`.
+
+The existing method also resets unrelated fresh-run state. Preserve those required behaviors explicitly at its former call sites using the existing:
+
+```gdscript
+GameState.reset_special_reward_claims()
+GameState.reset_transient_run_state()
+```
+
+Do not retain an autosave-named method for unrelated state reset.
+
+### UI and restart paths
+
+Clean autosave references from:
+
+* `scripts/ui/level_loader_menu.gd`;
+* `scripts/ui/menus.gd`;
+* `scripts/ui/game_over_modal.gd`;
+* `scripts/ui/victory_modal.gd`;
+* any other runtime script or scene found by search.
+
+Specific behavior:
+
+* remove “Reload autosave” from the level loader;
+* retain manual-save loading;
+* remove the `load_on_start()` call from `menus.gd`;
+* replace misleading quit text such as “Progress will be saved” with wording that does not promise a save;
+* replace reset text claiming it erases the save, because the manual save must remain untouched;
+* restart, level selection, game over and victory must still reset the required transient/fresh-run state.
+
+After this cleanup, searching runtime scripts and scenes for these terms should produce no functional autosave code:
+
+```text
+auto_save
+autosave
+AUTOSAVE
+progression_autosave
+skip_startup_autosave
+```
+
+Do not remove or redesign the normal save serialization format.
+
+---
+
+# Part 2 — Make counter bouquet updates allocation-free
+
+Ownership remains in:
+
+```text
+scripts/map/counter_stock_manager.gd
+```
+
+Do not move bouquet rendering into `BuildingManager`.
+
+## Required design
+
+Each physical rose counter must own a fixed set of 10 reusable bouquet slot sprites.
+
+Use the existing ten offsets in:
+
+```gdscript
+COUNTER_BOUQUET_SLOT_OFFSETS
+```
+
+### Counter registration
+
+Add a clear counter lifecycle API, for example:
+
+```gdscript
+register_counter(counter_cell: Vector2i) -> void
+unregister_counter(counter_cell: Vector2i) -> void
+```
+
+Use the existing counter placement/removal/scan pathways to register and unregister counters.
+
+On registration:
+
+* create exactly `MAX_STOCK_PER_COUNTER` sprites once;
+* configure their texture, frame, scale, position and z-index once;
+* add them to the scene tree;
+* start them hidden.
+
+Existing counters discovered during level loading or save restoration must also be registered before gameplay harvesting.
+
+On counter destruction/removal:
+
+* free its ten persistent sprites once;
+* remove its stock state;
+* clean all references.
+
+Do not create the ten nodes during the actual harvest operation when a clean counter-created or preload hook is available.
+
+### Stock mutation
+
+Replace `rebuild_pile()` with an incremental visibility synchronization.
+
+Changing stock from `previous` to `value` must only:
+
+* update `_stock_by_cell`;
+* show newly occupied slots;
+* hide newly emptied slots.
 
 For example:
 
-```gdscript
-is_item_disabled_for_placement(item_id: StringName) -> bool
-```
+* `4 -> 5`: show slot 4 only;
+* `5 -> 4`: hide slot 4 only;
+* `0 -> 10` during restore: show the ten existing slots;
+* `10 -> 0`: hide the ten existing slots.
 
-At night it must disable:
+Ordinary `set_stock()` and `add_stock()` must not call:
 
-* all catalog items with `category == "plant"`;
-* all house buildables;
-* any other already-established nighttime-disabled categories such as hammer buildables, without changing their current behavior.
+* `Sprite2D.new()`;
+* `queue_free()`;
+* deferred `add_child`;
+* a complete bouquet reconstruction.
 
-Do not hardcode separate `rose` and `imperial_seed` checks when the catalog category already expresses the rule.
+Preserve the exact bouquet offsets, scale, texture frame and visual layering.
 
-Do not duplicate the phase policy across several UI and placement files.
+### Restore and clear
 
-Lower layers may call the authoritative query, but they must not independently recreate the rule.
+Save/load behavior must remain unchanged logically.
 
-## Part 3 — Build-picker and quick-slot behavior
+Restoring counter stock must synchronize visibility on already registered slots without recreating the bouquet.
 
-Update the relevant picker/quickbar code, including `scripts/ui/game_ui.gd` and `scripts/shop/toolbuild.gd` where applicable.
+`clear()` and level teardown must correctly free registered slot nodes.
 
-### Gardening
+### Nightfall dissolve
 
-During night:
+Preserve the existing three-second reverse bouquet dissolve and rose-seed refund behavior.
 
-* keep the gardening tool/quick slot available;
-* show plant entries as disabled/greyed;
-* prevent mouse activation;
-* prevent keyboard confirmation;
-* prevent gamepad confirmation;
-* prevent remembered/default selection from choosing a disabled plant;
-* if the previously remembered gardening item is a plant, select the next valid non-plant gardening item when opening the picker;
-* if no valid item exists, leave no concrete build item selected.
+Adapt it to persistent slots:
 
-Do not hide plants permanently from the catalog.
+* immediately clear logical stock as before;
+* progressively hide the visible slots in reverse order;
+* refund from the corresponding slot’s world position;
+* do not detach or destroy persistent bouquet sprites;
+* leave all slots hidden and ready for reuse afterward.
 
-### Houses
+Counter destruction during or after dissolve must remain safe.
 
-During night:
+### Transient flight sprites
 
-* preserve all current house-slot visibility rules;
-* when visible, render the house quick slot disabled/greyed;
-* prevent opening it by mouse, keyboard shortcut, or gamepad;
-* prevent house item selection from scripts or resumed UI state.
+Do not create an elaborate generic object-pooling framework for the single flying rose animation unless telemetry proves it significant.
 
-Do not alter builder-house uniqueness rules, prices, inventory, tutorials, or house availability during day.
+One temporary flight sprite and Tween per harvested or sold rose is acceptable for now.
 
-## Part 4 — Cancel stale state on phase transition
+The persistent counter bouquet is the important allocation fix.
 
-When the game transitions into night, inspect the currently selected concrete placeable.
+---
 
-If it is now forbidden:
+# Part 3 — Remove stock changes from garden-topology rebuilding
 
-* cancel active drag placement;
-* clear the build preview;
-* clear selected item state;
-* close or refresh the picker as appropriate;
-* prevent the release event from committing the stale placement;
-* ensure input returns to the expected weapon/tool state.
+Counter stock must be runtime content state, not navigation topology.
 
-Use the existing drag/build cancellation APIs.
+Changing a counter between empty and stocked must never rebuild the complete plant zone.
 
-Do not add a parallel drag-state implementation.
+## Stable client-only counter access cells
 
-This must work for:
+Keep counter access cells available as stable client target points based on the existence of the physical counter, not on whether its stock is currently positive.
 
-* single-cell rose preview;
-* rose rectangle drag;
-* imperial-seed preview;
-* house preview;
-* house drag, if the architecture supports one;
-* mouse and gamepad selection.
+Currently, counter access collection is based on `stocked_counter_cells()`.
 
-## Part 5 — Harden scripted selection
-
-Any public method such as:
+Change this so access cells are generated from all physical rose counters:
 
 ```gdscript
-select_build_item_for_tool(tool_id, item_id)
+rose_shop_counter_cells()
 ```
 
-must reject a phase-disabled concrete item.
+This allows counter access geometry to be established when the counter is built or when topology is initially prepared.
 
-Expected behavior:
+Stock availability must remain a dynamic check:
 
-* return failure cleanly;
-* do not create a preview;
-* do not change current build definition;
-* do not consume currency or inventory;
-* do not leave half-selected UI state.
+```gdscript
+stock(counter_cell) > 0
+```
 
-This protects tutorials, debug helpers, restored selection state, and future callers.
+Therefore:
 
-## Part 6 — Add final placement-service guards
+* building/removing a counter may legitimately invalidate topology;
+* adding or removing a rose from an existing counter must not.
 
-In the authoritative placement commit layer, such as `scripts/map/build_placement_service.gd`, reject forbidden items before any gameplay mutation.
+## `BuildingManager.notify_counter_stock_changed()`
 
-Guard both single and batch/drag paths, including functions equivalent to:
+Remove the synchronous `0 -> positive` call to:
 
-* `try_apply_placeable(...)`
-* `commit_drag_build(...)`
+```gdscript
+_rebuild_plant_zone_from_layer()
+```
 
-The check must happen before:
+A stock mutation should normally only:
 
-* placement validation that scans agents;
-* price/inventory consumption;
-* tile mutation;
-* `PlantManager.add_plant()`;
-* house creation;
-* navigation invalidation;
-* garden invalidation;
-* sounds;
-* particles;
-* construction FX;
-* placement signals.
+* emit `counter_stock_changed`;
+* update the counter visual;
+* update lightweight client-sale state if required.
 
-A rejected placement must:
+It must not rebuild gardens, flow fields, route caches or all-agent targeting.
 
-* place nothing;
-* spend nothing;
-* emit no placement-related mutation signal;
-* trigger no garden or navigation work;
-* leave no preview residue.
+Remove `mark_counter_stock_restored_for_navigation()` if restoration no longer requires topology invalidation.
 
-This is defense in depth against stale definitions, same-frame transitions, scripted calls, and future UI regressions.
+## Counters are not monster food
 
-Use the authoritative phase-availability query. Do not duplicate the plant/house policy inside the placement service.
+Audit and remove the obsolete monster-counter consumption path.
 
-## Part 7 — Avoid unnecessary nighttime occupancy work
+Relevant current code includes:
 
-Because plants can no longer be player-placed at night, ensure the placement preview/validation flow does not continue performing expensive plant placement checks while a disabled plant is selected.
+* counter handling in `AgentNavigationPhaseController.process_plant_arrivals()`;
+* `BuildingManager._consume_counter_rose()`;
+* `BuildingManager.start_agent_eating_counter_rose()`;
+* `CounterStockManager.consume_counter_rose()`;
+* `GardenTopologyService.is_eatable_for_monster()` counter handling;
+* comments and conditions treating a stocked counter as an edible monster garden.
 
-In particular, avoid entering candidate-cell × active-agent occupancy scans for a phase-disabled item.
+Required behavior:
 
-The availability check should short-circuit before preview validation and drag-cell validation.
+* monsters never select a counter access cell as food;
+* monsters never eat or reduce counter stock;
+* stocked counters do not keep a monster night alive;
+* an empty or stocked counter is irrelevant to monster edible-target counts;
+* client agents can still find stocked counters and buy roses normally;
+* clients must not target empty counters as valid sale targets.
 
-Do not alter occupancy rules for valid daytime plant placement.
+Counter access cells may remain represented in garden route geometry for clients, but they must be explicitly client-only targets.
 
-## Do not modify
+Do not implement a second parallel general navigation framework. Use the smallest clean change that preserves existing client garden and counter routing.
 
-Do not redesign or change:
+---
 
-* garden clustering rules;
-* garden entrance scoring;
-* flow-field algorithms;
-* monster navigation semantics;
-* builder AI;
-* house construction progress;
-* savegame formats;
-* plant prices;
-* house prices;
-* inventory quantities;
-* tutorial consumption state;
-* valid nighttime non-plant placeables;
-* unrelated quickbar behavior.
+# Part 4 — Add focused harvest telemetry
 
-Do not reset gardens or route caches merely because night starts.
+Telemetry ownership belongs in:
 
-## Acceptance checks
+```text
+scripts/map/building_debug_telemetry.gd
+```
 
-### Plant restrictions
+Do not scatter unconditional `print()` calls through gameplay code.
 
-1. During day, rose and imperial-seed placement work exactly as before.
+Add a dedicated debug option in `CppDebugOptions`, default disabled, such as:
 
-2. During night:
+```gdscript
+@export var debug_rose_harvest_telemetry: bool = false
+```
 
-   * rose is visible in its picker but disabled;
-   * imperial seed is visible but disabled;
-   * neither can be selected by mouse, keyboard, or gamepad;
-   * other valid gardening items remain selectable.
+Optionally add a warning threshold, default around `1.0 ms` or `2.0 ms`.
 
-3. Open the gardening picker at night after previously using rose:
+Use `Time.get_ticks_usec()`.
 
-   * rose is not restored as the active item;
-   * the next valid non-plant item is selected, or no item is selected if none is available.
+## Measure these synchronous spans
 
-4. Select rose during day, begin rectangle dragging, then transition to night:
+For one regular rose harvest, record:
 
-   * drag is cancelled immediately;
-   * preview disappears;
-   * releasing input places nothing;
-   * no seed or currency is spent;
-   * no plant-added signal is emitted.
+* target-counter lookup;
+* plant removal;
+* counter stock mutation;
+* bouquet visibility synchronization;
+* counter-stock notification;
+* flight animation setup;
+* `check_finished()`;
+* complete harvest call.
 
-5. Call scripted item selection for rose or imperial seed during night:
+Also record diagnostic facts:
 
-   * selection is rejected;
-   * no preview is created.
+* frame number;
+* rose cell;
+* counter cell;
+* stock transition, such as `0 -> 1`;
+* bouquet sprites created during this harvest;
+* bouquet sprites freed during this harvest;
+* whether any topology rebuild or navigation invalidation was requested;
+* total duration.
 
-6. Pass a stale plant definition directly to single-placement and drag-commit functions during night:
+The optimized harvest must report:
 
-   * both paths reject it before validation, spending, mutation, or signals.
+```text
+bouquet_created=0
+bouquet_freed=0
+topology_rebuild=false
+```
 
-### House restrictions
+during normal harvesting.
 
-7. When the house quick slot is normally visible at night:
+Use one compact log line, for example:
 
-   * it remains visible;
-   * it is disabled/greyed;
-   * it cannot be opened by mouse, shortcut, or gamepad.
+```text
+[HARVEST_PERF] frame=1234 total=0.42ms lookup=0.03 plant=0.08 stock=0.05 pile=0.01 notify=0.01 flight=0.12 finish=0.12 stock_change=4->5 created=0 freed=0 topology_rebuild=false
+```
 
-8. Start night with a house preview active:
+When telemetry is disabled, its runtime overhead should be negligible.
 
-   * preview and selection are cancelled;
-   * placement cannot complete afterward;
-   * no gems are spent.
+Do not generate multiple log lines for one harvest. Logging itself must not become the hitch.
 
-9. Direct or scripted house selection/commit during night is rejected.
+Existing broad garden-lag telemetry may be reused where appropriate, but the harvest breakdown must remain identifiable and compact.
 
-10. Returning to day restores normal house availability.
+---
 
-### Architecture and performance
+# Plant-removal invalidation
 
-11. Inspect `BuildingManager._on_plant_added()`:
+The existing plant-layout invalidation appears to be deferred and coalesced when runtime agents are inactive.
 
-* no synchronous night-only garden rebuild branch remains;
-* plant changes use the same deferred/coalesced/budgeted invalidation entry point in every phase.
+Do not replace it with a synchronous rebuild.
 
-12. Trigger an internal `PlantManager.add_plant()` during night:
+Instrument it through the harvest telemetry, but only change it if inspection proves that one harvested plant still performs substantial synchronous topology work.
 
-* the signal callback does not synchronously rebuild all gardens;
-* topology work is queued/coalesced;
-* topology eventually becomes correct;
-* affected agents are retargeted through the existing queued pipeline.
+Repeated rose harvesting must result in at most one coalesced deferred plant-layout rebuild after the existing quiet period, not one rebuild per rose.
 
-13. Rectangle planting during day:
+Do not broaden this task into a full garden-navigation refactor.
 
-* repeated plant additions are coalesced;
-* the system does not perform one complete synchronous garden rebuild per cell.
+---
 
-14. A disabled plant selected at night does not run expensive occupancy checks against all active monsters.
+# Acceptance criteria
 
-## Deliverable
+## Autosave
 
-After implementation, report:
+* No autosave file is written.
+* No autosave file is loaded.
+* No autosave UI choice exists.
+* No harvest or dawn-growth code calls a save operation.
+* Manual F5 save still uses `progression_save.json`.
+* Manual F9 load still restores the manual save.
+* Restarting a run does not delete the manual save.
+* Dawn growth continues normally without waiting for a save result.
 
-* exact files changed;
-* the authoritative function that owns phase-based placeable availability;
-* the obsolete nighttime plant branch that was removed;
-* how internal nighttime plant additions now reach the deferred/budgeted invalidation pipeline;
-* how stale previews and drags are cancelled;
-* where the final commit-level guards were added;
-* any pre-existing behavior discovered that already satisfied part of the request.
+## Harvest performance
 
-Do not report tests as passed because no Godot execution is authorized.
+During ordinary harvesting:
+
+* no existing bouquet sprites are destroyed;
+* no bouquet sprites are created;
+* no deferred bouquet node insertion occurs;
+* no full garden rebuild occurs on counter `0 -> 1`;
+* no flow-field or global route rebuild is caused solely by counter stock;
+* the bouquet still has the same compact ten-rose layout;
+* the rose flight animation still works;
+* counter save/load visuals remain correct;
+* nightfall dissolve and refunds remain correct.
+
+## Agent behavior
+
+* clients still buy stocked counter roses;
+* clients do not buy from empty counters;
+* monsters never target or consume counter roses;
+* counter stock does not affect monster night completion;
+* constructing or destroying a counter still updates navigation correctly.
+
+## Code quality
+
+* strict GDScript typing;
+* no new gameplay responsibility added to `BuildingManager`;
+* no broad speculative framework;
+* no dead autosave compatibility wrappers;
+* no hidden per-harvest allocations;
+* no unconditional performance logging.
+
+---
+
+# Final report
+
+Report:
+
+1. the exact autosave files, methods and UI wiring removed;
+2. the final owner and lifecycle of persistent bouquet slots;
+3. how counter access remains available to clients without stock-triggered topology rebuilds;
+4. all obsolete monster-counter code removed;
+5. the exact harvest telemetry line and debug option;
+6. files changed;
+7. manual test checklist;
+8. anything that could not be completed safely.
+
+Do not claim performance improvement solely from inspection. Explain the structural allocations and rebuilds removed, and leave the telemetry available for manual confirmation.

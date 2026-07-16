@@ -91,10 +91,7 @@ static inline double terrain_speed_multiplier_for_agent(const AgentData &a, Flow
     // stale multipliers baked into an in-flight field are never observed.
     Vec2i rel = nav->world_to_cell(agent_foot_point(a));
     const Vec2i &origin = nav->get_cell_origin();
-    // The player reads the cell's player-specific multiplier: some slowdowns (roses) apply
-    // to every other agent but must never slow the player down.
-    const bool for_player = a.profile.smash_class == SMASH_CLASS_PLAYER;
-    return sys->terrain_speed_multiplier_at(Vec2i(rel.x + origin.x, rel.y + origin.y), for_player);
+    return sys->terrain_speed_multiplier_at(Vec2i(rel.x + origin.x, rel.y + origin.y), a.profile.terrain_speed_channel);
 }
 
 static inline Vec2 terrain_scaled_step(const AgentData &a, FlowField *nav, const Vec2 &velocity, double delta)
@@ -163,6 +160,8 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
     sanitized.fight_half_h = std::isfinite(sanitized.fight_half_h) ? std::max(0.0, sanitized.fight_half_h) : 0.0;
     if (sanitized.smash_class < 0)
         sanitized.smash_class = 0;
+    if (sanitized.terrain_speed_channel < DEFAULT_TERRAIN_SPEED_CHANNEL)
+        sanitized.terrain_speed_channel = DEFAULT_TERRAIN_SPEED_CHANNEL;
 
     return sanitized;
 }
@@ -274,34 +273,39 @@ void SteeringSystem::reactivate_agents_for_field(FlowField *field)
 void SteeringSystem::set_default_flowfield(FlowField *f) { default_flow = f; } // Définit le FlowField par défaut
 void SteeringSystem::set_grid(SpatialGrid *g) { grid = g; }                    // Définit la grille spatiale
 
-void SteeringSystem::set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier, double player_multiplier)
+void SteeringSystem::set_terrain_speed_cell(const Vec2i &abs_cell, double multiplier, int channel)
 {
-    auto sanitize = [](double value) -> double
-    {
-        return std::isfinite(value) ? std::clamp(value, 0.01, 1.0) : 1.0;
-    };
-    TerrainSpeed speed;
-    speed.all = sanitize(multiplier);
-    speed.player = sanitize(player_multiplier);
-
-    // Store only genuine slowdowns; a cell that slows nobody clears the entry so a reset to
-    // 1.0 removes the modifier immediately for every agent. A cell that slows other agents
-    // but not the player (a rose) still has to be stored, so both values must be at full
-    // speed before the entry is dropped.
-    if (speed.all >= 0.999 && speed.player >= 0.999)
-        terrain_speed_by_cell.erase(abs_cell);
-    else
-        terrain_speed_by_cell[abs_cell] = speed;
+    terrain_speed_grid.set_cell(abs_cell, multiplier, channel);
 }
 
-void SteeringSystem::clear_terrain_speed_multipliers() { terrain_speed_by_cell.clear(); }
-
-double SteeringSystem::terrain_speed_multiplier_at(const Vec2i &abs_cell, bool for_player) const
+void SteeringSystem::set_terrain_speed_cells(const std::vector<Vec2i> &cells, const std::vector<double> &multipliers, int channel)
 {
-    auto it = terrain_speed_by_cell.find(abs_cell);
-    if (it == terrain_speed_by_cell.end())
-        return 1.0;
-    return for_player ? it->second.player : it->second.all;
+    terrain_speed_grid.set_cells(cells, multipliers, channel);
+}
+
+void SteeringSystem::clear_terrain_speed_cell(const Vec2i &abs_cell, int channel)
+{
+    terrain_speed_grid.clear_cell(abs_cell, channel);
+}
+
+void SteeringSystem::clear_terrain_speed_cells(const std::vector<Vec2i> &cells, int channel)
+{
+    terrain_speed_grid.clear_cells(cells, channel);
+}
+
+void SteeringSystem::replace_terrain_speed_channel(const std::vector<Vec2i> &cells, const std::vector<double> &multipliers, int channel)
+{
+    terrain_speed_grid.replace_channel(cells, multipliers, channel);
+}
+
+void SteeringSystem::clear_terrain_speed_channel(int channel)
+{
+    terrain_speed_grid.clear_channel(channel);
+}
+
+double SteeringSystem::terrain_speed_multiplier_at(const Vec2i &abs_cell, int channel) const
+{
+    return terrain_speed_grid.multiplier_at(abs_cell, channel);
 }
 
 void SteeringSystem::set_agent_group(int id, GroupID group)

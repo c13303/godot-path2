@@ -15,18 +15,48 @@ class_name BuildingNavigationSyncService
 # BuildingManager.
 
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
+const DEFAULT_TERRAIN_SPEED_CHANNEL: int = 0
+const STATIC_TERRAIN_SOURCE_PREFIX: String = "static:"
+const CELL_TERRAIN_SOURCE_PREFIX: String = "cell:"
 
 var _manager: BuildingManager
-# Terrain speed owned by permanent static world features (authored bamboo), keyed by cell.
-# These are not derived from any tile layer, so they survive layer save/restore and cannot be
-# cleared by build/removal logic. Kept generic: any permanent feature can register here, and
-# 1.0 clears an entry. Vector2i -> Vector2 (x = every agent, y = the player), so a feature
-# can slow the crowd without slowing the player.
-var _static_terrain_speed_by_cell: Dictionary = {}
+var _terrain_speed: RefCounted = null
 
 
-func setup(manager: BuildingManager) -> void:
+func setup(manager: BuildingManager, terrain_speed: RefCounted) -> void:
 	_manager = manager
+	_terrain_speed = terrain_speed
+	_terrain_speed.setup(_get_steering_system())
+
+
+func sync_all_terrain_speed_cells() -> void:
+	if _terrain_speed == null:
+		return
+	_terrain_speed.set_steering(_get_steering_system())
+	_terrain_speed.clear_local_contributions()
+	_terrain_speed.clear_all_native_channels()
+	var touched: Dictionary = {}
+	for layer: TileMapLayer in [_manager.plantz, _manager.traversable_buildings, _manager.blocking_buildings, _manager.fences]:
+		if layer == null:
+			continue
+		for raw_cell: Variant in layer.get_used_cells():
+			touched[raw_cell as Vector2i] = true
+	var plant_manager: Node = _manager.plant_manager
+	if plant_manager != null and plant_manager.has_method("get_plant_cells"):
+		var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
+		for raw_cell: Variant in plant_cells:
+			touched[raw_cell as Vector2i] = true
+	for raw_cell: Variant in touched.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
+		_terrain_speed.set_cell_contribution_pair(
+			cell,
+			StringName(CELL_TERRAIN_SOURCE_PREFIX + str(cell)),
+			multipliers.x,
+			multipliers.y,
+			false
+		)
+	_terrain_speed.upload_all_channels()
 
 
 ## Registers (or clears) a permanent world feature's speed multipliers for one cell, then
@@ -37,13 +67,13 @@ func setup(manager: BuildingManager) -> void:
 ## refresh_cell_speed writes the shared native terrain-speed map that every steered agent
 ## reads live.
 func set_static_terrain_speed_multiplier(cell: Vector2i, multiplier: float, player_multiplier: float) -> void:
-	var clamped_multiplier: float = clampf(multiplier, 0.01, 1.0)
-	var clamped_player_multiplier: float = clampf(player_multiplier, 0.01, 1.0)
-	if clamped_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER and clamped_player_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER:
-		_static_terrain_speed_by_cell.erase(cell)
-	else:
-		_static_terrain_speed_by_cell[cell] = Vector2(clamped_multiplier, clamped_player_multiplier)
-	refresh_cell_speed(cell)
+	_terrain_speed.set_steering(_get_steering_system())
+	_terrain_speed.set_cell_contribution_pair(
+		cell,
+		StringName(STATIC_TERRAIN_SOURCE_PREFIX + str(cell)),
+		multiplier,
+		player_multiplier
+	)
 
 
 func sync_flow_extra_blocking_cells() -> void:
@@ -145,11 +175,14 @@ func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 
 
 func refresh_cell_speed(cell: Vector2i) -> void:
-	var flow: Node = _manager.flow
-	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
-		return
 	var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
-	flow.call("set_cell_speed_multiplier", cell, multipliers.x, multipliers.y)
+	_terrain_speed.set_steering(_get_steering_system())
+	_terrain_speed.set_cell_contribution_pair(
+		cell,
+		StringName(CELL_TERRAIN_SOURCE_PREFIX + str(cell)),
+		multipliers.x,
+		multipliers.y
+	)
 
 
 ## Effective terrain speed on a cell: x = every agent, y = the player. The two differ on
@@ -163,14 +196,6 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	# Permanent static features join the same minimum as logical plants and every speed-
-	# carrying layer, so the slowest thing on the cell always wins. They carry no item def,
-	# so each registrant states its own player rule when registering (authored bamboo slows
-	# every agent but not the player).
-	if _static_terrain_speed_by_cell.has(cell):
-		var static_multipliers: Vector2 = _static_terrain_speed_by_cell[cell] as Vector2
-		speed_multiplier = minf(speed_multiplier, static_multipliers.x)
-		player_speed_multiplier = minf(player_speed_multiplier, static_multipliers.y)
 	var plant_manager: Node = _manager.plant_manager
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
@@ -193,4 +218,6 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 ## All-agent terrain speed on a cell. Kept for the nav-speed telemetry / BuildingManager
 ## façade, which report what the crowd walks at.
 func effective_cell_speed_multiplier(cell: Vector2i) -> float:
+	if _terrain_speed != null:
+		return _terrain_speed.effective_multiplier(cell, DEFAULT_TERRAIN_SPEED_CHANNEL)
 	return effective_cell_speed_multipliers(cell).x

@@ -54,6 +54,12 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("set_agent_position", "agent_id", "position", "clear_velocity"), &SteeringSystemNative::set_agent_position, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("get_agent_position", "agent_id"), &SteeringSystemNative::get_agent_position);
     ClassDB::bind_method(D_METHOD("get_agent_velocity", "agent_id"), &SteeringSystemNative::get_agent_velocity);
+    ClassDB::bind_method(D_METHOD("set_terrain_speed_cell", "cell", "multiplier", "channel"), &SteeringSystemNative::set_terrain_speed_cell, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("set_terrain_speed_cells", "cells", "multipliers", "channel"), &SteeringSystemNative::set_terrain_speed_cells, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("clear_terrain_speed_cell", "cell", "channel"), &SteeringSystemNative::clear_terrain_speed_cell, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("clear_terrain_speed_cells", "cells", "channel"), &SteeringSystemNative::clear_terrain_speed_cells, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("replace_terrain_speed_channel", "cells", "multipliers", "channel"), &SteeringSystemNative::replace_terrain_speed_channel, DEFVAL(0));
+    ClassDB::bind_method(D_METHOD("clear_terrain_speed_channel", "channel"), &SteeringSystemNative::clear_terrain_speed_channel, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
     ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_area_smash);
     ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
@@ -384,6 +390,8 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.fight_half_h = double(profile["fight_half_h"]);
     if (profile.has("smash_class"))
         native_profile.smash_class = int(profile["smash_class"]);
+    if (profile.has("terrain_speed_channel"))
+        native_profile.terrain_speed_channel = int(profile["terrain_speed_channel"]);
     if (profile.has("weapon_immune"))
         native_profile.weapon_immune = bool(profile["weapon_immune"]);
 
@@ -401,6 +409,70 @@ Vector2 SteeringSystemNative::get_agent_position(int agent_id) const
     if (!a)
         return Vector2();
     return Vector2(a->position.x, a->position.y);
+}
+
+namespace
+{
+    static std::vector<ffcore::Vec2i> packed_cells_to_native(const PackedVector2Array &cells)
+    {
+        std::vector<ffcore::Vec2i> out;
+        out.reserve(cells.size());
+        for (int i = 0; i < cells.size(); ++i)
+        {
+            const Vector2 cell = cells[i];
+            out.emplace_back((int)cell.x, (int)cell.y);
+        }
+        return out;
+    }
+
+    static std::vector<double> packed_multipliers_to_native(const PackedFloat32Array &multipliers)
+    {
+        std::vector<double> out;
+        out.reserve(multipliers.size());
+        for (int i = 0; i < multipliers.size(); ++i)
+            out.push_back((double)multipliers[i]);
+        return out;
+    }
+}
+
+void SteeringSystemNative::set_terrain_speed_cell(const Vector2i &cell, double multiplier, int channel)
+{
+    system.set_terrain_speed_cell(ffcore::Vec2i(cell.x, cell.y), multiplier, channel);
+}
+
+void SteeringSystemNative::set_terrain_speed_cells(const PackedVector2Array &cells, const PackedFloat32Array &multipliers, int channel)
+{
+    if (cells.size() != multipliers.size())
+    {
+        UtilityFunctions::printerr("set_terrain_speed_cells: cells and multipliers size mismatch");
+        return;
+    }
+    system.set_terrain_speed_cells(packed_cells_to_native(cells), packed_multipliers_to_native(multipliers), channel);
+}
+
+void SteeringSystemNative::clear_terrain_speed_cell(const Vector2i &cell, int channel)
+{
+    system.clear_terrain_speed_cell(ffcore::Vec2i(cell.x, cell.y), channel);
+}
+
+void SteeringSystemNative::clear_terrain_speed_cells(const PackedVector2Array &cells, int channel)
+{
+    system.clear_terrain_speed_cells(packed_cells_to_native(cells), channel);
+}
+
+void SteeringSystemNative::replace_terrain_speed_channel(const PackedVector2Array &cells, const PackedFloat32Array &multipliers, int channel)
+{
+    if (cells.size() != multipliers.size())
+    {
+        UtilityFunctions::printerr("replace_terrain_speed_channel: cells and multipliers size mismatch");
+        return;
+    }
+    system.replace_terrain_speed_channel(packed_cells_to_native(cells), packed_multipliers_to_native(multipliers), channel);
+}
+
+void SteeringSystemNative::clear_terrain_speed_channel(int channel)
+{
+    system.clear_terrain_speed_channel(channel);
 }
 
 Vector2 SteeringSystemNative::get_agent_velocity(int agent_id) const

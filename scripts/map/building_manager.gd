@@ -201,6 +201,8 @@ var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.n
 var _sheep_controller: SheepController = SHEEP_CONTROLLER_SCRIPT.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
+const TERRAIN_SPEED_MODIFIER_SERVICE: Script = preload("res://scripts/map/terrain_speed_modifier_service.gd")
+var _terrain_speed_modifier: RefCounted = TERRAIN_SPEED_MODIFIER_SERVICE.new()
 var _house_manager: HouseManager = HouseManager.new()
 var _house_builder_work: HouseBuilderWorkController = HouseBuilderWorkController.new()
 var _ally_housing: AllyHousingController = AllyHousingController.new()
@@ -263,8 +265,11 @@ func _ready() -> void:
 	_debug_query_service.setup(self)
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
+	var scene: Node = get_tree().current_scene
+	_terrain_speed_modifier.setup(scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null)
+	_building_navigation_sync.setup(self, _terrain_speed_modifier)
+	_building_navigation_sync.sync_all_terrain_speed_cells()
 	_sheep_controller.setup(self)
-	_building_navigation_sync.setup(self)
 	_building_invalidation_controller.setup(self, _preparation_work_gate, _building_navigation_sync)
 	_spawner_garden_selection_service.setup(self)
 	_building_preparation_controller.setup(
@@ -1004,6 +1009,9 @@ func _effective_cell_speed_multiplier(cell: Vector2i) -> float:
 
 func refresh_runtime_cell_speed(cell: Vector2i) -> void:
 	_building_navigation_sync.refresh_cell_speed(cell)
+
+func get_terrain_speed_modifier_service() -> RefCounted:
+	return _terrain_speed_modifier
 
 # Plant additions are phase-agnostic: they only dirty the plant layout, and the budgeted
 # invalidation pipeline rebuilds garden topology and retargets agents later (see

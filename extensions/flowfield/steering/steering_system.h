@@ -4,6 +4,7 @@
 #include "../core/global_config.h"
 #include "../grid/spatial_grid.h"
 #include "agent.h"
+#include "terrain_speed_grid.h"
 #include "traffic_right_of_way_resolver.h"
 #include <unordered_map>
 #include <unordered_set>
@@ -93,23 +94,17 @@ namespace ffcore
         void set_grid(SpatialGrid *g);
         void set_default_flowfield(FlowField *f);
 
-        // Shared per-cell terrain speed modifiers (single source of truth for movement
-        // speed). Keyed by ABSOLUTE tilemap cell. The core knows nothing about what slows a
-        // cell (turret, ronce, fence, debris, ...): it only stores generic 0.01..1.0
-        // multipliers and applies them to every agent, independent of which Flow Field the
-        // agent steers on. A live edit is therefore visible immediately to all active,
-        // queued and future fields, and a reset to 1.0 clears the slowdown at once. Missing
-        // key == 1.0 (full speed).
-        //
-        // Two multipliers per cell: `all` applies to every agent, `player` only to the
-        // player (smash_class == SMASH_CLASS_PLAYER). They differ when a cell is slowed by
-        // something the player walks through freely (roses: the player is never slowed by
-        // their own crop), so the game side resolves "who does this slow" and the core just
-        // picks the right stored value. player >= all in practice, but nothing here relies
-        // on that.
-        void set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier, double player_multiplier);
-        void clear_terrain_speed_multipliers();
-        double terrain_speed_multiplier_at(const Vec2i &abs_cell, bool for_player) const;
+        // Authoritative physical movement speed multipliers, keyed by absolute cell and
+        // generic channel. Godot/main-thread writes may happen while async flow jobs run:
+        // flow workers do not read terrain speed, and steering samples the current grid
+        // only during movement integration.
+        void set_terrain_speed_cell(const Vec2i &abs_cell, double multiplier, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        void set_terrain_speed_cells(const std::vector<Vec2i> &cells, const std::vector<double> &multipliers, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        void clear_terrain_speed_cell(const Vec2i &abs_cell, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        void clear_terrain_speed_cells(const std::vector<Vec2i> &cells, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        void replace_terrain_speed_channel(const std::vector<Vec2i> &cells, const std::vector<double> &multipliers, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        void clear_terrain_speed_channel(int channel = DEFAULT_TERRAIN_SPEED_CHANNEL);
+        double terrain_speed_multiplier_at(const Vec2i &abs_cell, int channel = DEFAULT_TERRAIN_SPEED_CHANNEL) const;
 
         void set_agent_manager(AgentManager *m) { agent_manager = m; }
 
@@ -293,15 +288,7 @@ namespace ffcore
         std::unordered_map<int, DirectionalCellField> directional_cell_fields;
         std::unordered_map<int, int> phase_directional_cell_fields;
 
-        struct Vec2iKeyHash
-        {
-            size_t operator()(const Vec2i &v) const noexcept
-            {
-                return (size_t(v.x) * 73856093u) ^ (size_t(v.y) * 19349663u);
-            }
-        };
-        // Absolute-cell -> speed multiplier (<1.0). Only slowed cells are stored.
-        std::unordered_map<Vec2i, TerrainSpeed, Vec2iKeyHash> terrain_speed_by_cell;
+        TerrainSpeedGrid terrain_speed_grid;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;

@@ -70,8 +70,6 @@ namespace ffcore
         void enable_explicit_physics_passability();
         void set_cell_physics_passable(const Vec2i &cell, bool passable);
         Vec2i find_nearest_physics_passable(Vec2i start) const;
-        void set_cell_speed_multiplier(const Vec2i &cell, double multiplier);
-        double cell_speed_multiplier(const Vec2i &cell) const;
         void clear_bottlenecks();
         int add_bottleneck(const Vec2i &cell, int axis, double route_cost = 0.0);
         void add_bottleneck_zone_cell(int bottleneck_index, const Vec2i &cell);
@@ -110,7 +108,6 @@ namespace ffcore
         std::vector<std::uint8_t> navigable_cells;
         bool explicit_physics_passability = false;
         std::vector<std::uint8_t> physics_passable_cells;
-        std::vector<double> speed_multipliers;
         std::vector<float> distance_field;
         std::vector<double> route_cost_field;
         std::vector<BottleneckInfo> bottlenecks;

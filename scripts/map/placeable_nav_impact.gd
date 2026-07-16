@@ -29,6 +29,8 @@ const LAYER_WALLZ: String = "wallz"
 const LAYER_FENCES: String = "fences"
 const LAYER_BLOCKING: String = "blocking_buildings"
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
+const MIN_TERRAIN_SPEED_MULTIPLIER: float = 0.05
+const MAX_TERRAIN_SPEED_MULTIPLIER: float = 4.0
 
 # Speed-only placeables that must never reach the hard-topology invalidation path.
 # Used only by the debug assertion in debug_assert_not_hard().
@@ -46,7 +48,7 @@ static func classify_item(item_def: Dictionary) -> Impact:
 		return Impact.FENCE_DEPENDENT
 	if _def_is_hard_blocker(item_def):
 		return Impact.HARD_TOPOLOGY
-	if _def_has_slowdown(item_def):
+	if _def_has_speed_modifier(item_def):
 		return Impact.SPEED_ONLY
 	return Impact.NONE
 
@@ -61,7 +63,7 @@ static func classify_for_layer(layer_name: String, item_def: Dictionary) -> Impa
 		return Impact.FENCE_DEPENDENT
 	if layer_name == LAYER_BLOCKING:
 		return _classify_blocking_item(item_def)
-	return Impact.SPEED_ONLY if _def_has_slowdown(item_def) else Impact.NONE
+	return Impact.SPEED_ONLY if _def_has_speed_modifier(item_def) else Impact.NONE
 
 
 # Does this impact require the full hard-topology rebuild right now? Fences resolve by
@@ -83,11 +85,14 @@ static func is_speed_only(impact: Impact, fences_block_navigation: bool) -> bool
 
 
 # Speed multiplier this def imposes on a regular agent (monster / client / merchant /
-# sheep). 1.0 when the def carries no slowdown.
+# sheep). 1.0 when the def carries no terrain-speed modifier.
 static func def_speed_multiplier(item_def: Dictionary) -> float:
 	if item_def.is_empty() or not item_def.has("speed_multiplier"):
 		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	return clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+	var multiplier: float = float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER))
+	if is_nan(multiplier) or is_inf(multiplier) or multiplier <= 0.0:
+		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	return clampf(multiplier, MIN_TERRAIN_SPEED_MULTIPLIER, MAX_TERRAIN_SPEED_MULTIPLIER)
 
 
 # Speed multiplier this def imposes on the PLAYER. Defs opting out with
@@ -128,7 +133,7 @@ static func _classify_blocking_item(item_def: Dictionary) -> Impact:
 		return Impact.HARD_TOPOLOGY
 	if _def_is_hard_blocker(item_def):
 		return Impact.HARD_TOPOLOGY
-	if _def_has_slowdown(item_def):
+	if _def_has_speed_modifier(item_def):
 		return Impact.SPEED_ONLY
 	return Impact.NONE
 
@@ -145,7 +150,8 @@ static func _def_is_hard_blocker(item_def: Dictionary) -> bool:
 	)
 
 
-static func _def_has_slowdown(item_def: Dictionary) -> bool:
+static func _def_has_speed_modifier(item_def: Dictionary) -> bool:
 	if not item_def.has("speed_multiplier"):
 		return false
-	return float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)) < DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var multiplier: float = def_speed_multiplier(item_def)
+	return not is_equal_approx(multiplier, DEFAULT_TERRAIN_SPEED_MULTIPLIER)

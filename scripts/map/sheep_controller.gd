@@ -9,6 +9,9 @@ const DEBRIS_RESCAN_SECONDS: float = 0.5
 const SHEEP_SPEED_SCALE: float = 0.5
 const SHEEP_CROWD_RESIST: float = 1.0
 const SHEEP_SMASH_RESIST: float = 1.0
+const TERRAIN_SPEED_MIN_MULTIPLIER: float = 0.05
+const TERRAIN_SPEED_MAX_MULTIPLIER: float = 4.0
+const WATER_TERRAIN_SOURCE: StringName = &"water"
 const MAX_PATH_TARGET_ATTEMPTS: int = 8
 const DEBRIS_REWARD_GEMS: int = 1
 
@@ -393,14 +396,16 @@ func _resolve_idle_cell() -> Vector2i:
 
 func _upload_water_speed_multipliers() -> void:
 	var watersources: WaterSources = _manager.watersources
-	var flow: Node = _manager.get_flow()
-	if watersources == null or flow == null or not flow.has_method("set_cell_speed_multiplier"):
+	var terrain_speed: RefCounted = _manager.get_terrain_speed_modifier_service()
+	if watersources == null or terrain_speed == null:
 		return
-	var multiplier: float = clampf(watersources.player_slowdown, 0.01, 1.0)
+	var multiplier: float = clampf(watersources.player_slowdown, TERRAIN_SPEED_MIN_MULTIPLIER, TERRAIN_SPEED_MAX_MULTIPLIER)
+	var changed_cells: Array[Vector2i] = []
 	for raw_cell: Variant in watersources.get_used_cells():
 		var cell: Vector2i = raw_cell as Vector2i
-		# Water slows the player exactly like every other agent, so both multipliers match.
-		flow.call("set_cell_speed_multiplier", cell, multiplier, multiplier)
+		terrain_speed.set_cell_contribution_pair(cell, WATER_TERRAIN_SOURCE, multiplier, multiplier, false)
+		changed_cells.append(cell)
+	terrain_speed.upload_cells(changed_cells)
 
 
 func _find_sheep_marker() -> Node2D:

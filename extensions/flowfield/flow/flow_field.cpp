@@ -24,7 +24,6 @@ void FlowField::resize(int width, int height)
     navigable_cells.assign(w * h, 0);
     explicit_physics_passability = false;
     physics_passable_cells.assign(w * h, 0);
-    speed_multipliers.assign(w * h, 1.0);
     distance_field.assign(w * h, 0.0f);
     route_cost_field.assign(w * h, 0.0);
     clear_bottlenecks();
@@ -116,7 +115,6 @@ void FlowField::clear()
     std::fill(navigable_cells.begin(), navigable_cells.end(), 0);
     explicit_physics_passability = false;
     std::fill(physics_passable_cells.begin(), physics_passable_cells.end(), 0);
-    std::fill(speed_multipliers.begin(), speed_multipliers.end(), 1.0);
 }
 
 void FlowField::set_dir(int x, int y, const Vec2 &dir)
@@ -196,25 +194,6 @@ void FlowField::set_cell_physics_passable(const Vec2i &cell, bool passable)
     if (!explicit_physics_passability || cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
         return;
     physics_passable_cells[cell.y * w + cell.x] = passable ? 1 : 0;
-}
-
-void FlowField::set_cell_speed_multiplier(const Vec2i &cell, double multiplier)
-{
-    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
-        return;
-    if (!std::isfinite(multiplier) || multiplier <= 0.0)
-        multiplier = 1.0;
-    speed_multipliers[cell.y * w + cell.x] = std::clamp(multiplier, 0.01, 1.0);
-}
-
-double FlowField::cell_speed_multiplier(const Vec2i &cell) const
-{
-    if (cell.x < 0 || cell.y < 0 || cell.x >= w || cell.y >= h)
-        return 1.0;
-    const int idx = cell.y * w + cell.x;
-    if (idx < 0 || idx >= static_cast<int>(speed_multipliers.size()))
-        return 1.0;
-    return speed_multipliers[idx];
 }
 
 Vec2i FlowField::find_nearest_navigable(Vec2i start) const
@@ -392,7 +371,6 @@ void FlowField::copy_from(const FlowField &src)
     navigable_cells = src.navigable_cells;
     explicit_physics_passability = src.explicit_physics_passability;
     physics_passable_cells = src.physics_passable_cells;
-    speed_multipliers = src.speed_multipliers;
     ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
     route_cost_field = src.route_cost_field;

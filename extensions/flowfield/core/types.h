@@ -85,16 +85,6 @@ namespace ffcore
         double z = 0.0;
     };
 
-    // Per-cell terrain speed multiplier (0.01..1.0, 1.0 = full speed). `all` is what every
-    // agent walks the cell at; `player` is what the player walks it at. The two differ only
-    // for slowdowns the game side flags as not-affecting-the-player (a rose slows monsters
-    // and clients but never the player). See SteeringSystem::set_terrain_speed_multiplier.
-    struct TerrainSpeed
-    {
-        double all = 1.0;
-        double player = 1.0;
-    };
-
     inline Vec2 closest_point_on_aabb(const Vec2 &p, const Vec2 &center, double half_w, double half_h)
     {
         return Vec2(
