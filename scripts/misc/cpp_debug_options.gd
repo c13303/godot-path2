@@ -426,6 +426,7 @@ func _grant_skipped_night_loot() -> void:
 		push_warning("dev_keys: progression node not found")
 		return
 	var seed_chance_percent: int = clampi(int(manager.call("monster_death_drop_seed_chance_percent")), 0, 100)
+	@warning_ignore("integer_division")
 	var seed_count: int = monster_count * seed_chance_percent / 100
 	var gem_count: int = monster_count - seed_count
 	if seed_count > 0:

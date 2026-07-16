@@ -40,7 +40,7 @@ func setup(
 	navigation_sync_service: BuildingNavigationSyncService,
 	garden_topology_service: GardenTopologyService,
 	spawner_route_service: SpawnerRouteService,
-	budget_us: int,
+	budget_microseconds: int,
 	night_success_callback: Callable,
 	client_success_callback: Callable,
 	client_abort_callback: Callable
@@ -52,7 +52,7 @@ func setup(
 	_navigation_sync_service = navigation_sync_service
 	_garden_topology_service = garden_topology_service
 	_spawner_route_service = spawner_route_service
-	_budget_us = maxi(500, budget_us)
+	_budget_us = maxi(500, budget_microseconds)
 	_budget_ms = float(_budget_us) / 1000.0
 	_night_success_callback = night_success_callback
 	_client_success_callback = client_success_callback

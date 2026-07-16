@@ -29,15 +29,15 @@ func set_resident(resident: HouseResidentController) -> void:
 # HouseResidentRole hooks.
 # ---------------------------------------------------------------------------
 
-func on_spawned(_resident: HouseResidentController) -> void:
+func on_spawned(_resident_agent: HouseResidentController) -> void:
 	GameState.set_seed_merchant_phase(true)
 
 
-func on_night_started(_resident: HouseResidentController) -> void:
+func on_night_started(_resident_agent: HouseResidentController) -> void:
 	GameState.set_seed_merchant_phase(false)
 
 
-func on_leaving(_resident: HouseResidentController) -> void:
+func on_leaving(_resident_agent: HouseResidentController) -> void:
 	GameState.set_seed_merchant_phase(false)
 
 

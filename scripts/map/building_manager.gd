@@ -3250,6 +3250,10 @@ func is_sheep_walkable_cell(cell: Vector2i) -> bool:
 		return false
 	if wallz != null and wallz.get_cell_tile_data(cell) != null:
 		return false
+	# Sheep must never route over a live plant (they would visually trample it). Debris
+	# is not tracked as a plant, so the sheep can still path to and stand on it to eat.
+	if plant_manager != null and plant_manager.has_plant(cell):
+		return false
 	return not _building_cell_blocks_movement(cell)
 
 func _resolve_plant_target_for_agent_in_garden(from_cell: Vector2i, garden_id: int, agent_kind: StringName = SPAWNER_KIND_MONSTER) -> Vector2i:
