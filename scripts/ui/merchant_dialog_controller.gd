@@ -34,6 +34,7 @@ func _ready() -> void:
 	_portrait = _build_portrait_texture()
 	for currency: StringName in CurrencyCatalog.get_currency_ids():
 		_currency_icons[currency] = _region_texture(CurrencyCatalog.get_icon_region(currency))
+	add_to_group(&"interaction_targets")
 	set_process(true)
 
 
@@ -69,6 +70,26 @@ func request_shop_toggle() -> bool:
 
 func is_shop_open() -> bool:
 	return dialog != null and dialog.is_open_for(CONTEXT)
+
+
+# --- InteractionRouter contract ----------------------------------------------
+
+func can_interact() -> bool:
+	return _is_merchant_active()
+
+
+func get_interaction_world_position() -> Vector2:
+	if building_manager != null and building_manager.has_method("get_seed_merchant_world_position"):
+		return building_manager.call("get_seed_merchant_world_position") as Vector2
+	return Vector2.ZERO
+
+
+func request_interaction() -> bool:
+	return request_shop_toggle()
+
+
+func is_interaction_open() -> bool:
+	return is_shop_open()
 
 
 # --- Opening -----------------------------------------------------------------

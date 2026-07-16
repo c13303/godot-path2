@@ -142,14 +142,33 @@ Does not own:
 - Merchant interaction state, Builder roster state, claim allocation, save-file writing, generic pathfinding algorithms, or native route generation.
 
 Notes:
-- SeedMerchantController owns one instance. BuilderController owns one instance per active Builder.
+- HouseResidentController owns one instance per ordinary villager (the seed merchant today). BuilderController owns one instance per active Builder.
 
-## SeedMerchantController
+## AllyHousingController (villager orchestrator + handler registry)
 Owns:
-- One house-bound seed merchant runtime visitor, player proximity pause, shop/prompt positioning queries, purchase-phase closure, and home/evacuation requests.
+- The registry of `HouseResidentHandler` instances and the fan-out of every villager lifecycle operation to them (`reconcile_daytime_residents`, `process`, `process_phase`, `on_night_started`, `start_pending_departures`, `repath_residents`, `on_agent_removed`, `owns_agent`), plus the HouseManager `house_completed` / `house_removing` / `houses_restored` signal handling and generic house-build availability (`is_house_build_item_available` / `should_show_house_quickslot`).
 
 Does not own:
-- The reusable single-agent visitor movement details now handled by DayVisitorMovementController.
+- Any individual resident's movement, role behaviour, or Builder work — those live in the handlers.
+
+Notes:
+- It knows NO individual role names for ordinary villagers. Two handler flavours are registered: `BuilderResidentHandler` (specialized adapter over BuilderController — Builders build houses, own work queues, and carry the fundamental-Builder onboarding/cutscene/first-house rules, so they stay special) and one reusable `HouseResidentController` per ordinary resident type.
+- Generic house rules are data-driven: `unique_house_type` (no duplicate) and `requires_completed_house_type` (e.g. `house_merchant` needs a completed `house_builder`) come from ItemCatalog. Only the first Builder-House unlock stays specialized (it depends on the fundamental-Builder/tutorial flow).
+- Registering a future ordinary villager touches one place — `BuildingManager._setup_ally_housing` builds its `HouseResidentConfig` + `HouseResidentController` and passes it into `setup` — plus one house catalog entry, one agent/visual definition, and one role interaction/dialog controller. No runtime-tick, save/load, evacuation, night, removal-routing, PlayerController, or contact-array edits are needed.
+
+## HouseResidentController (reusable ordinary-villager lifecycle)
+Owns:
+- The complete shared lifecycle for one ordinary one-house/one-resident villager: reconstruction from one completed house, walk-in from the shared town entrance, association with the house, night return/departure, house-destruction evacuation toward the shared exit, repath after walkability changes, agent-removal cleanup, duplicate-reconciliation prevention, and canonical resident identity (the `house_residents` group + `resident_type` / `resident_house_id` / `home_entrance_cell` metadata). Reuses DayVisitorMovementController for all movement. Implements `HouseResidentHandler`.
+
+Does not own:
+- Any role-specific behaviour (shop, dialog, purchases, invention, Builder work). Those are delegated to an optional `HouseResidentRole` via lifecycle hooks (`on_spawned` / `on_reached_spot` / `on_night_started` / `on_leaving` / `on_cleared` / `process` / `process_phase`).
+
+## SeedMerchantController (merchant role only)
+Owns:
+- The merchant-specific concerns riding on a HouseResidentController: the seed-merchant shop phase flag (`GameState.seed_merchant_phase`), the interaction-range freeze/unfreeze (native per-agent pause), the afternoon "finishing the watering still ends the day" recheck, and the purchase-made phase clear. It is a `HouseResidentRole`.
+
+Does not own:
+- Spawn/arrival/night/evacuation/repath/removal (now the shared HouseResidentController) or dialog/shop UI + purchases (MerchantDialogController / game_ui).
 
 Notes:
 - Seed merchant presence is granted by `AllyHousingController` from completed `house_merchant` records. The old unconditional `seedmerchent` spawner path is no longer authoritative.

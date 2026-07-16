@@ -6,11 +6,11 @@ class_name AgentTileInteractionController
 # agent does to a stompable target in that cell.
 
 const CATEGORY_MONSTERS: StringName = &"monsters"
-const CATEGORY_CLIENTS: StringName = &"clients"
-const CATEGORY_MERCHANTS: StringName = &"merchants"
-const CATEGORY_BUILDERS: StringName = &"builders"
-const CATEGORY_SHEEP: StringName = &"sheep"
-const VILLAGER_CATEGORIES: Array[StringName] = [CATEGORY_CLIENTS, CATEGORY_MERCHANTS, CATEGORY_BUILDERS]
+# Behaviour flag stamped on the agent by its definition (see AgentDefinitionService): people and
+# monsters that crush placeables by walking over them. Reading this per-agent flag — rather than
+# matching a hardcoded list of role categories — lets a future villager inherit the shared
+# person-crush behaviour purely from its definition. Monsters crush via CATEGORY_MONSTERS.
+const CRUSHES_PLACEABLES_META: StringName = &"crushes_placeables"
 const KEY_PEOPLE_CRUSH_PLANTS: String = "tutorial.people_crush_plants"
 
 const RECHECK_CELL_ENTERED: int = 1
@@ -40,7 +40,7 @@ func evaluate(agent: Node2D, category: StringName, cell: Vector2i, reasons: int)
 	if _manager == null or agent == null or not is_instance_valid(agent):
 		return
 	var agent_id: int = agent.get_instance_id()
-	if not _category_can_stomp(category):
+	if not _agent_can_stomp(agent, category):
 		clear_agent_contact(agent_id)
 		refresh_contact_dance(agent, category)
 		return
@@ -156,7 +156,9 @@ func _apply_stomp_damage(record: Dictionary) -> bool:
 		return false
 	var destroyed: bool = _manager.damage_player_placeable_at(cell, String(layer_name), item_id, damage)
 	_debug_stomp += 1
-	if VILLAGER_CATEGORIES.has(category):
+	# "People crush plants" alert: only non-monster crushers (people) reach here as non-monsters,
+	# so gating on "not a monster" reproduces the old clients/merchants/builders trigger set.
+	if category != CATEGORY_MONSTERS:
 		_manager.show_tutorial_alert_once(KEY_PEOPLE_CRUSH_PLANTS)
 	return not destroyed
 
@@ -171,7 +173,7 @@ func _contact_is_valid(agent_id: int, record: Dictionary) -> bool:
 	if agent.get_instance_id() != agent_id:
 		return false
 	var category: StringName = StringName(record.get("category", &""))
-	if not _category_can_stomp(category):
+	if not _agent_can_stomp(agent, category):
 		return false
 	var cell: Vector2i = record.get("cell", Vector2i.ZERO) as Vector2i
 	if _manager.floorz == null:
@@ -261,21 +263,23 @@ func _target_from_durability(cell: Vector2i, layer_name: StringName, item_id: St
 	}
 
 
-func _category_can_stomp(category: StringName) -> bool:
-	return category == CATEGORY_MONSTERS \
-		or category == CATEGORY_CLIENTS \
-		or category == CATEGORY_MERCHANTS \
-		or category == CATEGORY_BUILDERS
+## An agent crushes placeables if it is a monster (via its category) or its definition flagged it
+## as a person-type crusher. Behaviour-oriented: unrelated to house residency, includes clients.
+func _agent_can_stomp(agent: Node2D, category: StringName) -> bool:
+	return category == CATEGORY_MONSTERS or _agent_crushes_placeables(agent)
+
+
+func _agent_crushes_placeables(agent: Node2D) -> bool:
+	return agent != null and is_instance_valid(agent) \
+		and agent.has_meta(CRUSHES_PLACEABLES_META) and bool(agent.get_meta(CRUSHES_PLACEABLES_META))
 
 
 func _stomp_damage_for(agent_ref: WeakRef, category: StringName) -> int:
-	if not _category_can_stomp(category):
-		return 0
+	# Only agents that already passed a crush gate reach here, so a non-monster is a person and
+	# deals normal damage; big monsters hit harder.
 	if category != CATEGORY_MONSTERS:
 		return NORMAL_STOMP_DAMAGE
-	if agent_ref == null:
-		return NORMAL_STOMP_DAMAGE
-	var agent: Node = agent_ref.get_ref() as Node
+	var agent: Node = agent_ref.get_ref() as Node if agent_ref != null else null
 	if agent != null and is_instance_valid(agent) and agent.has_meta("monster_type"):
 		var monster_type: StringName = StringName(str(agent.get_meta("monster_type")))
 		if monster_type == MonsterCatalog.BIG_MONSTER_ID:

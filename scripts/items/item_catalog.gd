@@ -218,6 +218,9 @@ const ITEM_DEFS: Dictionary = {
 		"special_placement_kind": &"house",
 		"house_resident_type": &"seed_merchant",
 		"unique_house_type": true,
+		# Generic prerequisite: the Merchant House only unlocks once a Builder House is completed.
+		# AllyHousingController reads this instead of hardcoding the merchant→builder-house rule.
+		"requires_completed_house_type": &"house_builder",
 		"house_texture": HOUSE_MERCHANT_TEXTURE,
 		"house_completed_texture": HOUSE_MERCHANT_TEXTURE,
 		"house_wip_texture": HOUSE_WIP_TEXTURE,
@@ -586,6 +589,12 @@ static func get_house_resident_type(item_id: String) -> StringName:
 
 static func is_unique_house_type(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("unique_house_type", false))
+
+
+## The completed house type this house requires before it can be built (e.g. the Merchant House
+## needs a completed Builder House). Empty StringName when the house has no prerequisite.
+static func get_required_completed_house_type(item_id: String) -> StringName:
+	return StringName(get_item_def(item_id).get("requires_completed_house_type", &""))
 
 
 ## Fixed-stock items are granted in finite quantities by the level/reward data and

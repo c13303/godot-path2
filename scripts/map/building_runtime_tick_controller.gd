@@ -155,11 +155,10 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	t = Time.get_ticks_usec()
 	_manager._process_client_counter_arrivals()
 	_manager.get_client_tantrum_controller().process(delta)
-	_manager.get_seed_merchant_controller().process_proximity()
-	_manager._process_fundamental_builder_proximity()
-	_manager.get_seed_merchant_controller().process_arrival()
-	_manager.get_builder_controller().process_arrivals()
-	_manager.get_builder_controller().process_active_visitors(delta)
+	# One consolidated per-frame entry for every house villager (merchant + builders). The housing
+	# controller dispatches arrival/proximity to each registered resident handler, so adding an
+	# ordinary villager never touches this tick controller.
+	_manager.get_ally_housing_controller().process(delta)
 	_manager.get_house_builder_work_controller().process(delta)
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_client_counter_arrivals", Time.get_ticks_usec() - t,
@@ -196,7 +195,7 @@ func _process_phase_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	_manager.get_client_sale_controller().process(delta)
 	var client_sale_elapsed_us: int = Time.get_ticks_usec() - client_sale_started_us
 	var merchant_started_us: int = Time.get_ticks_usec()
-	_manager.get_seed_merchant_controller().process_phase()
+	_manager.get_ally_housing_controller().process_phase(delta)
 	var merchant_elapsed_us: int = Time.get_ticks_usec() - merchant_started_us
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		# Context (incl. the per-pass count summary) only built when over threshold.

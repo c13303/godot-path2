@@ -289,7 +289,9 @@ func _clear_existing_agents() -> void:
 	# pre-load agents survives; the restored agents re-register as they are recreated.
 	_manager.get_agent_cell_tracker().clear()
 	var seen_ids: Dictionary = {}
-	for group_name: StringName in [&"monsters", &"clients", &"merchants", &"builders"]:
+	# house_residents covers every villager (merchant, builders, fundamental Builder); clearing it
+	# routes each through the generic removal handler so its owning controller drops its state.
+	for group_name: StringName in [&"monsters", &"clients", &"house_residents"]:
 		for raw_node: Node in _manager.get_tree().get_nodes_in_group(group_name):
 			var agent: Node2D = raw_node as Node2D
 			if agent == null:
@@ -300,8 +302,8 @@ func _clear_existing_agents() -> void:
 				_manager._unregister_nav_agent(nav_id)
 				seen_ids[nav_id] = true
 			_manager._unregister_runtime_agent(agent)
-			if group_name == &"builders":
-				_manager._on_removed_builder_agent(agent)
+			if group_name == &"house_residents":
+				_manager.on_removed_house_resident_agent(agent)
 			agent.queue_free()
 
 

@@ -20,6 +20,7 @@ var _portrait: Texture2D
 
 func _ready() -> void:
 	_portrait = _build_portrait_texture()
+	add_to_group(&"interaction_targets")
 
 
 func request_dialog_toggle() -> bool:
@@ -37,6 +38,26 @@ func request_dialog_toggle() -> bool:
 
 func is_dialog_open() -> bool:
 	return dialog != null and dialog.is_open_for(CONTEXT)
+
+
+# --- InteractionRouter contract ----------------------------------------------
+
+func can_interact() -> bool:
+	return _is_builder_interactable()
+
+
+func get_interaction_world_position() -> Vector2:
+	if building_manager != null and building_manager.has_method("get_fundamental_builder_world_position"):
+		return building_manager.call("get_fundamental_builder_world_position") as Vector2
+	return Vector2.ZERO
+
+
+func request_interaction() -> bool:
+	return request_dialog_toggle()
+
+
+func is_interaction_open() -> bool:
+	return is_dialog_open()
 
 
 func _open_dialog() -> void:

@@ -82,6 +82,7 @@ func apply_client_data(agent: Node) -> void:
 	agent.set("max_health", CLIENT_HEALTH)
 	agent.set("health", CLIENT_HEALTH)
 	agent.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
+	_mark_crushes_placeables(agent)
 
 
 func apply_merchant_data(agent: Node) -> void:
@@ -91,6 +92,7 @@ func apply_merchant_data(agent: Node) -> void:
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false
+	_mark_crushes_placeables(agent)
 
 
 func apply_builder_data(agent: Node) -> void:
@@ -111,6 +113,15 @@ func _apply_builder_visuals(agent: Node, texture: Texture2D) -> void:
 	# The hammer is part of the Builder's permanent look; construction only swings it.
 	if agent.has_method("set_held_object"):
 		agent.call("set_held_object", BUILDER_HAMMER_TEXTURE, 1, 0, BUILDER_HAMMER_SCALE)
+	_mark_crushes_placeables(agent)
+
+
+## People (clients, merchant, builders, future villagers) crush placeables by walking over them.
+## AgentTileInteractionController reads this per-agent flag instead of a hardcoded category list,
+## so a new person-type agent inherits crushing purely from its definition. Monsters crush via
+## their own category and are not flagged here.
+func _mark_crushes_placeables(agent: Node) -> void:
+	agent.set_meta("crushes_placeables", true)
 
 
 func _apply_bigmonster_animation(agent: Node) -> void:

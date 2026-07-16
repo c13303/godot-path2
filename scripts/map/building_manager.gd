@@ -203,6 +203,9 @@ var _terrain_speed_modifier: RefCounted = TERRAIN_SPEED_MODIFIER_SERVICE.new()
 var _house_manager: HouseManager = HouseManager.new()
 var _house_builder_work: HouseBuilderWorkController = HouseBuilderWorkController.new()
 var _ally_housing: AllyHousingController = AllyHousingController.new()
+# Shared ordinary-villager lifecycle for the seed merchant (_seed_merchant is now only the
+# merchant-specific role riding on this). A future ordinary villager gets its own instance here.
+var _merchant_resident: HouseResidentController = HouseResidentController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _preparation_work_gate: BuildingPreparationWorkGate = BUILDING_PREPARATION_WORK_GATE_SCRIPT.new()
 var _building_preparation_controller: BuildingPreparationController = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
@@ -718,7 +721,20 @@ func _setup_house_builder_work() -> void:
 
 
 func _setup_ally_housing() -> void:
-	_ally_housing.setup(self, _house_manager, _builder, _seed_merchant)
+	# Register the ordinary house villagers. Adding a future one (e.g. the Inventor) is a matter
+	# of building its HouseResidentConfig + HouseResidentController here and appending it below.
+	var merchant_config: HouseResidentConfig = HouseResidentConfig.new()
+	merchant_config.resident_type = ItemCatalog.get_house_resident_type("house_merchant")
+	merchant_config.house_item_id = AllyHousingController.HOUSE_MERCHANT_ID
+	merchant_config.agent_kind = SPAWNER_KIND_MERCHANT
+	merchant_config.scene_group = &"merchants"
+	merchant_config.tracking_category = &"merchants"
+	merchant_config.visual_setup = Callable(self, "apply_merchant_data")
+	merchant_config.role = _seed_merchant
+	_merchant_resident.setup(self, _house_manager, merchant_config)
+	_seed_merchant.set_resident(_merchant_resident)
+	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident]
+	_ally_housing.setup(self, _house_manager, _builder, ordinary_residents)
 
 
 func get_house_manager() -> HouseManager:
@@ -1468,7 +1484,7 @@ func save_load_client_block_reason() -> String:
 
 
 func _begin_seed_merchant_phase() -> void:
-	_seed_merchant.begin_phase(_merchant_spawners)
+	_seed_merchant.begin_phase()
 
 
 func _begin_ally_housing_day() -> void:
@@ -1597,25 +1613,10 @@ func is_fundamental_builder_arrival_pending() -> bool:
 	return _ally_housing.is_fundamental_builder_arrival_pending()
 
 
-func _process_fundamental_builder_proximity() -> void:
-	_builder.process_fundamental_builder_proximity(
-		_fundamental_builder_onboarding.is_fundamental_builder_dialog_pending(),
-		SeedMerchantController.INTERACT_RADIUS_TILES
-	)
-
-
-func _process_seed_merchant_arrival() -> void:
-	_seed_merchant.process_arrival()
-
-
-func _process_seed_merchant_phase() -> void:
-	_seed_merchant.process_phase()
-
-
 # True whenever the player is within interaction range of the merchant, no matter what
 # the merchant is doing (walking in, parked at the spot, or walking back out). This drives
 # the interaction prompt (merchant_prompt.gd), the shop (MerchantDialogController), and the
-# movement pause below.
+# merchant's own movement pause.
 func is_player_near_seed_merchant() -> bool:
 	return _seed_merchant.is_player_near()
 
@@ -1623,36 +1624,13 @@ func is_player_near_seed_merchant() -> bool:
 # True once the merchant has parked at its authored idle spot. The interaction prompt
 # waits for this so no hint is shown while the merchant is still walking in.
 func has_seed_merchant_reached_spot() -> bool:
-	return _seed_merchant.has_reached_idle_spot()
+	return _merchant_resident.has_reached_idle_spot()
 
 
 ## World position of the live seed merchant, used to anchor the interaction prompt above it.
 ## Returns Vector2.ZERO when no merchant is present.
 func get_seed_merchant_world_position() -> Vector2:
-	return _seed_merchant.get_agent_world_position()
-
-
-# Freezes the merchant while the player is close and lets it resume the moment they
-# leave, so getting near always stops it. Getting near also shows the shop prompt; the
-# player opens the shop itself with the interact button (see MerchantDialogController.request_shop_toggle).
-func _process_seed_merchant_proximity() -> void:
-	_seed_merchant.process_proximity()
-
-
-func request_seed_merchant_leave() -> void:
-	_seed_merchant.request_leave()
-
-
-func _start_seed_merchant_leave_for_night() -> void:
-	_seed_merchant.start_leave_for_night()
-
-
-func _clear_seed_merchant_phase(free_agent: bool) -> void:
-	_seed_merchant.clear_phase(free_agent)
-
-
-func _end_seed_merchant_phase() -> void:
-	_seed_merchant.end_phase()
+	return _merchant_resident.get_agent_world_position()
 
 
 func is_client_sale_active() -> bool:
@@ -1831,6 +1809,10 @@ func get_client_sale_controller() -> ClientSaleController:
 
 func get_seed_merchant_controller() -> SeedMerchantController:
 	return _seed_merchant
+
+
+func get_ally_housing_controller() -> AllyHousingController:
+	return _ally_housing
 
 
 func get_builder_controller() -> BuilderController:
@@ -2660,8 +2642,7 @@ func _is_seed_merchant_paused_agent(agent: Node2D) -> bool:
 	return _seed_merchant.is_paused_agent(agent)
 
 func _remove_escaped_monster(agent: Node2D) -> void:
-	var is_merchant: bool = agent.is_in_group("merchants")
-	var is_builder: bool = agent.is_in_group("builders")
+	var is_house_resident: bool = agent.is_in_group("house_residents")
 	var nav_id: int = int(agent.get("nav_id"))
 	if agent_manager and agent_manager.has_method("unregister_agent"):
 		agent_manager.call("unregister_agent", nav_id)
@@ -2672,12 +2653,13 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.remove_from_group("builders")
+	agent.remove_from_group("house_residents")
 	agent.remove_from_group("monsters")
 	agent.queue_free()
-	if is_merchant:
-		_seed_merchant.on_agent_removed(agent)
-	if is_builder:
-		_builder.on_agent_removed(agent)
+	# One generic route for every house villager: the housing controller hands the (still-valid)
+	# agent to whichever handler owns it, by reference — group membership is already stripped above.
+	if is_house_resident:
+		_ally_housing.on_agent_removed(agent)
 
 func skip_current_night_for_dev() -> bool:
 	if not GameState.is_night:
@@ -2751,12 +2733,10 @@ func _unregister_nav_agent(nav_id: int) -> void:
 		agent_manager.call("unregister_agent", nav_id)
 
 
-func _on_removed_merchant_agent(agent: Node2D) -> void:
-	_seed_merchant.on_agent_removed(agent)
-
-
-func _on_removed_builder_agent(agent: Node2D) -> void:
-	_builder.on_agent_removed(agent)
+## Generic removal route for house villagers (merchant, builders, fundamental Builder): the
+## housing controller dispatches to whichever handler owns the agent by reference.
+func on_removed_house_resident_agent(agent: Node2D) -> void:
+	_ally_housing.on_agent_removed(agent)
 
 
 func monster_death_drop_seed_chance_percent() -> int:

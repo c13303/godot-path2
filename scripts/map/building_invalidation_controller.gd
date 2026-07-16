@@ -204,8 +204,7 @@ func _run_runtime_walkability_rebuild(token: int, rebuild_id: int) -> void:
 	var ok: bool = bool(await _manager._rebuild_walkable_map_cache_budgeted(token))
 	_runtime_rebuild_progress = 0.3
 	if ok:
-		_manager.get_seed_merchant_controller().repath_for_walkability_change()
-		_manager.get_builder_controller().repath_for_walkability_change()
+		_manager.get_ally_housing_controller().repath_residents()
 		if _runtime_rebuild_wants_gardens:
 			ok = bool(await _manager._build_gardens_from_plants_budgeted(token))
 			if ok:
@@ -251,8 +250,7 @@ func _apply_walkability_topology_rebuild() -> void:
 	# before the route caches below decide what is still current.
 	_spawner_route_service.invalidate_spawner_approach_flows()
 	_manager._rebuild_walkable_map_cache()
-	_manager.get_seed_merchant_controller().repath_for_walkability_change()
-	_manager.get_builder_controller().repath_for_walkability_change()
+	_manager.get_ally_housing_controller().repath_residents()
 	_manager.get_house_builder_work_controller().on_topology_changed()
 	var topology: GardenTopologyService = _garden_topology
 	if _plant_layout_dirty or topology.plant_zone_built():

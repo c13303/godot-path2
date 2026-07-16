@@ -16,8 +16,6 @@ const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var toolbuild: Control = $"../../GameUI/Toolbuild"
-@onready var merchant_dialog_controller: Node = $"../../GameUI/MerchantDialogController"
-@onready var fundamental_builder_dialog_controller: Node = $"../../GameUI/FundamentalBuilderDialogController"
 @onready var build_system: Node = $"../../Map/BuildSystem"
 @onready var pause_overlay: PauseOverlay = $"../../GameUI/CanvasLayer/PauseOverlay"
 @onready var watersources: WaterSources = $"../../Map/MonTilemap/watersources"
@@ -45,6 +43,9 @@ const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 @export_group("")
 
 var global_config_node: Node = null
+# Generic nearest-interaction selection. Interaction dialog controllers register themselves in
+# the `interaction_targets` group; adding an ordinary villager needs no branch here.
+var _interaction_router: InteractionRouter = InteractionRouter.new()
 var _paused: bool = false
 var _pause_hold_count: int = 0
 var _cutscene_input_locked: bool = false
@@ -78,6 +79,7 @@ func _ready() -> void:
 	# controller's fresh default so a cursor hidden by the previous scene does not
 	# remain hidden when the reloaded scene starts in keyboard/mouse mode.
 	_apply_control_mode_mouse_visibility()
+	_interaction_router.setup(get_tree())
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
 		global_config_node = scene.get_node_or_null("CPP/GlobalConfigNative")
@@ -111,7 +113,7 @@ func _input(event: InputEvent) -> void:
 		elif joy_button_event.button_index == JOY_BUTTON_Y:
 			if joy_button_event.pressed:
 				# At interactable NPCs, Y opens their dialog; else it rotates the build preview.
-				if not _try_toggle_merchant_shop() and not _try_toggle_fundamental_builder_dialog():
+				if not _try_toggle_interaction():
 					_handle_pad_rotate_build()
 			get_viewport().set_input_as_handled()
 		elif joy_button_event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
@@ -129,7 +131,7 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_E:
-			if _try_toggle_merchant_shop() or _try_toggle_fundamental_builder_dialog():
+			if _try_toggle_interaction():
 				get_viewport().set_input_as_handled()
 				return
 
@@ -351,14 +353,8 @@ func _step_pad_shop_selection(direction: int) -> void:
 	if toolbuild != null and toolbuild.has_method("step_pad_selection"):
 		toolbuild.call("step_pad_selection", direction)
 
-func _is_merchant_shop_open() -> bool:
-	return merchant_dialog_controller != null and merchant_dialog_controller.has_method("is_shop_open") and bool(merchant_dialog_controller.call("is_shop_open"))
-
-
-func _is_fundamental_builder_dialog_open() -> bool:
-	return fundamental_builder_dialog_controller != null \
-		and fundamental_builder_dialog_controller.has_method("is_dialog_open") \
-		and bool(fundamental_builder_dialog_controller.call("is_dialog_open"))
+func _is_interaction_dialog_open() -> bool:
+	return _interaction_router.is_any_open()
 
 
 func _should_pad_open_quickbar_from_dpad() -> bool:
@@ -366,9 +362,7 @@ func _should_pad_open_quickbar_from_dpad() -> bool:
 		return false
 	if _is_quickbar_active():
 		return false
-	if _is_merchant_shop_open():
-		return false
-	if _is_fundamental_builder_dialog_open():
+	if _is_interaction_dialog_open():
 		return false
 	return game_ui != null and game_ui.has_method("activate_last_quickbar_slot")
 
@@ -804,23 +798,14 @@ func _active_quickbar_menu_kind() -> String:
 		return ""
 	return String(game_ui.call("get_active_menu_kind"))
 
-## Opens/closes the seed-merchant shop when the player stands at the merchant. Returns true when
-## the press was consumed (at the merchant, or the shop was open), so callers can fall back to
-## another action otherwise. Suppressed while paused or the inventory is open.
-func _try_toggle_merchant_shop() -> bool:
+## Opens/closes the nearest interactable NPC dialog (seed merchant, fundamental Builder, or any
+## future villager) when the player stands at it. Returns true when the press was consumed (at an
+## interactable, or a dialog was open), so callers can fall back to another action otherwise.
+## Suppressed while paused or the inventory is open. Selection lives in InteractionRouter.
+func _try_toggle_interaction() -> bool:
 	if _paused or _is_inventory_open():
 		return false
-	if merchant_dialog_controller == null or not merchant_dialog_controller.has_method("request_shop_toggle"):
-		return false
-	return bool(merchant_dialog_controller.call("request_shop_toggle"))
-
-
-func _try_toggle_fundamental_builder_dialog() -> bool:
-	if _paused or _is_inventory_open():
-		return false
-	if fundamental_builder_dialog_controller == null or not fundamental_builder_dialog_controller.has_method("request_dialog_toggle"):
-		return false
-	return bool(fundamental_builder_dialog_controller.call("request_dialog_toggle"))
+	return _interaction_router.try_toggle_nearest()
 
 
 func _deactivate_quickbar() -> void:
@@ -852,7 +837,7 @@ func _select_unbuild_tool() -> void:
 func _build_controls_active() -> bool:
 	if not _build_tool_selected():
 		return false
-	if _is_merchant_shop_open():
+	if _is_interaction_dialog_open():
 		return false
 	return true
 

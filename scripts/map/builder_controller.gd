@@ -6,6 +6,9 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const AGENT_KIND_BUILDER: StringName = &"builder"
 const BUILDER_GROUP: StringName = &"builders"
 const VISITOR_CATEGORY: StringName = &"builders"
+# Canonical house-resident identity shared by every villager (see HouseResidentController).
+const HOUSE_RESIDENTS_GROUP: StringName = &"house_residents"
+const RESIDENT_TYPE_FUNDAMENTAL_BUILDER: StringName = &"fundamental_builder"
 const FUNDAMENTAL_BUILDER_IN_ID: StringName = &"fundamental_builder_in"
 const FUNDAMENTAL_BUILDER_SPOT_ID: StringName = &"fundamental_builder_spot"
 const FUNDAMENTAL_BUILDER_OUT_ID: StringName = &"fundamental_builder_out"
@@ -139,6 +142,8 @@ func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> i
 	_home_cell_by_builder_id[builder_id] = entrance_cell
 	var agent: Node2D = visitor.agent_node()
 	if agent != null:
+		agent.add_to_group(HOUSE_RESIDENTS_GROUP)
+		agent.set_meta("resident_type", AGENT_KIND_BUILDER)
 		agent.set_meta("resident_house_id", house_id)
 		agent.set_meta("home_entrance_cell", entrance_cell)
 	return builder_id
@@ -228,6 +233,8 @@ func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vec
 		_builder_id_by_house_id[house_id] = builder_id
 	var agent: Node2D = visitor.agent_node()
 	if agent != null:
+		agent.add_to_group(HOUSE_RESIDENTS_GROUP)
+		agent.set_meta("resident_type", RESIDENT_TYPE_FUNDAMENTAL_BUILDER)
 		agent.set_meta("fundamental_builder", true)
 		agent.set_meta("home_entrance_cell", anchor_cell)
 		if house_id != &"":
@@ -354,6 +361,15 @@ func process_active_visitors(delta: float = 0.0) -> void:
 	_clean_invalid_visitors()
 	_process_idle_home_correction(delta)
 	_process_builder_motion_watchdog(delta)
+
+
+## Reference-based ownership check (does not rely on scene-group membership, so it still routes
+## correctly after removal code has stripped the agent's groups).
+func owns_agent(agent: Node2D) -> bool:
+	for visitor: DayVisitorMovementController in _visitors:
+		if visitor != null and visitor.owns_agent(agent):
+			return true
+	return false
 
 
 func on_agent_removed(agent: Node2D) -> void:
