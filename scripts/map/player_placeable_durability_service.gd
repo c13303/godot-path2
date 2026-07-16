@@ -201,8 +201,8 @@ func target_world_position(key: String) -> Vector2:
 		return Vector2.ZERO
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
 	if str(rec.get("layer_name", "")) == RUNTIME_RESERVOIR_LAYER:
-		var reservoir: Node2D = rec.get("node", null) as Node2D
-		if reservoir != null and is_instance_valid(reservoir):
+		var reservoir: Node2D = _valid_record_node(rec) as Node2D
+		if reservoir != null:
 			return reservoir.global_position
 	# Houses target their walkable entrance centre so tantrum clients can reach it; the whole
 	# house is still destroyed. All other targets attack their own cell centre.
@@ -232,8 +232,8 @@ func is_target_valid(key: String) -> bool:
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	var layer_name: String = str(rec.get("layer_name", ""))
 	if layer_name == RUNTIME_RESERVOIR_LAYER:
-		var reservoir: Node = rec.get("node", null) as Node
-		if reservoir == null or not is_instance_valid(reservoir):
+		var reservoir: Node = _valid_record_node(rec)
+		if reservoir == null:
 			return false
 		if reservoir.has_method("is_destroyed") and bool(reservoir.call("is_destroyed")):
 			return false
@@ -378,8 +378,8 @@ func _destroy_structure_cell(cell: Vector2i, layer_name: String, item_id: String
 
 
 func _destroy_runtime_reservoir(record: Dictionary) -> void:
-	var reservoir: Node = record.get("node", null) as Node
-	if reservoir != null and is_instance_valid(reservoir) and reservoir.has_method("take_damage"):
+	var reservoir: Node = _valid_record_node(record)
+	if reservoir != null and reservoir.has_method("take_damage"):
 		reservoir.call("take_damage", int(record.get("max_health", 100)))
 	else:
 		GameState.set_reservoir_destroyed(true)
@@ -631,6 +631,13 @@ func _erase_record_by_key(key: String) -> void:
 			_keys_by_cell.erase(cell)
 		else:
 			_keys_by_cell[cell] = keys
+
+
+func _valid_record_node(record: Dictionary) -> Node:
+	var raw_node: Variant = record.get("node", null)
+	if raw_node == null or not is_instance_valid(raw_node):
+		return null
+	return raw_node as Node
 
 
 func _make_key(layer_name: String, cell: Vector2i) -> String:

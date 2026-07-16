@@ -50,8 +50,6 @@ func load_tile_definitions() -> void:
 
 func scan_buildings() -> void:
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
-	if not traversable_buildings:
-		return
 
 	var debug_telemetry: BuildingDebugTelemetry = _debug_telemetry()
 	var t: int = Time.get_ticks_usec()
@@ -88,7 +86,8 @@ func scan_buildings() -> void:
 	var seen_spawners: Dictionary = {}
 	t = Time.get_ticks_usec()
 	# Spawners are authored as child nodes in the loaded level's spawner/spawners
-	# container. Tile special scanning is kept only for non-spawner legacy markers.
+	# container and exposed as SpawnerBinding objects. The traversable_buildings layer
+	# is optional legacy scan input and must not gate node-based spawner registration.
 	scan_configured_spawner_nodes(seen_spawners)
 	scan_special_layer(traversable_buildings, seen_spawners)
 	scan_special_layer(wallz, seen_spawners)

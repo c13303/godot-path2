@@ -271,8 +271,9 @@ func restore_runtime_placeables(saved_records: Array) -> void:
 			if layer != null:
 				restored_def["direction"] = BuildDirectionRules.direction_from_alternative(layer.get_cell_alternative_tile(cell))
 		add_building(cell, restored_def)
-		if record.get("state", {}) is Dictionary:
-			_restore_runtime_node_state(cell, record["state"] as Dictionary)
+		var raw_state: Variant = record.get("state", {})
+		if raw_state is Dictionary:
+			_restore_runtime_node_state(cell, raw_state as Dictionary)
 	if ignored > 0:
 		push_warning("BuildingObjectManager: ignored %d invalid runtime placeable records on load." % ignored)
 

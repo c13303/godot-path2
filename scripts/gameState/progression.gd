@@ -13,7 +13,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # Versions 1-5 remain accepted and default all authored bamboo to mature.
 # Version 7 adds explicit one-cell runtime placeable identity. Versions 1-6 infer
 # building-layer placeables from tiles as a legacy migration fallback.
-const SAVE_VERSION: int = 7
+# Version 8 stops requiring the removed legacy traversable_buildings TileMapLayer.
+const SAVE_VERSION: int = 8
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -26,11 +27,12 @@ const PHASE_NIGHT_KEY: String = "phase.night"
 const PHASE_DAWN_KEY: String = "phase.dawn"
 const PHASE_MORNING_KEY: String = "phase.morning"
 const PENDING_LOAD_META: StringName = &"pending_progression_load"
+# Live tile layers saved/restored directly. Legacy saves may still contain a
+# traversable_buildings section, but the layer itself is no longer authored or recreated.
 const LAYER_NAMES: Array[String] = [
 	"floor",
 	"plantz",
 	"wallz",
-	"traversable_buildings",
 	"blocking_buildings",
 	"fences",
 ]
