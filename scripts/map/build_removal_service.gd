@@ -5,6 +5,7 @@ class_name BuildRemovalService
 # input handling, hold timing, drag state, preview bars, and UI-facing API.
 
 const PLAYER_BUILDABLE_WALL_ATLAS: Vector2i = Vector2i(11, 1)
+const TRAVERSABLE_BUILDINGS_LAYER: String = "traversable_buildings"
 
 var _manager: BuildSystem
 var _wallz_layer: TileMapLayer
@@ -46,6 +47,8 @@ func commit_removal(removal: Dictionary) -> bool:
 	var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
 	var item_id: String = str(removal.get("item_id", ""))
 	var layer: TileMapLayer = removal.get("layer") as TileMapLayer
+	if bool(removal.get("runtime_placeable", false)):
+		return _commit_runtime_placeable_removal(removal)
 	if layer == null or item_id == "":
 		return false
 
@@ -54,6 +57,20 @@ func commit_removal(removal: Dictionary) -> bool:
 		return false
 
 	remove_tile(layer, cell, item_id)
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", item_id, refund_world_position(cell), 1)
+	return true
+
+
+func _commit_runtime_placeable_removal(removal: Dictionary) -> bool:
+	var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+	var item_id: String = str(removal.get("item_id", ""))
+	var current_removal: Dictionary = removable_at_cell(cell)
+	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != item_id:
+		return false
+	if not remove_runtime_placeable(cell, item_id):
+		return false
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui and game_ui.has_method("refund_build"):
 		game_ui.call("refund_build", item_id, refund_world_position(cell), 1)
@@ -156,6 +173,26 @@ func remove_tile(layer: TileMapLayer, cell: Vector2i, item_id: String = "") -> v
 		_notify_navigation_topology_changed(cell, "wall_removed")
 
 
+func remove_runtime_placeable(cell: Vector2i, item_id: String = "") -> bool:
+	var building_object_manager: Node = _building_object_manager()
+	if building_object_manager == null or not building_object_manager.has_method("get_building"):
+		return false
+	var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
+	var current_item_id: String = str(building.get("item_id", ""))
+	if current_item_id == "" or (item_id != "" and current_item_id != item_id):
+		return false
+	var target_layer: String = str(building.get("target_layer", TRAVERSABLE_BUILDINGS_LAYER))
+	if target_layer != TRAVERSABLE_BUILDINGS_LAYER:
+		return false
+	if _manager != null and _manager.has_method("unregister_player_placeable"):
+		_manager.call("unregister_player_placeable", cell, target_layer)
+	clear_pasteque_irrigation_before_unbuild(null, cell)
+	if building_object_manager.has_method("remove_building"):
+		building_object_manager.call("remove_building", cell, false)
+	_refresh_cell_terrain_speed(cell)
+	return true
+
+
 # True only when removing this tile is a genuine hard-topology change. Turrets and other
 # speed-only placeables return false: their slowdown is cleared live via
 # _refresh_cell_terrain_speed. Fences resolve by the current phase.
@@ -184,14 +221,14 @@ func _fences_block_navigation() -> bool:
 
 func clear_pasteque_irrigation_before_unbuild(layer: TileMapLayer, cell: Vector2i) -> void:
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
-	if layer != traversable_buildings:
+	if layer != null and layer != traversable_buildings:
 		return
 	var item_id: String = ""
 	var building_object_manager: Node = _building_object_manager()
 	if building_object_manager and building_object_manager.has_method("get_building"):
 		var building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
 		item_id = str(building.get("item_id", ""))
-	if item_id == "" and layer.get_cell_source_id(cell) >= 0:
+	if item_id == "" and layer != null and layer.get_cell_source_id(cell) >= 0:
 		item_id = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
 	if item_id != "pasteque":
 		return
@@ -212,8 +249,19 @@ func removable_at_cell(cell: Vector2i) -> Dictionary:
 	var blocking_buildings: TileMapLayer = _blocking_buildings()
 	var fences: TileMapLayer = _fences()
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
-	var layers: Array[TileMapLayer] = [blocking_buildings, fences, traversable_buildings, _plantz(), _wallz()]
 	var building_object_manager: Node = _building_object_manager()
+	if building_object_manager and building_object_manager.has_method("get_building"):
+		var runtime_building: Dictionary = building_object_manager.call("get_building", cell) as Dictionary
+		if str(runtime_building.get("target_layer", "")) == TRAVERSABLE_BUILDINGS_LAYER:
+			var runtime_item_id: String = str(runtime_building.get("item_id", ""))
+			if runtime_item_id != "":
+				return {
+					"item_id": runtime_item_id,
+					"cell": cell,
+					"layer_name": TRAVERSABLE_BUILDINGS_LAYER,
+					"runtime_placeable": true,
+				}
+	var layers: Array[TileMapLayer] = [blocking_buildings, fences, traversable_buildings, _plantz(), _wallz()]
 	for layer: TileMapLayer in layers:
 		if not layer or layer.get_cell_source_id(cell) < 0:
 			continue

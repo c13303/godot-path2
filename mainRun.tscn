@@ -767,11 +767,6 @@ script = ExtResource("41_rosedance")
 plant_manager_path = NodePath("../../../PlantManager")
 plantz_path = NodePath("..")
 
-[node name="traversable_buildings" type="TileMapLayer" parent="Map/MonTilemap" unique_id=784302091]
-z_index = -48
-tile_set = SubResource("TileSet_8wl7c")
-navigation_enabled = false
-
 [node name="blocking_buildings" type="TileMapLayer" parent="Map/MonTilemap" unique_id=784302092]
 z_index = -47
 tile_set = SubResource("TileSet_8wl7c")
@@ -791,9 +786,8 @@ script = ExtResource("49_imperial_visuals")
 
 [node name="BuildingObjects" type="Node2D" parent="Map" unique_id=228413639]
 
-[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("traversable_buildings", "blocking_buildings", "runtime_parent", "steering_system")]
+[node name="BuildingObjectManager" type="Node" parent="Map" unique_id=224053077 node_paths=PackedStringArray("blocking_buildings", "runtime_parent", "steering_system")]
 script = ExtResource("26_building_objects")
-traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 runtime_parent = NodePath("../BuildingObjects")
 steering_system = NodePath("../../CPP/SteeringSystemNative")
@@ -802,10 +796,9 @@ steering_system = NodePath("../../CPP/SteeringSystemNative")
 script = ExtResource("44_reservoir")
 building_object_manager = NodePath("../BuildingObjectManager")
 
-[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "reservoir_system", "game_ui", "notif")]
+[node name="BuildSystem" type="Node" parent="Map" unique_id=554659950 node_paths=PackedStringArray("plantz", "blocking_buildings", "previewbuild", "plant_manager", "building_object_manager", "reservoir_system", "game_ui", "notif")]
 script = ExtResource("17_k5rlw")
 plantz = NodePath("../MonTilemap/plantz")
-traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 previewbuild = NodePath("../MonTilemap/previewbuild")
 plant_manager = NodePath("../PlantManager")
@@ -814,10 +807,9 @@ reservoir_system = NodePath("../ReservoirSystem")
 game_ui = NodePath("../../GameUI")
 notif = NodePath("../../GameUI/notif")
 
-[node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("plantz", "traversable_buildings", "blocking_buildings", "plant_manager", "flow", "agent_manager", "pathfinder", "parent_for_agents", "global_config")]
+[node name="BuildingManager" type="Node" parent="Map" unique_id=676335905 node_paths=PackedStringArray("plantz", "blocking_buildings", "plant_manager", "flow", "agent_manager", "pathfinder", "parent_for_agents", "global_config")]
 script = ExtResource("18_vt3yt")
 plantz = NodePath("../MonTilemap/plantz")
-traversable_buildings = NodePath("../MonTilemap/traversable_buildings")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 plant_manager = NodePath("../PlantManager")
 flow = NodePath("../../CPP/FlowFieldNative")

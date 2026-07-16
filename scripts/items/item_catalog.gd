@@ -3,6 +3,8 @@ class_name ItemCatalog
 
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
 const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_epine.png")
+const TILESET_32_TEXTURE: Texture2D = preload("res://assets/sprites/tilesets/tileset32x32.png")
+const PASTEQUE_TEXTURE: Texture2D = preload("res://assets/sprites/house/pasteque.png")
 const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_visual.tscn")
 const KRAKEN_DATA: Resource = preload("res://scripts/combat/kraken/kraken.tres")
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
@@ -286,6 +288,13 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"runtime_id": "lamp",
 		"light_source": 3,
+		"drag_buildable": false,
+		"building_sprite_visual": {
+			"texture": TILESET_32_TEXTURE,
+			"frame_size": Vector2i(32, 32),
+			"atlas_coords": Vector2i(1, 0),
+			"health_bar_offset": Vector2(0.0, -18.0),
+		},
 		"max_health": 100,
 		"max_stack": 999,
 	},
@@ -304,9 +313,17 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"requires_grass_green_floor": true,
 		"runtime_id": "ronce",
+		"drag_buildable": false,
 		"speed_multiplier": 0.3,
 		"agent_contact_enabled": true,
 		"agent_contact_behavior": &"contact_visual_only",
+		"building_sprite_visual": {
+			"texture": TILESET_32_TEXTURE,
+			"frame_size": Vector2i(32, 32),
+			"atlas_coords": Vector2i(5, 0),
+			"contact_dance": true,
+			"health_bar_offset": Vector2(0.0, -14.0),
+		},
 		"recheck_agents_on_place": true,
 		"max_health": 100,
 		"max_stack": 999,
@@ -385,6 +402,11 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_projectiles": false,
 		"requires_walkable_floor": true,
 		"runtime_id": "pasteque",
+		"building_sprite_visual": {
+			"texture": PASTEQUE_TEXTURE,
+			"offset": Vector2(0.0, -4.0),
+			"health_bar_offset": Vector2(0.0, -18.0),
+		},
 		"drag_buildable": false,
 		"irrigation_radius_tiles": 9,
 		"destroyed_by_creatures": true,

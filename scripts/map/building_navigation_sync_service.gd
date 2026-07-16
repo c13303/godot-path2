@@ -36,7 +36,7 @@ func sync_all_terrain_speed_cells() -> void:
 	_terrain_speed.clear_local_contributions()
 	_terrain_speed.clear_all_native_channels()
 	var touched: Dictionary = {}
-	for layer: TileMapLayer in [_manager.plantz, _manager.traversable_buildings, _manager.blocking_buildings, _manager.fences]:
+	for layer: TileMapLayer in [_manager.plantz, _manager.blocking_buildings, _manager.fences]:
 		if layer == null:
 			continue
 		for raw_cell: Variant in layer.get_used_cells():
@@ -46,6 +46,10 @@ func sync_all_terrain_speed_cells() -> void:
 		var plant_cells: Array = plant_manager.call("get_plant_cells") as Array
 		for raw_cell: Variant in plant_cells:
 			touched[raw_cell as Vector2i] = true
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects != null:
+		for runtime_cell: Vector2i in building_objects.get_building_cells():
+			touched[runtime_cell] = true
 	for raw_cell: Variant in touched.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
@@ -191,7 +195,6 @@ func refresh_cell_speed(cell: Vector2i) -> void:
 ## on the cell, so the slowest thing that applies to that reader always wins.
 func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 	var plantz: TileMapLayer = _manager.plantz
-	var traversable_buildings: TileMapLayer = _manager.traversable_buildings
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
@@ -203,7 +206,7 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
 			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
 			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
-	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
+	for layer: TileMapLayer in [plantz, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
 		var layer_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
@@ -212,6 +215,13 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
 		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
 		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects != null:
+		var runtime_item_id: String = building_objects.get_placeable_item_id(cell)
+		if runtime_item_id != "":
+			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
+			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
+			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
 	return Vector2(speed_multiplier, player_speed_multiplier)
 
 

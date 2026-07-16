@@ -22,7 +22,10 @@ const RESERVOIR_WATER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/
 const RESERVOIR_WATER_FILL_SCRIPT: Script = preload("res://scripts/visual_fx/reservoir_water_fill.gd")
 const RESERVOIR_RUNTIME_SCRIPT: Script = preload("res://scripts/map/reservoir_runtime.gd")
 const TURRET_SPRITE_VISUAL_SCRIPT: Script = preload("res://scripts/combat/turrets/turret_sprite_visual.gd")
-const RESERVOIR_Z_INDEX: int = 510
+const SIMPLE_PLACEABLE_VISUAL_SCRIPT: Script = preload("res://scripts/map/simple_placeable_visual.gd")
+## Logical placeable category kept for save/durability/contact compatibility.
+## This is not a TileMapLayer node.
+const TRAVERSABLE_BUILDINGS_LAYER: String = "traversable_buildings"
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation", "fence"]
 
 class PlaceableContext:
@@ -71,7 +74,6 @@ func initialize_from_layer() -> void:
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
 	_clear_static_obstacles()
-	_initialize_from_one_layer(traversable_buildings)
 	_initialize_from_one_layer(blocking_buildings)
 	_initialize_from_one_layer(fences)
 	_log("Indexed buildings=%d rose_shop_counters=%d" % [
@@ -118,6 +120,8 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	_buildings_by_cell[cell] = building_data
 	if item_def.has("turret_sprite_visual"):
 		_register_turret_sprite_runtime(cell, runtime_id, item_def)
+	elif item_def.has("building_sprite_visual"):
+		_register_simple_placeable_runtime(cell, runtime_id, item_def)
 	elif item_def.get("building_visual_scene", null) is PackedScene:
 		_register_building_visual_scene_runtime(cell, runtime_id, item_def)
 	if runtime_id == "reservoir":
@@ -205,6 +209,13 @@ func get_runtime_node(cell: Vector2i) -> Node2D:
 	if node != null and is_instance_valid(node):
 		return node
 	return null
+
+
+func has_runtime_traversable_placeable(cell: Vector2i) -> bool:
+	if not _buildings_by_cell.has(cell):
+		return false
+	var data: Dictionary = _buildings_by_cell[cell] as Dictionary
+	return _normalize_layer_name(str(data.get("target_layer", ""))) == TRAVERSABLE_BUILDINGS_LAYER
 
 
 func serialize_runtime_placeables() -> Array[Dictionary]:
@@ -348,9 +359,14 @@ func _register_light_runtime(cell: Vector2i, runtime_id: String, light_source: f
 	var parent: Node2D = _runtime_parent()
 	if not parent:
 		return
-	var runtime_node: Node2D = Node2D.new()
-	runtime_node.name = "%s_Light_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
-	runtime_node.global_position = _cell_center(cell)
+	var runtime_node: Node2D = get_runtime_node(cell)
+	if runtime_node == null:
+		runtime_node = Node2D.new()
+		runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+		runtime_node.global_position = _cell_center(cell)
+		WorldDepthSort.apply_world_depth(runtime_node, runtime_node.global_position)
+		parent.add_child(runtime_node)
+		_runtime_nodes_by_cell[cell] = runtime_node
 
 	var radius_pixels: int = max(1, int(round(light_source * float(_tile_size_pixels()))))
 	var light: PointLight2D = PointLight2D.new()
@@ -367,9 +383,6 @@ func _register_light_runtime(cell: Vector2i, runtime_id: String, light_source: f
 	light.enabled = _is_game_state_night()
 	runtime_node.add_child(light)
 
-	parent.add_child(runtime_node)
-	_runtime_nodes_by_cell[cell] = runtime_node
-
 func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 	var parent: Node2D = _runtime_parent()
 	if not parent:
@@ -378,17 +391,33 @@ func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
 	runtime_node.script = RESERVOIR_RUNTIME_SCRIPT
 	runtime_node.global_position = _cell_center(cell)
+	WorldDepthSort.apply_world_depth(runtime_node, runtime_node.global_position)
 	runtime_node.add_to_group("reservoirs")
 
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.name = "Sprite2D"
 	sprite.texture = RESERVOIR_TEXTURE
-	sprite.z_as_relative = false
-	sprite.z_index = RESERVOIR_Z_INDEX
 	_add_reservoir_water_fill(sprite)
 	runtime_node.add_child(sprite)
 
 	parent.add_child(runtime_node)
+	_runtime_nodes_by_cell[cell] = runtime_node
+
+
+func _register_simple_placeable_runtime(cell: Vector2i, runtime_id: String, item_def: Dictionary) -> void:
+	var parent: Node2D = _runtime_parent()
+	if not parent:
+		return
+	var visual_def: Dictionary = item_def.get("building_sprite_visual", {}) as Dictionary
+	if visual_def.is_empty():
+		return
+	var runtime_node: Node2D = Node2D.new()
+	runtime_node.name = "%s_%d_%d" % [runtime_id.capitalize(), cell.x, cell.y]
+	runtime_node.script = SIMPLE_PLACEABLE_VISUAL_SCRIPT
+	runtime_node.global_position = _cell_center(cell)
+	WorldDepthSort.apply_world_depth(runtime_node, runtime_node.global_position)
+	parent.add_child(runtime_node)
+	runtime_node.call("setup", visual_def)
 	_runtime_nodes_by_cell[cell] = runtime_node
 
 func _add_reservoir_water_fill(reservoir_sprite: Sprite2D) -> void:
@@ -453,14 +482,15 @@ func _runtime_parent() -> Node2D:
 	return null
 
 func _reference_layer() -> TileMapLayer:
-	if traversable_buildings:
-		return traversable_buildings
+	if blocking_buildings:
+		return blocking_buildings
 	if fences:
 		return fences
-	return blocking_buildings
+	return traversable_buildings
 
 func _configure_world_depth_layers() -> void:
-	WorldDepthSort.configure_world_depth_tile_layer(traversable_buildings)
+	WorldDepthSort.configure_world_depth_tile_layer(blocking_buildings)
+	WorldDepthSort.configure_world_depth_tile_layer(fences)
 
 func _cell_center(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _reference_layer()
@@ -574,8 +604,8 @@ func _default_building_def_for_existing_tile(layer: TileMapLayer, _cell: Vector2
 
 func _layer_for_name(layer_name: String) -> TileMapLayer:
 	match _normalize_layer_name(layer_name):
-		"traversable_buildings":
-			return traversable_buildings
+		TRAVERSABLE_BUILDINGS_LAYER:
+			return null
 		"blocking_buildings":
 			return blocking_buildings
 		"fences":
@@ -584,7 +614,7 @@ func _layer_for_name(layer_name: String) -> TileMapLayer:
 
 
 func _normalize_layer_name(layer_name: String) -> String:
-	return "traversable_buildings" if layer_name == "buildings" else layer_name
+	return TRAVERSABLE_BUILDINGS_LAYER if layer_name == "buildings" else layer_name
 
 
 func _serialize_runtime_node_state(cell: Vector2i) -> Dictionary:

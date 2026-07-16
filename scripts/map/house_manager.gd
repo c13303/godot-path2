@@ -28,7 +28,7 @@ const FOOTPRINT_OFFSETS: Array[Vector2i] = [
 	Vector2i(-1, 0), Vector2i(1, 0),
 ]
 ## Fully transparent wallz atlas tile: blocks navigation/building/placement, renders nothing.
-## Same invisible blocker the reservoir base uses (see LevelLoader.RESERVOIR_BASE_WALL_ATLAS).
+## Houses still use a real wallz footprint; runtime reservoirs no longer use this marker.
 const HOUSE_WALL_ATLAS: Vector2i = Vector2i(15, 0)
 const AUTHORED_HOUSE_PREFIX: String = "house_"
 const HOUSE_STATUS_WIP: StringName = &"wip"

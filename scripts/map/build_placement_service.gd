@@ -12,6 +12,7 @@ const ALERT_NEEDS_WATER_KEY: String = "alert.needs_water"
 const PLACEMENT_SURFACE_BUILDABLE_FLOOR: StringName = &"buildable_floor"
 const PLACEMENT_SURFACE_WATER_SOURCE: StringName = &"water_source"
 const FENCE_ITEM_ID: String = "fence"
+const TRAVERSABLE_BUILDINGS_LAYER: String = "traversable_buildings"
 
 var _manager: BuildSystem
 var _actor_displacement: BuildActorDisplacementService = BuildActorDisplacementService.new()
@@ -59,6 +60,9 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	# one-tile commit path (which would validate/stamp/pay for a single cell).
 	if ItemCatalog.is_house_placeable(item_id):
 		_apply_house_placeable(placeable_def, cell)
+		return
+	if is_runtime_traversable_placeable(placeable_def):
+		_apply_runtime_traversable_placeable(placeable_def, cell)
 		return
 	if _atlas_source_id() < 0 and not is_logical_plant(placeable_def):
 		return
@@ -120,6 +124,39 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(cell)
 	_play_build_fx_at_cell(cell, target_layer)
+	clear_build_selection_if_unaffordable(item_id)
+
+
+func _apply_runtime_traversable_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
+	var item_id: String = str(placeable_def.get("id", ""))
+	var reference_layer: TileMapLayer = _placement_reference_layer()
+	if reference_layer == null:
+		return
+	if not is_valid_placeable_cell(cell, reference_layer, placeable_def):
+		if placement_surface(placeable_def) == PLACEMENT_SURFACE_BUILDABLE_FLOOR and not is_buildable_floor_cell(cell):
+			_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+			return
+		if requires_grass_green_floor(placeable_def) and not is_grass_green_floor_cell(cell):
+			_show_tutorial_alert(ALERT_NEEDS_GRASS_KEY)
+			return
+		_notify("invalid construction")
+		return
+	if not can_afford(item_id):
+		_notify("can't afford")
+		return
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui == null or not game_ui.has_method("try_purchase_build"):
+		return
+	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
+		_notify("can't afford")
+		return
+	clear_other_build_layer(null, cell)
+	after_placeable_placed(cell, placeable_def)
+	_refresh_cell_terrain_speed(cell)
+	if _placeable_displaces_actors(placeable_def):
+		var displaced_cells: Array[Vector2i] = [cell]
+		_actor_displacement.displace_from_cells(displaced_cells)
+	_play_build_fx_at_cell(cell, reference_layer)
 	clear_build_selection_if_unaffordable(item_id)
 
 
@@ -330,13 +367,13 @@ func target_tile_layer(layer_name: String) -> TileMapLayer:
 	if layer_name == "plantz":
 		return _plantz()
 	if layer_name == "traversable_buildings":
-		return _traversable_buildings()
+		return null
 	if layer_name == "blocking_buildings":
 		return _blocking_buildings()
 	if layer_name == "fences":
 		return _fences()
 	if layer_name == "buildings":
-		return _traversable_buildings()
+		return null
 	return _wallz()
 
 
@@ -405,7 +442,10 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
 	var blocking_buildings: TileMapLayer = _blocking_buildings()
 	var fences: TileMapLayer = _fences()
-	if bool(placeable_def.get("occupies_cell", true)) and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and is_debris_cell(cell)):
+	if bool(placeable_def.get("occupies_cell", true)) and target_layer != null and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and is_debris_cell(cell)):
+		return true
+	var building_object_manager: Node = _building_object_manager()
+	if building_object_manager and building_object_manager.has_method("has_building") and bool(building_object_manager.call("has_building", cell)):
 		return true
 	var plant_manager: Node = _plant_manager()
 	if plant_manager and plant_manager.has_method("has_plant") and bool(plant_manager.call("has_plant", cell)):
@@ -459,6 +499,11 @@ func placement_surface(placeable_def: Dictionary) -> StringName:
 
 func is_logical_plant(placeable_def: Dictionary) -> bool:
 	return bool(placeable_def.get("logical_plant", false))
+
+
+func is_runtime_traversable_placeable(placeable_def: Dictionary) -> bool:
+	var target_layer: String = str(placeable_def.get("target_layer", ""))
+	return target_layer == TRAVERSABLE_BUILDINGS_LAYER or target_layer == "buildings"
 
 
 func _placeable_displaces_actors(placeable_def: Dictionary) -> bool:
@@ -599,6 +644,8 @@ func uses_building_object_manager(placeable_def: Dictionary) -> bool:
 	var light_source: float = float(placeable_def.get("light_source", 0.0))
 	if light_source > 0.0:
 		return true
+	if is_runtime_traversable_placeable(placeable_def):
+		return true
 	return placeable_category == "furniture" or placeable_category == "turret" or placeable_category == "trap" or placeable_category == "shop_counter" or placeable_category == "irrigation" or placeable_category == "fence"
 
 
@@ -656,23 +703,25 @@ func clear_other_build_layer(target_layer: TileMapLayer, cell: Vector2i) -> void
 			var plant_manager: Node = _plant_manager()
 			if plant_manager and plant_manager.has_method("remove_plant"):
 				plant_manager.call("remove_plant", cell, false)
+	var building_object_manager: Node = _building_object_manager()
 	if target_layer != traversable_buildings and traversable_buildings:
 		traversable_buildings.erase_cell(cell)
 		traversable_buildings.update_internals()
-		var building_object_manager: Node = _building_object_manager()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
 		_refresh_cell_terrain_speed(cell)
+	elif traversable_buildings == null and building_object_manager and building_object_manager.has_method("remove_building") and building_object_manager.has_method("has_runtime_traversable_placeable"):
+		if bool(building_object_manager.call("has_runtime_traversable_placeable", cell)):
+			building_object_manager.call("remove_building", cell, false)
+			_refresh_cell_terrain_speed(cell)
 	if target_layer != blocking_buildings and blocking_buildings:
 		blocking_buildings.erase_cell(cell)
 		blocking_buildings.update_internals()
-		var building_object_manager: Node = _building_object_manager()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
 	if target_layer != fences and fences:
 		fences.erase_cell(cell)
 		fences.update_internals()
-		var building_object_manager: Node = _building_object_manager()
 		if building_object_manager and building_object_manager.has_method("remove_building"):
 			building_object_manager.call("remove_building", cell, false)
 		_refresh_cell_terrain_speed(cell)
@@ -775,6 +824,12 @@ func _plantz() -> TileMapLayer:
 
 func _traversable_buildings() -> TileMapLayer:
 	return _manager.traversable_buildings
+
+
+func _placement_reference_layer() -> TileMapLayer:
+	if _blocking_buildings() != null:
+		return _blocking_buildings()
+	return _wallz()
 
 
 func _blocking_buildings() -> TileMapLayer:

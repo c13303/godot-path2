@@ -428,7 +428,15 @@ func _fill_cells(layer: TileMapLayer, cells: Array, color: Color) -> void:
 
 
 func _kraken_layer() -> TileMapLayer:
-	return _building_objects.traversable_buildings if _building_objects != null else null
+	if _build_system != null:
+		var previewbuild: TileMapLayer = _build_system.get("previewbuild") as TileMapLayer
+		if previewbuild != null:
+			return previewbuild
+	if _building_manager != null:
+		if _building_manager.blocking_buildings != null:
+			return _building_manager.blocking_buildings
+		return _building_manager.wallz
+	return null
 
 
 func _tile_size_pixels(layer: TileMapLayer) -> float:

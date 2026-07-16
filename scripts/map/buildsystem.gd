@@ -442,6 +442,9 @@ func destroy_placeable_no_refund(cell: Vector2i, layer_name: String = "", target
 	if _removal_service == null:
 		return false
 	if layer_name != "":
+		if layer_name == "traversable_buildings" or layer_name == "buildings":
+			if _removal_service.remove_runtime_placeable(cell, target_item_id):
+				return true
 		var target_layer: TileMapLayer = _placeable_layer_for_name(layer_name)
 		if target_layer == null or target_layer.get_cell_source_id(cell) < 0:
 			return false
@@ -457,6 +460,8 @@ func destroy_placeable_no_refund(cell: Vector2i, layer_name: String = "", target
 		return false
 	var layer: TileMapLayer = removal.get("layer") as TileMapLayer
 	var item_id: String = str(removal.get("item_id", ""))
+	if bool(removal.get("runtime_placeable", false)):
+		return _removal_service.remove_runtime_placeable(cell, item_id)
 	if layer == null or item_id == "":
 		return false
 	_removal_service.remove_tile(layer, cell, item_id)
@@ -508,6 +513,11 @@ func _sync_terrain_speed_cells() -> void:
 		for raw_cell: Variant in plant_cells:
 			var cell: Vector2i = raw_cell as Vector2i
 			_refresh_cell_terrain_speed(cell, false)
+	if building_object_manager != null and building_object_manager.has_method("get_building_cells"):
+		var building_cells: Array = building_object_manager.call("get_building_cells") as Array
+		for raw_cell: Variant in building_cells:
+			var cell: Vector2i = raw_cell as Vector2i
+			_refresh_cell_terrain_speed(cell, false)
 	_terrain_speed.upload_all_channels()
 
 # Startup terrain-speed seed for one cell. Pushes both the all-agent and the player
@@ -538,6 +548,12 @@ func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
 		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
 		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+	if building_object_manager != null and building_object_manager.has_method("get_placeable_item_id"):
+		var runtime_item_id: String = str(building_object_manager.call("get_placeable_item_id", cell))
+		if runtime_item_id != "":
+			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
+			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
+			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
 	_terrain_speed.set_cell_contribution_pair(cell, StringName(TERRAIN_SPEED_SOURCE_PREFIX + str(cell)), speed_multiplier, player_speed_multiplier, upload)
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:

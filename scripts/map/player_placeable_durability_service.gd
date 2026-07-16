@@ -30,6 +30,7 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const RESERVOIR_ITEM_ID: String = "reservoir"
 const RUNTIME_RESERVOIR_LAYER: String = "runtime_reservoir"
 const RESERVOIR_GROUP: StringName = &"reservoirs"
+const TRAVERSABLE_BUILDINGS_LAYER: String = "traversable_buildings"
 # Logical durability layer for player-built houses. A house is ONE entrance-keyed target (never
 # its five wall cells): its validity, attack position, health-bar position and destruction are all
 # resolved through HouseManager, not a TileMap layer. See register_player_built_house.
@@ -156,7 +157,7 @@ func remove_house_target(entrance: Vector2i) -> void:
 
 func register_live_destructible_targets() -> int:
 	var added: int = 0
-	for layer_name: String in ["wallz", "plantz", "traversable_buildings", "blocking_buildings", "fences"]:
+	for layer_name: String in ["wallz", "plantz", "blocking_buildings", "fences"]:
 		var layer: TileMapLayer = _layer_for_name(layer_name)
 		if layer == null:
 			continue
@@ -164,6 +165,7 @@ func register_live_destructible_targets() -> int:
 			var cell: Vector2i = raw_cell as Vector2i
 			if _register_live_destructible_target(layer, layer_name, cell):
 				added += 1
+	added += _register_live_runtime_traversable_targets()
 	added += _register_live_reservoir_nodes()
 	if added > 0:
 		_bump_target_revision_and_refresh()
@@ -217,6 +219,9 @@ func health_bar_world_position(key: String) -> Vector2:
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	if str(rec.get("layer_name", "")) == HOUSES_LAYER:
 		return _manager.house_health_bar_world_position(cell)
+	var runtime_anchor: Vector2 = _runtime_health_bar_world_position(cell)
+	if runtime_anchor != Vector2.INF:
+		return runtime_anchor
 	return _manager.cell_center(cell)
 
 
@@ -236,6 +241,13 @@ func is_target_valid(key: String) -> bool:
 	if layer_name == HOUSES_LAYER:
 		# The house is authoritative; it lives in HouseManager, not a TileMap layer.
 		return _manager.house_target_exists(cell)
+	if layer_name == TRAVERSABLE_BUILDINGS_LAYER:
+		var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+		return (
+			building_objects != null
+			and building_objects.has_building(cell)
+			and building_objects.get_placeable_item_id(cell) == str(rec.get("item_id", ""))
+		)
 	var layer: TileMapLayer = _layer_for_name(layer_name)
 	if layer == null or layer.get_cell_source_id(cell) < 0:
 		return false
@@ -431,6 +443,27 @@ func restore(saved: Array) -> void:
 			}
 			_add_cell_key(cell, house_key)
 			continue
+		if layer_name == TRAVERSABLE_BUILDINGS_LAYER:
+			var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+			if building_objects == null or not building_objects.has_building(cell) or building_objects.get_placeable_item_id(cell) != item_id:
+				ignored += 1
+				continue
+			var runtime_catalog_max_health: int = maxi(1, ItemCatalog.get_max_health(item_id))
+			var runtime_saved_max_health: int = int(entry.get("max_health", runtime_catalog_max_health))
+			var runtime_saved_health: int = int(entry.get("health", runtime_catalog_max_health))
+			var runtime_max_health: int = maxi(1, runtime_saved_max_health)
+			var runtime_health: int = clampi(runtime_saved_health, 1, runtime_max_health)
+			var runtime_key: String = _make_key(layer_name, cell)
+			_targets_by_key[runtime_key] = {
+				"key": runtime_key,
+				"cell": cell,
+				"item_id": item_id,
+				"layer_name": layer_name,
+				"health": runtime_health,
+				"max_health": runtime_max_health,
+			}
+			_add_cell_key(cell, runtime_key)
+			continue
 		var layer: TileMapLayer = _layer_for_name(layer_name)
 		# Validate every saved record against the actual live item at that cell.
 		if layer == null or layer.get_cell_source_id(cell) < 0 or _live_item_id_at(layer, layer_name, cell) != item_id:
@@ -546,6 +579,35 @@ func _register_live_reservoir_nodes() -> int:
 	return added
 
 
+func _register_live_runtime_traversable_targets() -> int:
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects == null:
+		return 0
+	var added: int = 0
+	for cell: Vector2i in building_objects.get_building_cells():
+		var building: Dictionary = building_objects.get_building(cell)
+		if str(building.get("target_layer", "")) != TRAVERSABLE_BUILDINGS_LAYER:
+			continue
+		var item_id: String = str(building.get("item_id", ""))
+		if item_id == "" or not ItemCatalog.is_destructible_placeable(item_id):
+			continue
+		var key: String = _make_key(TRAVERSABLE_BUILDINGS_LAYER, cell)
+		if _targets_by_key.has(key):
+			continue
+		var max_health: int = maxi(1, ItemCatalog.get_max_health(item_id))
+		_targets_by_key[key] = {
+			"key": key,
+			"cell": cell,
+			"item_id": item_id,
+			"layer_name": TRAVERSABLE_BUILDINGS_LAYER,
+			"health": max_health,
+			"max_health": max_health,
+		}
+		_add_cell_key(cell, key)
+		added += 1
+	return added
+
+
 func _erase_records_at_cell(cell: Vector2i) -> bool:
 	if not _keys_by_cell.has(cell):
 		return false
@@ -586,7 +648,7 @@ func _layer_for_name(layer_name: String) -> TileMapLayer:
 		"plantz":
 			return _manager.plantz
 		"traversable_buildings":
-			return _manager.traversable_buildings
+			return null
 		"blocking_buildings":
 			return _manager.blocking_buildings
 		"fences":
@@ -603,6 +665,20 @@ func _live_item_id_at(layer: TileMapLayer, layer_name: String, cell: Vector2i) -
 			if building_item_id != "":
 				return building_item_id
 	return ItemCatalog.get_placeable_id_for_tile(layer_name, layer.get_cell_atlas_coords(cell))
+
+
+func _runtime_health_bar_world_position(cell: Vector2i) -> Vector2:
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects == null:
+		return Vector2.INF
+	var runtime_node: Node2D = building_objects.get_runtime_node(cell)
+	if runtime_node == null:
+		return Vector2.INF
+	if runtime_node.has_method("get_health_bar_anchor_world_position"):
+		var raw_position: Variant = runtime_node.call("get_health_bar_anchor_world_position")
+		if raw_position is Vector2:
+			return raw_position as Vector2
+	return Vector2.INF
 
 
 func _resolve_build_system() -> Node:
