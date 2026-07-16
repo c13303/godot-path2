@@ -134,7 +134,8 @@ func take_damage(amount: int) -> bool:
 		_flash_time_left = FLASH_DURATION
 		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 		return false
-	health = max(0, health - amount)
+	var health_cap: int = maxi(0, max_health)
+	health = clampi(health - amount, 0, health_cap)
 	_flash_time_left = FLASH_DURATION
 	_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 	queue_redraw()
@@ -143,8 +144,17 @@ func take_damage(amount: int) -> bool:
 		return true
 	return false
 
+func heal(amount: int) -> void:
+	if amount <= 0:
+		return
+	var health_cap: int = maxi(0, max_health)
+	health = clampi(health + amount, 0, health_cap)
+	if health > 0:
+		_dead = false
+	queue_redraw()
+
 func _draw() -> void:
-	if _is_damage_immune_agent():
+	if not should_show_health_bar():
 		return
 	var bar_position: Vector2 = _health_bar_position()
 	var background_rect: Rect2 = Rect2(bar_position, HEALTH_BAR_SIZE)
@@ -152,6 +162,10 @@ func _draw() -> void:
 	var health_ratio: float = float(health) / float(max(1, max_health))
 	var fill_size: Vector2 = Vector2((HEALTH_BAR_SIZE.x - 2.0) * health_ratio, HEALTH_BAR_SIZE.y - 2.0)
 	draw_rect(Rect2(bar_position + Vector2.ONE, fill_size), Color(0.9, 0.05, 0.05, 1.0))
+
+
+func should_show_health_bar() -> bool:
+	return max_health > 0 and health < max_health
 
 
 func _health_bar_position() -> Vector2:
@@ -369,7 +383,7 @@ func _is_damage_immune_agent() -> bool:
 	if status == "angry":
 		return false
 	var agent_kind: StringName = StringName(str(get_meta("agent_kind")))
-	return agent_kind == &"client" or agent_kind == &"merchant" or agent_kind == &"builder"
+	return agent_kind == &"client" or is_in_group(AgentDefinitionService.VILLAGERS_GROUP)
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

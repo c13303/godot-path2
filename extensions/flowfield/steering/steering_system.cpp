@@ -2132,11 +2132,26 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
-        // Hard freeze: a paused agent holds its exact position and path/flow state.
-        // Zero the velocity and skip all integration so it neither drifts nor advances
-        // its waypoint/flow progress; it resumes seamlessly once unpaused.
+        // A paused agent freezes autonomous navigation, but contact impulses are
+        // still allowed to displace it so dialog villagers do not become walls.
         if (a.paused)
         {
+            if (a.is_propelled)
+            {
+                FlowField *paused_nav = a.flow ? a.flow : default_flow;
+                if (paused_nav && !paused_nav->is_ready())
+                    paused_nav = nullptr;
+                Vec2 offset(0, a.profile.foot_offset_y);
+                Vec2 old_pos = a.position;
+                Vec2 step = terrain_scaled_step(a, paused_nav, a.velocity, delta);
+                a.position = apply_walk_with_walls(a, step, paused_nav);
+                if (paused_nav)
+                    ultimate_wall_correction(a, paused_nav, delta);
+                resolve_static_obstacle_overlap(a);
+                grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                a.update_motion_state(delta, cfg, safe_len(a.velocity) > 1.0);
+                continue;
+            }
             a.velocity = Vec2(0, 0);
             a.update_motion_state(delta, cfg);
             continue;

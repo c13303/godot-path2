@@ -9,10 +9,11 @@ const ICON_SIZE: Vector2 = Vector2(40.0, 40.0)
 const ABOVE_HEAD_OFFSET: Vector2 = Vector2(0.0, -60.0)
 const SHADOW_OFFSET: Vector2 = Vector2(2.0, 3.0)
 
-var _building_manager: Node
+@export var target_controller: NodePath
+
 var _player_controller: Node
-var _dialog_controller: Node
 var _dialog_ui: Node
+var _target: Node
 var _icon: TextureRect
 var _shadow: TextureRect
 var _frame_kmouse: AtlasTexture
@@ -42,28 +43,21 @@ func _process(_delta: float) -> void:
 			visible = false
 		return
 	_apply_frame(_desired_frame())
-	_position_over_builder()
+	_position_over_target()
 	if not visible:
 		visible = true
 
 
 func _should_show() -> bool:
-	if GameState.is_night:
+	var target: Node = _resolve_target()
+	if target == null:
 		return false
-	var manager: Node = _resolve_building_manager()
-	if manager == null:
+	if not target.has_method("can_interact") or not bool(target.call("can_interact")):
 		return false
-	if manager.has_method("is_any_reveal_cutscene_active") and bool(manager.call("is_any_reveal_cutscene_active")):
-		return false
-	if manager.has_method("is_player_near_fundamental_builder") and not bool(manager.call("is_player_near_fundamental_builder")):
-		return false
-	if manager.has_method("is_fundamental_builder_working") and bool(manager.call("is_fundamental_builder_working")):
+	if target.has_method("is_interaction_open") and bool(target.call("is_interaction_open")):
 		return false
 	var dialog_ui: Node = _resolve_dialog_ui()
 	if dialog_ui != null and dialog_ui.has_method("is_open") and bool(dialog_ui.call("is_open")):
-		return false
-	var dialog_controller: Node = _resolve_dialog_controller()
-	if dialog_controller != null and dialog_controller.has_method("is_dialog_open") and bool(dialog_controller.call("is_dialog_open")):
 		return false
 	return true
 
@@ -85,11 +79,11 @@ func _apply_frame(frame: int) -> void:
 	_shadow.texture = texture
 
 
-func _position_over_builder() -> void:
-	var manager: Node = _resolve_building_manager()
-	if manager == null or not manager.has_method("get_fundamental_builder_world_position"):
+func _position_over_target() -> void:
+	var target: Node = _resolve_target()
+	if target == null or not target.has_method("get_interaction_world_position"):
 		return
-	var world_position: Vector2 = manager.call("get_fundamental_builder_world_position") as Vector2
+	var world_position: Vector2 = target.call("get_interaction_world_position") as Vector2
 	var screen_position: Vector2 = get_viewport().get_canvas_transform() * (world_position + ABOVE_HEAD_OFFSET)
 	global_position = (screen_position - ICON_SIZE * 0.5).round()
 
@@ -105,11 +99,10 @@ func _make_glyph() -> TextureRect:
 	return rect
 
 
-func _resolve_building_manager() -> Node:
-	if _building_manager == null or not is_instance_valid(_building_manager):
-		var scene: Node = get_tree().current_scene
-		_building_manager = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
-	return _building_manager
+func _resolve_target() -> Node:
+	if _target == null or not is_instance_valid(_target):
+		_target = get_node_or_null(target_controller)
+	return _target
 
 
 func _resolve_player_controller() -> Node:
@@ -117,13 +110,6 @@ func _resolve_player_controller() -> Node:
 		var scene: Node = get_tree().current_scene
 		_player_controller = scene.get_node_or_null("Player/PlayerController") if scene != null else null
 	return _player_controller
-
-
-func _resolve_dialog_controller() -> Node:
-	if _dialog_controller == null or not is_instance_valid(_dialog_controller):
-		var scene: Node = get_tree().current_scene
-		_dialog_controller = scene.get_node_or_null("GameUI/FundamentalBuilderDialogController") if scene != null else null
-	return _dialog_controller
 
 
 func _resolve_dialog_ui() -> Node:

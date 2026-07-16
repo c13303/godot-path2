@@ -1,8 +1,13 @@
 extends CharacterBody2D
 class_name PlayerCharacter
 
+const HEALTH_BAR_SIZE: Vector2 = Vector2(28.0, 4.0)
+const HEALTH_BAR_POSITION: Vector2 = Vector2(-14.0, -44.0)
+const HEALTH_BAR_SPRITE_GAP: float = 4.0
+
 @export var acceleration: float = 900.0
 @export var deceleration: float = 1200.0
+@export var max_health: int = 100
 
 ## Max movement speed. 0 = inherit the global agent_max_speed from GlobalConfigNative.
 @export var max_speed: float = 0.0
@@ -38,6 +43,7 @@ var _facing_frame: int = FRAME_SOUTH
 var _facing_west: bool = false
 var _spritesheet_texture: Texture2D
 var _direction_textures: Array[AtlasTexture] = []
+var health: int = 100
 
 var nav_id: int = -1:
 	get:
@@ -46,6 +52,7 @@ var nav_id: int = -1:
 		_nav_id = value
 
 func _ready() -> void:
+	health = maxi(1, max_health)
 	_apply_sprite_offset()
 	var sprite: Sprite2D = get_sprite()
 	if sprite:
@@ -56,6 +63,33 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	z_index = int(position.y)
+
+func _draw() -> void:
+	if not should_show_health_bar():
+		return
+	var bar_position: Vector2 = _health_bar_position()
+	draw_rect(Rect2(bar_position, HEALTH_BAR_SIZE), Color.BLACK)
+	var health_ratio: float = float(health) / float(maxi(1, max_health))
+	var fill_size: Vector2 = Vector2((HEALTH_BAR_SIZE.x - 2.0) * health_ratio, HEALTH_BAR_SIZE.y - 2.0)
+	draw_rect(Rect2(bar_position + Vector2.ONE, fill_size), Color(0.9, 0.05, 0.05, 1.0))
+
+func take_damage(amount: int) -> bool:
+	if amount <= 0:
+		return false
+	var health_cap: int = maxi(0, max_health)
+	health = clampi(health - amount, 0, health_cap)
+	queue_redraw()
+	return health <= 0
+
+func heal(amount: int) -> void:
+	if amount <= 0:
+		return
+	var health_cap: int = maxi(0, max_health)
+	health = clampi(health + amount, 0, health_cap)
+	queue_redraw()
+
+func should_show_health_bar() -> bool:
+	return max_health > 0 and health < max_health
 
 func set_propelled_state(enabled: bool) -> void:
 	_is_propelled = enabled
@@ -101,6 +135,18 @@ func _apply_sprite_offset() -> void:
 	var sprite: Sprite2D = get_sprite()
 	if sprite:
 		sprite.position = sprite_offset
+
+func _health_bar_position() -> Vector2:
+	var sprite: Sprite2D = get_sprite()
+	if sprite == null or sprite.texture == null:
+		return HEALTH_BAR_POSITION
+	var sprite_height: float = sprite.texture.get_size().y * absf(sprite.scale.y)
+	var sprite_top: float = sprite.position.y
+	if sprite.centered:
+		sprite_top -= sprite_height * 0.5
+	var bar_x: float = sprite.position.x - HEALTH_BAR_SIZE.x * 0.5
+	var bar_y: float = sprite_top - HEALTH_BAR_SPRITE_GAP - HEALTH_BAR_SIZE.y
+	return Vector2(bar_x, bar_y)
 
 func _apply_facing_visual() -> void:
 	var sprite: Sprite2D = get_sprite()

@@ -28,8 +28,7 @@ const TRACKED_GROUPS: Array[StringName] = [
 	&"main_chars",
 	&"monsters",
 	&"clients",
-	&"merchants",
-	&"builders",
+	AgentDefinitionService.VILLAGERS_GROUP,
 	&"sheep",
 ]
 

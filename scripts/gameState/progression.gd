@@ -689,7 +689,7 @@ func _unregister_scene_agents() -> void:
 		return
 
 	var seen_ids: Dictionary = {}
-	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters", &"clients", &"merchants", &"sheep"]
+	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters", &"clients", AgentDefinitionService.VILLAGERS_GROUP, &"sheep"]
 	for group_name: StringName in group_names:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			var nav_id: int = int(node.get("nav_id"))

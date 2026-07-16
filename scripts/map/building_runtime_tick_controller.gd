@@ -155,7 +155,7 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	t = Time.get_ticks_usec()
 	_manager._process_client_counter_arrivals()
 	_manager.get_client_tantrum_controller().process(delta)
-	# One consolidated per-frame entry for every house villager (merchant + builders). The housing
+	# One consolidated per-frame entry for every ordinary house villager. The housing
 	# controller dispatches arrival/proximity to each registered resident handler, so adding an
 	# ordinary villager never touches this tick controller.
 	_manager.get_ally_housing_controller().process(delta)

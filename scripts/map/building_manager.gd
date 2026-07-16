@@ -1634,7 +1634,7 @@ func is_fundamental_builder_arrival_pending() -> bool:
 
 # True whenever the player is within interaction range of the merchant, no matter what
 # the merchant is doing (walking in, parked at the spot, or walking back out). This drives
-# the interaction prompt (merchant_prompt.gd), the shop (MerchantDialogController), and the
+# the interaction prompt, the shop (MerchantDialogController), and the
 # merchant's own movement pause.
 func is_player_near_seed_merchant() -> bool:
 	return _seed_merchant.is_player_near()
@@ -1654,7 +1654,7 @@ func get_seed_merchant_world_position() -> Vector2:
 
 # ---------------------------------------------------------------------------
 # Generic ordinary-house-resident queries, keyed by resident_type. A villager's dialog/interaction
-# controller (e.g. InventorDialogController / InventorPrompt) uses these to reach its live agent
+# controller (e.g. InventorDialogController) uses these to reach its live agent
 # without a role-specific BuildingManager method. All return a neutral default when no such
 # resident is currently active.
 # ---------------------------------------------------------------------------
@@ -2694,6 +2694,7 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.remove_from_group("builders")
+	agent.remove_from_group(AgentDefinitionService.VILLAGERS_GROUP)
 	agent.remove_from_group("house_residents")
 	agent.remove_from_group("monsters")
 	agent.queue_free()
@@ -2805,7 +2806,7 @@ func _agent_within_tiles(agent: Node2D, cell: Vector2i, tiles: int) -> bool:
 
 func _occupied_cells() -> Array[Vector2i]:
 	var occupied: Array[Vector2i] = []
-	for group_name: StringName in [&"main_chars", &"monsters", &"clients", &"merchants", &"builders", &"player"]:
+	for group_name: StringName in [&"main_chars", &"monsters", &"clients", AgentDefinitionService.VILLAGERS_GROUP, &"player"]:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			if node is Node2D:
 				var unit: Node2D = node as Node2D

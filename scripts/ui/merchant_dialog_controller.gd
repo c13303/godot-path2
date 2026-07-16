@@ -116,6 +116,8 @@ func _is_merchant_active() -> bool:
 		return false
 	if building_manager == null or not building_manager.has_method("is_player_near_seed_merchant"):
 		return false
+	if building_manager.has_method("has_seed_merchant_reached_spot") and not bool(building_manager.call("has_seed_merchant_reached_spot")):
+		return false
 	return bool(building_manager.call("is_player_near_seed_merchant"))
 
 

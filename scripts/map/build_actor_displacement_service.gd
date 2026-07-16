@@ -6,7 +6,7 @@ class_name BuildActorDisplacementService
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ACTOR_DISPLACEMENT_MAX_RADIUS: int = 6
-const ACTOR_DISPLACEMENT_GROUPS: Array[StringName] = [&"main_chars", &"monsters", &"clients", &"merchants", &"builders", &"sheep", &"player"]
+const ACTOR_DISPLACEMENT_GROUPS: Array[StringName] = [&"main_chars", &"monsters", &"clients", AgentDefinitionService.VILLAGERS_GROUP, &"sheep", &"player"]
 
 var _manager: BuildSystem
 

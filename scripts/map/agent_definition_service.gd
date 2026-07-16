@@ -13,11 +13,15 @@ const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/builder.
 const FUNDAMENTAL_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
 const BUILDER_HAMMER_TEXTURE: Texture2D = preload("res://assets/sprites/house/marto.png")
 const BUILDER_HAMMER_SCALE: Vector2 = Vector2(0.56, 0.56)
+const VILLAGERS_GROUP: StringName = &"villagers"
 const CLIENT_HEALTH: int = 10
 const CLIENT_SPRITE_HFRAMES: int = 7
 const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.225
 const BIG_MONSTER_WALK_SQUASH: float = 0.03
+const VILLAGER_CONTACT_PUSH_POWER: float = 0.0
+const VILLAGER_CONTACT_PUSH_RESIST: float = 1.0
+const VILLAGER_CONTACT_PUSH_COOLDOWN: float = 0.2
 
 var _manager: Node
 
@@ -93,7 +97,7 @@ func apply_merchant_data(agent: Node) -> void:
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false
-	_mark_crushes_placeables(agent)
+	_apply_villager_traits(agent)
 
 
 ## Inventor villager visuals. Identical frame layout / animation rules to the other ordinary
@@ -106,7 +110,7 @@ func apply_inventor_data(agent: Node) -> void:
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false
-	_mark_crushes_placeables(agent)
+	_apply_villager_traits(agent)
 
 
 func apply_builder_data(agent: Node) -> void:
@@ -127,6 +131,14 @@ func _apply_builder_visuals(agent: Node, texture: Texture2D) -> void:
 	# The hammer is part of the Builder's permanent look; construction only swings it.
 	if agent.has_method("set_held_object"):
 		agent.call("set_held_object", BUILDER_HAMMER_TEXTURE, 1, 0, BUILDER_HAMMER_SCALE)
+	_apply_villager_traits(agent)
+
+
+func _apply_villager_traits(agent: Node) -> void:
+	agent.add_to_group(VILLAGERS_GROUP)
+	agent.set_meta("agent_contact_push_power", VILLAGER_CONTACT_PUSH_POWER)
+	agent.set_meta("agent_contact_push_resist", VILLAGER_CONTACT_PUSH_RESIST)
+	agent.set_meta("agent_contact_push_cooldown", VILLAGER_CONTACT_PUSH_COOLDOWN)
 	_mark_crushes_placeables(agent)
 
 

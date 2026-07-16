@@ -111,6 +111,8 @@ func _is_inventor_active() -> bool:
 		return false
 	if building_manager == null or not building_manager.has_method("is_player_near_house_resident"):
 		return false
+	if building_manager.has_method("has_house_resident_reached_spot") and not bool(building_manager.call("has_house_resident_reached_spot", RESIDENT_TYPE)):
+		return false
 	return bool(building_manager.call("is_player_near_house_resident", RESIDENT_TYPE, INTERACT_RADIUS_TILES))
 
 

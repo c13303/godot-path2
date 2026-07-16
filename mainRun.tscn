@@ -50,8 +50,7 @@
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
-[ext_resource type="Script" uid="uid://bmrcp0pth1nt7" path="res://scripts/ui/merchant_prompt.gd" id="46_mprompt"]
-[ext_resource type="Script" path="res://scripts/ui/fundamental_builder_prompt.gd" id="47_builder_prompt"]
+[ext_resource type="Script" path="res://scripts/ui/interaction_prompt.gd" id="46_interaction_prompt"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
@@ -61,7 +60,6 @@
 [ext_resource type="Script" uid="uid://bmh7gdxndafa6" path="res://scripts/ui/merchant_dialog_controller.gd" id="61_mdc"]
 [ext_resource type="Script" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
 [ext_resource type="Script" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
-[ext_resource type="Script" path="res://scripts/ui/inventor_prompt.gd" id="64_inventor_prompt"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -1327,19 +1325,22 @@ script = ExtResource("12_vj62y")
 layout_mode = 3
 anchors_preset = 0
 mouse_filter = 2
-script = ExtResource("46_mprompt")
+script = ExtResource("46_interaction_prompt")
+target_controller = NodePath("../MerchantDialogController")
 
 [node name="FundamentalBuilderPrompt" type="Control" parent="GameUI" unique_id=700000031]
 layout_mode = 3
 anchors_preset = 0
 mouse_filter = 2
-script = ExtResource("47_builder_prompt")
+script = ExtResource("46_interaction_prompt")
+target_controller = NodePath("../FundamentalBuilderDialogController")
 
 [node name="InventorPrompt" type="Control" parent="GameUI" unique_id=700000032]
 layout_mode = 3
 anchors_preset = 0
 mouse_filter = 2
-script = ExtResource("64_inventor_prompt")
+script = ExtResource("46_interaction_prompt")
+target_controller = NodePath("../InventorDialogController")
 
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3

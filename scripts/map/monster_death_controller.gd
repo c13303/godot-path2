@@ -18,7 +18,7 @@ func remove_dead_monster(agent: Node2D, spawn_death_effects: bool = true) -> voi
 	if not is_instance_valid(agent):
 		return
 	var is_client: bool = agent.is_in_group("clients")
-	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not agent.is_in_group("merchants") and not agent.is_in_group("builders")
+	var awards_monster_drop: bool = agent.is_in_group("monsters") and not is_client and not agent.is_in_group(AgentDefinitionService.VILLAGERS_GROUP)
 	var death_position: Vector2 = agent.global_position
 	if spawn_death_effects:
 		_manager.spawn_agent_death_burst(death_position)
@@ -53,8 +53,9 @@ func _remove_dead_agent_without_drop(agent: Node2D) -> void:
 	agent.remove_from_group("clients")
 	agent.remove_from_group("merchants")
 	agent.remove_from_group("builders")
+	agent.remove_from_group(AgentDefinitionService.VILLAGERS_GROUP)
 	agent.remove_from_group("house_residents")
 	agent.queue_free()
-	# Route every house villager (merchant, builders) through the one generic removal handler.
+	# Route every house villager through the one generic removal handler.
 	if is_house_resident:
 		_manager.on_removed_house_resident_agent(agent)
