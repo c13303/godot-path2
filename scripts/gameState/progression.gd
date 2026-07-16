@@ -19,7 +19,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # Version 8 stops requiring the removed legacy traversable_buildings TileMapLayer.
 # Version 9 replaces live runtime-agent serialization with semantic runtime_simulation checkpoints.
 # Version 10 adds permanent inventor blueprint unlocks.
-const SAVE_VERSION: int = 10
+# Version 11 makes Kraken a paid blueprint after Ronce and Fence instead of an automatic unlock.
+const SAVE_VERSION: int = 11
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -805,9 +806,20 @@ func _migrate_save_data_to_current(data: Dictionary) -> Dictionary:
 		runtime_simulation = _legacy_runtime_agents_to_runtime_simulation(migrated)
 	migrated["runtime_simulation"] = runtime_simulation
 	migrated.erase("runtime_agents")
-	# Versions 1-9 allowed all blueprint-controlled buildables. Preserve those
-	# capabilities instead of silently locking existing players out after upgrade.
-	migrated["unlocked_blueprints"] = ["ronce", "fence", "kraken"]
+	if save_version <= 9:
+		# Versions 1-9 allowed all blueprint-controlled buildables. Preserve those
+		# capabilities instead of silently locking existing players out after upgrade.
+		migrated["unlocked_blueprints"] = ["ronce", "fence", "kraken"]
+	elif save_version == 10:
+		# Version 10 could only unlock Kraken automatically; it had no purchasable row.
+		# Keep paid Ronce/Fence state but require the new explicit Kraken purchase.
+		var migrated_blueprints: Array = []
+		var raw_blueprints: Variant = migrated.get("unlocked_blueprints", [])
+		if raw_blueprints is Array:
+			for raw_blueprint_id: Variant in (raw_blueprints as Array):
+				if str(raw_blueprint_id) != "kraken":
+					migrated_blueprints.append(raw_blueprint_id)
+			migrated["unlocked_blueprints"] = migrated_blueprints
 	migrated["version"] = SAVE_VERSION
 	return migrated
 

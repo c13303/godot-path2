@@ -26,7 +26,7 @@ const DIRECTION_UP: Vector2i = Vector2i(0, -1)
 # The build cursor / preview may never sit more than this many tiles from the player on
 # either axis (Chebyshev range). Both the mouse target and the accumulated pad offset are
 # clamped to it so the preview always stays within reach of the player.
-const MAX_BUILD_CURSOR_TILES_FROM_PLAYER: int = 10
+const MAX_BUILD_CURSOR_TILES_FROM_PLAYER: int = 20
 const FENCE_ITEM_ID: String = "fence"
 # Visible coverage tile drawn over each of a house's six presence cells in the preview (the same
 # player-wall atlas the wall build uses), tinted valid/invalid by the shared previewbuild.modulate.

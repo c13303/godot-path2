@@ -3,7 +3,7 @@ class_name BlueprintUnlockService
 
 ## Owns permanent blueprint unlocks. Definitions are intentionally kept as small,
 ## explicit data: paid blueprints can have prerequisites, while automatic blueprints
-## unlock as soon as all of their prerequisites are owned.
+## can unlock as soon as all of their prerequisites are owned.
 
 const BLUEPRINT_DEFS: Dictionary = {
 	&"ronce": {
@@ -22,14 +22,14 @@ const BLUEPRINT_DEFS: Dictionary = {
 	},
 	&"kraken": {
 		"build_item_id": &"kraken",
-		"currency": &"",
-		"price": 0,
+		"currency": &"money",
+		"price": 10,
 		"prerequisites": [&"ronce", &"fence"],
-		"automatic": true,
+		"automatic": false,
 	},
 }
 
-const PAID_BLUEPRINT_ORDER: Array[StringName] = [&"ronce", &"fence"]
+const PAID_BLUEPRINT_ORDER: Array[StringName] = [&"ronce", &"fence", &"kraken"]
 
 var _progression: Node
 var _unlocked_ids: Dictionary = {}
