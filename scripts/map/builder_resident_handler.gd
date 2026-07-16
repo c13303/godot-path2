@@ -75,8 +75,12 @@ func on_house_removing(snapshot: HouseManager.HouseSnapshot) -> void:
 	if _builder == null or snapshot == null:
 		return
 	if snapshot.resident_role == HouseManager.RESIDENT_ROLE_FUNDAMENTAL_BUILDER:
-		_builder.clear_fundamental_builder_house_assignment()
+		if not _builder.fundamental_builder_active() and GameState.is_night and snapshot.completed:
+			_builder.spawn_fundamental_builder_for_house(snapshot.id, snapshot.entrance_cell, true)
+		_builder.retire_fundamental_builder()
 	elif snapshot.resident_type == RESIDENT_BUILDER:
+		if not _builder.active_house_builder_ids().has(snapshot.id) and GameState.is_night and snapshot.completed:
+			_builder.spawn_builder_for_house(snapshot.id, snapshot.entrance_cell, true)
 		_builder.remove_builder_for_house(snapshot.id)
 
 

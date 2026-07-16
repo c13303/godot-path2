@@ -4,7 +4,7 @@ class_name HouseResidentController
 ## Reusable lifecycle for one ordinary one-house/one-resident villager (the seed merchant, the
 ## future Inventor, ...). It owns everything a normal villager shares:
 ##   * one resident reconstructed from one completed house (never serialized independently);
-##   * the walk-in from the shared town entrance to the house entrance;
+##   * first-time walk-in from the shared town entrance and dawn emergence from the house;
 ##   * association with that house;
 ##   * night return-home / departure;
 ##   * house-destruction evacuation toward the shared exit;
@@ -129,6 +129,8 @@ func on_house_removing(snapshot: HouseManager.HouseSnapshot) -> void:
 		return
 	if _resident_house_id == snapshot.id:
 		evacuate()
+	elif GameState.is_night and snapshot.completed and spawn_for_house(snapshot.id, snapshot.entrance_cell, true):
+		evacuate()
 
 
 func on_agent_removed(agent: Node2D) -> void:
@@ -157,11 +159,12 @@ func clear(free_agents: bool) -> void:
 # Spawn / reconcile.
 # ---------------------------------------------------------------------------
 
-## Spawns the resident for its house: walks in from the shared town entrance to the exact idle
-## tile below the house entrance and stamps canonical identity. Returns false on any failure. Refuses to
-## create a duplicate while a resident is already active.
-func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
-	if GameState.is_night or _visitor.is_active():
+## Spawns the resident for its house and stamps canonical identity. At dawn the resident emerges
+## at the exact idle tile below its own house entrance; a first-time daytime resident still walks
+## in from the shared town entrance. Returns false on any failure and refuses to create a duplicate
+## while a resident is already active.
+func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_destruction_escape: bool = false) -> bool:
+	if (GameState.is_night and not for_house_destruction_escape) or _visitor.is_active():
 		return false
 	if entrance_cell == INVALID_CELL:
 		return false
@@ -170,12 +173,13 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
 		push_warning("HouseResidentController: %s house idle cell %s is not walkable; resident not spawned." % [
 			String(_config.resident_type), idle_cell])
 		return false
-	var source_cell: Vector2i = _manager.named_authored_spot_cell(ENTER_MARKER_ID)
+	var emerges_from_house: bool = GameState.is_dawn_phase or for_house_destruction_escape
+	var source_cell: Vector2i = idle_cell if emerges_from_house else _manager.named_authored_spot_cell(ENTER_MARKER_ID)
 	if source_cell == INVALID_CELL:
 		push_warning("HouseResidentController: %s cannot enter; required marker '%s' is missing." % [
 			String(_config.resident_type), String(ENTER_MARKER_ID)])
 		return false
-	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
+	var spawn_cell: Vector2i = idle_cell if emerges_from_house else _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		push_warning("HouseResidentController: %s cannot enter; no free spawn cell near %s." % [
 			String(_config.resident_type), str(source_cell)])
@@ -197,7 +201,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i) -> bool:
 	_returning_home = false
 	_evacuating = false
 	_stamp_identity()
-	if _config.role != null:
+	if _config.role != null and not for_house_destruction_escape:
 		_config.role.on_spawned(self)
 	return true
 

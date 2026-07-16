@@ -105,19 +105,20 @@ func start_pending_departures() -> void:
 		visitor.start_pending_leave_if_needed()
 
 
-func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> int:
-	if GameState.is_night or house_id == &"" or _builder_id_by_house_id.has(house_id):
+func spawn_builder_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_destruction_escape: bool = false) -> int:
+	if (GameState.is_night and not for_house_destruction_escape) or house_id == &"" or _builder_id_by_house_id.has(house_id):
 		return -1
-	var source_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
+	var idle_cell: Vector2i = entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET
+	var emerges_from_house: bool = GameState.is_dawn_phase or for_house_destruction_escape
+	var source_cell: Vector2i = idle_cell if emerges_from_house else _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
 	if source_cell == INVALID_CELL:
 		push_warning("BuilderController: house-bound Builder cannot enter; required marker '%s' is missing." % String(FUNDAMENTAL_BUILDER_IN_ID))
 		return -1
-	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
+	var spawn_cell: Vector2i = idle_cell if emerges_from_house else _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		push_warning("BuilderController: house-bound Builder cannot enter; no free spawn cell near %s." % str(source_cell))
 		return -1
-	var idle_cell: Vector2i = entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET
-	var target_cell: Vector2i = _find_claim_near_anchor(idle_cell, null, spawn_cell, true, 0)
+	var target_cell: Vector2i = idle_cell if emerges_from_house else _find_claim_near_anchor(idle_cell, null, spawn_cell, true, 0)
 	if target_cell == INVALID_CELL:
 		push_warning("BuilderController: exact idle cell below house entrance %s is unavailable." % str(entrance_cell))
 		return -1
@@ -155,10 +156,10 @@ func spawn_fundamental_builder() -> int:
 	return _spawn_fundamental_builder_at_anchor(&"", spot_cell, false)
 
 
-func spawn_fundamental_builder_for_house(house_id: StringName, entrance_cell: Vector2i) -> int:
+func spawn_fundamental_builder_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_destruction_escape: bool = false) -> int:
 	if house_id == &"":
 		return spawn_fundamental_builder()
-	return _spawn_fundamental_builder_at_anchor(house_id, entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET, true)
+	return _spawn_fundamental_builder_at_anchor(house_id, entrance_cell + HouseManager.RESIDENT_IDLE_OFFSET, true, for_house_destruction_escape)
 
 
 func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Vector2i) -> void:
@@ -198,20 +199,21 @@ func clear_fundamental_builder_house_assignment() -> void:
 		return_builder_to_idle_area(_fundamental_builder_id)
 
 
-func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, exact_anchor: bool) -> int:
-	if GameState.is_night or _fundamental_builder_id >= 0:
+func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, exact_anchor: bool, for_house_destruction_escape: bool = false) -> int:
+	if (GameState.is_night and not for_house_destruction_escape) or _fundamental_builder_id >= 0:
 		return -1
-	var source_cell: Vector2i = _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
+	var emerges_from_house: bool = exact_anchor and (GameState.is_dawn_phase or for_house_destruction_escape)
+	var source_cell: Vector2i = anchor_cell if emerges_from_house else _named_spot_cell(FUNDAMENTAL_BUILDER_IN_ID)
 	if source_cell == INVALID_CELL or anchor_cell == INVALID_CELL:
 		push_warning("BuilderController: fundamental Builder markers are missing.")
 		return -1
-	var spawn_cell: Vector2i = _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
+	var spawn_cell: Vector2i = anchor_cell if emerges_from_house else _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		return -1
 	var target_cell: Vector2i = anchor_cell
-	if exact_anchor:
+	if exact_anchor and not emerges_from_house:
 		target_cell = _find_claim_near_anchor(anchor_cell, null, spawn_cell, true, 0)
-	else:
+	elif not exact_anchor:
 		target_cell = _find_claim_near_anchor(anchor_cell, null, spawn_cell, true)
 	if target_cell == INVALID_CELL:
 		return -1
