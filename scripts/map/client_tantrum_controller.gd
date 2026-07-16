@@ -134,7 +134,7 @@ func start_for_client(client: Node2D) -> bool:
 		sprite.frame = CLIENT_FRAME_TANTRUM_SOUTH
 		sprite.flip_h = false
 		base_offset = sprite.offset
-	# Angry state makes the client damageable (character._is_damage_immune_agent).
+	# Angry state makes the client damageable (character._is_currently_damageable).
 	if client.has_method("start_angry"):
 		client.call("start_angry")
 	if client.has_method("queue_redraw"):

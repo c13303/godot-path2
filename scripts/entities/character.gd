@@ -34,6 +34,11 @@ var _velocity_len: float = 0.0
 var _eating_timer: float = 0.0
 var status: String = ""
 @export var max_health: int = 100
+# Invincible agents never lose HP and never show a health bar. On by default so
+# any new agent kind is safe; only monsters/bigmonsters clear it (see
+# AgentDefinitionService.apply_monster_data). A client mid-tantrum is the one
+# exception that is still damageable — see _is_currently_damageable().
+@export var invincible: bool = true
 @export var drownable: bool = true
 @export_range(0.0, 60.0, 0.1, "or_greater") var drowning: float = 1.0
 @export_range(0.01, 10.0, 0.01, "or_greater") var drowning_update_freq: float = 0.1
@@ -130,7 +135,7 @@ func take_damage(amount: int) -> bool:
 		_flash_time_left = FLASH_DURATION
 		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 		return false
-	if _is_damage_immune_agent() and status != "drowning":
+	if not _is_currently_damageable():
 		_flash_time_left = FLASH_DURATION
 		_monster_sprite.set_instance_shader_parameter("flash_amount", 1.0)
 		return false
@@ -165,7 +170,7 @@ func _draw() -> void:
 
 
 func should_show_health_bar() -> bool:
-	return max_health > 0 and health < max_health
+	return _is_currently_damageable() and max_health > 0 and health < max_health
 
 
 func _health_bar_position() -> Vector2:
@@ -377,13 +382,11 @@ func _is_client_agent() -> bool:
 	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client"
 
 
-func _is_damage_immune_agent() -> bool:
-	if not has_meta("agent_kind"):
-		return false
-	if status == "angry":
-		return false
-	var agent_kind: StringName = StringName(str(get_meta("agent_kind")))
-	return agent_kind == &"client" or is_in_group(AgentDefinitionService.VILLAGERS_GROUP)
+# An invincible agent never loses HP, with one exception: a client mid-tantrum
+# ("angry") is temporarily damageable so a hostile crowd can be fought. This single
+# predicate drives both take_damage and health-bar visibility so they never disagree.
+func _is_currently_damageable() -> bool:
+	return not invincible or status == "angry"
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

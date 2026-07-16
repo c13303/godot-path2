@@ -62,6 +62,9 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	# live pool.
 	agent.set("max_health", data.max_health)
 	agent.set("health", data.max_health)
+	# Monsters (basic + bigmonster) are the only damageable agents; every other
+	# agent kind keeps the invincible default from character.gd.
+	agent.set("invincible", false)
 	agent.set("drownable", data.drownable)
 	agent.set_meta("monster_speed_scale", data.speed_scale)
 	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
