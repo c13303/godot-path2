@@ -5,7 +5,7 @@ class_name SeedMerchantController
 ## night return, evacuation, repath, removal, identity) lives in the HouseResidentController
 ## this role is attached to. This role owns:
 ##   * the seed-merchant shop phase flag (GameState.seed_merchant_phase);
-##   * freezing/unfreezing the merchant while the player is within interaction range;
+##   * tracking whether the merchant is held for interaction while the player is in range;
 ##   * the afternoon "finishing the watering still ends the day" recheck and the
 ##     purchase-made phase clear.
 ## Dialog/shop UI + purchases live in MerchantDialogController / game_ui.
@@ -14,8 +14,9 @@ const INTERACT_RADIUS_TILES: int = 2
 
 var _manager: BuildingManager = null
 var _resident: HouseResidentController = null
-# True while the merchant is frozen because the player is within interaction range. Mirrors the
-# native per-agent pause; cleared when the player walks away or the merchant starts leaving.
+# True while the merchant is held for interaction because the player is within range.
+# It does not pause native movement; parked residents already have no path, and
+# keeping native contact active lets the player push the merchant like any villager.
 var _paused: bool = false
 
 
@@ -54,20 +55,21 @@ func on_cleared() -> void:
 
 
 func process(resident: HouseResidentController) -> void:
-	# Once the merchant is leaving it must never re-pause: night has already started, and walking
-	# back into the departing merchant should not freeze it.
+	# Once the merchant is leaving it must never re-enter the interaction hold: night has already
+	# started, and walking back into the departing merchant should not reopen the phase.
 	if not resident.is_active() or resident.is_leaving():
 		return
 	var near: bool = resident.is_player_near(INTERACT_RADIUS_TILES)
 	if near and not GameState.is_night and not GameState.is_seed_merchant_phase:
 		GameState.set_seed_merchant_phase(true)
-	# Keep walking to the spot even when the player is close; the merchant only freezes for the
-	# player once it has parked. The player can still open the shop with interact during the walk-in.
+	# Keep walking to the spot even when the player is close; the merchant only enters the
+	# interaction hold once it has parked. The player can still open the shop with interact during
+	# the walk-in.
 	if not resident.has_reached_idle_spot():
 		return
 	if near == _paused:
 		return
-	_set_paused(resident, near)
+	_set_interaction_hold(near)
 
 
 func process_phase(resident: HouseResidentController) -> void:
@@ -108,15 +110,10 @@ func is_paused_agent(agent: Node2D) -> bool:
 # Internals.
 # ---------------------------------------------------------------------------
 
-func _unpause(resident: HouseResidentController) -> void:
+func _unpause(_resident: HouseResidentController) -> void:
 	if _paused:
-		_set_paused(resident, false)
+		_set_interaction_hold(false)
 
 
-func _set_paused(resident: HouseResidentController, value: bool) -> void:
+func _set_interaction_hold(value: bool) -> void:
 	_paused = value
-	var agent: Node2D = resident.agent_node()
-	var nav_id: int = int(agent.get("nav_id")) if agent != null else -1
-	var agent_manager: Node = _manager.get_agent_manager() if _manager != null else null
-	if nav_id >= 0 and agent_manager != null and agent_manager.has_method("set_agent_paused"):
-		agent_manager.call("set_agent_paused", nav_id, value)

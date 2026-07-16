@@ -24,6 +24,10 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ENTER_MARKER_ID: StringName = &"fundamental_builder_in"
 const EXIT_MARKER_ID: StringName = &"fundamental_builder_out"
 const HOUSE_RESIDENTS_GROUP: StringName = &"house_residents"
+const IDLE_HOME_CHECK_INTERVAL_SECONDS: float = 0.5
+const IDLE_HOME_DISPLACEMENT_GRACE_SECONDS: float = 1.0
+const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
+const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.45
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null
@@ -33,6 +37,10 @@ var _resident_house_id: StringName = &""
 var _home_entrance_cell: Vector2i = INVALID_CELL
 var _returning_home: bool = false
 var _evacuating: bool = false
+var _idle_home_check_elapsed: float = 0.0
+var _idle_displacement_seconds: float = 0.0
+var _idle_return_retry_cooldown: float = 0.0
+var _idle_return_pending: bool = false
 
 
 func setup(manager: BuildingManager, house_manager: HouseManager, config: HouseResidentConfig) -> void:
@@ -68,6 +76,7 @@ func process(_delta: float) -> void:
 	if _config.role != null:
 		_config.role.process(self)
 	_process_arrival()
+	_process_idle_home_correction(_delta)
 
 
 func process_phase(_delta: float) -> void:
@@ -259,8 +268,70 @@ func _process_arrival() -> void:
 	# arrival at the destination retires the resident.
 	if not _visitor.is_active():
 		return
-	if _visitor.process_arrival() and (_returning_home or _evacuating):
+	if not _visitor.process_arrival():
+		return
+	if _returning_home or _evacuating:
 		clear(true)
+	else:
+		_clear_idle_return_state()
+
+
+func _process_idle_home_correction(delta: float) -> void:
+	if delta <= 0.0 or GameState.is_night:
+		return
+	if not _eligible_for_idle_home_correction():
+		_clear_idle_return_state()
+		return
+	_idle_home_check_elapsed += delta
+	if _idle_home_check_elapsed < IDLE_HOME_CHECK_INTERVAL_SECONDS:
+		return
+	var elapsed: float = _idle_home_check_elapsed
+	_idle_home_check_elapsed = 0.0
+	if _idle_return_retry_cooldown > 0.0:
+		_idle_return_retry_cooldown = maxf(0.0, _idle_return_retry_cooldown - elapsed)
+		return
+	if _idle_return_pending:
+		_request_idle_home_return()
+		return
+	if not _is_idle_resident_meaningfully_displaced():
+		_idle_displacement_seconds = 0.0
+		return
+	_idle_displacement_seconds += elapsed
+	if _idle_displacement_seconds >= IDLE_HOME_DISPLACEMENT_GRACE_SECONDS:
+		_request_idle_home_return()
+
+
+func _eligible_for_idle_home_correction() -> bool:
+	if _returning_home or _evacuating:
+		return false
+	if _home_entrance_cell == INVALID_CELL:
+		return false
+	if not _visitor.is_active() or _visitor.is_leaving() or not _visitor.is_waiting():
+		return false
+	return true
+
+
+func _is_idle_resident_meaningfully_displaced() -> bool:
+	if _visitor.target_cell() == INVALID_CELL:
+		return false
+	var tile_size: Vector2 = _manager.tile_size()
+	var threshold: float = maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR
+	return _visitor.get_agent_world_position().distance_to(_visitor.target_world_position()) > threshold
+
+
+func _request_idle_home_return() -> void:
+	_idle_displacement_seconds = 0.0
+	if _visitor.repath_to_target(_home_entrance_cell):
+		_clear_idle_return_state()
+		return
+	_idle_return_pending = true
+	_idle_return_retry_cooldown = IDLE_HOME_RETRY_COOLDOWN_SECONDS
+
+
+func _clear_idle_return_state() -> void:
+	_idle_displacement_seconds = 0.0
+	_idle_return_retry_cooldown = 0.0
+	_idle_return_pending = false
 
 
 ## Canonical house-resident identity so generic systems can tell an agent is house-owned, which
@@ -280,3 +351,5 @@ func _reset_state() -> void:
 	_home_entrance_cell = INVALID_CELL
 	_returning_home = false
 	_evacuating = false
+	_idle_home_check_elapsed = 0.0
+	_clear_idle_return_state()
