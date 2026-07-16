@@ -543,7 +543,6 @@ const ITEM_DEFS: Dictionary = {
 		"isWall": true,
 		"blocks_movement": true,
 		"blocks_projectiles": true,
-		"requires_grass_green_floor": true,
 		"pad_skip_preview": true,
 		"runtime_id": "rose_shop_counter",
 		# Bought directly from the hammer build picker with its catalog currency, paid

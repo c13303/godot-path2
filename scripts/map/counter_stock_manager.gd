@@ -27,7 +27,6 @@ const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
-const ROSE_ITEM_ID: String = "rose"
 # Total duration of the nightfall "counters emptying" animation. The per-rose tick is
 # derived from this so the whole sequence always finishes in exactly this many seconds.
 const NIGHTFALL_DISSOLVE_SECONDS: float = 3.0
@@ -88,7 +87,7 @@ func register_counter(counter_cell: Vector2i) -> void:
 		sprite.global_position = counter_world + _bouquet_offset(index)
 		sprite.z_index = _bouquet_z_index(counter_world, index)
 		sprite.visible = false
-		_resolve_pile_parent().add_child(sprite)
+		_attach_pile_sprite(sprite)
 		nodes.append(sprite)
 	_pile_nodes_by_cell[counter_cell] = nodes
 	_sync_pile_visibility(counter_cell, stock(counter_cell))
@@ -441,6 +440,24 @@ func clear_all_piles() -> void:
 	_pile_nodes_by_cell.clear()
 
 
+func _attach_pile_sprite(sprite: Sprite2D) -> void:
+	var parent: Node = _resolve_pile_parent()
+	if parent == null or not is_instance_valid(parent):
+		sprite.queue_free()
+		return
+	call_deferred("_add_pile_sprite_to_parent", parent, sprite)
+
+
+func _add_pile_sprite_to_parent(parent: Node, sprite: Sprite2D) -> void:
+	if parent == null or sprite == null:
+		return
+	if not is_instance_valid(parent) or not is_instance_valid(sprite):
+		return
+	if sprite.is_queued_for_deletion() or sprite.get_parent() != null:
+		return
+	parent.add_child(sprite)
+
+
 # Every counter is emptied (triggered when the last client of the sale leaves). The
 # logical stock drops to zero immediately while persistent bouquet slots hide in
 # reverse fill order for a visual "counters emptying" effect.
@@ -477,21 +494,7 @@ func _pop_last_bouquet_slots(piles: Array) -> void:
 			continue
 		var sprite: Sprite2D = nodes.pop_back() as Sprite2D
 		if sprite != null and is_instance_valid(sprite):
-			_refund_unsold_rose_seed(sprite)
 			sprite.visible = false
-
-
-func _refund_unsold_rose_seed(rose_node: Node2D) -> void:
-	if rose_node == null:
-		return
-	var scene: Node = get_tree().current_scene
-	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui != null and game_ui.has_method("refund_build"):
-		game_ui.call("refund_build", ROSE_ITEM_ID, rose_node.global_position, 1)
-		return
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_seeds"):
-		progression_node.call("update_seeds", 1)
 
 
 func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:
