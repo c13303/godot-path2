@@ -191,7 +191,7 @@ const ITEM_DEFS: Dictionary = {
 	},
 	# Multi-cell player-built houses. Unlike normal placeables they are NOT routed through
 	# the generic one-cell placement path: HouseManager owns the 3x2 blocking footprint,
-	# walkable entrance, sprite snapping and durability. Both are direct gem purchases.
+	# walkable entrance, sprite snapping and durability. Both are direct bamboo purchases.
 	"house_builder": {
 		"id": "house_builder",
 		"name": "Builder House",
@@ -208,7 +208,7 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"max_health": 100,
 		"max_stack": 999,
-		"currency": &"gem",
+		"currency": &"bamboo",
 		"price": 20,
 	},
 	"house_merchant": {
@@ -231,7 +231,7 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"max_health": 100,
 		"max_stack": 999,
-		"currency": &"gem",
+		"currency": &"bamboo",
 		"price": 20,
 	},
 	# Ordinary villager house, added purely through catalog config (no central-system edits): same
@@ -257,7 +257,7 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"max_health": 100,
 		"max_stack": 999,
-		"currency": &"gem",
+		"currency": &"bamboo",
 		"price": 20,
 	},
 	"rose": {

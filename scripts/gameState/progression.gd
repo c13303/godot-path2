@@ -1356,8 +1356,8 @@ func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has
 		return
 	if phase == "afternoon":
 		var plant_manager: Node = scene.get_node_or_null("Map/PlantManager") if scene else null
-		if plant_manager != null and plant_manager.has_method("mark_build_phase_rose_dry_handled_for_current_day"):
-			plant_manager.call("mark_build_phase_rose_dry_handled_for_current_day")
+		if plant_manager != null and plant_manager.has_method("mark_rose_rot_handled_for_current_day"):
+			plant_manager.call("mark_rose_rot_handled_for_current_day")
 	GameState.restore_gameplay_phase_flags(phase)
 	var phase_state: Dictionary = _dict_from_value(raw_state)
 	if legacy_phase == "seed_merchant" and not phase_state.has("dawn_stage"):

@@ -32,13 +32,13 @@ var _buckets: Dictionary = {}
 var _hidden_visual_cells: Dictionary = {}
 var _initialized: bool = false
 var _plant_layer_flush_queued: bool = false
-var _last_build_phase_rose_dry_day: int = -1
+var _last_rose_rot_day: int = -1
 
 func _ready() -> void:
 	initialize_from_layer()
 	_connect_day_started()
 	if GameState.is_afternoon_phase:
-		_last_build_phase_rose_dry_day = _current_day_number()
+		_last_rose_rot_day = _current_day_number()
 
 func _connect_day_started() -> void:
 	var scene: Node = get_tree().current_scene
@@ -86,21 +86,21 @@ func _current_day_number() -> int:
 		return -1
 	return int(progression_node.call("get_value", &"nDays"))
 
-func _dry_roses_once_for_current_day() -> void:
+func _rot_unsold_roses_once_for_current_day() -> void:
 	var current_day: int = _current_day_number()
 	if current_day >= 0:
-		if _last_build_phase_rose_dry_day == current_day:
+		if _last_rose_rot_day == current_day:
 			return
-		_last_build_phase_rose_dry_day = current_day
-	dry_all_roses()
+		_last_rose_rot_day = current_day
+	rot_unsold_grownup_roses()
 
-func dry_roses_once_after_clients_finished() -> void:
-	_dry_roses_once_for_current_day()
+func rot_unsold_roses_once_after_clients_finished() -> void:
+	_rot_unsold_roses_once_for_current_day()
 
-func mark_build_phase_rose_dry_handled_for_current_day() -> void:
+func mark_rose_rot_handled_for_current_day() -> void:
 	var current_day: int = _current_day_number()
 	if current_day >= 0:
-		_last_build_phase_rose_dry_day = current_day
+		_last_rose_rot_day = current_day
 
 func initialize_from_layer() -> void:
 	_configure_plant_layer_depth_sorting()
@@ -233,9 +233,9 @@ func grow_green_roses() -> int:
 		_plants[cell] = plant_data
 		# Grown roses keep their watered (green) look through the night and morning;
 		# they only open into the full-bloom "rose-rose" tile once the harvest phase
-		# begins (see bloom_grownup_roses), and revert to the dry tile after the
-		# client sale finishes (see dry_all_roses), so a watered rose never appears
-		# to dry out overnight or before clients have visited.
+		# begins (see bloom_grownup_roses). Any grown rose the player leaves unsold rots
+		# into debris when the next build phase starts (see rot_unsold_grownup_roses);
+		# dry and watered roses are never touched, so watering is never lost overnight.
 		_set_rose_atlas(cell, ROSE_WET_ATLAS)
 		grown_count += 1
 	return grown_count
@@ -341,19 +341,40 @@ func _sort_cells_top_left(a: Vector2i, b: Vector2i) -> bool:
 	return a.y < b.y
 
 
-## Reverts every rose to its dry, unwatered state (dry tile, needs watering again to
-## grow). Called when a new build phase starts so the player re-waters each day; not
-## called overnight, so watered roses stay green until then.
-func dry_all_roses() -> void:
+## Rots every unsold grown rose into debris when the new build phase starts. Dry and
+## watered roses are deliberately left in their current state, so watering carried over
+## from a previous day is never lost; only mature blooms the player failed to harvest or
+## sell are turned into debris (which sheep can eat or the player can clear).
+func rot_unsold_grownup_roses() -> void:
 	if not plantz:
 		return
+	var grownup_cells: Array[Vector2i] = []
 	for raw_cell: Variant in _plants.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		if not is_rose_cell(cell):
-			continue
-		_reset_rose_to_dry(cell)
+		if is_rose_grownup(cell):
+			grownup_cells.append(cell)
+	if grownup_cells.is_empty():
+		return
+	for cell: Vector2i in grownup_cells:
+		_convert_grownup_rose_to_debris(cell)
 	_flush_plant_layer_now()
 	_queue_plant_layer_flush()
+
+
+## Turns one grown rose into a debris tile, mirroring consume_plant() but leaving the
+## layer flush to the bulk caller so a full garden pays for a single flush.
+func _convert_grownup_rose_to_debris(cell: Vector2i) -> void:
+	var source_id: int = plantz.get_cell_source_id(cell)
+	var alternative_tile: int = plantz.get_cell_alternative_tile(cell)
+	_unindex_cell(cell)
+	_emit_visual_removed(cell)
+	if source_id < 0:
+		source_id = _plant_layer_source_id()
+	if alternative_tile < 0:
+		alternative_tile = DEFAULT_ALTERNATIVE_TILE
+	if source_id >= 0:
+		plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
+	plant_removed.emit(cell)
 
 
 ## Returns one rose to its dry, unwatered state, leaving the plot itself in place.

@@ -301,7 +301,7 @@ func _complete_client_sale() -> void:
 	# before the roses-watered night gate below (there is no next night).
 	if _manager.try_finish_final_day():
 		return
-	_dry_planted_roses_after_clients()
+	_rot_unsold_roses_after_clients()
 	GameState.start_afternoon()
 	if _manager.can_start_night_after_clients():
 		_manager.request_night_after_clients()
@@ -336,10 +336,10 @@ func has_roses_available() -> bool:
 	return _roses_available()
 
 
-func _dry_planted_roses_after_clients() -> void:
+func _rot_unsold_roses_after_clients() -> void:
 	var plant_manager: Node = _manager.get_plant_manager()
-	if plant_manager != null and plant_manager.has_method("dry_roses_once_after_clients_finished"):
-		plant_manager.call("dry_roses_once_after_clients_finished")
+	if plant_manager != null and plant_manager.has_method("rot_unsold_roses_once_after_clients_finished"):
+		plant_manager.call("rot_unsold_roses_once_after_clients_finished")
 
 
 # Clients shown and spawned during day D belong to the night completed immediately
