@@ -257,7 +257,16 @@ Notes:
 Captures the root-level `bamboo` container's direct Node2D children into stable floor cells (deduplicated, sorted by Y then X) before freeing the authored level shell. The markers are editor aids only: never mutated or reparented as gameplay visuals. A level with no container yields an empty list without error.
 
 ## BuildingNavigationSyncService
-Owns generic static-world-feature terrain-speed multipliers (`set_static_terrain_speed_multiplier`) in addition to tile/placeable-derived speed. Static values join the same minimum as logical plants and every speed-carrying layer in `effective_cell_speed_multiplier`; `1.0` clears an entry. Writes the shared native terrain map, so no flow rebuild is involved.
+Owns generic static-world-feature terrain-speed multipliers (`set_static_terrain_speed_multiplier`) in addition to tile/placeable-derived speed. Static values join the same minimum as logical plants and every speed-carrying layer in `effective_cell_speed_multipliers`; an entry is dropped only once it slows nobody. Writes the shared native terrain map, so no flow rebuild is involved.
+
+Every cell carries **two** multipliers: one for all agents and one for the player. They diverge for slowdowns the player is exempt from — currently **roses and bamboo**: you are never slowed by your own crop or grove, while monsters/clients/merchants still are. Everything else (ronce, debris, fences, turrets, water) slows the player like anyone else. The rule is authored where the slowdown is:
+
+- **Tile/placeable-derived**: `"slows_player": false` on the item def, read via `PlaceableNavImpact.def_speed_multiplier` / `def_player_speed_multiplier` (single authority — both terrain-speed call sites ask it).
+- **Static world features** (no item def): each registrant passes its own `player_multiplier` to `set_static_terrain_speed_multiplier` (bamboo passes `1.0`, see `BambooHarvestController.PLAYER_TERRAIN_SPEED_MULTIPLIER`).
+
+Both values are pushed to `FlowFieldNative.set_cell_speed_multiplier(cell, multiplier, player_multiplier)`, and the native side picks per agent via `smash_class == SMASH_CLASS_PLAYER`. The player-exempt value must survive flow-field rebuilds, so `FlowFieldNative` records the pair (not just the all-agent value) and re-seeds both.
+
+Terrain speed is seeded from two places: `BuildSystem._refresh_cell_terrain_speed` (startup bulk seed — BuildSystem `_ready` runs before BuildingManager's, so it cannot use this service) and this service (runtime edits). The layer walk is duplicated between them; the slow-rule itself is not.
 
 ## Build placement
 `BuildPlacementService.is_placeable_occupied` rejects permanent world-feature cells (`BuildingManager.is_permanent_world_feature_cell`, reached from BuildSystem's resolver) before actor-displacement logic — that bypass would otherwise let most non-plant placeables skip group occupancy. Covers one-cell buildings, plants, fences, turrets, counters, every house presence cell, drag placement and both previews. Bamboo cells stay walkable.

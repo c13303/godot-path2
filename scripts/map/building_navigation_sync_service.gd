@@ -20,7 +20,8 @@ var _manager: BuildingManager
 # Terrain speed owned by permanent static world features (authored bamboo), keyed by cell.
 # These are not derived from any tile layer, so they survive layer save/restore and cannot be
 # cleared by build/removal logic. Kept generic: any permanent feature can register here, and
-# 1.0 clears an entry. Vector2i -> float.
+# 1.0 clears an entry. Vector2i -> Vector2 (x = every agent, y = the player), so a feature
+# can slow the crowd without slowing the player.
 var _static_terrain_speed_by_cell: Dictionary = {}
 
 
@@ -28,16 +29,20 @@ func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
-## Registers (or clears) a permanent world feature's speed multiplier for one cell, then
-## refreshes only that cell's effective terrain speed. A multiplier at or above 1.0 removes
-## the entry. This never rebuilds a flow field: refresh_cell_speed writes the shared native
-## terrain-speed map that every steered agent reads live.
-func set_static_terrain_speed_multiplier(cell: Vector2i, multiplier: float) -> void:
+## Registers (or clears) a permanent world feature's speed multipliers for one cell, then
+## refreshes only that cell's effective terrain speed. `multiplier` applies to every agent,
+## `player_multiplier` only to the player, so a feature can slow the crowd while leaving the
+## player at full speed (bamboo passes 1.0 there, mirroring the rose rule). The entry is
+## removed only when the cell slows nobody. This never rebuilds a flow field:
+## refresh_cell_speed writes the shared native terrain-speed map that every steered agent
+## reads live.
+func set_static_terrain_speed_multiplier(cell: Vector2i, multiplier: float, player_multiplier: float) -> void:
 	var clamped_multiplier: float = clampf(multiplier, 0.01, 1.0)
-	if clamped_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER:
+	var clamped_player_multiplier: float = clampf(player_multiplier, 0.01, 1.0)
+	if clamped_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER and clamped_player_multiplier >= DEFAULT_TERRAIN_SPEED_MULTIPLIER:
 		_static_terrain_speed_by_cell.erase(cell)
 	else:
-		_static_terrain_speed_by_cell[cell] = clamped_multiplier
+		_static_terrain_speed_by_cell[cell] = Vector2(clamped_multiplier, clamped_player_multiplier)
 	refresh_cell_speed(cell)
 
 
@@ -143,26 +148,36 @@ func refresh_cell_speed(cell: Vector2i) -> void:
 	var flow: Node = _manager.flow
 	if flow == null or not flow.has_method("set_cell_speed_multiplier"):
 		return
-	flow.call("set_cell_speed_multiplier", cell, effective_cell_speed_multiplier(cell))
+	var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
+	flow.call("set_cell_speed_multiplier", cell, multipliers.x, multipliers.y)
 
 
-func effective_cell_speed_multiplier(cell: Vector2i) -> float:
+## Effective terrain speed on a cell: x = every agent, y = the player. The two differ on
+## cells slowed only by a def that opts out of slowing the player (a rose), which the
+## player then walks at full speed. Both are the minimum over every speed-carrying source
+## on the cell, so the slowest thing that applies to that reader always wins.
+func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 	var plantz: TileMapLayer = _manager.plantz
 	var traversable_buildings: TileMapLayer = _manager.traversable_buildings
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	# Permanent static features join the same minimum as logical plants and every speed-
-	# carrying layer, so the slowest thing on the cell always wins.
+	# carrying layer, so the slowest thing on the cell always wins. They carry no item def,
+	# so each registrant states its own player rule when registering (authored bamboo slows
+	# every agent but not the player).
 	if _static_terrain_speed_by_cell.has(cell):
-		speed_multiplier = minf(speed_multiplier, float(_static_terrain_speed_by_cell[cell]))
+		var static_multipliers: Vector2 = _static_terrain_speed_by_cell[cell] as Vector2
+		speed_multiplier = minf(speed_multiplier, static_multipliers.x)
+		player_speed_multiplier = minf(player_speed_multiplier, static_multipliers.y)
 	var plant_manager: Node = _manager.plant_manager
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
 		if logical_plant_item_id != "":
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
-			var logical_plant_multiplier: float = clampf(float(logical_plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, logical_plant_multiplier)
+			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
+			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
@@ -170,6 +185,12 @@ func effective_cell_speed_multiplier(cell: Vector2i) -> float:
 		if layer_item_id == "":
 			continue
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
-		var layer_multiplier: float = clampf(float(layer_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-		speed_multiplier = minf(speed_multiplier, layer_multiplier)
-	return speed_multiplier
+		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
+		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+	return Vector2(speed_multiplier, player_speed_multiplier)
+
+
+## All-agent terrain speed on a cell. Kept for the nav-speed telemetry / BuildingManager
+## façade, which report what the crowd walks at.
+func effective_cell_speed_multiplier(cell: Vector2i) -> float:
+	return effective_cell_speed_multipliers(cell).x

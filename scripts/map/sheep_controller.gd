@@ -399,7 +399,8 @@ func _upload_water_speed_multipliers() -> void:
 	var multiplier: float = clampf(watersources.player_slowdown, 0.01, 1.0)
 	for raw_cell: Variant in watersources.get_used_cells():
 		var cell: Vector2i = raw_cell as Vector2i
-		flow.call("set_cell_speed_multiplier", cell, multiplier)
+		# Water slows the player exactly like every other agent, so both multipliers match.
+		flow.call("set_cell_speed_multiplier", cell, multiplier, multiplier)
 
 
 func _find_sheep_marker() -> Node2D:

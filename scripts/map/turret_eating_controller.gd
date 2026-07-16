@@ -35,7 +35,9 @@ func clear_agent(nav_id: int) -> void:
 
 # Single-agent turret-overlap check, invoked by AgentTileInteractionController when
 # an agent (re)enters a relevant cell. Skip while garden-eating, turret-eating or
-# drowning, then consume only turrets whose TurretData allows monster eating.
+# drowning, then consume the turret: villagers crush every turret they walk over, while
+# monsters only devour the ones whose TurretData allows monster eating.
+# Sheep never reach this method (AgentTileInteractionController filters them out).
 # Returns true when a turret was actually consumed.
 func evaluate_agent(agent: Node2D) -> bool:
 	if agent == null or not is_instance_valid(agent):
@@ -55,18 +57,23 @@ func evaluate_agent(agent: Node2D) -> bool:
 	if turret_data == null:
 		return false
 	var agent_kind: StringName = _manager._agent_kind(agent)
-	if agent_kind == SPAWNER_KIND_BUILDER:
-		return false
-	if agent_kind != SPAWNER_KIND_CLIENT and agent_kind != SPAWNER_KIND_MERCHANT and not turret_data.eatable_by_monsters:
+	if not _is_villager_kind(agent_kind) and not turret_data.eatable_by_monsters:
 		return false
 	return _consume_turret(agent, agent_cell, agent_kind)
+
+
+# Villagers are the people agents: they crush placeables by walking over them rather than
+# devouring them, so they take the instant-destroy path in _consume_turret.
+func _is_villager_kind(agent_kind: StringName) -> bool:
+	return agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT or agent_kind == SPAWNER_KIND_BUILDER
 
 
 func _consume_turret(agent: Node2D, turret_cell: Vector2i, agent_kind: StringName) -> bool:
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
 		return false
-	if agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT:
+	# Villagers crush and walk on: no eating pause, no suspend/resume machinery.
+	if _is_villager_kind(agent_kind):
 		_manager._leave_turret_debris(turret_cell)
 		_manager._remove_turret_cell(turret_cell)
 		Sfx.play_sound(&"crunsh")

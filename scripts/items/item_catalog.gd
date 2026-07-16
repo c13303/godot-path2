@@ -238,11 +238,13 @@ const ITEM_DEFS: Dictionary = {
 		"blocks_movement": false,
 		"blocks_projectiles": false,
 		"runtime_id": "rose",
-		# Roses slow any agent crossing the cell to 50% speed (player included). Applied
-		# via the shared per-cell terrain multiplier, so it reaches every native agent
-		# through effective_cell_speed_multiplier. A creature that eats/destroys the rose
-		# removes it, which clears the slow.
+		# Roses slow any agent crossing the cell to 50% speed, EXCEPT the player: you are
+		# never slowed by your own crop ("slows_player": false). Applied via the shared
+		# per-cell terrain multiplier, so it reaches every native agent through
+		# effective_cell_speed_multipliers. A creature that eats/destroys the rose removes
+		# it, which clears the slow.
 		"speed_multiplier": 0.5,
+		"slows_player": false,
 		"max_stack": 999,
 	},
 	"debris": {

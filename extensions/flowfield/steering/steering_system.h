@@ -95,14 +95,21 @@ namespace ffcore
 
         // Shared per-cell terrain speed modifiers (single source of truth for movement
         // speed). Keyed by ABSOLUTE tilemap cell. The core knows nothing about what slows a
-        // cell (turret, ronce, fence, debris, ...): it only stores a generic 0.01..1.0
-        // multiplier and applies it to every agent, independent of which Flow Field the
+        // cell (turret, ronce, fence, debris, ...): it only stores generic 0.01..1.0
+        // multipliers and applies them to every agent, independent of which Flow Field the
         // agent steers on. A live edit is therefore visible immediately to all active,
         // queued and future fields, and a reset to 1.0 clears the slowdown at once. Missing
         // key == 1.0 (full speed).
-        void set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier);
+        //
+        // Two multipliers per cell: `all` applies to every agent, `player` only to the
+        // player (smash_class == SMASH_CLASS_PLAYER). They differ when a cell is slowed by
+        // something the player walks through freely (roses: the player is never slowed by
+        // their own crop), so the game side resolves "who does this slow" and the core just
+        // picks the right stored value. player >= all in practice, but nothing here relies
+        // on that.
+        void set_terrain_speed_multiplier(const Vec2i &abs_cell, double multiplier, double player_multiplier);
         void clear_terrain_speed_multipliers();
-        double terrain_speed_multiplier_at(const Vec2i &abs_cell) const;
+        double terrain_speed_multiplier_at(const Vec2i &abs_cell, bool for_player) const;
 
         void set_agent_manager(AgentManager *m) { agent_manager = m; }
 
@@ -294,7 +301,7 @@ namespace ffcore
             }
         };
         // Absolute-cell -> speed multiplier (<1.0). Only slowed cells are stored.
-        std::unordered_map<Vec2i, double, Vec2iKeyHash> terrain_speed_by_cell;
+        std::unordered_map<Vec2i, TerrainSpeed, Vec2iKeyHash> terrain_speed_by_cell;
 
         FlowField *default_flow = nullptr;
         SpatialGrid *grid = nullptr;

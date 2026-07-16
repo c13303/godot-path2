@@ -82,6 +82,25 @@ static func is_speed_only(impact: Impact, fences_block_navigation: bool) -> bool
 	return false
 
 
+# Speed multiplier this def imposes on a regular agent (monster / client / merchant /
+# sheep). 1.0 when the def carries no slowdown.
+static func def_speed_multiplier(item_def: Dictionary) -> float:
+	if item_def.is_empty() or not item_def.has("speed_multiplier"):
+		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	return clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
+
+
+# Speed multiplier this def imposes on the PLAYER. Defs opting out with
+# "slows_player": false (roses: the player is never slowed by their own crop) impose
+# nothing on the player while still slowing every other agent. Everything else
+# (ronce, debris, fences, turrets, water, bamboo) slows the player like anyone else.
+# Single authority for the rule: both terrain-speed call sites ask this.
+static func def_player_speed_multiplier(item_def: Dictionary) -> float:
+	if not bool(item_def.get("slows_player", true)):
+		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	return def_speed_multiplier(item_def)
+
+
 static func impact_name(impact: Impact) -> String:
 	match impact:
 		Impact.NONE:

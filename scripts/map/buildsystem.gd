@@ -504,46 +504,34 @@ func _sync_terrain_speed_cells() -> void:
 			var cell: Vector2i = raw_cell as Vector2i
 			_refresh_cell_terrain_speed(cell)
 
+# Startup terrain-speed seed for one cell. Pushes both the all-agent and the player
+# multiplier (a rose slows every agent but never the player -- see
+# PlaceableNavImpact.def_player_speed_multiplier). This walks the layers itself rather
+# than reusing BuildingNavigationSyncService: BuildSystem._ready() runs before
+# BuildingManager's (it is the earlier sibling under Map), so the service does not exist
+# yet at seed time. The "who does a def slow" rule is shared, only the walk is duplicated.
 func _refresh_cell_terrain_speed(cell: Vector2i) -> void:
 	var ff: Object = _resolve_flow_field()
 	if ff == null or not ff.has_method("set_cell_speed_multiplier"):
 		return
 	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
 		if logical_plant_item_id != "":
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
-			var logical_plant_speed_multiplier: float = clampf(float(logical_plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, logical_plant_speed_multiplier)
-	if plantz != null and plantz.get_cell_source_id(cell) >= 0:
-		var plant_atlas_coords: Vector2i = plantz.get_cell_atlas_coords(cell)
-		var plant_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(plantz.name), plant_atlas_coords)
-		if plant_item_id != "":
-			var plant_item_def: Dictionary = ItemCatalog.get_item_def(plant_item_id)
-			var plant_speed_multiplier: float = clampf(float(plant_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, plant_speed_multiplier)
-	if traversable_buildings != null and traversable_buildings.get_cell_source_id(cell) >= 0:
-		var atlas_coords: Vector2i = traversable_buildings.get_cell_atlas_coords(cell)
-		var item_id: String = ItemCatalog.get_placeable_id_for_tile(str(traversable_buildings.name), atlas_coords)
-		if item_id != "":
-			var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-			var traversable_speed_multiplier: float = clampf(float(item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, traversable_speed_multiplier)
-	if blocking_buildings != null and blocking_buildings.get_cell_source_id(cell) >= 0:
-		var blocking_atlas_coords: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
-		var blocking_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), blocking_atlas_coords)
-		if blocking_item_id != "":
-			var blocking_item_def: Dictionary = ItemCatalog.get_item_def(blocking_item_id)
-			var blocking_speed_multiplier: float = clampf(float(blocking_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, blocking_speed_multiplier)
-	if fences != null and fences.get_cell_source_id(cell) >= 0:
-		var fence_atlas_coords: Vector2i = fences.get_cell_atlas_coords(cell)
-		var fence_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(fences.name), fence_atlas_coords)
-		if fence_item_id != "":
-			var fence_item_def: Dictionary = ItemCatalog.get_item_def(fence_item_id)
-			var fence_speed_multiplier: float = clampf(float(fence_item_def.get("speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER)), 0.01, 1.0)
-			speed_multiplier = minf(speed_multiplier, fence_speed_multiplier)
-	ff.call("set_cell_speed_multiplier", cell, speed_multiplier)
+			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
+			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
+	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
+		if layer == null or layer.get_cell_source_id(cell) < 0:
+			continue
+		var layer_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
+		if layer_item_id == "":
+			continue
+		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
+		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
+		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+	ff.call("set_cell_speed_multiplier", cell, speed_multiplier, player_speed_multiplier)
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
 	var touched: Dictionary = {}

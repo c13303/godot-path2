@@ -23,6 +23,9 @@ const HARVEST_AMOUNT: int = 5
 ## registered once per cell at setup and never touched again, so maturity changes can never
 ## dirty navigation.
 const TERRAIN_SPEED_MULTIPLIER: float = 0.5
+## Bamboo never slows the PLAYER, only the agents crossing it (same rule as roses, see the
+## rose's "slows_player" in ItemCatalog): you walk your own grove at full speed.
+const PLAYER_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 
 
 ## One authored bamboo. `world_position` is cached because authored cells never move.
@@ -149,12 +152,13 @@ func _create_visual(record: BambooRecord) -> BambooPlantVisual:
 
 
 ## Registers the permanent slowdown once. This writes the shared native terrain-speed map,
-## which every native-steered agent (player included) reads live — no flow rebuild, no route
-## invalidation, no garden topology work, and no per-species branch.
+## which every native-steered agent reads live — no flow rebuild, no route invalidation, no
+## garden topology work, and no per-species branch. The player is exempt (see
+## PLAYER_TERRAIN_SPEED_MULTIPLIER).
 func _register_terrain_slowdown(cell: Vector2i) -> void:
 	if _navigation_sync == null:
 		return
-	_navigation_sync.set_static_terrain_speed_multiplier(cell, TERRAIN_SPEED_MULTIPLIER)
+	_navigation_sync.set_static_terrain_speed_multiplier(cell, TERRAIN_SPEED_MULTIPLIER, PLAYER_TERRAIN_SPEED_MULTIPLIER)
 
 
 func _cell_center_world(cell: Vector2i) -> Vector2:

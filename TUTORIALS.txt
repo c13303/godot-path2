@@ -126,13 +126,19 @@ rose shortage -> clients turn hostile (PERSISTENT red alert, shows count)
     = "Pénurie de rose : des clients sont enragés" / "Rose shortage: clients are enraged"
                                                             [tutorial.tantrum]
 
-a client / merchant / builder destroys a plant, pasteque or turret by walking on it
+a villager (client / merchant / builder) crushes anything by walking on it
     = "Les gens écrasent vos plantes !" / "People are trampling your plants!"
                                                             [tutorial.people_crush_plants]
     (transient 3s alert. Pops once per burst: further crushes are ignored while it is
      still showing, and it can pop again after it vanishes. Skipped entirely while any
      other alert holds the label, so it never hides the persistent tantrum alert.
-     Monsters crushing plants never raise it — that is normal night gameplay.)
+     Monsters crushing plants never raise it — that is normal night gameplay.
+     Sheep crush nothing at all, so they never raise it either.
+
+     Crush rule (AgentTileInteractionController.VILLAGER_CATEGORIES):
+       villagers  -> plants (roses + imperials), pasteques, turrets. All of them.
+       monsters   -> pasteques, and turrets flagged eatable_by_monsters (with eat pause).
+       sheep      -> nothing.)
 
 --- SEED MERCHANT phase ---
 

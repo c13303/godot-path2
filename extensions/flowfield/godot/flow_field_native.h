@@ -58,7 +58,11 @@ namespace godot
         // block_fences = true (client/merchant groups). Monsters ignore fences entirely
         // and are merely slowed by their per-cell speed multiplier.
         std::unordered_set<Vector2i, Vector2iHash> fence_blocking_cells;
-        std::unordered_map<Vector2i, double, Vector2iHash> cell_speed_multipliers;
+        // Absolute-cell record of every terrain slowdown, carrying both the all-agent and
+        // the player-specific multiplier. This is what re-seeds the shared steering map on
+        // every (re)build, so it must keep the pair: dropping the player value here would
+        // silently restore the player slowdown on the next field rebuild.
+        std::unordered_map<Vector2i, ffcore::TerrainSpeed, Vector2iHash> cell_speed_multipliers;
 
         struct CellSpeedModifier
         {
@@ -220,7 +224,7 @@ namespace godot
         // (clients/merchants). They never affect the default field or monster flow builds.
         void set_fence_blocking_cells(const PackedVector2Array &cells);
         void clear_fence_blocking_cells();
-        void set_cell_speed_multiplier(Vector2i map_cell, double multiplier);
+        void set_cell_speed_multiplier(Vector2i map_cell, double multiplier, double player_multiplier);
         void clear_cell_speed_multipliers();
 
         bool rebuild_async(Vector2 goal);
