@@ -4,6 +4,7 @@ signal day_started(day_number: int)
 signal values_changed
 
 const SAVE_GAME_SERVICE_SCRIPT: Script = preload("res://scripts/gameState/save_game_service.gd")
+const BLUEPRINT_UNLOCK_SERVICE_SCRIPT: Script = preload("res://scripts/gameState/blueprint_unlock_service.gd")
 
 ## Manual save slot, written/read by the F5/F9 hotkeys.
 const SAVE_PATH: String = "user://progression_save.json"
@@ -17,7 +18,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # building-layer placeables from tiles as a legacy migration fallback.
 # Version 8 stops requiring the removed legacy traversable_buildings TileMapLayer.
 # Version 9 replaces live runtime-agent serialization with semantic runtime_simulation checkpoints.
-const SAVE_VERSION: int = 9
+# Version 10 adds permanent inventor blueprint unlocks.
+const SAVE_VERSION: int = 10
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -127,12 +129,46 @@ var _water_reserve_tween: Tween
 # True once a manual save has been applied to this scene instance during _ready.
 var _save_applied: bool = false
 var _save_game_service: SaveGameService = SAVE_GAME_SERVICE_SCRIPT.new()
+var _blueprint_unlock_service: BlueprintUnlockService = BLUEPRINT_UNLOCK_SERVICE_SCRIPT.new()
 
 
 ## Public accessor so other systems (e.g. the monster spawner) can read a
 ## progression prop value by key, e.g. get_value(&"monster_per_day").
 func get_value(key: StringName) -> int:
 	return progression.get_value(key)
+
+
+func get_currency_value(currency: StringName) -> int:
+	var key: StringName = CurrencyCatalog.get_progression_key(currency)
+	return progression.get_value(key) if key != &"" else 0
+
+
+func is_blueprint_buildable(item_id: String) -> bool:
+	return _blueprint_unlock_service.is_blueprint_buildable(item_id)
+
+
+func is_blueprint_unlocked(item_id: String) -> bool:
+	return _blueprint_unlock_service.is_blueprint_unlocked(item_id)
+
+
+func get_purchasable_blueprint_ids() -> Array[StringName]:
+	return _blueprint_unlock_service.get_purchasable_blueprint_ids()
+
+
+func get_blueprint_price(blueprint_id: StringName) -> int:
+	return _blueprint_unlock_service.get_blueprint_price(blueprint_id)
+
+
+func get_blueprint_currency(blueprint_id: StringName) -> StringName:
+	return _blueprint_unlock_service.get_blueprint_currency(blueprint_id)
+
+
+func can_purchase_blueprint(blueprint_id: StringName) -> bool:
+	return _blueprint_unlock_service.can_purchase_blueprint(blueprint_id)
+
+
+func try_purchase_blueprint(blueprint_id: StringName) -> bool:
+	return _blueprint_unlock_service.try_purchase_blueprint(blueprint_id)
 
 
 ## Spend a positive amount of a progression prop and refresh its UI.
@@ -273,6 +309,7 @@ func _apply_level_starting_values() -> void:
 
 func _ready() -> void:
 	_save_game_service.setup(self)
+	_blueprint_unlock_service.setup(self)
 	# GameState is an autoload, so reconnect every time a fresh scene loads.
 	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
 		GameState.mode_changed.connect(_on_game_mode_changed)
@@ -581,6 +618,7 @@ func _save_progression_impl(
 		"version": SAVE_VERSION,
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
+		"unlocked_blueprints": _blueprint_unlock_service.get_save_data(),
 		"night_rewards": GameState.get_special_reward_claim_save_data(),
 		"gameplay_phase": gameplay_phase,
 		"gameplay_phase_state": gameplay_phase_state,
@@ -767,6 +805,9 @@ func _migrate_save_data_to_current(data: Dictionary) -> Dictionary:
 		runtime_simulation = _legacy_runtime_agents_to_runtime_simulation(migrated)
 	migrated["runtime_simulation"] = runtime_simulation
 	migrated.erase("runtime_agents")
+	# Versions 1-9 allowed all blueprint-controlled buildables. Preserve those
+	# capabilities instead of silently locking existing players out after upgrade.
+	migrated["unlocked_blueprints"] = ["ronce", "fence", "kraken"]
 	migrated["version"] = SAVE_VERSION
 	return migrated
 
@@ -922,6 +963,8 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	var progression_data: Dictionary = data.get("progression", {}) as Dictionary
 	progression.from_dict(progression_data)
 	_log("Progression restored: %s" % str(progression.to_dict()))
+	# Blueprint state must be restored before the selected build item is validated.
+	_blueprint_unlock_service.apply_save_data(data.get("unlocked_blueprints", []))
 
 	var raw_night_rewards: Variant = data.get("night_rewards", {})
 	var night_reward_data: Dictionary = {}
@@ -1173,9 +1216,11 @@ func _restore_inventory(game_ui: Node, player_data: Dictionary) -> void:
 	# The quickbar is restored to play mode (inactive): the equipped weapon and any equipped
 	# build preview are restored, but no menu is reopened.
 	game_ui.set("equipped_weapon_id", String(player_data.get("equipped_weapon_id", "")))
-	game_ui.set("selected_build_item_id", String(player_data.get("selected_build_item_id", "")))
+	game_ui.set("selected_build_item_id", "")
 	game_ui.set("quickbar_active", false)
 	game_ui.set("active_slot_index", -1)
+	if game_ui.has_method("set_selected_build_item"):
+		game_ui.call("set_selected_build_item", String(player_data.get("selected_build_item_id", "")))
 	if game_ui.has_method("reset_possessed_weapons_from_inventory"):
 		game_ui.call("reset_possessed_weapons_from_inventory")
 	if game_ui.has_method("_refresh_all_slots"):
@@ -1376,6 +1421,12 @@ func _validate_save(data: Dictionary) -> String:
 		return "missing gameplay phase"
 	if not (data.get("layers") is Dictionary) or not (data.get("player") is Dictionary):
 		return "missing save sections"
+	if save_version >= 10:
+		if not (data.get("unlocked_blueprints") is Array):
+			return "invalid unlocked blueprints"
+		for raw_blueprint_id: Variant in (data["unlocked_blueprints"] as Array):
+			if not (raw_blueprint_id is String):
+				return "invalid unlocked blueprint id"
 
 	var layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:

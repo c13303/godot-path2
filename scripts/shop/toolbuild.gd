@@ -700,6 +700,12 @@ func _highlight_item(item_id: String) -> void:
 
 ## Commits a buildable: it becomes the active build preview and closes the quickbar for placement.
 func _commit_item(item_id: String) -> void:
+	# Re-check the central availability rule at activation time. A row may have gone
+	# stale since it was rendered, and mouse/gamepad activation must not equip it.
+	if game_ui == null or not game_ui.has_method("is_build_item_available"):
+		return
+	if not bool(game_ui.call("is_build_item_available", item_id)):
+		return
 	_selected_item_id = item_id
 	var tool_id: String = _selected_build_tool_id()
 	if tool_id != "":

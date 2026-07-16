@@ -1390,11 +1390,12 @@ dialog = NodePath("../Dialog")
 game_ui = NodePath("..")
 building_manager = NodePath("../../Map/BuildingManager")
 
-[node name="InventorDialogController" type="Node" parent="GameUI" unique_id=343104801 node_paths=PackedStringArray("dialog", "game_ui", "building_manager")]
+[node name="InventorDialogController" type="Node" parent="GameUI" unique_id=343104801 node_paths=PackedStringArray("dialog", "game_ui", "building_manager", "progression")]
 script = ExtResource("63_inventor_dialog")
 dialog = NodePath("../Dialog")
 game_ui = NodePath("..")
 building_manager = NodePath("../../Map/BuildingManager")
+progression = NodePath("../../progression")
 
 [node name="Dialog" parent="GameUI" unique_id=2138026225 instance=ExtResource("60_dialog")]
 visible = false

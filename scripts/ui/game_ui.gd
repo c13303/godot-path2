@@ -362,10 +362,18 @@ func is_item_disabled_for_placement(item_id: String) -> bool:
 func get_selected_build_item_id() -> String:
 	if quickbar_active and not is_build_menu_open():
 		return ""
+	if selected_build_item_id != "" and not is_build_item_available(selected_build_item_id):
+		selected_build_item_id = ""
 	return selected_build_item_id
 
 func set_selected_build_item(item_id: String) -> void:
-	selected_build_item_id = item_id
+	# All picker, mouse, gamepad, tutorial and scripted selection paths converge here.
+	# Empty remains the normal clear operation; unavailable buildables cannot become a
+	# hidden stale preview through a direct call.
+	if item_id != "" and not is_build_item_available(item_id):
+		selected_build_item_id = ""
+	else:
+		selected_build_item_id = item_id
 	_set_unbuild_selected(false)
 
 ## Clears any active build preview and leaves unbuild mode. Called on right-click / pad-cancel
@@ -728,6 +736,15 @@ func _build_currency_prog_key(item_id: String) -> StringName:
 
 func is_build_item_available(item_id: String) -> bool:
 	item_id = ItemCatalog.normalize_house_item_id(item_id)
+	# Permanent blueprint progression is an additional gate. Items without a blueprint
+	# definition pass unchanged into the existing level/house availability rules below.
+	if (
+		_progression_node != null
+		and _progression_node.has_method("is_blueprint_buildable")
+		and bool(_progression_node.call("is_blueprint_buildable", item_id))
+	):
+		if not _progression_node.has_method("is_blueprint_unlocked") or not bool(_progression_node.call("is_blueprint_unlocked", item_id)):
+			return false
 	if ItemCatalog.is_house_placeable(item_id):
 		return _is_house_build_item_available(item_id)
 	var scene: Node = get_tree().current_scene

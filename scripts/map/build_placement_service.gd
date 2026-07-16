@@ -50,11 +50,19 @@ func is_disabled_for_placement(item_id: String) -> bool:
 	return bool(game_ui.call("is_item_disabled_for_placement", item_id))
 
 
+## Permanent/level availability is deliberately separate from temporary phase disabling.
+func is_available_for_placement(item_id: String) -> bool:
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui == null or not game_ui.has_method("is_build_item_available"):
+		return false
+	return bool(game_ui.call("is_build_item_available", item_id))
+
+
 func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	var item_id: String = str(placeable_def.get("id", ""))
 	# Defense in depth: reject before validation scans, purchase, tile mutation, plant/house
 	# creation, navigation or garden invalidation, FX and placement signals.
-	if is_disabled_for_placement(item_id):
+	if not is_available_for_placement(item_id) or is_disabled_for_placement(item_id):
 		return
 	# Houses are multi-cell logical objects owned by HouseManager: route them before the generic
 	# one-tile commit path (which would validate/stamp/pay for a single cell).
@@ -252,7 +260,13 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 	# phase places nothing, spends nothing, and emits no placement signal. Both ids are checked
 	# because item_id drives the purchase while the def drives the tile mutation, and a
 	# scripted caller can pass the two out of sync.
-	if is_disabled_for_placement(item_id) or is_disabled_for_placement(str(placeable_def.get("id", ""))):
+	var definition_item_id: String = str(placeable_def.get("id", ""))
+	if (
+		not is_available_for_placement(item_id)
+		or not is_available_for_placement(definition_item_id)
+		or is_disabled_for_placement(item_id)
+		or is_disabled_for_placement(definition_item_id)
+	):
 		return false
 	var target_layer: TileMapLayer = target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
@@ -316,7 +330,8 @@ func drag_build_rectangle_cells(
 	var cells: Array[Vector2i] = []
 	# Asked once for the whole rectangle, before the per-cell loop: a phase-disabled buildable
 	# never enters the candidate-cell x active-agent occupancy scan below.
-	if limit <= 0 or is_disabled_for_placement(str(placeable_def.get("id", ""))):
+	var item_id: String = str(placeable_def.get("id", ""))
+	if limit <= 0 or not is_available_for_placement(item_id) or is_disabled_for_placement(item_id):
 		return cells
 	var x_step: int = 1 if end_cell.x >= start_cell.x else -1
 	var y_step: int = 1 if end_cell.y >= start_cell.y else -1

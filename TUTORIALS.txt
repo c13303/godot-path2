@@ -141,13 +141,5 @@ a crushing people-agent (client / merchant / builder) crushes anything by walkin
        monsters   -> pasteques, and turrets flagged eatable_by_monsters (with eat pause).
        sheep      -> nothing.)
 
---- SEED MERCHANT phase ---
-
-merchant present + you have an unclaimed night reward
-    = "Le marchand a une récompense pour vous" / "Merchent has a reward for you"
-                                                            [tutorial.seed_merchant_reward]
-
-
-
 game over reached (shown by game_over modal, not the hint label)
     = "Game Over" / "Game Over"                             [tutorial.game_over]

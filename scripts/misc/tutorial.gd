@@ -15,13 +15,12 @@ extends RichTextLabel
 ##   3. empty water reserve ......................... Refill your water
 ##   4. dawn harvest (grown roses) .................. Harvest / add counters / place shop
 ##   5. client sale phase ........................... nothing (only the tantrum alert)
-##   6. seed merchant reward waiting ................ Merchant has a reward
-##   7. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
-##   8. seeds left, day 2+ ......................... Plant roses, once per day
-##   9. planted roses still dry ..................... Water your roses
-##  10. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
-##  11. day 1 not enough roses for tomorrow ......... Plant more roses
-##  12. all roses watered, clients done ............. Hold to start night
+##   6. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
+##   7. seeds left, day 2+ ......................... Plant roses, once per day
+##   8. planted roses still dry ..................... Water your roses
+##   9. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
+##  10. day 1 not enough roses for tomorrow ......... Plant more roses
+##  11. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -36,7 +35,6 @@ const KEY_PLANT_PASTEQUE: String = "tutorial.plant_pasteque"
 const KEY_PLANT_TURRET_EPINE: String = "tutorial.plant_turret_epine"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
-const KEY_SEED_MERCHANT_REWARD: String = "tutorial.seed_merchant_reward"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
@@ -439,8 +437,6 @@ func _refresh(delta: float = 0.0) -> void:
 		return
 	if start_night_skip_hold_active:
 		_advance_hold(HOLD_ACTION_START_NIGHT, delta)
-	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and key != KEY_REFILL_WATER and _has_active_night_reward():
-		key = KEY_SEED_MERCHANT_REWARD
 	if key == "":
 		_displayed_key = ""
 		_clear_tutorial_message()
@@ -520,8 +516,6 @@ func _current_message_key() -> String:
 			return KEY_ADD_COUNTERS_TO_SELL_ROSES
 		if _client_sale_requested_without_roses():
 			return KEY_NO_ROSES_NO_CLIENTS
-		if GameState.is_seed_merchant_phase and _has_active_night_reward():
-			return KEY_SEED_MERCHANT_REWARD
 		if not _client_sale_start_requested() and _should_prompt_place_shop():
 			return KEY_PLACE_SHOP
 		return ""
@@ -533,8 +527,6 @@ func _current_message_key() -> String:
 		return ""
 	if _client_sale_requested_without_roses():
 		return KEY_NO_ROSES_NO_CLIENTS
-	if GameState.is_seed_merchant_phase and not GameState.is_morning_phase and _has_active_night_reward():
-		return KEY_SEED_MERCHANT_REWARD
 	# Seeds buy (and directly place) roses; that outranks watering.
 	if seeds > 0:
 		var rose_key: String = _rose_step_key()
@@ -816,13 +808,6 @@ func _has_counter_room_for_harvest() -> bool:
 	if _building_manager != null and _building_manager.has_method("has_counter_room_for_harvest"):
 		return bool(_building_manager.call("has_counter_room_for_harvest"))
 	return false
-
-
-func _has_active_night_reward() -> bool:
-	if _game_ui == null or not _game_ui.has_method("get_active_night_reward"):
-		return false
-	var reward_info: Dictionary = _game_ui.call("get_active_night_reward") as Dictionary
-	return not reward_info.is_empty()
 
 
 func _current_day_number() -> int:
