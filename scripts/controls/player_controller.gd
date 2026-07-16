@@ -151,6 +151,11 @@ func _input(event: InputEvent) -> void:
 		_set_control_mode(INPUT_MODE_KMOUSE)
 		if mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed and not _paused and not _is_inventory_open():
 			if _is_quickbar_active() or _in_build_mode() or _unbuild_selected():
+				# Right-click deselects the unbuild tool. Abort any in-progress removal drag first,
+				# mirroring pad-B: deselecting mid-drag would otherwise orphan the drag rect, because
+				# the left-release that finishes it only runs while the tool is still equipped.
+				if _unbuild_selected() and build_system != null and build_system.has_method("cancel_remove_drag"):
+					build_system.call("cancel_remove_drag")
 				_clear_build_selection()
 				_deactivate_quickbar()
 				get_viewport().set_input_as_handled()

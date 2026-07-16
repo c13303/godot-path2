@@ -15,6 +15,10 @@ const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 # placement rect.
 const DRAG_REMOVE_FILL_COLOR: Color = Color(1.0, 0.22, 0.24, 0.14)
 const DRAG_REMOVE_BORDER_COLOR: Color = Color(1.0, 0.32, 0.34)
+# Hint image shown centered above the unbuild cursor / removal drag rectangle.
+const UNBUILD_TOOLTIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/unbuild_tooltip.png")
+# Pixels between the tooltip's bottom edge and the top of the selection rect.
+const UNBUILD_TOOLTIP_GAP: float = 3.0
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
@@ -51,6 +55,7 @@ var _drag_selection_rect: Panel = null
 var _drag_selection_style: StyleBoxFlat = null
 # Tracks the current rect tint so its colors are only swapped when the mode changes.
 var _drag_rect_is_remove: bool = false
+var _unbuild_tooltip: TextureRect = null
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _preview_visual: Node2D = null
 var _preview_visuals: Array[Node2D] = []
@@ -383,11 +388,18 @@ func show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: 
 	_drag_selection_rect.position = top_left
 	_drag_selection_rect.size = bottom_right - top_left
 	_drag_selection_rect.visible = true
+	# The tooltip only makes sense for the destructive unbuild cursor / rectangle, never the
+	# green placement drag.
+	if remove:
+		_position_unbuild_tooltip(previewbuild, top_left, bottom_right)
+	else:
+		_hide_unbuild_tooltip()
 
 
 func hide_drag_selection_rect() -> void:
 	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
 		_drag_selection_rect.visible = false
+	_hide_unbuild_tooltip()
 
 
 func has_single_tile_preview() -> bool:
@@ -431,6 +443,42 @@ func _ensure_drag_selection_rect() -> void:
 	_drag_selection_style = style
 	_drag_rect_is_remove = false
 	previewbuild.add_child(_drag_selection_rect)
+
+
+# Shows the unbuild hint image centered above the top edge of the removal selection rect,
+# following the rect (single-cell cursor or dragged rectangle) each time it is redrawn.
+func _position_unbuild_tooltip(previewbuild: TileMapLayer, top_left: Vector2, bottom_right: Vector2) -> void:
+	_ensure_unbuild_tooltip(previewbuild)
+	if _unbuild_tooltip == null:
+		return
+	var tooltip_size: Vector2 = _unbuild_tooltip.size
+	var center_x: float = (top_left.x + bottom_right.x) * 0.5
+	_unbuild_tooltip.position = Vector2(
+		center_x - tooltip_size.x * 0.5,
+		top_left.y - tooltip_size.y - UNBUILD_TOOLTIP_GAP
+	)
+	_unbuild_tooltip.visible = true
+
+
+func _hide_unbuild_tooltip() -> void:
+	if _unbuild_tooltip != null and is_instance_valid(_unbuild_tooltip):
+		_unbuild_tooltip.visible = false
+
+
+func _ensure_unbuild_tooltip(previewbuild: TileMapLayer) -> void:
+	if _unbuild_tooltip != null and is_instance_valid(_unbuild_tooltip):
+		return
+	if UNBUILD_TOOLTIP_TEXTURE == null:
+		return
+	_unbuild_tooltip = TextureRect.new()
+	_unbuild_tooltip.name = "UnbuildTooltip"
+	_unbuild_tooltip.texture = UNBUILD_TOOLTIP_TEXTURE
+	_unbuild_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_unbuild_tooltip.stretch_mode = TextureRect.STRETCH_KEEP
+	_unbuild_tooltip.size = UNBUILD_TOOLTIP_TEXTURE.get_size()
+	# Sit just above the selection rect (z_index 60) in the preview layer's local space.
+	_unbuild_tooltip.z_index = 61
+	previewbuild.add_child(_unbuild_tooltip)
 
 
 # Swaps the selection rect between the green (placement) and red (removal/unbuild) tints, only

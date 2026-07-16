@@ -306,9 +306,16 @@ func pad_confirm_remove_at_cursor() -> void:
 		_start_remove_drag()
 
 
+## Aborts an in-progress removal drag rectangle without touching the committed removal queue.
+## Returns true when a drag was active. Called on any deselect that happens mid-drag (right-click,
+## pad-B) so the drag rect is never orphaned.
+func cancel_remove_drag() -> bool:
+	return _drag_controller.cancel_remove_drag()
+
+
 ## Aborts an in-progress pad removal drag (the B / cancel button). Returns true when one was active.
 func pad_cancel_remove_drag() -> bool:
-	return _drag_controller.cancel_remove_drag()
+	return cancel_remove_drag()
 
 
 func pad_rotate_selected_at_cursor() -> bool:

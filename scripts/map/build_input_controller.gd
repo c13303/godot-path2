@@ -38,6 +38,13 @@ func setup(
 func process(delta: float) -> void:
 	_tick_drag(delta)
 	if _is_remove_drag_active():
+		# Safety net: a removal drag can only be started while the unbuild tool is equipped, and
+		# both finish and cancel clear the drag flag before deselecting. So if a drag is still
+		# active while the tool is no longer selected, some deselect path (quickslot switch,
+		# nightfall, ...) orphaned it - abort the drag so its rectangle can never get stuck.
+		if not _is_unbuild_selected():
+			_drag_controller.cancel_remove_drag()
+			return
 		_clear_hover()
 		return
 
