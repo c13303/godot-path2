@@ -54,8 +54,6 @@ const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
 const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
-const RONCE_ITEM_ID: String = "ronce"
-const ITEM_CATEGORY_TURRET: String = "turret"
 # Garden access-cell scoring penalties (ACCESS_*) now live in GardenAccessResolver,
 # which owns the garden access scoring / entry selection extracted from this manager.
 const PASTEQUE_ITEM_ID: String = "pasteque"
@@ -996,10 +994,8 @@ func _blocking_building_item_id_at_cell(cell: Vector2i) -> String:
 	return _building_navigation_sync.blocking_building_item_id_at_cell(cell)
 
 func _building_item_requests_agent_recheck(item_id: String) -> bool:
-	if item_id == PASTEQUE_ITEM_ID or item_id == RONCE_ITEM_ID:
-		return true
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	return str(item_def.get("category", "")) == ITEM_CATEGORY_TURRET
+	return bool(item_def.get("recheck_agents_on_place", false))
 
 func _sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 	_building_navigation_sync.sync_building_cell_speed(cell, item_id)

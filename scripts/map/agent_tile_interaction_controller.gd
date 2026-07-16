@@ -44,7 +44,7 @@ func setup(manager: BuildingManager) -> void:
 
 
 # Evaluate every tile interaction that applies to this agent's category, preserving
-# the original non-drowning interaction order: rose -> pasteque -> turret.
+# the original non-drowning interaction order: plant -> building-layer placeable.
 # Drowning is run by AgentCellTracker immediately afterwards so the same central
 # water result can drive both the targeted candidate set and the drowning start.
 func evaluate(agent: Node2D, category: StringName, cell: Vector2i) -> void:
@@ -54,30 +54,92 @@ func evaluate(agent: Node2D, category: StringName, cell: Vector2i) -> void:
 	var is_villager: bool = VILLAGER_CATEGORIES.has(category)
 	var is_monster: bool = category == CATEGORY_MONSTERS
 	var crushed_something: bool = false
-	if is_monster:
-		_damage_kraken_at_cell(cell)
-	if is_villager:
+	if _plant_contact_applies(is_villager):
 		if _manager.trample_plant_at_agent(agent):
 			crushed_something = true
 		if debug:
 			_debug_rose += 1
-	if is_villager or is_monster:
-		if _manager.trample_pasteque_at_agent(agent):
-			crushed_something = true
-		if debug:
-			_debug_pasteque += 1
-	if is_villager or is_monster:
-		if _manager.get_turret_eating_controller().evaluate_agent(agent):
-			crushed_something = true
-		if debug:
-			_debug_turret += 1
+	crushed_something = _evaluate_placeable_contact(agent, category, cell, is_villager, is_monster, debug) or crushed_something
 	if crushed_something and is_villager:
 		_manager.show_tutorial_alert_once(KEY_PEOPLE_CRUSH_PLANTS)
 	refresh_contact_dance(agent, category)
 
 
-func _damage_kraken_at_cell(cell: Vector2i) -> void:
-	var item_def: Dictionary = ItemCatalog.get_item_def(KRAKEN_ITEM_ID)
+func _evaluate_placeable_contact(
+	agent: Node2D,
+	category: StringName,
+	cell: Vector2i,
+	is_villager: bool,
+	is_monster: bool,
+	debug: bool
+) -> bool:
+	var placeable: Dictionary = _placeable_at_cell(cell)
+	if placeable.is_empty():
+		return false
+	var item_id: String = str(placeable.get("item_id", ""))
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if not bool(item_def.get("agent_contact_enabled", false)):
+		return _dispatch_scene_contact(placeable, agent, category)
+	var behavior: StringName = StringName(item_def.get("agent_contact_behavior", &""))
+	var changed: bool = false
+	match behavior:
+		&"kraken_walkover_damage":
+			if is_monster:
+				_damage_kraken_at_cell(cell, item_def)
+		&"pasteque_trample":
+			if is_villager or is_monster:
+				if _manager.trample_pasteque_at_agent(agent):
+					changed = true
+				if debug:
+					_debug_pasteque += 1
+		&"turret_eating":
+			if is_villager or is_monster:
+				if _manager.get_turret_eating_controller().evaluate_agent(agent):
+					changed = true
+				if debug:
+					_debug_turret += 1
+		&"contact_visual_only":
+			pass
+		_:
+			pass
+	if _dispatch_scene_contact(placeable, agent, category):
+		changed = true
+	return changed
+
+
+func _plant_contact_applies(is_villager: bool) -> bool:
+	return is_villager
+
+
+func _placeable_at_cell(cell: Vector2i) -> Dictionary:
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects == null:
+		return {}
+	if building_objects.has_method("get_placeable_instance"):
+		return building_objects.call("get_placeable_instance", cell) as Dictionary
+	if building_objects.has_method("get_building"):
+		return building_objects.call("get_building", cell) as Dictionary
+	return {}
+
+
+func _dispatch_scene_contact(placeable: Dictionary, agent: Node2D, category: StringName) -> bool:
+	var runtime_node: Node = null
+	var raw_cell: Variant = placeable.get("cell", null)
+	var cell: Vector2i = Vector2i.ZERO
+	if raw_cell is Vector2i:
+		cell = raw_cell as Vector2i
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects != null and building_objects.has_method("get_runtime_node"):
+		runtime_node = building_objects.call("get_runtime_node", cell) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return false
+	if not runtime_node.has_method("on_agent_entered_placeable"):
+		return false
+	var result: Variant = runtime_node.call("on_agent_entered_placeable", agent, category)
+	return bool(result) if result is bool else false
+
+
+func _damage_kraken_at_cell(cell: Vector2i, item_def: Dictionary) -> void:
 	var damage: int = maxi(0, int(item_def.get("walkover_damage_by_monsters", 0)))
 	if damage <= 0:
 		return

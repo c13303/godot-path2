@@ -8,8 +8,8 @@ class_name PlantContactDanceRouter
 const CONTACT_DANCE_DURATION: float = 0.16
 const CATEGORY_CLIENTS: StringName = &"clients"
 const CATEGORY_MERCHANTS: StringName = &"merchants"
-const RONCE_ITEM_ID: String = "ronce"
 const CATEGORY_TURRET: String = "turret"
+const CONTACT_BEHAVIOR_VISUAL_ONLY: StringName = &"contact_visual_only"
 
 var _manager: BuildingManager
 
@@ -66,13 +66,14 @@ func _request_building_contact(cell: Vector2i) -> bool:
 	if building_data.is_empty():
 		return false
 	var item_id: String = str(building_data.get("item_id", ""))
-	if item_id == RONCE_ITEM_ID:
-		_manager.plant_contact_dance_requested.emit(&"traversable_buildings", cell, item_id, CONTACT_DANCE_DURATION)
-		return true
 	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	var target_layer: StringName = StringName(building_data.get("target_layer", item_def.get("target_layer", "")))
+	if StringName(item_def.get("agent_contact_behavior", &"")) == CONTACT_BEHAVIOR_VISUAL_ONLY:
+		_manager.plant_contact_dance_requested.emit(target_layer, cell, item_id, CONTACT_DANCE_DURATION)
+		return true
 	if str(item_def.get("category", "")) != CATEGORY_TURRET:
 		return false
-	_manager.plant_contact_dance_requested.emit(&"blocking_buildings", cell, item_id, CONTACT_DANCE_DURATION)
+	_manager.plant_contact_dance_requested.emit(target_layer, cell, item_id, CONTACT_DANCE_DURATION)
 	if building_objects.has_method("request_contact_dance"):
 		building_objects.call("request_contact_dance", cell, CONTACT_DANCE_DURATION)
 	return true

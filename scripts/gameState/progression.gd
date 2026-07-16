@@ -11,7 +11,9 @@ const SAVE_PATH: String = "user://progression_save.json"
 # accepted and simply have no house section (treated as an empty list).
 # Version 6 adds authored bamboo maturity state.
 # Versions 1-5 remain accepted and default all authored bamboo to mature.
-const SAVE_VERSION: int = 6
+# Version 7 adds explicit one-cell runtime placeable identity. Versions 1-6 infer
+# building-layer placeables from tiles as a legacy migration fallback.
+const SAVE_VERSION: int = 7
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -551,6 +553,7 @@ func save_progression(
 	var runtime_agents: Dictionary = _get_runtime_agents(scene)
 	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
 	var runtime_houses: Array[Dictionary] = _get_runtime_houses(scene)
+	var runtime_placeables: Array[Dictionary] = _get_runtime_placeables(scene)
 	var gameplay_phase_state: Dictionary = _get_gameplay_phase_state(scene)
 	for raw_key: Variant in gameplay_phase_state_override.keys():
 		var key: String = str(raw_key)
@@ -569,6 +572,7 @@ func save_progression(
 		"ground_collectibles": ground_collectibles,
 		"player_placeable_durability": player_placeable_durability,
 		"runtime_houses": runtime_houses,
+		"runtime_placeables": runtime_placeables,
 		"runtime_agents": runtime_agents,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
@@ -757,7 +761,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	player.global_position = target_position
 	player.set("velocity", Vector2.ZERO)
 	_restore_inventory(game_ui, player_data)
-	_reindex_loaded_layers(scene)
+	_reindex_loaded_layers(scene, data.get("runtime_placeables", []))
 	_restore_plant_states(scene, data.get("plant_states", []))
 	# After the authored layers and normal plants, and before _restore_gameplay_phase emits the
 	# restored phase signals — a restored dawn must not re-mature bamboo saved as harvested.
@@ -907,6 +911,19 @@ func _get_runtime_agents(scene: Node) -> Dictionary:
 	if raw_state is Dictionary:
 		return raw_state as Dictionary
 	return {}
+
+
+func _get_runtime_placeables(scene: Node) -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	var building_object_manager: Node = scene.get_node_or_null("Map/BuildingObjectManager") if scene else null
+	if building_object_manager == null or not building_object_manager.has_method("serialize_runtime_placeables"):
+		return records
+	var raw_records: Variant = building_object_manager.call("serialize_runtime_placeables")
+	if raw_records is Array:
+		for raw_record: Variant in (raw_records as Array):
+			if raw_record is Dictionary:
+				records.append(raw_record as Dictionary)
+	return records
 
 
 func _get_gameplay_phase_state(scene: Node) -> Dictionary:
@@ -1147,16 +1164,20 @@ func _restore_runtime_agents_deferred(raw_state: Variant) -> void:
 	_restore_runtime_agents(scene, raw_state)
 
 
-func _reindex_loaded_layers(scene: Node) -> void:
+func _reindex_loaded_layers(scene: Node, raw_runtime_placeables: Variant = []) -> void:
 	var plant_manager: Node = scene.get_node_or_null("Map/PlantManager")
 	if plant_manager and plant_manager.has_method("initialize_from_layer"):
 		plant_manager.call("initialize_from_layer")
 		_log("Plant manager re-indexed")
 
 	var building_object_manager: Node = scene.get_node_or_null("Map/BuildingObjectManager")
-	if building_object_manager and building_object_manager.has_method("initialize_from_layer"):
-		building_object_manager.call("initialize_from_layer")
-		_log("Building object manager re-indexed")
+	if building_object_manager:
+		if raw_runtime_placeables is Array and not (raw_runtime_placeables as Array).is_empty() and building_object_manager.has_method("restore_runtime_placeables"):
+			building_object_manager.call("restore_runtime_placeables", raw_runtime_placeables as Array)
+			_log("Building object manager restored from runtime_placeables: %d" % (raw_runtime_placeables as Array).size())
+		elif building_object_manager.has_method("initialize_from_layer"):
+			building_object_manager.call("initialize_from_layer")
+			_log("Building object manager re-indexed from legacy layers")
 
 	var fight_system: Node = scene.get_node_or_null("fightSystem")
 	if fight_system and fight_system.has_method("refresh_projectile_walls"):
@@ -1255,6 +1276,29 @@ func _validate_save(data: Dictionary) -> String:
 				return "invalid runtime house status"
 			if entry.has("construction_order") and not (entry["construction_order"] is int or entry["construction_order"] is float):
 				return "invalid runtime house construction order"
+	# Optional since save version 7; versions 1-6 legitimately omit it.
+	if data.has("runtime_placeables"):
+		if not (data["runtime_placeables"] is Array):
+			return "invalid runtime placeables"
+		var runtime_placeables: Array = data["runtime_placeables"] as Array
+		for raw_entry: Variant in runtime_placeables:
+			if not (raw_entry is Dictionary):
+				return "invalid runtime placeable entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "item_id", "target_layer"]:
+				if not entry.has(field):
+					return "invalid runtime placeable entry"
+			if ItemCatalog.get_item_def(str(entry["item_id"])).is_empty():
+				return "invalid runtime placeable item"
+			if not (str(entry["target_layer"]) in ["traversable_buildings", "blocking_buildings", "fences", "buildings"]):
+				return "invalid runtime placeable layer"
+			for coordinate: String in ["x", "y"]:
+				if not (entry[coordinate] is int or entry[coordinate] is float):
+					return "invalid runtime placeable coordinate"
+			if (entry.has("direction_x") or entry.has("direction_y")) and not (entry.has("direction_x") and entry.has("direction_y")):
+				return "invalid runtime placeable direction"
+			if entry.has("state") and not (entry["state"] is Dictionary):
+				return "invalid runtime placeable state"
 	if data.has("plant_states"):
 		if not (data["plant_states"] is Array):
 			return "invalid plant states"

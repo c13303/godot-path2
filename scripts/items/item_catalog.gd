@@ -88,6 +88,9 @@ const ITEM_DEFS: Dictionary = {
 		"runtime_id": "imperial_plant",
 		"logical_plant": true,
 		"plant_kind": "imperial",
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"plant_trample",
+		"recheck_agents_on_place": true,
 		"inventory_backed": true,
 		"speed_multiplier": 0.3,
 		"max_stack": 999,
@@ -245,6 +248,9 @@ const ITEM_DEFS: Dictionary = {
 		# it, which clears the slow.
 		"speed_multiplier": 0.5,
 		"slows_player": false,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"plant_trample",
+		"recheck_agents_on_place": true,
 		"max_stack": 999,
 	},
 	"debris": {
@@ -290,6 +296,9 @@ const ITEM_DEFS: Dictionary = {
 		"requires_grass_green_floor": true,
 		"runtime_id": "ronce",
 		"speed_multiplier": 0.3,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"contact_visual_only",
+		"recheck_agents_on_place": true,
 		"max_health": 100,
 		"max_stack": 999,
 	},
@@ -370,6 +379,9 @@ const ITEM_DEFS: Dictionary = {
 		"drag_buildable": false,
 		"irrigation_radius_tiles": 9,
 		"destroyed_by_creatures": true,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"pasteque_trample",
+		"recheck_agents_on_place": true,
 		"restore_floor_atlas": FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS,
 		# Paid for at the seed merchant into the inventory; placing consumes one unit
 		# from the inventory rather than charging currency again.
@@ -400,6 +412,9 @@ const ITEM_DEFS: Dictionary = {
 		"runtime_id": "turret_epine",
 		# One hit point: destroyed in a single hit by tantrum clients.
 		"max_health": 1,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"turret_eating",
+		"recheck_agents_on_place": true,
 		"turret_data": TURRET_EPINE_DATA,
 		"turret_sprite_visual": {
 			"texture": TURRET_EPINE_TEXTURE,
@@ -437,6 +452,9 @@ const ITEM_DEFS: Dictionary = {
 		"requires_grass_green_floor": true,
 		"speed_multiplier": 0.5,
 		"walkover_damage_by_monsters": 30,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"kraken_walkover_damage",
+		"recheck_agents_on_place": true,
 		"leaves_debris_on_destroy": true,
 		"drag_buildable": false,
 		"pad_skip_preview": true,
@@ -731,6 +749,74 @@ static func get_placeable_id_for_tile(target_layer: String, atlas_coords: Vector
 			return str(item_def.get("id", ""))
 	return ""
 
+static func get_placeable_ids_for_tile_identity(
+	target_layer: String,
+	_source_id: int,
+	atlas_coords: Vector2i,
+	alternative_tile: int
+) -> Array[String]:
+	var ids: Array[String] = []
+	var normalized_layer: String = "traversable_buildings" if target_layer == "buildings" else target_layer
+	for raw_item_def: Variant in ITEM_DEFS.values():
+		if not (raw_item_def is Dictionary):
+			continue
+		var item_def: Dictionary = raw_item_def as Dictionary
+		if str(item_def.get("type", "")) != "placeable" and not bool(item_def.get("removable", false)):
+			continue
+		var item_layer: String = str(item_def.get("target_layer", "wallz"))
+		if item_layer == "buildings":
+			item_layer = "traversable_buildings"
+		if item_layer != normalized_layer:
+			continue
+		if not _def_uses_atlas(item_def, atlas_coords):
+			continue
+		if bool(item_def.get("directional", false)):
+			var direction: Vector2i = BuildDirectionRules.direction_from_alternative(alternative_tile)
+			if BuildDirectionRules.alternative_from_direction(direction) != alternative_tile:
+				continue
+		ids.append(str(item_def.get("id", "")))
+	return ids
+
+static func validate_duplicate_marker_identities() -> void:
+	var markers: Dictionary = {}
+	for raw_item_def: Variant in ITEM_DEFS.values():
+		if not (raw_item_def is Dictionary):
+			continue
+		var item_def: Dictionary = raw_item_def as Dictionary
+		if str(item_def.get("type", "")) != "placeable":
+			continue
+		var target_layer: String = str(item_def.get("target_layer", ""))
+		if target_layer == "buildings":
+			target_layer = "traversable_buildings"
+		var atlases: Array[Vector2i] = _def_atlases(item_def)
+		var alternatives: Array[int] = [0]
+		if bool(item_def.get("directional", false)):
+			alternatives = [
+				BuildDirectionRules.alternative_from_direction(BuildDirectionRules.DIRECTION_RIGHT),
+				BuildDirectionRules.alternative_from_direction(BuildDirectionRules.DIRECTION_DOWN),
+				BuildDirectionRules.alternative_from_direction(BuildDirectionRules.DIRECTION_LEFT),
+				BuildDirectionRules.alternative_from_direction(BuildDirectionRules.DIRECTION_UP),
+			]
+		for atlas: Vector2i in atlases:
+			for alternative_tile: int in alternatives:
+				var key: String = "%s:%d:%d:%d:%d" % [
+					target_layer,
+					-1,
+					atlas.x,
+					atlas.y,
+					alternative_tile,
+				]
+				if not markers.has(key):
+					markers[key] = []
+				(markers[key] as Array).append(str(item_def.get("id", "")))
+	for raw_key: Variant in markers.keys():
+		var ids: Array = markers[raw_key] as Array
+		if ids.size() > 1:
+			push_warning("ItemCatalog: duplicate placeable marker identity %s is ambiguous for legacy tile inference: %s" % [
+				str(raw_key),
+				_join_string_array(ids),
+			])
+
 static func removed_item_returns_to_inventory(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("return_to_inventory", true))
 
@@ -743,6 +829,35 @@ static func _atlas_coords_from_variant(raw_atlas: Variant) -> Vector2i:
 	if raw_atlas is Array and raw_atlas.size() == 2:
 		return Vector2i(int(raw_atlas[0]), int(raw_atlas[1]))
 	return Vector2i(-1, -1)
+
+static func _def_uses_atlas(item_def: Dictionary, atlas_coords: Vector2i) -> bool:
+	if _atlas_coords_from_variant(item_def.get("atlas", Vector2i(-1, -1))) == atlas_coords:
+		return true
+	var raw_atlases: Variant = item_def.get("tile_atlases", [])
+	if raw_atlases is Array:
+		for raw_atlas: Variant in raw_atlases:
+			if _atlas_coords_from_variant(raw_atlas) == atlas_coords:
+				return true
+	return false
+
+static func _def_atlases(item_def: Dictionary) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var atlas: Vector2i = _atlas_coords_from_variant(item_def.get("atlas", Vector2i(-1, -1)))
+	if atlas != Vector2i(-1, -1):
+		result.append(atlas)
+	var raw_atlases: Variant = item_def.get("tile_atlases", [])
+	if raw_atlases is Array:
+		for raw_atlas: Variant in raw_atlases:
+			var tile_atlas: Vector2i = _atlas_coords_from_variant(raw_atlas)
+			if tile_atlas != Vector2i(-1, -1) and not result.has(tile_atlas):
+				result.append(tile_atlas)
+	return result
+
+static func _join_string_array(values: Array) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	for raw_value: Variant in values:
+		parts.append(str(raw_value))
+	return ", ".join(parts)
 
 static func _ordered_known_first(ids: Array[StringName], preferred_order: Array[StringName]) -> Array[StringName]:
 	var ordered: Array[StringName] = []

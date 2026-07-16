@@ -25,6 +25,31 @@ const TURRET_SPRITE_VISUAL_SCRIPT: Script = preload("res://scripts/combat/turret
 const RESERVOIR_Z_INDEX: int = 510
 const BUILDING_CATEGORIES: Array[String] = ["furniture", "turret", "trap", "shop_counter", "irrigation", "fence"]
 
+class PlaceableContext:
+	extends RefCounted
+
+	var cell: Vector2i = Vector2i.ZERO
+	var item_id: String = ""
+	var item_def: Dictionary = {}
+	var target_layer: String = ""
+	var direction: Vector2i = Vector2i.ZERO
+	var owner: Node = null
+
+	func _init(
+		p_cell: Vector2i,
+		p_item_id: String,
+		p_item_def: Dictionary,
+		p_target_layer: String,
+		p_direction: Vector2i,
+		p_owner: Node
+	) -> void:
+		cell = p_cell
+		item_id = p_item_id
+		item_def = p_item_def.duplicate(true)
+		target_layer = p_target_layer
+		direction = p_direction
+		owner = p_owner
+
 var _buildings_by_cell: Dictionary = {}
 var _runtime_nodes_by_cell: Dictionary = {}
 # cell -> static obstacle id we registered with the steering system. Only blocking
@@ -34,6 +59,7 @@ var _static_obstacle_ids_by_cell: Dictionary = {}
 func _ready() -> void:
 	_connect_game_state()
 	_resolve_level_layers()
+	ItemCatalog.validate_duplicate_marker_identities()
 	initialize_from_layer()
 
 func _resolve_level_layers() -> void:
@@ -66,6 +92,7 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	var placeable_category: String = str(item_def.get("category", ""))
 	var runtime_id: String = str(item_def.get("runtime_id", item_id))
 	var light_source: float = float(item_def.get("light_source", 0.0))
+	var target_layer: String = _normalize_layer_name(str(item_def.get("target_layer", "")))
 	if item_id == "":
 		return
 	if runtime_id == "":
@@ -73,12 +100,18 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	if _buildings_by_cell.has(cell):
 		remove_building(cell)
 	var building_data: Dictionary = {
+		"cell": cell,
 		"item_id": item_id,
 		"category": placeable_category,
 		"runtime_id": runtime_id,
+		"target_layer": target_layer,
 	}
 	if item_def.has("direction"):
 		building_data["direction"] = item_def.get("direction", Vector2i(1, 0))
+	else:
+		var layer: TileMapLayer = _layer_for_name(target_layer)
+		if layer != null and bool(item_def.get("directional", false)):
+			building_data["direction"] = BuildDirectionRules.direction_from_alternative(layer.get_cell_alternative_tile(cell))
 	if item_def.has("light_source"):
 		building_data["light_source"] = light_source
 	_buildings_by_cell[cell] = building_data
@@ -112,6 +145,15 @@ func get_building(cell: Vector2i) -> Dictionary:
 	if not _buildings_by_cell.has(cell):
 		return {}
 	return _buildings_by_cell[cell] as Dictionary
+
+
+func get_placeable_instance(cell: Vector2i) -> Dictionary:
+	return get_building(cell)
+
+
+func get_placeable_item_id(cell: Vector2i) -> String:
+	var data: Dictionary = get_building(cell)
+	return str(data.get("item_id", ""))
 
 func has_building(cell: Vector2i) -> bool:
 	return _buildings_by_cell.has(cell)
@@ -162,6 +204,64 @@ func get_runtime_node(cell: Vector2i) -> Node2D:
 	if node != null and is_instance_valid(node):
 		return node
 	return null
+
+
+func serialize_runtime_placeables() -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	for raw_cell: Variant in _buildings_by_cell.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var data: Dictionary = _buildings_by_cell[cell] as Dictionary
+		var item_id: String = str(data.get("item_id", ""))
+		if item_id == "":
+			continue
+		var target_layer: String = _normalize_layer_name(str(data.get("target_layer", "")))
+		var record: Dictionary = {
+			"x": cell.x,
+			"y": cell.y,
+			"item_id": item_id,
+			"target_layer": target_layer,
+		}
+		if data.has("direction"):
+			var direction: Vector2i = data.get("direction", Vector2i.ZERO) as Vector2i
+			record["direction_x"] = direction.x
+			record["direction_y"] = direction.y
+		var state: Dictionary = _serialize_runtime_node_state(cell)
+		if not state.is_empty():
+			record["state"] = state
+		records.append(record)
+	return records
+
+
+func restore_runtime_placeables(saved_records: Array) -> void:
+	_buildings_by_cell.clear()
+	_clear_runtime_nodes()
+	_clear_static_obstacles()
+	var ignored: int = 0
+	for raw_record: Variant in saved_records:
+		if not (raw_record is Dictionary):
+			ignored += 1
+			continue
+		var record: Dictionary = raw_record as Dictionary
+		var cell: Vector2i = Vector2i(int(record.get("x", 0)), int(record.get("y", 0)))
+		var item_id: String = ItemCatalog.normalize_house_item_id(str(record.get("item_id", "")))
+		var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+		if item_def.is_empty():
+			ignored += 1
+			continue
+		var restored_def: Dictionary = item_def.duplicate(true)
+		var target_layer: String = _normalize_layer_name(str(record.get("target_layer", restored_def.get("target_layer", ""))))
+		restored_def["target_layer"] = target_layer
+		if record.has("direction_x") and record.has("direction_y"):
+			restored_def["direction"] = Vector2i(int(record["direction_x"]), int(record["direction_y"]))
+		elif bool(restored_def.get("directional", false)):
+			var layer: TileMapLayer = _layer_for_name(target_layer)
+			if layer != null:
+				restored_def["direction"] = BuildDirectionRules.direction_from_alternative(layer.get_cell_alternative_tile(cell))
+		add_building(cell, restored_def)
+		if record.get("state", {}) is Dictionary:
+			_restore_runtime_node_state(cell, record["state"] as Dictionary)
+	if ignored > 0:
+		push_warning("BuildingObjectManager: ignored %d invalid runtime placeable records on load." % ignored)
 
 
 func count_buildings_by_item_id(item_id: String) -> int:
@@ -332,9 +432,18 @@ func _register_building_visual_scene_runtime(cell: Vector2i, runtime_id: String,
 	runtime_node.global_position = _cell_center(cell)
 	runtime_node.z_index = int(runtime_node.global_position.y)
 	parent.add_child(runtime_node)
+	if runtime_node.has_method("setup_placeable"):
+		runtime_node.call("setup_placeable", _make_placeable_context(cell, item_def))
 	if runtime_node.has_method("reset_to_idle"):
 		runtime_node.call("reset_to_idle")
 	_runtime_nodes_by_cell[cell] = runtime_node
+
+
+func _make_placeable_context(cell: Vector2i, item_def: Dictionary) -> PlaceableContext:
+	var item_id: String = str(item_def.get("id", ""))
+	var target_layer: String = _normalize_layer_name(str(item_def.get("target_layer", "")))
+	var direction: Vector2i = item_def.get("direction", Vector2i.ZERO) as Vector2i
+	return PlaceableContext.new(cell, item_id, item_def, target_layer, direction, self)
 
 func _runtime_parent() -> Node2D:
 	if runtime_parent:
@@ -434,35 +543,68 @@ func _default_building_def_for_existing_tile(layer: TileMapLayer, _cell: Vector2
 	if not layer:
 		return {}
 	var layer_name: String = layer.name
+	var source_id: int = layer.get_cell_source_id(_cell)
 	var atlas: Vector2i = layer.get_cell_atlas_coords(_cell)
-	for raw_item_def in ItemCatalog.ITEM_DEFS.values():
-		var item_def: Dictionary = raw_item_def as Dictionary
-		if str(item_def.get("type", "")) != "placeable":
-			continue
+	var alternative_tile: int = layer.get_cell_alternative_tile(_cell)
+	var ids: Array[String] = ItemCatalog.get_placeable_ids_for_tile_identity(layer_name, source_id, atlas, alternative_tile)
+	var building_ids: Array[String] = []
+	for item_id: String in ids:
+		var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
 		var placeable_category: String = str(item_def.get("category", ""))
-		if not BUILDING_CATEGORIES.has(placeable_category):
-			continue
-		var target_layer: String = str(item_def.get("target_layer", ""))
-		# Match the def's target layer to the layer the tile actually lives on.
-		# Old saves/scenes that still say "buildings" map to traversable_buildings.
-		if target_layer == "buildings":
-			target_layer = "traversable_buildings"
-		if target_layer != layer_name:
-			continue
-		var item_atlas: Vector2i = _atlas_coords_from_item_def(item_def)
-		if item_atlas == atlas:
-			var resolved_def: Dictionary = item_def.duplicate(true)
-			if bool(resolved_def.get("directional", false)):
-				resolved_def["direction"] = BuildDirectionRules.direction_from_alternative(layer.get_cell_alternative_tile(_cell))
-			return resolved_def
+		if BUILDING_CATEGORIES.has(placeable_category):
+			building_ids.append(item_id)
+	if building_ids.size() > 1:
+		push_warning("BuildingObjectManager: ambiguous legacy placeable marker at %s on %s matches %s; runtime identity requires a new save." % [
+			str(_cell),
+			layer_name,
+			_join_string_array(building_ids),
+		])
+		return {}
+	if building_ids.size() == 1:
+		var resolved_def: Dictionary = ItemCatalog.get_item_def(building_ids[0]).duplicate(true)
+		resolved_def["target_layer"] = _normalize_layer_name(str(resolved_def.get("target_layer", layer_name)))
+		if bool(resolved_def.get("directional", false)):
+			resolved_def["direction"] = BuildDirectionRules.direction_from_alternative(alternative_tile)
+		return resolved_def
 	return {}
 
-func _atlas_coords_from_item_def(item_def: Dictionary) -> Vector2i:
-	var raw: Variant = item_def.get("atlas", Vector2i(-1, -1))
-	if raw is Vector2i:
-		return raw
-	if raw is Vector2:
-		return Vector2i(int(raw.x), int(raw.y))
-	if raw is Array and raw.size() == 2:
-		return Vector2i(int(raw[0]), int(raw[1]))
-	return Vector2i(-1, -1)
+
+func _layer_for_name(layer_name: String) -> TileMapLayer:
+	match _normalize_layer_name(layer_name):
+		"traversable_buildings":
+			return traversable_buildings
+		"blocking_buildings":
+			return blocking_buildings
+		"fences":
+			return fences
+	return null
+
+
+func _normalize_layer_name(layer_name: String) -> String:
+	return "traversable_buildings" if layer_name == "buildings" else layer_name
+
+
+func _serialize_runtime_node_state(cell: Vector2i) -> Dictionary:
+	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return {}
+	if runtime_node.has_method("serialize_placeable_state"):
+		var raw_state: Variant = runtime_node.call("serialize_placeable_state")
+		if raw_state is Dictionary:
+			return raw_state as Dictionary
+	return {}
+
+
+func _restore_runtime_node_state(cell: Vector2i, state: Dictionary) -> void:
+	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
+	if runtime_node == null or not is_instance_valid(runtime_node):
+		return
+	if runtime_node.has_method("restore_placeable_state"):
+		runtime_node.call("restore_placeable_state", state)
+
+
+func _join_string_array(values: Array) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	for raw_value: Variant in values:
+		parts.append(str(raw_value))
+	return ", ".join(parts)
