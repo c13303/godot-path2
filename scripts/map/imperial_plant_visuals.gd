@@ -27,6 +27,8 @@ var _plantz: TileMapLayer
 var _sprites_by_cell: Dictionary = {}
 var _stages_by_cell: Dictionary = {}
 var _pop_tweens_by_cell: Dictionary = {}
+var _damage_flash_tweens_by_cell: Dictionary = {}
+var _damage_flash_original_modulates_by_cell: Dictionary = {}
 var _contact_until_by_cell: Dictionary = {}
 var _contact_phases_by_cell: Dictionary = {}
 var _time: float = 0.0
@@ -96,6 +98,7 @@ func _rebuild_from_manager() -> void:
 	_sprites_by_cell.clear()
 	_stages_by_cell.clear()
 	_clear_pop_tweens()
+	_clear_damage_flash_tweens()
 	if _plant_manager == null or not _plant_manager.has_method("get_imperial_plant_visual_states"):
 		return
 	var raw_states: Variant = _plant_manager.call("get_imperial_plant_visual_states")
@@ -134,6 +137,22 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 			"sway_phase": randf() * TAU,
 			"breathe_phase": randf() * TAU,
 		}
+
+
+func play_damage_flash_at(cell: Vector2i, duration: float) -> bool:
+	var sprite: Sprite2D = _sprites_by_cell.get(cell, null) as Sprite2D
+	if sprite == null or not is_instance_valid(sprite):
+		return false
+	_kill_damage_flash_tween(cell)
+	if not _damage_flash_original_modulates_by_cell.has(cell):
+		_damage_flash_original_modulates_by_cell[cell] = sprite.modulate
+	var original: Color = _damage_flash_original_modulates_by_cell[cell] as Color
+	sprite.modulate = Color(1.0, 0.12, 0.12, original.a)
+	var tween: Tween = create_tween()
+	_damage_flash_tweens_by_cell[cell] = tween
+	tween.tween_property(sprite, "modulate", original, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(Callable(self, "_on_damage_flash_finished").bind(cell, sprite))
+	return true
 
 
 func _sync_cell_from_manager(cell: Vector2i) -> void:
@@ -213,6 +232,7 @@ func _remove_visual(cell: Vector2i) -> void:
 	_stages_by_cell.erase(cell)
 	_contact_until_by_cell.erase(cell)
 	_contact_phases_by_cell.erase(cell)
+	_clear_damage_flash(cell)
 	var sprite: Sprite2D = _sprites_by_cell.get(cell, null) as Sprite2D
 	_sprites_by_cell.erase(cell)
 	if is_instance_valid(sprite):
@@ -267,3 +287,31 @@ func _clear_pop_tweens() -> void:
 		if tween != null and tween.is_valid():
 			tween.kill()
 	_pop_tweens_by_cell.clear()
+
+
+func _on_damage_flash_finished(cell: Vector2i, sprite: Sprite2D) -> void:
+	_damage_flash_tweens_by_cell.erase(cell)
+	if _damage_flash_original_modulates_by_cell.has(cell) and is_instance_valid(sprite):
+		sprite.modulate = _damage_flash_original_modulates_by_cell[cell] as Color
+	_damage_flash_original_modulates_by_cell.erase(cell)
+
+
+func _clear_damage_flash(cell: Vector2i) -> void:
+	_kill_damage_flash_tween(cell)
+	_damage_flash_original_modulates_by_cell.erase(cell)
+
+
+func _kill_damage_flash_tween(cell: Vector2i) -> void:
+	var tween: Tween = _damage_flash_tweens_by_cell.get(cell, null) as Tween
+	_damage_flash_tweens_by_cell.erase(cell)
+	if tween != null and tween.is_valid():
+		tween.kill()
+
+
+func _clear_damage_flash_tweens() -> void:
+	for raw_tween: Variant in _damage_flash_tweens_by_cell.values():
+		var tween: Tween = raw_tween as Tween
+		if tween != null and tween.is_valid():
+			tween.kill()
+	_damage_flash_tweens_by_cell.clear()
+	_damage_flash_original_modulates_by_cell.clear()

@@ -221,10 +221,6 @@ func _process_moving(nav_id: int, data: Dictionary) -> void:
 		return
 	var target_cell: Vector2i = _target_cell(durability, key)
 	if _in_attack_range(client, target_cell):
-		if bool(durability.target_record(key).get("instant_destroy", false)):
-			durability.apply_damage(key, ATTACK_DAMAGE)
-			_begin_retarget(nav_id, true)
-			return
 		_enter_attacking(nav_id)
 		return
 	# Arrived at the reserved cell but still out of range: that slot is unusable.
@@ -300,7 +296,6 @@ func _attempt_assignment(nav_id: int, data: Dictionary) -> void:
 		_begin_retarget(nav_id, true)
 		return
 	var attack_cell: Vector2i = assignment.get("attack_cell", INVALID_CELL) as Vector2i
-	var instant_destroy: bool = bool(assignment.get("instant_destroy", false))
 	data["target_key"] = target_key
 	data["attack_cell"] = attack_cell
 	data["idle_target_revision"] = -1
@@ -308,11 +303,7 @@ func _attempt_assignment(nav_id: int, data: Dictionary) -> void:
 	_hostile_clients[nav_id] = data
 	var target_cell: Vector2i = _target_cell(durability, target_key)
 	if _in_attack_range(client, target_cell):
-		if instant_destroy:
-			durability.apply_damage(target_key, ATTACK_DAMAGE)
-			_begin_retarget(nav_id, true)
-		else:
-			_enter_attacking(nav_id)
+		_enter_attacking(nav_id)
 		return
 	var path_world: PackedVector2Array = _compute_path_to_cell(client, attack_cell)
 	if path_world.is_empty():

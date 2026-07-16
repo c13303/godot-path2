@@ -67,9 +67,6 @@ func reevaluate_water_candidate(agent: Node2D, delta: float, floor_cell: Vector2
 	var nav_id: int = int(agent.get("nav_id"))
 	if nav_id < 0:
 		return WaterTrackResult.CANDIDATE
-	var turret_eating: TurretEatingController = _manager._turret_eating_controller
-	if turret_eating.is_eating(nav_id):
-		return WaterTrackResult.CANDIDATE
 	if _drowning_agents.has(nav_id):
 		return WaterTrackResult.DROWNING
 	var water_coverage: float = _agent_water_coverage(agent)

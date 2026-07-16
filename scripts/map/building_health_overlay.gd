@@ -2,15 +2,14 @@ extends Node2D
 class_name BuildingHealthOverlay
 
 # Single lightweight overlay that draws a health bar for every currently damaged,
-# registered player-built structure. TileMap-only targets (walls, fences) are
+# registered player-built placeable. TileMap-only targets (plants, walls, fences) are
 # supported without creating one runtime node per tile: the bars are drawn here
 # from the durability service's records. Follows BuildingConstructionOverlay:
 # purely visual, and it redraws only when the durability service reports a
 # health/registration change (see PlayerPlaceableDurabilityService._bump_and_redraw).
 #
-# Bars are hidden at full health and while a structure is instant-destroy (plants
-# never show a bar); they appear after the first damage and disappear when the
-# structure is removed.
+# Bars are hidden at full health; they appear after the first damage and disappear
+# when the target is removed.
 
 const BAR_SIZE: Vector2 = Vector2(22.0, 3.0)
 const BAR_Y_OFFSET: float = -14.0

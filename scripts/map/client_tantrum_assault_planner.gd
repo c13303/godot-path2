@@ -39,8 +39,7 @@ var _durability: PlayerPlaceableDurabilityService = null
 
 # Slot cache, rebuilt only when the durability target revision changes.
 var _cache_target_revision: int = -1
-# slot_id(String) -> { "target_key": String, "attack_cell": Vector2i,
-#                      "slot_id": String, "instant_destroy": bool }
+# slot_id(String) -> { "target_key": String, "attack_cell": Vector2i, "slot_id": String }
 var _slots_by_id: Dictionary = {}
 # target_key(String) -> Array[String] slot_ids (deterministic order)
 var _slot_ids_by_target: Dictionary = {}
@@ -109,7 +108,7 @@ func reservation(nav_id: int) -> Dictionary:
 # Reservation mutation.
 # ---------------------------------------------------------------------------
 # Picks the best available target/slot for this client and reserves it. Returns an
-# explicit assignment { target_key, attack_cell, slot_id, instant_destroy } or {}
+# explicit assignment { target_key, attack_cell, slot_id } or {}
 # when nothing is currently available (all useful perimeter occupied / rejected).
 func reserve_best_assignment(nav_id: int, from_world: Vector2, rejected_slot_ids: Dictionary) -> Dictionary:
 	_ensure_cache()
@@ -172,23 +171,15 @@ func _rebuild_slots() -> void:
 		var cell: Vector2i = record.get("cell", INVALID_CELL) as Vector2i
 		if cell == INVALID_CELL:
 			continue
-		var instant_destroy: bool = bool(record.get("instant_destroy", false))
 		var slot_ids: Array[String] = []
-		if instant_destroy:
-			# One logical slot on the target cell itself, matching current instant
-			# plant pathing: the first client to reach it destroys it.
-			var slot_id: String = "%s|instant" % target_key
-			new_slots_by_id[slot_id] = _make_slot(target_key, cell, slot_id, true)
-			slot_ids.append(slot_id)
-		else:
-			for offset: Vector2i in NEIGHBOR_OFFSETS:
-				var attack_cell: Vector2i = cell + offset
-				if not _manager.is_walkable_cell(attack_cell):
-					continue
-				for local_index: int in range(SLOTS_PER_ATTACK_CELL):
-					var sid: String = "%s|%d,%d|%d" % [target_key, attack_cell.x, attack_cell.y, local_index]
-					new_slots_by_id[sid] = _make_slot(target_key, attack_cell, sid, false)
-					slot_ids.append(sid)
+		for offset: Vector2i in NEIGHBOR_OFFSETS:
+			var attack_cell: Vector2i = cell + offset
+			if not _manager.is_walkable_cell(attack_cell):
+				continue
+			for local_index: int in range(SLOTS_PER_ATTACK_CELL):
+				var sid: String = "%s|%d,%d|%d" % [target_key, attack_cell.x, attack_cell.y, local_index]
+				new_slots_by_id[sid] = _make_slot(target_key, attack_cell, sid)
+				slot_ids.append(sid)
 		if not slot_ids.is_empty():
 			new_slot_ids_by_target[target_key] = slot_ids
 	_slots_by_id = new_slots_by_id
@@ -264,12 +255,11 @@ func _decrement_count(counts: Dictionary, key: String) -> void:
 		counts[key] = value
 
 
-func _make_slot(target_key: String, attack_cell: Vector2i, slot_id: String, instant_destroy: bool) -> Dictionary:
+func _make_slot(target_key: String, attack_cell: Vector2i, slot_id: String) -> Dictionary:
 	return {
 		"target_key": target_key,
 		"attack_cell": attack_cell,
 		"slot_id": slot_id,
-		"instant_destroy": instant_destroy,
 	}
 
 
@@ -278,7 +268,6 @@ func _assignment_from_slot(slot: Dictionary) -> Dictionary:
 		"target_key": str(slot.get("target_key", "")),
 		"attack_cell": slot.get("attack_cell", INVALID_CELL) as Vector2i,
 		"slot_id": str(slot.get("slot_id", "")),
-		"instant_destroy": bool(slot.get("instant_destroy", false)),
 	}
 
 

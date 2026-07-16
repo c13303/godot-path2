@@ -1,10 +1,18 @@
 extends RefCounted
 class_name PlayerPlaceableDurabilityService
 
+signal placeable_damaged(
+	cell: Vector2i,
+	layer_name: StringName,
+	item_id: String,
+	remaining_health: int,
+	max_health: int
+)
+
 # Owns the generic destructible target system: registered build provenance, live
 # map/runtime target discovery for tantrum fallback, current/max health, target
-# validity, cheap nearest-target selection, damage application, instant plant
-# destruction, and save serialization/restoration for registered tile targets.
+# validity, cheap nearest-target selection, damage application, plant destruction
+# policy, and save serialization/restoration for registered tile targets.
 #
 # BuildingManager owns this service and exposes thin wrappers. Provenance is still
 # registered on placement (BuildPlacementService.after_placeable_placed) and
@@ -35,7 +43,7 @@ var _build_system: Node = null
 # provenance; the record shape is centralized here so target dictionaries never
 # leak loosely-typed across files.
 #   { "key": String, "cell": Vector2i, "item_id": String, "layer_name": String,
-#     "health": int, "max_health": int, "instant_destroy": bool }
+#     "health": int, "max_health": int }
 var _targets_by_key: Dictionary = {}
 # cell(Vector2i) -> Dictionary[key(String) -> true]. Multiple target layers may
 # legally share one cell (for example a plant-layer target and a structure), so
@@ -84,8 +92,7 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 	# Overbuild replaces prior provenance for the same layer/cell, but does not
 	# discard another layer's target that happens to share the same map cell.
 	_erase_record_by_key(key)
-	var instant_destroy: bool = ItemCatalog.is_instant_destroy_placeable(item_id)
-	var max_health: int = 1 if instant_destroy else maxi(1, ItemCatalog.get_max_health(item_id))
+	var max_health: int = maxi(1, ItemCatalog.get_max_health(item_id))
 	_targets_by_key[key] = {
 		"key": key,
 		"cell": cell,
@@ -93,7 +100,6 @@ func register_player_placeable(cell: Vector2i, item_id: String, layer_name: Stri
 		"layer_name": normalized_layer,
 		"health": max_health,
 		"max_health": max_health,
-		"instant_destroy": instant_destroy,
 	}
 	_add_cell_key(cell, key)
 	_bump_target_revision_and_refresh()
@@ -134,7 +140,6 @@ func register_player_built_house(entrance: Vector2i, item_id: String) -> void:
 		"layer_name": HOUSES_LAYER,
 		"health": max_health,
 		"max_health": max_health,
-		"instant_destroy": false,
 	}
 	_add_cell_key(entrance, key)
 	_bump_target_revision_and_refresh()
@@ -276,8 +281,6 @@ func damaged_records() -> Array:
 		if not is_target_valid(key):
 			continue
 		var rec: Dictionary = _targets_by_key[key] as Dictionary
-		if bool(rec.get("instant_destroy", false)):
-			continue
 		var health: int = int(rec.get("health", 0))
 		var max_health: int = int(rec.get("max_health", 0))
 		if health > 0 and health < max_health:
@@ -293,12 +296,10 @@ func apply_damage(key: String, amount: int) -> bool:
 	if amount <= 0 or not _targets_by_key.has(key):
 		return false
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
-	if bool(rec.get("instant_destroy", false)):
-		destroy_target(key)
-		return true
 	var health: int = maxi(0, int(rec.get("health", 0)) - amount)
 	rec["health"] = health
 	_targets_by_key[key] = rec
+	_emit_placeable_damaged(rec)
 	if health <= 0:
 		destroy_target(key)
 		return true
@@ -324,11 +325,10 @@ func destroy_target(key: String) -> void:
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	var item_id: String = str(rec.get("item_id", ""))
-	var instant_destroy: bool = bool(rec.get("instant_destroy", false))
 	# Remove provenance first so the removal callback (remove_tile ->
 	# unregister_player_placeable) is idempotent and cannot recurse.
 	_erase_record_by_key(key)
-	if instant_destroy:
+	if ItemCatalog.uses_plant_destruction_path(item_id):
 		_destroy_plant_cell(cell)
 	elif str(rec.get("layer_name", "")) == HOUSES_LAYER:
 		# No-refund teardown of the whole house (sprite + five blockers + collision + one topology
@@ -428,7 +428,6 @@ func restore(saved: Array) -> void:
 				"layer_name": HOUSES_LAYER,
 				"health": house_health,
 				"max_health": house_max_health,
-				"instant_destroy": false,
 			}
 			_add_cell_key(cell, house_key)
 			continue
@@ -437,9 +436,11 @@ func restore(saved: Array) -> void:
 		if layer == null or layer.get_cell_source_id(cell) < 0 or _live_item_id_at(layer, layer_name, cell) != item_id:
 			ignored += 1
 			continue
-		var instant_destroy: bool = ItemCatalog.is_instant_destroy_placeable(item_id)
-		var max_health: int = 1 if instant_destroy else maxi(1, int(entry.get("max_health", ItemCatalog.get_max_health(item_id))))
-		var health: int = 1 if instant_destroy else clampi(int(entry.get("health", max_health)), 1, max_health)
+		var catalog_max_health: int = maxi(1, ItemCatalog.get_max_health(item_id))
+		var saved_max_health: int = int(entry.get("max_health", catalog_max_health))
+		var saved_health: int = int(entry.get("health", catalog_max_health))
+		var max_health: int = catalog_max_health if _is_legacy_full_health_record(item_id, saved_health, saved_max_health) else maxi(1, saved_max_health)
+		var health: int = max_health if _is_legacy_full_health_record(item_id, saved_health, saved_max_health) else clampi(saved_health, 1, max_health)
 		var key: String = _make_key(layer_name, cell)
 		_targets_by_key[key] = {
 			"key": key,
@@ -448,11 +449,11 @@ func restore(saved: Array) -> void:
 			"layer_name": layer_name,
 			"health": health,
 			"max_health": max_health,
-			"instant_destroy": instant_destroy,
 		}
 		_add_cell_key(cell, key)
 	if ignored > 0:
 		push_warning("PlayerPlaceableDurabilityService: ignored %d stale/invalid durability records on load." % ignored)
+	register_live_destructible_targets()
 	_bump_target_revision_and_refresh()
 
 
@@ -472,6 +473,21 @@ func _refresh_overlay() -> void:
 		_overlay.call("refresh")
 
 
+func _emit_placeable_damaged(record: Dictionary) -> void:
+	var cell: Vector2i = record.get("cell", INVALID_CELL) as Vector2i
+	var layer_name: StringName = StringName(str(record.get("layer_name", "")))
+	var item_id: String = str(record.get("item_id", ""))
+	var remaining_health: int = int(record.get("health", 0))
+	var max_health: int = int(record.get("max_health", 0))
+	placeable_damaged.emit(cell, layer_name, item_id, remaining_health, max_health)
+
+
+func _is_legacy_full_health_record(item_id: String, saved_health: int, saved_max_health: int) -> bool:
+	if saved_health != 1 or saved_max_health != 1:
+		return false
+	return item_id == "rose" or item_id == "imperial_seed" or item_id == "turret_epine"
+
+
 func _add_cell_key(cell: Vector2i, key: String) -> void:
 	var keys: Dictionary = _keys_by_cell.get(cell, {}) as Dictionary
 	keys[key] = true
@@ -488,8 +504,7 @@ func _register_live_destructible_target(layer: TileMapLayer, layer_name: String,
 	var key: String = _make_key(normalized_layer, cell)
 	if _targets_by_key.has(key):
 		return false
-	var instant_destroy: bool = ItemCatalog.is_instant_destroy_placeable(item_id)
-	var max_health: int = 1 if instant_destroy else maxi(1, ItemCatalog.get_max_health(item_id))
+	var max_health: int = maxi(1, ItemCatalog.get_max_health(item_id))
 	_targets_by_key[key] = {
 		"key": key,
 		"cell": cell,
@@ -497,7 +512,6 @@ func _register_live_destructible_target(layer: TileMapLayer, layer_name: String,
 		"layer_name": normalized_layer,
 		"health": max_health,
 		"max_health": max_health,
-		"instant_destroy": instant_destroy,
 	}
 	_add_cell_key(cell, key)
 	return true
@@ -525,7 +539,6 @@ func _register_live_reservoir_nodes() -> int:
 			"layer_name": RUNTIME_RESERVOIR_LAYER,
 			"health": max_health,
 			"max_health": max_health,
-			"instant_destroy": false,
 			"node": reservoir,
 		}
 		_add_cell_key(cell, key)

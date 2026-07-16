@@ -89,7 +89,10 @@ const ITEM_DEFS: Dictionary = {
 		"logical_plant": true,
 		"plant_kind": "imperial",
 		"agent_contact_enabled": true,
-		"agent_contact_behavior": &"plant_trample",
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
+		"max_health": 80,
+		"destruction_policy": &"plant_consume",
 		"recheck_agents_on_place": true,
 		"inventory_backed": true,
 		"speed_multiplier": 0.3,
@@ -249,7 +252,10 @@ const ITEM_DEFS: Dictionary = {
 		"speed_multiplier": 0.5,
 		"slows_player": false,
 		"agent_contact_enabled": true,
-		"agent_contact_behavior": &"plant_trample",
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
+		"max_health": 80,
+		"destruction_policy": &"plant_consume",
 		"recheck_agents_on_place": true,
 		"max_stack": 999,
 	},
@@ -380,9 +386,11 @@ const ITEM_DEFS: Dictionary = {
 		"irrigation_radius_tiles": 9,
 		"destroyed_by_creatures": true,
 		"agent_contact_enabled": true,
-		"agent_contact_behavior": &"pasteque_trample",
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
 		"recheck_agents_on_place": true,
 		"restore_floor_atlas": FLOOR_TILE_CATALOG.DRY_GROUND_FLOOR_ATLAS,
+		"leaves_debris_on_destroy": true,
 		# Paid for at the seed merchant into the inventory; placing consumes one unit
 		# from the inventory rather than charging currency again.
 		"inventory_backed": true,
@@ -410,10 +418,11 @@ const ITEM_DEFS: Dictionary = {
 		"pad_skip_preview": true,
 		"directional": true,
 		"runtime_id": "turret_epine",
-		# One hit point: destroyed in a single hit by tantrum clients.
-		"max_health": 1,
+		"max_health": 50,
+		"leaves_debris_on_destroy": true,
 		"agent_contact_enabled": true,
-		"agent_contact_behavior": &"turret_eating",
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
 		"recheck_agents_on_place": true,
 		"turret_data": TURRET_EPINE_DATA,
 		"turret_sprite_visual": {
@@ -451,9 +460,9 @@ const ITEM_DEFS: Dictionary = {
 		"requires_walkable_floor": true,
 		"requires_grass_green_floor": true,
 		"speed_multiplier": 0.5,
-		"walkover_damage_by_monsters": 30,
 		"agent_contact_enabled": true,
-		"agent_contact_behavior": &"kraken_walkover_damage",
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
 		"recheck_agents_on_place": true,
 		"leaves_debris_on_destroy": true,
 		"drag_buildable": false,
@@ -585,8 +594,8 @@ static func is_unique_house_type(item_id: String) -> bool:
 static func is_fixed_stock(item_id: String) -> bool:
 	return bool(get_item_def(item_id).get("fixed_stock", false))
 
-## Data-driven maximum health for a destructible player-built placeable. 0 means the
-## item has no repeated-damage health (plants use the instant-destroy path instead).
+## Data-driven maximum health for a destructible player-built placeable. 0 means
+## the item has no repeated-damage health.
 static func get_max_health(item_id: String) -> int:
 	return maxi(0, int(get_item_def(item_id).get("max_health", 0)))
 
@@ -602,17 +611,13 @@ static func is_destructible_placeable(item_id: String) -> bool:
 static func is_plant_placeable(item_id: String) -> bool:
 	return is_placeable(item_id) and str(get_item_def(item_id).get("category", "")) == "plant"
 
-## True for placeables that live on the plant layer and are destroyed instantly on contact
-## (roses, imperial plants, future plant-layer placeables) rather than taking repeated hits.
-static func is_instant_destroy_placeable(item_id: String) -> bool:
-	var item_def: Dictionary = get_item_def(item_id)
-	if not is_placeable(item_id):
-		return false
-	if bool(item_def.get("logical_plant", false)):
-		return true
-	if str(item_def.get("category", "")) == "plant":
-		return true
-	return str(item_def.get("target_layer", "")) == "plantz"
+## True for placeables that receive repeated stomp damage from eligible agents.
+static func is_stompable(item_id: String) -> bool:
+	return is_placeable(item_id) and bool(get_item_def(item_id).get("stompable", false))
+
+## True when lethal durability damage must use PlantManager.consume_plant semantics.
+static func uses_plant_destruction_path(item_id: String) -> bool:
+	return StringName(get_item_def(item_id).get("destruction_policy", &"")) == &"plant_consume"
 
 ## Catalog types that count as combat weapons (fired by the fight system) rather
 ## than tools/placeables. Quick-bar disabling and night auto-arming key off this.

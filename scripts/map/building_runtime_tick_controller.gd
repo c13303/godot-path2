@@ -107,16 +107,8 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 				_manager.eating_agent_count(), _manager.astar_in_agent_count(),
 				_manager.escaping_agent_count()])
 
-	# Turret-eating timeline first so the turret-eating set is fresh before the tile
-	# pass evaluates turret overlaps (preserves the old scan order).
-	t = Time.get_ticks_usec()
-	_manager.get_turret_eating_controller().process_turret_eating_agents(delta)
-	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
-		debug_telemetry.warn_garden_task_lag_us("_process_turrets_eaten", Time.get_ticks_usec() - t,
-			"turret_eating=%d" % _manager.get_turret_eating_controller().turret_eating_count())
-
 	# One lightweight cell-transition pass replacing the four per-frame full-agent
-	# scans (drowning start + splash, turret overlap, rose/pasteque trampling).
+	# scans (drowning start + splash, stomp damage/contact visuals).
 	t = Time.get_ticks_usec()
 	var tracker: AgentCellTracker = _manager.get_agent_cell_tracker()
 	tracker.process(delta)
@@ -124,13 +116,13 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		var stats: Dictionary = tracker.debug_stats()
 		debug_telemetry.warn_garden_task_lag_us("_process_agent_tile_interactions", Time.get_ticks_usec() - t,
-			"registered=%d pending_general=%d transitions=%d checked=%d invalidations=%d water_candidates=%d continuous_water=%d state_exit_rechecks=%d stale_water_removed=%d rose=%d pasteque=%d turret=%d drowning=%d" % [
+			"registered=%d pending_general=%d transitions=%d checked=%d invalidations=%d water_candidates=%d continuous_water=%d state_exit_rechecks=%d stale_water_removed=%d stomp=%d active_stomp=%d drowning=%d" % [
 				int(stats.get("registered", 0)), int(stats.get("pending_general_checks", 0)),
 				int(stats.get("transitions", 0)), int(stats.get("checked", 0)),
 				int(stats.get("invalidations", 0)), int(stats.get("water_candidates", 0)),
 				int(stats.get("continuous_water_checks", 0)), int(stats.get("state_exit_rechecks", 0)),
-				int(stats.get("stale_water_candidates_removed", 0)), int(stats.get("rose", 0)),
-				int(stats.get("pasteque", 0)), int(stats.get("turret", 0)),
+				int(stats.get("stale_water_candidates_removed", 0)), int(stats.get("stomp", 0)),
+				int(stats.get("active_stomp_contacts", 0)),
 				int(stats.get("drowning", 0))])
 
 	# Drowning damage timeline after the tile pass so an agent that started drowning

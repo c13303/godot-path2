@@ -9,6 +9,9 @@ class_name AgentCellTracker
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const INVALID_WATER_STATE: int = DrowningController.WaterTrackResult.INVALID
 const OUTSIDE_WATER_STATE: int = DrowningController.WaterTrackResult.OUTSIDE_CANDIDATE
+const RECHECK_CELL_ENTERED: int = 1
+const RECHECK_WORLD_CHANGED: int = 2
+const RECHECK_STATE_CHANGED: int = 4
 
 var _manager: BuildingManager = null
 var _interactions: AgentTileInteractionController = AgentTileInteractionController.new()
@@ -24,6 +27,7 @@ var _suspended: Dictionary = {}
 # FIFO dedup queue of instance_ids pending an interaction check.
 var _queue: Array[int] = []
 var _queued: Dictionary = {}
+var _queued_reasons: Dictionary = {}
 var _general_checked_this_frame: Dictionary = {}
 
 # Per-frame debug counters, only maintained when debug logs are enabled.
@@ -77,8 +81,10 @@ func suspend_agent(agent: Node2D) -> void:
 	_suspended[id] = true
 	_water_candidates.erase(id)
 	_queued.erase(id)
+	_queued_reasons.erase(id)
 	_general_checked_this_frame.erase(id)
 	_erase_from_queue(id)
+	_interactions.clear_agent_contact(id)
 
 
 func resume_agent(agent: Node2D) -> void:
@@ -103,7 +109,7 @@ func request_recheck(agent: Node2D) -> void:
 	var id: int = agent.get_instance_id()
 	if not _agents.has(id):
 		return
-	_enqueue(id)
+	_enqueue(id, RECHECK_STATE_CHANGED)
 	if CppDebugOptions.logs_enabled:
 		_pending_debug_state_exit_rechecks += 1
 
@@ -119,10 +125,13 @@ func refresh_agent(agent: Node2D) -> void:
 	var record: Dictionary = _agents[id] as Dictionary
 	var cell: Vector2i = _current_floor_cell(agent)
 	var last_cell: Vector2i = record["cell"] as Vector2i
+	var reason: int = RECHECK_STATE_CHANGED
 	if cell != last_cell:
+		_interactions.clear_agent_contact(id)
 		_reindex(id, last_cell, cell)
 		record["cell"] = cell
-	_enqueue(id)
+		reason = RECHECK_CELL_ENTERED
+	_enqueue(id, reason)
 	_refresh_water_candidate_membership(id, agent, cell)
 
 
@@ -176,6 +185,7 @@ func process(delta: float) -> void:
 	_general_checked_this_frame.clear()
 	_poll_transitions()
 	_drain_queue(delta)
+	_interactions.process_active_contacts(delta)
 	_tick_water_candidates(delta)
 
 
@@ -184,7 +194,7 @@ func invalidate_cell(cell: Vector2i) -> void:
 		return
 	var bucket: Dictionary = _cell_to_agents[cell] as Dictionary
 	for raw_id: Variant in bucket.keys():
-		_enqueue(int(raw_id))
+		_enqueue(int(raw_id), RECHECK_WORLD_CHANGED)
 		if CppDebugOptions.logs_enabled:
 			_pending_debug_invalidations += 1
 
@@ -202,7 +212,9 @@ func clear() -> void:
 	_suspended.clear()
 	_queue.clear()
 	_queued.clear()
+	_queued_reasons.clear()
 	_general_checked_this_frame.clear()
+	_interactions.clear()
 	_pending_debug_invalidations = 0
 	_pending_debug_state_exit_rechecks = 0
 
@@ -245,9 +257,10 @@ func _poll_transitions() -> void:
 		var last_cell: Vector2i = record["cell"] as Vector2i
 		var category: StringName = record["category"] as StringName
 		if cell != last_cell:
+			_interactions.clear_agent_contact(id)
 			_reindex(id, last_cell, cell)
 			record["cell"] = cell
-			_enqueue(id)
+			_enqueue(id, RECHECK_CELL_ENTERED)
 			_refresh_water_candidate_membership(id, agent, cell)
 			if debug:
 				_debug_transitions += 1
@@ -275,13 +288,15 @@ func _drain_queue(delta: float) -> void:
 			continue
 		var category: StringName = record["category"] as StringName
 		var cell: Vector2i = record["cell"] as Vector2i
-		_interactions.evaluate(agent, category, cell)
+		var reasons: int = int(_queued_reasons.get(id, RECHECK_STATE_CHANGED))
+		_interactions.evaluate(agent, category, cell, reasons)
 		_general_checked_this_frame[id] = true
 		_apply_water_result(id, agent, _evaluate_water_state(agent, cell, delta))
 		if debug:
 			_debug_general_checks += 1
 	_queue.clear()
 	_queued.clear()
+	_queued_reasons.clear()
 
 
 func _tick_water_candidates(delta: float) -> void:
@@ -362,11 +377,11 @@ func _reindex(id: int, old_cell: Vector2i, new_cell: Vector2i) -> void:
 		_cell_to_agents[new_cell] = new_bucket
 
 
-func _enqueue(id: int) -> void:
-	if _queued.has(id):
-		return
-	_queue.append(id)
-	_queued[id] = true
+func _enqueue(id: int, reason: int) -> void:
+	_queued_reasons[id] = int(_queued_reasons.get(id, 0)) | reason
+	if not _queued.has(id):
+		_queue.append(id)
+		_queued[id] = true
 
 
 func _remove_id(id: int) -> void:
@@ -382,8 +397,10 @@ func _remove_id(id: int) -> void:
 	_water_candidates.erase(id)
 	_suspended.erase(id)
 	_queued.erase(id)
+	_queued_reasons.erase(id)
 	_general_checked_this_frame.erase(id)
 	_erase_from_queue(id)
+	_interactions.clear_agent_contact(id)
 
 
 func _erase_from_queue(id: int) -> void:

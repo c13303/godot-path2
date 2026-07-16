@@ -284,8 +284,6 @@ func _is_target_still_eligible(agent: Node2D, nav_id: int, allow_own_reservation
 		return false
 	if _building_manager.get_drowning_controller().is_drowning(nav_id):
 		return false
-	if _building_manager.get_turret_eating_controller().is_eating(nav_id):
-		return false
 	if _building_manager.is_agent_eating_plant(nav_id):
 		return false
 	return true

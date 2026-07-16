@@ -49,6 +49,8 @@ var _region: Rect2
 var _tile_size: Vector2
 var _dancers: Dictionary = {}  # cell -> {"sprite": Sprite2D, "sway_phase": float, "breathe_phase": float, "pop_started_at": float}
 var _contact_dancers: Dictionary = {}  # key -> {"sprite": Sprite2D, "layer": TileMapLayer, "cell": Vector2i, "until": float, "source_id": int, "atlas_coords": Vector2i, "alternative_tile": int}
+var _damage_flash_tweens: Dictionary = {}  # key -> Tween
+var _damage_flash_original_modulates: Dictionary = {}  # key -> Color
 var _time: float = 0.0
 
 
@@ -165,6 +167,25 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 	_update_contact_dancer_visual(key)
 
 
+func play_damage_flash_at(layer_name: StringName, cell: Vector2i, item_id: String, duration: float) -> bool:
+	if layer_name == &"plantz" and item_id == "rose" and _dancers.has(cell):
+		var dancer_data: Dictionary = _dancers[cell] as Dictionary
+		var dancer_sprite: Sprite2D = dancer_data.get("sprite", null) as Sprite2D
+		return _flash_sprite(_flash_key(layer_name, cell), dancer_sprite, duration)
+	var key: String = _contact_key(layer_name, cell)
+	if not _contact_dancers.has(key):
+		_on_plant_contact_dance_requested(layer_name, cell, item_id, duration)
+	elif _contact_dancers.has(key):
+		var existing: Dictionary = _contact_dancers[key] as Dictionary
+		existing["until"] = maxf(float(existing.get("until", 0.0)), _time + maxf(0.0, duration))
+		_contact_dancers[key] = existing
+	if not _contact_dancers.has(key):
+		return false
+	var data: Dictionary = _contact_dancers[key] as Dictionary
+	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+	return _flash_sprite(_flash_key(layer_name, cell), sprite, duration)
+
+
 func _add_dancer(cell: Vector2i, play_pop: bool) -> void:
 	if not _is_visual_grownup(cell) and not _is_logical_grownup(cell):
 		return
@@ -194,6 +215,7 @@ func _remove_dancer(cell: Vector2i) -> void:
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
 	if is_instance_valid(sprite):
 		sprite.queue_free()
+	_clear_damage_flash(_flash_key(&"plantz", cell))
 	_set_source_visual_hidden(cell, false)
 
 
@@ -205,7 +227,8 @@ func _remove_contact_dancer(key: String) -> void:
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
 	if is_instance_valid(sprite):
 		sprite.queue_free()
-	var layer_name: StringName = data.get("layer_name", &"") as StringName
+	_clear_damage_flash(_flash_key(layer_name, cell))
+	var layer_name: StringName = StringName(data.get("layer_name", &""))
 	var cell: Vector2i = data.get("cell", Vector2i.ZERO) as Vector2i
 	if layer_name == &"plantz" and _plant_manager != null and _plant_manager.has_method("set_rose_visual_hidden"):
 		_plant_manager.call("set_rose_visual_hidden", cell, false)
@@ -373,3 +396,41 @@ func _building_still_exists(cell: Vector2i, item_id: String) -> bool:
 		return true
 	var data: Dictionary = manager.call("get_building", cell) as Dictionary
 	return str(data.get("item_id", "")) == item_id
+
+
+func _flash_sprite(key: String, sprite: Sprite2D, duration: float) -> bool:
+	if sprite == null or not is_instance_valid(sprite):
+		return false
+	_kill_damage_flash_tween(key)
+	if not _damage_flash_original_modulates.has(key):
+		_damage_flash_original_modulates[key] = sprite.modulate
+	var original: Color = _damage_flash_original_modulates[key] as Color
+	sprite.modulate = Color(1.0, 0.12, 0.12, original.a)
+	var tween: Tween = create_tween()
+	_damage_flash_tweens[key] = tween
+	tween.tween_property(sprite, "modulate", original, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.finished.connect(Callable(self, "_on_damage_flash_finished").bind(key, sprite))
+	return true
+
+
+func _on_damage_flash_finished(key: String, sprite: Sprite2D) -> void:
+	_damage_flash_tweens.erase(key)
+	if _damage_flash_original_modulates.has(key) and is_instance_valid(sprite):
+		sprite.modulate = _damage_flash_original_modulates[key] as Color
+	_damage_flash_original_modulates.erase(key)
+
+
+func _clear_damage_flash(key: String) -> void:
+	_kill_damage_flash_tween(key)
+	_damage_flash_original_modulates.erase(key)
+
+
+func _kill_damage_flash_tween(key: String) -> void:
+	var tween: Tween = _damage_flash_tweens.get(key, null) as Tween
+	_damage_flash_tweens.erase(key)
+	if tween != null and tween.is_valid():
+		tween.kill()
+
+
+func _flash_key(layer_name: StringName, cell: Vector2i) -> String:
+	return "flash:%s:%d:%d" % [String(layer_name), cell.x, cell.y]

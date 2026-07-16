@@ -16,11 +16,10 @@ class_name AllyHousingController
 # from the completed house records and spawns/retires them through the owning
 # BuilderController / SeedMerchantController.
 #
-# Terminology warning: AgentTileInteractionController.VILLAGER_CATEGORIES (and the matching
-# TurretEatingController._is_villager_kind) is a SEPARATE, older "people agents that crush
-# placeables by walking" grouping. It borrows the word "villager" but also includes clients,
-# so it is broader than this residency concept. That constant is a movement/crush rule; do
-# not treat its membership as the villager roster.
+# Terminology warning: AgentTileInteractionController.VILLAGER_CATEGORIES is a separate
+# "people agents that crush placeables by walking" grouping. It includes clients, so it is
+# broader than this residency concept. That constant is a movement/crush rule; do not treat
+# its membership as the villager roster.
 
 const HOUSE_BUILDER_ID: StringName = &"house_builder"
 const HOUSE_MERCHANT_ID: StringName = &"house_merchant"

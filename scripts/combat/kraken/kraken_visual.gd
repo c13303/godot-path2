@@ -76,6 +76,9 @@ var _grab_extension_start_points: PackedVector2Array = PackedVector2Array()
 var _contact_emitted: bool = false
 var _finish_emitted: bool = false
 var _animation_paused: bool = false
+var _damage_flash_tween: Tween = null
+var _damage_flash_original_modulates: Array[Color] = []
+var _damage_flash_active: bool = false
 
 
 func _ready() -> void:
@@ -178,6 +181,28 @@ func set_animation_paused(paused: bool) -> void:
 	_animation_paused = paused
 
 
+func play_damage_flash(duration: float) -> void:
+	if _segments.is_empty():
+		return
+	_kill_damage_flash_tween()
+	if not _damage_flash_active:
+		_damage_flash_original_modulates.clear()
+		for sprite: Sprite2D in _segments:
+			_damage_flash_original_modulates.append(sprite.modulate)
+		_damage_flash_active = true
+	for index: int in range(_segments.size()):
+		var sprite: Sprite2D = _segments[index]
+		var original: Color = _damage_flash_original_modulates[index] if index < _damage_flash_original_modulates.size() else Color.WHITE
+		sprite.modulate = Color(1.0, 0.12, 0.12, original.a)
+	_damage_flash_tween = create_tween()
+	_damage_flash_tween.set_parallel(true)
+	for index: int in range(_segments.size()):
+		var sprite: Sprite2D = _segments[index]
+		var original: Color = _damage_flash_original_modulates[index] if index < _damage_flash_original_modulates.size() else Color.WHITE
+		_damage_flash_tween.tween_property(sprite, "modulate", original, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_damage_flash_tween.finished.connect(Callable(self, "_on_damage_flash_finished"))
+
+
 func _setup_segment_points() -> void:
 	segment_points.resize(SEGMENT_COUNT)
 	_idle_start_points.resize(SEGMENT_COUNT)
@@ -195,6 +220,9 @@ func _setup_segment_points() -> void:
 
 
 func _setup_segments() -> void:
+	_kill_damage_flash_tween()
+	_damage_flash_active = false
+	_damage_flash_original_modulates.clear()
 	var segment_root: Node2D = _get_or_create_segment_root()
 	_segments.clear()
 	for index: int in range(SEGMENT_COUNT):
@@ -445,6 +473,27 @@ func _capture_idle_start_pose() -> void:
 	_idle_start_anchor_local = _capture_anchor_local
 	for index: int in range(SEGMENT_COUNT):
 		_idle_start_points[index] = segment_points[index]
+
+
+func _on_damage_flash_finished() -> void:
+	_damage_flash_tween = null
+	_restore_damage_flash_modulates()
+	_damage_flash_active = false
+
+
+func _kill_damage_flash_tween() -> void:
+	if _damage_flash_tween != null and _damage_flash_tween.is_valid():
+		_damage_flash_tween.kill()
+	_damage_flash_tween = null
+
+
+func _restore_damage_flash_modulates() -> void:
+	for index: int in range(_segments.size()):
+		var sprite: Sprite2D = _segments[index]
+		if not is_instance_valid(sprite):
+			continue
+		if index < _damage_flash_original_modulates.size():
+			sprite.modulate = _damage_flash_original_modulates[index]
 
 
 func _capture_eating_start_pose() -> void:

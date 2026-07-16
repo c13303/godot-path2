@@ -56,7 +56,6 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
 # Garden access-cell scoring penalties (ACCESS_*) now live in GardenAccessResolver,
 # which owns the garden access scoring / entry selection extracted from this manager.
-const PASTEQUE_ITEM_ID: String = "pasteque"
 const _SANE_CELL_LIMIT: int = 100000
 
 @export var floorz: TileMapLayer
@@ -173,18 +172,18 @@ var _builder: BuilderController = BuilderController.new()
 var _dawn_harvest: DawnHarvestController = DawnHarvestController.new()
 var _client_tantrum: ClientTantrumController = ClientTantrumController.new()
 # Generic player-built destructible system: provenance, health, target selection,
-# damage, instant plant destruction, and durability save/load. The tantrum
+# damage, destruction policy, and durability save/load. The tantrum
 # controller consumes it; BuildSystem/placement/removal feed provenance into it.
 var _durability: PlayerPlaceableDurabilityService = PlayerPlaceableDurabilityService.new()
+var _damage_feedback: PlaceableDamageFeedback = PlaceableDamageFeedback.new()
 var _health_overlay: BuildingHealthOverlay
 var _client_sale: ClientSaleController = ClientSaleController.new()
 # Owns run-length + victory decisioning (finite runs, final client day, win latch).
 # See RunCompletionController.
 var _run_completion: RunCompletionController = RunCompletionController.new()
 var _drowning_controller: DrowningController = DrowningController.new()
-var _turret_eating_controller: TurretEatingController = TurretEatingController.new()
 # Detects agent cell transitions and dispatches tile-based interactions (drowning,
-# turret eating, rose/pasteque trampling) only on entry, replacing four per-frame
+# stomp damage/contact visuals) only on entry, replacing old per-frame
 # full-agent scans. Runtime agents register through _register_runtime_agent.
 var _agent_cell_tracker: AgentCellTracker = AgentCellTracker.new()
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
@@ -247,10 +246,10 @@ func _ready() -> void:
 	add_child(_health_overlay)
 	_health_overlay.setup(self, _durability)
 	_durability.set_overlay(_health_overlay)
+	_damage_feedback.setup(self, _durability)
 	_client_sale.setup(self)
 	_run_completion.setup(self)
 	_drowning_controller.setup(self)
-	_turret_eating_controller.setup(self)
 	_agent_cell_tracker.setup(self)
 	_agent_suspend.setup(self)
 	_building_scan.setup(self)
@@ -1223,56 +1222,6 @@ func _process_dawn_harvest_walkover() -> void:
 	_dawn_harvest.process_walkover()
 
 
-# The crushing people-agents (clients, merchants, builders — the
-# AgentTileInteractionController crush grouping, broader than a "villager"/house resident)
-# crush any plant they walk over, leaving debris
-# behind. This works off the plant layer rather than the rose item, so it covers roses,
-# imperials and any future plant-layer placeable alike.
-# Monsters reach plants through the garden targeting/eating system; this covers the
-# shop-bound creatures that cross the garden without ever targeting a plant. The
-# player is exempt (it harvests roses instead). consume_plant() swaps to debris and
-# fires plant_removed, so any monster targeting that cell retargets synchronously.
-# Called per-agent by AgentTileInteractionController when the agent enters a new cell
-# (was a per-frame full-agent scan over clients/merchants).
-# Returns true when a plant was actually destroyed, so the caller can react to the
-# destruction (it drives the "people are trampling your plants" alert).
-func trample_plant_at_agent(agent: Node2D) -> bool:
-	if plant_manager == null or floorz == null:
-		return false
-	if not is_instance_valid(agent):
-		return false
-	if not plant_manager.has_method("has_plant") or not plant_manager.has_method("consume_plant"):
-		return false
-	var cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	if not bool(plant_manager.call("has_plant", cell)):
-		return false
-	spawn_plant_parts_burst(cell_center(cell))
-	plant_manager.call("consume_plant", cell)
-	return true
-
-
-# Called per-agent by AgentTileInteractionController when the agent enters a new cell
-# (was a per-frame full-agent scan over monsters/clients).
-# Returns true when a pasteque was actually destroyed.
-# Crushed by monsters and by every crushing people-agent (clients, merchants, builders —
-# the crush grouping, not just villagers/house residents).
-func trample_pasteque_at_agent(agent: Node2D) -> bool:
-	if traversable_buildings == null or not is_instance_valid(agent):
-		return false
-	var pasteque_def: Dictionary = ItemCatalog.get_item_def(PASTEQUE_ITEM_ID)
-	if not bool(pasteque_def.get("destroyed_by_creatures", false)):
-		return false
-	var building_objects: BuildingObjectManager = _get_building_object_manager()
-	if building_objects == null or not building_objects.has_method("get_building"):
-		return false
-	var cell: Vector2i = traversable_buildings.local_to_map(traversable_buildings.to_local(agent.global_position))
-	var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
-	if str(building_data.get("item_id", "")) != PASTEQUE_ITEM_ID:
-		return false
-	_destroy_pasteque_cell(cell)
-	return true
-
-
 func has_grownup_roses_to_harvest() -> bool:
 	return _dawn_harvest.has_grownup_roses_to_harvest()
 
@@ -1902,10 +1851,6 @@ func get_dawn_harvest_controller() -> DawnHarvestController:
 
 func get_drowning_controller() -> DrowningController:
 	return _drowning_controller
-
-
-func get_turret_eating_controller() -> TurretEatingController:
-	return _turret_eating_controller
 
 
 func get_agent_cell_tracker() -> AgentCellTracker:
@@ -2614,38 +2559,11 @@ func _resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dict
 func _capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 	return _agent_suspend.capture_agent_resume_state(nav_id, agent)
 
-func _suspend_agent_for_turret_eating(nav_id: int) -> void:
-	_agent_suspend.suspend_agent_for_turret_eating(nav_id)
-
-func _resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
-	_agent_suspend.resume_agent_after_turret_eating(nav_id, agent, resume_state)
-
 func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionary:
 	return _agent_suspend.suspend_agent_for_external_capture(nav_id, agent)
 
 func resume_agent_after_external_capture(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
 	_agent_suspend.resume_agent_after_external_capture(nav_id, agent, resume_state)
-
-# A devoured turret leaves the same debris tile a consumed rose does, so the cell
-# reads as "something was eaten here". plantz/blocking_buildings share one TileSet
-# and transform (see mainRun.tscn), so the turret cell maps directly and its source
-# id is the shared atlas source we need for the debris tile. Capture it before the
-# turret is erased.
-func _leave_turret_debris(turret_cell: Vector2i) -> void:
-	if plantz == null or blocking_buildings == null:
-		return
-	spawn_plant_parts_burst(cell_center(turret_cell))
-	# Don't stomp an existing rose/debris occupant on the plant layer.
-	if plantz.get_cell_source_id(turret_cell) >= 0:
-		return
-	var source_id: int = blocking_buildings.get_cell_source_id(turret_cell)
-	if source_id < 0:
-		return
-	var alternative_tile: int = blocking_buildings.get_cell_alternative_tile(turret_cell)
-	plantz.set_cell(turret_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
-	_flush_plant_layer_visuals()
-	_sync_building_cell_speed(turret_cell, "debris")
-
 
 func leave_destroyed_placeable_debris(cell: Vector2i, layer_name: String) -> void:
 	if plantz == null:
@@ -2680,61 +2598,9 @@ func _placeable_layer_for_name_for_debris(layer_name: String) -> TileMapLayer:
 	return null
 
 
-func _destroy_pasteque_cell(pasteque_cell: Vector2i) -> void:
-	if traversable_buildings == null:
-		return
-	var source_id: int = traversable_buildings.get_cell_source_id(pasteque_cell)
-	var alternative_tile: int = traversable_buildings.get_cell_alternative_tile(pasteque_cell)
-	_clear_pasteque_irrigation(pasteque_cell)
-	spawn_plant_parts_burst(cell_center(pasteque_cell))
-	_leave_pasteque_debris(pasteque_cell, source_id, alternative_tile)
-	var building_objects: BuildingObjectManager = _get_building_object_manager()
-	if building_objects != null and building_objects.has_method("remove_building"):
-		building_objects.call("remove_building", pasteque_cell, true)
-	elif traversable_buildings.get_cell_source_id(pasteque_cell) >= 0:
-		traversable_buildings.erase_cell(pasteque_cell)
-		traversable_buildings.update_internals()
-	Sfx.play_sound(&"crunsh")
-
-func _clear_pasteque_irrigation(pasteque_cell: Vector2i) -> void:
-	var reservoir_system: Node = get_node_or_null("../ReservoirSystem")
-	if reservoir_system == null or not reservoir_system.has_method("clear_pasteque_irrigation_from_cell"):
-		return
-	reservoir_system.call("clear_pasteque_irrigation_from_cell", pasteque_cell)
-
-func _leave_pasteque_debris(pasteque_cell: Vector2i, source_id: int, alternative_tile: int) -> void:
-	if plantz == null or source_id < 0:
-		return
-	if plantz.get_cell_source_id(pasteque_cell) >= 0:
-		return
-	plantz.set_cell(pasteque_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
-	_flush_plant_layer_visuals()
-	_sync_building_cell_speed(pasteque_cell, "debris")
-
-func _remove_turret_cell(turret_cell: Vector2i) -> void:
-	var building_objects: BuildingObjectManager = _get_building_object_manager()
-	if building_objects != null and building_objects.has_method("remove_building"):
-		building_objects.call("remove_building", turret_cell, true)
-		return
-	if blocking_buildings != null and blocking_buildings.get_cell_source_id(turret_cell) >= 0:
-		blocking_buildings.erase_cell(turret_cell)
-		blocking_buildings.update_internals()
-
 func _get_building_object_manager() -> BuildingObjectManager:
 	var manager: BuildingObjectManager = get_node_or_null("../BuildingObjectManager") as BuildingObjectManager
 	return manager
-
-func _is_turret_cell(cell: Vector2i) -> bool:
-	var building_objects: BuildingObjectManager = _get_building_object_manager()
-	if building_objects != null and building_objects.has_method("get_building"):
-		var building_data: Dictionary = building_objects.call("get_building", cell) as Dictionary
-		var item_id: String = str(building_data.get("item_id", ""))
-		return ItemCatalog.get_turret_data(item_id) != null
-	if blocking_buildings == null or blocking_buildings.get_cell_source_id(cell) < 0:
-		return false
-	var atlas: Vector2i = blocking_buildings.get_cell_atlas_coords(cell)
-	var fallback_item_id: String = ItemCatalog.get_placeable_id_for_tile(str(blocking_buildings.name), atlas)
-	return ItemCatalog.get_turret_data(fallback_item_id) != null
 
 func _flush_plant_layer_visuals() -> void:
 	if not plantz:
@@ -2874,7 +2740,6 @@ func _clear_removed_agent_state(nav_id: int) -> void:
 	_erase_astar_in_agent(nav_id)
 	_erase_eating_agent(nav_id)
 	_drowning_controller.clear_agent(nav_id)
-	_turret_eating_controller.clear_agent(nav_id)
 	_escaping_agents.erase(nav_id)
 	_client_counter_agents.erase(nav_id)
 	_client_tantrum.clear_hostile(nav_id)

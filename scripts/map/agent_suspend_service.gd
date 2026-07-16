@@ -26,7 +26,7 @@ func suspend_agent_for_drowning(nav_id: int) -> void:
 
 
 func resume_agent_after_drowning(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
-	resume_agent_after_turret_eating(nav_id, agent, resume_state)
+	resume_agent_after_capture(nav_id, agent, resume_state)
 
 
 func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionary:
@@ -40,7 +40,6 @@ func suspend_agent_for_external_capture(nav_id: int, agent: Node2D) -> Dictionar
 	_client_counter_agents().erase(nav_id)
 	_manager.get_drowning_controller().clear_agent(nav_id)
 	_manager.get_drowning_controller().stop_splash(agent)
-	_manager.get_turret_eating_controller().clear_agent(nav_id)
 	_manager.get_agent_cell_tracker().suspend_agent(agent)
 	if agent.has_method("begin_external_capture"):
 		agent.call("begin_external_capture")
@@ -51,7 +50,7 @@ func resume_agent_after_external_capture(nav_id: int, agent: Node2D, resume_stat
 	if agent != null and is_instance_valid(agent) and agent.has_method("end_external_capture"):
 		agent.call("end_external_capture")
 	_manager.get_agent_cell_tracker().resume_agent(agent)
-	resume_agent_after_turret_eating(nav_id, agent, resume_state)
+	resume_agent_after_capture(nav_id, agent, resume_state)
 
 
 func capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
@@ -92,16 +91,7 @@ func capture_agent_resume_state(nav_id: int, agent: Node2D) -> Dictionary:
 	}
 
 
-func suspend_agent_for_turret_eating(nav_id: int) -> void:
-	_manager.get_agent_navigation_phase_controller().clear_agent_traffic(nav_id)
-	_detach_agent_navigation(nav_id)
-	_entry_path_agents().erase(nav_id)
-	_manager._erase_astar_in_agent(nav_id)
-	_escaping_agents().erase(nav_id)
-	_client_counter_agents().erase(nav_id)
-
-
-func resume_agent_after_turret_eating(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
+func resume_agent_after_capture(nav_id: int, agent: Node2D, resume_state: Dictionary) -> void:
 	var kind: String = str(resume_state.get("kind", "retarget"))
 	var data: Dictionary = resume_state.get("data", {}) as Dictionary
 	if kind == "entry":

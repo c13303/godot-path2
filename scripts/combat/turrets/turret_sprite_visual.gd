@@ -45,6 +45,10 @@ var _refractory_active: bool = false
 var _shot_frames: Array[Dictionary] = []
 var _shot_time_left: float = 0.0
 var _shot_frame_index: int = 0
+var _damage_flash_tween: Tween = null
+var _base_original_modulate: Color = Color.WHITE
+var _head_original_modulate: Color = Color.WHITE
+var _damage_flash_active: bool = false
 
 
 func setup(visual_def: Dictionary, direction: Vector2i) -> void:
@@ -100,6 +104,23 @@ func set_refractory_active(active: bool) -> void:
 	if _head_sprite == null or _shot_time_left > 0.0:
 		return
 	_set_head_frame(_refractory_frame if _refractory_active else _head_idle_frame)
+
+
+func play_damage_flash(duration: float) -> void:
+	if _base_sprite == null or _head_sprite == null:
+		return
+	_kill_damage_flash_tween()
+	if not _damage_flash_active:
+		_base_original_modulate = _base_sprite.modulate
+		_head_original_modulate = _head_sprite.modulate
+		_damage_flash_active = true
+	_base_sprite.modulate = Color(1.0, 0.12, 0.12, _base_original_modulate.a)
+	_head_sprite.modulate = Color(1.0, 0.12, 0.12, _head_original_modulate.a)
+	_damage_flash_tween = create_tween()
+	_damage_flash_tween.set_parallel(true)
+	_damage_flash_tween.tween_property(_base_sprite, "modulate", _base_original_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_damage_flash_tween.tween_property(_head_sprite, "modulate", _head_original_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_damage_flash_tween.finished.connect(Callable(self, "_on_damage_flash_finished"))
 
 
 func _process(delta: float) -> void:
@@ -165,6 +186,7 @@ func _create_frame_sprite(texture: Texture2D, region: Rect2) -> Sprite2D:
 
 
 func _clear_sprites() -> void:
+	_kill_damage_flash_tween()
 	for child: Node in get_children():
 		child.queue_free()
 	_base_sprite = null
@@ -175,6 +197,7 @@ func _clear_sprites() -> void:
 	_shot_frame_index = 0
 	_refractory_frame = DEFAULT_REFRACTORY_FRAME
 	_refractory_active = false
+	_damage_flash_active = false
 
 
 func _frame_region(frame: int) -> Rect2:
@@ -260,3 +283,18 @@ func _shot_frames_from_variant(value: Variant) -> Array[Dictionary]:
 			"duration": maxf(0.0, float(frame_data.get("duration", 0.0))),
 		})
 	return frames
+
+
+func _on_damage_flash_finished() -> void:
+	_damage_flash_tween = null
+	if _base_sprite != null and is_instance_valid(_base_sprite):
+		_base_sprite.modulate = _base_original_modulate
+	if _head_sprite != null and is_instance_valid(_head_sprite):
+		_head_sprite.modulate = _head_original_modulate
+	_damage_flash_active = false
+
+
+func _kill_damage_flash_tween() -> void:
+	if _damage_flash_tween != null and _damage_flash_tween.is_valid():
+		_damage_flash_tween.kill()
+	_damage_flash_tween = null
