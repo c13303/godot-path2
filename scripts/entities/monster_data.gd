@@ -31,6 +31,10 @@ class_name MonsterData
 ## Small monsters can be grabbed and eaten whole by capture buildings (kraken).
 ## Large monsters are too heavy to be lifted.
 @export var is_small: bool = true
+## Whether deep water drowns this monster. When false the monster only slows down
+## in water (via the shared terrain-speed multiplier) like the player, and never
+## takes drowning damage. Large monsters are too big to drown.
+@export var drownable: bool = true
 
 @export_group("Stats")
 @export_range(1, 100000, 1, "or_greater") var max_health: int = 100

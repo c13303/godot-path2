@@ -65,6 +65,7 @@ static func _make_bigmonster() -> MonsterData:
 	data.id = BIG_MONSTER_ID
 	data.display_name = "Big Monster"
 	data.is_small = false
+	data.drownable = false
 	data.texture = BIG_MONSTER_TEXTURE
 	data.sprite_hframes = 4
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL

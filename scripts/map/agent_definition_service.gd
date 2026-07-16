@@ -57,6 +57,7 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	# live pool.
 	agent.set("max_health", data.max_health)
 	agent.set("health", data.max_health)
+	agent.set("drownable", data.drownable)
 	agent.set_meta("monster_speed_scale", data.speed_scale)
 	agent.set_meta("monster_crowd_resist", data.crowd_resist_scale)
 	agent.set_meta("agent_contact_push_power", data.contact_push_power)
