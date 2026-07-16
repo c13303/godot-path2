@@ -1223,7 +1223,9 @@ func _process_dawn_harvest_walkover() -> void:
 	_dawn_harvest.process_walkover()
 
 
-# Villagers (clients, merchants, builders) crush any plant they walk over, leaving debris
+# The crushing people-agents (clients, merchants, builders — the
+# AgentTileInteractionController crush grouping, broader than a "villager"/house resident)
+# crush any plant they walk over, leaving debris
 # behind. This works off the plant layer rather than the rose item, so it covers roses,
 # imperials and any future plant-layer placeable alike.
 # Monsters reach plants through the garden targeting/eating system; this covers the
@@ -1252,7 +1254,8 @@ func trample_plant_at_agent(agent: Node2D) -> bool:
 # Called per-agent by AgentTileInteractionController when the agent enters a new cell
 # (was a per-frame full-agent scan over monsters/clients).
 # Returns true when a pasteque was actually destroyed.
-# Crushed by monsters and by every villager (clients, merchants, builders).
+# Crushed by monsters and by every crushing people-agent (clients, merchants, builders —
+# the crush grouping, not just villagers/house residents).
 func trample_pasteque_at_agent(agent: Node2D) -> bool:
 	if traversable_buildings == null or not is_instance_valid(agent):
 		return false

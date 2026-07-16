@@ -22,14 +22,19 @@ const CATEGORY_BUILDERS: StringName = &"builders"
 const CATEGORY_SHEEP: StringName = &"sheep"
 const KRAKEN_ITEM_ID: String = "kraken"
 const KRAKEN_LAYER_NAME: String = "traversable_buildings"
-# The people agents. They all crush every crushable placeable they walk over — plants
-# (roses and imperials alike), pasteques and turrets — and warn the player when they do.
-# Sheep are deliberately not villagers: they are the player's own debris-eating animals,
-# and trampling creates the very debris they walk to, so letting them crush would feed
-# itself. Monsters are not villagers either; they destroy the garden through their own
-# targeting/eating systems.
+# The "people agents" crush grouping. Clients, merchants and builders all crush every
+# crushable placeable they walk over — plants (roses and imperials alike), pasteques and
+# turrets — and warn the player when they do.
+# This is a movement/crush rule and is BROADER than the game's "villager" (house-resident
+# ally) concept, whose canonical definition lives on AllyHousingController: it also includes
+# clients, who are visiting customers and never live in a house. So "villager" here means
+# "person who crushes by walking", not "house resident" — the two overlap but are not equal.
+# Sheep are deliberately excluded: they are the player's own debris-eating animals, and
+# trampling creates the very debris they walk to, so letting them crush would feed itself.
+# Monsters are excluded too; they destroy the garden through their own targeting/eating
+# systems.
 const VILLAGER_CATEGORIES: Array[StringName] = [CATEGORY_CLIENTS, CATEGORY_MERCHANTS, CATEGORY_BUILDERS]
-# Raised when a villager destroys anything by walking over it. Monsters never raise it:
+# Raised when a crushing people-agent destroys anything by walking over it. Monsters never raise it:
 # wrecking the garden is what they are there for, so it is not worth warning about.
 const KEY_PEOPLE_CRUSH_PLANTS: String = "tutorial.people_crush_plants"
 

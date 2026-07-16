@@ -1,6 +1,27 @@
 extends RefCounted
 class_name AllyHousingController
 
+# Canonical definition of a "villager".
+#
+# A villager is an ally agent that lives in a house. Membership is a property — house
+# residency — not a fixed list: any agent spawned as a house resident is a villager, so a
+# new resident role becomes a villager automatically, without editing an enumeration here.
+# Today the villagers are:
+#   - the Builder             (RESIDENT_BUILDER, lives in a completed house_builder)
+#   - the fundamental Builder (RESIDENT_ROLE_FUNDAMENTAL_BUILDER, its own authored house;
+#                              persists independently but is still a house resident)
+#   - the seed merchant       (RESIDENT_SEED_MERCHANT, lives in a completed house_merchant)
+# Clients (visiting customers) and monsters are NOT villagers: they never live in a house.
+# This controller is the villager orchestrator: it reconciles which villagers should exist
+# from the completed house records and spawns/retires them through the owning
+# BuilderController / SeedMerchantController.
+#
+# Terminology warning: AgentTileInteractionController.VILLAGER_CATEGORIES (and the matching
+# TurretEatingController._is_villager_kind) is a SEPARATE, older "people agents that crush
+# placeables by walking" grouping. It borrows the word "villager" but also includes clients,
+# so it is broader than this residency concept. That constant is a movement/crush rule; do
+# not treat its membership as the villager roster.
+
 const HOUSE_BUILDER_ID: StringName = &"house_builder"
 const HOUSE_MERCHANT_ID: StringName = &"house_merchant"
 const RESIDENT_BUILDER: StringName = &"builder"

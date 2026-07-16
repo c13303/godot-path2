@@ -62,8 +62,11 @@ func evaluate_agent(agent: Node2D) -> bool:
 	return _consume_turret(agent, agent_cell, agent_kind)
 
 
-# Villagers are the people agents: they crush placeables by walking over them rather than
-# devouring them, so they take the instant-destroy path in _consume_turret.
+# The "people agents" crush grouping (clients, merchants, builders): they crush placeables
+# by walking over them rather than devouring them, so they take the instant-destroy path in
+# _consume_turret. This mirrors AgentTileInteractionController.VILLAGER_CATEGORIES and, like
+# it, is broader than the game's "villager"/house-resident concept (see AllyHousingController):
+# clients are visiting customers, not house-dwellers.
 func _is_villager_kind(agent_kind: StringName) -> bool:
 	return agent_kind == SPAWNER_KIND_CLIENT or agent_kind == SPAWNER_KIND_MERCHANT or agent_kind == SPAWNER_KIND_BUILDER
 
