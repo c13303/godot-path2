@@ -17,7 +17,12 @@ func setup(manager: BuildingManager) -> void:
 	_manager = manager
 
 
-func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
+func spawn_agent_from(
+	spawner_cell: Vector2i,
+	monster_type: StringName = &"basic",
+	agent_kind: StringName = SPAWNER_KIND_MONSTER,
+	resume_state: Dictionary = {}
+) -> bool:
 	var agent_scene: PackedScene = _manager._resolve_monster_scene(monster_type)
 	if agent_scene == null:
 		return false
@@ -122,6 +127,10 @@ func spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic
 		# before the agent is registered with the native manager, which reads the
 		# metas in spawn_agent.
 		_manager._apply_monster_data(agent, monster_type)
+		if not resume_state.is_empty():
+			agent.set("max_health", maxi(1, int(resume_state.get("max_health", agent.get("max_health")))))
+			agent.set("health", clampi(int(resume_state.get("health", agent.get("health"))), 1, int(agent.get("max_health"))))
+			agent.set_meta("roses_eaten", maxi(0, int(resume_state.get("roses_eaten", 0))))
 	agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
 	if telemetry.over_garden_threshold_us(inst_us):

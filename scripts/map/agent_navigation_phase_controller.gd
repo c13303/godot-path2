@@ -90,6 +90,48 @@ func client_counter_count() -> int:
 	return _client_counter_agents.size()
 
 
+func capture_monster_resume_tokens() -> Dictionary:
+	var tokens: Array[Dictionary] = []
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group(&"monsters"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		var nav_id: int = int(agent.get("nav_id"))
+		if nav_id < 0:
+			return _capture_failure("live monster has invalid nav_id")
+		if _escaping_agents.has(nav_id):
+			continue
+		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+		if spawner_cell == INVALID_CELL or not _manager.get_spawners().has(spawner_cell):
+			return _capture_failure("monster missing valid source spawner: nav_id=%d spawner=%s" % [nav_id, str(spawner_cell)])
+		var roses_eaten: int = int(agent.get_meta("roses_eaten")) if agent.has_meta("roses_eaten") else 0
+		if _eating_agents.has(nav_id):
+			var eating: Dictionary = _eating_agents[nav_id] as Dictionary
+			roses_eaten = int(eating.get("roses_eaten", roses_eaten))
+			if roses_eaten >= _manager.number_of_roses_before_satiety():
+				continue
+		tokens.append(_monster_resume_token(agent, spawner_cell, roses_eaten))
+	return {"ok": true, "error": "", "tokens": tokens}
+
+
+func _monster_resume_token(agent: Node2D, spawner_cell: Vector2i, roses_eaten: int) -> Dictionary:
+	var monster_type: StringName = MonsterCatalog.BASIC_ID
+	if agent.has_meta("monster_type"):
+		monster_type = StringName(str(agent.get_meta("monster_type")))
+	return {
+		"spawner_cell": {"x": spawner_cell.x, "y": spawner_cell.y},
+		"monster_type": String(monster_type),
+		"health": int(agent.get("health")),
+		"max_health": int(agent.get("max_health")),
+		"roses_eaten": maxi(0, roses_eaten),
+	}
+
+
+func _capture_failure(error: String) -> Dictionary:
+	CppDebugOptions.save_log("[SAVE] AgentNavigationPhaseController: " + error)
+	return {"ok": false, "error": error, "tokens": []}
+
+
 func process_astar_in_arrivals() -> void:
 	var finished: Array[int] = []
 	var entry_ids: Array = _entry_path_agents.keys()

@@ -71,8 +71,42 @@ func restore_client_step_pending(value: bool) -> void:
 
 
 func serialize_state() -> Dictionary:
-	var pending_spawners: Array[Dictionary] = []
+	return _serialize_state_with_pending(_client_sale_pending_spawners)
+
+
+func capture_checkpoint() -> Dictionary:
+	var resumed_live_spawners: Array[Vector2i] = []
+	var seen_live_agents: Dictionary = {}
+	var client_tantrum: ClientTantrumController = _manager.get_client_tantrum_controller()
+	if client_tantrum.is_active() or client_tantrum.has_hostiles():
+		return _capture_failure("client tantrum is active; hostile clients are not serializable")
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group(&"clients"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		if bool(agent.get_meta("client_has_rose", false)):
+			continue
+		var spawner_cell: Vector2i = agent.get_meta("spawner_cell") as Vector2i if agent.has_meta("spawner_cell") else INVALID_CELL
+		if spawner_cell == INVALID_CELL or not _manager.client_spawners().has(spawner_cell):
+			var nav_id: int = int(agent.get("nav_id"))
+			return _capture_failure("unserved client missing valid source spawner: nav_id=%d spawner=%s" % [nav_id, str(spawner_cell)])
+		if seen_live_agents.has(agent):
+			continue
+		seen_live_agents[agent] = true
+		resumed_live_spawners.append(spawner_cell)
+	var combined_pending: Array[Vector2i] = []
+	for spawner_cell: Vector2i in resumed_live_spawners:
+		combined_pending.append(spawner_cell)
 	for spawner_cell: Vector2i in _client_sale_pending_spawners:
+		combined_pending.append(spawner_cell)
+	var state: Dictionary = _serialize_state_with_pending(combined_pending)
+	state["resumed_live_client_count"] = resumed_live_spawners.size()
+	return {"ok": true, "error": "", "state": state}
+
+
+func _serialize_state_with_pending(pending_cells: Array[Vector2i]) -> Dictionary:
+	var pending_spawners: Array[Dictionary] = []
+	for spawner_cell: Vector2i in pending_cells:
 		pending_spawners.append({"x": spawner_cell.x, "y": spawner_cell.y})
 	var spawn_timers: Array[Dictionary] = []
 	for raw_cell: Variant in _client_sale_spawn_timers.keys():
@@ -87,6 +121,11 @@ func serialize_state() -> Dictionary:
 		"pending_spawners": pending_spawners,
 		"spawn_timers": spawn_timers,
 	}
+
+
+func _capture_failure(error: String) -> Dictionary:
+	CppDebugOptions.save_log("[SAVE] ClientSaleController: " + error)
+	return {"ok": false, "error": error, "state": {}}
 
 
 func restore_state(data: Dictionary) -> void:

@@ -25,7 +25,7 @@ const AGENT_NAVIGATION_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/
 const BUILDING_PREPARATION_WORK_GATE_SCRIPT: Script = preload("res://scripts/map/building_preparation_work_gate.gd")
 const BUILDING_PREPARATION_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_preparation_controller.gd")
 const AGENT_SPAWN_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_spawn_service.gd")
-const AGENT_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/agent_save_service.gd")
+const RUNTIME_SIMULATION_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/map/runtime_simulation_save_service.gd")
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
 const BAMBOO_HARVEST_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/bamboo_harvest_controller.gd")
 const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_drop_manager.gd")
@@ -213,7 +213,7 @@ var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGa
 var _preparation_work_gate: BuildingPreparationWorkGate = BUILDING_PREPARATION_WORK_GATE_SCRIPT.new()
 var _building_preparation_controller: BuildingPreparationController = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
 var _agent_spawn_service: Variant = AGENT_SPAWN_SERVICE_SCRIPT.new()
-var _agent_save_service: AgentSaveService = AGENT_SAVE_SERVICE_SCRIPT.new()
+var _runtime_simulation_save_service: RuntimeSimulationSaveService = RUNTIME_SIMULATION_SAVE_SERVICE_SCRIPT.new()
 var _runtime_tick_controller: Variant = BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT.new()
 var _ground_drop_manager: GroundDropManager = GROUND_DROP_MANAGER_SCRIPT.new()
 var _bamboo_harvest_controller: BambooHarvestController = BAMBOO_HARVEST_CONTROLLER_SCRIPT.new()
@@ -232,6 +232,10 @@ func set_eating_time(value: float) -> void:
 
 func set_number_of_roses_before_satiety(value: int) -> void:
 	_number_of_roses_before_satiety = maxi(1, value)
+
+
+func number_of_roses_before_satiety() -> int:
+	return _number_of_roses_before_satiety
 
 func set_same_garden_only(value: bool) -> void:
 	_same_garden_only = value
@@ -289,7 +293,7 @@ func _ready() -> void:
 		Callable(self, "_on_client_preparation_aborted")
 	)
 	_agent_spawn_service.setup(self)
-	_agent_save_service.setup(self)
+	_runtime_simulation_save_service.setup(self)
 	_spawn_playlist_config.setup(self)
 	_runtime_tick_controller.setup(self, preparation_budget_us)
 	_spawner_reveal_phase.setup(self, _spawner_reveal_cutscene)
@@ -1261,7 +1265,7 @@ func has_grownup_roses_to_harvest() -> bool:
 	return _dawn_harvest.has_grownup_roses_to_harvest()
 
 
-func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_agents: bool) -> void:
+func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_phase_resume_state: bool) -> void:
 	_builder.restore_state(phase_state.get("builder_count", 0))
 	if phase == "night":
 		_dawn_harvest.clear_active()
@@ -1293,7 +1297,7 @@ func restore_gameplay_phase(phase: String, phase_state: Dictionary, has_runtime_
 			_client_sale.begin_client_step()
 			GameState.set_client_phase(true)
 			_dawn_harvest.on_client_sale_started()
-			if not has_runtime_agents:
+			if not has_phase_resume_state:
 				call_deferred("_begin_client_sale_phase")
 		_:
 			_client_sale.mark_client_step_finished()
@@ -2040,8 +2044,8 @@ func released_client_reveal_spawner_cells() -> Dictionary:
 	return _spawner_reveal_phase.released_client_spawner_cells()
 
 
-func serialize_runtime_agents_for_save() -> Dictionary:
-	return _agent_save_service.serialize_state()
+func capture_runtime_simulation_for_save() -> Dictionary:
+	return _runtime_simulation_save_service.capture_state()
 
 
 func serialize_ground_collectibles_for_save() -> Array[Dictionary]:
@@ -2056,19 +2060,23 @@ func restore_ground_collectibles_from_save(saved_items: Array) -> void:
 	_ground_drop_manager.restore_state(saved_items)
 
 
-func restore_runtime_agents_from_save(data: Dictionary) -> void:
+func restore_runtime_simulation_from_save(data: Dictionary) -> void:
 	# This restore suppresses _on_game_mode_changed (see _notify_restored_phase), which
 	# is where these transient prompt requests are normally cleared. Clear them here so a
 	# request set during the pre-restore load transition can't leak into the restored phase.
 	_night_start_requested = false
 	if not GameState.is_dawn_phase:
 		_client_sale_start_requested = false
+	# Restore reveal one-shot latches before preparation callbacks can request a reveal.
+	# Otherwise a save taken after a camera-scroll reveal has played can replay it while
+	# the restore preparation is rebuilding routes.
+	_spawner_reveal_phase.restore_state(_dict_from_value(data.get("spawner_reveal", {})))
 	if GameState.is_night:
 		var night_token: int = _building_preparation_controller.begin_night_preparation()
 		var night_prepared: bool = await _building_preparation_controller.run_night_preparation(night_token)
 		if not night_prepared:
 			return
-		_agent_save_service.restore_state(data, true)
+		_runtime_simulation_save_service.restore_state(data)
 		_notify_restored_phase()
 		return
 	if GameState.is_client_phase:
@@ -2076,17 +2084,23 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 		var client_prepared: bool = await _building_preparation_controller.run_client_preparation(client_token)
 		if not client_prepared:
 			return
-		_agent_save_service.restore_state(data, true)
+		_runtime_simulation_save_service.restore_state(data)
 		_purge_day_phase_monsters_after_load()
 		# Tantrum state is never saved (saving is blocked during tantrum), so there are
 		# no live hostiles to restore here.
 		_notify_restored_phase()
 		return
 	_building_preparation_controller.restore_unprepared_state()
-	_agent_save_service.restore_state(data, false)
+	_runtime_simulation_save_service.restore_state(data)
 	_purge_day_phase_monsters_after_load()
 	_notify_restored_phase()
 	call_deferred("reconcile_ally_housing_after_scene_ready")
+
+
+func _dict_from_value(raw_value: Variant) -> Dictionary:
+	if raw_value is Dictionary:
+		return raw_value as Dictionary
+	return {}
 
 
 # Save/load safety net: monsters only exist at night, so any monster present after a
@@ -2095,7 +2109,7 @@ func restore_runtime_agents_from_save(data: Dictionary) -> void:
 func _purge_day_phase_monsters_after_load() -> void:
 	if GameState.is_night:
 		return
-	var removed: int = _agent_save_service.purge_day_phase_monsters()
+	var removed: int = _runtime_simulation_save_service.purge_day_phase_monsters()
 	if removed > 0:
 		push_error("[LOAD GAME ERROR] Monster when its day.")
 		CppDebugOptions.save_log("[SAVE] Progression: removed %d day-phase monster(s) on load" % removed)
@@ -2363,6 +2377,10 @@ func spawn_monster_from_spawner(spawner_cell: Vector2i, monster_type: StringName
 	return _spawn_monster_from(spawner_cell, monster_type)
 
 
+func spawn_resumed_monster_from_spawner(spawner_cell: Vector2i, monster_type: StringName, resume_state: Dictionary) -> bool:
+	return _spawn_agent_from(spawner_cell, monster_type, SPAWNER_KIND_MONSTER, resume_state)
+
+
 func _spawn_client_from(spawner_cell: Vector2i) -> bool:
 	return _spawn_agent_from(spawner_cell, &"basic", SPAWNER_KIND_CLIENT)
 
@@ -2371,8 +2389,13 @@ func spawn_client_from_spawner(spawner_cell: Vector2i) -> bool:
 	return _spawn_client_from(spawner_cell)
 
 
-func _spawn_agent_from(spawner_cell: Vector2i, monster_type: StringName = &"basic", agent_kind: StringName = SPAWNER_KIND_MONSTER) -> bool:
-	return _agent_spawn_service.spawn_agent_from(spawner_cell, monster_type, agent_kind)
+func _spawn_agent_from(
+	spawner_cell: Vector2i,
+	monster_type: StringName = &"basic",
+	agent_kind: StringName = SPAWNER_KIND_MONSTER,
+	resume_state: Dictionary = {}
+) -> bool:
+	return _agent_spawn_service.spawn_agent_from(spawner_cell, monster_type, agent_kind, resume_state)
 
 
 # Phase 1 -> 2: agent reached its assigned garden entry via flow field. Compute
@@ -2417,17 +2440,18 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
-	agent.set_meta("client_has_rose", true)
-	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
-	agent.set_meta("client_rose_visible", true)
-	_spawn_client_payment_money(agent.global_position)
-	spawn_plant_parts_burst(cell_center(plant_cell))
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
 		plantz.erase_cell(plant_cell)
 		_flush_plant_layer_visuals()
+	_credit_client_purchase_money()
+	agent.set_meta("client_has_rose", true)
+	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
+	agent.set_meta("client_rose_visible", true)
 	_finish_client_purchase(agent)
+	_spawn_client_payment_money_visual(agent.global_position)
+	spawn_plant_parts_burst(cell_center(plant_cell))
 
 
 func _process_client_counter_arrivals() -> void:
@@ -2502,25 +2526,28 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 	# launches from exactly that pile position before the stock decrement rebuilds it.
 	var pile_index: int = _counter_stock(counter_cell) - 1
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
+	_credit_client_purchase_money()
 	# Logical purchase is complete immediately (night-start gating, tantrum eligibility),
 	# but the pinned rose sprite is withheld until the flown rose reaches the client:
 	# _on_client_rose_arrived flips client_rose_visible on arrival.
 	agent.set_meta("client_has_rose", true)
-	_animate_counter_rose_to_client(counter_cell, pile_index, agent)
-	_spawn_client_payment_money(agent.global_position)
 	_finish_client_purchase(agent)
+	_animate_counter_rose_to_client(counter_cell, pile_index, agent)
+	_spawn_client_payment_money_visual(agent.global_position)
 
 
-func _spawn_client_payment_money(world_position: Vector2) -> void:
+func _credit_client_purchase_money() -> void:
 	var scene: Node = get_tree().current_scene
-	var money_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/moneyIcon") if scene != null else null
-	if money_icon != null and money_icon.has_method("animate_money_harvest"):
-		var started: bool = bool(money_icon.call("animate_money_harvest", world_position, 0))
-		if started:
-			return
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
 	if progression_node != null and progression_node.has_method("update_money"):
 		progression_node.call("update_money", 1)
+
+
+func _spawn_client_payment_money_visual(world_position: Vector2) -> void:
+	var scene: Node = get_tree().current_scene
+	var money_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/moneyIcon") if scene != null else null
+	if money_icon != null and money_icon.has_method("animate_money_harvest_visual_only"):
+		money_icon.call("animate_money_harvest_visual_only", world_position, 0)
 
 
 # A client that has taken its rose (from a counter or a garden plant) leaves the map
@@ -2770,9 +2797,21 @@ func _clear_removed_agent_state(nav_id: int) -> void:
 	_garden_retarget.remove_queued_agent(nav_id)
 
 
+func clear_removed_agent_state(nav_id: int) -> void:
+	_clear_removed_agent_state(nav_id)
+
+
 func _unregister_nav_agent(nav_id: int) -> void:
 	if agent_manager and agent_manager.has_method("unregister_agent") and nav_id >= 0:
 		agent_manager.call("unregister_agent", nav_id)
+
+
+func unregister_nav_agent(nav_id: int) -> void:
+	_unregister_nav_agent(nav_id)
+
+
+func unregister_runtime_agent_for_save(agent: Node2D) -> void:
+	_unregister_runtime_agent(agent)
 
 
 ## Generic removal route for house villagers (merchant, builders, fundamental Builder): the

@@ -27,6 +27,27 @@ func animate_money_harvest(
 	)
 
 
+func animate_money_harvest_visual_only(
+	world_position: Vector2,
+	sequence_index: int = 0,
+	stagger_seconds: float = -1.0,
+	finished_callback: Callable = Callable()
+) -> bool:
+	return CurrencyHarvestAnimation.animate_harvest(
+		self,
+		world_position,
+		sequence_index,
+		delay_between_money,
+		animation_speed,
+		curve_strength,
+		Callable(self, "_credit_money"),
+		Callable(),
+		false,
+		stagger_seconds,
+		finished_callback
+	)
+
+
 func _credit_money() -> void:
 	var scene: Node = get_tree().current_scene
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null

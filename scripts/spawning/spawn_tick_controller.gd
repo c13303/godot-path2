@@ -20,6 +20,7 @@ var _debug_telemetry: BuildingDebugTelemetry
 # Ready playlist spawn requests awaiting a spawn slot this/next frame.
 var _ready_spawner_queue: Array[Dictionary] = []
 var _ready_spawner_queue_set: Dictionary = {}  # playlist track index -> true
+var _resume_monster_queue: Array[Dictionary] = []
 
 # Seconds the current night has had zero monsters with no plants; flips back to day
 # once it passes EMPTY_NIGHT_DAY_DELAY_SECONDS.
@@ -49,9 +50,10 @@ func reset_empty_night() -> void:
 func clear_ready_queue() -> void:
 	_ready_spawner_queue.clear()
 	_ready_spawner_queue_set.clear()
+	_resume_monster_queue.clear()
 
 
-func serialize_state() -> Dictionary:
+func serialize_state(extra_resume_tokens: Array = []) -> Dictionary:
 	var ready_queue: Array[Dictionary] = []
 	for raw_request: Variant in _ready_spawner_queue:
 		if raw_request is Dictionary:
@@ -65,8 +67,16 @@ func serialize_state() -> Dictionary:
 				"night_index": int(request.get("night_index", -1)),
 				"wave_index": int(request.get("wave_index", 0)),
 			})
+	var resume_monsters: Array[Dictionary] = []
+	for raw_token: Variant in _resume_monster_queue:
+		if raw_token is Dictionary:
+			resume_monsters.append(_serialized_resume_token(raw_token as Dictionary))
+	for raw_extra: Variant in extra_resume_tokens:
+		if raw_extra is Dictionary:
+			resume_monsters.append(_serialized_resume_token(raw_extra as Dictionary))
 	return {
 		"ready_queue": ready_queue,
+		"resume_monsters": resume_monsters,
 		"empty_night_elapsed": _empty_night_elapsed,
 	}
 
@@ -92,6 +102,14 @@ func restore_state(data: Dictionary) -> void:
 				"wave_index": int(request.get("wave_index", 0)),
 			})
 			_ready_spawner_queue_set[track_index] = true
+	var raw_resume: Variant = data.get("resume_monsters", [])
+	if raw_resume is Array:
+		for raw_token: Variant in raw_resume as Array:
+			if not (raw_token is Dictionary):
+				continue
+			var token: Dictionary = _resume_token_from_save(raw_token as Dictionary)
+			if not token.is_empty():
+				_resume_monster_queue.append(token)
 	_empty_night_elapsed = maxf(0.0, float(data.get("empty_night_elapsed", 0.0)))
 
 
@@ -112,6 +130,7 @@ func process(delta: float, playlist_enabled: bool) -> void:
 		"skipped_count": 0,
 		"active_monsters": -1,
 		"ready_queue_remaining": 0,
+		"resume_queue_remaining": 0,
 		"elapsed_ms": 0.0,
 	}
 
@@ -138,7 +157,7 @@ func process(delta: float, playlist_enabled: bool) -> void:
 
 func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 	var playlist: SpawnPlaylistController = _manager._spawn_playlist_controller
-	if playlist.is_current_night_schedule_complete():
+	if playlist.is_current_night_schedule_complete() and _resume_monster_queue.is_empty():
 		if active_monsters == 0:
 			GameState.start_day()
 		return
@@ -146,6 +165,9 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 	var no_plants: bool = _manager._no_plants_remaining()
 	_warn_garden_task_lag_us("_process_spawners.no_plants_remaining", Time.get_ticks_usec() - t_np)
 	if no_plants:
+		if not _resume_monster_queue.is_empty():
+			CppDebugOptions.save_log("[SAVE] SpawnTickController: discarded %d resume monster token(s); no targetable plants remain" % _resume_monster_queue.size())
+			_resume_monster_queue.clear()
 		if active_monsters == 0:
 			_empty_night_elapsed += delta
 			if _empty_night_elapsed >= EMPTY_NIGHT_DAY_DELAY_SECONDS:
@@ -158,7 +180,9 @@ func _process_playlist_spawners(delta: float, active_monsters: int) -> void:
 			_log("no plants remaining for playlist spawners")
 		return
 	_empty_night_elapsed = 0.0
-	_enqueue_playlist_spawn_requests(delta)
+	_drain_resume_monster_queue_budgeted()
+	if _resume_monster_queue.is_empty():
+		_enqueue_playlist_spawn_requests(delta)
 	_drain_ready_spawner_queue_budgeted()
 
 
@@ -252,7 +276,56 @@ func _drain_ready_spawner_queue_budgeted(allowed_track_indices: Dictionary = {},
 	for index: int in range(blocked_requests.size() - 1, -1, -1):
 		_ready_spawner_queue.push_front(blocked_requests[index])
 	_spawn_pass_stats["ready_queue_remaining"] = _ready_spawner_queue.size()
+	_spawn_pass_stats["resume_queue_remaining"] = _resume_monster_queue.size()
 	_spawn_pass_stats["elapsed_ms"] = float(Time.get_ticks_usec() - start_us) / 1000.0
+
+
+func _drain_resume_monster_queue_budgeted() -> void:
+	var start_us: int = Time.get_ticks_usec()
+	var budget_us: int = int(_manager.spawner_budget_ms * 1000.0)
+	var budget_per_frame: int = _manager.spawner_budget_per_frame
+	var processed: int = 0
+	while not _resume_monster_queue.is_empty():
+		if processed >= budget_per_frame:
+			break
+		if processed > 0 and budget_us > 0 and Time.get_ticks_usec() - start_us >= budget_us:
+			break
+		var token: Dictionary = _resume_monster_queue.pop_front()
+		processed += 1
+		_spawn_pass_stats["processed_spawners"] = int(_spawn_pass_stats["processed_spawners"]) + 1
+		var spawner_cell: Vector2i = token.get("spawner_cell", INVALID_CELL) as Vector2i
+		var monster_type: StringName = StringName(str(token.get("monster_type", "basic")))
+		var spawned: bool = _manager.spawn_resumed_monster_from_spawner(spawner_cell, monster_type, token)
+		if spawned:
+			_spawn_pass_stats["spawned_count"] = int(_spawn_pass_stats["spawned_count"]) + 1
+			continue
+		_resume_monster_queue.push_front(token)
+		break
+	_spawn_pass_stats["resume_queue_remaining"] = _resume_monster_queue.size()
+
+
+func _serialized_resume_token(token: Dictionary) -> Dictionary:
+	var cell: Vector2i = token.get("spawner_cell", INVALID_CELL) as Vector2i
+	return {
+		"spawner_cell": {"x": cell.x, "y": cell.y},
+		"monster_type": String(token.get("monster_type", "basic")),
+		"health": int(token.get("health", 1)),
+		"max_health": int(token.get("max_health", 1)),
+		"roses_eaten": int(token.get("roses_eaten", 0)),
+	}
+
+
+func _resume_token_from_save(data: Dictionary) -> Dictionary:
+	var cell: Vector2i = _cell_from_dict(data.get("spawner_cell", {}))
+	if cell == INVALID_CELL:
+		return {}
+	return {
+		"spawner_cell": cell,
+		"monster_type": StringName(str(data.get("monster_type", "basic"))),
+		"health": maxi(1, int(data.get("health", 1))),
+		"max_health": maxi(1, int(data.get("max_health", 1))),
+		"roses_eaten": maxi(0, int(data.get("roses_eaten", 0))),
+	}
 
 
 func _warn_garden_task_lag_us(task_name: String, elapsed_us: int, extra: String = "") -> void:

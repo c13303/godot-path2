@@ -3,6 +3,8 @@ extends Node
 signal day_started(day_number: int)
 signal values_changed
 
+const SAVE_GAME_SERVICE_SCRIPT: Script = preload("res://scripts/gameState/save_game_service.gd")
+
 ## Manual save slot, written/read by the F5/F9 hotkeys.
 const SAVE_PATH: String = "user://progression_save.json"
 # v4 replaces the ambiguous day-phase flags with one canonical gameplay phase and
@@ -14,7 +16,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # Version 7 adds explicit one-cell runtime placeable identity. Versions 1-6 infer
 # building-layer placeables from tiles as a legacy migration fallback.
 # Version 8 stops requiring the removed legacy traversable_buildings TileMapLayer.
-const SAVE_VERSION: int = 8
+# Version 9 replaces live runtime-agent serialization with semantic runtime_simulation checkpoints.
+const SAVE_VERSION: int = 9
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -123,6 +126,7 @@ var _money_label_tween: Tween
 var _water_reserve_tween: Tween
 # True once a manual save has been applied to this scene instance during _ready.
 var _save_applied: bool = false
+var _save_game_service: SaveGameService = SAVE_GAME_SERVICE_SCRIPT.new()
 
 
 ## Public accessor so other systems (e.g. the monster spawner) can read a
@@ -268,6 +272,7 @@ func _apply_level_starting_values() -> void:
 
 
 func _ready() -> void:
+	_save_game_service.setup(self)
 	# GameState is an autoload, so reconnect every time a fresh scene loads.
 	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
 		GameState.mode_changed.connect(_on_game_mode_changed)
@@ -523,6 +528,14 @@ func save_progression(
 	gameplay_phase_override: String = "",
 	gameplay_phase_state_override: Dictionary = {}
 ) -> bool:
+	return _save_game_service.save_progression(save_path, gameplay_phase_override, gameplay_phase_state_override)
+
+
+func _save_progression_impl(
+	save_path: String = SAVE_PATH,
+	gameplay_phase_override: String = "",
+	gameplay_phase_state_override: Dictionary = {}
+) -> bool:
 	var scene: Node = get_tree().current_scene
 	# Reject saving while any client tantrum is active, before touching either save
 	# slot. Hostile combat state is intentionally never serialized, so a mid-tantrum
@@ -552,7 +565,11 @@ func save_progression(
 	var bamboo_states: Array[Dictionary] = _get_bamboo_states(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
-	var runtime_agents: Dictionary = _get_runtime_agents(scene)
+	var runtime_result: Dictionary = _get_runtime_simulation(scene)
+	if not bool(runtime_result.get("ok", false)):
+		_fail("Save failed: " + str(runtime_result.get("error", "runtime simulation capture failed")))
+		return false
+	var runtime_simulation: Dictionary = runtime_result.get("state", {}) as Dictionary
 	var player_placeable_durability: Array[Dictionary] = _get_player_placeable_durability(scene)
 	var runtime_houses: Array[Dictionary] = _get_runtime_houses(scene)
 	var runtime_placeables: Array[Dictionary] = _get_runtime_placeables(scene)
@@ -575,7 +592,7 @@ func save_progression(
 		"player_placeable_durability": player_placeable_durability,
 		"runtime_houses": runtime_houses,
 		"runtime_placeables": runtime_placeables,
-		"runtime_agents": runtime_agents,
+		"runtime_simulation": runtime_simulation,
 		"player": {
 			"position": [player.global_position.x, player.global_position.y],
 			"inventory": inventory,
@@ -586,14 +603,14 @@ func save_progression(
 	_log("Save summary: %s" % _save_summary(data))
 	_log("Save live summary: %s" % _live_scene_summary(scene))
 	_warn_if_day_phase_has_monsters("SAVE GAME ERROR")
+	var validation_error: String = _validate_save(data)
+	if validation_error != "":
+		_fail("Save failed: " + validation_error)
+		return false
 
 	var json_text: String = JSON.stringify(data)
-	var file: FileAccess = FileAccess.open(save_path, FileAccess.WRITE)
-	if file == null:
-		_fail("Save failed: cannot open save file")
+	if not _write_save_atomic(save_path, json_text):
 		return false
-	file.store_string(json_text)
-	file.close()
 	_log("Save complete: player=%s inventory_slots=%d bytes=%d" % [
 		str(player.global_position), inventory.size(), json_text.to_utf8_buffer().size()
 	])
@@ -610,6 +627,10 @@ func _game_ui_equipped_weapon_id(game_ui: Node) -> String:
 
 
 func load_progression() -> void:
+	_save_game_service.load_progression()
+
+
+func _load_progression_impl() -> void:
 	# F9 reload is allowed anytime, including during night.
 	_log("Load started: %s" % ProjectSettings.globalize_path(SAVE_PATH))
 	var data: Dictionary = _read_save_data()
@@ -670,6 +691,10 @@ func _find_player_spawn_marker() -> Node2D:
 ## Restart a brand-new game (Day 1, defaults). The manual F5 slot is intentionally
 ## left untouched.
 func reset_game() -> void:
+	_save_game_service.reset_game()
+
+
+func _reset_game_impl() -> void:
 	# A leftover pending-load flag must never carry into the fresh game.
 	if GameState.has_meta(PENDING_LOAD_META):
 		GameState.remove_meta(PENDING_LOAD_META)
@@ -717,12 +742,172 @@ func _read_save_data(save_path: String = SAVE_PATH) -> Dictionary:
 		return {}
 
 	var data: Dictionary = json.data as Dictionary
+	data = _migrate_save_data_to_current(data)
 	var validation_error: String = _validate_save(data)
 	if validation_error != "":
 		_fail("Load failed: " + validation_error)
 		return {}
 	_log("Read save OK: %s summary=%s" % [ProjectSettings.globalize_path(save_path), _save_summary(data)])
 	return data
+
+
+func _migrate_save_data_to_current(data: Dictionary) -> Dictionary:
+	var save_version: int = int(data.get("version", -1))
+	if save_version < 1:
+		return data
+	if save_version >= SAVE_VERSION:
+		return data
+	var migrated: Dictionary = data.duplicate(true)
+	var runtime_simulation: Dictionary = {}
+	if migrated.has("runtime_simulation") and migrated["runtime_simulation"] is Dictionary:
+		runtime_simulation = migrated["runtime_simulation"] as Dictionary
+	elif not migrated.has("runtime_agents"):
+		runtime_simulation = {}
+	else:
+		runtime_simulation = _legacy_runtime_agents_to_runtime_simulation(migrated)
+	migrated["runtime_simulation"] = runtime_simulation
+	migrated.erase("runtime_agents")
+	migrated["version"] = SAVE_VERSION
+	return migrated
+
+
+func _legacy_runtime_agents_to_runtime_simulation(data: Dictionary) -> Dictionary:
+	var legacy: Dictionary = _dict_from_value(data.get("runtime_agents", {}))
+	var client_sale: Dictionary = _dict_from_value(legacy.get("client_sale", {}))
+	var pending_spawners: Array = []
+	var raw_pending: Variant = client_sale.get("pending_spawners", [])
+	if raw_pending is Array:
+		pending_spawners = (raw_pending as Array).duplicate(true)
+	var resume_monsters: Array[Dictionary] = []
+	var raw_agents: Variant = legacy.get("agents", [])
+	if raw_agents is Array:
+		for raw_agent: Variant in raw_agents as Array:
+			if not (raw_agent is Dictionary):
+				continue
+			var agent_data: Dictionary = raw_agent as Dictionary
+			var kind: String = _legacy_agent_kind(agent_data)
+			if kind == "client":
+				if bool(_dict_from_value(agent_data.get("metadata", {})).get("client_has_rose", false)):
+					continue
+				var client_spawner: Dictionary = _legacy_agent_source_spawner(agent_data)
+				if client_spawner.is_empty():
+					return {"__migration_error": "legacy unserved client is missing a source spawner"}
+				pending_spawners.append(client_spawner)
+			elif kind == "monster":
+				var token: Dictionary = _legacy_monster_resume_token(agent_data)
+				if token.has("__migration_error"):
+					return token
+				if not token.is_empty():
+					resume_monsters.append(token)
+	client_sale["pending_spawners"] = pending_spawners
+	var spawn_tick: Dictionary = _dict_from_value(legacy.get("spawn_tick", {}))
+	spawn_tick["resume_monsters"] = resume_monsters
+	var spawn_playlist: Dictionary = _dict_from_value(legacy.get("spawn_playlist", {}))
+	var sheep: Dictionary = _dict_from_value(legacy.get("sheep", {}))
+	var spawner_reveal: Dictionary = _dict_from_value(legacy.get("spawner_reveal", {}))
+	var fundamental_builder_onboarding: Dictionary = _dict_from_value(legacy.get("fundamental_builder_onboarding", {}))
+	return {
+		"client_sale": client_sale,
+		"night": {
+			"spawn_playlist": spawn_playlist,
+			"spawn_tick": spawn_tick,
+		},
+		"sheep": sheep,
+		"spawner_reveal": spawner_reveal,
+		"fundamental_builder_onboarding": fundamental_builder_onboarding,
+	}
+
+
+func _legacy_agent_kind(agent_data: Dictionary) -> String:
+	var kind: String = str(agent_data.get("kind", ""))
+	if kind != "":
+		return kind
+	var metadata: Dictionary = _dict_from_value(agent_data.get("metadata", {}))
+	return str(metadata.get("agent_kind", "monster"))
+
+
+func _legacy_monster_resume_token(agent_data: Dictionary) -> Dictionary:
+	var phase: Dictionary = _dict_from_value(agent_data.get("phase", {}))
+	var phase_kind: String = str(phase.get("kind", "retarget"))
+	if phase_kind == "escape":
+		return {}
+	var metadata: Dictionary = _dict_from_value(agent_data.get("metadata", {}))
+	var roses_eaten: int = int(metadata.get("roses_eaten", phase.get("roses_eaten", 0)))
+	if phase_kind == "eating" and roses_eaten >= 3:
+		return {}
+	var spawner_cell: Dictionary = _legacy_agent_source_spawner(agent_data)
+	if spawner_cell.is_empty():
+		return {"__migration_error": "legacy monster is missing a source spawner"}
+	return {
+		"spawner_cell": spawner_cell,
+		"monster_type": str(agent_data.get("monster_type", metadata.get("monster_type", "basic"))),
+		"health": int(agent_data.get("health", 1)),
+		"max_health": int(agent_data.get("max_health", 1)),
+		"roses_eaten": roses_eaten,
+	}
+
+
+func _legacy_agent_source_spawner(agent_data: Dictionary) -> Dictionary:
+	var metadata: Dictionary = _dict_from_value(agent_data.get("metadata", {}))
+	var meta_spawner: Dictionary = _cell_dict_from_any(metadata.get("spawner_cell", {}))
+	if not meta_spawner.is_empty():
+		return meta_spawner
+	var phase: Dictionary = _dict_from_value(agent_data.get("phase", {}))
+	return _cell_dict_from_any(phase.get("spawner_cell", {}))
+
+
+func _cell_dict_from_any(raw_value: Variant) -> Dictionary:
+	if raw_value is Dictionary:
+		var data: Dictionary = raw_value as Dictionary
+		if data.has("x") and data.has("y"):
+			return {"x": int(data.get("x", 0)), "y": int(data.get("y", 0))}
+	if raw_value is Vector2i:
+		var cell: Vector2i = raw_value as Vector2i
+		return {"x": cell.x, "y": cell.y}
+	return {}
+
+
+func _dict_from_value(raw_value: Variant) -> Dictionary:
+	if raw_value is Dictionary:
+		return raw_value as Dictionary
+	return {}
+
+
+func _write_save_atomic(save_path: String, json_text: String) -> bool:
+	var base_dir: String = save_path.get_base_dir()
+	var file_name: String = save_path.get_file()
+	var temp_name: String = "%s.tmp" % file_name
+	var backup_name: String = "%s.bak" % file_name
+	var temp_path: String = "%s/%s" % [base_dir, temp_name]
+	var temp_file: FileAccess = FileAccess.open(temp_path, FileAccess.WRITE)
+	if temp_file == null:
+		_fail("Save failed: cannot open temporary save file")
+		return false
+	temp_file.store_string(json_text)
+	temp_file.flush()
+	temp_file.close()
+	var dir: DirAccess = DirAccess.open(base_dir)
+	if dir == null:
+		_fail("Save failed: cannot open save directory")
+		return false
+	if FileAccess.file_exists("%s/%s" % [base_dir, backup_name]):
+		dir.remove(backup_name)
+	if FileAccess.file_exists(save_path):
+		var backup_error: Error = dir.rename(file_name, backup_name)
+		if backup_error != OK:
+			dir.remove(temp_name)
+			_fail("Save failed: cannot replace previous save file")
+			return false
+	var rename_error: Error = dir.rename(temp_name, file_name)
+	if rename_error != OK:
+		if FileAccess.file_exists("%s/%s" % [base_dir, backup_name]):
+			dir.rename(backup_name, file_name)
+		dir.remove(temp_name)
+		_fail("Save failed: cannot finalize save file")
+		return false
+	if FileAccess.file_exists("%s/%s" % [base_dir, backup_name]):
+		dir.remove(backup_name)
+	return true
 
 
 func _apply_save_to_fresh_scene(data: Dictionary) -> void:
@@ -779,8 +964,8 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	# against the live item at its layer/cell. Older saves have no section (no
 	# provenance is inferred for them).
 	_restore_player_placeable_durability(scene, data.get("player_placeable_durability", []))
-	var raw_runtime_agents: Variant = data.get("runtime_agents", {})
-	var has_runtime_agents: bool = raw_runtime_agents is Dictionary and not (raw_runtime_agents as Dictionary).is_empty()
+	var raw_runtime_simulation: Variant = data.get("runtime_simulation", {})
+	var has_phase_resume_state: bool = raw_runtime_simulation is Dictionary and not (raw_runtime_simulation as Dictionary).is_empty()
 	var gameplay_phase: String = str(data.get("gameplay_phase", ""))
 	var legacy_phase: String = str(data.get("day_phase", ""))
 	var raw_phase_state: Variant = data.get("gameplay_phase_state", data.get("day_phase_state", {}))
@@ -795,8 +980,8 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 		):
 			gameplay_phase = "dawn"
 			(raw_phase_state as Dictionary)["dawn_stage"] = "pre_clients"
-	_restore_gameplay_phase(scene, gameplay_phase, raw_phase_state, has_runtime_agents, legacy_phase)
-	call_deferred("_restore_runtime_agents_deferred", raw_runtime_agents)
+	_restore_gameplay_phase(scene, gameplay_phase, raw_phase_state, has_phase_resume_state, legacy_phase)
+	call_deferred("_restore_runtime_simulation_deferred", raw_runtime_simulation)
 	_save_applied = true
 	_log("Post-load live summary: %s" % _live_scene_summary(scene))
 	_log("Load complete: player=%s inventory_slots=%d" % [
@@ -905,14 +1090,14 @@ func _get_bamboo_states(scene: Node) -> Array[Dictionary]:
 	return states
 
 
-func _get_runtime_agents(scene: Node) -> Dictionary:
+func _get_runtime_simulation(scene: Node) -> Dictionary:
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if building_manager == null or not building_manager.has_method("serialize_runtime_agents_for_save"):
-		return {}
-	var raw_state: Variant = building_manager.call("serialize_runtime_agents_for_save")
+	if building_manager == null or not building_manager.has_method("capture_runtime_simulation_for_save"):
+		return {"ok": true, "error": "", "state": {}}
+	var raw_state: Variant = building_manager.call("capture_runtime_simulation_for_save")
 	if raw_state is Dictionary:
 		return raw_state as Dictionary
-	return {}
+	return {"ok": false, "error": "runtime simulation capture returned invalid data", "state": {}}
 
 
 func _get_runtime_placeables(scene: Node) -> Array[Dictionary]:
@@ -1121,7 +1306,7 @@ func _restore_bamboo_states(scene: Node, raw_states: Variant) -> void:
 	_log("Bamboo states restored: %d entries" % states.size())
 
 
-func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has_runtime_agents: bool, legacy_phase: String) -> void:
+func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has_phase_resume_state: bool, legacy_phase: String) -> void:
 	if phase == "":
 		return
 	if phase == "afternoon":
@@ -1129,41 +1314,37 @@ func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has
 		if plant_manager != null and plant_manager.has_method("mark_build_phase_rose_dry_handled_for_current_day"):
 			plant_manager.call("mark_build_phase_rose_dry_handled_for_current_day")
 	GameState.restore_gameplay_phase_flags(phase)
-	var phase_state: Dictionary = raw_state as Dictionary if raw_state is Dictionary else {}
+	var phase_state: Dictionary = _dict_from_value(raw_state)
 	if legacy_phase == "seed_merchant" and not phase_state.has("dawn_stage"):
 		phase_state["dawn_stage"] = "pre_clients"
 		phase_state["seed_merchant_active"] = true
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
 	if building_manager != null and building_manager.has_method("restore_gameplay_phase"):
-		building_manager.call("restore_gameplay_phase", phase, phase_state, has_runtime_agents)
+		building_manager.call("restore_gameplay_phase", phase, phase_state, has_phase_resume_state)
 		_log("Gameplay phase restored: %s state=%s" % [phase, str(phase_state)])
-	if not has_runtime_agents:
+	if not has_phase_resume_state:
 		GameState.emit_restored_phase_signals()
 
 
-func _restore_runtime_agents(scene: Node, raw_state: Variant) -> void:
+func _restore_runtime_simulation(scene: Node, raw_state: Variant) -> void:
 	if not (raw_state is Dictionary):
 		return
 	var runtime_state: Dictionary = raw_state as Dictionary
 	if runtime_state.is_empty():
 		return
 	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene else null
-	if building_manager == null or not building_manager.has_method("restore_runtime_agents_from_save"):
+	if building_manager == null or not building_manager.has_method("restore_runtime_simulation_from_save"):
 		return
-	building_manager.call("restore_runtime_agents_from_save", runtime_state)
-	var agents: Array = []
-	var raw_agents: Variant = runtime_state.get("agents", [])
-	if raw_agents is Array:
-		agents = raw_agents as Array
-	_log("Runtime agents restored from save: %d" % agents.size())
+	building_manager.call("restore_runtime_simulation_from_save", runtime_state)
+	_log("Runtime simulation restored from semantic checkpoint")
 
 
-func _restore_runtime_agents_deferred(raw_state: Variant) -> void:
+func _restore_runtime_simulation_deferred(raw_state: Variant) -> void:
 	await get_tree().process_frame
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return
-	_restore_runtime_agents(scene, raw_state)
+	_restore_runtime_simulation(scene, raw_state)
 
 
 func _reindex_loaded_layers(scene: Node, raw_runtime_placeables: Variant = []) -> void:
@@ -1374,8 +1555,31 @@ func _validate_save(data: Dictionary) -> String:
 		return "invalid gameplay phase state"
 	if gameplay_phase_state.has("client_sale_start_requested") and not (gameplay_phase_state["client_sale_start_requested"] is bool):
 		return "invalid gameplay phase state"
-	if data.has("runtime_agents") and not (data["runtime_agents"] is Dictionary):
-		return "invalid runtime agents"
+	if data.has("runtime_agents"):
+		return "legacy runtime agents were not migrated"
+	if data.has("runtime_simulation"):
+		if not (data["runtime_simulation"] is Dictionary):
+			return "invalid runtime simulation"
+		var runtime_simulation: Dictionary = data["runtime_simulation"] as Dictionary
+		if runtime_simulation.has("__migration_error"):
+			return str(runtime_simulation["__migration_error"])
+		if runtime_simulation.has("agents"):
+			return "invalid runtime simulation agents"
+		var night_state: Dictionary = _dict_from_value(runtime_simulation.get("night", {}))
+		var spawn_tick: Dictionary = _dict_from_value(night_state.get("spawn_tick", {}))
+		var resume_monsters: Variant = spawn_tick.get("resume_monsters", [])
+		if resume_monsters is Array:
+			for raw_token: Variant in resume_monsters as Array:
+				if not (raw_token is Dictionary):
+					return "invalid resume monster token"
+				var token: Dictionary = raw_token as Dictionary
+				for field: String in ["spawner_cell", "monster_type", "health", "max_health", "roses_eaten"]:
+					if not token.has(field):
+						return "invalid resume monster token"
+				if not (token["spawner_cell"] is Dictionary):
+					return "invalid resume monster spawner"
+		elif spawn_tick.has("resume_monsters"):
+			return "invalid resume monster queue"
 	return ""
 
 
@@ -1424,7 +1628,20 @@ func _save_summary(data: Dictionary) -> String:
 	var raw_bamboo_states: Variant = data.get("bamboo_states", [])
 	if raw_bamboo_states is Array:
 		bamboo_state_count = (raw_bamboo_states as Array).size()
-	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d bamboo_states=%d" % [
+	var runtime_simulation: Dictionary = _dict_from_value(data.get("runtime_simulation", {}))
+	var client_sale: Dictionary = _dict_from_value(runtime_simulation.get("client_sale", {}))
+	var pending_client_count: int = 0
+	var raw_pending_clients: Variant = client_sale.get("pending_spawners", [])
+	if raw_pending_clients is Array:
+		pending_client_count = (raw_pending_clients as Array).size()
+	var resumed_live_client_count: int = int(client_sale.get("resumed_live_client_count", 0))
+	var night_state: Dictionary = _dict_from_value(runtime_simulation.get("night", {}))
+	var spawn_tick: Dictionary = _dict_from_value(night_state.get("spawn_tick", {}))
+	var resume_monster_count: int = 0
+	var raw_resume_monsters: Variant = spawn_tick.get("resume_monsters", [])
+	if raw_resume_monsters is Array:
+		resume_monster_count = (raw_resume_monsters as Array).size()
+	return "phase=%s day=%d seeds=%d gems=%d money=%d bamboo=%d plant_layer=%d plant_states=%d watered=%d grown=%d counter_entries=%d counter_total=%d inventory_slots=%d durability=%d bamboo_states=%d pending_clients=%d resumed_clients=%d resume_monsters=%d" % [
 		str(data.get("gameplay_phase", data.get("day_phase", "<missing>"))),
 		int(progression_data.get("nDays", 0)),
 		int(progression_data.get("seeds", 0)),
@@ -1440,6 +1657,9 @@ func _save_summary(data: Dictionary) -> String:
 		inventory_count,
 		durability_count,
 		bamboo_state_count,
+		pending_client_count,
+		resumed_live_client_count,
+		resume_monster_count,
 	]
 
 
