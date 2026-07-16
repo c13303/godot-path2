@@ -227,9 +227,9 @@ func _remove_contact_dancer(key: String) -> void:
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
 	if is_instance_valid(sprite):
 		sprite.queue_free()
-	_clear_damage_flash(_flash_key(layer_name, cell))
 	var layer_name: StringName = StringName(data.get("layer_name", &""))
 	var cell: Vector2i = data.get("cell", Vector2i.ZERO) as Vector2i
+	_clear_damage_flash(_flash_key(layer_name, cell))
 	if layer_name == &"plantz" and _plant_manager != null and _plant_manager.has_method("set_rose_visual_hidden"):
 		_plant_manager.call("set_rose_visual_hidden", cell, false)
 	else:

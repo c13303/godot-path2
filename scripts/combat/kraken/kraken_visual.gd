@@ -197,9 +197,9 @@ func play_damage_flash(duration: float) -> void:
 	_damage_flash_tween = create_tween()
 	_damage_flash_tween.set_parallel(true)
 	for index: int in range(_segments.size()):
-		var sprite: Sprite2D = _segments[index]
-		var original: Color = _damage_flash_original_modulates[index] if index < _damage_flash_original_modulates.size() else Color.WHITE
-		_damage_flash_tween.tween_property(sprite, "modulate", original, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		var tween_sprite: Sprite2D = _segments[index]
+		var target_modulate: Color = _damage_flash_original_modulates[index] if index < _damage_flash_original_modulates.size() else Color.WHITE
+		_damage_flash_tween.tween_property(tween_sprite, "modulate", target_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_damage_flash_tween.finished.connect(Callable(self, "_on_damage_flash_finished"))
 
 
