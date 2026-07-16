@@ -229,6 +229,12 @@ func resident_house_id() -> StringName:
 	return _resident_house_id
 
 
+## Canonical role id this controller drives, so generic callers can look it up by resident_type
+## (e.g. a villager's dialog/interaction controller reaching its live agent).
+func resident_type() -> StringName:
+	return _config.resident_type
+
+
 ## Generic Chebyshev-distance proximity test in tile space between the player and this resident.
 func is_player_near(radius_tiles: int) -> bool:
 	var agent: Node2D = _visitor.agent_node()

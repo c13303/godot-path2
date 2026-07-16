@@ -60,6 +60,8 @@
 [ext_resource type="PackedScene" path="res://scenes/dialog.tscn" id="60_dialog"]
 [ext_resource type="Script" uid="uid://bmh7gdxndafa6" path="res://scripts/ui/merchant_dialog_controller.gd" id="61_mdc"]
 [ext_resource type="Script" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
+[ext_resource type="Script" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
+[ext_resource type="Script" path="res://scripts/ui/inventor_prompt.gd" id="64_inventor_prompt"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -1333,6 +1335,12 @@ anchors_preset = 0
 mouse_filter = 2
 script = ExtResource("47_builder_prompt")
 
+[node name="InventorPrompt" type="Control" parent="GameUI" unique_id=700000032]
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+script = ExtResource("64_inventor_prompt")
+
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3
 anchors_preset = 15
@@ -1377,6 +1385,12 @@ building_manager = NodePath("../../Map/BuildingManager")
 
 [node name="FundamentalBuilderDialogController" type="Node" parent="GameUI" unique_id=343104800 node_paths=PackedStringArray("dialog", "game_ui", "building_manager")]
 script = ExtResource("62_builder_dialog")
+dialog = NodePath("../Dialog")
+game_ui = NodePath("..")
+building_manager = NodePath("../../Map/BuildingManager")
+
+[node name="InventorDialogController" type="Node" parent="GameUI" unique_id=343104801 node_paths=PackedStringArray("dialog", "game_ui", "building_manager")]
+script = ExtResource("63_inventor_dialog")
 dialog = NodePath("../Dialog")
 game_ui = NodePath("..")
 building_manager = NodePath("../../Map/BuildingManager")

@@ -123,6 +123,18 @@ func owns_agent(agent: Node2D) -> bool:
 	return false
 
 
+## Looks up the ordinary-resident lifecycle controller for a resident_type (null when none is
+## registered / registered as a specialized Builder handler). Lets a villager's dialog/interaction
+## controller reach its live agent generically, without a per-role method here or in BuildingManager.
+func get_ordinary_resident(resident_type: StringName) -> HouseResidentController:
+	for handler: HouseResidentHandler in _handlers:
+		if handler is HouseResidentController:
+			var resident: HouseResidentController = handler as HouseResidentController
+			if resident.resident_type() == resident_type:
+				return resident
+	return null
+
+
 # ---------------------------------------------------------------------------
 # House build-menu availability (generic catalog rules + Builder-house special case).
 # ---------------------------------------------------------------------------

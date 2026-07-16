@@ -206,6 +206,9 @@ var _ally_housing: AllyHousingController = AllyHousingController.new()
 # Shared ordinary-villager lifecycle for the seed merchant (_seed_merchant is now only the
 # merchant-specific role riding on this). A future ordinary villager gets its own instance here.
 var _merchant_resident: HouseResidentController = HouseResidentController.new()
+# The Inventor: an ordinary villager with no role (no shop/phase/pause) — its only role-specific
+# behavior is a dialog, owned by InventorDialogController through the generic interaction router.
+var _inventor_resident: HouseResidentController = HouseResidentController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _preparation_work_gate: BuildingPreparationWorkGate = BUILDING_PREPARATION_WORK_GATE_SCRIPT.new()
 var _building_preparation_controller: BuildingPreparationController = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
@@ -733,7 +736,18 @@ func _setup_ally_housing() -> void:
 	merchant_config.role = _seed_merchant
 	_merchant_resident.setup(self, _house_manager, merchant_config)
 	_seed_merchant.set_resident(_merchant_resident)
-	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident]
+	# The Inventor: same registration shape as the merchant, but with no role. Its identity/lifecycle
+	# come entirely from the generic HouseResidentController; its dialog lives in a scene controller.
+	var inventor_config: HouseResidentConfig = HouseResidentConfig.new()
+	inventor_config.resident_type = ItemCatalog.get_house_resident_type("house_inventor")
+	inventor_config.house_item_id = &"house_inventor"
+	inventor_config.agent_kind = &"inventor"
+	inventor_config.scene_group = &"inventors"
+	inventor_config.tracking_category = &"inventors"
+	inventor_config.visual_setup = Callable(self, "apply_inventor_data")
+	inventor_config.role = null
+	_inventor_resident.setup(self, _house_manager, inventor_config)
+	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident, _inventor_resident]
 	_ally_housing.setup(self, _house_manager, _builder, ordinary_residents)
 
 
@@ -889,6 +903,11 @@ func _apply_client_data(agent: Node) -> void:
 
 func apply_merchant_data(agent: Node) -> void:
 	_agent_definition_service.apply_merchant_data(agent)
+
+
+# Visual setup for the Inventor villager (config.visual_setup Callable). Reached via _manager.call.
+func apply_inventor_data(agent: Node) -> void:
+	_agent_definition_service.apply_inventor_data(agent)
 
 
 func _setup_plant_manager() -> void:
@@ -1631,6 +1650,28 @@ func has_seed_merchant_reached_spot() -> bool:
 ## Returns Vector2.ZERO when no merchant is present.
 func get_seed_merchant_world_position() -> Vector2:
 	return _merchant_resident.get_agent_world_position()
+
+
+# ---------------------------------------------------------------------------
+# Generic ordinary-house-resident queries, keyed by resident_type. A villager's dialog/interaction
+# controller (e.g. InventorDialogController / InventorPrompt) uses these to reach its live agent
+# without a role-specific BuildingManager method. All return a neutral default when no such
+# resident is currently active.
+# ---------------------------------------------------------------------------
+
+func is_player_near_house_resident(resident_type: StringName, radius_tiles: int) -> bool:
+	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
+	return resident != null and resident.is_active() and resident.is_player_near(radius_tiles)
+
+
+func has_house_resident_reached_spot(resident_type: StringName) -> bool:
+	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
+	return resident != null and resident.has_reached_idle_spot()
+
+
+func get_house_resident_world_position(resident_type: StringName) -> Vector2:
+	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
+	return resident.get_agent_world_position() if resident != null else Vector2.ZERO
 
 
 func is_client_sale_active() -> bool:

@@ -8,6 +8,7 @@ class_name AgentDefinitionService
 const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
+const INVENTOR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/inventor.png")
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/builder.png")
 const FUNDAMENTAL_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
 const BUILDER_HAMMER_TEXTURE: Texture2D = preload("res://assets/sprites/house/marto.png")
@@ -89,6 +90,19 @@ func apply_merchant_data(agent: Node) -> void:
 	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
 	if sprite != null:
 		sprite.texture = MERCHANT_TEXTURE
+		sprite.hframes = 4
+		sprite.frame = 0
+		sprite.flip_h = false
+	_mark_crushes_placeables(agent)
+
+
+## Inventor villager visuals. Identical frame layout / animation rules to the other ordinary
+## villagers (same 4-frame directional sheet, default scale/offset/z-index from character.tscn);
+## only the texture differs. Inherits person crushing via the generic crushes_placeables flag.
+func apply_inventor_data(agent: Node) -> void:
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = INVENTOR_TEXTURE
 		sprite.hframes = 4
 		sprite.frame = 0
 		sprite.flip_h = false

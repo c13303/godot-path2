@@ -11,6 +11,7 @@ const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog
 const HOUSE_TEXTURE: Texture2D = preload("res://assets/sprites/house/house1.png")
 const HOUSE_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_builder.png")
 const HOUSE_MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_merchant.png")
+const HOUSE_INVENTOR_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_inventor.png")
 const HOUSE_WIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/wiphouse.png")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
@@ -225,6 +226,32 @@ const ITEM_DEFS: Dictionary = {
 		"requires_completed_house_type": &"house_builder",
 		"house_texture": HOUSE_MERCHANT_TEXTURE,
 		"house_completed_texture": HOUSE_MERCHANT_TEXTURE,
+		"house_wip_texture": HOUSE_WIP_TEXTURE,
+		"builder_work_seconds": 20.0,
+		"drag_buildable": false,
+		"max_health": 100,
+		"max_stack": 999,
+		"currency": &"gem",
+		"price": 20,
+	},
+	# Ordinary villager house, added purely through catalog config (no central-system edits): same
+	# build rules, footprint, WIP flow, durability and save behavior as the Merchant House. It owns
+	# the "inventor" resident, spawned by the generic HouseResidentController registered in
+	# BuildingManager._setup_ally_housing.
+	"house_inventor": {
+		"id": "house_inventor",
+		"name": "Inventor House",
+		"type": "placeable",
+		"category": "house",
+		"frame": 31,
+		"target_layer": "wallz",
+		"special_placement_kind": &"house",
+		"house_resident_type": &"inventor",
+		"unique_house_type": true,
+		# Same generic prerequisite as the Merchant House: unlocks once a Builder House is completed.
+		"requires_completed_house_type": &"house_builder",
+		"house_texture": HOUSE_INVENTOR_TEXTURE,
+		"house_completed_texture": HOUSE_INVENTOR_TEXTURE,
 		"house_wip_texture": HOUSE_WIP_TEXTURE,
 		"builder_work_seconds": 20.0,
 		"drag_buildable": false,
@@ -713,7 +740,7 @@ static func get_house_build_item_ids() -> Array[StringName]:
 			continue
 		if StringName(item_def.get("special_placement_kind", &"")) == &"house":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"house_builder", &"house_merchant"])
+	return _ordered_known_first(ids, [&"house_builder", &"house_merchant", &"house_inventor"])
 
 static func get_tool_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = get_gardening_shop_item_ids()
