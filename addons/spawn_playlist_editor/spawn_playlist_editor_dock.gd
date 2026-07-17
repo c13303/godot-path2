@@ -858,6 +858,11 @@ func _capture_spawners() -> void:
 		if spawner_id == &"":
 			continue
 		var spawner_name: String = String(spawner_id)
+		# Skip per-spawner marker nodes (e.g. "monster1_exit", "client1_spot"): they
+		# share the spawner name prefix but are exit/spot markers, not spawners. Mirrors
+		# LevelLoader._is_spawner_marker_node so the editor and runtime agree.
+		if spawner_name.ends_with("_exit") or spawner_name.ends_with("_spot"):
+			continue
 		if not spawner_name.begins_with("monster") and not spawner_name.begins_with("client"):
 			continue
 		if seen.has(spawner_id):
