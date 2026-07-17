@@ -1396,7 +1396,7 @@ grow_horizontal = 0
 mouse_filter = 2
 script = ExtResource("45_s6agy")
 
-[node name="phaseToggleButton" type="Button" parent="GameUI" unique_id=306424860 node_paths=PackedStringArray("tutorial")]
+[node name="phaseToggleButton" type="Button" parent="GameUI" unique_id=306424860 node_paths=PackedStringArray("tutorial", "hold_fill")]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -1414,6 +1414,14 @@ morning_icon = SubResource("AtlasTexture_phase_morning")
 afternoon_icon = SubResource("AtlasTexture_phase_afternoon")
 available_style = SubResource("StyleBoxFlat_phase_available")
 unavailable_style = SubResource("StyleBoxFlat_phase_unavailable")
+hold_fill = NodePath("HoldFill")
+
+[node name="HoldFill" type="ColorRect" parent="GameUI/phaseToggleButton" unique_id=306424861]
+show_behind_parent = true
+visible = false
+offset_right = 72.0
+offset_bottom = 72.0
+mouse_filter = 2
 
 [node name="MerchantDialogController" type="Node" parent="GameUI" unique_id=343104799 node_paths=PackedStringArray("dialog", "game_ui", "player_controller", "building_manager")]
 script = ExtResource("61_mdc")

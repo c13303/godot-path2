@@ -3,9 +3,13 @@ extends Button
 ##
 ## It owns no phase rules. The confirm input (space / pad X) stays authoritative and the
 ## tutorial hint owns which phase advance that input is bound to this frame; this button
-## only mirrors that availability as a green/gray frame and offers a click as a second way
+## only mirrors that availability as a green/gray frame and offers a hold as a second way
 ## to trigger the same action. If the tutorial says nothing is available, the button is grey
 ## and inert even though it is still shown.
+##
+## Advancing the phase is not undoable, so the button asks for a deliberate hold rather than a
+## click: the action only fires once the mouse has been held down for hold_seconds, and a white
+## fill grows behind the button to show how far along that hold is.
 ##
 ## Everything visual is authored in the scene: the four phase icons, both frame styles, and
 ## the animation tuning are exported so they can be tweaked in the Inspector without
@@ -23,6 +27,11 @@ const FRAME_STYLE_SLOTS: Array[String] = ["normal", "hover", "pressed", "focus",
 @export var afternoon_icon: Texture2D
 @export var available_style: StyleBoxFlat
 @export var unavailable_style: StyleBoxFlat
+## How long the button must be held down before the phase advance fires.
+@export var hold_seconds: float = 1.0
+## Fill that grows left to right while the button is held. It is authored in the scene behind
+## the button so the phase icon stays readable through the whole hold.
+@export var hold_fill: Control
 ## One bounce cycle: scale up then back down.
 @export var bounce_scale: float = 1.18
 @export var bounce_seconds: float = 0.28
@@ -38,6 +47,10 @@ var _bounce_tween: Tween
 var _flash_tween: Tween
 var _applied_style: StyleBoxFlat
 var _applied_icon: Texture2D
+var _holding: bool = false
+var _hold_elapsed: float = 0.0
+# Resizing the fill notifies the layout, so only touch it when the drawn ratio actually moves.
+var _applied_fill_ratio: float = -1.0
 # Availability is only interesting once it changes. Without this the button would fire its
 # alert on the first processed frame if the confirm input happened to be live already
 # (a loaded save dropped straight into an afternoon that can already end).
@@ -46,13 +59,18 @@ var _availability_known: bool = false
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_NONE
-	pressed.connect(_on_pressed)
+	button_down.connect(_on_button_down)
+	button_up.connect(_cancel_hold)
+	# Dragging off the button abandons the hold, so the fill can never keep filling under a
+	# cursor that has already left.
+	mouse_exited.connect(_cancel_hold)
 	_refresh()
 
 
 func _process(delta: float) -> void:
 	if _alert_remaining > 0.0:
 		_alert_remaining = maxf(0.0, _alert_remaining - delta)
+	_advance_hold(delta)
 	_refresh()
 
 
@@ -64,6 +82,7 @@ func _refresh() -> void:
 	_availability_known = true
 	_apply_icon()
 	_apply_frame()
+	_apply_hold_fill()
 	_apply_animation()
 
 
@@ -102,6 +121,26 @@ func _apply_frame() -> void:
 	_applied_style = style
 	for slot: String in FRAME_STYLE_SLOTS:
 		add_theme_stylebox_override(slot, style)
+
+
+func _apply_hold_fill() -> void:
+	if hold_fill == null:
+		return
+	var ratio: float = _hold_ratio()
+	if is_equal_approx(ratio, _applied_fill_ratio):
+		return
+	_applied_fill_ratio = ratio
+	hold_fill.visible = ratio > 0.0
+	hold_fill.position = Vector2.ZERO
+	hold_fill.size = Vector2(size.x * ratio, size.y)
+
+
+func _hold_ratio() -> float:
+	if not _holding:
+		return 0.0
+	if hold_seconds <= 0.0:
+		return 1.0
+	return clampf(_hold_elapsed / hold_seconds, 0.0, 1.0)
 
 
 func _apply_animation() -> void:
@@ -143,7 +182,30 @@ func _set_flashing(active: bool) -> void:
 	_flash_tween.tween_property(self, "modulate", Color.WHITE, flash_seconds)
 
 
-func _on_pressed() -> void:
-	if not _available or tutorial == null or not tutorial.has_method("trigger_phase_action"):
+func _on_button_down() -> void:
+	if not _available:
 		return
-	tutorial.call("trigger_phase_action")
+	_holding = true
+	_hold_elapsed = 0.0
+
+
+func _cancel_hold() -> void:
+	_holding = false
+	_hold_elapsed = 0.0
+
+
+## The hold is the only way this button fires: a plain click releases before hold_seconds and
+## must do nothing, and losing availability mid-hold throws the progress away rather than
+## advancing a phase the tutorial no longer offers.
+func _advance_hold(delta: float) -> void:
+	if not _holding:
+		return
+	if not _available:
+		_cancel_hold()
+		return
+	_hold_elapsed += delta
+	if _hold_elapsed < hold_seconds:
+		return
+	_cancel_hold()
+	if tutorial != null and tutorial.has_method("trigger_phase_action"):
+		tutorial.call("trigger_phase_action")

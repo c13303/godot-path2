@@ -308,6 +308,37 @@ func _complete_client_sale() -> void:
 		return
 
 
+# Dev-only: consumes the day's whole client step at once and returns how many clients it
+# consumed. Every remaining client counts and pays exactly 1 money regardless of rose
+# stock: those still waiting to spawn, plus every live one on the map (walking,
+# counter-bound or hostile). Clients are removed through the same authoritative despawn
+# the night skip uses, then the normal completion path empties the counters and closes the
+# step. BuildingManager cancels the pre-sale machinery before calling this.
+func skip_for_dev() -> int:
+	if GameState.is_night or not _client_step_pending:
+		return 0
+	var consumed: int = 0
+	if _client_sale_active:
+		consumed = _client_sale_pending_spawners.size() + client_count()
+	else:
+		# Pre-sale gap (dawn harvest, preparation, reveal): nothing has spawned yet, so the
+		# day's whole authored demand is still ahead.
+		consumed = completed_night_client_count_for_day()
+	_client_sale_pending_spawners.clear()
+	_client_sale_spawn_timers.clear()
+	# Ends before the agents are freed: it unpauses native agents by nav_id and kills their
+	# attack visuals, which requires the hostile clients to still exist.
+	_manager.get_client_tantrum_controller().end()
+	for raw_node: Node in _manager.get_tree().get_nodes_in_group(&"clients"):
+		var agent: Node2D = raw_node as Node2D
+		if agent == null or not is_instance_valid(agent):
+			continue
+		_manager.remove_dead_monster(agent, false)
+	_manager.credit_client_purchase_money(consumed)
+	_complete_client_sale()
+	return consumed
+
+
 func client_count() -> int:
 	return _manager.get_tree().get_nodes_in_group("clients").size()
 

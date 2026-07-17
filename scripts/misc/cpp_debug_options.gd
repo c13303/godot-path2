@@ -322,10 +322,12 @@ func _is_game_paused() -> bool:
 	return false
 
 
-## Dev cheat keys, gated behind dev_keys. Numpad + fully refills the water
-## reserve and, during the day, grants 100 seeds/gems/money. At night it skips
-## the night (removes every monster, ends the night) and pays out the loot the
-## night would still have produced, so skipping does not cost the run its drops.
+## Dev cheat keys, gated behind dev_keys. Numpad + resolves to exactly one of three
+## exclusive actions depending on the phase: at night it skips the night (removes
+## every monster, ends the night) and pays out the loot the night would still have
+## produced, so skipping does not cost the run its drops; while the day's client step
+## is pending or active it only skips that step (see _skip_dev_client_sale); outside
+## both it refills the water reserve and grants 100 seeds/gems/money.
 ## Numpad 1/2/0 force-spawn one agent from each
 ## registered enemy/client spawner. K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
@@ -338,13 +340,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if key_event.keycode == KEY_KP_ADD:
 		get_viewport().set_input_as_handled()
-		# The night loot must be counted before _end_dev_night() clears the monsters.
-		if GameState.is_night:
-			_grant_skipped_night_loot()
-		else:
-			_grant_dev_currency()
-		_refill_dev_water_reserve()
-		_end_dev_night()
+		_handle_dev_skip_key()
 	elif _is_key(key_event, KEY_KP_1):
 		get_viewport().set_input_as_handled()
 		_spawn_dev_agents_from_spawners(&"monster", &"basic")
@@ -387,6 +383,36 @@ func _restart_level_with_debug() -> void:
 func _get_progression() -> Node:
 	var scene: Node = get_tree().current_scene if is_inside_tree() else null
 	return scene.get_node_or_null("progression") if scene else null
+
+
+## The three Numpad + actions are exclusive and resolved in phase order: skip the
+## night, else skip the day's client step, else grant the plain day cheats.
+func _handle_dev_skip_key() -> void:
+	if GameState.is_night:
+		# The night loot must be counted before _end_dev_night() clears the monsters.
+		_grant_skipped_night_loot()
+		_refill_dev_water_reserve()
+		_end_dev_night()
+		return
+	if _skip_dev_client_sale():
+		return
+	_grant_dev_currency()
+	_refill_dev_water_reserve()
+
+
+## Ends the day's client step: every remaining client is consumed for 1 money and
+## removed, the counters are emptied and the morning is completed. True once the key
+## was consumed here, i.e. a client step was pending or active; false on any other day
+## frame, where the caller falls back to the plain day cheats.
+func _skip_dev_client_sale() -> bool:
+	var manager: Node = _get_building_manager()
+	if manager == null or not manager.has_method("skip_current_client_sale_for_dev"):
+		return false
+	var consumed: int = int(manager.call("skip_current_client_sale_for_dev"))
+	if consumed < 0:
+		return false
+	CppDebugOptions.dlog("dev_keys: client skip consumed %d client(s) for %d money" % [consumed, consumed])
+	return true
 
 
 func _grant_dev_currency() -> void:

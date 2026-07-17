@@ -1443,6 +1443,11 @@ func begin_client_sale_phase() -> void:
 func request_client_sale_start() -> void:
 	if GameState.is_night:
 		return
+	# The day's client step is the authority on whether clients are still owed. Once it is
+	# closed (normal completion, no-sale skip, or the dev client skip), a late request from
+	# the dawn harvest must not re-open a sale for a day that is already past its clients.
+	if not _client_sale.current_day_client_step_pending_or_active():
+		return
 	_client_sale_start_requested = true
 
 
@@ -2546,7 +2551,7 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 	elif plantz:
 		plantz.erase_cell(plant_cell)
 		_flush_plant_layer_visuals()
-	_credit_client_purchase_money()
+	credit_client_purchase_money()
 	agent.set_meta("client_has_rose", true)
 	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
 	agent.set_meta("client_rose_visible", true)
@@ -2627,7 +2632,7 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 	# launches from exactly that pile position before the stock decrement rebuilds it.
 	var pile_index: int = _counter_stock(counter_cell) - 1
 	_set_counter_stock(counter_cell, _counter_stock(counter_cell) - 1)
-	_credit_client_purchase_money()
+	credit_client_purchase_money()
 	# Logical purchase is complete immediately (night-start gating, tantrum eligibility),
 	# but the pinned rose sprite is withheld until the flown rose reaches the client:
 	# _on_client_rose_arrived flips client_rose_visible on arrival.
@@ -2637,11 +2642,15 @@ func _start_client_counter_payment(agent: Node2D, counter_cell: Vector2i) -> voi
 	_spawn_client_payment_money_visual(agent.global_position)
 
 
-func _credit_client_purchase_money() -> void:
+# Single money credit path for client purchases: 1 for a real counter sale, the whole
+# remaining demand at once for the dev client-step skip.
+func credit_client_purchase_money(amount: int = 1) -> void:
+	if amount <= 0:
+		return
 	var scene: Node = get_tree().current_scene
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
 	if progression_node != null and progression_node.has_method("update_money"):
-		progression_node.call("update_money", 1)
+		progression_node.call("update_money", amount)
 
 
 func _spawn_client_payment_money_visual(world_position: Vector2) -> void:
@@ -2830,6 +2839,22 @@ func _remove_escaped_monster(agent: Node2D) -> void:
 	# agent to whichever handler owns it, by reference — group membership is already stripped above.
 	if is_house_resident:
 		_ally_housing.on_agent_removed(agent)
+
+# Dev-only day mirror of skip_current_night_for_dev(): ends the day's client step
+# wherever it stands, from the post-night dawn gap through the running sale. Returns the
+# number of clients consumed, or -1 when no client step is pending (the caller then knows
+# the key was not consumed here). Cancels every pre-sale mechanism that could re-open the
+# sale afterwards — the in-flight preparation token, the reveal cutscene and the pending
+# start request — before handing the consumption itself to the client-sale owner.
+func skip_current_client_sale_for_dev() -> int:
+	if GameState.is_night or not _client_sale.current_day_client_step_pending_or_active():
+		return -1
+	_client_sale_start_requested = false
+	_building_preparation_controller.reset_for_phase_transition()
+	_spawner_reveal_phase.abort_client_reveal()
+	_dawn_harvest.clear_active()
+	return _client_sale.skip_for_dev()
+
 
 func skip_current_night_for_dev() -> bool:
 	if not GameState.is_night:
