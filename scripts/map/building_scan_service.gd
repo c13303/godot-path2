@@ -20,6 +20,7 @@ var _tile_defs_by_atlas: Dictionary = {}
 var _last_wall_signature: int = 0
 var _last_water_signature: int = 0
 var _last_blocking_hard_signature: int = 0
+var _full_scan_count: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -49,6 +50,7 @@ func load_tile_definitions() -> void:
 
 
 func scan_buildings() -> void:
+	_full_scan_count += 1
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
 
 	var debug_telemetry: BuildingDebugTelemetry = _debug_telemetry()
@@ -68,11 +70,12 @@ func scan_buildings() -> void:
 	# scanned here at all (their phase-dependent routing is driven by the placement/removal
 	# event path); this also stops fence autotiling from reading as a topology change.
 	var blocking_hard_signature: int = _hard_topology_signature(blocking_buildings)
-	debug_telemetry.warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
-		"wall_cells=%d water_cells=%d" % [
-			wallz.get_used_cells().size() if wallz else 0,
-			watersources.get_used_cells().size() if watersources else 0,
-		])
+	if debug_telemetry.detailed_logging_enabled():
+		debug_telemetry.warn_garden_task_lag_us("_tile_layer_signature", Time.get_ticks_usec() - t,
+			"wall_cells=%d water_cells=%d" % [
+				wallz.get_used_cells().size() if wallz else 0,
+				watersources.get_used_cells().size() if watersources else 0,
+			])
 	var hard_topology_changed: bool = (
 		wall_signature != _last_wall_signature
 		or water_signature != _last_water_signature
@@ -93,7 +96,8 @@ func scan_buildings() -> void:
 	scan_special_layer(wallz, seen_spawners)
 	debug_telemetry.warn_garden_task_lag_us("_scan_special_layer", Time.get_ticks_usec() - t,
 		"seen_spawners=%d" % seen_spawners.size())
-	debug_telemetry.log_scan_summary(seen_spawners, migrated, hard_topology_changed)
+	if debug_telemetry.detailed_logging_enabled():
+		debug_telemetry.log_scan_summary(seen_spawners, migrated, hard_topology_changed)
 
 	var spawners: Dictionary = _spawners()
 	for raw_spawner_cell: Variant in spawners.keys():
@@ -260,6 +264,10 @@ func resync_topology_signatures() -> void:
 	_last_wall_signature = tile_layer_signature(_wallz())
 	_last_water_signature = tile_layer_signature(_watersources())
 	_last_blocking_hard_signature = _hard_topology_signature(_blocking_buildings())
+
+
+func full_scan_count() -> int:
+	return _full_scan_count
 
 
 func _building_object_manager() -> BuildingObjectManager:

@@ -15,9 +15,12 @@ class_name BuildingManager
 signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 signal counter_stock_changed(previous: int, value: int)
+signal planificator_data_changed
 # Emitted from plant_contact_dance_router.gd; ignore the false unused-signal warning.
 @warning_ignore("unused_signal")
 signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float)
+@warning_ignore("unused_signal")
+signal plant_contact_dance_state_changed(layer_name: StringName, cell: Vector2i, item_id: String, active: bool)
 
 const GARDEN_TOPOLOGY_SERVICE_SCRIPT: Script = preload("res://scripts/map/garden_topology_service.gd")
 const GARDEN_ACCESS_RESOLVER_SCRIPT: Script = preload("res://scripts/map/garden_access_resolver.gd")
@@ -319,6 +322,9 @@ func _ready() -> void:
 	_setup_ally_housing()
 	_setup_ground_drop_manager()
 	_setup_bamboo_harvest_controller()
+	var player: Node2D = get_tree().get_first_node_in_group(&"player") as Node2D
+	if player != null:
+		_agent_cell_tracker.register(player, &"player")
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
@@ -349,10 +355,12 @@ func _resolve_level_layers() -> void:
 # AgentManager registration stays with the spawn/navigation code.
 func _register_runtime_agent(agent: Node2D, category: StringName) -> void:
 	_agent_cell_tracker.register(agent, category)
+	planificator_data_changed.emit()
 
 
 func _unregister_runtime_agent(agent: Node2D) -> void:
 	_agent_cell_tracker.unregister(agent)
+	planificator_data_changed.emit()
 
 
 func register_tracked_agent(agent: Node2D, category: StringName) -> void:
@@ -463,12 +471,16 @@ func get_progression() -> Node:
 func get_plant_manager() -> Node:
 	return plant_manager
 
-func request_agent_plant_contact_dance(agent: Node2D, category: StringName) -> void:
-	_plant_contact_dance_router.request_agent_contact(agent, category)
+func update_agent_plant_contact(agent: Node2D, category: StringName, cell: Vector2i) -> void:
+	_plant_contact_dance_router.update_agent_contact(agent, category, cell)
 
 
-func request_player_plant_contact_dance() -> void:
-	_plant_contact_dance_router.request_player_contact()
+func clear_agent_plant_contact(agent_id: int) -> void:
+	_plant_contact_dance_router.clear_agent_contact(agent_id)
+
+
+func clear_all_plant_contacts() -> void:
+	_plant_contact_dance_router.clear()
 
 
 func is_agent_eating_plant(nav_id: int) -> bool:
@@ -944,6 +956,10 @@ func _setup_plant_manager() -> void:
 		plant_manager.connect("plant_added", Callable(self, "_on_plant_added"))
 	if plant_manager.has_signal("plant_removed") and not plant_manager.is_connected("plant_removed", Callable(self, "_on_plant_removed")):
 		plant_manager.connect("plant_removed", Callable(self, "_on_plant_removed"))
+	if plant_manager.has_signal("plant_state_changed") and not plant_manager.is_connected("plant_state_changed", Callable(self, "_on_plant_state_changed")):
+		plant_manager.connect("plant_state_changed", Callable(self, "_on_plant_state_changed"))
+	if plant_manager.has_signal("plant_visual_changed") and not plant_manager.is_connected("plant_visual_changed", Callable(self, "_on_plant_visual_changed")):
+		plant_manager.connect("plant_visual_changed", Callable(self, "_on_plant_visual_changed"))
 	if plant_manager.has_signal("new_day_finished") and not plant_manager.is_connected("new_day_finished", Callable(self, "_on_new_day_finished")):
 		plant_manager.connect("new_day_finished", Callable(self, "_on_new_day_finished"))
 
@@ -1023,6 +1039,8 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 
 
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
+	if _building_item_requests_agent_recheck(item_id):
+		_agent_cell_tracker.invalidate_cell(cell)
 	if _building_item_blocks_player(item_id):
 		_set_player_cell_blocked(cell, false)
 	_sync_building_cell_speed(cell, item_id)
@@ -1109,6 +1127,14 @@ func _on_plant_added(_cell: Vector2i) -> void:
 	_agent_cell_tracker.invalidate_cell(_cell)
 	_building_invalidation_controller.after_plant_layout_changed("plant_added")
 
+
+func _on_plant_state_changed(cell: Vector2i, _atlas_coords: Vector2i) -> void:
+	_agent_cell_tracker.invalidate_cell(cell)
+
+
+func _on_plant_visual_changed(cell: Vector2i, _plant_kind: String, _stage: int, _watered: bool) -> void:
+	_agent_cell_tracker.invalidate_cell(cell)
+
 # Runtime plant removal (an agent ate a plant, or a plant was removed at runtime).
 # This is CONTENT-ONLY: it never recomputes garden entry/access points and never
 # triggers a full topology rebuild. We only narrow-retarget the agents that were
@@ -1116,6 +1142,7 @@ func _on_plant_added(_cell: Vector2i) -> void:
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
+	_agent_cell_tracker.invalidate_cell(cell)
 	_sync_building_cell_speed(cell, "debris")
 	if not _runtime_agents_active():
 		_building_invalidation_controller.after_plant_layout_changed("plant_removed")

@@ -181,9 +181,6 @@ func _start_runtime_walkability_rebuild() -> void:
 	if _runtime_rebuild_active:
 		return
 	clear_navigation_topology_dirty()
-	# Capture the tile state we are about to rebuild for, so the next periodic scan sees a
-	# matching baseline and does not re-trigger a second rebuild for this same mutation.
-	_manager.get_building_scan_service().resync_topology_signatures()
 	_runtime_rebuild_active = true
 	_runtime_rebuild_is_plant_layout = false
 	_runtime_rebuild_id += 1
@@ -250,9 +247,6 @@ func _apply_walkability_topology_rebuild() -> void:
 	if not _navigation_topology_dirty:
 		return
 	clear_navigation_topology_dirty()
-	# Keep the periodic scan's baseline in sync with the tiles we rebuild for so it does
-	# not re-detect this mutation and rebuild again (see resync_topology_signatures).
-	_manager.get_building_scan_service().resync_topology_signatures()
 	_navigation_sync_service.sync_flow_extra_blocking_cells()
 	_navigation_sync_service.rebuild_waterpool_directional_field()
 	# Same reason as the budgeted path: refuse every approach answer from the old map

@@ -7,6 +7,7 @@ var _damage_flash_tween: Tween = null
 var _contact_tween: Tween = null
 var _health_bar_offset: Vector2 = Vector2(0.0, -16.0)
 var _contact_dance_enabled: bool = false
+var _contact_dance_active: bool = false
 
 
 func setup(visual_def: Dictionary) -> void:
@@ -40,6 +41,21 @@ func request_contact_dance(duration: float) -> void:
 	_contact_tween = create_tween()
 	_contact_tween.tween_property(_sprite, "rotation", 0.14, maxf(0.0, duration) * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_contact_tween.tween_property(_sprite, "rotation", 0.0, maxf(0.0, duration) * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+func set_contact_dance_active(active: bool) -> void:
+	if not _contact_dance_enabled or _sprite == null or not is_instance_valid(_sprite):
+		return
+	_contact_dance_active = active
+	if _contact_tween != null and _contact_tween.is_valid():
+		_contact_tween.kill()
+	if not active:
+		_sprite.rotation = 0.0
+		return
+	_sprite.rotation = -0.14
+	_contact_tween = create_tween().set_loops()
+	_contact_tween.tween_property(_sprite, "rotation", 0.14, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_contact_tween.tween_property(_sprite, "rotation", -0.14, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 
 func get_health_bar_anchor_world_position() -> Vector2:

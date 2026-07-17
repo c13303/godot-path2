@@ -232,6 +232,10 @@ func log(message: String) -> void:
 		print("BuildingManager: ", message)
 
 
+func detailed_logging_enabled() -> bool:
+	return _manager != null and _manager.debug_logs and CppDebugOptions.logs_enabled
+
+
 func log_spawn_failure(message: String) -> void:
 	var now_ms: int = Time.get_ticks_msec()
 	var last_ms: int = int(_last_spawn_failure_at_ms.get(message, -SPAWN_FAILURE_WARN_INTERVAL_MS))

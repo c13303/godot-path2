@@ -85,6 +85,7 @@ func suspend_agent(agent: Node2D) -> void:
 	_general_checked_this_frame.erase(id)
 	_erase_from_queue(id)
 	_interactions.clear_agent_contact(id)
+	_manager.clear_agent_plant_contact(id)
 
 
 func resume_agent(agent: Node2D) -> void:
@@ -215,6 +216,8 @@ func clear() -> void:
 	_queued_reasons.clear()
 	_general_checked_this_frame.clear()
 	_interactions.clear()
+	if _manager != null:
+		_manager.clear_all_plant_contacts()
 	_pending_debug_invalidations = 0
 	_pending_debug_state_exit_rechecks = 0
 
@@ -255,7 +258,6 @@ func _poll_transitions() -> void:
 			continue
 		var cell: Vector2i = _current_floor_cell(agent)
 		var last_cell: Vector2i = record["cell"] as Vector2i
-		var category: StringName = record["category"] as StringName
 		if cell != last_cell:
 			_interactions.clear_agent_contact(id)
 			_reindex(id, last_cell, cell)
@@ -264,8 +266,6 @@ func _poll_transitions() -> void:
 			_refresh_water_candidate_membership(id, agent, cell)
 			if debug:
 				_debug_transitions += 1
-		else:
-			_interactions.refresh_contact_dance(agent, category)
 	for id: int in dead:
 		_remove_id(id)
 
@@ -401,6 +401,8 @@ func _remove_id(id: int) -> void:
 	_general_checked_this_frame.erase(id)
 	_erase_from_queue(id)
 	_interactions.clear_agent_contact(id)
+	if _manager != null:
+		_manager.clear_agent_plant_contact(id)
 
 
 func _erase_from_queue(id: int) -> void:

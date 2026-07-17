@@ -12,24 +12,34 @@ const LOS_READY: int = 1
 # Fill drawn over the union of every existing turret's build range while placing a
 # turret: the whole no-build zone that matches the placement rule in BuildSystem.
 @export var forbidden_color: Color = Color(1.0, 0.1, 0.1, 0.35)
+@export_range(0.02, 1.0, 0.01) var target_acquisition_interval: float = 0.12
 
 var _fight_system: FightSystem
 var _building_objects: BuildingObjectManager
 var _build_system: Node
 var _wall_layer: TileMapLayer
 var _turrets: Dictionary = {}
+var _active_turret_cells: Array[Vector2i] = []
+var _agent_tracker: AgentCellTracker = null
 var _los_generation: int = 0
 var _has_hovered_turret: bool = false
 var _hovered_turret_cell: Vector2i = Vector2i.ZERO
 var _has_preview_turret: bool = false
 var _preview_turret_cell: Vector2i = Vector2i.ZERO
 var _preview_turret_direction: Vector2i = Vector2i(1, 0)
+var _debug_acquisition_scans: int = 0
+var _debug_spatial_candidates: int = 0
+var _debug_los_checks: int = 0
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
 	_building_objects = get_node_or_null("../../Map/BuildingObjectManager") as BuildingObjectManager
 	_build_system = get_node_or_null("../../Map/BuildSystem")
 	_wall_layer = get_node_or_null("../../Map/MonTilemap/wallz") as TileMapLayer
+	var scene: Node = get_tree().current_scene
+	var building_manager: BuildingManager = scene.get_node_or_null("Map/BuildingManager") as BuildingManager if scene != null else null
+	if building_manager != null:
+		_agent_tracker = building_manager.get_agent_cell_tracker()
 	if _fight_system == null or _building_objects == null:
 		push_error("TurretSystem: FightSystem or BuildingObjectManager is missing.")
 		set_process(false)
@@ -51,9 +61,9 @@ func _process(delta: float) -> void:
 	_update_preview_turret()
 	if _fight_system and _fight_system.has_method("is_paused") and bool(_fight_system.call("is_paused")):
 		return
-	for raw_cell: Variant in _turrets.keys():
-		var cell: Vector2i = raw_cell as Vector2i
+	for cell: Vector2i in _active_turret_cells:
 		var state: Dictionary = _turrets[cell] as Dictionary
+		state["acquisition_wait"] = maxf(0.0, float(state.get("acquisition_wait", 0.0)) - delta)
 		var origin: Vector2 = _turret_world_position(cell)
 		var activation_range: float = float(state.get("shooting_range", 0.0))
 		if bool(state.get("shot_active", false)):
@@ -255,6 +265,7 @@ func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 		return
 	_fight_system.remove_turret_spray(cell)
 	_turrets.erase(cell)
+	_active_turret_cells.erase(cell)
 	if _has_hovered_turret and _hovered_turret_cell == cell:
 		_has_hovered_turret = false
 	if TURRET_SHOW_RADIUS:
@@ -301,7 +312,11 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"los_status": LOS_PENDING,
 		"visible_cells": {},
 		"los_generation": _next_los_generation(),
+		"target_ref": null,
+		"acquisition_wait": _initial_acquisition_offset(cell),
 	}
+	if not _active_turret_cells.has(cell):
+		_active_turret_cells.append(cell)
 	if not _fight_system.is_gun(weapon_id):
 		_fight_system.create_turret_spray(cell)
 	call_deferred("_compute_turret_los_async", cell, int((_turrets[cell] as Dictionary).get("los_generation", 0)))
@@ -364,10 +379,23 @@ func _weapon_id_from_resource(weapon: Resource) -> String:
 	return str(weapon.get("id"))
 
 func _target_for_turret(turret_cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float) -> Node2D:
+	var existing: Node2D = _target_from_state(state)
+	if _target_is_valid_for_turret(existing, turret_cell, state, origin, activation_range):
+		return existing
+	state["target_ref"] = null
+	if float(state.get("acquisition_wait", 0.0)) > 0.0:
+		return null
+	state["acquisition_wait"] = maxf(0.02, target_acquisition_interval)
+	_debug_acquisition_scans += 1
+	var target: Node2D = null
 	if bool(state.get("straight_line_detection", false)):
 		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
-		return _nearest_enemy_in_line(turret_cell, origin, activation_range, direction)
-	return _nearest_enemy_in_range(turret_cell, origin, activation_range)
+		target = _nearest_enemy_in_line(turret_cell, origin, activation_range, direction)
+	else:
+		target = _nearest_enemy_in_range(turret_cell, origin, activation_range)
+	if target != null:
+		state["target_ref"] = weakref(target)
+	return target
 
 func _fire_direction_for_target(state: Dictionary, origin: Vector2, target: Node2D) -> Vector2:
 	if bool(state.get("directional", false)):
@@ -385,11 +413,10 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 	var nearest_step: int = 2147483647
 	var tile_size: float = _tile_size_pixels(layer)
 	var max_steps: int = ceili(activation_range / maxf(1.0, tile_size))
-	for raw_enemy: Node in get_tree().get_nodes_in_group(&"monsters"):
-		var enemy: Node2D = raw_enemy as Node2D
-		if enemy == null or not is_instance_valid(enemy):
-			continue
-		if enemy.has_method("is_external_capture_active") and bool(enemy.call("is_external_capture_active")):
+	var candidates: Array[Node2D] = _nearby_monsters(origin, activation_range)
+	_debug_spatial_candidates += candidates.size()
+	for enemy: Node2D in candidates:
+		if not _is_targetable_monster(enemy):
 			continue
 		var enemy_cell: Vector2i = layer.local_to_map(layer.to_local(enemy.global_position))
 		var offset: Vector2i = enemy_cell - turret_cell
@@ -398,6 +425,7 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 			continue
 		if origin.distance_squared_to(enemy.global_position) > activation_range * activation_range:
 			continue
+		_debug_los_checks += 1
 		if not _turret_can_see_world_position(turret_cell, enemy.global_position):
 			continue
 		nearest = enemy
@@ -418,17 +446,67 @@ func _line_step_for_offset(offset: Vector2i, direction: Vector2i) -> int:
 func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_range: float) -> Node2D:
 	var nearest: Node2D = null
 	var nearest_distance_squared: float = activation_range * activation_range
-	for raw_enemy: Node in get_tree().get_nodes_in_group(&"monsters"):
-		var enemy: Node2D = raw_enemy as Node2D
-		if enemy == null or not is_instance_valid(enemy):
-			continue
-		if enemy.has_method("is_external_capture_active") and bool(enemy.call("is_external_capture_active")):
+	var candidates: Array[Node2D] = _nearby_monsters(origin, activation_range)
+	_debug_spatial_candidates += candidates.size()
+	for enemy: Node2D in candidates:
+		if not _is_targetable_monster(enemy):
 			continue
 		var distance_squared: float = origin.distance_squared_to(enemy.global_position)
-		if distance_squared <= nearest_distance_squared and _turret_can_see_world_position(turret_cell, enemy.global_position):
+		if distance_squared > nearest_distance_squared:
+			continue
+		_debug_los_checks += 1
+		if _turret_can_see_world_position(turret_cell, enemy.global_position):
 			nearest = enemy
 			nearest_distance_squared = distance_squared
 	return nearest
+
+
+func _nearby_monsters(origin: Vector2, activation_range: float) -> Array[Node2D]:
+	if _agent_tracker == null:
+		return []
+	return _agent_tracker.get_agents_in_world_radius(origin, activation_range, &"monsters")
+
+
+func _target_from_state(state: Dictionary) -> Node2D:
+	var target_ref: WeakRef = state.get("target_ref", null) as WeakRef
+	return target_ref.get_ref() as Node2D if target_ref != null else null
+
+
+func _target_is_valid_for_turret(target: Node2D, turret_cell: Vector2i, state: Dictionary, origin: Vector2, activation_range: float) -> bool:
+	if not _is_targetable_monster(target):
+		return false
+	if origin.distance_squared_to(target.global_position) > activation_range * activation_range:
+		return false
+	if bool(state.get("straight_line_detection", false)):
+		var layer: TileMapLayer = _building_objects.blocking_buildings
+		if layer == null:
+			return false
+		var direction: Vector2i = state.get("direction", Vector2i.RIGHT) as Vector2i
+		var target_cell: Vector2i = layer.local_to_map(layer.to_local(target.global_position))
+		if _line_step_for_offset(target_cell - turret_cell, direction) <= 0:
+			return false
+	_debug_los_checks += 1
+	return _turret_can_see_world_position(turret_cell, target.global_position)
+
+
+func _is_targetable_monster(target: Node2D) -> bool:
+	if target == null or not is_instance_valid(target) or target.is_queued_for_deletion():
+		return false
+	return not (target.has_method("is_external_capture_active") and bool(target.call("is_external_capture_active")))
+
+
+func _initial_acquisition_offset(cell: Vector2i) -> float:
+	var interval: float = maxf(0.02, target_acquisition_interval)
+	var stable_hash: int = absi((cell.x * 73856093) ^ (cell.y * 19349663))
+	return (float(stable_hash % 1000) / 1000.0) * interval
+
+
+func acquisition_debug_stats() -> Dictionary:
+	return {
+		"acquisition_scans": _debug_acquisition_scans,
+		"spatial_candidates": _debug_spatial_candidates,
+		"los_checks": _debug_los_checks,
+	}
 
 func _turret_world_position(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _building_objects.blocking_buildings

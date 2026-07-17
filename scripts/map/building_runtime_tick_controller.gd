@@ -7,10 +7,6 @@ class_name BuildingRuntimeTickController
 
 var _manager: BuildingManager = null
 var _preparation_budget_us: int = 500
-# Countdown (seconds) gating the periodic building rescan cadence. Owned here because
-# this controller is the sole driver of the scan tick; starts at 0.0 so the first
-# eligible frame scans immediately, then resets to the 0.25s interval.
-var _scan_timer: float = 0.0
 
 
 func setup(manager: BuildingManager, preparation_budget_us: int) -> void:
@@ -33,8 +29,8 @@ func process(delta: float) -> void:
 	var frame_start_us: int = Time.get_ticks_usec()
 	var debug_telemetry: BuildingDebugTelemetry = _manager.get_building_debug_telemetry()
 
-	# Keep scan and route drains before agent ticks so fresh topology is visible this frame.
-	_process_building_scan(debug_telemetry, delta)
+	# Authoritative building/plant mutation signals dirty topology before this controller
+	# runs. Full-map scans are bootstrap/debug operations, never a runtime tick concern.
 	_process_navigation_topology_rebuild(debug_telemetry, delta)
 	# A runtime walkability rebuild may have just started (budgeted, multi-frame):
 	# stop this tick immediately so no decision runs against half-rebuilt topology.
@@ -52,16 +48,6 @@ func process(delta: float) -> void:
 
 func _should_skip_paused_runtime() -> bool:
 	return _manager.should_skip_building_runtime_tick()
-
-
-func _process_building_scan(debug_telemetry: BuildingDebugTelemetry, delta: float) -> void:
-	_scan_timer -= delta
-	if _scan_timer <= 0.0:
-		_scan_timer = 0.25
-		var t: int = Time.get_ticks_usec()
-		_manager._scan_buildings()
-		debug_telemetry.warn_garden_task_lag_us("_scan_buildings", Time.get_ticks_usec() - t,
-			"spawners=%d" % _manager.get_spawners().size())
 
 
 func _process_dirty_routes(debug_telemetry: BuildingDebugTelemetry) -> void:
@@ -112,7 +98,6 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	t = Time.get_ticks_usec()
 	var tracker: AgentCellTracker = _manager.get_agent_cell_tracker()
 	tracker.process(delta)
-	_manager.request_player_plant_contact_dance()
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		var stats: Dictionary = tracker.debug_stats()
 		debug_telemetry.warn_garden_task_lag_us("_process_agent_tile_interactions", Time.get_ticks_usec() - t,

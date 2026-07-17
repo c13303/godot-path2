@@ -32,6 +32,7 @@ var _base_sprite: Sprite2D
 var _head_sprite: Sprite2D
 var _time: float = 0.0
 var _contact_until: float = 0.0
+var _contact_active: bool = false
 var _sway_phase: float = 0.0
 var _breathe_phase: float = 0.0
 var _base_position: Vector2 = Vector2.ZERO
@@ -90,6 +91,10 @@ func request_contact_dance(duration: float) -> void:
 		_breathe_phase = randf() * TAU
 
 
+func set_contact_dance_active(active: bool) -> void:
+	_contact_active = active
+
+
 func play_shot_animation() -> void:
 	if _head_sprite == null or _shot_frames.is_empty():
 		return
@@ -135,7 +140,7 @@ func _process(delta: float) -> void:
 			SHOT_BOB_PIXELS
 		)
 		return
-	if _time >= _contact_until:
+	if not _contact_active and _time >= _contact_until:
 		_apply_dance_transform(
 			IDLE_SWAY_DEGREES,
 			IDLE_SWAY_SPEED,

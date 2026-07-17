@@ -1,615 +1,560 @@
-# Task: Fix villager idle FPS hitches, interaction proximity polling, and redundant reload navigation work
+# Task: Remove confirmed per-frame and periodic query aberrations
 
-Read `AGENTS.md` and `ARCHITECTURE.md` first. Follow all project rules, especially:
+Read `AGENTS.md` and `ARCHITECTURE.md` first.
 
-* strict typing;
-* no oversized controllers;
-* one responsibility per class;
-* reuse existing generic systems where appropriate;
-* do not introduce speculative abstractions;
-* native C++ systems must remain generic;
-* game-specific villager logic belongs in GDScript;
-* preserve current gameplay behavior unless this task explicitly changes it.
+Do not run Godot, tests, builds, exports, or benchmarks. The user will perform runtime validation.
+
+Follow the project rules:
+
+* strict GDScript typing;
+* explicit ownership and responsibilities;
+* no speculative large framework;
+* no oversized manager expansion;
+* preserve existing gameplay behavior;
+* native C++ code must remain generic;
+* game-specific behavior belongs in GDScript;
+* do not hide problems by merely increasing timers;
+* do not replace one global scan with many smaller per-agent scans.
 
 ## Context
 
-A small recurring FPS hitch appears when more than one villager is idle near their house.
+A static performance audit found four confirmed recurring-work aberrations:
 
-Static investigation found several likely causes.
+1. Full building and tilemap scans every `0.25s`.
+2. Duplicate plant-contact queries for every agent every frame.
+3. Turrets scanning the entire monster group every frame while ready.
+4. Planificator UI being destroyed and rebuilt every `0.15s`.
 
-### Confirmed issue 1: per-villager, per-frame player proximity polling
+These are structural inefficiencies, not speculative micro-optimizations.
 
-Ordinary villagers currently check player proximity every frame through the housing/resident interaction path.
+This task should fix these four systems cleanly in one focused pass.
 
-The test performs work such as:
-
-* finding the player through the scene tree/group;
-* retrieving the floor layer;
-* converting player position to a tile;
-* converting villager position to a tile;
-* computing tile distance.
-
-The interaction prompt system independently repeats similar `can_interact()` / proximity checks every frame.
-
-The fundamental builder has a separate version of comparable logic.
-
-This means proximity work scales with the number of villagers and is duplicated between villager controllers and prompt controllers.
-
-### Confirmed issue 2: multiple independently processing interaction prompts
-
-Several villager-specific dialog controllers own their own continuously processing `InteractionPrompt`.
-
-Each prompt repeatedly asks whether its corresponding villager can currently interact.
-
-This should not remain one permanent polling loop per villager.
-
-### Suspected main hitch: synchronized idle-home correction and A* repathing
-
-Ordinary residents periodically check whether they are too far from their idle/home position, approximately every `0.5s`.
-
-When considered displaced, they can call the return-home/repath logic and request an A* path.
-
-There appears to be a tolerance mismatch:
-
-* resident home correction considers an agent displaced at roughly `tile_size * 0.45`;
-* native steering considers a destination reached at roughly `tile_size * 0.50`.
-
-This creates a range where native steering may consider the target reached while the resident controller shortly afterward considers the villager displaced.
-
-Idle agents can also still be moved slightly by local avoidance/separation. With several nearby villagers, this may produce a loop:
-
-1. destination considered reached;
-2. idle separation shifts villagers slightly;
-3. synchronized home checks run;
-4. several villagers request A* return paths;
-5. they stop again;
-6. the cycle repeats.
-
-This is a strong static diagnosis, but it must be confirmed with lightweight instrumentation before blindly changing behavior.
-
-### Reload logs also show redundant work
-
-Observed after starting and then reloading a save:
-
-```text
-[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=building_removed:reservoir
-[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=building_added:reservoir
-...
-plant layout rebuild completed in 645ms
-...
-plant layout rebuild completed in 620ms
-```
-
-The invalidation messages themselves are diagnostic, not errors.
-
-However:
-
-* the reservoir is redundantly removed and immediately re-added during registration/load;
-* restored buildings emit many individual navigation changes;
-* the same plant layout appears to rebuild twice after one load.
-
-These should be cleaned up where the fix is local and safe.
+Do not broadly refactor unrelated gameplay systems.
 
 ---
 
-# Main objectives
+# Part 1 — Remove permanent full building scans
 
-## 1. Replace villager-owned proximity polling with a single player-centric interaction coordinator
+## Current issue
 
-Create a clean, focused interaction-proximity owner.
+`BuildingRuntimeTickController` periodically invokes a complete building scan, approximately every `0.25s`.
 
-Do not let each villager search for the player or convert both positions every frame.
+Relevant areas include:
 
-The player side, or a dedicated coordinator owned near the player, must determine the currently interactable villager.
+* `scripts/map/building_runtime_tick_controller.gd`
+* `scripts/map/building_scan_service.gd`
 
-A suitable structure could be something like:
+The scan repeatedly traverses some or all of:
 
-```text
-VillagerInteractionCoordinator
-```
+* wall tile cells;
+* water cells;
+* blocking buildings;
+* hard-topology buildings;
+* special tile layers;
+* physical spawners;
+* topology signatures.
 
-The exact name and ownership may differ after inspecting the architecture.
+It also creates temporary arrays through calls such as `get_used_cells()`.
 
-Responsibilities:
+This occurs even though normal building placement/removal already uses authoritative mutation and invalidation paths.
 
-* maintain a registry of currently valid villager interactables;
-* track the current selected interaction target;
-* recompute the candidate only when relevant state changes;
-* expose the selected candidate to the interaction prompt and input system;
-* notify villagers when they become or cease to be the selected proximity target.
+This periodic full-world scan must not remain active during ordinary gameplay.
 
-Do not make every villager subscribe to `_process()` just to measure player distance.
+## Required behavior
 
-### Required recompute events
+### Startup and reload
 
-Player tile change is the primary trigger, but not the only trigger.
+A complete scan is still allowed when required during:
 
-Recompute when any of the following happens:
+* initial level startup;
+* scene reload;
+* save restoration;
+* explicit map/bootstrap initialization.
 
-* player enters a different tile;
-* a registered villager enters a different tile;
-* a villager is spawned;
-* a villager is removed;
-* a villager is hidden or shown;
-* a villager starts or ends an errand;
-* a villager enters or leaves a dialog/interactable state;
-* a villager arrives at or leaves its home idle position;
-* a villager is pushed into or out of interaction range while the player remains stationary;
-* a villager becomes otherwise eligible or ineligible for interaction.
+The startup scan must establish the authoritative initial state.
 
-Use existing tile/cell transition events if the project already exposes them.
+### Runtime
 
-Do not introduce a new global per-frame world-position scan when an event-based hook already exists.
+After initialization, navigation/building changes must be driven by authoritative events:
 
-A very small throttled fallback is acceptable only if there is genuinely no event for sub-tile displacement, but it must be centralized, not one timer per villager.
+* building added;
+* building removed;
+* building updated;
+* tile traversal cost changed;
+* special tile changed;
+* spawner registered/unregistered;
+* save restoration batch completed.
 
-### Candidate selection
+Do not perform full scans every few frames as a normal runtime mechanism.
 
-Do not select the first arbitrary node returned by a group or dictionary.
+### Debug consistency check
 
-On each recompute:
+A manual or debug-only consistency scan may remain, but it must:
 
-1. filter unavailable candidates;
-2. filter candidates outside interaction range;
-3. choose the nearest candidate;
-4. use a deterministic tie-breaker for equal distance.
+* be disabled by default;
+* not run continuously in production;
+* clearly identify itself as a verification scan;
+* report mismatches without silently becoming the normal update path.
 
-Possible stable tie-breakers:
+A very slow fallback timer is acceptable only if an unavoidable legacy mutation path genuinely exists and cannot emit events. Do not add such a fallback without proving the need.
 
-* persistent resident ID;
-* stable registration order;
-* instance ID as a last resort.
+## Telemetry allocation
 
-An early exit is valid only for a perfect-distance candidate or another guaranteed best possible result.
+Do not enumerate entire tile layers or build temporary arrays merely to compose debug strings when the corresponding debug output is disabled.
 
-With the current small villager count, scanning all registered interactables on an event is acceptable. Do not add a spatial tree unless profiling proves it necessary.
+Expensive telemetry values must be computed only inside the enabled-debug branch.
 
-## 2. Use one shared interaction prompt for the selected target
+## Acceptance criteria
 
-Replace permanent villager-specific range polling by a single prompt representing the coordinator’s selected target.
-
-The prompt may continue processing while visible if needed to follow the target’s screen position, but it must not:
-
-* search all villagers;
-* recompute interaction range;
-* independently call every villager’s `can_interact()` each frame.
-
-The coordinator should push target changes into the prompt.
-
-Expected behavior:
-
-* no selected target: prompt hidden and processing disabled;
-* selected target: prompt follows that villager;
-* selected target changes: prompt updates cleanly;
-* dialog begins: prompt hides appropriately;
-* target becomes invalid: prompt clears immediately.
-
-Dialog controllers may remain villager-specific, but proximity selection and prompt visibility must no longer be duplicated across them.
-
-## 3. Centralize interaction input and hold behavior
-
-Currently each villager may independently process proximity/hold behavior.
-
-Change this so only the selected interaction candidate can receive the player’s interaction hold/input.
-
-There must not be several villagers simultaneously entering an interaction hold merely because they are all near the player.
-
-When the player presses interact:
-
-* use the coordinator’s cached selected target;
-* perform one final lightweight validity check;
-* open the correct dialog or interaction;
-* avoid a new scene-wide search.
-
-Preserve current input semantics, including hold duration and cancellation behavior, unless the existing behavior is clearly inconsistent between villager types.
-
-The fundamental builder and normal house villagers must use the same selection/proximity mechanism.
-
-Do not retain a separate fundamental-builder player search path.
-
-## 4. Instrument and fix repeated idle-home repathing
-
-Before modifying the home-return behavior, add debug-only instrumentation sufficient to prove what is happening.
-
-Track per resident:
-
-* number of idle-home probes;
-* number of return-home requests;
-* number of actual A* repaths caused by home correction;
-* distance from home when the repath was requested;
-* whether the resident already had an active path;
-* whether the resident was being pushed or displaced;
-* timestamps or frame numbers sufficient to identify repeated cycles.
-
-The instrumentation must be:
-
-* behind an existing debug flag, development build guard, or explicit local constant;
-* silent in normal production play;
-* easy to remove or retain safely.
-
-Then fix the actual issue.
-
-### Required home-return invariants
-
-A villager must not request a new return-home path when:
-
-* it is already returning to the same home target;
-* it has an active valid path to that target;
-* it is within an arrival tolerance consistent with native steering;
-* only minor avoidance displacement has occurred;
-* the last correction was requested too recently and no meaningful displacement occurred.
-
-Use the same positional reference for both arrival and correction logic.
-
-For example, do not compare:
-
-* sprite/global origin in one system;
-* navigation foot position in another.
-
-Inspect how agent tile/foot positions are represented and use the canonical navigation position.
-
-### Fix tolerance mismatch
-
-Align home correction with native arrival semantics.
-
-Do not simply change `0.45` to a guessed larger number without understanding path endpoint dispersal and the native destination-reached threshold.
-
-Define explicit named values or derive the correction threshold from the native/public navigation arrival radius.
-
-A valid solution should include hysteresis:
-
-* one threshold for considering home reached;
-* a meaningfully larger threshold for considering a settled resident displaced enough to require a repath.
-
-For example conceptually:
+During normal gameplay after initialization:
 
 ```text
-arrival radius < displacement/repath radius
+full building scans per second = 0
 ```
 
-This prevents oscillation around one boundary.
-
-The exact values must be selected based on current tile size, path endpoint dispersion, and existing steering behavior.
-
-### Avoid synchronized periodic spikes
-
-If periodic home validation still remains necessary:
-
-* do not let all residents run it on the same frame;
-* prefer event-driven displacement detection;
-* otherwise stagger checks deterministically per resident.
-
-However, staggering is not a substitute for eliminating redundant A* requests.
-
-### Preserve pushing behavior
-
-Player push/control suppression must continue working.
-
-A pushed villager should:
-
-* temporarily accept displacement;
-* not fight the push every frame;
-* eventually return home when genuinely displaced and no longer under push/control suppression.
-
-Do not make residents immutable or immediately snap them home.
-
-## 5. Clean redundant navigation invalidations during save reload
-
-Inspect:
-
-* building registration;
-* building replacement;
-* save restore;
-* level-loader reservoir registration;
-* navigation invalidation aggregation.
-
-The following sequence should not be emitted when an identical reservoir registration is restored:
-
-```text
-building_removed:reservoir
-building_added:reservoir
-```
-
-Make building registration idempotent where appropriate.
-
-If an existing building has the same:
-
-* type;
-* occupied cells;
-* relevant topology flags;
-* traversal-speed data;
-* runtime identity or authoritative restore identity;
-
-then registration should not remove and re-add it merely to refresh the same data.
-
-If data actually changed, emit only the minimum correct invalidation.
-
-### Restore transaction
-
-Where feasible, restore buildings inside a scoped batch/transaction:
-
-1. begin restore batch;
-2. register or update buildings without immediately rebuilding navigation;
-3. collect changed topology cells;
-4. collect changed speed cells;
-5. complete restore;
-6. emit one consolidated hard-topology invalidation if required;
-7. emit one batched speed update if required.
-
-Do not suppress legitimate changes.
-
-The following remain correct conceptually:
-
-```text
-[NAV_SPEED] ... turret_epine ... new=0.50
-[NAV_INVALIDATION] ... rose_shop_counter
-[NAV_INVALIDATION] ... reservoir
-```
-
-The task is to avoid redundant duplicate emissions and rebuilds, not to hide logs.
-
-## 6. Find and eliminate the duplicate plant-layout rebuild after reload
-
-One reload currently appears to produce two full plant-layout rebuilds:
-
-```text
-plant layout rebuild completed in 645ms
-plant layout rebuild completed in 620ms
-```
-
-Investigate all scheduling paths.
-
-Add debug context to layout rebuild scheduling:
-
-* dirty reason;
-* requested generation;
-* currently running generation;
-* whether the request was merged;
-* whether another generation was queued;
-* changed garden IDs;
-* whether the request came from save restoration, building scan, navigation invalidation, or delayed startup.
-
-The scheduler should coalesce equivalent requests.
-
-Expected behavior:
-
-* several dirty events during one restore/startup transaction should produce one final rebuild;
-* a request received while a rebuild is running should only queue another generation if the underlying relevant data changed after the active generation snapshot;
-* identical requests must not cause a second full rebuild.
-
-Do not merely suppress the second log line. Ensure the second computation is genuinely eliminated.
-
-## 7. Preserve valid invalidation logging
-
-Do not remove the `[NAV_INVALIDATION]` and `[NAV_SPEED]` diagnostics entirely.
-
-They are useful.
-
-Improve them if necessary so logs distinguish:
-
-* queued invalidation;
-* merged invalidation;
-* executed rebuild;
-* ignored no-op registration;
-* batched restore invalidation.
-
-Avoid production spam if the project has an existing navigation debug flag.
+Building placement, destruction, restore, and topology invalidation must still work correctly through event-driven updates.
 
 ---
 
-# Architecture requirements
+# Part 2 — Eliminate duplicate per-agent plant-contact probes
 
-Prefer a small set of explicit components rather than growing existing large controllers.
+## Current issue
 
-Likely responsibilities:
+`AgentCellTracker` already determines each agent’s current floor cell.
 
-### Interaction coordinator
+Relevant areas include:
 
-Owns:
+* `scripts/map/agent_cell_tracker.gd`
+* `scripts/map/agent_tile_interaction_controller.gd`
+* `scripts/map/plant_contact_dance_router.gd`
+* `scripts/map/building_runtime_tick_controller.gd`
 
-* interactable registry;
-* selected target;
-* event-driven candidate refresh;
-* interaction input routing;
-* selected-target signal.
+However, stationary agents currently trigger a second path that:
 
-### Interactable villager adapter/interface
+* converts their position to a tile again;
+* queries plant/building state again;
+* refreshes contact visuals repeatedly.
 
-Each villager exposes only what the coordinator needs, such as:
+With hundreds of agents, this creates duplicate per-frame work.
 
-* stable ID;
-* navigation position or current cell;
-* interaction radius;
-* eligibility;
-* display anchor;
-* interaction callback.
+The player also has a separate repeated query path that searches for the player and converts its position again.
 
-Use the project’s existing conventions rather than forcing a formal interface if GDScript architecture already uses components or signals.
+## Required design
 
-### Shared prompt presenter
+The cell tracker must remain the authoritative owner of agent cell transitions.
 
-Owns:
+The plant-contact system should consume:
 
-* current visual target;
+* agent reference or stable ID;
+* already-computed current cell;
+* previous cell;
+* contact start/end events;
+* cell-content invalidation events.
+
+Do not recompute an agent’s floor cell in the contact router when the tracker already knows it.
+
+## Contact lifecycle
+
+Implement a clear lifecycle:
+
+```text
+contact entered
+contact remains active
+contact exited
+contact invalidated because plant/building state changed
+```
+
+The visual animation owner should continue its own animation while contact is active.
+
+It must not require a new “still touching” request every rendered frame merely to keep an animation alive.
+
+## Required triggers
+
+Refresh plant-contact state when:
+
+* an agent enters another cell;
+* an agent is registered;
+* an agent is removed;
+* a plant appears in the occupied cell;
+* a plant disappears from the occupied cell;
+* a relevant traversable building appears/disappears;
+* plant maturity or contact eligibility changes;
+* an agent category/state changes in a way that affects contact behavior.
+
+Use existing building/plant invalidation signals when available.
+
+Do not introduce one signal connection per plant-agent pair.
+
+## Player handling
+
+Do not call `get_first_node_in_group("player")` every frame.
+
+Cache the player reference through authoritative registration or startup resolution.
+
+Use the same player cell-transition path as other agents where possible.
+
+If the player is intentionally not part of the ordinary tracker, create one focused player-cell observer. It must emit only on actual cell changes or relevant cell-content invalidations.
+
+## Acceptance criteria
+
+For stationary agents on unchanged cells:
+
+```text
+position-to-cell conversions caused by plant contact = 0 per frame
+plant-contact eligibility queries = 0 per frame
+```
+
+Plant dance/contact visuals must still:
+
+* start correctly;
+* remain active;
+* stop correctly;
+* react when the underlying plant/building changes without requiring agent movement.
+
+---
+
+# Part 3 — Replace turret full-group target scans
+
+## Current issue
+
+Relevant file:
+
+* `scripts/combat/turret_system.gd`
+
+Ready turrets can repeatedly call:
+
+```gdscript
+get_tree().get_nodes_in_group(&"monsters")
+```
+
+When a ready turret finds no target, it may repeat the complete scan on the next frame.
+
+This creates scaling near:
+
+```text
+turret count × monster count × frame rate
+```
+
+Directional turrets may additionally perform tile conversions and line-of-sight checks for every monster candidate.
+
+This must be removed.
+
+## Required design
+
+Use the existing spatial agent-cell tracking/query infrastructure.
+
+There is already radius-query behavior used by systems such as Kraken targeting. Reuse the generic spatial query mechanism rather than creating another monster registry.
+
+Target acquisition should work conceptually as:
+
+1. query agents inside the turret’s relevant world radius or cell bounds;
+2. filter by valid monster category/state;
+3. apply turret-specific directional/cone/line rules;
+4. perform line-of-sight checks only for nearby filtered candidates;
+5. choose the correct target according to existing gameplay rules.
+
+Do not change target-selection semantics accidentally.
+
+## Target acquisition cadence
+
+A ready turret with no target must not rescan every rendered frame.
+
+Add an explicit target-acquisition interval separate from the firing cooldown.
+
+Requirements:
+
+* configurable;
+* small enough to preserve responsive gameplay;
+* staggered between turret instances;
+* no synchronized scan burst for all turrets;
+* no full scan immediately repeated every frame.
+
+Use a deterministic initial offset derived from turret identity or registration order.
+
+Do not introduce random nondeterminism if the game expects deterministic behavior.
+
+## Existing target validation
+
+When a turret already has a target:
+
+* validate that target cheaply;
+* retain it while valid according to existing behavior;
+* do not reacquire the complete candidate set unless necessary.
+
+Do not preserve dead, removed, exited, or invalid targets.
+
+## Iteration allocations
+
+Inspect per-frame use of:
+
+```gdscript
+_turrets.keys()
+```
+
+Avoid allocating a key array every frame when a safe direct or stable-list iteration model is available.
+
+Do not mutate dictionaries during unsafe direct iteration.
+
+A dedicated stable active-turret array is acceptable if ownership and removal are handled correctly.
+
+## Acceptance criteria
+
+No turret targeting path may call:
+
+```gdscript
+get_nodes_in_group("monsters")
+```
+
+during ordinary repeated acquisition.
+
+With no nearby monsters, each turret performs target acquisition only at the configured staggered interval.
+
+Line-of-sight work must only happen for nearby spatial candidates.
+
+---
+
+# Part 4 — Stop rebuilding the Planificator UI every 0.15 seconds
+
+## Current issue
+
+Relevant file:
+
+* `scripts/ui/planificator.gd`
+
+The Planificator currently refreshes approximately every `0.15s`.
+
+Each refresh can:
+
+* recompute the complete display model;
+* queue-free current row controls;
+* create new containers, icons, and labels;
+* reapply theme/layout values;
+* recursively traverse the UI tree;
+* rebuild identical content even when nothing changed.
+
+This is allocation and scene-tree churn.
+
+## Required design
+
+Create the required row/view controls once.
+
+Update existing controls in place:
+
+* label text;
+* icon texture;
+* count;
 * visibility;
-* screen position;
-* prompt animation.
+* section title;
+* row size if genuinely required;
+* current/tonight/tomorrow state.
 
-Does not own range selection.
+Do not destroy and recreate the complete interface for ordinary count changes.
 
-### Resident home-settling logic
+## Model change detection
 
-Owns:
+Build a compact immutable display model or signature containing only values that affect the UI.
 
-* settled/home state;
-* displacement hysteresis;
-* return request deduplication;
-* push/control-suppression awareness.
+For example:
 
-Do not mix save restoration batching into the interaction coordinator.
+* current phase/display section;
+* represented agent types;
+* counts;
+* icon/frame identity;
+* title/label keys;
+* victory state;
+* visibility state.
 
----
+Compare the new model with the previous model.
 
-# Performance constraints
+If unchanged, return before touching UI nodes.
 
-After the fix:
+Do not use an expensive deeply nested dynamic structure if a small typed model or normalized signature is sufficient.
 
-* ordinary idle villagers must not run player-proximity calculations every frame;
-* fundamental builder must not run a separate player lookup every frame;
-* hidden villager prompts must not process;
-* candidate selection must not perform scene-tree group searches repeatedly;
-* no per-villager timer should poll the player position;
-* no repeated home A* request should occur while the villager is already returning;
-* save reload should not perform two identical plant-layout rebuilds;
-* identical building re-registration should not emit remove/add topology invalidations.
+## Event-driven refresh
 
-Avoid allocations in recurring hot paths:
+Connect to authoritative signals where available:
 
-* do not create temporary arrays every frame;
-* reuse registry structures where sensible;
-* avoid repeated `Callable`, dictionary, or string construction in movement/process paths;
-* signals/events must not produce unbounded connection duplication after reload.
+* day/night phase transition;
+* playlist/current wave update;
+* client count update;
+* monster count update;
+* progression/night index update;
+* victory state;
+* language/locale change where relevant.
 
-Ensure coordinators unregister cleanly on scene reload.
+A slow fallback poll may remain only for legacy data with no signal, but:
 
----
+* it must only recompute the lightweight model;
+* it must not rebuild UI when unchanged;
+* it should not run at `0.15s` unless there is a demonstrated requirement.
 
-# Required investigation steps
+## Mouse filtering
 
-Before coding:
+Set `mouse_filter` correctly when controls are created.
 
-1. Trace all ordinary villager interaction paths.
-2. Trace the fundamental builder interaction path.
-3. Find every `InteractionPrompt` instance and every `can_interact()` call.
-4. Find every per-frame or periodic player proximity calculation.
-5. Trace agent tile-change events already available.
-6. Trace villager push/control-suppression state.
-7. Trace `_request_idle_home_return()` and all A* calls it can cause.
-8. Compare GDScript home-arrival thresholds with native steering arrival thresholds.
-9. Trace building restoration and reservoir registration.
-10. Trace every plant-layout rebuild scheduling source.
+Do not recursively traverse the entire Planificator control hierarchy every refresh.
 
-Document the findings briefly in the final report.
+## Acceptance criteria
 
-Do not assume the initial diagnosis is complete. If profiling reveals another major hotspot associated with idle residents, fix it when it is directly related and can be addressed without broad unrelated refactoring.
-
----
-
-# Validation
-
-## Interaction
-
-Test with:
-
-* one ordinary villager;
-* several ordinary villagers;
-* fundamental builder plus ordinary villagers;
-* multiple villagers standing inside interaction radius;
-* equal-distance villagers;
-* player stationary while a villager walks into range;
-* player stationary while a villager is pushed out of range;
-* villager starts an errand while selected;
-* selected villager enters its house;
-* selected villager is removed;
-* save reload with player already near a villager.
-
-Confirm:
-
-* nearest eligible villager is selected deterministically;
-* only one prompt is visible;
-* only one villager reacts to interaction hold;
-* prompt updates without needing the player to move again;
-* no stale target survives removal/reload;
-* all dialogs still open correctly.
-
-## Idle-home behavior
-
-Test:
-
-* one idle villager;
-* two villagers at nearby homes;
-* several villagers clustered near adjacent houses;
-* player repeatedly pushes a villager;
-* villager returns after push suppression ends;
-* avoidance shifts villagers slightly;
-* villager is genuinely displaced by more than one tile;
-* house destroyed while villager is idle;
-* daytime/nighttime transitions;
-* save during displaced/returning state, where supported.
-
-Confirm:
-
-* no repeated A* repath loop;
-* no oscillation around the home point;
-* minor avoidance movement does not cause constant repathing;
-* genuinely displaced villagers still return;
-* villagers remain pushable;
-* no new stuck state is introduced.
-
-## Reload/navigation
-
-Start a game, save, and reload.
-
-Confirm:
-
-* no duplicate coordinator or signal connections;
-* identical reservoir registration does not emit remove then add;
-* topology rebuild remains correct;
-* thorn traversal speed is restored correctly;
-* counters and reservoir remain navigationally correct;
-* only one plant-layout rebuild occurs for the restore/startup batch;
-* flow-field recomputation count remains correct;
-* no stale gardens or entry points remain.
-
-## Profiling
-
-Use the project’s normal profiler or lightweight counters.
-
-Compare before/after:
-
-* per-frame script time with 1, 2, 5, and 10 idle villagers;
-* number of proximity evaluations per second;
-* number of `get_first_node_in_group("player")` calls from villager interaction code;
-* number of idle-home A* requests per minute;
-* number of plant-layout generations during reload;
-* number of hard invalidations during restore.
-
-Expected:
+When the displayed model remains unchanged:
 
 ```text
-idle per-villager proximity evaluations per second = 0
+new Control nodes created = 0
+nodes queue_freed = 0
+UI property writes = 0
 ```
 
-Candidate scans should occur only on relevant events.
+The Planificator must continue showing exactly the correct two-section behavior already specified by the project.
 
-While nobody moves or changes interaction state, interaction candidate recomputations should remain at zero.
+Do not alter its gameplay sequencing rules.
 
 ---
 
-# Acceptance criteria
+# Shared instrumentation
 
-The task is complete only when all of the following are true:
+Add lightweight debug counters for this pass.
 
-1. Villagers no longer poll player proximity independently each frame.
-2. Fundamental builder uses the same centralized proximity selection.
-3. There is only one active interaction prompt for the selected villager.
-4. Candidate selection is event-driven and deterministic.
-5. A stationary player correctly detects a villager that moves into range.
-6. Only the selected villager receives interaction hold/input.
-7. Idle villagers do not repeatedly request A* paths near their settled position.
-8. Home correction uses consistent position semantics and hysteresis.
-9. Player pushing still works.
-10. Identical reservoir restore does not generate redundant remove/add invalidations.
-11. Save restoration batches navigation mutations where safe.
-12. One reload does not execute two equivalent plant-layout rebuilds.
-13. Navigation diagnostics remain available and meaningful.
-14. No duplicate signal connections or leaked node references occur after repeated reloads.
-15. A concise final report states:
+Use an existing debug/performance flag where possible.
 
-    * root causes found;
-    * files changed;
-    * architecture introduced;
-    * measured before/after counters;
-    * remaining uncertainty or intentionally deferred work.
+Track:
 
-Do not stop after merely reducing the polling frequency. The ownership must be corrected so interaction proximity is centralized and event-driven.
+* full building scans;
+* agent plant-contact evaluations;
+* duplicate position-to-cell conversions avoided;
+* turret acquisition scans;
+* turret spatial candidates examined;
+* turret LOS checks;
+* Planificator model evaluations;
+* Planificator actual UI updates;
+* Planificator node creations after initialization.
+
+The counters must not spam normal logs.
+
+A summarized debug report once every few seconds is acceptable when explicitly enabled.
+
+Do not leave per-agent or per-turret print statements active.
+
+---
+
+# Required investigation before implementation
+
+Before editing, identify and report internally:
+
+1. All callers of the building scan service.
+2. Which runtime mutations currently bypass authoritative building events.
+3. Existing agent cell-entered/cell-exited signals.
+4. Existing plant/building mutation signals.
+5. How player cell tracking currently differs from ordinary agent tracking.
+6. Existing spatial radius-query APIs in `AgentCellTracker`.
+7. Existing turret target-selection rules that must be preserved.
+8. All signals/data sources used by the Planificator.
+9. Whether the Planificator has a reusable row scene/component already.
+10. Any save/load ordering dependency affected by removing fallback scans.
+
+Do not code around an unknown mutation path. Trace it.
+
+---
+
+# Non-goals
+
+Do not include these secondary optimizations unless they are required by the four fixes:
+
+* general character metadata caching;
+* ground-drop pooling or spatialization;
+* grown-rose animation rewrites;
+* Toolbuild event refactor;
+* tutorial state-machine refactor;
+* FPS debug label refactor;
+* unrelated navigation architecture changes;
+* unrelated villager interaction changes already handled in another task.
+
+Small directly related cleanup is allowed.
+
+---
+
+# Validation checklist
+
+## Building state
+
+Validate:
+
+* fresh level start;
+* save reload;
+* place wall;
+* remove wall;
+* place/remove reservoir where supported;
+* place/remove counters;
+* place/remove slow traversal buildings;
+* special tile initialization;
+* spawner registration;
+* topology invalidation;
+* speed-cell update.
+
+Confirm no runtime full scan is needed for these operations.
+
+## Plant contact
+
+Validate:
+
+* stationary agent on a plant;
+* agent enters plant cell;
+* agent exits plant cell;
+* plant becomes mature under stationary agent;
+* plant is harvested/removed under stationary agent;
+* traversable contact building added/removed;
+* player contact;
+* several hundred stationary agents.
+
+Confirm visual behavior remains correct with no per-frame eligibility refresh.
+
+## Turrets
+
+Validate:
+
+* one turret, no monsters;
+* many turrets, no monsters;
+* one monster enters range;
+* monster exits range;
+* monster dies while targeted;
+* several monsters in range;
+* directional turret;
+* LOS blocked/unblocked;
+* save reload with existing turrets;
+* turret removed during acquisition.
+
+Confirm target response remains visually acceptable despite acquisition throttling.
+
+## Planificator
+
+Validate every documented phase:
+
+* start of game;
+* night 1;
+* day client phase;
+* after client phase;
+* later nights;
+* victory;
+* save reload;
+* counts changing while visible;
+* language change if supported.
+
+Confirm no stale rows or incorrect sequencing.
+
+---
+
+# Final report required
+
+Provide a concise implementation report containing:
+
+* confirmed root causes;
+* architecture changes;
+* files changed;
+* any legacy mutation paths discovered;
+* counters before/after where statically or manually measurable;
+* remaining fallback polling;
+* any behavior intentionally preserved;
+* anything requiring user runtime validation.
+
+Do not claim runtime FPS improvement without runtime profiling.
+
+The implementation is complete only when the four recurring-work paths are structurally removed, not merely slowed down with longer timers.

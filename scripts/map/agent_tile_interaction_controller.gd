@@ -42,12 +42,12 @@ func evaluate(agent: Node2D, category: StringName, cell: Vector2i, reasons: int)
 	var agent_id: int = agent.get_instance_id()
 	if not _agent_can_stomp(agent, category):
 		clear_agent_contact(agent_id)
-		refresh_contact_dance(agent, category)
+		refresh_contact_dance(agent, category, cell)
 		return
 	var target: Dictionary = _resolve_stompable_target(cell)
 	if target.is_empty():
 		clear_agent_contact(agent_id)
-		refresh_contact_dance(agent, category)
+		refresh_contact_dance(agent, category, cell)
 		return
 	var existing: Dictionary = _active_contacts.get(agent_id, {}) as Dictionary
 	var is_same_contact: bool = _contact_matches(existing, target, cell)
@@ -56,16 +56,16 @@ func evaluate(agent: Node2D, category: StringName, cell: Vector2i, reasons: int)
 		if bool(existing.get("skip_first_process", false)):
 			updated["skip_first_process"] = true
 		_active_contacts[agent_id] = updated
-		refresh_contact_dance(agent, category)
+		refresh_contact_dance(agent, category, cell)
 		return
 	var should_start_fresh: bool = (reasons & RECHECK_CELL_ENTERED) != 0 or (reasons & RECHECK_WORLD_CHANGED) != 0
 	if not should_start_fresh:
 		clear_agent_contact(agent_id)
-		refresh_contact_dance(agent, category)
+		refresh_contact_dance(agent, category, cell)
 		return
 	clear_agent_contact(agent_id)
 	_start_contact(agent, category, cell, target)
-	refresh_contact_dance(agent, category)
+	refresh_contact_dance(agent, category, cell)
 
 
 func process_active_contacts(delta: float) -> void:
@@ -107,11 +107,10 @@ func clear() -> void:
 	_active_contacts.clear()
 
 
-func refresh_contact_dance(agent: Node2D, category: StringName) -> void:
+func refresh_contact_dance(agent: Node2D, category: StringName, cell: Vector2i) -> void:
 	if _manager == null or agent == null or not is_instance_valid(agent):
 		return
-	if _manager.has_method("request_agent_plant_contact_dance"):
-		_manager.call("request_agent_plant_contact_dance", agent, category)
+	_manager.update_agent_plant_contact(agent, category, cell)
 
 
 func reset_debug_counters() -> void:

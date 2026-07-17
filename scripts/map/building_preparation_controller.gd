@@ -16,7 +16,6 @@ const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
 
 var _host: Node = null
 var _work_gate: BuildingPreparationWorkGate = null
-var _scan_service: BuildingScanService = null
 var _invalidation_controller: BuildingInvalidationController = null
 var _navigation_sync_service: BuildingNavigationSyncService = null
 var _garden_topology_service: GardenTopologyService = null
@@ -35,7 +34,7 @@ var _night_ready: bool = false
 func setup(
 	host: Node,
 	work_gate: BuildingPreparationWorkGate,
-	scan_service: BuildingScanService,
+	_scan_service: BuildingScanService,
 	invalidation_controller: BuildingInvalidationController,
 	navigation_sync_service: BuildingNavigationSyncService,
 	garden_topology_service: GardenTopologyService,
@@ -47,7 +46,8 @@ func setup(
 ) -> void:
 	_host = host
 	_work_gate = work_gate
-	_scan_service = scan_service
+	# Kept in the setup signature for BuildingManager compatibility. Complete map scans
+	# belong to bootstrap; phase preparation consumes authoritative dirty state only.
 	_invalidation_controller = invalidation_controller
 	_navigation_sync_service = navigation_sync_service
 	_garden_topology_service = garden_topology_service
@@ -186,7 +186,6 @@ func run_client_preparation(token: int) -> bool:
 
 
 func _run_shared_preparation(token: int) -> bool:
-	_scan_service.scan_buildings()
 	_navigation_sync_service.sync_flow_extra_blocking_cells()
 	_navigation_sync_service.rebuild_waterpool_directional_field()
 	# A save is applied to the fresh scene before BuildingManager's deferred startup pass. When

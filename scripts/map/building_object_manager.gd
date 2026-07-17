@@ -208,6 +208,12 @@ func request_contact_dance(cell: Vector2i, duration: float) -> void:
 		runtime_node.call("request_contact_dance", duration)
 
 
+func set_contact_dance_active(cell: Vector2i, active: bool) -> void:
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node != null and runtime_node.has_method("set_contact_dance_active"):
+		runtime_node.call("set_contact_dance_active", active)
+
+
 func play_turret_shot_animation(cell: Vector2i) -> void:
 	var runtime_node: Node = _valid_runtime_node(cell)
 	if runtime_node == null:

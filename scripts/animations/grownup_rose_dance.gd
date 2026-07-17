@@ -41,6 +41,7 @@ class_name GrownupRoseDance
 
 const ROSE_GROWNUP_ATLAS: Vector2i = Vector2i(0, 1)
 const SOURCE_ID: int = 0
+const CONTACT_DANCE_DURATION: float = 0.16
 
 var _plant_manager: Node
 var _plantz: TileMapLayer
@@ -95,6 +96,22 @@ func _connect_contact_source() -> void:
 	var callback: Callable = Callable(self, "_on_plant_contact_dance_requested")
 	if not source.is_connected("plant_contact_dance_requested", callback):
 		source.connect("plant_contact_dance_requested", callback)
+	if source.has_signal("plant_contact_dance_state_changed"):
+		var state_callback: Callable = Callable(self, "_on_plant_contact_dance_state_changed")
+		if not source.is_connected("plant_contact_dance_state_changed", state_callback):
+			source.connect("plant_contact_dance_state_changed", state_callback)
+
+
+func _on_plant_contact_dance_state_changed(layer_name: StringName, cell: Vector2i, item_id: String, active: bool) -> void:
+	var key: String = _contact_key(layer_name, cell)
+	if not active:
+		_remove_contact_dancer(key)
+		return
+	_on_plant_contact_dance_requested(layer_name, cell, item_id, CONTACT_DANCE_DURATION)
+	if _contact_dancers.has(key):
+		var data: Dictionary = _contact_dancers[key] as Dictionary
+		data["contact_active"] = true
+		_contact_dancers[key] = data
 
 
 ## Pick up any roses already in bloom (e.g. a scene loaded mid-harvest).
@@ -152,6 +169,7 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 		"cell": cell,
 		"item_id": item_id,
 		"until": _time + maxf(0.0, duration),
+		"contact_active": false,
 		"source_id": source_id,
 		"atlas_coords": atlas_coords,
 		"alternative_tile": alternative_tile,
@@ -353,7 +371,7 @@ func _expire_contact_dancers() -> void:
 	for raw_key: Variant in _contact_dancers.keys():
 		var key: String = str(raw_key)
 		var data: Dictionary = _contact_dancers[key] as Dictionary
-		if _time >= float(data.get("until", 0.0)):
+		if not bool(data.get("contact_active", false)) and _time >= float(data.get("until", 0.0)):
 			expired.append(key)
 	for key: String in expired:
 		_remove_contact_dancer(key)

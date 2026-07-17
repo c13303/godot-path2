@@ -30,6 +30,7 @@ var _pop_tweens_by_cell: Dictionary = {}
 var _damage_flash_tweens_by_cell: Dictionary = {}
 var _damage_flash_original_modulates_by_cell: Dictionary = {}
 var _contact_until_by_cell: Dictionary = {}
+var _contact_active_by_cell: Dictionary = {}
 var _contact_phases_by_cell: Dictionary = {}
 var _time: float = 0.0
 
@@ -88,6 +89,21 @@ func _connect_contact_source() -> void:
 	var callback: Callable = Callable(self, "_on_plant_contact_dance_requested")
 	if not source.is_connected("plant_contact_dance_requested", callback):
 		source.connect("plant_contact_dance_requested", callback)
+	if source.has_signal("plant_contact_dance_state_changed"):
+		var state_callback: Callable = Callable(self, "_on_plant_contact_dance_state_changed")
+		if not source.is_connected("plant_contact_dance_state_changed", state_callback):
+			source.connect("plant_contact_dance_state_changed", state_callback)
+
+
+func _on_plant_contact_dance_state_changed(layer_name: StringName, cell: Vector2i, item_id: String, active: bool) -> void:
+	if layer_name != &"plantz" or item_id != "imperial_seed":
+		return
+	if active:
+		_contact_active_by_cell[cell] = true
+		_on_plant_contact_dance_requested(layer_name, cell, item_id, CONTACT_DANCE_DURATION)
+		return
+	_contact_active_by_cell.erase(cell)
+	_contact_until_by_cell[cell] = _time
 
 
 func _rebuild_from_manager() -> void:
@@ -231,6 +247,7 @@ func _remove_visual(cell: Vector2i) -> void:
 	_kill_pop_tween(cell)
 	_stages_by_cell.erase(cell)
 	_contact_until_by_cell.erase(cell)
+	_contact_active_by_cell.erase(cell)
 	_contact_phases_by_cell.erase(cell)
 	_clear_damage_flash(cell)
 	var sprite: Sprite2D = _sprites_by_cell.get(cell, null) as Sprite2D
@@ -253,7 +270,7 @@ func _process(delta: float) -> void:
 		if _pop_tweens_by_cell.has(cell):
 			continue
 		var base_position: Vector2 = _plantz.to_global(_plantz.map_to_local(cell))
-		if _time >= float(_contact_until_by_cell.get(cell, 0.0)):
+		if not _contact_active_by_cell.has(cell) and _time >= float(_contact_until_by_cell.get(cell, 0.0)):
 			sprite.scale = Vector2.ONE
 			sprite.rotation = 0.0
 			sprite.global_position = base_position
@@ -272,6 +289,7 @@ func _process(delta: float) -> void:
 	for cell: Vector2i in expired:
 		_contact_until_by_cell.erase(cell)
 		_contact_phases_by_cell.erase(cell)
+		_contact_active_by_cell.erase(cell)
 
 
 func _kill_pop_tween(cell: Vector2i) -> void:
