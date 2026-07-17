@@ -46,7 +46,12 @@ func on_cleared() -> void:
 	pass
 
 
-## Per-frame agent-pass hook (role-specific interaction proximity, errand/work timers).
+## The player interaction coordinator selected or deselected this resident.
+func on_interaction_selected(_resident: HouseResidentController, _selected: bool) -> void:
+	pass
+
+
+## Per-frame agent-pass hook (role-specific errand/work timers).
 func process(_resident: HouseResidentController, _delta: float) -> void:
 	pass
 

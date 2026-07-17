@@ -5,6 +5,8 @@ const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const IDLE_GROUP: int = 0
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const REPATH_START_SEARCH_RADIUS: int = 4
+# Must match steering_system.cpp's path waypoint radius.
+const PATH_ARRIVAL_TILE_FACTOR: float = 0.5
 
 var _manager: BuildingManager
 var _diagnostic_label: String = "day visitor"
@@ -21,11 +23,14 @@ var _waiting: bool = false
 var _leaving: bool = false
 var _leave_at_night_pending: bool = false
 var _autonomous_paused: bool = false
+var _steering_system: Node = null
 
 
 func setup(manager: BuildingManager, diagnostic_label: String) -> void:
 	_manager = manager
 	_diagnostic_label = diagnostic_label
+	var scene: Node = manager.get_tree().current_scene if manager != null else null
+	_steering_system = scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null
 
 
 func spawn(
@@ -122,6 +127,24 @@ func get_agent_world_position() -> Vector2:
 	if is_instance_valid(_agent):
 		return _agent.global_position
 	return Vector2.ZERO
+
+
+## Canonical position corresponding to native steering's agent position. Current visitor profiles
+## use no foot offset, so the synchronized Node2D origin and navigation foot are identical.
+func navigation_position() -> Vector2:
+	return get_agent_world_position()
+
+
+func arrival_radius_world() -> float:
+	var tile_size: Vector2 = _manager.tile_size() if _manager != null else Vector2.ZERO
+	return maxf(tile_size.x, tile_size.y) * PATH_ARRIVAL_TILE_FACTOR
+
+
+func debug_motion_snapshot() -> Dictionary:
+	if not CppDebugOptions.logs_enabled or _nav_id < 0 or _steering_system == null \
+			or not _steering_system.has_method("get_agent_debug_snapshot"):
+		return {}
+	return _steering_system.call("get_agent_debug_snapshot", _nav_id) as Dictionary
 
 
 func nav_id() -> int:

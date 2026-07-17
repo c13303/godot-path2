@@ -742,10 +742,9 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		if building_object_manager == null:
 			push_warning("LevelLoader: no BuildingObjectManager; authored reservoir at %s ignored." % str(cell))
 			continue
-		# The stamped tile alone would already register the reservoir (BuildingObjectManager
-		# indexes blocking_buildings on _ready), but registering it explicitly keeps this
-		# loader independent of that startup order. add_building replaces any existing entry
-		# for the cell, so the two paths cannot double-register it.
+		# The stamped tile may already be indexed by BuildingObjectManager. Its idempotent
+		# registration keeps this startup-order-independent without emitting remove/add for the
+		# identical authored reservoir.
 		var item_def: Dictionary = ItemCatalog.get_item_def("reservoir").duplicate(true)
 		building_object_manager.call_deferred("add_building", cell, item_def)
 

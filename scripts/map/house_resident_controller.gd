@@ -31,7 +31,9 @@ const HOUSE_RESIDENTS_GROUP: StringName = &"house_residents"
 const IDLE_HOME_CHECK_INTERVAL_SECONDS: float = 0.5
 const IDLE_HOME_DISPLACEMENT_GRACE_SECONDS: float = 1.0
 const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
-const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.45
+# Native steering accepts a path waypoint at 0.50 tile. Correction starts farther out so local
+# avoidance and the path endpoint's authored dispersion cannot oscillate around arrival.
+const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.75
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null
@@ -48,6 +50,9 @@ var _idle_displacement_seconds: float = 0.0
 var _idle_return_retry_cooldown: float = 0.0
 var _idle_return_pending: bool = false
 var _interaction_held: bool = false
+var _debug_idle_home_probes: int = 0
+var _debug_idle_home_requests: int = 0
+var _debug_idle_home_repaths: int = 0
 
 
 func setup(manager: BuildingManager, house_manager: HouseManager, config: HouseResidentConfig) -> void:
@@ -59,6 +64,8 @@ func setup(manager: BuildingManager, house_manager: HouseManager, config: HouseR
 		_config.role.setup(manager)
 	if CppDebugOptions.logs_enabled and not _config.is_valid():
 		push_warning("HouseResidentController: incomplete config for resident_type '%s'." % String(_config.resident_type))
+	# Spread the three ordinary resident probes across the shared 0.5 second interval.
+	_idle_home_check_elapsed = float(abs(hash(String(config.resident_type))) % 1000) / 1000.0 * IDLE_HOME_CHECK_INTERVAL_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +90,6 @@ func process(_delta: float) -> void:
 	if _config.role != null:
 		_config.role.process(self, _delta)
 	_process_arrival()
-	_process_interaction_hold()
 	_process_idle_home_correction(_delta)
 
 
@@ -306,20 +312,6 @@ func is_parked() -> bool:
 
 
 ## Generic Chebyshev-distance proximity test in tile space between the player and this resident.
-func is_player_near(radius_tiles: int) -> bool:
-	var agent: Node2D = _visitor.agent_node()
-	if agent == null:
-		return false
-	var player: Node2D = _manager.get_tree().get_first_node_in_group("player") as Node2D
-	var floorz: TileMapLayer = _manager.get_floorz()
-	if player == null or floorz == null:
-		return false
-	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
-	var resident_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var delta: Vector2i = player_cell - resident_cell
-	return abs(delta.x) <= radius_tiles and abs(delta.y) <= radius_tiles
-
-
 # ---------------------------------------------------------------------------
 # Internals.
 # ---------------------------------------------------------------------------
@@ -354,11 +346,16 @@ func _process_idle_home_correction(delta: float) -> void:
 		return
 	var elapsed: float = _idle_home_check_elapsed
 	_idle_home_check_elapsed = 0.0
+	if CppDebugOptions.logs_enabled:
+		_debug_idle_home_probes += 1
 	if _idle_return_retry_cooldown > 0.0:
 		_idle_return_retry_cooldown = maxf(0.0, _idle_return_retry_cooldown - elapsed)
 		return
 	if _idle_return_pending:
-		_request_idle_home_return()
+		if _is_idle_resident_meaningfully_displaced():
+			_request_idle_home_return()
+		else:
+			_clear_idle_return_state()
 		return
 	if not _is_idle_resident_meaningfully_displaced():
 		_idle_displacement_seconds = 0.0
@@ -386,14 +383,31 @@ func _eligible_for_idle_home_correction() -> bool:
 func _is_idle_resident_meaningfully_displaced() -> bool:
 	if _visitor.target_cell() == INVALID_CELL:
 		return false
+	var arrival_radius: float = _visitor.arrival_radius_world()
 	var tile_size: Vector2 = _manager.tile_size()
-	var threshold: float = maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR
-	return _visitor.get_agent_world_position().distance_to(_visitor.target_world_position()) > threshold
+	var displacement_radius: float = maxf(arrival_radius, maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR)
+	return _visitor.navigation_position().distance_to(_visitor.target_world_position()) > displacement_radius
 
 
 func _request_idle_home_return() -> void:
 	_idle_displacement_seconds = 0.0
+	if not _eligible_for_idle_home_correction() or not _is_idle_resident_meaningfully_displaced():
+		_clear_idle_return_state()
+		return
+	var distance_from_home: float = _visitor.navigation_position().distance_to(_visitor.target_world_position())
+	if CppDebugOptions.logs_enabled:
+		_debug_idle_home_requests += 1
+		var snapshot: Dictionary = _visitor.debug_motion_snapshot()
+		CppDebugOptions.dlog("[IDLE_HOME] resident=%s event=request frame=%d probes=%d requests=%d repaths=%d distance=%.2f path_active=%s pushed=%s paused=%s" % [
+			String(_config.resident_type), Engine.get_process_frames(), _debug_idle_home_probes,
+			_debug_idle_home_requests, _debug_idle_home_repaths, distance_from_home,
+			str(bool(snapshot.get("path_active", false))),
+			str(str(snapshot.get("diagnostic", "")) == "propelled"), str(_visitor.is_autonomous_paused())])
 	if _visitor.repath_to_target(_idle_cell):
+		if CppDebugOptions.logs_enabled:
+			_debug_idle_home_repaths += 1
+			CppDebugOptions.dlog("[IDLE_HOME] resident=%s event=repath frame=%d repaths=%d distance=%.2f" % [
+				String(_config.resident_type), Engine.get_process_frames(), _debug_idle_home_repaths, distance_from_home])
 		_clear_idle_return_state()
 		return
 	_idle_return_pending = true
@@ -406,17 +420,18 @@ func _clear_idle_return_state() -> void:
 	_idle_return_pending = false
 
 
-func _process_interaction_hold() -> void:
-	if _config.interaction_hold_radius_tiles <= 0:
-		_set_interaction_hold(false)
-		return
-	if not _visitor.is_active() or GameState.is_night or _visitor.is_leaving() or _evacuating or _returning_home:
-		_set_interaction_hold(false)
-		return
-	if not _interaction_held and not has_reached_idle_spot():
-		_set_interaction_hold(false)
-		return
-	_set_interaction_hold(is_player_near(_config.interaction_hold_radius_tiles))
+func set_interaction_selected(value: bool) -> void:
+	var allowed: bool = value \
+		and _config.interaction_hold_radius_tiles > 0 \
+		and _visitor.is_active() \
+		and not GameState.is_night \
+		and not _visitor.is_leaving() \
+		and not _evacuating \
+		and not _returning_home \
+		and has_reached_idle_spot()
+	_set_interaction_hold(allowed)
+	if _config.role != null:
+		_config.role.on_interaction_selected(self, allowed)
 
 
 func _set_interaction_hold(value: bool) -> void:
@@ -449,3 +464,6 @@ func _reset_state() -> void:
 	_evacuating = false
 	_idle_home_check_elapsed = 0.0
 	_clear_idle_return_state()
+	_debug_idle_home_probes = 0
+	_debug_idle_home_requests = 0
+	_debug_idle_home_repaths = 0

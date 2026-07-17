@@ -189,6 +189,14 @@ func _run_shared_preparation(token: int) -> bool:
 	_scan_service.scan_buildings()
 	_navigation_sync_service.sync_flow_extra_blocking_cells()
 	_navigation_sync_service.rebuild_waterpool_directional_field()
+	# A save is applied to the fresh scene before BuildingManager's deferred startup pass. When
+	# startup has already built that exact restored snapshot, phase restoration only needs its
+	# phase-specific routes below; rebuilding the same complete plant layout is redundant.
+	if not _invalidation_controller.navigation_topology_dirty() \
+			and not _invalidation_controller.plant_layout_dirty() \
+			and _garden_topology_service.plant_zone_built():
+		CppDebugOptions.dlog("[PLANT_LAYOUT] request=restore_preparation merged=true reason=clean_startup_snapshot")
+		return true
 	_invalidation_controller.clear_navigation_topology_dirty()
 	_invalidation_controller.clear_plant_layout_dirty()
 	await _host.get_tree().process_frame

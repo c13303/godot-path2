@@ -1356,33 +1356,11 @@ script = ExtResource("11_62xsw")
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
 
-[node name="MerchantPrompt" type="Control" parent="GameUI" unique_id=700000030]
+[node name="InteractionPrompt" type="Control" parent="GameUI" unique_id=700000030]
 layout_mode = 3
 anchors_preset = 0
 mouse_filter = 2
 script = ExtResource("46_interaction_prompt")
-target_controller = NodePath("../MerchantDialogController")
-
-[node name="FundamentalBuilderPrompt" type="Control" parent="GameUI" unique_id=700000031]
-layout_mode = 3
-anchors_preset = 0
-mouse_filter = 2
-script = ExtResource("46_interaction_prompt")
-target_controller = NodePath("../FundamentalBuilderDialogController")
-
-[node name="InventorPrompt" type="Control" parent="GameUI" unique_id=700000032]
-layout_mode = 3
-anchors_preset = 0
-mouse_filter = 2
-script = ExtResource("46_interaction_prompt")
-target_controller = NodePath("../InventorDialogController")
-
-[node name="SheepPrompt" type="Control" parent="GameUI" unique_id=700000033]
-layout_mode = 3
-anchors_preset = 0
-mouse_filter = 2
-script = ExtResource("46_interaction_prompt")
-target_controller = NodePath("../SheepDialogController")
 
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3

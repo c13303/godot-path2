@@ -27,7 +27,7 @@ const LOCAL_WORK_MOVE_MAX_DISTANCE: int = 10
 const IDLE_HOME_CHECK_INTERVAL_SECONDS: float = 0.5
 const IDLE_HOME_DISPLACEMENT_GRACE_SECONDS: float = 1.0
 const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
-const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.45
+const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.75
 
 var _manager: BuildingManager
 var _hammer_visual: BuilderHammerVisualController = BuilderHammerVisualController.new()
@@ -45,11 +45,14 @@ var _next_builder_runtime_id: int = 1
 var _last_watch_position_by_builder_id: Dictionary = {}  # int -> Vector2
 var _stall_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _stall_warning_cooldown_by_builder_id: Dictionary = {}  # int -> float
-var _idle_home_check_elapsed: float = 0.0
+var _idle_home_probe_elapsed_by_builder_id: Dictionary = {}  # int -> float
 var _idle_displacement_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _idle_return_retry_cooldown_by_builder_id: Dictionary = {}  # int -> float
 var _pending_idle_return_by_builder_id: Dictionary = {}  # int -> true
 var _fundamental_builder_paused: bool = false
+var _debug_idle_home_probes_by_builder_id: Dictionary = {}
+var _debug_idle_home_requests_by_builder_id: Dictionary = {}
+var _debug_idle_home_repaths_by_builder_id: Dictionary = {}
 
 
 func setup(manager: BuildingManager) -> void:
@@ -269,14 +272,6 @@ func fundamental_builder_idle_at_spot() -> bool:
 	return visitor != null and visitor.is_waiting()
 
 
-func process_fundamental_builder_proximity(dialog_pending: bool, interact_radius_tiles: int) -> void:
-	if not dialog_pending or GameState.is_night or not fundamental_builder_active():
-		set_fundamental_builder_paused(false)
-		return
-	var near: bool = is_player_near_fundamental_builder(interact_radius_tiles)
-	set_fundamental_builder_paused(near)
-
-
 func set_fundamental_builder_paused(value: bool) -> void:
 	if _fundamental_builder_paused == value:
 		return
@@ -286,6 +281,10 @@ func set_fundamental_builder_paused(value: bool) -> void:
 		visitor.set_autonomous_paused(value)
 
 
+func is_fundamental_builder_interaction_selected() -> bool:
+	return _fundamental_builder_paused
+
+
 func fundamental_builder_world_position() -> Vector2:
 	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
 	return visitor.get_agent_world_position() if visitor != null else Vector2.ZERO
@@ -293,20 +292,6 @@ func fundamental_builder_world_position() -> Vector2:
 
 func fundamental_builder_node() -> Node2D:
 	return _builder_agent_node(_fundamental_builder_id) if _fundamental_builder_id >= 0 else null
-
-
-func is_player_near_fundamental_builder(interact_radius_tiles: int) -> bool:
-	var agent: Node2D = fundamental_builder_node()
-	if agent == null:
-		return false
-	var player: Node2D = _manager.get_tree().get_first_node_in_group("player") as Node2D
-	var floorz: TileMapLayer = _manager.get_floorz()
-	if player == null or floorz == null:
-		return false
-	var player_cell: Vector2i = floorz.local_to_map(floorz.to_local(player.global_position))
-	var builder_cell: Vector2i = floorz.local_to_map(floorz.to_local(agent.global_position))
-	var delta: Vector2i = player_cell - builder_cell
-	return abs(delta.x) <= interact_radius_tiles and abs(delta.y) <= interact_radius_tiles
 
 
 func retire_fundamental_builder() -> void:
@@ -403,7 +388,10 @@ func clear_active_builders(free_agents: bool) -> void:
 	_idle_displacement_seconds_by_builder_id.clear()
 	_idle_return_retry_cooldown_by_builder_id.clear()
 	_pending_idle_return_by_builder_id.clear()
-	_idle_home_check_elapsed = 0.0
+	_debug_idle_home_probes_by_builder_id.clear()
+	_debug_idle_home_requests_by_builder_id.clear()
+	_debug_idle_home_repaths_by_builder_id.clear()
+	_idle_home_probe_elapsed_by_builder_id.clear()
 	_fundamental_builder_id = -1
 	_fundamental_builder_paused = false
 	_hammer_visual.clear_all()
@@ -749,31 +737,37 @@ func _claim_still_valid(visitor: DayVisitorMovementController, cell: Vector2i) -
 func _process_idle_home_correction(delta: float) -> void:
 	if delta <= 0.0 or GameState.is_night:
 		return
-	_idle_home_check_elapsed += delta
-	if _idle_home_check_elapsed < IDLE_HOME_CHECK_INTERVAL_SECONDS:
-		return
-	var elapsed: float = _idle_home_check_elapsed
-	_idle_home_check_elapsed = 0.0
-	for raw_builder_id: Variant in _idle_return_retry_cooldown_by_builder_id.keys():
-		var cooldown_builder_id: int = int(raw_builder_id)
-		var cooldown: float = maxf(0.0, float(_idle_return_retry_cooldown_by_builder_id.get(cooldown_builder_id, 0.0)) - elapsed)
-		if cooldown <= 0.0:
-			_idle_return_retry_cooldown_by_builder_id.erase(cooldown_builder_id)
-		else:
-			_idle_return_retry_cooldown_by_builder_id[cooldown_builder_id] = cooldown
 	for visitor: DayVisitorMovementController in _visitors:
 		var builder_id: int = _builder_id_for_visitor(visitor)
-		if builder_id < 0 or _builder_home_cell(builder_id) == INVALID_CELL:
-			if builder_id >= 0:
-				_clear_idle_return_state(builder_id)
+		if builder_id < 0:
+			continue
+		var initial_offset: float = float(builder_id % 10) / 10.0 * IDLE_HOME_CHECK_INTERVAL_SECONDS
+		var elapsed: float = float(_idle_home_probe_elapsed_by_builder_id.get(builder_id, initial_offset)) + delta
+		if elapsed < IDLE_HOME_CHECK_INTERVAL_SECONDS:
+			_idle_home_probe_elapsed_by_builder_id[builder_id] = elapsed
+			continue
+		_idle_home_probe_elapsed_by_builder_id[builder_id] = fmod(elapsed, IDLE_HOME_CHECK_INTERVAL_SECONDS)
+		if _idle_return_retry_cooldown_by_builder_id.has(builder_id):
+			var cooldown: float = maxf(0.0, float(_idle_return_retry_cooldown_by_builder_id.get(builder_id, 0.0)) - elapsed)
+			if cooldown <= 0.0:
+				_idle_return_retry_cooldown_by_builder_id.erase(builder_id)
+			else:
+				_idle_return_retry_cooldown_by_builder_id[builder_id] = cooldown
+		if _builder_home_cell(builder_id) == INVALID_CELL:
+			_clear_idle_return_state(builder_id)
 			continue
 		if not _eligible_for_idle_home_correction(builder_id, visitor):
 			_idle_displacement_seconds_by_builder_id.erase(builder_id)
 			continue
+		if CppDebugOptions.logs_enabled:
+			_debug_idle_home_probes_by_builder_id[builder_id] = int(_debug_idle_home_probes_by_builder_id.get(builder_id, 0)) + 1
 		if _idle_return_retry_cooldown_by_builder_id.has(builder_id):
 			continue
 		if _pending_idle_return_by_builder_id.has(builder_id):
-			_request_idle_home_return(builder_id)
+			if _is_idle_builder_meaningfully_displaced(visitor):
+				_request_idle_home_return(builder_id)
+			else:
+				_clear_idle_return_state(builder_id)
 			continue
 		if not _is_idle_builder_meaningfully_displaced(visitor):
 			_idle_displacement_seconds_by_builder_id.erase(builder_id)
@@ -800,13 +794,31 @@ func _is_idle_builder_meaningfully_displaced(visitor: DayVisitorMovementControll
 	if visitor.target_cell() == INVALID_CELL:
 		return false
 	var tile_size: Vector2 = _manager.tile_size()
-	var threshold: float = maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR
-	return visitor.get_agent_world_position().distance_to(visitor.target_world_position()) > threshold
+	var threshold: float = maxf(visitor.arrival_radius_world(), maxf(tile_size.x, tile_size.y) * IDLE_HOME_DISPLACEMENT_TILE_FACTOR)
+	return visitor.navigation_position().distance_to(visitor.target_world_position()) > threshold
 
 
 func _request_idle_home_return(builder_id: int) -> void:
 	_idle_displacement_seconds_by_builder_id.erase(builder_id)
+	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
+	if visitor == null or not _eligible_for_idle_home_correction(builder_id, visitor) \
+			or not _is_idle_builder_meaningfully_displaced(visitor):
+		_clear_idle_return_state(builder_id)
+		return
+	if CppDebugOptions.logs_enabled:
+		_debug_idle_home_requests_by_builder_id[builder_id] = int(_debug_idle_home_requests_by_builder_id.get(builder_id, 0)) + 1
+		var snapshot: Dictionary = visitor.debug_motion_snapshot()
+		CppDebugOptions.dlog("[IDLE_HOME] resident=builder:%d event=request frame=%d probes=%d requests=%d repaths=%d distance=%.2f path_active=%s pushed=%s paused=%s" % [
+			builder_id, Engine.get_process_frames(), int(_debug_idle_home_probes_by_builder_id.get(builder_id, 0)),
+			int(_debug_idle_home_requests_by_builder_id.get(builder_id, 0)), int(_debug_idle_home_repaths_by_builder_id.get(builder_id, 0)),
+			visitor.navigation_position().distance_to(visitor.target_world_position()),
+			str(bool(snapshot.get("path_active", false))), str(str(snapshot.get("diagnostic", "")) == "propelled"),
+			str(visitor.is_autonomous_paused())])
 	if return_builder_to_idle_area(builder_id):
+		if CppDebugOptions.logs_enabled:
+			_debug_idle_home_repaths_by_builder_id[builder_id] = int(_debug_idle_home_repaths_by_builder_id.get(builder_id, 0)) + 1
+			CppDebugOptions.dlog("[IDLE_HOME] resident=builder:%d event=repath frame=%d repaths=%d" % [
+				builder_id, Engine.get_process_frames(), int(_debug_idle_home_repaths_by_builder_id.get(builder_id, 0))])
 		_clear_idle_return_state(builder_id)
 		return
 	_mark_idle_return_pending(builder_id)
@@ -940,6 +952,10 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		if _fundamental_builder_id == builder_id:
 			_fundamental_builder_id = -1
 		_clear_idle_return_state(builder_id)
+		_idle_home_probe_elapsed_by_builder_id.erase(builder_id)
+		_debug_idle_home_probes_by_builder_id.erase(builder_id)
+		_debug_idle_home_requests_by_builder_id.erase(builder_id)
+		_debug_idle_home_repaths_by_builder_id.erase(builder_id)
 		_clear_builder_motion_watch(builder_id)
 		_hammer_visual.forget_builder(builder_id)
 		if _manager != null:

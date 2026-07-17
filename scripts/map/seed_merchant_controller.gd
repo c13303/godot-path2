@@ -30,7 +30,7 @@ func set_resident(resident: HouseResidentController) -> void:
 # ---------------------------------------------------------------------------
 
 func on_spawned(_resident_agent: HouseResidentController) -> void:
-	GameState.set_seed_merchant_phase(true)
+	GameState.set_seed_merchant_phase(false)
 
 
 func on_night_started(_resident_agent: HouseResidentController) -> void:
@@ -45,29 +45,13 @@ func on_cleared() -> void:
 	GameState.set_seed_merchant_phase(false)
 
 
-func process(resident: HouseResidentController, _delta: float) -> void:
-	# Once the merchant is leaving it must never re-enter the interaction hold: night has already
-	# started, and walking back into the departing merchant should not reopen the phase.
-	if not resident.is_active() or resident.is_leaving():
-		return
-	var near: bool = resident.is_player_near(INTERACT_RADIUS_TILES)
-	if near and not GameState.is_night and not GameState.is_seed_merchant_phase:
-		GameState.set_seed_merchant_phase(true)
-	# The player can still open the shop with interact during the walk-in; movement hold is owned
-	# by HouseResidentController and starts only after the resident has parked.
+func on_interaction_selected(_resident_agent: HouseResidentController, selected: bool) -> void:
+	GameState.set_seed_merchant_phase(selected and not GameState.is_night)
 
 
 func process_phase(resident: HouseResidentController) -> void:
 	if not resident.is_active():
 		return
-	# The seed-merchant shop phase mirrors player proximity: process() opens it when the player
-	# steps up to the merchant, so it must close again the moment they walk away — whether or not a
-	# purchase was made. Otherwise the phase is only ever cleared on nightfall, so once the merchant
-	# has settled it latches on for the whole afternoon and permanently withholds the "hold to start
-	# night" prompt, leaving the player unable to end the day. Runs before the night recheck below so
-	# it still clears on afternoons where that branch returns early.
-	if GameState.is_seed_merchant_phase and not resident.is_player_near(INTERACT_RADIUS_TILES):
-		GameState.set_seed_merchant_phase(false)
 	# The client sale can finish before the player has watered every rose. When that happens the
 	# client sale does NOT start the night and the merchant lingers. Re-check here so finishing
 	# the watering afterwards still ends the day.
@@ -82,15 +66,14 @@ func process_phase(resident: HouseResidentController) -> void:
 
 ## Turns on the shop phase at the start of a day when the merchant is already present.
 func begin_phase() -> void:
-	if _resident != null and _resident.is_active() and not GameState.is_night:
-		GameState.set_seed_merchant_phase(true)
+	GameState.set_seed_merchant_phase(false)
 
 
 ## True whenever the player is within interaction range of the merchant, no matter what the
 ## merchant is doing (walking in, parked at the spot, or walking back out). Drives the interaction
 ## prompt, the shop, and the walk-in shop-open path.
 func is_player_near() -> bool:
-	return _resident != null and _resident.is_player_near(INTERACT_RADIUS_TILES)
+	return _resident != null and _resident.is_interaction_held()
 
 
 func is_paused_agent(agent: Node2D) -> bool:

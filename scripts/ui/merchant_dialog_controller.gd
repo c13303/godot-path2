@@ -81,6 +81,15 @@ func get_interaction_world_position() -> Vector2:
 	return Vector2.ZERO
 
 
+func get_interaction_radius_tiles() -> int:
+	return SeedMerchantController.INTERACT_RADIUS_TILES
+
+
+func set_interaction_selected(value: bool) -> void:
+	if building_manager != null and building_manager.has_method("set_house_resident_interaction_selected"):
+		building_manager.call("set_house_resident_interaction_selected", &"seed_merchant", value)
+
+
 func request_interaction() -> bool:
 	return request_shop_toggle()
 
@@ -109,13 +118,13 @@ func _open_shop() -> void:
 
 
 func _is_merchant_active() -> bool:
-	if GameState.is_night or not GameState.is_seed_merchant_phase:
+	if GameState.is_night:
 		return false
-	if building_manager == null or not building_manager.has_method("is_player_near_seed_merchant"):
+	if building_manager == null:
 		return false
 	if building_manager.has_method("has_seed_merchant_reached_spot") and not bool(building_manager.call("has_seed_merchant_reached_spot")):
 		return false
-	return bool(building_manager.call("is_player_near_seed_merchant"))
+	return true
 
 
 # --- Choice building ---------------------------------------------------------

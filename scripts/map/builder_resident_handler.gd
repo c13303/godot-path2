@@ -39,10 +39,6 @@ func reconcile_houses() -> void:
 func process(delta: float) -> void:
 	if _builder == null:
 		return
-	_builder.process_fundamental_builder_proximity(
-		_manager.is_fundamental_builder_dialog_pending(),
-		SeedMerchantController.INTERACT_RADIUS_TILES
-	)
 	_builder.process_arrivals()
 	_builder.process_active_visitors(delta)
 

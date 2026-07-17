@@ -47,6 +47,15 @@ func get_interaction_world_position() -> Vector2:
 	return Vector2.ZERO
 
 
+func get_interaction_radius_tiles() -> int:
+	return INTERACT_RADIUS_TILES
+
+
+func set_interaction_selected(value: bool) -> void:
+	if building_manager != null and building_manager.has_method("set_house_resident_interaction_selected"):
+		building_manager.call("set_house_resident_interaction_selected", RESIDENT_TYPE, value)
+
+
 func request_interaction() -> bool:
 	return _request_dialog_toggle()
 
@@ -97,11 +106,11 @@ func _open_dialog() -> void:
 func _is_sheep_active() -> bool:
 	if GameState.is_night:
 		return false
-	if building_manager == null or not building_manager.has_method("is_player_near_house_resident"):
+	if building_manager == null:
 		return false
 	if building_manager.has_method("has_house_resident_reached_spot") and not bool(building_manager.call("has_house_resident_reached_spot", RESIDENT_TYPE)):
 		return false
-	return bool(building_manager.call("is_player_near_house_resident", RESIDENT_TYPE, INTERACT_RADIUS_TILES))
+	return true
 
 
 # --- Icons -------------------------------------------------------------------

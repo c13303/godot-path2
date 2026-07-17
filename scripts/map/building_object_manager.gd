@@ -3,6 +3,8 @@ class_name BuildingObjectManager
 
 signal building_added(cell: Vector2i, item_id: String)
 signal building_removed(cell: Vector2i, item_id: String)
+signal restore_batch_started
+signal restore_batch_finished
 
 @export var traversable_buildings: TileMapLayer
 @export var blocking_buildings: TileMapLayer
@@ -101,6 +103,9 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 	if runtime_id == "":
 		runtime_id = item_id
 	if _buildings_by_cell.has(cell):
+		if _registration_matches(cell, item_id, placeable_category, runtime_id, target_layer, item_def, light_source):
+			_log("Ignored no-op building registration item=%s cell=%s" % [item_id, str(cell)])
+			return
 		remove_building(cell)
 	var building_data: Dictionary = {
 		"cell": cell,
@@ -130,6 +135,31 @@ func add_building(cell: Vector2i, item_def: Dictionary) -> void:
 		_register_light_runtime(cell, runtime_id, light_source)
 	_register_blocking_obstacle(cell, item_def)
 	building_added.emit(cell, item_id)
+
+
+func _registration_matches(
+	cell: Vector2i,
+	item_id: String,
+	category: String,
+	runtime_id: String,
+	target_layer: String,
+	item_def: Dictionary,
+	light_source: float
+) -> bool:
+	var existing: Dictionary = _buildings_by_cell.get(cell, {}) as Dictionary
+	if existing.is_empty():
+		return false
+	if str(existing.get("item_id", "")) != item_id \
+			or str(existing.get("category", "")) != category \
+			or str(existing.get("runtime_id", "")) != runtime_id \
+			or str(existing.get("target_layer", "")) != target_layer:
+		return false
+	var existing_direction: Vector2i = existing.get("direction", Vector2i.RIGHT) as Vector2i
+	var requested_direction: Vector2i = item_def.get("direction", existing_direction) as Vector2i
+	if existing.has("direction") and existing_direction != requested_direction:
+		return false
+	var existing_light: float = float(existing.get("light_source", 0.0))
+	return is_equal_approx(existing_light, light_source)
 
 func remove_building(cell: Vector2i, erase_tile: bool = false) -> void:
 	if not _buildings_by_cell.has(cell):
@@ -242,6 +272,7 @@ func serialize_runtime_placeables() -> Array[Dictionary]:
 
 
 func restore_runtime_placeables(saved_records: Array) -> void:
+	restore_batch_started.emit()
 	_configure_world_depth_layers()
 	_buildings_by_cell.clear()
 	_clear_runtime_nodes()
@@ -273,6 +304,7 @@ func restore_runtime_placeables(saved_records: Array) -> void:
 			_restore_runtime_node_state(cell, raw_state as Dictionary)
 	if ignored > 0:
 		push_warning("BuildingObjectManager: ignored %d invalid runtime placeable records on load." % ignored)
+	restore_batch_finished.emit()
 
 
 func count_buildings_by_item_id(item_id: String) -> int:

@@ -79,10 +79,14 @@ func _ready() -> void:
 	# controller's fresh default so a cursor hidden by the previous scene does not
 	# remain hidden when the reloaded scene starts in keyboard/mouse mode.
 	_apply_control_mode_mouse_visibility()
-	_interaction_router.setup(get_tree())
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
 		global_config_node = scene.get_node_or_null("CPP/GlobalConfigNative")
+	var floor_layer: TileMapLayer = scene.get_node_or_null("Map/MonTilemap/floor") as TileMapLayer if scene != null else null
+	if floor_layer == null and scene != null:
+		floor_layer = scene.get_node_or_null("Map/MonTilemap/floorz") as TileMapLayer
+	_interaction_router.setup(get_tree(), get_parent() as Node2D, floor_layer)
+	call_deferred("_finish_interaction_setup")
 
 	call_deferred("_setup_player")
 
@@ -192,6 +196,7 @@ func _input(event: InputEvent) -> void:
 			camera_controller.handle_mouse_wheel(-zoom_speed)
 
 func _process(delta: float) -> void:
+	_interaction_router.process(delta)
 	if _startup_loading_active():
 		return
 	if _cutscene_input_locked:
@@ -224,6 +229,15 @@ func _apply_control_mode_mouse_visibility() -> void:
 
 func get_control_mode() -> String:
 	return _control_mode
+
+
+func _finish_interaction_setup() -> void:
+	_interaction_router.register_scene_targets()
+	var prompt: Node = game_ui.get_node_or_null("InteractionPrompt") if game_ui != null else null
+	if prompt == null or not prompt.has_method("set_target"):
+		return
+	_interaction_router.selected_target_changed.connect(Callable(prompt, "set_target"))
+	prompt.call("set_target", _interaction_router.selected_target())
 
 func is_gamepad_control_mode() -> bool:
 	return _control_mode == INPUT_MODE_PAD
@@ -810,7 +824,7 @@ func _active_quickbar_menu_kind() -> String:
 func _try_toggle_interaction() -> bool:
 	if _paused or _is_inventory_open():
 		return false
-	return _interaction_router.try_toggle_nearest()
+	return _interaction_router.try_toggle_selected()
 
 
 func _deactivate_quickbar() -> void:

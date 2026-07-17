@@ -52,6 +52,15 @@ func get_interaction_world_position() -> Vector2:
 	return Vector2.ZERO
 
 
+func get_interaction_radius_tiles() -> int:
+	return SeedMerchantController.INTERACT_RADIUS_TILES
+
+
+func set_interaction_selected(value: bool) -> void:
+	if building_manager != null and building_manager.has_method("set_fundamental_builder_interaction_selected"):
+		building_manager.call("set_fundamental_builder_interaction_selected", value)
+
+
 func request_interaction() -> bool:
 	return request_dialog_toggle()
 
@@ -93,8 +102,6 @@ func _is_builder_interactable() -> bool:
 	if building_manager.has_method("is_fundamental_builder_active") and not bool(building_manager.call("is_fundamental_builder_active")):
 		return false
 	if building_manager.has_method("is_fundamental_builder_working") and bool(building_manager.call("is_fundamental_builder_working")):
-		return false
-	if building_manager.has_method("is_player_near_fundamental_builder") and not bool(building_manager.call("is_player_near_fundamental_builder")):
 		return false
 	return true
 

@@ -9,11 +9,9 @@ const ICON_SIZE: Vector2 = Vector2(40.0, 40.0)
 const ABOVE_HEAD_OFFSET: Vector2 = Vector2(0.0, -60.0)
 const SHADOW_OFFSET: Vector2 = Vector2(2.0, 3.0)
 
-@export var target_controller: NodePath
-
 var _player_controller: Node
 var _dialog_ui: Node
-var _target: Node
+var _target: Node = null
 var _icon: TextureRect
 var _shadow: TextureRect
 var _frame_kmouse: AtlasTexture
@@ -34,11 +32,21 @@ func _ready() -> void:
 	_icon = _make_glyph()
 	add_child(_icon)
 	visible = false
-	set_process(true)
+	set_process(false)
+
+
+func set_target(target: Node) -> void:
+	_target = target
+	var has_target: bool = _target != null and is_instance_valid(_target)
+	visible = false
+	set_process(has_target)
 
 
 func _process(_delta: float) -> void:
-	if not _should_show():
+	if _target == null or not is_instance_valid(_target):
+		set_target(null)
+		return
+	if _interaction_is_open() or _another_dialog_is_open():
 		if visible:
 			visible = false
 		return
@@ -48,18 +56,13 @@ func _process(_delta: float) -> void:
 		visible = true
 
 
-func _should_show() -> bool:
-	var target: Node = _resolve_target()
-	if target == null:
-		return false
-	if not target.has_method("can_interact") or not bool(target.call("can_interact")):
-		return false
-	if target.has_method("is_interaction_open") and bool(target.call("is_interaction_open")):
-		return false
+func _interaction_is_open() -> bool:
+	return _target.has_method("is_interaction_open") and bool(_target.call("is_interaction_open"))
+
+
+func _another_dialog_is_open() -> bool:
 	var dialog_ui: Node = _resolve_dialog_ui()
-	if dialog_ui != null and dialog_ui.has_method("is_open") and bool(dialog_ui.call("is_open")):
-		return false
-	return true
+	return dialog_ui != null and dialog_ui.has_method("is_open") and bool(dialog_ui.call("is_open"))
 
 
 func _desired_frame() -> int:
@@ -80,10 +83,9 @@ func _apply_frame(frame: int) -> void:
 
 
 func _position_over_target() -> void:
-	var target: Node = _resolve_target()
-	if target == null or not target.has_method("get_interaction_world_position"):
+	if _target == null or not _target.has_method("get_interaction_world_position"):
 		return
-	var world_position: Vector2 = target.call("get_interaction_world_position") as Vector2
+	var world_position: Vector2 = _target.call("get_interaction_world_position") as Vector2
 	var screen_position: Vector2 = get_viewport().get_canvas_transform() * (world_position + ABOVE_HEAD_OFFSET)
 	global_position = (screen_position - ICON_SIZE * 0.5).round()
 
@@ -97,12 +99,6 @@ func _make_glyph() -> TextureRect:
 	rect.custom_minimum_size = ICON_SIZE
 	rect.size = ICON_SIZE
 	return rect
-
-
-func _resolve_target() -> Node:
-	if _target == null or not is_instance_valid(_target):
-		_target = get_node_or_null(target_controller)
-	return _target
 
 
 func _resolve_player_controller() -> Node:

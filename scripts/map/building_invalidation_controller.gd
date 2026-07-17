@@ -35,6 +35,9 @@ var _runtime_rebuild_wants_gardens: bool = false
 # budgeted passes. Read by BuildingConstructionOverlay for the progress bar.
 var _runtime_rebuild_progress: float = 0.0
 var _navigation_revision: int = 0
+var _plant_layout_requested_generation: int = 0
+var _plant_layout_running_generation: int = 0
+var _plant_layout_dirty_reasons: Dictionary = {}
 
 const WALKABILITY_REBUILD_QUIET_SECONDS: float = 0.15
 
@@ -62,8 +65,13 @@ func clear_navigation_topology_dirty() -> void:
 	_walkability_quiet_seconds_remaining = 0.0
 
 
-func mark_plant_layout_dirty() -> void:
+func mark_plant_layout_dirty(reason: String = "unspecified") -> void:
+	var was_dirty: bool = _plant_layout_dirty
 	_plant_layout_dirty = true
+	_plant_layout_requested_generation += 1
+	_plant_layout_dirty_reasons[reason] = true
+	CppDebugOptions.dlog("[PLANT_LAYOUT] request_generation=%d running_generation=%d merged=%s reason=%s" % [
+		_plant_layout_requested_generation, _plant_layout_running_generation, str(was_dirty), reason])
 	_walkability_quiet_seconds_remaining = WALKABILITY_REBUILD_QUIET_SECONDS
 	# A plant edit between budgeted slices supersedes that topology snapshot.
 	if _runtime_rebuild_active:
@@ -74,6 +82,7 @@ func mark_plant_layout_dirty() -> void:
 
 func clear_plant_layout_dirty() -> void:
 	_plant_layout_dirty = false
+	_plant_layout_dirty_reasons.clear()
 
 
 # A wall / blocking-building change altered map walkability (which cells block
@@ -101,7 +110,7 @@ func mark_after_blocking_building_removed() -> void:
 func after_plant_layout_changed(_reason: String = "") -> void:
 	var topology: GardenTopologyService = _garden_topology
 	topology.set_plant_zone_built(false)
-	mark_plant_layout_dirty()
+	mark_plant_layout_dirty(_reason if _reason != "" else "plant_layout_changed")
 	_manager.queue_plant_zone_overlay_redraw()
 
 
@@ -287,6 +296,9 @@ func _start_runtime_plant_layout_rebuild() -> void:
 	_runtime_rebuild_active = true
 	_runtime_rebuild_is_plant_layout = true
 	_runtime_rebuild_id += 1
+	_plant_layout_running_generation = _plant_layout_requested_generation
+	CppDebugOptions.dlog("[PLANT_LAYOUT] start_generation=%d reasons=%s" % [
+		_plant_layout_running_generation, str(_plant_layout_dirty_reasons.keys())])
 	_runtime_work_token = _work_gate.begin_work(&"runtime_plant_layout_rebuild")
 	_run_runtime_plant_layout_rebuild(_runtime_work_token, _runtime_rebuild_id)
 
@@ -315,6 +327,7 @@ func _run_runtime_plant_layout_rebuild(token: int, rebuild_id: int) -> void:
 		_runtime_rebuild_active = false
 		_runtime_rebuild_is_plant_layout = false
 		_runtime_work_token = 0
+		_plant_layout_running_generation = 0
 
 
 func _apply_plant_layout_rebuild() -> void:

@@ -185,6 +185,9 @@ var _drowning_controller: DrowningController = DrowningController.new()
 # stomp damage/contact visuals) only on entry, replacing old per-frame
 # full-agent scans. Runtime agents register through _register_runtime_agent.
 var _agent_cell_tracker: AgentCellTracker = AgentCellTracker.new()
+var _building_restore_batch_active: bool = false
+var _building_restore_hard_cells: Dictionary = {}
+var _building_restore_speed_cells: Dictionary = {}
 var _agent_suspend: AgentSuspendService = AgentSuspendService.new()
 var _building_scan: BuildingScanService = BuildingScanService.new()
 var _spawner_route_service: SpawnerRouteService = SpawnerRouteService.new()
@@ -953,6 +956,27 @@ func _setup_building_object_manager() -> void:
 		building_objects.connect("building_added", Callable(self, "_on_building_added"))
 	if building_objects.has_signal("building_removed") and not building_objects.is_connected("building_removed", Callable(self, "_on_building_removed")):
 		building_objects.connect("building_removed", Callable(self, "_on_building_removed"))
+	if building_objects.has_signal("restore_batch_started") and not building_objects.is_connected("restore_batch_started", Callable(self, "_on_building_restore_batch_started")):
+		building_objects.connect("restore_batch_started", Callable(self, "_on_building_restore_batch_started"))
+	if building_objects.has_signal("restore_batch_finished") and not building_objects.is_connected("restore_batch_finished", Callable(self, "_on_building_restore_batch_finished")):
+		building_objects.connect("restore_batch_finished", Callable(self, "_on_building_restore_batch_finished"))
+
+
+func _on_building_restore_batch_started() -> void:
+	_building_restore_batch_active = true
+	_building_restore_hard_cells.clear()
+	_building_restore_speed_cells.clear()
+
+
+func _on_building_restore_batch_finished() -> void:
+	_building_restore_batch_active = false
+	if not _building_restore_hard_cells.is_empty():
+		_building_invalidation_controller.mark_after_blocking_building_added()
+		CppDebugOptions.dlog("[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=restore_batch cells=%d" % _building_restore_hard_cells.size())
+	if not _building_restore_speed_cells.is_empty():
+		CppDebugOptions.dlog("[NAV_SPEED] source=restore_batch cells=%d" % _building_restore_speed_cells.size())
+	_building_restore_hard_cells.clear()
+	_building_restore_speed_cells.clear()
 
 
 func _setup_counter_stock_manager() -> void:
@@ -977,10 +1001,16 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 	var impact: PlaceableNavImpact.Impact = _building_item_nav_impact(item_id)
 	var fences_block: bool = _fences_block_navigation()
 	if PlaceableNavImpact.requires_hard_topology(impact, fences_block):
-		_building_invalidation_controller.mark_after_blocking_building_added()
-		_log_nav_invalidation("building_added:%s" % item_id, cell)
+		if _building_restore_batch_active:
+			_building_restore_hard_cells[cell] = true
+		else:
+			_building_invalidation_controller.mark_after_blocking_building_added()
+			_log_nav_invalidation("building_added:%s" % item_id, cell)
 	elif PlaceableNavImpact.is_speed_only(impact, fences_block):
-		_log_nav_speed("building_added:%s" % item_id, cell)
+		if _building_restore_batch_active:
+			_building_restore_speed_cells[cell] = true
+		else:
+			_log_nav_speed("building_added:%s" % item_id, cell)
 	# A plant-like contact tile or pasteque just appeared: re-check any agent already
 	# standing on the cell so a stationary agent still triggers the interaction
 	# (removal makes a cell non-interactive, so no invalidation is needed there).
@@ -1568,7 +1598,10 @@ func is_fundamental_builder_working() -> bool:
 
 
 func is_player_near_fundamental_builder() -> bool:
-	return _builder.is_player_near_fundamental_builder(SeedMerchantController.INTERACT_RADIUS_TILES)
+	# Compatibility wrapper: the coordinator is now the sole proximity owner, and it pauses only
+	# the selected in-range fundamental builder.
+	return _builder.fundamental_builder_active() and _builder.fundamental_builder_node() != null \
+		and _builder.is_fundamental_builder_interaction_selected()
 
 
 func get_fundamental_builder_world_position() -> Vector2:
@@ -1577,6 +1610,10 @@ func get_fundamental_builder_world_position() -> Vector2:
 
 func get_fundamental_builder_node() -> Node2D:
 	return _builder.fundamental_builder_node()
+
+
+func set_fundamental_builder_interaction_selected(value: bool) -> void:
+	_builder.set_fundamental_builder_paused(value)
 
 
 func is_any_reveal_cutscene_active() -> bool:
@@ -1683,7 +1720,9 @@ func get_seed_merchant_world_position() -> Vector2:
 
 func is_player_near_house_resident(resident_type: StringName, radius_tiles: int) -> bool:
 	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
-	return resident != null and resident.is_active() and resident.is_player_near(radius_tiles)
+	# Compatibility wrapper for older scene/dynamic callers. Proximity ownership now lives in the
+	# player interaction coordinator; an interaction-held resident is the selected in-range one.
+	return radius_tiles > 0 and resident != null and resident.is_active() and resident.is_interaction_held()
 
 
 func has_house_resident_reached_spot(resident_type: StringName) -> bool:
@@ -1694,6 +1733,12 @@ func has_house_resident_reached_spot(resident_type: StringName) -> bool:
 func get_house_resident_world_position(resident_type: StringName) -> Vector2:
 	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
 	return resident.get_agent_world_position() if resident != null else Vector2.ZERO
+
+
+func set_house_resident_interaction_selected(resident_type: StringName, value: bool) -> void:
+	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
+	if resident != null:
+		resident.set_interaction_selected(value)
 
 
 func is_client_sale_active() -> bool:
@@ -2075,6 +2120,12 @@ func restore_ground_collectibles_from_save(saved_items: Array) -> void:
 
 
 func restore_runtime_simulation_from_save(data: Dictionary) -> void:
+	# Progression applies tile/building state during scene _ready, while startup topology sync is
+	# deferred. Let that single startup generation consume the final restored snapshot before phase
+	# restoration asks for phase-specific routes; otherwise both coroutines can build the same plant
+	# layout independently.
+	while not _startup_ready:
+		await get_tree().process_frame
 	# This restore suppresses _on_game_mode_changed (see _notify_restored_phase), which
 	# is where these transient prompt requests are normally cleared. Clear them here so a
 	# request set during the pre-restore load transition can't leak into the restored phase.
