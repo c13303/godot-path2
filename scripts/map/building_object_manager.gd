@@ -398,11 +398,26 @@ func _register_reservoir_runtime(cell: Vector2i, runtime_id: String) -> void:
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.name = "Sprite2D"
 	sprite.texture = RESERVOIR_TEXTURE
+	# Set through `position`, not `offset`: the WaterFill child sits at the sprite's origin
+	# and drives its own `position`, so it only follows the tank through the transform.
+	sprite.position = reservoir_footprint_offset(RESERVOIR_TEXTURE, _tile_size_pixels())
 	_add_reservoir_water_fill(sprite)
 	runtime_node.add_child(sprite)
 
 	parent.add_child(runtime_node)
 	_runtime_nodes_by_cell[cell] = runtime_node
+
+
+## How far the reservoir art is lifted from its cell centre. The tank is taller than one
+## tile and only its bottom tile-sized square stands on the cell, so the overhang above
+## that square is shifted off the cell. This also makes the runtime node's depth base (the
+## cell centre) land on the centre of that square rather than the middle of the whole tank.
+## LevelLoader reads the same rule in reverse to pick an authored reservoir's cell.
+static func reservoir_footprint_offset(texture: Texture2D, tile_size_pixels: int) -> Vector2:
+	if texture == null:
+		return Vector2.ZERO
+	var overhang: float = texture.get_size().y - float(tile_size_pixels)
+	return Vector2(0.0, -overhang * 0.5)
 
 
 func _register_simple_placeable_runtime(cell: Vector2i, runtime_id: String, item_def: Dictionary) -> void:

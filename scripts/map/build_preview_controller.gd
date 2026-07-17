@@ -15,11 +15,12 @@ const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 # placement rect.
 const DRAG_REMOVE_FILL_COLOR: Color = Color(1.0, 0.22, 0.24, 0.14)
 const DRAG_REMOVE_BORDER_COLOR: Color = Color(1.0, 0.32, 0.34)
-# Hint image shown centered above the tool cursor whenever the tool in hand can be dragged:
-# the unbuild cursor / removal rectangle, or a drag-buildable placeable's ghost / chunk
-# rectangle. BuildSystem.is_current_tool_drag_capable() owns the "can this drag" rule.
+# Hint image shown past the bottom-right corner of the tool cursor whenever the tool in hand can
+# be dragged: the unbuild cursor / removal rectangle, or a drag-buildable placeable's ghost /
+# chunk rectangle. BuildSystem.is_current_tool_drag_capable() owns the "can this drag" rule.
 const DRAG_ICON_TEXTURE: Texture2D = preload("res://assets/sprites/legval/drag_icon.png")
-# Pixels between the icon's bottom edge and the top of the cursor footprint.
+# Pixels between the cursor footprint's bottom-right corner and the icon's top-left corner, on
+# both axes - the icon sits diagonally outside so it never overlaps the cursor or rectangle.
 const DRAG_ICON_GAP: float = 3.0
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
@@ -471,10 +472,10 @@ func _ensure_drag_selection_rect() -> void:
 	previewbuild.add_child(_drag_selection_rect)
 
 
-# Shows the drag hint centered above the top edge of the current tool cursor's footprint, or
-# hides it when the tool in hand cannot be dragged. Every cursor shape routes here - the unbuild
-# single-cell rect, a dragged rectangle, and a placeable's hovered ghost - so the hint follows
-# whatever the cursor currently is without any caller re-deriving the drag rule.
+# Shows the drag hint just outside the bottom-right corner of the current tool cursor's
+# footprint, or hides it when the tool in hand cannot be dragged. Every cursor shape routes
+# here - the unbuild single-cell rect, a dragged rectangle, and a placeable's hovered ghost -
+# so the hint follows whatever the cursor currently is without any caller re-deriving the rule.
 func _refresh_drag_icon(previewbuild: TileMapLayer, footprint: Rect2) -> void:
 	if not _tool_is_drag_capable():
 		_hide_drag_icon()
@@ -482,11 +483,9 @@ func _refresh_drag_icon(previewbuild: TileMapLayer, footprint: Rect2) -> void:
 	_ensure_drag_icon(previewbuild)
 	if _drag_icon == null:
 		return
-	var icon_size: Vector2 = _drag_icon.size
-	_drag_icon.position = Vector2(
-		footprint.position.x + footprint.size.x * 0.5 - icon_size.x * 0.5,
-		footprint.position.y - icon_size.y - DRAG_ICON_GAP
-	)
+	# Offset on both axes from the corner, so the icon sits in the free diagonal zone and never
+	# covers the cursor, the rectangle, or the tile under them.
+	_drag_icon.position = footprint.position + footprint.size + Vector2(DRAG_ICON_GAP, DRAG_ICON_GAP)
 	_drag_icon.visible = true
 
 

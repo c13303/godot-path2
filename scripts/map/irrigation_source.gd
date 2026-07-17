@@ -100,8 +100,8 @@ func _flood_fill(is_blocked: Callable) -> void:
 		var ring_bucket: Array[Vector2i] = []
 		_cells_by_ring[ring] = ring_bucket
 	var limit: float = float(radius)
-	# The center seeds the fill without a blocked test: an authored reservoir stamps a wall
-	# tile on its own base cell, and it must still irrigate from where it stands.
+	# The center seeds the fill without a blocked test: a center always irrigates from where
+	# it stands, even when its own cell is one the fill would not otherwise spread into.
 	var cost_by_cell: Dictionary = {}
 	cost_by_cell[center] = 0.0
 	var pending: Array[Vector2i] = [center]

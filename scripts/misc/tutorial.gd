@@ -60,6 +60,15 @@ const HOLD_ACTION_START_CLIENTS: StringName = &"start_clients"
 const HOLD_ACTION_START_NIGHT: StringName = &"start_night"
 const INPUT_MODE_PAD: String = "pad"
 const HOLD_CONFIRM_SECONDS: float = 1.0
+## The hold actions that advance the phase. HOLD_ACTION_ALLOW_BUILDER is deliberately absent:
+## it binds the same input, but it requests a cutscene rather than moving the phase on, so the
+## phase-toggle button must stay grey and inert while it owns the input.
+const PHASE_HOLD_ACTIONS: Array[StringName] = [HOLD_ACTION_START_CLIENTS, HOLD_ACTION_START_NIGHT]
+## Last day on which the "hold to start night" hint is shown. It is onboarding: it plays before
+## night 1 (day 1) and night 2 (day 2), then stops for the rest of the run. `nDays` increments
+## at dawn, so day N is the day preceding night N. Only the hint stops — the hold itself and
+## the phase-toggle button keep working every day.
+const START_NIGHT_PROMPT_LAST_DAY: int = 2
 
 const ALERT_DURATION: float = 3.0
 const ALERT_LIGHT_RED: Color = Color(1.0, 0.28, 0.28)
@@ -86,7 +95,6 @@ var _game_ui: Node
 var _toolbuild: Control
 var _building_manager: Node
 var _building_object_manager: Node
-var _day_toggle: Control
 var _planificator: Control
 var _player_controller: Node
 var _hold_progress_circle: Control
@@ -95,8 +103,12 @@ var _hold_elapsed: float = 0.0
 var _displayed_key: String = ""  # key currently shown ("" while blank)
 var _pending_key: String = ""    # key we are waiting to reveal
 var _pending_remaining: float = 0.0
-var _glow_tween: Tween
-var _glow_active: bool = false
+# The phase advance the confirm input is bound to this frame, or HOLD_ACTION_NONE. Recorded by
+# _refresh as it walks its branch tree rather than re-derived, so the reading published to the
+# phase-toggle button can never drift out of step with what the input actually does. Note this
+# is not _hold_action: that one only names the hold being tracked, which for the background
+# holds means "available AND currently held".
+var _available_phase_action: StringName = HOLD_ACTION_NONE
 var _alert_key: String = ""
 var _alert_count: int = -1
 var _alert_remaining: float = 0.0
@@ -169,7 +181,6 @@ func _resolve_nodes() -> void:
 			GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)
 		if not GameState.seed_merchant_phase_changed.is_connected(_on_seed_merchant_phase_changed):
 			GameState.seed_merchant_phase_changed.connect(_on_seed_merchant_phase_changed)
-	_day_toggle = get_node_or_null("../dayToggle") as Control
 
 
 func _process(delta: float) -> void:
@@ -292,7 +303,6 @@ func show_alert(key: String, count: int = -1, persistent: bool = false) -> void:
 		# typing plus the fresh window, so it is never cut off mid-animation.
 		_alert_remaining = maxf(ALERT_DURATION, _text_animator.get_minimum_visible_duration())
 	_apply_alert_modulate()
-	_set_glow(false)
 	_update_tutorial_arrow("")
 
 
@@ -340,9 +350,13 @@ func _current_alert_color() -> Color:
 
 
 func _refresh(delta: float = 0.0) -> void:
-	if _plant_manager == null or _progression == null or _game_ui == null or _day_toggle == null:
+	if _plant_manager == null or _progression == null or _game_ui == null:
 		_resolve_nodes()
 	_update_alert_timer(delta)
+	# Cleared before the walk; every branch that offers a phase advance marks it again below.
+	# A branch that returns without marking is one where the confirm input does nothing (or is
+	# bound to something that is not a phase), which is exactly what NONE means.
+	_available_phase_action = HOLD_ACTION_NONE
 	# The intro prompt binds the hold input to letting the Builder in, so it is the one
 	# onboarding step that owns the input. Every other onboarding step below is a hint only:
 	# the afternoon-end hold keeps running under it.
@@ -362,13 +376,7 @@ func _refresh(delta: float = 0.0) -> void:
 		return
 	if _normal_tutorials_suppressed_by_builder_onboarding():
 		_update_background_night_hold(delta)
-		_displayed_key = ""
-		_pending_key = ""
-		_clear_tutorial_message()
-		visible = false
-		modulate = Color.WHITE
-		_set_glow(false)
-		_update_tutorial_arrow("")
+		_clear_hint()
 		return
 	if _alert_key != "":
 		_update_background_night_hold(delta)
@@ -376,14 +384,12 @@ func _refresh(delta: float = 0.0) -> void:
 			visible = true
 			_present_tutorial_message(_alert_message_id(), _alert_text())
 			_apply_alert_modulate()
-			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
 		if _alert_remaining > 0.0:
 			visible = true
 			_present_tutorial_message(_alert_message_id(), _alert_text())
 			_apply_alert_modulate()
-			_set_glow(false)
 			_update_tutorial_arrow("")
 			return
 		_clear_elapsed_alert()
@@ -392,23 +398,11 @@ func _refresh(delta: float = 0.0) -> void:
 	# the alert branch above), which is why this check sits after it.
 	if _is_spawner_reveal_cutscene_active():
 		_reset_hold_progress()
-		_displayed_key = ""
-		_pending_key = ""
-		_clear_tutorial_message()
-		visible = false
-		modulate = Color.WHITE
-		_set_glow(false)
-		_update_tutorial_arrow("")
+		_clear_hint()
 		return
 	if _is_dialog_open():
 		_reset_hold_progress()
-		_displayed_key = ""
-		_pending_key = ""
-		_clear_tutorial_message()
-		visible = false
-		modulate = Color.WHITE
-		_set_glow(false)
-		_update_tutorial_arrow("")
+		_clear_hint()
 		return
 	var hold_action: StringName = _current_hold_action()
 	if hold_action != HOLD_ACTION_NONE:
@@ -427,14 +421,28 @@ func _refresh(delta: float = 0.0) -> void:
 	# the roses are grown up. The hold runs in the background so the harvest hint stays on
 	# screen; the progress circle only appears while the key is actually held.
 	if _dawn_client_skip_available():
+		_available_phase_action = HOLD_ACTION_START_CLIENTS
 		_advance_hold(HOLD_ACTION_START_CLIENTS, delta)
 	elif not start_night_skip_hold_active:
 		_reset_hold_progress()
 	var key: String = _current_message_key()
 	if key == KEY_PASS_NIGHT and not GameState.is_night:
 		_request_start_night_prompt()
+		if _start_night_prompt_suppressed():
+			# Past the onboarding nights only the message stops. This is _show_hold_action minus
+			# the label, deliberately: routing through the weaker background hold instead would
+			# also drop the hold's own conditions, and space must keep ending the day on exactly
+			# the days it does today.
+			_available_phase_action = HOLD_ACTION_START_NIGHT
+			_advance_hold(HOLD_ACTION_START_NIGHT, delta)
+			_clear_hint()
+			return
 		_show_hold_action(HOLD_ACTION_START_NIGHT, delta)
 		return
+	# Reached when a contextual hint owns the label while the night is already available; mark
+	# it whether or not the key is down, then let the background hold track the press.
+	if _should_request_start_night_prompt():
+		_available_phase_action = HOLD_ACTION_START_NIGHT
 	if start_night_skip_hold_active:
 		_advance_hold(HOLD_ACTION_START_NIGHT, delta)
 	if key == "":
@@ -442,13 +450,11 @@ func _refresh(delta: float = 0.0) -> void:
 		_clear_tutorial_message()
 		visible = false
 		modulate = Color.WHITE
-		_set_glow(false)
 		_update_tutorial_arrow("")
 		return
 	if GameState.is_night and key != KEY_REFILL_WATER:
 		visible = false
 		modulate = Color.WHITE
-		_set_glow(false)
 		_update_tutorial_arrow("")
 		return
 	visible = true
@@ -476,8 +482,6 @@ func _refresh(delta: float = 0.0) -> void:
 				_displayed_key = key
 				_present_tutorial_message(_tutorial_message_id(key), Translations.t(key))
 
-	# Glow tracks the message actually on screen, so it stays in step with the text.
-	_set_glow(false)
 	_update_tutorial_arrow(_displayed_key)
 
 
@@ -583,7 +587,6 @@ func _show_key_immediately(key: String) -> void:
 	_present_tutorial_message(_tutorial_message_id(key), Translations.t(key))
 	visible = true
 	modulate = Color.WHITE
-	_set_glow(false)
 	_update_tutorial_arrow(key)
 
 
@@ -660,6 +663,10 @@ func _start_night_pre_prompt_hold_active() -> bool:
 ## even though the "hold to start night" prompt is not the current message. Clears the hold
 ## when night is not available, so a key held for something else never accumulates progress.
 func _update_background_night_hold(delta: float) -> void:
+	# Availability is about what the input is bound to, not whether it is down: mark it from the
+	# prompt condition alone, so the phase-toggle button turns green before the player holds.
+	if _should_request_start_night_prompt():
+		_available_phase_action = HOLD_ACTION_START_NIGHT
 	if _start_night_pre_prompt_hold_active():
 		_advance_hold(HOLD_ACTION_START_NIGHT, delta)
 	else:
@@ -669,6 +676,8 @@ func _update_background_night_hold(delta: float) -> void:
 ## Shows the hold prompt as the on-screen hint and advances its progress. Used when the
 ## phase change is the natural next step, so the label itself is the "hold to..." prompt.
 func _show_hold_action(action: StringName, delta: float) -> void:
+	if PHASE_HOLD_ACTIONS.has(action):
+		_available_phase_action = action
 	_displayed_key = ""
 	_pending_key = ""
 	_pending_remaining = 0.0
@@ -676,7 +685,6 @@ func _show_hold_action(action: StringName, delta: float) -> void:
 	modulate = Color.WHITE
 	var hold_key: String = _hold_translation_key(action)
 	_present_tutorial_message(_hold_message_id(hold_key), Translations.t(hold_key))
-	_set_glow(false)
 	_update_tutorial_arrow("")
 	_advance_hold(action, delta)
 
@@ -730,6 +738,24 @@ func _has_roses_to_sell_today() -> bool:
 	if _building_manager != null and _building_manager.has_method("has_roses_to_sell_today"):
 		return bool(_building_manager.call("has_roses_to_sell_today"))
 	return false
+
+
+## The phase advance the confirm input (space / pad X) would perform right now, or
+## HOLD_ACTION_NONE. Read by the phase-toggle button, which mirrors it as a green/gray frame
+## rather than deciding availability for itself.
+func available_phase_action() -> StringName:
+	return _available_phase_action
+
+
+## Perform the phase advance the confirm input is currently bound to; no-op when there is none.
+## This is the phase-toggle button's click path: it takes the same route as a completed hold,
+## so the button can never do something the spacebar would not.
+func trigger_phase_action() -> void:
+	if _available_phase_action == HOLD_ACTION_NONE:
+		return
+	_trigger_hold_action(_available_phase_action)
+	_reset_hold_progress()
+	_available_phase_action = HOLD_ACTION_NONE
 
 
 func _trigger_hold_action(action: StringName) -> void:
@@ -1168,24 +1194,19 @@ func _hide_tutorial_arrow() -> void:
 		_tutorial_arrow.hide_arrow()
 
 
-## Pulses the day/night icon so the player notices they can end the day.
-func _set_glow(active: bool) -> void:
-	if active == _glow_active:
-		return
-	_glow_active = active
-	if _glow_tween != null and _glow_tween.is_valid():
-		_glow_tween.kill()
-		_glow_tween = null
-	if _day_toggle == null:
-		return
-	if active:
-		_day_toggle.pivot_offset = _day_toggle.size * 0.5
-		_glow_tween = create_tween().set_loops()
-		_glow_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		_glow_tween.tween_property(_day_toggle, "modulate", Color(1.0, 0.82, 0.25), 0.55)
-		_glow_tween.parallel().tween_property(_day_toggle, "scale", Vector2(1.12, 1.12), 0.55)
-		_glow_tween.tween_property(_day_toggle, "modulate", Color.WHITE, 0.55)
-		_glow_tween.parallel().tween_property(_day_toggle, "scale", Vector2.ONE, 0.55)
-	else:
-		_day_toggle.modulate = Color.WHITE
-		_day_toggle.scale = Vector2.ONE
+## Blanks the hint entirely: no message, no arrow, label hidden. Does not touch the hold, so a
+## caller that wants the background hold to keep running just calls it after that hold.
+func _clear_hint() -> void:
+	_displayed_key = ""
+	_pending_key = ""
+	_clear_tutorial_message()
+	visible = false
+	modulate = Color.WHITE
+	_update_tutorial_arrow("")
+
+
+## True once the "hold to start night" hint has served its onboarding purpose. Suppresses only
+## the message; see START_NIGHT_PROMPT_LAST_DAY. An unknown day reads as -1 and so keeps the
+## hint showing, which is the safe way round.
+func _start_night_prompt_suppressed() -> bool:
+	return _current_day_number() > START_NIGHT_PROMPT_LAST_DAY

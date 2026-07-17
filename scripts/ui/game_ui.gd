@@ -54,13 +54,7 @@ const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
 @onready var close_button: Button = $Modals/inventoryModal/CloseButton
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
-@onready var day_toggle: TextureRect = $"top anchor/dayToggle"
 @onready var toolbuild: Control = get_node_or_null("Toolbuild") as Control
-
-const MOONSUN_TEXTURE: Texture2D = preload("res://assets/sprites/legval/moonsun.png")
-const MOONSUN_TILE_SIZE: int = 64
-var _sun_icon: AtlasTexture
-var _moon_icon: AtlasTexture
 
 var inventory_slots: Array[Dictionary] = []
 # Quickbar activity. false = play mode: menus closed, no labels, the equipped weapon (or
@@ -97,7 +91,8 @@ func _ready() -> void:
 	close_button.pressed.connect(_hide_inventory)
 	if not Translations.locale_changed.is_connected(_on_locale_changed):
 		Translations.locale_changed.connect(_on_locale_changed)
-	_setup_day_toggle()
+	if not GameState.mode_changed.is_connected(_on_game_mode_changed):
+		GameState.mode_changed.connect(_on_game_mode_changed)
 	_build_toolbar()
 	_build_inventory()
 	_refresh_all_slots()
@@ -107,19 +102,7 @@ func _ready() -> void:
 	# activates a slot to build. equipped_weapon_id self-heals to the first possessed weapon.
 	equipped_weapon_id = _first_possessed_weapon_id()
 
-func _setup_day_toggle() -> void:
-	_sun_icon = AtlasTexture.new()
-	_sun_icon.atlas = MOONSUN_TEXTURE
-	_sun_icon.region = Rect2(0, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
-	_moon_icon = AtlasTexture.new()
-	_moon_icon.atlas = MOONSUN_TEXTURE
-	_moon_icon.region = Rect2(MOONSUN_TILE_SIZE, 0, MOONSUN_TILE_SIZE, MOONSUN_TILE_SIZE)
-
-	GameState.mode_changed.connect(_on_game_mode_changed)
-	_update_day_toggle_icon(GameState.is_night)
-
 func _on_game_mode_changed(is_night: bool) -> void:
-	_update_day_toggle_icon(is_night)
 	# Night forbids plants and structural builds. Drop a now-forbidden selection so no stale
 	# preview survives the transition; BuildSystem cancels the matching drag gesture.
 	if is_night and is_item_disabled_for_placement(selected_build_item_id):
@@ -135,10 +118,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 
 func _on_locale_changed(_locale: String) -> void:
 	_refresh_toolbar_info()
-
-func _update_day_toggle_icon(is_night: bool) -> void:
-	# Icon reflects the current mode: sun during day, moon during night.
-	day_toggle.texture = _moon_icon if is_night else _sun_icon
 
 func _input(event: InputEvent) -> void:
 	# The mouse wheel is reserved for rotating the buildable during placement

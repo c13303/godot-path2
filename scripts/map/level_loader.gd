@@ -729,6 +729,7 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 	if reservoir_nodes.is_empty():
 		return
 	var wallz: TileMapLayer = host.get_node_or_null(^"wallz") as TileMapLayer
+	var blocking_buildings: TileMapLayer = host.get_node_or_null(^"blocking_buildings") as TileMapLayer
 	var building_object_manager: BuildingObjectManager = null
 	if host.get_parent() != null:
 		building_object_manager = host.get_parent().get_node_or_null("BuildingObjectManager") as BuildingObjectManager
@@ -737,33 +738,68 @@ func _reparent_reservoir_nodes(level_root: Node, host: Node) -> void:
 		level_root.remove_child(reservoir)
 		_clear_owner_recursive(reservoir)
 		reservoir.queue_free()
+		_stamp_authored_reservoir_tile(blocking_buildings, cell)
 		if building_object_manager == null:
 			push_warning("LevelLoader: no BuildingObjectManager; authored reservoir at %s ignored." % str(cell))
 			continue
+		# The stamped tile alone would already register the reservoir (BuildingObjectManager
+		# indexes blocking_buildings on _ready), but registering it explicitly keeps this
+		# loader independent of that startup order. add_building replaces any existing entry
+		# for the cell, so the two paths cannot double-register it.
 		var item_def: Dictionary = ItemCatalog.get_item_def("reservoir").duplicate(true)
 		building_object_manager.call_deferred("add_building", cell, item_def)
 
 
+## Stamps the authored reservoir's blocking tile, mirroring what a player build does. The
+## reservoir is a wall, and everything that decides walkability, player collision and
+## tantrum targeting reads the blocking_buildings tile — a runtime node alone would leave
+## an authored reservoir walk-through.
+func _stamp_authored_reservoir_tile(blocking_buildings: TileMapLayer, cell: Vector2i) -> void:
+	if blocking_buildings == null:
+		push_warning("LevelLoader: no blocking_buildings layer; authored reservoir at %s will not block." % str(cell))
+		return
+	var source_id: int = _atlas_source_id(blocking_buildings)
+	if source_id < 0:
+		push_error("LevelLoader: blocking_buildings tile_set has no atlas source; cannot stamp the authored reservoir.")
+		return
+	var atlas: Vector2i = ItemCatalog.get_item_def("reservoir").get("atlas", Vector2i.ZERO) as Vector2i
+	blocking_buildings.set_cell(cell, source_id, atlas)
+	blocking_buildings.update_internals()
+
+
+func _atlas_source_id(layer: TileMapLayer) -> int:
+	if layer == null or layer.tile_set == null:
+		return -1
+	var tile_set: TileSet = layer.tile_set
+	for i: int in range(tile_set.get_source_count()):
+		var source_id: int = tile_set.get_source_id(i)
+		if tile_set.get_source(source_id) is TileSetAtlasSource:
+			return source_id
+	return -1
+
+
+## The cell an authored reservoir stands on: the one under the bottom tile-sized square of
+## its art. BuildingObjectManager lays the runtime tank out by the same rule (see
+## BuildingObjectManager.reservoir_footprint_offset), so the runtime reservoir lands
+## exactly where the level author drew it.
 func _reservoir_base_cell(reservoir: Node2D, wallz: TileMapLayer) -> Vector2i:
 	if wallz == null:
-		push_warning("LevelLoader: no wallz layer; cannot anchor reservoir base to a wall tile.")
+		push_warning("LevelLoader: no wallz layer; cannot anchor the reservoir to a cell.")
 		return Vector2i.ZERO
 	var sprite: Sprite2D = reservoir as Sprite2D
 	if sprite == null or sprite.texture == null:
 		push_warning("LevelLoader: reservoir has no sprite texture; cannot compute its base.")
 		return Vector2i.ZERO
-	# Middle of the bottom edge in the sprite's local space (centered sprites put the
-	# origin at the middle; otherwise the top-left corner is the origin).
 	var tex_size: Vector2 = sprite.texture.get_size()
+	var tile_height: float = tex_size.y if wallz.tile_set == null else float(wallz.tile_set.tile_size.y)
+	# Centre of that bottom square, in the sprite's local space (centered sprites put the
+	# origin at the middle; otherwise the top-left corner is the origin).
 	var base_local: Vector2 = sprite.offset
 	if sprite.centered:
-		base_local += Vector2(0.0, tex_size.y * 0.5)
+		base_local += Vector2(0.0, (tex_size.y - tile_height) * 0.5)
 	else:
-		base_local += Vector2(tex_size.x * 0.5, tex_size.y)
-	var base_world: Vector2 = sprite.to_global(base_local)
-	# For a square grid the cell containing the point is the one whose center is
-	# nearest, so local_to_map already gives the nearest tile.
-	return wallz.local_to_map(wallz.to_local(base_world))
+		base_local += Vector2(tex_size.x * 0.5, tex_size.y - tile_height * 0.5)
+	return wallz.local_to_map(wallz.to_local(sprite.to_global(base_local)))
 
 func _find_spawner_container(level_root: Node) -> Node:
 	for container_name: String in SPAWNER_CONTAINER_NAMES:

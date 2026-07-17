@@ -26,7 +26,7 @@
 [ext_resource type="Script" uid="uid://b5vaci07ptdxl" path="res://scripts/gameState/progression.gd" id="22_m1b8m"]
 [ext_resource type="Script" uid="uid://b5nqtkm8yap7s" path="res://scripts/map/plant_manager.gd" id="22_plant"]
 [ext_resource type="Script" uid="uid://denaqk5pl5kg4" path="res://scripts/misc/cpp_debug_options.gd" id="23_cpp_debug"]
-[ext_resource type="Texture2D" uid="uid://upf2adxvftxk" path="res://assets/sprites/legval/moonsun.png" id="24_moonsun"]
+[ext_resource type="Texture2D" uid="uid://cnncupdmu1hqf" path="res://assets/sprites/legval/phaseToggle.png" id="24_phasetoggle"]
 [ext_resource type="Script" uid="uid://c0xdaynightc1" path="res://scripts/misc/gameplay_phase_colors.gd" id="25_gameplay_phase_colors"]
 [ext_resource type="Script" uid="uid://d2qbdobjmgr12" path="res://scripts/map/building_object_manager.gd" id="26_building_objects"]
 [ext_resource type="Script" uid="uid://tkaa4x04kq78" path="res://scripts/sfx/music_autostart.gd" id="27_music_autostart"]
@@ -49,8 +49,9 @@
 [ext_resource type="Script" uid="uid://crgdnr40ekmc8" path="res://scripts/ui/build_frame.gd" id="43_build_frame"]
 [ext_resource type="Script" uid="uid://bgfq01ln4aqiv" path="res://scripts/map/reservoir_system.gd" id="44_reservoir"]
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
+[ext_resource type="Script" uid="uid://oelg5dafhog7" path="res://scripts/ui/phase_toggle_button.gd" id="45_phase_toggle"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
-[ext_resource type="Script" path="res://scripts/ui/interaction_prompt.gd" id="46_interaction_prompt"]
+[ext_resource type="Script" uid="uid://cwlj3h4n7r42t" path="res://scripts/ui/interaction_prompt.gd" id="46_interaction_prompt"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
@@ -58,8 +59,8 @@
 [ext_resource type="Script" uid="uid://b1ma6ecjehdsq" path="res://scripts/map/path_preview_controller.gd" id="51_path_preview"]
 [ext_resource type="PackedScene" path="res://scenes/dialog.tscn" id="60_dialog"]
 [ext_resource type="Script" uid="uid://bmh7gdxndafa6" path="res://scripts/ui/merchant_dialog_controller.gd" id="61_mdc"]
-[ext_resource type="Script" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
-[ext_resource type="Script" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
+[ext_resource type="Script" uid="uid://b3w5g6y628mb8" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
+[ext_resource type="Script" uid="uid://pxs2r7op080a" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -567,10 +568,6 @@ tile_size = Vector2i(32, 32)
 navigation_layer_0/layers = 1
 sources/0 = SubResource("TileSetAtlasSource_egp0g")
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_sun"]
-atlas = ExtResource("24_moonsun")
-region = Rect2(0, 0, 64, 64)
-
 [sub_resource type="AtlasTexture" id="AtlasTexture_seed_icon"]
 atlas = ExtResource("27_shop_items")
 region = Rect2(226, 0, 32, 32)
@@ -638,6 +635,54 @@ corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
 [sub_resource type="Theme" id="Theme_siwji"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_phase_night"]
+atlas = ExtResource("24_phasetoggle")
+region = Rect2(0, 0, 64, 64)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_phase_dawn"]
+atlas = ExtResource("24_phasetoggle")
+region = Rect2(64, 0, 64, 64)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_phase_morning"]
+atlas = ExtResource("24_phasetoggle")
+region = Rect2(128, 0, 64, 64)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_phase_afternoon"]
+atlas = ExtResource("24_phasetoggle")
+region = Rect2(192, 0, 64, 64)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_phase_available"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.08, 0.11, 0.09, 0.55)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.29, 0.87, 0.35, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_phase_unavailable"]
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+bg_color = Color(0.09, 0.09, 0.1, 0.55)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.45, 0.45, 0.48, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
 
 [node name="game" type="Node2D" unique_id=1481310298]
 
@@ -859,18 +904,6 @@ offset_right = 32.0
 offset_bottom = 80.0
 grow_horizontal = 2
 grow_vertical = 0
-
-[node name="dayToggle" type="TextureRect" parent="GameUI/top anchor" unique_id=2071789185]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 2
-texture = SubResource("AtlasTexture_sun")
-expand_mode = 1
-stretch_mode = 5
 
 [node name="tutorial" type="RichTextLabel" parent="GameUI/top anchor" unique_id=269466648]
 layout_mode = 0
@@ -1376,6 +1409,25 @@ offset_bottom = 300.0
 grow_horizontal = 0
 mouse_filter = 2
 script = ExtResource("45_s6agy")
+
+[node name="phaseToggleButton" type="Button" parent="GameUI" unique_id=306424860 node_paths=PackedStringArray("tutorial")]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -302.0
+offset_top = 92.0
+offset_right = -230.0
+offset_bottom = 164.0
+grow_horizontal = 0
+expand_icon = true
+script = ExtResource("45_phase_toggle")
+tutorial = NodePath("../top anchor/tutorial")
+night_icon = SubResource("AtlasTexture_phase_night")
+dawn_icon = SubResource("AtlasTexture_phase_dawn")
+morning_icon = SubResource("AtlasTexture_phase_morning")
+afternoon_icon = SubResource("AtlasTexture_phase_afternoon")
+available_style = SubResource("StyleBoxFlat_phase_available")
+unavailable_style = SubResource("StyleBoxFlat_phase_unavailable")
 
 [node name="MerchantDialogController" type="Node" parent="GameUI" unique_id=343104799 node_paths=PackedStringArray("dialog", "game_ui", "player_controller", "building_manager")]
 script = ExtResource("61_mdc")

@@ -399,11 +399,16 @@ const ITEM_DEFS: Dictionary = {
 		"category": "irrigation",
 		"frame": 16,
 		"price": 100,
-		"target_layer": "traversable_buildings",
+		# Solid like a wall (same rule as rose_shop_counter): on the blocking layer with
+		# isWall, so the cell is a hard navigation blocker, stops the player and registers a
+		# steering obstacle. Atlas (6, 0) is a transparent tileset cell — the tile is only the
+		# identity marker for this layer; the tank the player sees is the runtime sprite.
+		"target_layer": "blocking_buildings",
 		"atlas": Vector2i(6, 0),
 		"occupies_cell": true,
-		"blocks_movement": false,
-		"blocks_projectiles": false,
+		"isWall": true,
+		"blocks_movement": true,
+		"blocks_projectiles": true,
 		"requires_walkable_floor": true,
 		"runtime_id": "reservoir",
 		"drag_buildable": false,

@@ -2,6 +2,10 @@ extends Node2D
 class_name ReservoirRuntime
 
 const FLASH_DURATION: float = 0.08
+## Just above the tank's top edge. The runtime node sits at its cell centre and
+## BuildingObjectManager lifts the 64px art so only its bottom tile-sized square covers
+## the cell, which puts the top of the tank 48px above this node.
+const HEALTH_BAR_OFFSET: Vector2 = Vector2(0.0, -50.0)
 
 @export var max_health: int = 100
 
@@ -45,7 +49,7 @@ func play_damage_flash(duration: float) -> void:
 
 
 func get_health_bar_anchor_world_position() -> Vector2:
-	return global_position + Vector2(0.0, -34.0)
+	return global_position + HEALTH_BAR_OFFSET
 
 
 ## Removes the reservoir's two sprites (the base tank and its child water fill)
