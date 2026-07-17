@@ -15,13 +15,12 @@ const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 # placement rect.
 const DRAG_REMOVE_FILL_COLOR: Color = Color(1.0, 0.22, 0.24, 0.14)
 const DRAG_REMOVE_BORDER_COLOR: Color = Color(1.0, 0.32, 0.34)
-# Hint image shown past the bottom-right corner of the tool cursor whenever the tool in hand can
-# be dragged: the unbuild cursor / removal rectangle, or a drag-buildable placeable's ghost /
-# chunk rectangle. BuildSystem.is_current_tool_drag_capable() owns the "can this drag" rule.
+# Hint image overlapping the tool cursor whenever the tool in hand can be dragged: the unbuild
+# cursor / removal rectangle, or a drag-buildable placeable's ghost / chunk rectangle.
+# BuildSystem.is_current_tool_drag_capable() owns the "can this drag" rule. The image is authored
+# tile-aligned - its top-left tile-sized square registers onto the cursor tile - so it is placed
+# at the cursor cell with no extra offset, and where the art sits is decided by the art itself.
 const DRAG_ICON_TEXTURE: Texture2D = preload("res://assets/sprites/legval/drag_icon.png")
-# Pixels between the cursor footprint's bottom-right corner and the icon's top-left corner, on
-# both axes - the icon sits diagonally outside so it never overlaps the cursor or rectangle.
-const DRAG_ICON_GAP: float = 3.0
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
@@ -118,11 +117,9 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 	previewbuild.update_internals()
 	_set_preview_cursor_hidden(true)
 	# A hovered placeable has no selection rect to hang the hint on (that only exists once a drag
-	# starts), so anchor to the hovered cell itself - the cell the ghost sits on and the cell a
-	# drag would anchor from. Multi-cell ghosts (houses) are not drag-buildable, so the single
-	# hovered cell is always the right footprint here.
+	# starts), but the hovered cell is the cursor, which is all the hint needs.
 	if previewbuild.tile_set != null:
-		_refresh_drag_icon(previewbuild, _cells_footprint(previewbuild, cell, cell))
+		_refresh_drag_icon(previewbuild, cell)
 
 
 func draw_drag_build_preview(
@@ -420,7 +417,9 @@ func show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: 
 	_drag_selection_rect.position = footprint.position
 	_drag_selection_rect.size = footprint.size
 	_drag_selection_rect.visible = true
-	_refresh_drag_icon(previewbuild, footprint)
+	# end_cell is where the cursor is: the hovered cell for the single-cell unbuild cursor, and
+	# the moving end of a drag rectangle. The hint follows it rather than the rect's geometry.
+	_refresh_drag_icon(previewbuild, end_cell)
 
 
 func hide_drag_selection_rect() -> void:
@@ -472,20 +471,21 @@ func _ensure_drag_selection_rect() -> void:
 	previewbuild.add_child(_drag_selection_rect)
 
 
-# Shows the drag hint just outside the bottom-right corner of the current tool cursor's
-# footprint, or hides it when the tool in hand cannot be dragged. Every cursor shape routes
-# here - the unbuild single-cell rect, a dragged rectangle, and a placeable's hovered ghost -
-# so the hint follows whatever the cursor currently is without any caller re-deriving the rule.
-func _refresh_drag_icon(previewbuild: TileMapLayer, footprint: Rect2) -> void:
+# Registers the drag hint onto the cursor cell, or hides it when the tool in hand cannot be
+# dragged. Every cursor shape routes here - the unbuild single-cell rect, a dragged rectangle,
+# and a placeable's hovered ghost - passing the cell the cursor is actually on, so the hint
+# tracks the cursor itself rather than any corner of a selection.
+func _refresh_drag_icon(previewbuild: TileMapLayer, cursor_cell: Vector2i) -> void:
 	if not _tool_is_drag_capable():
 		_hide_drag_icon()
 		return
 	_ensure_drag_icon(previewbuild)
 	if _drag_icon == null:
 		return
-	# Offset on both axes from the corner, so the icon sits in the free diagonal zone and never
-	# covers the cursor, the rectangle, or the tile under them.
-	_drag_icon.position = footprint.position + footprint.size + Vector2(DRAG_ICON_GAP, DRAG_ICON_GAP)
+	# The icon's top-left tile-sized square is authored to land exactly on one tile, so aligning
+	# the icon to the cursor cell's top-left overlaps that square with the cursor.
+	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
+	_drag_icon.position = previewbuild.map_to_local(cursor_cell) - tile_size * 0.5
 	_drag_icon.visible = true
 
 

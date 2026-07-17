@@ -171,24 +171,24 @@ func get_building_cells() -> Array[Vector2i]:
 
 
 func request_contact_dance(cell: Vector2i, duration: float) -> void:
-	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
-	if runtime_node == null or not is_instance_valid(runtime_node):
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node == null:
 		return
 	if runtime_node.has_method("request_contact_dance"):
 		runtime_node.call("request_contact_dance", duration)
 
 
 func play_turret_shot_animation(cell: Vector2i) -> void:
-	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
-	if runtime_node == null or not is_instance_valid(runtime_node):
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node == null:
 		return
 	if runtime_node.has_method("play_shot_animation"):
 		runtime_node.call("play_shot_animation")
 
 
 func set_turret_refractory_active(cell: Vector2i, active: bool) -> void:
-	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
-	if runtime_node == null or not is_instance_valid(runtime_node):
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node == null:
 		return
 	if runtime_node.has_method("set_refractory_active"):
 		runtime_node.call("set_refractory_active", active)
@@ -205,10 +205,7 @@ func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
 
 
 func get_runtime_node(cell: Vector2i) -> Node2D:
-	var node: Node2D = _runtime_nodes_by_cell.get(cell, null) as Node2D
-	if node != null and is_instance_valid(node):
-		return node
-	return null
+	return _valid_runtime_node(cell) as Node2D
 
 
 func has_runtime_traversable_placeable(cell: Vector2i) -> bool:
@@ -557,10 +554,9 @@ func _is_game_state_night() -> bool:
 	return bool(game_state.get("is_night"))
 
 func _set_all_runtime_lights_enabled(enabled: bool) -> void:
-	for raw_node in _runtime_nodes_by_cell.values():
-		var runtime_node: Node = raw_node as Node
-		if runtime_node and is_instance_valid(runtime_node):
-			_set_runtime_node_light_enabled(runtime_node, enabled)
+	for raw_node: Variant in _runtime_nodes_by_cell.values():
+		if is_instance_valid(raw_node):
+			_set_runtime_node_light_enabled(raw_node as Node, enabled)
 
 func _set_runtime_node_light_enabled(runtime_node: Node, enabled: bool) -> void:
 	var child_count: int = runtime_node.get_child_count()
@@ -573,19 +569,27 @@ func _set_runtime_node_light_enabled(runtime_node: Node, enabled: bool) -> void:
 func _log(message: String) -> void:
 	CppDebugOptions.save_log("[SAVE] BuildingObjectManager: " + message)
 
+# Sole read path for _runtime_nodes_by_cell. A runtime node can be freed by its own
+# scene without passing through _remove_runtime_node, leaving a dangling entry here, so
+# validity must be checked before any cast: casting a freed object raises an error.
+# Stale entries are dropped on read; never call this while iterating the dictionary.
+func _valid_runtime_node(cell: Vector2i) -> Node:
+	var raw_node: Variant = _runtime_nodes_by_cell.get(cell, null)
+	if not is_instance_valid(raw_node):
+		_runtime_nodes_by_cell.erase(cell)
+		return null
+	return raw_node as Node
+
 func _remove_runtime_node(cell: Vector2i) -> void:
-	if not _runtime_nodes_by_cell.has(cell):
-		return
-	var node: Node = _runtime_nodes_by_cell[cell] as Node
+	var node: Node = _valid_runtime_node(cell)
 	_runtime_nodes_by_cell.erase(cell)
-	if node and is_instance_valid(node):
+	if node != null:
 		node.queue_free()
 
 func _clear_runtime_nodes() -> void:
-	for raw_node in _runtime_nodes_by_cell.values():
-		var node: Node = raw_node as Node
-		if node and is_instance_valid(node):
-			node.queue_free()
+	for raw_node: Variant in _runtime_nodes_by_cell.values():
+		if is_instance_valid(raw_node):
+			(raw_node as Node).queue_free()
 	_runtime_nodes_by_cell.clear()
 
 func _default_building_def_for_existing_tile(layer: TileMapLayer, _cell: Vector2i) -> Dictionary:
@@ -634,8 +638,8 @@ func _normalize_layer_name(layer_name: String) -> String:
 
 
 func _serialize_runtime_node_state(cell: Vector2i) -> Dictionary:
-	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
-	if runtime_node == null or not is_instance_valid(runtime_node):
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node == null:
 		return {}
 	if runtime_node.has_method("serialize_placeable_state"):
 		var raw_state: Variant = runtime_node.call("serialize_placeable_state")
@@ -645,8 +649,8 @@ func _serialize_runtime_node_state(cell: Vector2i) -> Dictionary:
 
 
 func _restore_runtime_node_state(cell: Vector2i, state: Dictionary) -> void:
-	var runtime_node: Node = _runtime_nodes_by_cell.get(cell, null) as Node
-	if runtime_node == null or not is_instance_valid(runtime_node):
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node == null:
 		return
 	if runtime_node.has_method("restore_placeable_state"):
 		runtime_node.call("restore_placeable_state", state)
