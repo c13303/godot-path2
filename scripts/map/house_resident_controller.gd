@@ -17,6 +17,10 @@ class_name HouseResidentController
 ## optional HouseResidentRole. No shop/dialog/invention/Builder/tutorial logic lives
 ## here. One HouseResidentController instance is registered per ordinary resident_type in
 ## AllyHousingController.
+##
+## Most villagers walk in once and park at their idle spot for the whole day. A role may instead
+## send its villager on daytime errands (see send_on_errand / SheepGardenRole); the night return,
+## evacuation and removal stay owned here, so an errand can never outlive the day.
 
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 ## Shared authored town entrance / exit markers used by every arriving/leaving villager.
@@ -77,7 +81,7 @@ func reconcile_houses() -> void:
 
 func process(_delta: float) -> void:
 	if _config.role != null:
-		_config.role.process(self)
+		_config.role.process(self, _delta)
 	_process_arrival()
 	_process_interaction_hold()
 	_process_idle_home_correction(_delta)
@@ -263,6 +267,44 @@ func is_interaction_held() -> bool:
 	return _interaction_held
 
 
+## The resident's own idle spot below its house, so a role can send it back home after an errand.
+func idle_cell() -> Vector2i:
+	return _idle_cell
+
+
+## Tile the resident currently stands on. INVALID_CELL when it has no live agent.
+func current_cell() -> Vector2i:
+	var agent: Node2D = _visitor.agent_node()
+	var floorz: TileMapLayer = _manager.get_floorz()
+	if agent == null or floorz == null:
+		return INVALID_CELL
+	return floorz.local_to_map(floorz.to_local(agent.global_position))
+
+
+# ---------------------------------------------------------------------------
+# Role-driven errands.
+# ---------------------------------------------------------------------------
+
+## Sends the resident to `destination_cell` along a role-supplied path, for the roles whose villager
+## works away from its idle spot instead of parking there all day. The path comes from the role
+## because the routing rule is role-specific (the sheep refuses live-plant cells, see
+## BuildingManager.find_sheep_path); this controller never starts an errand of its own. The role is
+## told the walk finished through on_reached_spot(). Refused once the resident is leaving,
+## evacuating or heading home for the night, so an errand can never fight the shared lifecycle.
+func send_on_errand(destination_cell: Vector2i, path_cells: PackedVector2Array) -> bool:
+	if GameState.is_night or _returning_home or _evacuating:
+		return false
+	if not _visitor.is_active() or _visitor.is_leaving():
+		return false
+	return _visitor.assign_cell_path(destination_cell, path_cells)
+
+
+## True while the resident stands still (parked at its idle spot or wherever an errand ended),
+## i.e. it is not currently walking anywhere.
+func is_parked() -> bool:
+	return _visitor.is_waiting()
+
+
 ## Generic Chebyshev-distance proximity test in tile space between the player and this resident.
 func is_player_near(radius_tiles: int) -> bool:
 	var agent: Node2D = _visitor.agent_node()
@@ -291,9 +333,14 @@ func _process_arrival() -> void:
 		return
 	if _returning_home or _evacuating:
 		clear(true)
-	else:
-		_has_reached_idle_spot = true
-		_clear_idle_return_state()
+		return
+	# Latched on the first arrival and never cleared by a later errand: it means "has settled in
+	# town", which is what the interaction prompt and the movement hold wait for. A villager out
+	# on an errand is still someone you can walk up to and talk to.
+	_has_reached_idle_spot = true
+	_clear_idle_return_state()
+	if _config.role != null:
+		_config.role.on_reached_spot(self)
 
 
 func _process_idle_home_correction(delta: float) -> void:
@@ -325,6 +372,11 @@ func _eligible_for_idle_home_correction() -> bool:
 	if _returning_home or _evacuating:
 		return false
 	if _idle_cell == INVALID_CELL:
+		return false
+	# A role-driven errand parks the villager away from its idle spot on purpose, so correcting it
+	# home would fight the role. The role owns bringing its villager back; the night return below
+	# brings it home either way.
+	if _visitor.target_cell() != _idle_cell:
 		return false
 	if not _visitor.is_active() or _visitor.is_leaving() or not _visitor.is_waiting():
 		return false

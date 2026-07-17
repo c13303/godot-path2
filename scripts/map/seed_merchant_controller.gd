@@ -45,7 +45,7 @@ func on_cleared() -> void:
 	GameState.set_seed_merchant_phase(false)
 
 
-func process(resident: HouseResidentController) -> void:
+func process(resident: HouseResidentController, _delta: float) -> void:
 	# Once the merchant is leaving it must never re-enter the interaction hold: night has already
 	# started, and walking back into the departing merchant should not reopen the phase.
 	if not resident.is_active() or resident.is_leaving():

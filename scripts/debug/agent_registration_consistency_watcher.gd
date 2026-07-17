@@ -29,7 +29,6 @@ const TRACKED_GROUPS: Array[StringName] = [
 	&"monsters",
 	&"clients",
 	AgentDefinitionService.VILLAGERS_GROUP,
-	&"sheep",
 ]
 
 ## Seconds between consistency checks. Kept low on purpose: registration and

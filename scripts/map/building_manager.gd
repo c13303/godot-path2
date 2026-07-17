@@ -29,7 +29,6 @@ const RUNTIME_SIMULATION_SAVE_SERVICE_SCRIPT: Script = preload("res://scripts/ma
 const BUILDING_RUNTIME_TICK_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/building_runtime_tick_controller.gd")
 const BAMBOO_HARVEST_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/bamboo_harvest_controller.gd")
 const GROUND_DROP_MANAGER_SCRIPT: Script = preload("res://scripts/map/ground_drop_manager.gd")
-const SHEEP_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/sheep_controller.gd")
 const SPAWNER_REVEAL_CUTSCENE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_cutscene_controller.gd")
 const SPAWNER_REVEAL_PHASE_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/spawner_reveal_phase_controller.gd")
 const FUNDAMENTAL_BUILDER_ONBOARDING_CONTROLLER_SCRIPT: Script = preload("res://scripts/map/fundamental_builder_onboarding_controller.gd")
@@ -195,7 +194,6 @@ var _debug_telemetry: BuildingDebugTelemetry = BuildingDebugTelemetry.new()
 var _debug_query_service: BuildingDebugQueryService = BuildingDebugQueryService.new()
 var _monster_death: MonsterDeathController = MonsterDeathController.new()
 var _agent_definition_service: AgentDefinitionService = AgentDefinitionService.new()
-var _sheep_controller: SheepController = SHEEP_CONTROLLER_SCRIPT.new()
 var _building_invalidation_controller: BuildingInvalidationController = BuildingInvalidationController.new()
 var _building_navigation_sync: BuildingNavigationSyncService = BuildingNavigationSyncService.new()
 const TERRAIN_SPEED_MODIFIER_SERVICE: Script = preload("res://scripts/map/terrain_speed_modifier_service.gd")
@@ -209,6 +207,10 @@ var _merchant_resident: HouseResidentController = HouseResidentController.new()
 # The Inventor: an ordinary villager with no role (no shop/phase/pause) — its only role-specific
 # behavior is a dialog, owned by InventorDialogController through the generic interaction router.
 var _inventor_resident: HouseResidentController = HouseResidentController.new()
+# The sheep: an ordinary villager whose role walks it around the garden eating debris for gems
+# and mending damaged wet-grass buildings.
+var _sheep_garden: SheepGardenRole = SheepGardenRole.new()
+var _sheep_resident: HouseResidentController = HouseResidentController.new()
 var _spawner_garden_selection_service: SpawnerGardenSelectionService = SpawnerGardenSelectionService.new()
 var _preparation_work_gate: BuildingPreparationWorkGate = BUILDING_PREPARATION_WORK_GATE_SCRIPT.new()
 var _building_preparation_controller: BuildingPreparationController = BUILDING_PREPARATION_CONTROLLER_SCRIPT.new()
@@ -276,7 +278,6 @@ func _ready() -> void:
 	_terrain_speed_modifier.setup(scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null)
 	_building_navigation_sync.setup(self, _terrain_speed_modifier)
 	_building_navigation_sync.sync_all_terrain_speed_cells()
-	_sheep_controller.setup(self)
 	_building_invalidation_controller.setup(self, _preparation_work_gate, _building_navigation_sync)
 	_spawner_garden_selection_service.setup(self)
 	_building_preparation_controller.setup(
@@ -379,7 +380,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_night_start_requested = false
 		_spawner_reveal_phase.abort_client_reveal()
 		_day_start_pending = false
-		_sheep_controller.on_game_mode_changed(true)
 		_client_tantrum.end()
 		_client_sale.reset()
 		_client_sale.mark_client_step_finished()
@@ -394,7 +394,6 @@ func _on_game_mode_changed(is_night: bool) -> void:
 		_counter_stock_manager.dissolve_all_piles()
 	if not is_night:
 		_spawner_reveal_phase.abort_night_reveal()
-		_sheep_controller.on_game_mode_changed(false)
 		_day_start_pending = true
 		# The night just ended: the completed night's client step is now pending, even
 		# though the dawn harvest has not begun yet. Latch it here so the
@@ -753,7 +752,19 @@ func _setup_ally_housing() -> void:
 	inventor_config.role = null
 	inventor_config.interaction_hold_radius_tiles = 2
 	_inventor_resident.setup(self, _house_manager, inventor_config)
-	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident, _inventor_resident]
+	# The sheep: same registration shape again, with a role that sends it on garden-work errands.
+	# Its dialog lives in SheepDialogController, like the Inventor's.
+	var sheep_config: HouseResidentConfig = HouseResidentConfig.new()
+	sheep_config.resident_type = ItemCatalog.get_house_resident_type("house_sheep")
+	sheep_config.house_item_id = &"house_sheep"
+	sheep_config.agent_kind = &"sheep"
+	sheep_config.scene_group = &"sheep"
+	sheep_config.tracking_category = &"sheep"
+	sheep_config.visual_setup = Callable(self, "apply_sheep_data")
+	sheep_config.role = _sheep_garden
+	sheep_config.interaction_hold_radius_tiles = 2
+	_sheep_resident.setup(self, _house_manager, sheep_config)
+	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident, _inventor_resident, _sheep_resident]
 	_ally_housing.setup(self, _house_manager, _builder, ordinary_residents)
 
 
@@ -914,6 +925,11 @@ func apply_merchant_data(agent: Node) -> void:
 # Visual setup for the Inventor villager (config.visual_setup Callable). Reached via _manager.call.
 func apply_inventor_data(agent: Node) -> void:
 	_agent_definition_service.apply_inventor_data(agent)
+
+
+# Visual setup for the sheep villager (config.visual_setup Callable). Reached via _manager.call.
+func apply_sheep_data(agent: Node) -> void:
+	_agent_definition_service.apply_sheep_data(agent)
 
 
 func _setup_plant_manager() -> void:
@@ -1868,10 +1884,6 @@ func get_builder_controller() -> BuilderController:
 
 func get_house_builder_work_controller() -> HouseBuilderWorkController:
 	return _house_builder_work
-
-
-func get_sheep_controller() -> SheepController:
-	return _sheep_controller
 
 
 func get_dawn_harvest_controller() -> DawnHarvestController:

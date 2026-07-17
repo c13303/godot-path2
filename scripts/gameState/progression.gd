@@ -753,7 +753,7 @@ func _unregister_scene_agents() -> void:
 		return
 
 	var seen_ids: Dictionary = {}
-	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters", &"clients", AgentDefinitionService.VILLAGERS_GROUP, &"sheep"]
+	var group_names: Array[StringName] = [&"player", &"main_chars", &"monsters", &"clients", AgentDefinitionService.VILLAGERS_GROUP]
 	for group_name: StringName in group_names:
 		for node: Node in get_tree().get_nodes_in_group(group_name):
 			var nav_id: int = int(node.get("nav_id"))
@@ -856,7 +856,6 @@ func _legacy_runtime_agents_to_runtime_simulation(data: Dictionary) -> Dictionar
 	var spawn_tick: Dictionary = _dict_from_value(legacy.get("spawn_tick", {}))
 	spawn_tick["resume_monsters"] = resume_monsters
 	var spawn_playlist: Dictionary = _dict_from_value(legacy.get("spawn_playlist", {}))
-	var sheep: Dictionary = _dict_from_value(legacy.get("sheep", {}))
 	var spawner_reveal: Dictionary = _dict_from_value(legacy.get("spawner_reveal", {}))
 	var fundamental_builder_onboarding: Dictionary = _dict_from_value(legacy.get("fundamental_builder_onboarding", {}))
 	return {
@@ -865,7 +864,6 @@ func _legacy_runtime_agents_to_runtime_simulation(data: Dictionary) -> Dictionar
 			"spawn_playlist": spawn_playlist,
 			"spawn_tick": spawn_tick,
 		},
-		"sheep": sheep,
 		"spawner_reveal": spawner_reveal,
 		"fundamental_builder_onboarding": fundamental_builder_onboarding,
 	}

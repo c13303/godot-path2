@@ -40,7 +40,6 @@ func capture_state() -> Dictionary:
 				"spawn_playlist": spawn_playlist_state,
 				"spawn_tick": spawn_tick_state,
 			},
-			"sheep": _manager.get_sheep_controller().serialize_state(),
 			"spawner_reveal": _manager.get_spawner_reveal_phase_controller().serialize_state(),
 			"fundamental_builder_onboarding": _manager.serialize_fundamental_builder_onboarding(),
 		},
@@ -60,7 +59,6 @@ func restore_state(data: Dictionary) -> void:
 	_manager.get_spawn_tick_controller().restore_state(spawn_tick_state)
 	_manager.get_client_sale_controller().restore_state(_dict_from_value(data.get("client_sale", {})))
 	_manager.restore_fundamental_builder_onboarding(_dict_from_value(data.get("fundamental_builder_onboarding", {})))
-	_manager.get_sheep_controller().restore_state(_dict_from_value(data.get("sheep", {})))
 
 
 func clear_transient_runtime_agents() -> void:

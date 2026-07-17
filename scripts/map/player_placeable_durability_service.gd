@@ -331,6 +331,30 @@ func apply_damage_at(cell: Vector2i, layer_name: String, item_id: String, amount
 	return apply_damage(key, amount)
 
 
+# ---------------------------------------------------------------------------
+# Repair.
+# ---------------------------------------------------------------------------
+## Heals a live target by `amount`, clamped to its max health, and returns the health actually
+## restored (0 when there was nothing to repair) so a caller healing over time can tell when it is
+## done. Health only:
+##   * it never revives a destroyed or invalid target (health 0 stays 0 — that target is gone);
+##   * it does not bump the structural revision, since the target set is unchanged;
+##   * it deliberately does not emit placeable_damaged, which drives the red damage flash.
+func apply_repair(key: String, amount: int) -> int:
+	if amount <= 0 or not _targets_by_key.has(key) or not is_target_valid(key):
+		return 0
+	var rec: Dictionary = _targets_by_key[key] as Dictionary
+	var health: int = int(rec.get("health", 0))
+	var max_health: int = int(rec.get("max_health", 0))
+	if health <= 0 or health >= max_health:
+		return 0
+	var restored: int = mini(amount, max_health - health)
+	rec["health"] = health + restored
+	_targets_by_key[key] = rec
+	_refresh_overlay()
+	return restored
+
+
 func destroy_target(key: String) -> void:
 	if not _targets_by_key.has(key):
 		return

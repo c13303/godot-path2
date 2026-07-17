@@ -18,6 +18,9 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const DEFAULT_TERRAIN_SPEED_CHANNEL: int = 0
 const STATIC_TERRAIN_SOURCE_PREFIX: String = "static:"
 const CELL_TERRAIN_SOURCE_PREFIX: String = "cell:"
+const WATER_TERRAIN_SOURCE: StringName = &"water"
+const WATER_TERRAIN_SPEED_MIN_MULTIPLIER: float = 0.05
+const WATER_TERRAIN_SPEED_MAX_MULTIPLIER: float = 4.0
 
 var _manager: BuildingManager
 var _terrain_speed: RefCounted = null
@@ -60,7 +63,33 @@ func sync_all_terrain_speed_cells() -> void:
 			multipliers.y,
 			false
 		)
+	# Water carries its slowdown on the WaterSources layer rather than a catalog def, so it is not
+	# part of the per-cell composition above and has to be re-registered after the clear.
+	_sync_water_terrain_speed_cells()
 	_terrain_speed.upload_all_channels()
+
+
+## Registers the water layer's slowdown on every water cell. Water is authored on WaterSources
+## (player_slowdown), not in the item catalog, so it needs its own pass; it applies equally to the
+## player and to the crowd. Called from sync_all_terrain_speed_cells, which clears local
+## contributions first and would otherwise drop the water entry.
+func _sync_water_terrain_speed_cells() -> void:
+	var watersources: WaterSources = _manager.watersources
+	if watersources == null or _terrain_speed == null:
+		return
+	var multiplier: float = clampf(
+		watersources.player_slowdown,
+		WATER_TERRAIN_SPEED_MIN_MULTIPLIER,
+		WATER_TERRAIN_SPEED_MAX_MULTIPLIER
+	)
+	for raw_cell: Variant in watersources.get_used_cells():
+		_terrain_speed.set_cell_contribution_pair(
+			raw_cell as Vector2i,
+			WATER_TERRAIN_SOURCE,
+			multiplier,
+			multiplier,
+			false
+		)
 
 
 ## Registers (or clears) a permanent world feature's speed multipliers for one cell, then

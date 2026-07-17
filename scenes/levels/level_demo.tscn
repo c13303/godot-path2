@@ -1260,6 +1260,7 @@ tool_shop_prices = {
 &"house_builder": 20,
 &"house_inventor": 20,
 &"house_merchant": 20,
+&"house_sheep": 20,
 &"imperial_seed": 20,
 &"kraken": 20,
 &"lamp": 0,
@@ -1292,6 +1293,7 @@ shop_prices = {
 &"house_builder": 20,
 &"house_inventor": 20,
 &"house_merchant": 20,
+&"house_sheep": 20,
 &"imperial_seed": 20,
 &"kraken": 20,
 &"lamp": 0,
@@ -1464,11 +1466,6 @@ metadata/id = ""
 [node name="fundamental_builder_out" type="Sprite2D" parent="spawners" unique_id=1151164943]
 position = Vector2(2107, 3780)
 texture = ExtResource("5_drkbx")
-metadata/id = ""
-
-[node name="sheep" type="Sprite2D" parent="spawners" unique_id=17673017]
-position = Vector2(2482, 2790)
-texture = ExtResource("7_wyhb5")
 metadata/id = ""
 
 [node name="monster1" type="Sprite2D" parent="spawners" unique_id=1274841071]

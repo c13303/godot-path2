@@ -9,6 +9,7 @@ const AGENT_SCENE: PackedScene = preload("res://scenes/entities/character.tscn")
 const CLIENT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/cat.png")
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const INVENTOR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/inventor.png")
+const SHEEP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/sheep_villager.png")
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/builder.png")
 const FUNDAMENTAL_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
 const BUILDER_HAMMER_TEXTURE: Texture2D = preload("res://assets/sprites/house/marto.png")
@@ -116,6 +117,22 @@ func apply_inventor_data(agent: Node) -> void:
 	_apply_villager_traits(agent)
 
 
+## Sheep villager visuals. Same 4-frame directional sheet as the other ordinary villagers, but the
+## sheep is deliberately NOT flagged crushes_placeables: it is the one villager that leaves its idle
+## spot and walks the garden (to eat debris), so the shared flag would make it trample the player's
+## roses. Its errand paths already refuse live-plant cells (see SheepGardenRole), and dropping the
+## flag extends that guarantee to the paths the sheep does not choose itself — the controller-owned
+## night return and house-destruction evacuation, which both use the plain walkable map.
+func apply_sheep_data(agent: Node) -> void:
+	var sprite: Sprite2D = agent.get_node_or_null("MonsterSprite2D") as Sprite2D
+	if sprite != null:
+		sprite.texture = SHEEP_TEXTURE
+		sprite.hframes = 4
+		sprite.frame = 0
+		sprite.flip_h = false
+	_apply_villager_traits(agent, false)
+
+
 func apply_builder_data(agent: Node) -> void:
 	_apply_builder_visuals(agent, BUILDER_TEXTURE)
 
@@ -137,12 +154,16 @@ func _apply_builder_visuals(agent: Node, texture: Texture2D) -> void:
 	_apply_villager_traits(agent)
 
 
-func _apply_villager_traits(agent: Node) -> void:
+## Shared villager identity/contact traits. `crushes_placeables` is a parameter because it is a
+## behaviour rule rather than part of being a villager: every villager that only walks in and parks
+## crushes, but the sheep wanders the garden and must not (see apply_sheep_data).
+func _apply_villager_traits(agent: Node, crushes_placeables: bool = true) -> void:
 	agent.add_to_group(VILLAGERS_GROUP)
 	agent.set_meta("agent_contact_push_power", VILLAGER_CONTACT_PUSH_POWER)
 	agent.set_meta("agent_contact_push_resist", VILLAGER_CONTACT_PUSH_RESIST)
 	agent.set_meta("agent_contact_push_cooldown", VILLAGER_CONTACT_PUSH_COOLDOWN)
-	_mark_crushes_placeables(agent)
+	if crushes_placeables:
+		_mark_crushes_placeables(agent)
 
 
 ## People (clients, merchant, builders, future villagers) crush placeables by walking over them.

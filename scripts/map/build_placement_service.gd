@@ -533,9 +533,13 @@ func _placeable_displaces_actors(placeable_def: Dictionary) -> bool:
 	return bool(placeable_def.get("occupies_cell", true))
 
 
+## ItemCatalog owns this rule (including the rose special case); callers here pass a composed,
+## possibly direction-injected def, so a flag set on the def itself is still honoured before
+## falling back to the catalog's id-based answer.
 func requires_grass_green_floor(placeable_def: Dictionary) -> bool:
-	var item_id: String = str(placeable_def.get("id", ""))
-	return item_id == "rose" or bool(placeable_def.get("requires_grass_green_floor", false))
+	if bool(placeable_def.get("requires_grass_green_floor", false)):
+		return true
+	return ItemCatalog.requires_grass_green_floor(str(placeable_def.get("id", "")))
 
 
 func is_grass_green_floor_cell(cell: Vector2i) -> bool:

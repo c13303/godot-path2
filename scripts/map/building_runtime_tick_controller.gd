@@ -129,7 +129,6 @@ func _process_agent_runtime(debug_telemetry: BuildingDebugTelemetry, delta: floa
 	# this frame still gets its first timeline tick this frame (matches old order).
 	t = Time.get_ticks_usec()
 	_manager.get_drowning_controller().process_drowning_timeline(delta)
-	_manager.get_sheep_controller().process(delta)
 	if debug_telemetry.over_garden_threshold_us(Time.get_ticks_usec() - t):
 		debug_telemetry.warn_garden_task_lag_us("_process_drowning_agents", Time.get_ticks_usec() - t,
 			"drowning=%d" % _manager.get_drowning_controller().drowning_count())

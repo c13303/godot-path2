@@ -61,6 +61,7 @@
 [ext_resource type="Script" uid="uid://bmh7gdxndafa6" path="res://scripts/ui/merchant_dialog_controller.gd" id="61_mdc"]
 [ext_resource type="Script" uid="uid://b3w5g6y628mb8" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
 [ext_resource type="Script" uid="uid://pxs2r7op080a" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
+[ext_resource type="Script" uid="uid://b0hxiqllnmr55" path="res://scripts/ui/sheep_dialog_controller.gd" id="64_sheep_dialog"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -740,9 +741,10 @@ script = ExtResource("7_pqqvp")
 
 [node name="CPP" type="Node" parent="." unique_id=304113688]
 script = ExtResource("23_cpp_debug")
+debug_enabled = true
 dev_keys = true
+draw_bottleneck_zones = false
 refresh_interval = 0.0
-draw_flow_field = true
 verbose = true
 show_enters_exits = true
 monster_eating_time = 1.0
@@ -1375,6 +1377,13 @@ mouse_filter = 2
 script = ExtResource("46_interaction_prompt")
 target_controller = NodePath("../InventorDialogController")
 
+[node name="SheepPrompt" type="Control" parent="GameUI" unique_id=700000033]
+layout_mode = 3
+anchors_preset = 0
+mouse_filter = 2
+script = ExtResource("46_interaction_prompt")
+target_controller = NodePath("../SheepDialogController")
+
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3
 anchors_preset = 15
@@ -1448,6 +1457,12 @@ dialog = NodePath("../Dialog")
 game_ui = NodePath("..")
 building_manager = NodePath("../../Map/BuildingManager")
 progression = NodePath("../../progression")
+
+[node name="SheepDialogController" type="Node" parent="GameUI" unique_id=343104802 node_paths=PackedStringArray("dialog", "game_ui", "building_manager")]
+script = ExtResource("64_sheep_dialog")
+dialog = NodePath("../Dialog")
+game_ui = NodePath("..")
+building_manager = NodePath("../../Map/BuildingManager")
 
 [node name="Dialog" parent="GameUI" unique_id=2138026225 instance=ExtResource("60_dialog")]
 visible = false

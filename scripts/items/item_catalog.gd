@@ -12,6 +12,7 @@ const HOUSE_TEXTURE: Texture2D = preload("res://assets/sprites/house/house1.png"
 const HOUSE_BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_builder.png")
 const HOUSE_MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_merchant.png")
 const HOUSE_INVENTOR_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_inventor.png")
+const HOUSE_SHEEP_TEXTURE: Texture2D = preload("res://assets/sprites/house/house_sheep.png")
 const HOUSE_WIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/wiphouse.png")
 const INVISIBLE_BUILDING_MARKER_ATLAS: Vector2i = Vector2i(8, 0)
 
@@ -252,6 +253,32 @@ const ITEM_DEFS: Dictionary = {
 		"requires_completed_house_type": &"house_builder",
 		"house_texture": HOUSE_INVENTOR_TEXTURE,
 		"house_completed_texture": HOUSE_INVENTOR_TEXTURE,
+		"house_wip_texture": HOUSE_WIP_TEXTURE,
+		"builder_work_seconds": 3.0,
+		"drag_buildable": false,
+		"max_health": 100,
+		"max_stack": 999,
+		"currency": &"bamboo",
+		"price": 20,
+	},
+	# The sheep's house. Same catalog shape as the Merchant/Inventor houses; it owns the "sheep"
+	# resident, whose garden work is a HouseResidentRole (SheepGardenRole) on top of the generic
+	# HouseResidentController registered in BuildingManager._setup_ally_housing.
+	"house_sheep": {
+		"id": "house_sheep",
+		"name": "Sheep House",
+		"type": "placeable",
+		"category": "house",
+		"frame": 32,
+		"target_layer": "wallz",
+		"special_placement_kind": &"house",
+		"house_resident_type": &"sheep",
+		"unique_house_type": true,
+		# Same generic prerequisite as the Merchant/Inventor houses: unlocks once a Builder House
+		# is completed, which is what makes the fundamental Builder functional.
+		"requires_completed_house_type": &"house_builder",
+		"house_texture": HOUSE_SHEEP_TEXTURE,
+		"house_completed_texture": HOUSE_SHEEP_TEXTURE,
 		"house_wip_texture": HOUSE_WIP_TEXTURE,
 		"builder_work_seconds": 3.0,
 		"drag_buildable": false,
@@ -667,6 +694,17 @@ static func get_max_health(item_id: String) -> int:
 static func is_destructible_placeable(item_id: String) -> bool:
 	return is_placeable(item_id)
 
+## True for placeables that may only be built on wet (green) grass. The rose predates the
+## `requires_grass_green_floor` flag and is still authored without it, so its special case lives
+## here — the single owner of the rule. BuildPlacementService delegates to this, and the sheep asks
+## it to decide what it may repair, so placement and repair can never disagree about what counts as
+## a wet-grass building.
+static func requires_grass_green_floor(item_id: String) -> bool:
+	if normalize_house_item_id(item_id) == "rose":
+		return true
+	return bool(get_item_def(item_id).get("requires_grass_green_floor", false))
+
+
 ## True for placeables the catalog files under the "plant" category (rose, imperial_seed, and
 ## any plant added later). The nighttime placement ban keys off this category so a new plant
 ## is covered by the rule the moment it is added to the catalog.
@@ -753,7 +791,7 @@ static func get_house_build_item_ids() -> Array[StringName]:
 			continue
 		if StringName(item_def.get("special_placement_kind", &"")) == &"house":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"house_builder", &"house_merchant", &"house_inventor"])
+	return _ordered_known_first(ids, [&"house_builder", &"house_merchant", &"house_inventor", &"house_sheep"])
 
 static func get_tool_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = get_gardening_shop_item_ids()

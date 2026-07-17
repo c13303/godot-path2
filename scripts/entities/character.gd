@@ -36,8 +36,8 @@ var status: String = ""
 @export var max_health: int = 100
 # Invincible agents never lose HP and never show a health bar. On by default so
 # any new agent kind is safe; only monsters/bigmonsters clear it (see
-# AgentDefinitionService.apply_monster_data). A client mid-tantrum is the one
-# exception that is still damageable — see _is_currently_damageable().
+# AgentDefinitionService.apply_monster_data). Clients are the exception: they stay
+# damageable mid-tantrum and while drowning — see _is_currently_damageable().
 @export var invincible: bool = true
 @export var drownable: bool = true
 @export_range(0.0, 60.0, 0.1, "or_greater") var drowning: float = 1.0
@@ -382,11 +382,17 @@ func _is_client_agent() -> bool:
 	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client"
 
 
-# An invincible agent never loses HP, with one exception: a client mid-tantrum
-# ("angry") is temporarily damageable so a hostile crowd can be fought. This single
-# predicate drives both take_damage and health-bar visibility so they never disagree.
+# An invincible agent never loses HP, with two client-only exceptions: a client
+# mid-tantrum ("angry") is temporarily damageable so a hostile crowd can be fought,
+# and a drowning client is damageable so deep water actually kills it instead of
+# holding it suspended forever. This single predicate drives both take_damage and
+# health-bar visibility so they never disagree.
 func _is_currently_damageable() -> bool:
-	return not invincible or status == "angry"
+	if not invincible:
+		return true
+	if status == "angry":
+		return true
+	return status == "drowning" and _is_client_agent()
 
 # Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the

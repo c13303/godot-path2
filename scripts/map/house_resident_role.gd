@@ -8,6 +8,10 @@ class_name HouseResidentRole
 ## lifecycle events — e.g. the seed merchant's shop-phase flag — without re-implementing any
 ## movement. Ordinary villagers with no special behaviour register no role.
 ##
+## A role whose villager works away from its idle spot (SheepGardenRole) drives it through the
+## controller's send_on_errand() and reacts to on_reached_spot(); it still never touches pathing,
+## the night return or removal.
+##
 ## All hooks default to no-ops. The `resident` argument is the owning HouseResidentController,
 ## so a role can read the live agent node / world position / waiting state through it.
 
@@ -21,7 +25,8 @@ func on_spawned(_resident: HouseResidentController) -> void:
 	pass
 
 
-## The resident finished walking in and is parked at its idle spot.
+## The resident finished a walk and is now parked: at its idle spot after walking in, or at
+## whatever cell a role errand (send_on_errand) sent it to.
 func on_reached_spot(_resident: HouseResidentController) -> void:
 	pass
 
@@ -41,8 +46,8 @@ func on_cleared() -> void:
 	pass
 
 
-## Per-frame agent-pass hook (role-specific interaction proximity).
-func process(_resident: HouseResidentController) -> void:
+## Per-frame agent-pass hook (role-specific interaction proximity, errand/work timers).
+func process(_resident: HouseResidentController, _delta: float) -> void:
 	pass
 
 
