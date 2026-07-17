@@ -1017,6 +1017,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	# against the live item at its layer/cell. Older saves have no section (no
 	# provenance is inferred for them).
 	_restore_player_placeable_durability(scene, data.get("player_placeable_durability", []))
+	_resync_restored_terrain_speed(scene)
 	var raw_runtime_simulation: Variant = data.get("runtime_simulation", {})
 	var has_phase_resume_state: bool = raw_runtime_simulation is Dictionary and not (raw_runtime_simulation as Dictionary).is_empty()
 	var gameplay_phase: String = str(data.get("gameplay_phase", ""))
@@ -1421,6 +1422,14 @@ func _reindex_loaded_layers(scene: Node, raw_runtime_placeables: Variant = []) -
 	if fight_system and fight_system.has_method("refresh_projectile_walls"):
 		fight_system.call("refresh_projectile_walls")
 		_log("Projectile static colliders refreshed")
+
+
+func _resync_restored_terrain_speed(scene: Node) -> void:
+	var building_manager: Node = scene.get_node_or_null("Map/BuildingManager") if scene != null else null
+	if building_manager == null or not building_manager.has_method("resync_terrain_speed_after_world_restore"):
+		return
+	building_manager.call("resync_terrain_speed_after_world_restore")
+	_log("Terrain speed channels rebuilt from restored world")
 
 
 func _validate_save(data: Dictionary) -> String:

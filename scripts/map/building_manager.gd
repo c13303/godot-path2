@@ -1113,6 +1113,15 @@ func refresh_runtime_cell_speed(cell: Vector2i) -> void:
 func get_terrain_speed_modifier_service() -> RefCounted:
 	return _terrain_speed_modifier
 
+
+## Rebuilds native terrain-speed channels from the fully restored world snapshot. Progression
+## calls this after replacing saved layers and restoring logical runtime records; startup's
+## earlier terrain upload only saw the scene-authored state.
+func resync_terrain_speed_after_world_restore() -> void:
+	_building_navigation_sync.sync_all_terrain_speed_cells()
+	if _bamboo_harvest_controller != null:
+		_bamboo_harvest_controller.refresh_terrain_slowdowns()
+
 # Plant additions are phase-agnostic: they only dirty the plant layout, and the budgeted
 # invalidation pipeline rebuilds garden topology and retargets agents later (see
 # BuildingInvalidationController._start_runtime_plant_layout_rebuild, which runs every frame

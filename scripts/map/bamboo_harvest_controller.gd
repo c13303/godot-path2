@@ -161,6 +161,14 @@ func _register_terrain_slowdown(cell: Vector2i) -> void:
 	_navigation_sync.set_static_terrain_speed_multiplier(cell, TERRAIN_SPEED_MULTIPLIER, PLAYER_TERRAIN_SPEED_MULTIPLIER)
 
 
+## Re-publishes controller-owned terrain contributions after a bulk terrain-channel rebuild.
+## Save restoration replaces world layers and rebuilds their composed speed map; that rebuild
+## deliberately clears every prior source, including these authored bamboo entries.
+func refresh_terrain_slowdowns() -> void:
+	for record: BambooRecord in _records:
+		_register_terrain_slowdown(record.cell)
+
+
 func _cell_center_world(cell: Vector2i) -> Vector2:
 	if _floor_layer == null:
 		return Vector2.ZERO
