@@ -17,6 +17,7 @@ signal dawn_phase_changed(is_dawn_phase: bool)
 signal morning_phase_changed(is_morning_phase: bool)
 signal client_phase_changed(is_client_phase: bool)
 signal seed_merchant_phase_changed(is_seed_merchant_phase: bool)
+signal run_won_changed(is_won: bool)
 
 ## The single authoritative owner of the run's broad phase. Narrow flags such as
 ## `is_client_phase` and `is_seed_merchant_phase` describe activity within it.
@@ -114,7 +115,10 @@ func set_reservoir_destroyed(value: bool) -> void:
 
 
 func set_run_won(value: bool) -> void:
+	if is_run_won == value:
+		return
 	is_run_won = value
+	run_won_changed.emit(is_run_won)
 
 
 func set_client_phase(value: bool) -> void:

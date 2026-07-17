@@ -30,6 +30,7 @@ var _manager: BuildingManager = null
 var _active_contacts: Dictionary = {}
 
 var _debug_stomp: int = 0
+var _debug_plant_contact_evaluations: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -110,17 +111,21 @@ func clear() -> void:
 func refresh_contact_dance(agent: Node2D, category: StringName, cell: Vector2i) -> void:
 	if _manager == null or agent == null or not is_instance_valid(agent):
 		return
+	if CppDebugOptions.logs_enabled:
+		_debug_plant_contact_evaluations += 1
 	_manager.update_agent_plant_contact(agent, category, cell)
 
 
 func reset_debug_counters() -> void:
 	_debug_stomp = 0
+	_debug_plant_contact_evaluations = 0
 
 
 func debug_stats() -> Dictionary:
 	return {
 		"stomp": _debug_stomp,
 		"active_stomp_contacts": _active_contacts.size(),
+		"plant_contact_evaluations": _debug_plant_contact_evaluations,
 	}
 
 

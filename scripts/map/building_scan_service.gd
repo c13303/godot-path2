@@ -106,9 +106,8 @@ func scan_buildings() -> void:
 			_manager._remove_missing_scanned_spawner(cell)
 
 	if hard_topology_changed:
-		# Fallback path only: authoritative placement/removal already marks topology on the
-		# event. resync_topology_signatures() (called at rebuild start) keeps this baseline
-		# current so one authoritative wall mutation cannot rebuild a second time here.
+		# Bootstrap/manual-verification path only. Runtime placement/removal uses the
+		# authoritative invalidation events and never calls this scan.
 		_manager.get_building_invalidation_controller().mark_after_building_scan_changed()
 		CppDebugOptions.dlog("[NAV_INVALIDATION] impact=HARD_TOPOLOGY source=building_scan")
 
@@ -257,9 +256,8 @@ func _blocking_cell_item_id(layer: TileMapLayer, cell: Vector2i, building_object
 	return ItemCatalog.get_placeable_id_for_tile(str(layer.name), layer.get_cell_atlas_coords(cell))
 
 
-# Recompute and store the hard-topology baselines from the current tile state. Called at
-# the start of an authoritative topology rebuild so the next periodic scan sees no change
-# and cannot rebuild a second time for a mutation already handled by the event path.
+# Manual verification helper retained for compatibility with external debug tooling.
+# Ordinary runtime code has no caller because there is no periodic consistency scan.
 func resync_topology_signatures() -> void:
 	_last_wall_signature = tile_layer_signature(_wallz())
 	_last_water_signature = tile_layer_signature(_watersources())

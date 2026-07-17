@@ -18,6 +18,7 @@ const CONTACT_SWAY_SPEED: float = 1.1
 const CONTACT_BREATHE_AMOUNT: float = 0.05
 const CONTACT_BREATHE_SPEED: float = 1.4
 const CONTACT_BOB_PIXELS: float = 1.0
+const CONTACT_DANCE_DURATION: float = 0.16
 
 @export var plant_manager_path: NodePath
 @export var plantz_path: NodePath

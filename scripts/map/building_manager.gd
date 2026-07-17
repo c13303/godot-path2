@@ -324,7 +324,7 @@ func _ready() -> void:
 	_setup_bamboo_harvest_controller()
 	var player: Node2D = get_tree().get_first_node_in_group(&"player") as Node2D
 	if player != null:
-		_agent_cell_tracker.register(player, &"player")
+		_agent_cell_tracker.register(player, &"player", true)
 	_wait_for_flow_ready()
 	GameState.mode_changed.connect(_on_game_mode_changed)
 	GameState.afternoon_phase_changed.connect(_on_afternoon_phase_changed)

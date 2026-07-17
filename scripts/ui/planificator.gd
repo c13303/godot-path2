@@ -11,7 +11,7 @@ const FOCUS_ICON_SIZE: Vector2 = Vector2(72.0, 72.0)
 const PANEL_WIDTH: float = 210.0
 const NORMAL_FONT_SIZE: int = 11
 const FOCUS_FONT_SIZE: int = 24
-const LIVE_REFRESH_SECONDS: float = 0.15
+const FALLBACK_REFRESH_SECONDS: float = 1.0
 const SLOT_COUNT: int = 2
 # Fallback icon for a monster type with no catalog texture; clients use their own sheet.
 # Numeric font theme for the per-type count readout (icon + count), distinct from body text.
@@ -28,9 +28,17 @@ const KEY_VICTORY: String = "planificator.victory"
 
 var _slot_labels: Array[Label] = []
 var _slot_rows: Array[VBoxContainer] = []
+var _slot_row_views: Array[Dictionary] = []
 var _resolver: PlanificatorTimelineResolver = PlanificatorTimelineResolver.new()
 var _icon_cache: Dictionary = {}
 var _live_refresh_elapsed: float = 0.0
+var _last_model_signature: String = ""
+var _has_model_signature: bool = false
+var _runtime_signals_connected: bool = false
+var _initial_model_published: bool = false
+var _debug_model_evaluations: int = 0
+var _debug_ui_updates: int = 0
+var _debug_node_creations_after_initialization: int = 0
 # Coalesces the several game-state signals emitted during one day/night transition into a
 # single deferred refresh, so the visual model is only resolved once the transition stack
 # has fully settled (see _queue_refresh).
@@ -49,7 +57,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_live_refresh_elapsed += delta
-	if _live_refresh_elapsed < LIVE_REFRESH_SECONDS:
+	if _live_refresh_elapsed < FALLBACK_REFRESH_SECONDS:
 		return
 	_live_refresh_elapsed = 0.0
 	_refresh()
@@ -60,6 +68,7 @@ func _build_ui() -> void:
 		child.queue_free()
 	_slot_labels.clear()
 	_slot_rows.clear()
+	_slot_row_views.clear()
 
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "Panel"
@@ -97,8 +106,9 @@ func _build_ui() -> void:
 		rows.add_theme_constant_override("separation", 3)
 		content.add_child(rows)
 		_slot_rows.append(rows)
-
-	_set_mouse_filter_recursive(self)
+		_slot_row_views.append({})
+	_precreate_row_views()
+	_initial_model_published = true
 
 
 func _make_section_label(font_size: int) -> Label:
@@ -111,6 +121,8 @@ func _make_section_label(font_size: int) -> Label:
 func _connect_refresh_signals() -> void:
 	if not GameState.gameplay_phase_changed.is_connected(_on_gameplay_phase_changed):
 		GameState.gameplay_phase_changed.connect(_on_gameplay_phase_changed)
+	if not GameState.run_won_changed.is_connected(_on_run_won_changed):
+		GameState.run_won_changed.connect(_on_run_won_changed)
 	if not Translations.locale_changed.is_connected(_on_locale_changed):
 		Translations.locale_changed.connect(_on_locale_changed)
 	var progression: Node = _get_progression()
@@ -118,9 +130,18 @@ func _connect_refresh_signals() -> void:
 		var callback: Callable = Callable(self, "_on_day_started")
 		if not progression.is_connected(&"day_started", callback):
 			progression.connect(&"day_started", callback)
+	if progression != null and progression.has_signal(&"values_changed"):
+		var values_callback: Callable = Callable(self, "_on_progression_values_changed")
+		if not progression.is_connected(&"values_changed", values_callback):
+			progression.connect(&"values_changed", values_callback)
+	_connect_runtime_signals()
 
 
 func _on_gameplay_phase_changed(_phase: int) -> void:
+	_queue_refresh()
+
+
+func _on_run_won_changed(_is_won: bool) -> void:
 	_queue_refresh()
 
 
@@ -130,6 +151,26 @@ func _on_day_started(_day_number: int) -> void:
 
 func _on_locale_changed(_locale: String) -> void:
 	_queue_refresh()
+
+
+func _on_progression_values_changed() -> void:
+	_queue_refresh()
+
+
+func _on_planificator_data_changed() -> void:
+	_queue_refresh()
+
+
+func _connect_runtime_signals() -> void:
+	if _runtime_signals_connected:
+		return
+	var building_manager: Node = _get_building_manager()
+	if building_manager == null or not building_manager.has_signal(&"planificator_data_changed"):
+		return
+	var callback: Callable = Callable(self, "_on_planificator_data_changed")
+	if not building_manager.is_connected(&"planificator_data_changed", callback):
+		building_manager.connect(&"planificator_data_changed", callback)
+	_runtime_signals_connected = true
 
 
 # Signal-driven refreshes are coalesced: a day/night transition emits several phase
@@ -152,6 +193,9 @@ func _run_queued_refresh() -> void:
 func _refresh() -> void:
 	if _slot_rows.size() < SLOT_COUNT or _slot_labels.size() < SLOT_COUNT:
 		return
+	_connect_runtime_signals()
+	if CppDebugOptions.logs_enabled:
+		_debug_model_evaluations += 1
 	# Resolve and validate the complete model BEFORE touching the visible sections, so the
 	# UI is never progressively cleared and repopulated while the timeline is being decided.
 	var playlist: LevelSpawnPlaylist = _get_playlist()
@@ -160,15 +204,19 @@ func _refresh() -> void:
 		# Dependency temporarily missing or an invalid partial model: keep the previous
 		# valid display and retry on the next deferred/polled refresh.
 		return
+	var signature: String = _display_model_signature(slots)
+	if _has_model_signature and signature == _last_model_signature:
+		return
+	_last_model_signature = signature
+	_has_model_signature = true
+	if CppDebugOptions.logs_enabled:
+		_debug_ui_updates += 1
 	visible = true
-	for rows: VBoxContainer in _slot_rows:
-		_clear_rows(rows)
 	for slot_index: int in range(SLOT_COUNT):
 		if slot_index < slots.size():
 			_render_slot(slot_index, slots[slot_index] as PlanificatorTimelineResolver.TimelineSlot, slot_index == 0)
 		else:
 			_hide_slot(slot_index)
-	_set_mouse_filter_recursive(self)
 	if playlist != null:
 		_has_published_valid = true
 
@@ -233,12 +281,20 @@ func _render_slot(slot_index: int, slot: PlanificatorTimelineResolver.TimelineSl
 		# Victory carries a label but no rows.
 		label.visible = true
 		rows.visible = false
+		_hide_unused_row_views(slot_index, {})
 		return
 
 	rows.add_theme_constant_override("separation", 8 if focused else 3)
+	var used_types: Dictionary = {}
+	var row_index: int = 0
 	for row: PlanificatorTimelineResolver.TimelineRow in slot.rows:
-		_add_row(rows, row.agent_type, row.count, focused)
-	var has_rows: bool = rows.get_child_count() > 0
+		if row.count <= 0:
+			continue
+		used_types[row.agent_type] = true
+		_update_row(slot_index, row_index, row.agent_type, row.count, focused)
+		row_index += 1
+	_hide_unused_row_views(slot_index, used_types)
+	var has_rows: bool = row_index > 0
 	label.visible = has_rows
 	rows.visible = has_rows
 
@@ -246,6 +302,7 @@ func _render_slot(slot_index: int, slot: PlanificatorTimelineResolver.TimelineSl
 func _hide_slot(slot_index: int) -> void:
 	_slot_labels[slot_index].visible = false
 	_slot_rows[slot_index].visible = false
+	_hide_unused_row_views(slot_index, {})
 
 
 func _slot_label_text(kind: StringName) -> String:
@@ -259,11 +316,6 @@ func _slot_label_text(kind: StringName) -> String:
 		PlanificatorTimelineResolver.SLOT_VICTORY:
 			return Translations.t(KEY_VICTORY)
 	return ""
-
-
-func _clear_rows(container: VBoxContainer) -> void:
-	for child: Node in container.get_children():
-		child.queue_free()
 
 
 func _remaining_client_count() -> int:
@@ -346,21 +398,37 @@ func _get_progression() -> Node:
 	return scene.get_node_or_null("progression")
 
 
-func _add_row(container: VBoxContainer, agent_type: StringName, count: int, large: bool = false) -> void:
-	if count <= 0:
-		return
+func _update_row(slot_index: int, row_index: int, agent_type: StringName, count: int, large: bool) -> void:
+	var container: VBoxContainer = _slot_rows[slot_index]
+	var views: Dictionary = _slot_row_views[slot_index] as Dictionary
+	var view: Dictionary = views.get(agent_type, {}) as Dictionary
+	if view.is_empty():
+		view = _create_row_view(container)
+		views[agent_type] = view
+		_slot_row_views[slot_index] = views
+	var row: HBoxContainer = view.get("row", null) as HBoxContainer
+	var icon: TextureRect = view.get("icon", null) as TextureRect
+	var count_label: Label = view.get("count_label", null) as Label
 	var icon_size: Vector2 = FOCUS_ICON_SIZE if large else ICON_SIZE
 	var font_size: int = FOCUS_FONT_SIZE if large else NORMAL_FONT_SIZE
-	var row: HBoxContainer = HBoxContainer.new()
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.visible = true
 	row.custom_minimum_size = Vector2(0.0, icon_size.y)
 	row.add_theme_constant_override("separation", 9 if large else 6)
+	icon.custom_minimum_size = icon_size
+	icon.texture = _get_icon(agent_type)
+	count_label.text = "X %d" % count
+	count_label.add_theme_font_size_override("font_size", font_size)
+	container.move_child(row, row_index)
+
+
+func _create_row_view(container: VBoxContainer) -> Dictionary:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.visible = false
 	container.add_child(row)
 
 	var icon: TextureRect = TextureRect.new()
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.custom_minimum_size = icon_size
-	icon.texture = _get_icon(agent_type)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	row.add_child(icon)
@@ -368,10 +436,57 @@ func _add_row(container: VBoxContainer, agent_type: StringName, count: int, larg
 	var count_label: Label = Label.new()
 	count_label.theme = NUMBER_THEME
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	count_label.text = "X %d" % count
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	count_label.add_theme_font_size_override("font_size", font_size)
 	row.add_child(count_label)
+	if _initial_model_published:
+		_debug_node_creations_after_initialization += 3
+	return {
+		"row": row,
+		"icon": icon,
+		"count_label": count_label,
+	}
+
+
+func _precreate_row_views() -> void:
+	var agent_types: Array[StringName] = MonsterCatalog.get_ids()
+	agent_types.append(PlanificatorTimelineResolver.CLIENT_AGENT)
+	for slot_index: int in range(SLOT_COUNT):
+		var views: Dictionary = _slot_row_views[slot_index] as Dictionary
+		for agent_type: StringName in agent_types:
+			views[agent_type] = _create_row_view(_slot_rows[slot_index])
+		_slot_row_views[slot_index] = views
+
+
+func _hide_unused_row_views(slot_index: int, used_types: Dictionary) -> void:
+	var views: Dictionary = _slot_row_views[slot_index] as Dictionary
+	for raw_type: Variant in views:
+		if used_types.has(raw_type):
+			continue
+		var view: Dictionary = views[raw_type] as Dictionary
+		var row: HBoxContainer = view.get("row", null) as HBoxContainer
+		if row != null:
+			row.visible = false
+
+
+func _display_model_signature(slots: Array) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	for slot_index: int in range(SLOT_COUNT):
+		if slot_index >= slots.size():
+			parts.append("hidden")
+			continue
+		var slot: PlanificatorTimelineResolver.TimelineSlot = slots[slot_index] as PlanificatorTimelineResolver.TimelineSlot
+		parts.append("%s|%s|%s" % [String(slot.kind), _slot_label_text(slot.kind), str(slot.is_victory)])
+		for row: PlanificatorTimelineResolver.TimelineRow in slot.rows:
+			parts.append("%s=%d" % [String(row.agent_type), row.count])
+	return ";".join(parts)
+
+
+func performance_debug_stats() -> Dictionary:
+	return {
+		"model_evaluations": _debug_model_evaluations,
+		"ui_updates": _debug_ui_updates,
+		"node_creations_after_initialization": _debug_node_creations_after_initialization,
+	}
 
 
 # Resolve a row icon generically. Clients use their own sheet; every other agent_type is a
@@ -402,11 +517,3 @@ func _get_icon(agent_type: StringName) -> Texture2D:
 func _first_frame_region(texture: Texture2D, hframes: int) -> Rect2:
 	var frame_width: float = float(texture.get_width()) / float(maxi(1, hframes))
 	return Rect2(0.0, 0.0, frame_width, float(texture.get_height()))
-
-
-func _set_mouse_filter_recursive(node: Node) -> void:
-	if node is Control:
-		var control: Control = node as Control
-		control.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for child: Node in node.get_children():
-		_set_mouse_filter_recursive(child)

@@ -38,6 +38,7 @@ var _debug_invalidations: int = 0
 var _debug_continuous_water_checks: int = 0
 var _debug_state_exit_rechecks: int = 0
 var _debug_removed_water_candidates: int = 0
+var _debug_contact_conversions_avoided: int = 0
 var _pending_debug_invalidations: int = 0
 var _pending_debug_state_exit_rechecks: int = 0
 
@@ -47,7 +48,7 @@ func setup(manager: BuildingManager) -> void:
 	_interactions.setup(manager)
 
 
-func register(agent: Node2D, category: StringName) -> void:
+func register(agent: Node2D, category: StringName, contact_only: bool = false) -> void:
 	if agent == null or not is_instance_valid(agent):
 		return
 	var id: int = agent.get_instance_id()
@@ -57,6 +58,7 @@ func register(agent: Node2D, category: StringName) -> void:
 		"ref": weakref(agent),
 		"category": category,
 		"cell": INVALID_CELL,
+		"contact_only": contact_only,
 	}
 	refresh_agent(agent)
 
@@ -133,7 +135,8 @@ func refresh_agent(agent: Node2D) -> void:
 		record["cell"] = cell
 		reason = RECHECK_CELL_ENTERED
 	_enqueue(id, reason)
-	_refresh_water_candidate_membership(id, agent, cell)
+	if not bool(record.get("contact_only", false)):
+		_refresh_water_candidate_membership(id, agent, cell)
 
 
 func registered_count() -> int:
@@ -178,6 +181,7 @@ func process(delta: float) -> void:
 		_debug_continuous_water_checks = 0
 		_debug_state_exit_rechecks = _pending_debug_state_exit_rechecks
 		_debug_removed_water_candidates = 0
+		_debug_contact_conversions_avoided = 0
 		_pending_debug_invalidations = 0
 		_pending_debug_state_exit_rechecks = 0
 	else:
@@ -207,6 +211,14 @@ func invalidate_cells(cells: Array[Vector2i]) -> void:
 
 # Wipe all state on level unload / bulk agent clear (e.g. save load).
 func clear() -> void:
+	var preserved_player: Node2D = null
+	for raw_record: Variant in _agents.values():
+		var record: Dictionary = raw_record as Dictionary
+		if (record.get("category", &"") as StringName) != &"player":
+			continue
+		var player_ref: WeakRef = record.get("ref", null) as WeakRef
+		preserved_player = player_ref.get_ref() as Node2D if player_ref != null else null
+		break
 	_agents.clear()
 	_cell_to_agents.clear()
 	_water_candidates.clear()
@@ -220,6 +232,8 @@ func clear() -> void:
 		_manager.clear_all_plant_contacts()
 	_pending_debug_invalidations = 0
 	_pending_debug_state_exit_rechecks = 0
+	if preserved_player != null and is_instance_valid(preserved_player):
+		register(preserved_player, &"player", true)
 
 
 func debug_stats() -> Dictionary:
@@ -234,6 +248,7 @@ func debug_stats() -> Dictionary:
 		"state_exit_rechecks": _debug_state_exit_rechecks,
 		"stale_water_candidates_removed": _debug_removed_water_candidates,
 		"drowning": _debug_drowning_checks,
+		"duplicate_contact_conversions_avoided": _debug_contact_conversions_avoided,
 	}
 	var by_type: Dictionary = _interactions.debug_stats()
 	for key: Variant in by_type.keys():
@@ -263,9 +278,12 @@ func _poll_transitions() -> void:
 			_reindex(id, last_cell, cell)
 			record["cell"] = cell
 			_enqueue(id, RECHECK_CELL_ENTERED)
-			_refresh_water_candidate_membership(id, agent, cell)
+			if not bool(record.get("contact_only", false)):
+				_refresh_water_candidate_membership(id, agent, cell)
 			if debug:
 				_debug_transitions += 1
+		elif debug:
+			_debug_contact_conversions_avoided += 1
 	for id: int in dead:
 		_remove_id(id)
 
@@ -289,9 +307,13 @@ func _drain_queue(delta: float) -> void:
 		var category: StringName = record["category"] as StringName
 		var cell: Vector2i = record["cell"] as Vector2i
 		var reasons: int = int(_queued_reasons.get(id, RECHECK_STATE_CHANGED))
-		_interactions.evaluate(agent, category, cell, reasons)
+		if bool(record.get("contact_only", false)):
+			_manager.update_agent_plant_contact(agent, category, cell)
+		else:
+			_interactions.evaluate(agent, category, cell, reasons)
 		_general_checked_this_frame[id] = true
-		_apply_water_result(id, agent, _evaluate_water_state(agent, cell, delta))
+		if not bool(record.get("contact_only", false)):
+			_apply_water_result(id, agent, _evaluate_water_state(agent, cell, delta))
 		if debug:
 			_debug_general_checks += 1
 	_queue.clear()

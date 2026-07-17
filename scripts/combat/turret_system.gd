@@ -386,7 +386,8 @@ func _target_for_turret(turret_cell: Vector2i, state: Dictionary, origin: Vector
 	if float(state.get("acquisition_wait", 0.0)) > 0.0:
 		return null
 	state["acquisition_wait"] = maxf(0.02, target_acquisition_interval)
-	_debug_acquisition_scans += 1
+	if CppDebugOptions.logs_enabled:
+		_debug_acquisition_scans += 1
 	var target: Node2D = null
 	if bool(state.get("straight_line_detection", false)):
 		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
@@ -414,7 +415,8 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 	var tile_size: float = _tile_size_pixels(layer)
 	var max_steps: int = ceili(activation_range / maxf(1.0, tile_size))
 	var candidates: Array[Node2D] = _nearby_monsters(origin, activation_range)
-	_debug_spatial_candidates += candidates.size()
+	if CppDebugOptions.logs_enabled:
+		_debug_spatial_candidates += candidates.size()
 	for enemy: Node2D in candidates:
 		if not _is_targetable_monster(enemy):
 			continue
@@ -425,7 +427,8 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 			continue
 		if origin.distance_squared_to(enemy.global_position) > activation_range * activation_range:
 			continue
-		_debug_los_checks += 1
+		if CppDebugOptions.logs_enabled:
+			_debug_los_checks += 1
 		if not _turret_can_see_world_position(turret_cell, enemy.global_position):
 			continue
 		nearest = enemy
@@ -447,14 +450,16 @@ func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_
 	var nearest: Node2D = null
 	var nearest_distance_squared: float = activation_range * activation_range
 	var candidates: Array[Node2D] = _nearby_monsters(origin, activation_range)
-	_debug_spatial_candidates += candidates.size()
+	if CppDebugOptions.logs_enabled:
+		_debug_spatial_candidates += candidates.size()
 	for enemy: Node2D in candidates:
 		if not _is_targetable_monster(enemy):
 			continue
 		var distance_squared: float = origin.distance_squared_to(enemy.global_position)
 		if distance_squared > nearest_distance_squared:
 			continue
-		_debug_los_checks += 1
+		if CppDebugOptions.logs_enabled:
+			_debug_los_checks += 1
 		if _turret_can_see_world_position(turret_cell, enemy.global_position):
 			nearest = enemy
 			nearest_distance_squared = distance_squared
@@ -463,7 +468,8 @@ func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_
 
 func _nearby_monsters(origin: Vector2, activation_range: float) -> Array[Node2D]:
 	if _agent_tracker == null:
-		return []
+		var empty: Array[Node2D] = []
+		return empty
 	return _agent_tracker.get_agents_in_world_radius(origin, activation_range, &"monsters")
 
 
@@ -485,12 +491,15 @@ func _target_is_valid_for_turret(target: Node2D, turret_cell: Vector2i, state: D
 		var target_cell: Vector2i = layer.local_to_map(layer.to_local(target.global_position))
 		if _line_step_for_offset(target_cell - turret_cell, direction) <= 0:
 			return false
-	_debug_los_checks += 1
+	if CppDebugOptions.logs_enabled:
+		_debug_los_checks += 1
 	return _turret_can_see_world_position(turret_cell, target.global_position)
 
 
 func _is_targetable_monster(target: Node2D) -> bool:
 	if target == null or not is_instance_valid(target) or target.is_queued_for_deletion():
+		return false
+	if not target.is_in_group(&"monsters"):
 		return false
 	return not (target.has_method("is_external_capture_active") and bool(target.call("is_external_capture_active")))
 
