@@ -84,6 +84,10 @@ const COUNTER_ITEM_ID: String = "rose_shop_counter"
 const WALL_ITEM_ID: String = "wall"
 const HOUSE_BUILDER_ITEM_ID: String = "house_builder"
 const HOUSE_MERCHANT_ITEM_ID: String = "house_merchant"
+## Returned by _rose_shop_counter_count when the building manager is not resolved yet. It is
+## not zero: zero is the authoritative answer "the player owns no counter", which drives the
+## "place the shop" step, whereas unknown must show nothing at all.
+const COUNTER_COUNT_UNKNOWN: int = -1
 
 ## When the hint switches messages it first blanks out for this long, so each
 ## new instruction reads as a distinct prompt rather than a silent swap.
@@ -117,10 +121,6 @@ var _tutorial_arrow: TutorialArrow
 var _tutorial_world_arrow: TutorialWorldArrow
 var _text_animator: TutorialTextAnimator = TutorialTextAnimator.new()
 var _has_planted_turret_epine: bool = false
-# True once the player has placed their first rose shop counter. Latches the one-time
-# "place the shop" dawn step off for the rest of the run. Re-derived from the world on
-# _resolve_nodes, so a loaded save with counters already built never shows the step again.
-var _has_placed_rose_shop_counter: bool = false
 # Wall stock captured the first time the day-1 wall step is evaluated. The step is skipped
 # once the current stock drops below this, i.e. as soon as one starting wall is placed.
 var _wall_stock_baseline: int = -1
@@ -165,12 +165,12 @@ func _resolve_nodes() -> void:
 			if _building_object_manager.has_method("count_buildings_by_item_id") \
 					and int(_building_object_manager.call("count_buildings_by_item_id", TURRET_EPINE_ITEM_ID)) > 0:
 				_has_planted_turret_epine = true
-			if _building_object_manager.has_method("count_buildings_by_item_id") \
-					and int(_building_object_manager.call("count_buildings_by_item_id", COUNTER_ITEM_ID)) > 0:
-				_has_placed_rose_shop_counter = true
 			if _building_object_manager.has_signal("building_added") \
 					and not _building_object_manager.is_connected("building_added", Callable(self, "_on_building_added")):
 				_building_object_manager.connect("building_added", Callable(self, "_on_building_added"))
+			if _building_object_manager.has_signal("building_removed") \
+					and not _building_object_manager.is_connected("building_removed", Callable(self, "_on_building_removed")):
+				_building_object_manager.connect("building_removed", Callable(self, "_on_building_removed"))
 		_player_controller = scene.get_node_or_null("Player/PlayerController")
 		_progression = scene.get_node_or_null("progression")
 		_game_ui = scene.get_node_or_null("GameUI")
@@ -260,7 +260,13 @@ func _on_building_added(_cell: Vector2i, item_id: String) -> void:
 		_has_planted_turret_epine = true
 		_refresh()
 	elif item_id == COUNTER_ITEM_ID:
-		_has_placed_rose_shop_counter = true
+		_refresh()
+
+
+## Counters are counted live off the building system, so removal keeps no state here: the
+## signal only invalidates the hint, which then re-reads the current count.
+func _on_building_removed(_cell: Vector2i, item_id: String) -> void:
+	if item_id == COUNTER_ITEM_ID:
 		_refresh()
 
 
@@ -513,11 +519,14 @@ func _current_message_key() -> String:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			if _has_counter_room_for_harvest():
 				return KEY_HARVEST_ROSE
-			# Counters all full: nudge to add more, unless the player has never placed one,
-			# in which case the real next step is the one-time "place the shop" step.
-			if _should_prompt_place_shop():
+			# No room to harvest into. Which step that means depends on how many counters
+			# exist right now, never on whether one existed earlier in the run.
+			var counter_count: int = _rose_shop_counter_count()
+			if counter_count == 0:
 				return KEY_PLACE_SHOP
-			return KEY_ADD_COUNTERS_TO_SELL_ROSES
+			if counter_count > 0:
+				return KEY_ADD_COUNTERS_TO_SELL_ROSES
+			return ""
 		if _client_sale_requested_without_roses():
 			return KEY_NO_ROSES_NO_CLIENTS
 		if not _client_sale_start_requested() and _should_prompt_place_shop():
@@ -871,11 +880,21 @@ func _build_affordable_quantity(item_id: String) -> int:
 	return int(_game_ui.call("get_build_affordable_quantity", item_id))
 
 
-## One-time dawn step: the shop prompt runs until the player places their first rose
-## counter, then never comes back for the rest of the run. It belongs to dawn only,
-## before the client sale: the afternoon build phase must not raise it.
+## Rose shop counters that exist in the world right now, or COUNTER_COUNT_UNKNOWN while the
+## building manager is not resolved yet. Counters are never tracked here: the building system
+## owns that state, and a counter the player removes must lower this count again.
+func _rose_shop_counter_count() -> int:
+	if _building_manager == null or not _building_manager.has_method("rose_shop_counter_count"):
+		return COUNTER_COUNT_UNKNOWN
+	return int(_building_manager.call("rose_shop_counter_count"))
+
+
+## Dawn step: the player has no counter at all, so building the first one is the current
+## requirement. Not a one-time step — removing the last counter brings it back. It belongs to
+## dawn only, before the client sale: the afternoon build phase must not raise it. An unknown
+## count suppresses the step rather than guessing either way.
 func _should_prompt_place_shop() -> bool:
-	return not _has_placed_rose_shop_counter
+	return _rose_shop_counter_count() == 0
 
 
 ## Day-1 only: any of the guided build steps (wall / watermelon / spitter) is still pending.
