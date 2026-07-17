@@ -4,6 +4,11 @@ signal inventory_changed
 # Emitted when the unbuild tool is equipped/unequipped so the build frame overlay can
 # follow the selection without polling (see build_frame.gd).
 signal unbuild_selection_changed(active: bool)
+# Emitted when the equipped buildable changes (including when it self-heals to none because it
+# stopped being usable), so the build frame overlay can follow it without polling. Mirrors
+# unbuild_selection_changed; build_frame.gd recomputes from the queries rather than trusting
+# either payload, because the two selections change independently.
+signal build_selection_changed(active: bool)
 
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const INVENTORY_SLOT_COUNT: int = 32
@@ -221,7 +226,8 @@ func activate_quickbar_slot(index: int) -> void:
 	# buildable again, or close the menu back to weapon mode. Without this the ghost of the
 	# previously placed tool lingered under the freshly opened menu.
 	if kind in BUILD_TOOL_IDS:
-		selected_build_item_id = ""
+		_set_selected_build_item_id("")
+	_notify_build_selection_changed()
 	_refresh_all_slots()
 
 ## Closes the quickbar back to play mode (menus closed, no labels).
@@ -230,6 +236,7 @@ func deactivate_quickbar() -> void:
 		return
 	quickbar_active = false
 	active_slot_index = -1
+	_notify_build_selection_changed()
 	_refresh_all_slots()
 
 func is_quickbar_active() -> bool:
@@ -359,28 +366,63 @@ func is_item_disabled_for_placement(item_id: String) -> bool:
 
 # --- Build menu state --------------------------------------------------------
 
+## The single authoritative "may this buildable be equipped, and stay equipped, right now" rule:
+## the level/progression offers it, the current phase allows placing it, and the player can still
+## pay for at least one. Every selection path (picker, gamepad, tutorial, self-heal) asks this, so
+## an unusable buildable is never left in hand. Previously this same trio of checks was spelled out
+## separately in select_build_item_for_tool, the ghost-preview gate and the build-mode state query.
+func is_build_item_usable(item_id: String) -> bool:
+	if item_id == "":
+		return false
+	return (
+		is_build_item_available(item_id)
+		and not is_item_disabled_for_placement(item_id)
+		and can_afford_build(item_id, 1)
+	)
+
+## The one place selected_build_item_id is written. Emits only on a real change, so the
+## self-heal below can run from a getter without re-entering: by emit time the field already
+## holds the new value, and a listener that reads back through get_selected_build_item_id()
+## finds nothing left to heal.
+func _set_selected_build_item_id(item_id: String) -> void:
+	if selected_build_item_id == item_id:
+		return
+	selected_build_item_id = item_id
+	build_selection_changed.emit(item_id != "")
+
+## Re-announces the armed-build state after something that changes what
+## get_selected_build_item_id() reports without writing the field itself. Quickbar activity is
+## the case that matters: opening the weapon menu masks the selection, and closing a picker
+## unmasks it, so listeners must be told even though selected_build_item_id never moved.
+func _notify_build_selection_changed() -> void:
+	build_selection_changed.emit(is_build_mode_active())
+
 func get_selected_build_item_id() -> String:
 	if quickbar_active and not is_build_menu_open():
 		return ""
-	if selected_build_item_id != "" and not is_build_item_available(selected_build_item_id):
-		selected_build_item_id = ""
+	# Self-heal: a buildable that stopped being usable (ran dry, night fell, level availability
+	# changed) is dropped on the spot rather than lingering as an invisible selection. This is
+	# what upholds the "unusable => unequipped" invariant for state that goes stale on its own,
+	# with no signal to listen to; every consumer reads through here.
+	if not is_build_item_usable(selected_build_item_id):
+		_set_selected_build_item_id("")
 	return selected_build_item_id
 
 func set_selected_build_item(item_id: String) -> void:
 	# All picker, mouse, gamepad, tutorial and scripted selection paths converge here.
-	# Empty remains the normal clear operation; unavailable buildables cannot become a
+	# Empty remains the normal clear operation; an unusable buildable can never become a
 	# hidden stale preview through a direct call.
-	if item_id != "" and not is_build_item_available(item_id):
-		selected_build_item_id = ""
+	if item_id != "" and not is_build_item_usable(item_id):
+		_set_selected_build_item_id("")
 	else:
-		selected_build_item_id = item_id
+		_set_selected_build_item_id(item_id)
 	_set_unbuild_selected(false)
 
 ## Clears any active build preview and leaves unbuild mode. Called on right-click / pad-cancel
 ## and after placement flows, so it doubles as the deselect path for the unbuild tool.
 func clear_build_selection() -> void:
 	var was_unbuild: bool = _unbuild_selected
-	selected_build_item_id = ""
+	_set_selected_build_item_id("")
 	_set_unbuild_selected(false)
 	if was_unbuild:
 		_refresh_all_slots()
@@ -391,6 +433,19 @@ func is_build_mode_active() -> bool:
 ## True while a build-tool menu is open or an explicit build preview is active.
 func is_build_tool_selected() -> bool:
 	return is_build_menu_open() or is_build_mode_active()
+
+## True while a build or unbuild tool is actually in hand for use on the map: a usable buildable
+## armed with no picker menu browsing over it, or the unbuild tool equipped. Distinct from
+## is_build_tool_selected(), which also counts merely having a picker open.
+##
+## This is the single rule behind both "one cursor at a time" (a tool in hand replaces the mouse
+## cursor with its own map cursor) and the yellow/black build frame, so the frame is shown exactly
+## when a tool cursor is. It needs no usability check of its own: an unusable tool is never left
+## equipped (see is_build_item_usable).
+func is_build_or_unbuild_tool_in_hand() -> bool:
+	if is_unbuild_tool_selected():
+		return true
+	return is_build_mode_active() and not is_build_menu_open()
 
 ## True while one of the build-tool drop-up menus is open.
 func is_build_menu_open() -> bool:
@@ -421,7 +476,7 @@ func is_unbuild_tool_selected() -> bool:
 func select_unbuild_tool() -> void:
 	if _is_quickbar_slot_disabled(UNBUILD_TOOL_ID):
 		return
-	selected_build_item_id = ""
+	_set_selected_build_item_id("")
 	quickbar_active = false
 	active_slot_index = -1
 	_set_unbuild_selected(true)
@@ -448,16 +503,17 @@ func select_build_item_for_tool(tool_id: String, item_id: String) -> bool:
 		return false
 	if not _tool_offers_build_item(tool_id, item_id):
 		return false
-	# The gardening slot stays open at night for its non-plant items, so the concrete item
-	# needs its own phase check: reject before any selection state changes.
-	if is_item_disabled_for_placement(item_id):
+	# The gardening slot stays open at night for its non-plant items, so the concrete item still
+	# needs its own usability check: reject before any selection state changes.
+	if not is_build_item_usable(item_id):
 		return false
-	if not is_build_item_available(item_id) or not can_afford_build(item_id, 1):
-		return false
-	selected_build_item_id = item_id
+	# Close the quickbar before arming the item, never after: _set_selected_build_item_id emits,
+	# and a listener asking "is a tool in hand" must not be answered while this menu still reads
+	# as open. Same reason _set_unbuild_selected runs first - the last emit sees the final state.
 	quickbar_active = false
 	active_slot_index = -1
 	_set_unbuild_selected(false)
+	_set_selected_build_item_id(item_id)
 	_refresh_all_slots()
 	return true
 

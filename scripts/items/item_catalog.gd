@@ -668,6 +668,15 @@ static func is_destructible_placeable(item_id: String) -> bool:
 static func is_plant_placeable(item_id: String) -> bool:
 	return is_placeable(item_id) and str(get_item_def(item_id).get("category", "")) == "plant"
 
+## True for placeables that build as a click-drag rectangle chunk, which is the default. A
+## placeable opts out with `"drag_buildable": false` and is then placed one at a time (houses,
+## lamp, ronce, reservoir, pasteque, kraken). Takes the composed placeable def rather than an id
+## because every caller already holds the direction-injected def from BuildModeStateController.
+## This is the single owner of the rule: the drag gesture, the gamepad confirm path and the
+## drag hint icon all ask it instead of re-reading the flag.
+static func is_drag_buildable(placeable_def: Dictionary) -> bool:
+	return bool(placeable_def.get("drag_buildable", true))
+
 ## True for placeables that receive repeated stomp damage from eligible agents.
 static func is_stompable(item_id: String) -> bool:
 	return is_placeable(item_id) and bool(get_item_def(item_id).get("stompable", false))

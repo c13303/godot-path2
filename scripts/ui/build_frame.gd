@@ -28,7 +28,6 @@ extends Control
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_connect_build_system()
 	_connect_game_ui()
 	_refresh_visibility()
 
@@ -55,49 +54,39 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
-func _connect_build_system() -> void:
-	var build_system: Node = _build_system()
-	if build_system == null or not build_system.has_signal(&"build_preview_changed"):
-		return
-	var callback: Callable = Callable(self, "_on_build_state_changed")
-	if not build_system.is_connected(&"build_preview_changed", callback):
-		build_system.connect(&"build_preview_changed", callback)
-
-
+# The build and unbuild selections change independently, so both are listened to. Neither
+# payload is trusted: the handler re-asks game_ui for the composed answer instead.
 func _connect_game_ui() -> void:
 	var game_ui: Node = _game_ui()
-	if game_ui == null or not game_ui.has_signal(&"unbuild_selection_changed"):
+	if game_ui == null:
 		return
 	var callback: Callable = Callable(self, "_on_build_state_changed")
-	if not game_ui.is_connected(&"unbuild_selection_changed", callback):
-		game_ui.connect(&"unbuild_selection_changed", callback)
+	var signal_names: Array[StringName] = [&"unbuild_selection_changed", &"build_selection_changed"]
+	for signal_name: StringName in signal_names:
+		if not game_ui.has_signal(signal_name):
+			continue
+		if not game_ui.is_connected(signal_name, callback):
+			game_ui.connect(signal_name, callback)
 
 
-# The frame shows while a placement drag is previewing OR the unbuild tool is equipped, so it
-# reads both sources rather than trusting a single signal's bool payload.
+# The frame marks "a build or unbuild tool is in hand", which is exactly when a tool cursor has
+# replaced the mouse cursor on the map. game_ui owns that rule; no usability check is needed here
+# because a tool that stops being usable is unequipped rather than left in hand.
 func _refresh_visibility() -> void:
-	visible = _build_preview_active() or _unbuild_selected()
+	visible = _tool_in_hand()
 
 
-func _build_preview_active() -> bool:
-	var build_system: Node = _build_system()
-	return build_system != null and build_system.has_method("pad_is_build_preview_active") and bool(build_system.call("pad_is_build_preview_active"))
-
-
-func _unbuild_selected() -> bool:
+func _tool_in_hand() -> bool:
 	var game_ui: Node = _game_ui()
-	return game_ui != null and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
+	return (
+		game_ui != null
+		and game_ui.has_method("is_build_or_unbuild_tool_in_hand")
+		and bool(game_ui.call("is_build_or_unbuild_tool_in_hand"))
+	)
 
 
 func _on_build_state_changed(_is_active: bool) -> void:
 	_refresh_visibility()
-
-
-func _build_system() -> Node:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return null
-	return scene.get_node_or_null("Map/BuildSystem")
 
 
 func _game_ui() -> Node:

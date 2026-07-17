@@ -59,7 +59,9 @@ var _shown_build_tool_id: String = ""
 var _level_start_default_pending: bool = true
 # Affordable count of the selected buildable on the previous refresh. Used to detect the
 # moment it runs dry through use (>0 -> 0) so we can auto-switch to the next buildable.
-# Deliberately clicking an already-empty slot leaves this at 0, so no auto-switch fires.
+# Deliberately highlighting an already-empty slot leaves this at 0, so no auto-switch fires.
+# (Equipping an empty slot is refused outright by _commit_item; this tracks the picker
+# highlight only.)
 var _selected_affordable_prev: int = -1
 
 var _toolbuild_column: VBoxContainer
@@ -700,11 +702,13 @@ func _highlight_item(item_id: String) -> void:
 
 ## Commits a buildable: it becomes the active build preview and closes the quickbar for placement.
 func _commit_item(item_id: String) -> void:
-	# Re-check the central availability rule at activation time. A row may have gone
-	# stale since it was rendered, and mouse/gamepad activation must not equip it.
-	if game_ui == null or not game_ui.has_method("is_build_item_available"):
+	# Re-check the central usability rule at activation time. A row may have gone stale since it
+	# was rendered, and mouse/gamepad activation must not equip it. Refusing here (rather than
+	# letting game_ui equip and immediately self-heal) is what keeps a greyed row inert: no buy
+	# sound, no picker close, so the player stays in the menu and can pick something else.
+	if game_ui == null or not game_ui.has_method("is_build_item_usable"):
 		return
-	if not bool(game_ui.call("is_build_item_available", item_id)):
+	if not bool(game_ui.call("is_build_item_usable", item_id)):
 		return
 	_selected_item_id = item_id
 	var tool_id: String = _selected_build_tool_id()
@@ -804,10 +808,14 @@ func _refresh_slots() -> void:
 	_maybe_auto_switch_from_empty()
 
 
-## When the selected buildable runs dry through use (its affordable/limit count drops from
-## >0 to 0), hop to the next available buildable in the vertical bar. Does nothing when the
-## player deliberately selected an already-empty slot (the count never transitioned from >0),
-## and stays put when no other buildable is available.
+## When the highlighted buildable runs dry through use (its affordable/limit count drops from
+## >0 to 0), hop the picker highlight to the next available buildable in the vertical bar. Does
+## nothing when the player deliberately highlighted an already-empty slot (the count never
+## transitioned from >0), and stays put when no other buildable is available.
+##
+## This moves the highlight inside the open picker only. Dropping the *equipped* tool when it
+## runs dry is a separate rule owned by game_ui (is_build_item_usable + its self-heal), so the
+## two never fight over the same state.
 func _maybe_auto_switch_from_empty() -> void:
 	if _selected_item_id == "":
 		_selected_affordable_prev = -1

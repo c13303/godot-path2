@@ -44,18 +44,12 @@ func selected_placeable_def() -> Dictionary:
 		return {}
 	if _placement_disabled():
 		return {}
+	# An empty id is the normal "no buildable selected" state (including while the unbuild tool
+	# is equipped, which reports an empty build item). Availability and phase are not re-checked
+	# here: game_ui owns that rule (is_build_item_usable) and its getter already drops a selection
+	# that stopped being usable, so a non-empty id read here is usable by construction.
 	var item_id: String = String(game_ui.call("get_selected_build_item_id"))
-	# An empty id is the normal "no buildable selected" state (including while the unbuild
-	# tool is equipped, which reports an empty build item). Only a non-empty-but-unavailable
-	# id is stale state worth clearing — clearing on empty would wipe the unbuild selection
-	# every frame through clear_build_selection().
-	if item_id != "" and game_ui.has_method("is_build_item_available") and not bool(game_ui.call("is_build_item_available", item_id)):
-		# Clear malformed/restored/direct stale state through its public owner, so the
-		# unavailable item does not remain invisibly selected after this query.
-		if game_ui.has_method("clear_build_selection"):
-			game_ui.call("clear_build_selection")
-		return {}
-	if game_ui.has_method("is_item_disabled_for_placement") and bool(game_ui.call("is_item_disabled_for_placement", item_id)):
+	if item_id == "":
 		return {}
 	var placeable_def: Dictionary = ItemCatalog.get_placeable_def(item_id)
 	if BuildDirectionRules.is_directional_placeable(placeable_def):

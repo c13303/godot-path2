@@ -15,10 +15,12 @@ const DRAG_SELECT_BORDER_COLOR: Color = Color(0.30, 1.0, 0.45)
 # placement rect.
 const DRAG_REMOVE_FILL_COLOR: Color = Color(1.0, 0.22, 0.24, 0.14)
 const DRAG_REMOVE_BORDER_COLOR: Color = Color(1.0, 0.32, 0.34)
-# Hint image shown centered above the unbuild cursor / removal drag rectangle.
-const UNBUILD_TOOLTIP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/unbuild_tooltip.png")
-# Pixels between the tooltip's bottom edge and the top of the selection rect.
-const UNBUILD_TOOLTIP_GAP: float = 3.0
+# Hint image shown centered above the tool cursor whenever the tool in hand can be dragged:
+# the unbuild cursor / removal rectangle, or a drag-buildable placeable's ghost / chunk
+# rectangle. BuildSystem.is_current_tool_drag_capable() owns the "can this drag" rule.
+const DRAG_ICON_TEXTURE: Texture2D = preload("res://assets/sprites/legval/drag_icon.png")
+# Pixels between the icon's bottom edge and the top of the cursor footprint.
+const DRAG_ICON_GAP: float = 3.0
 const DIRECTION_RIGHT: Vector2i = Vector2i(1, 0)
 const DIRECTION_DOWN: Vector2i = Vector2i(0, 1)
 const DIRECTION_LEFT: Vector2i = Vector2i(-1, 0)
@@ -50,12 +52,17 @@ var _hover_atlas_coords: Vector2i = Vector2i(-1, -1)
 var _preview_cells: Array[Vector2i] = []
 var _pad_cursor_active: bool = false
 var _pad_cursor_offset: Vector2i = Vector2i.ZERO
-var _cursor_hidden_for_preview: bool = false
+# One cursor at a time: the OS mouse cursor is hidden while a tool cursor stands in for it on the
+# map. The two sources are tracked separately because they are driven by different code paths and
+# neither may clear the other - the unbuild branch calls clear_hover() (dropping the ghost) on the
+# same frame it draws its own rect cursor.
+var _ghost_cursor_active: bool = false
+var _unbuild_cursor_active: bool = false
 var _drag_selection_rect: Panel = null
 var _drag_selection_style: StyleBoxFlat = null
 # Tracks the current rect tint so its colors are only swapped when the mode changes.
 var _drag_rect_is_remove: bool = false
-var _unbuild_tooltip: TextureRect = null
+var _drag_icon: TextureRect = null
 var _remove_progress_by_cell: Dictionary = {}  # Vector2i -> ProgressBar
 var _preview_visual: Node2D = null
 var _preview_visuals: Array[Node2D] = []
@@ -109,6 +116,12 @@ func draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, place
 	refresh_preview_visual_state(placeable_def)
 	previewbuild.update_internals()
 	_set_preview_cursor_hidden(true)
+	# A hovered placeable has no selection rect to hang the hint on (that only exists once a drag
+	# starts), so anchor to the hovered cell itself - the cell the ghost sits on and the cell a
+	# drag would anchor from. Multi-cell ghosts (houses) are not drag-buildable, so the single
+	# hovered cell is always the right footprint here.
+	if previewbuild.tile_set != null:
+		_refresh_drag_icon(previewbuild, _cells_footprint(previewbuild, cell, cell))
 
 
 func draw_drag_build_preview(
@@ -208,6 +221,9 @@ func refresh_preview_visual_state(placeable_def: Dictionary) -> void:
 func clear_hover() -> void:
 	var previewbuild: TileMapLayer = _preview_layer()
 	_set_preview_cursor_hidden(false)
+	# The ghost is going away, so its hint goes with it. The unbuild cursor redraws its own hint
+	# right after calling this, and a drag rectangle redraws it through show_drag_selection_rect.
+	_hide_drag_icon()
 	if previewbuild == null:
 		return
 	previewbuild.modulate = PREVIEW_NORMAL_COLOR
@@ -224,19 +240,30 @@ func clear_hover() -> void:
 	_hover_atlas_coords = Vector2i(-1, -1)
 
 
+# The placeable ghost is standing in for the mouse cursor (or has stopped doing so). Tracked
+# even while the pad cursor owns the screen, so the flag is accurate the moment it hands back.
 func _set_preview_cursor_hidden(hidden: bool) -> void:
-	if _pad_cursor_active:
+	if hidden == _ghost_cursor_active:
 		return
-	if hidden == _cursor_hidden_for_preview:
+	_ghost_cursor_active = hidden
+	_apply_cursor_visibility()
+
+
+## The unbuild tool's selection rect is standing in for the mouse cursor (or has stopped doing
+## so). Kept apart from the ghost flag so the unbuild branch's per-frame clear_hover() cannot
+## un-hide the OS cursor underneath its own rect cursor.
+func set_unbuild_cursor_active(active: bool) -> void:
+	if active == _unbuild_cursor_active:
 		return
-	_cursor_hidden_for_preview = hidden
+	_unbuild_cursor_active = active
 	_apply_cursor_visibility()
 
 
 func _apply_cursor_visibility() -> void:
 	if _pad_cursor_active:
 		return
-	var hidden: bool = _cursor_hidden_for_preview or _is_gamepad_control_mode()
+	# One cursor at a time: any tool cursor on the map hides the OS one.
+	var hidden: bool = _ghost_cursor_active or _unbuild_cursor_active or _is_gamepad_control_mode()
 	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN if hidden else Input.MOUSE_MODE_VISIBLE)
 
 
@@ -291,6 +318,11 @@ func is_pad_cursor_active() -> bool:
 
 func set_pad_cursor_active(active: bool) -> void:
 	_pad_cursor_active = active
+	# Handing the screen over between the pad cursor and the mouse re-applies the OS cursor mode.
+	# Without this the tool-cursor flags, which keep tracking while the pad owns the screen, could
+	# already hold their target value when the mouse takes back over, so the next
+	# _set_preview_cursor_hidden() would find "no change" and never restore the right mode.
+	_apply_cursor_visibility()
 	if not active:
 		return
 	_pad_cursor_offset = _clamp_offset_to_player_range(mouse_hovered_cell() - player_cell())
@@ -374,32 +406,26 @@ func free_remove_progress_for_cell(cell: Vector2i) -> void:
 	_remove_progress_by_cell.erase(cell)
 
 
+# `remove` selects the rect's tint only (red destructive vs green placement). Whether the drag
+# hint shows is a separate question - "can the tool in hand be dragged" - so a green placement
+# chunk gets the hint too, and a future non-draggable removal tool would not.
 func show_drag_selection_rect(start_cell: Vector2i, end_cell: Vector2i, remove: bool = false) -> void:
 	var previewbuild: TileMapLayer = _preview_layer()
 	if previewbuild == null or previewbuild.tile_set == null:
 		return
 	_ensure_drag_selection_rect()
 	_set_drag_selection_remove(remove)
-	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
-	var min_cell: Vector2i = Vector2i(mini(start_cell.x, end_cell.x), mini(start_cell.y, end_cell.y))
-	var max_cell: Vector2i = Vector2i(maxi(start_cell.x, end_cell.x), maxi(start_cell.y, end_cell.y))
-	var top_left: Vector2 = previewbuild.map_to_local(min_cell) - tile_size * 0.5
-	var bottom_right: Vector2 = previewbuild.map_to_local(max_cell) + tile_size * 0.5
-	_drag_selection_rect.position = top_left
-	_drag_selection_rect.size = bottom_right - top_left
+	var footprint: Rect2 = _cells_footprint(previewbuild, start_cell, end_cell)
+	_drag_selection_rect.position = footprint.position
+	_drag_selection_rect.size = footprint.size
 	_drag_selection_rect.visible = true
-	# The tooltip only makes sense for the destructive unbuild cursor / rectangle, never the
-	# green placement drag.
-	if remove:
-		_position_unbuild_tooltip(previewbuild, top_left, bottom_right)
-	else:
-		_hide_unbuild_tooltip()
+	_refresh_drag_icon(previewbuild, footprint)
 
 
 func hide_drag_selection_rect() -> void:
 	if _drag_selection_rect != null and is_instance_valid(_drag_selection_rect):
 		_drag_selection_rect.visible = false
-	_hide_unbuild_tooltip()
+	_hide_drag_icon()
 
 
 func has_single_tile_preview() -> bool:
@@ -445,40 +471,59 @@ func _ensure_drag_selection_rect() -> void:
 	previewbuild.add_child(_drag_selection_rect)
 
 
-# Shows the unbuild hint image centered above the top edge of the removal selection rect,
-# following the rect (single-cell cursor or dragged rectangle) each time it is redrawn.
-func _position_unbuild_tooltip(previewbuild: TileMapLayer, top_left: Vector2, bottom_right: Vector2) -> void:
-	_ensure_unbuild_tooltip(previewbuild)
-	if _unbuild_tooltip == null:
+# Shows the drag hint centered above the top edge of the current tool cursor's footprint, or
+# hides it when the tool in hand cannot be dragged. Every cursor shape routes here - the unbuild
+# single-cell rect, a dragged rectangle, and a placeable's hovered ghost - so the hint follows
+# whatever the cursor currently is without any caller re-deriving the drag rule.
+func _refresh_drag_icon(previewbuild: TileMapLayer, footprint: Rect2) -> void:
+	if not _tool_is_drag_capable():
+		_hide_drag_icon()
 		return
-	var tooltip_size: Vector2 = _unbuild_tooltip.size
-	var center_x: float = (top_left.x + bottom_right.x) * 0.5
-	_unbuild_tooltip.position = Vector2(
-		center_x - tooltip_size.x * 0.5,
-		top_left.y - tooltip_size.y - UNBUILD_TOOLTIP_GAP
+	_ensure_drag_icon(previewbuild)
+	if _drag_icon == null:
+		return
+	var icon_size: Vector2 = _drag_icon.size
+	_drag_icon.position = Vector2(
+		footprint.position.x + footprint.size.x * 0.5 - icon_size.x * 0.5,
+		footprint.position.y - icon_size.y - DRAG_ICON_GAP
 	)
-	_unbuild_tooltip.visible = true
+	_drag_icon.visible = true
 
 
-func _hide_unbuild_tooltip() -> void:
-	if _unbuild_tooltip != null and is_instance_valid(_unbuild_tooltip):
-		_unbuild_tooltip.visible = false
+func _tool_is_drag_capable() -> bool:
+	return _manager != null and _manager.is_current_tool_drag_capable()
 
 
-func _ensure_unbuild_tooltip(previewbuild: TileMapLayer) -> void:
-	if _unbuild_tooltip != null and is_instance_valid(_unbuild_tooltip):
+# The local-space rect covering start_cell..end_cell, which is what the hint anchors to and what
+# the drag selection rect is sized from.
+func _cells_footprint(previewbuild: TileMapLayer, start_cell: Vector2i, end_cell: Vector2i) -> Rect2:
+	var tile_size: Vector2 = Vector2(previewbuild.tile_set.tile_size)
+	var min_cell: Vector2i = Vector2i(mini(start_cell.x, end_cell.x), mini(start_cell.y, end_cell.y))
+	var max_cell: Vector2i = Vector2i(maxi(start_cell.x, end_cell.x), maxi(start_cell.y, end_cell.y))
+	var top_left: Vector2 = previewbuild.map_to_local(min_cell) - tile_size * 0.5
+	var bottom_right: Vector2 = previewbuild.map_to_local(max_cell) + tile_size * 0.5
+	return Rect2(top_left, bottom_right - top_left)
+
+
+func _hide_drag_icon() -> void:
+	if _drag_icon != null and is_instance_valid(_drag_icon):
+		_drag_icon.visible = false
+
+
+func _ensure_drag_icon(previewbuild: TileMapLayer) -> void:
+	if _drag_icon != null and is_instance_valid(_drag_icon):
 		return
-	if UNBUILD_TOOLTIP_TEXTURE == null:
+	if DRAG_ICON_TEXTURE == null:
 		return
-	_unbuild_tooltip = TextureRect.new()
-	_unbuild_tooltip.name = "UnbuildTooltip"
-	_unbuild_tooltip.texture = UNBUILD_TOOLTIP_TEXTURE
-	_unbuild_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_unbuild_tooltip.stretch_mode = TextureRect.STRETCH_KEEP
-	_unbuild_tooltip.size = UNBUILD_TOOLTIP_TEXTURE.get_size()
+	_drag_icon = TextureRect.new()
+	_drag_icon.name = "DragIcon"
+	_drag_icon.texture = DRAG_ICON_TEXTURE
+	_drag_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_drag_icon.stretch_mode = TextureRect.STRETCH_KEEP
+	_drag_icon.size = DRAG_ICON_TEXTURE.get_size()
 	# Sit just above the selection rect (z_index 60) in the preview layer's local space.
-	_unbuild_tooltip.z_index = 61
-	previewbuild.add_child(_unbuild_tooltip)
+	_drag_icon.z_index = 61
+	previewbuild.add_child(_drag_icon)
 
 
 # Swaps the selection rect between the green (placement) and red (removal/unbuild) tints, only

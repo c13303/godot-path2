@@ -241,6 +241,9 @@ func _is_build_menu_open() -> bool:
 
 func _show_unbuild_cursor(cell: Vector2i) -> void:
 	_build_preview.show_drag_selection_rect(cell, cell, true)
+	# The rect is the unbuild tool's cursor, so the OS cursor gives way to it exactly like it
+	# does for a placeable ghost - one cursor at a time.
+	_build_preview.set_unbuild_cursor_active(true)
 	_unbuild_cursor_visible = true
 
 
@@ -248,6 +251,7 @@ func _hide_unbuild_cursor() -> void:
 	if not _unbuild_cursor_visible:
 		return
 	_build_preview.hide_drag_selection_rect()
+	_build_preview.set_unbuild_cursor_active(false)
 	_unbuild_cursor_visible = false
 
 
@@ -313,7 +317,7 @@ func _finish_drag_build() -> void:
 
 
 func _is_drag_buildable(placeable_def: Dictionary) -> bool:
-	return bool(placeable_def.get("drag_buildable", true))
+	return ItemCatalog.is_drag_buildable(placeable_def)
 
 
 func _start_drag_build(placeable_def: Dictionary) -> void:

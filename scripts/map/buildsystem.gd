@@ -682,9 +682,24 @@ func _draw_preview(cell: Vector2i, atlas_coords: Vector2i, item_id: String, plac
 
 # Placeables build as a click-drag rectangle chunk by default, placed up to the
 # affordable/limited count while skipping occupied or invalid cells. Specific
-# future placeables can opt out with `"drag_buildable": false`.
+# placeables opt out with `"drag_buildable": false` (the rule itself lives in ItemCatalog).
 func _is_drag_buildable(placeable_def: Dictionary) -> bool:
-	return bool(placeable_def.get("drag_buildable", true))
+	return ItemCatalog.is_drag_buildable(placeable_def)
+
+## True when the tool currently in hand can start a drag/chunk gesture: the unbuild tool (which
+## always drags a removal rectangle) or an armed drag-buildable placeable. This is the single
+## rule behind the drag hint icon, so any future drag-capable tool lights it up by answering
+## here rather than by touching the preview code.
+func is_current_tool_drag_capable() -> bool:
+	if _is_unbuild_selected():
+		return true
+	var placeable_def: Dictionary = _selected_placeable_def()
+	if placeable_def.is_empty():
+		return false
+	return _is_drag_buildable(placeable_def)
+
+func _is_unbuild_selected() -> bool:
+	return game_ui != null and game_ui.has_method("is_unbuild_tool_selected") and bool(game_ui.call("is_unbuild_tool_selected"))
 
 # Placement sound for a finished chunk build. This preserves the old per-item
 # behavior: roses play the plant sound, other buildings stay silent unless they
