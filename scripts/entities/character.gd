@@ -103,9 +103,17 @@ var _facing_frame: int = MONSTER_FRAME_SOUTH
 var _facing_west: bool = false
 var _facing_state: DirectionalFacingState = DirectionalFacingState.new()
 var _last_facing_position: Vector2 = Vector2.ZERO
+var _agent_kind: StringName = &""
+var _is_monster: bool = false
+var _is_client: bool = false
+var _is_big_monster: bool = false
+var _uses_monster_directional_layout: bool = false
+var _uses_client_directional_layout: bool = false
+var _debug_immutable_metadata_lookups_avoided: int = 0
 
 
 func _ready() -> void:
+	_refresh_agent_classification_cache()
 	health = max(1, max_health)
 	_setup_flash_material()
 	_held_object_visual.setup(self)
@@ -121,6 +129,10 @@ func _process(delta: float) -> void:
 		z_index = int(position.y)
 	if _paused:
 		return
+	if CppDebugOptions.logs_enabled:
+		# Conservative baseline: kind plus both frame-layout predicates are used by
+		# the ordinary animation pass more often than this count records.
+		_debug_immutable_metadata_lookups_avoided += 4
 	_process_damage_flash(delta)
 	_process_eating_status(delta)
 	_update_directional_facing(delta)
@@ -261,21 +273,11 @@ func _directional_idle_frame() -> int:
 
 
 func _uses_directional_monster_frames() -> bool:
-	if not _is_monster_agent() or not is_instance_valid(_monster_sprite):
-		return false
-	if not has_meta("monster_sprite_frame_layout"):
-		return false
-	var frame_layout: StringName = StringName(str(get_meta("monster_sprite_frame_layout")))
-	return frame_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+	return _uses_monster_directional_layout
 
 
 func _uses_directional_client_frames() -> bool:
-	if not _is_client_agent() or not is_instance_valid(_monster_sprite):
-		return false
-	if not has_meta("client_sprite_frame_layout"):
-		return false
-	var frame_layout: StringName = StringName(str(get_meta("client_sprite_frame_layout")))
-	return frame_layout == CLIENT_FRAME_LAYOUT_DIRECTIONAL_7_HORIZONTAL and _monster_sprite.hframes >= CLIENT_DIRECTIONAL_FRAME_COUNT
+	return _uses_client_directional_layout
 
 
 func _directional_client_tantrum_frame() -> int:
@@ -375,11 +377,59 @@ func _held_object_pin_position() -> Vector2:
 
 
 func _is_monster_agent() -> bool:
-	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"monster"
+	return _is_monster
 
 
 func _is_client_agent() -> bool:
-	return has_meta("agent_kind") and StringName(str(get_meta("agent_kind"))) == &"client"
+	return _is_client
+
+
+func set_agent_kind(kind: StringName) -> void:
+	set_meta("agent_kind", kind)
+	_agent_kind = kind
+	_refresh_agent_classification_cache()
+
+
+func set_monster_sprite_frame_layout(frame_layout: StringName) -> void:
+	set_meta("monster_sprite_frame_layout", frame_layout)
+	_refresh_agent_classification_cache()
+
+
+func set_client_sprite_frame_layout(frame_layout: StringName) -> void:
+	set_meta("client_sprite_frame_layout", frame_layout)
+	_refresh_agent_classification_cache()
+
+
+func set_monster_size_classification(is_small: bool) -> void:
+	set_meta("monster_is_small", is_small)
+	_is_big_monster = _is_monster and not is_small
+
+
+func is_big_monster_agent() -> bool:
+	return _is_big_monster
+
+
+func _refresh_agent_classification_cache() -> void:
+	if has_meta("agent_kind"):
+		_agent_kind = StringName(str(get_meta("agent_kind")))
+	_is_monster = _agent_kind == &"monster"
+	_is_client = _agent_kind == &"client"
+	var monster_layout: StringName = StringName(str(get_meta("monster_sprite_frame_layout", &"")))
+	var client_layout: StringName = StringName(str(get_meta("client_sprite_frame_layout", &"")))
+	var sprite_valid: bool = is_instance_valid(_monster_sprite)
+	_uses_monster_directional_layout = (
+		_is_monster
+		and sprite_valid
+		and monster_layout == MONSTER_FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
+		and _monster_sprite.hframes >= MONSTER_DIRECTIONAL_FRAME_COUNT
+	)
+	_uses_client_directional_layout = (
+		_is_client
+		and sprite_valid
+		and client_layout == CLIENT_FRAME_LAYOUT_DIRECTIONAL_7_HORIZONTAL
+		and _monster_sprite.hframes >= CLIENT_DIRECTIONAL_FRAME_COUNT
+	)
+	_is_big_monster = _is_monster and not bool(get_meta("monster_is_small", true))
 
 
 # An invincible agent never loses HP, with two client-only exceptions: a client
@@ -574,6 +624,16 @@ func _update_sprite_tint() -> void:
 		and not is_in_group(AgentDefinitionService.VILLAGERS_GROUP)
 	)
 	_set_sprite_tint_recursive(self, Color(1, 0, 0, 1) if show_impaired_tint else Color(1, 1, 1, 1))
+
+
+func debug_classification_cache_stats() -> Dictionary:
+	return {
+		"immutable_metadata_lookups_avoided": _debug_immutable_metadata_lookups_avoided,
+		"agent_kind": _agent_kind,
+		"is_monster": _is_monster,
+		"is_client": _is_client,
+		"is_big_monster": _is_big_monster,
+	}
 
 func _set_sprite_tint_recursive(node: Node, color: Color) -> void:
 	if node is Sprite2D:

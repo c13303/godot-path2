@@ -121,11 +121,13 @@ func start_for_client(client: Node2D) -> bool:
 		client.add_to_group("monsters")
 	if client.has_method("stop_eating"):
 		client.call("stop_eating")
-	client.set_meta("agent_kind", &"client")
+	if client is FlowAgent:
+		(client as FlowAgent).set_agent_kind(&"client")
+	else:
+		client.set_meta("agent_kind", &"client")
 	client.set_meta("hostile_client", true)
 	client.set("max_health", TANTRUM_CLIENT_HEALTH)
 	client.set("health", TANTRUM_CLIENT_HEALTH)
-	client.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 	var sprite: Sprite2D = _client_sprite(client)
 	var base_offset: Vector2 = Vector2.ZERO
 	if sprite != null:
@@ -134,6 +136,10 @@ func start_for_client(client: Node2D) -> bool:
 		sprite.frame = CLIENT_FRAME_TANTRUM_SOUTH
 		sprite.flip_h = false
 		base_offset = sprite.offset
+	if client is FlowAgent:
+		(client as FlowAgent).set_client_sprite_frame_layout(CLIENT_SPRITE_FRAME_LAYOUT)
+	else:
+		client.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 	# Angry state makes the client damageable (character._is_currently_damageable).
 	if client.has_method("start_angry"):
 		client.call("start_angry")

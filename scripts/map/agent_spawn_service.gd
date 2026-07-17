@@ -131,7 +131,10 @@ func spawn_agent_from(
 			agent.set("max_health", maxi(1, int(resume_state.get("max_health", agent.get("max_health")))))
 			agent.set("health", clampi(int(resume_state.get("health", agent.get("health"))), 1, int(agent.get("max_health"))))
 			agent.set_meta("roses_eaten", maxi(0, int(resume_state.get("roses_eaten", 0))))
-	agent.set_meta("agent_kind", agent_kind)
+	if agent is FlowAgent:
+		(agent as FlowAgent).set_agent_kind(agent_kind)
+	else:
+		agent.set_meta("agent_kind", agent_kind)
 	var inst_us: int = Time.get_ticks_usec() - t_inst
 	if telemetry.over_garden_threshold_us(inst_us):
 		telemetry.warn_garden_task_lag_us("_process_spawners.instantiate_agent", inst_us,

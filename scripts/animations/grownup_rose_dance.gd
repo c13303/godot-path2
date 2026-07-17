@@ -49,7 +49,9 @@ var _texture: Texture2D
 var _region: Rect2
 var _tile_size: Vector2
 var _dancers: Dictionary = {}  # cell -> {"sprite": Sprite2D, "sway_phase": float, "breathe_phase": float, "pop_started_at": float}
+var _dancer_cells: Array[Vector2i] = []
 var _contact_dancers: Dictionary = {}  # key -> {"sprite": Sprite2D, "layer": TileMapLayer, "cell": Vector2i, "until": float, "source_id": int, "atlas_coords": Vector2i, "alternative_tile": int}
+var _contact_dancer_keys: Array[String] = []
 var _damage_flash_tweens: Dictionary = {}  # key -> Tween
 var _damage_flash_original_modulates: Dictionary = {}  # key -> Color
 var _time: float = 0.0
@@ -75,6 +77,7 @@ func _ready() -> void:
 	_connect_plant_manager()
 	_connect_contact_source()
 	_rescan()
+	_refresh_processing_state()
 
 
 func _connect_plant_manager() -> void:
@@ -176,6 +179,7 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 		"sway_phase": randf() * TAU,
 		"breathe_phase": randf() * TAU,
 	}
+	_contact_dancer_keys.append(key)
 	if layer_name == &"plantz" and _plant_manager != null and _plant_manager.has_method("set_rose_visual_hidden"):
 		_plant_manager.call("set_rose_visual_hidden", cell, true)
 	else:
@@ -183,6 +187,7 @@ func _on_plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, i
 		layer.update_internals()
 		layer.queue_redraw()
 	_update_contact_dancer_visual(key)
+	_refresh_processing_state()
 
 
 func play_damage_flash_at(layer_name: StringName, cell: Vector2i, item_id: String, duration: float) -> bool:
@@ -221,8 +226,10 @@ func _add_dancer(cell: Vector2i, play_pop: bool) -> void:
 		"breathe_phase": randf() * TAU,
 		"pop_started_at": pop_started_at,
 	}
+	_dancer_cells.append(cell)
 	_set_source_visual_hidden(cell, true)
 	_update_dancer_visual(cell)
+	_refresh_processing_state()
 
 
 func _remove_dancer(cell: Vector2i) -> void:
@@ -230,11 +237,13 @@ func _remove_dancer(cell: Vector2i) -> void:
 		return
 	var data: Dictionary = _dancers[cell] as Dictionary
 	_dancers.erase(cell)
+	_dancer_cells.erase(cell)
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
 	if is_instance_valid(sprite):
 		sprite.queue_free()
 	_clear_damage_flash(_flash_key(&"plantz", cell))
 	_set_source_visual_hidden(cell, false)
+	_refresh_processing_state()
 
 
 func _remove_contact_dancer(key: String) -> void:
@@ -242,6 +251,7 @@ func _remove_contact_dancer(key: String) -> void:
 		return
 	var data: Dictionary = _contact_dancers[key] as Dictionary
 	_contact_dancers.erase(key)
+	_contact_dancer_keys.erase(key)
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
 	if is_instance_valid(sprite):
 		sprite.queue_free()
@@ -254,6 +264,7 @@ func _remove_contact_dancer(key: String) -> void:
 		var layer: TileMapLayer = data.get("layer", null) as TileMapLayer
 		var item_id: String = str(data.get("item_id", ""))
 		if item_id != "" and not _building_still_exists(cell, item_id):
+			_refresh_processing_state()
 			return
 		if layer != null and is_instance_valid(layer) and layer.get_cell_source_id(cell) < 0:
 			layer.set_cell(
@@ -264,11 +275,10 @@ func _remove_contact_dancer(key: String) -> void:
 			)
 			layer.update_internals()
 			layer.queue_redraw()
+	_refresh_processing_state()
 
 
 func _process(delta: float) -> void:
-	if _dancers.is_empty() and _contact_dancers.is_empty():
-		return
 	_time += delta
 	_expire_contact_dancers()
 	_update_dancer_visuals()
@@ -290,14 +300,18 @@ func _create_region_sprite(texture: Texture2D, region: Rect2, node_name: String)
 
 
 func _update_dancer_visuals() -> void:
-	for raw_cell: Variant in _dancers.keys():
-		_update_dancer_visual(raw_cell as Vector2i)
+	for index: int in range(_dancer_cells.size() - 1, -1, -1):
+		var cell: Vector2i = _dancer_cells[index]
+		var data: Dictionary = _dancers[cell] as Dictionary
+		var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+		if sprite == null or not is_instance_valid(sprite):
+			_remove_dancer(cell)
+			continue
+		_update_dancer_visual(cell)
 
 
 func _update_dancer_visual(cell: Vector2i) -> void:
 	if not _dancers.has(cell):
-		return
-	if not _is_logical_grownup(cell):
 		return
 	var data: Dictionary = _dancers[cell] as Dictionary
 	var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
@@ -310,8 +324,15 @@ func _update_dancer_visual(cell: Vector2i) -> void:
 
 
 func _update_contact_dancer_visuals() -> void:
-	for raw_key: Variant in _contact_dancers.keys():
-		_update_contact_dancer_visual(str(raw_key))
+	for index: int in range(_contact_dancer_keys.size() - 1, -1, -1):
+		var key: String = _contact_dancer_keys[index]
+		var data: Dictionary = _contact_dancers[key] as Dictionary
+		var sprite: Sprite2D = data.get("sprite", null) as Sprite2D
+		var layer: TileMapLayer = data.get("layer", null) as TileMapLayer
+		if sprite == null or not is_instance_valid(sprite) or layer == null or not is_instance_valid(layer):
+			_remove_contact_dancer(key)
+			continue
+		_update_contact_dancer_visual(key)
 
 
 func _update_contact_dancer_visual(key: String) -> void:
@@ -367,14 +388,11 @@ func _apply_dance_transform(
 
 
 func _expire_contact_dancers() -> void:
-	var expired: Array[String] = []
-	for raw_key: Variant in _contact_dancers.keys():
-		var key: String = str(raw_key)
+	for index: int in range(_contact_dancer_keys.size() - 1, -1, -1):
+		var key: String = _contact_dancer_keys[index]
 		var data: Dictionary = _contact_dancers[key] as Dictionary
 		if not bool(data.get("contact_active", false)) and _time >= float(data.get("until", 0.0)):
-			expired.append(key)
-	for key: String in expired:
-		_remove_contact_dancer(key)
+			_remove_contact_dancer(key)
 
 
 func _is_visual_grownup(cell: Vector2i) -> bool:
@@ -452,3 +470,15 @@ func _kill_damage_flash_tween(key: String) -> void:
 
 func _flash_key(layer_name: StringName, cell: Vector2i) -> String:
 	return "flash:%s:%d:%d" % [String(layer_name), cell.x, cell.y]
+
+
+func _refresh_processing_state() -> void:
+	set_process(not _dancer_cells.is_empty() or not _contact_dancer_keys.is_empty())
+
+
+func debug_stats() -> Dictionary:
+	return {
+		"active_rose_dancers": _dancer_cells.size(),
+		"active_contact_dancers": _contact_dancer_keys.size(),
+		"rose_dancer_temporary_array_allocations": 0,
+	}

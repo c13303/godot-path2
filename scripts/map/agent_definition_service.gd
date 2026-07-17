@@ -57,8 +57,13 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 		sprite.hframes = data.sprite_hframes
 		sprite.scale = data.sprite_scale
 		sprite.position = data.sprite_offset
-	agent.set_meta("monster_sprite_frame_layout", data.sprite_frame_layout)
-	agent.set_meta("monster_is_small", data.is_small)
+	if agent is FlowAgent:
+		var flow_agent: FlowAgent = agent as FlowAgent
+		flow_agent.set_monster_sprite_frame_layout(data.sprite_frame_layout)
+		flow_agent.set_monster_size_classification(data.is_small)
+	else:
+		agent.set_meta("monster_sprite_frame_layout", data.sprite_frame_layout)
+		agent.set_meta("monster_is_small", data.is_small)
 	# _ready() already ran (add_child), so override both the exported cap and the
 	# live pool.
 	agent.set("max_health", data.max_health)
@@ -90,7 +95,10 @@ func apply_client_data(agent: Node) -> void:
 		sprite.flip_h = false
 	agent.set("max_health", CLIENT_HEALTH)
 	agent.set("health", CLIENT_HEALTH)
-	agent.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
+	if agent is FlowAgent:
+		(agent as FlowAgent).set_client_sprite_frame_layout(CLIENT_SPRITE_FRAME_LAYOUT)
+	else:
+		agent.set_meta("client_sprite_frame_layout", CLIENT_SPRITE_FRAME_LAYOUT)
 	_mark_crushes_placeables(agent)
 
 

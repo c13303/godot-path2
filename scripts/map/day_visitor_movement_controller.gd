@@ -66,7 +66,10 @@ func spawn(
 	agent.z_index = int(agent.global_position.y)
 	agent.add_to_group(scene_group)
 	_manager.register_runtime_agent(agent, tracking_category)
-	agent.set_meta("agent_kind", agent_kind)
+	if agent is FlowAgent:
+		(agent as FlowAgent).set_agent_kind(agent_kind)
+	else:
+		agent.set_meta("agent_kind", agent_kind)
 	agent.set_meta("spawner_cell", spawner_cell)
 	visual_setup.call(agent)
 	var agent_nav_id: int = int(agent_manager.call("spawn_agent", agent, IDLE_GROUP))
