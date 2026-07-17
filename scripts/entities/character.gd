@@ -35,7 +35,7 @@ var _eating_timer: float = 0.0
 var status: String = ""
 @export var max_health: int = 100
 # Invincible agents never lose HP and never show a health bar. On by default so
-# any new agent kind is safe; only monsters/bigmonsters clear it (see
+# any new agent kind is safe; only catalogued monsters clear it (see
 # AgentDefinitionService.apply_monster_data). Clients are the exception: they stay
 # damageable mid-tantrum and while drowning — see _is_currently_damageable().
 @export var invincible: bool = true

@@ -2615,7 +2615,7 @@ func _default_playlist_path_for_level(level_path: String) -> String:
 
 
 func _monster_types() -> Array[StringName]:
-	# Enumerated from the monster bible so new .tres definitions appear in the wave
+	# Enumerated from the monster bible so new catalog definitions appear in the wave
 	# dropdown automatically.
 	var ids: Array[StringName] = MonsterCatalog.get_ids()
 	if ids.is_empty():

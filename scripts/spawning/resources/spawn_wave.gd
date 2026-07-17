@@ -2,7 +2,7 @@ extends Resource
 class_name SpawnWave
 
 @export_group("Monster")
-## Stable monster catalog ID. Currently supported: "basic".
+## Stable monster catalog ID. Available values come from MonsterCatalog.
 @export var monster_type: StringName = &"basic"
 
 @export_group("Schedule")

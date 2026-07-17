@@ -9,27 +9,43 @@ class_name MonsterCatalog
 ## unavailable, so the exported fields cannot be read back there.
 
 const BASIC_ID: StringName = &"basic"
+const GREEN_MONSTER_ID: StringName = &"greenmonster"
 const BIG_MONSTER_ID: StringName = &"bigmonster"
 const FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL: StringName = &"directional_4_horizontal"
 const BASIC_TEXTURE: Texture2D = preload("res://assets/sprites/legval/monster.png")
+const GREEN_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/speedmonster.png")
 const BIG_MONSTER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/bigmonster.png")
+const BASIC_MAX_HEALTH: int = 500
+const GREEN_MONSTER_HEALTH_SCALE: float = 0.5
+const GREEN_MONSTER_SPEED_SCALE: float = 1.5
 const BIG_MONSTER_SPRITE_SCALE: Vector2 = Vector2(0.75, 0.75)
 const BIG_MONSTER_SPRITE_OFFSET: Vector2 = Vector2(0.0, -48.0)
+const MONSTER_ID_ORDER: Array[StringName] = [BASIC_ID, GREEN_MONSTER_ID, BIG_MONSTER_ID]
 
 
 static func get_all() -> Array[MonsterData]:
-	return [_make_basic(), _make_bigmonster()]
+	var monsters: Array[MonsterData] = []
+	for monster_id: StringName in MONSTER_ID_ORDER:
+		var data: MonsterData = get_monster(monster_id)
+		if data != null:
+			monsters.append(data)
+	return monsters
 
 
 ## Ordered list of catalog IDs, suitable for editor dropdowns and validation.
 static func get_ids() -> Array[StringName]:
-	return [BASIC_ID, BIG_MONSTER_ID]
+	var ids: Array[StringName] = []
+	for monster_id: StringName in MONSTER_ID_ORDER:
+		ids.append(monster_id)
+	return ids
 
 
 static func get_monster(id: StringName) -> MonsterData:
 	match id:
 		BASIC_ID:
 			return _make_basic()
+		GREEN_MONSTER_ID:
+			return _make_greenmonster()
 		BIG_MONSTER_ID:
 			return _make_bigmonster()
 		_:
@@ -37,20 +53,35 @@ static func get_monster(id: StringName) -> MonsterData:
 
 
 static func has_monster(id: StringName) -> bool:
-	return id == BASIC_ID or id == BIG_MONSTER_ID
+	return MONSTER_ID_ORDER.has(id)
 
 
 static func _make_basic() -> MonsterData:
+	return _make_ordinary_monster(BASIC_ID, "Monster", BASIC_TEXTURE)
+
+
+static func _make_greenmonster() -> MonsterData:
+	var data: MonsterData = _make_ordinary_monster(
+		GREEN_MONSTER_ID,
+		"Greenmonster",
+		GREEN_MONSTER_TEXTURE
+	)
+	data.max_health = int(float(BASIC_MAX_HEALTH) * GREEN_MONSTER_HEALTH_SCALE)
+	data.speed_scale = GREEN_MONSTER_SPEED_SCALE
+	return data
+
+
+static func _make_ordinary_monster(id: StringName, display_name: String, texture: Texture2D) -> MonsterData:
 	var data: MonsterData = MonsterData.new()
-	data.id = BASIC_ID
-	data.display_name = "Monster"
+	data.id = id
+	data.display_name = display_name
 	data.is_small = true
-	data.texture = BASIC_TEXTURE
+	data.texture = texture
 	data.sprite_hframes = 4
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
 	data.sprite_scale = Vector2(0.75, 0.75)
 	data.sprite_offset = Vector2(0.0, -16.0)
-	data.max_health = 500
+	data.max_health = BASIC_MAX_HEALTH
 	data.speed_scale = 1.0
 	data.crowd_resist_scale = 1.0
 	data.contact_push_power = 0.0

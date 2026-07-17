@@ -5,7 +5,7 @@ class_name MonsterData
 ## type. Referenced by SpawnWave.monster_type (a StringName equal to `id`) and
 ## enumerated by MonsterCatalog, which builds every entry in code — unlike
 ## WeaponData, there are no monster .tres resources to edit. Tune stats in
-## MonsterCatalog._make_basic() / _make_bigmonster().
+## MonsterCatalog's focused factory methods.
 
 ## Stable catalog ID. Must match the StringName used in SpawnWave.monster_type and
 ## be unique across the catalog.

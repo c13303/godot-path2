@@ -1417,8 +1417,9 @@ unavailable_style = SubResource("StyleBoxFlat_phase_unavailable")
 hold_fill = NodePath("HoldFill")
 
 [node name="HoldFill" type="ColorRect" parent="GameUI/phaseToggleButton" unique_id=306424861]
-show_behind_parent = true
 visible = false
+show_behind_parent = true
+layout_mode = 0
 offset_right = 72.0
 offset_bottom = 72.0
 mouse_filter = 2
