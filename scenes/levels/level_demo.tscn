@@ -1258,6 +1258,7 @@ tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &
 tool_shop_prices = {
 &"fence": 1,
 &"house_builder": 20,
+&"house_inventor": 20,
 &"house_merchant": 20,
 &"imperial_seed": 20,
 &"kraken": 20,
@@ -1289,6 +1290,7 @@ shop_prices = {
 &"bomb": 100,
 &"fence": 1,
 &"house_builder": 20,
+&"house_inventor": 20,
 &"house_merchant": 20,
 &"imperial_seed": 20,
 &"kraken": 20,
