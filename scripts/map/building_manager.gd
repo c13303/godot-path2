@@ -280,6 +280,10 @@ func _ready() -> void:
 	_debug_query_service.setup(self)
 	_monster_death.setup(self)
 	_agent_definition_service.setup(self)
+	# LevelLoader injects floor/water/fence layers under MonTilemap before this _ready,
+	# but they are not scene-wired exports. Resolve them before the authoritative terrain
+	# upload so water and authored fences participate in both native speed channels.
+	_resolve_level_layers()
 	var scene: Node = get_tree().current_scene
 	_terrain_speed_modifier.setup(scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null)
 	_building_navigation_sync.setup(self, _terrain_speed_modifier)
@@ -307,7 +311,6 @@ func _ready() -> void:
 	_fundamental_builder_onboarding.setup(self, _spawner_reveal_cutscene)
 	_plant_contact_dance_router.setup(self)
 	add_child(_spawner_reveal_cutscene)
-	_resolve_level_layers()
 	_load_level_spawn_config()
 	startup_loading_progress.emit(0.48, "Preparing zones")
 	_load_tile_definitions()
