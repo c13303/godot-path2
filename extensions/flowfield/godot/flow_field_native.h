@@ -58,6 +58,10 @@ namespace godot
         // block_fences = true (client/merchant groups). Monsters ignore fences entirely
         // and are merely slowed by their per-cell speed multiplier.
         std::unordered_set<Vector2i, Vector2iHash> fence_blocking_cells;
+        using DirectionalTraversalConstraints = std::unordered_map<Vector2i, Vector2i, Vector2iHash>;
+        // Immutable authored directed edges, keyed by game-defined field ID. They are
+        // copied sparsely into only the async snapshot that requests them.
+        std::unordered_map<int, DirectionalTraversalConstraints> directional_traversal_fields;
         struct AsyncFlowSnapshot
         {
             Rect2i used;
@@ -73,6 +77,7 @@ namespace godot
             int bottleneck_zone_radius_tiles = 0;
             double flow_field_wall_clearance = 0.0;
             bool block_fences = false;
+            DirectionalTraversalConstraints traversal_constraints;
             // Raw inputs for the worker-side coverage filter. A zero threshold or an
             // empty nav_coverage_cells list disables filtering.
             double coverage_threshold = 0.0;
@@ -138,11 +143,13 @@ namespace godot
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
         void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                            const Vector2i &goal_cell,
-                           std::unordered_map<Vector2i, double, Vector2iHash> &costs);
+                           std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+                           const DirectionalTraversalConstraints *traversal_constraints = nullptr);
         void compute_directions(const Rect2i &used,
                                 const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                 const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
+                                const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                const DirectionalTraversalConstraints *traversal_constraints = nullptr);
 
         void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
         void compute_distance_field(const Rect2i &used,
@@ -153,7 +160,7 @@ namespace godot
 
         std::vector<float> distance_field;
         int group_size_for_draw() const;
-        bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences);
+        bool build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences, int traversal_field_id);
         static bool snapshot_cell_is_coverage_blocked(const AsyncFlowSnapshot &snapshot,
                                                       const std::unordered_set<Vector2i, Vector2iHash> &nav_cells,
                                                       const Vector2i &cell);
@@ -204,13 +211,16 @@ namespace godot
         // (clients/merchants). They never affect the default field or monster flow builds.
         void set_fence_blocking_cells(const PackedVector2Array &cells);
         void clear_fence_blocking_cells();
+        void set_directional_traversal_field(int field_id, const PackedVector2Array &cells, const PackedVector2Array &directions);
+        void clear_directional_traversal_field(int field_id);
+        void clear_directional_traversal_fields();
         bool rebuild_async(Vector2 goal);
         // Lazy flow fields: GDScript calls this the moment it enqueues a group's rebuild,
         // before it is submitted for computation, so agents waiting on that group show
         // "ff wait" and freeze. request_flow_to_group / assign_flow_to_group then move the
         // group to "computing", and applying the field clears it back to none.
         void mark_group_flow_queued(int group_id);
-        void request_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
+        void request_flow_to_group(int group_id, Vector2 goal, bool block_fences = false, int traversal_field_id = -1);
         bool are_async_flows_idle() const;
         bool is_group_flow_request_ready(int group_id) const;
         void cancel_group_flow_request(int group_id);
@@ -224,7 +234,7 @@ namespace godot
         ffcore::FlowField *get_field() { return &field; }
         Vector2 get_goal_world() const { return goal_world; }
 
-        void assign_flow_to_group(int group_id, Vector2 goal, bool block_fences = false);
+        void assign_flow_to_group(int group_id, Vector2 goal, bool block_fences = false, int traversal_field_id = -1);
 
         // Walkable cost-to-goal for a group's flow field at a world position.
         // Returns +INF if the group has no flow or the cell is unreachable.

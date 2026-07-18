@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <algorithm>
+#include <utility>
 #include "../core/global_config.h"
 #include <thread>
 
@@ -33,6 +34,33 @@ struct DijkstraNode
 static inline double clamp01(double v)
 {
     return (v < 0.0) ? 0.0 : (v > 1.0 ? 1.0 : v);
+}
+
+using DirectionalTraversalConstraints = std::unordered_map<Vector2i, Vector2i, godot::Vector2iHash>;
+
+static bool can_traverse(const Vector2i &from_cell,
+                         const Vector2i &to_cell,
+                         const std::unordered_set<Vector2i, godot::Vector2iHash> &walkable_set,
+                         const DirectionalTraversalConstraints *traversal_constraints)
+{
+    if (!walkable_set.count(from_cell) || !walkable_set.count(to_cell))
+        return false;
+    const Vector2i delta = to_cell - from_cell;
+    if (std::abs(delta.x) > 1 || std::abs(delta.y) > 1 || (delta.x == 0 && delta.y == 0))
+        return false;
+    if (traversal_constraints)
+    {
+        const auto constraint = traversal_constraints->find(from_cell);
+        if (constraint != traversal_constraints->end() && constraint->second != delta)
+            return false;
+    }
+    if (std::abs(delta.x) + std::abs(delta.y) == 2)
+    {
+        if (!walkable_set.count(from_cell + Vector2i(delta.x, 0)) ||
+            !walkable_set.count(from_cell + Vector2i(0, delta.y)))
+            return false;
+    }
+    return true;
 }
 
 static double tile_size_from_layer(TileMapLayer *layer)
@@ -81,12 +109,12 @@ void FlowFieldNative::_bind_methods()
 {
     ClassDB::bind_method(D_METHOD("rebuild_async", "goal"), &FlowFieldNative::rebuild_async);
     ClassDB::bind_method(D_METHOD("mark_group_flow_queued", "group_id"), &FlowFieldNative::mark_group_flow_queued);
-    ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::request_flow_to_group, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("request_flow_to_group", "group_id", "goal", "block_fences", "traversal_field_id"), &FlowFieldNative::request_flow_to_group, DEFVAL(false), DEFVAL(-1));
     ClassDB::bind_method(D_METHOD("are_async_flows_idle"), &FlowFieldNative::are_async_flows_idle);
     ClassDB::bind_method(D_METHOD("is_group_flow_request_ready", "group_id"), &FlowFieldNative::is_group_flow_request_ready);
     ClassDB::bind_method(D_METHOD("cancel_group_flow_request", "group_id"), &FlowFieldNative::cancel_group_flow_request);
     ClassDB::bind_method(D_METHOD("get_flow_pool_debug_snapshot"), &FlowFieldNative::get_flow_pool_debug_snapshot);
-    ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal", "block_fences"), &FlowFieldNative::assign_flow_to_group, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("assign_flow_to_group", "group_id", "goal", "block_fences", "traversal_field_id"), &FlowFieldNative::assign_flow_to_group, DEFVAL(false), DEFVAL(-1));
     ClassDB::bind_method(D_METHOD("group_route_cost_at_world", "group_id", "world_pos"), &FlowFieldNative::group_route_cost_at_world);
     ClassDB::bind_method(D_METHOD("set_debug_draw", "enabled"), &FlowFieldNative::set_debug_draw);
     ClassDB::bind_method(D_METHOD("get_debug_draw"), &FlowFieldNative::get_debug_draw);
@@ -101,6 +129,9 @@ void FlowFieldNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("clear_extra_blocking_cells"), &FlowFieldNative::clear_extra_blocking_cells);
     ClassDB::bind_method(D_METHOD("set_fence_blocking_cells", "cells"), &FlowFieldNative::set_fence_blocking_cells);
     ClassDB::bind_method(D_METHOD("clear_fence_blocking_cells"), &FlowFieldNative::clear_fence_blocking_cells);
+    ClassDB::bind_method(D_METHOD("set_directional_traversal_field", "field_id", "cells", "directions"), &FlowFieldNative::set_directional_traversal_field);
+    ClassDB::bind_method(D_METHOD("clear_directional_traversal_field", "field_id"), &FlowFieldNative::clear_directional_traversal_field);
+    ClassDB::bind_method(D_METHOD("clear_directional_traversal_fields"), &FlowFieldNative::clear_directional_traversal_fields);
     ClassDB::bind_method(D_METHOD("get_floor_layer"), &FlowFieldNative::get_floor_layer);
     ClassDB::bind_method(D_METHOD("get_wall_layer"), &FlowFieldNative::get_wall_layer);
     ClassDB::bind_method(D_METHOD("get_navigation_blocking_layer"), &FlowFieldNative::get_navigation_blocking_layer);
@@ -150,6 +181,25 @@ void FlowFieldNative::set_fence_blocking_cells(const PackedVector2Array &cells)
     }
 }
 void FlowFieldNative::clear_fence_blocking_cells() { fence_blocking_cells.clear(); }
+void FlowFieldNative::set_directional_traversal_field(int field_id, const PackedVector2Array &cells, const PackedVector2Array &directions)
+{
+    if (field_id < 0 || cells.size() != directions.size())
+        return;
+    DirectionalTraversalConstraints constraints;
+    constraints.reserve(cells.size());
+    for (int i = 0; i < cells.size(); ++i)
+    {
+        const Vector2 cell = cells[i];
+        const Vector2 direction = directions[i];
+        const Vector2i cardinal_direction((int)direction.x, (int)direction.y);
+        if (std::abs(cardinal_direction.x) + std::abs(cardinal_direction.y) != 1)
+            continue;
+        constraints[Vector2i((int)cell.x, (int)cell.y)] = cardinal_direction;
+    }
+    directional_traversal_fields[field_id] = std::move(constraints);
+}
+void FlowFieldNative::clear_directional_traversal_field(int field_id) { directional_traversal_fields.erase(field_id); }
+void FlowFieldNative::clear_directional_traversal_fields() { directional_traversal_fields.clear(); }
 Object *FlowFieldNative::get_floor_layer() const { return floor_layer; }
 Object *FlowFieldNative::get_wall_layer() const { return wall_layer; }
 Object *FlowFieldNative::get_navigation_blocking_layer() const { return navigation_blocking_layer; }
@@ -417,7 +467,8 @@ void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
 
 void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                     const Vector2i &goal_cell,
-                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs)
+                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs,
+                                    const DirectionalTraversalConstraints *traversal_constraints)
 {
     costs.clear();
     for (const Vector2i &c : walkable_set)
@@ -444,16 +495,10 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
         {
             const Vector2i d = dirs8[i];
             Vector2i nb = cur.cell + d;
-            if (!walkable_set.count(nb))
+            // Reverse Dijkstra considers the forward edge nb -> cur.cell. The
+            // directional constraint belongs to that predecessor/source cell.
+            if (!can_traverse(nb, cur.cell, walkable_set, traversal_constraints))
                 continue;
-
-            // Prevent diagonal corner-cutting through obstacles.
-            if ((std::abs(d.x) + std::abs(d.y)) == 2)
-            {
-                if (!walkable_set.count(cur.cell + Vector2i(d.x, 0)) ||
-                    !walkable_set.count(cur.cell + Vector2i(0, d.y)))
-                    continue;
-            }
 
             double step = (i < 4) ? 1.0 : 1.41421356237;
             double new_cost = cur.cost + step;
@@ -695,7 +740,8 @@ int FlowFieldNative::group_size_for_draw() const
 void FlowFieldNative::compute_directions(const Rect2i &used,
                                          const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
                                          const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
+                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
+                                         const DirectionalTraversalConstraints *traversal_constraints)
 {
     auto cost_at = [&](const Vector2i &p) -> double
     {
@@ -734,10 +780,8 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
             double best_cost = cc;
             for (const Vector2i &d : dirs8)
             {
-                if (!diagonal_ok(c, d))
-                    continue;
                 Vector2i n = c + d;
-                if (!is_walkable(n))
+                if (!can_traverse(c, n, walkable_set, traversal_constraints))
                     continue;
                 double nc = cost_at(n);
                 if (!std::isfinite(nc))
@@ -797,10 +841,8 @@ void FlowFieldNative::compute_directions(const Rect2i &used,
             const double cost_eps = 1e-9;
             for (const Vector2i &d : dirs8)
             {
-                if (!diagonal_ok(c, d))
-                    continue;
                 Vector2i n = c + d;
-                if (!is_walkable(n))
+                if (!can_traverse(c, n, walkable_set, traversal_constraints))
                     continue;
                 double nc = cost_at(n);
                 if (!std::isfinite(nc) || nc > cc)
@@ -955,9 +997,16 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     return true;
 }
 
-bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences)
+bool FlowFieldNative::build_async_snapshot(Vector2 goal, AsyncFlowSnapshot &snapshot, bool block_fences, int traversal_field_id)
 {
     snapshot.block_fences = block_fences;
+    snapshot.traversal_constraints.clear();
+    if (traversal_field_id >= 0)
+    {
+        const auto field = directional_traversal_fields.find(traversal_field_id);
+        if (field != directional_traversal_fields.end())
+            snapshot.traversal_constraints = field->second;
+    }
     if (!floor_layer || !wall_layer)
         return false;
 
@@ -1230,15 +1279,8 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
         {
             const Vector2i d = dirs8[i];
             Vector2i nb = cur.cell + d;
-            if (!walkable_set.count(nb))
+            if (!can_traverse(nb, cur.cell, walkable_set, &snapshot.traversal_constraints))
                 continue;
-
-            if ((std::abs(d.x) + std::abs(d.y)) == 2)
-            {
-                if (!walkable_set.count(cur.cell + Vector2i(d.x, 0)) ||
-                    !walkable_set.count(cur.cell + Vector2i(0, d.y)))
-                    continue;
-            }
 
             double step = (i < 4) ? 1.0 : 1.41421356237;
             double new_cost = cur.cost + step;
@@ -1387,10 +1429,8 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
             double best_cost = cc;
             for (const Vector2i &d : dirs8)
             {
-                if (!diagonal_ok(cell, d))
-                    continue;
                 Vector2i n = cell + d;
-                if (!is_walkable(n))
+                if (!can_traverse(cell, n, walkable_set, &snapshot.traversal_constraints))
                     continue;
                 double nc = cost_at(n);
                 if (std::isfinite(nc) && nc < best_cost)
@@ -1438,10 +1478,8 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
             const double cost_eps = 1e-9;
             for (const Vector2i &d : dirs8)
             {
-                if (!diagonal_ok(cell, d))
-                    continue;
                 Vector2i n = cell + d;
-                if (!is_walkable(n))
+                if (!can_traverse(cell, n, walkable_set, &snapshot.traversal_constraints))
                     continue;
                 double nc = cost_at(n);
                 if (!std::isfinite(nc) || nc > cc)
@@ -1492,7 +1530,7 @@ void FlowFieldNative::mark_group_flow_queued(int group_id)
     }
 }
 
-void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool block_fences)
+void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool block_fences, int traversal_field_id)
 {
     if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
     {
@@ -1521,7 +1559,7 @@ void FlowFieldNative::request_flow_to_group(int group_id, Vector2 goal, bool blo
 
     // Stamp the request before snapshot construction. If the snapshot is invalid,
     // readiness remains false instead of accidentally accepting an older field.
-    if (!build_async_snapshot(goal, request.snapshot, block_fences))
+    if (!build_async_snapshot(goal, request.snapshot, block_fences, traversal_field_id))
     {
         // Snapshot failed: the field will never build, so don't leave agents frozen.
         if (auto *mgr = ffcore::get_global_agent_manager())
@@ -1879,7 +1917,7 @@ void FlowFieldNative::_draw()
 
 }
 
-void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool block_fences)
+void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool block_fences, int traversal_field_id)
 {
     if (group_id == ffcore::INVALID_GROUP || group_id >= ffcore::MAX_GROUPS)
     {
@@ -1906,13 +1944,13 @@ void FlowFieldNative::assign_flow_to_group(int group_id, Vector2 goal, bool bloc
     // for the frames before the drain reaches them; here we just make sure the group ends
     // at "none" on success and is never left stuck-frozen on a failure.
     ffcore::FlowField computed_field;
-    if (block_fences)
+    if (block_fences || traversal_field_id >= 0)
     {
         AsyncFlowRequest request;
         request.group_id = group_id;
         request.serial = serial;
         request.group_generation = group_generation;
-        if (!build_async_snapshot(goal, request.snapshot, true))
+        if (!build_async_snapshot(goal, request.snapshot, block_fences, traversal_field_id))
         {
             if (auto *m = ffcore::get_global_agent_manager())
                 m->set_group_flow_wait(group_id, ffcore::GROUP_FLOW_WAIT_NONE);

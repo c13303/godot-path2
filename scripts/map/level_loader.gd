@@ -21,7 +21,7 @@ extends Node
 @export var level_scene: PackedScene
 
 ## The authored layers a level provides, in the order they should be hosted.
-const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz", "fences"]
+const LEVEL_LAYER_NAMES: PackedStringArray = ["floor", "watersources", "wallz", "fences", "special_tiles"]
 const SPAWNER_CONTAINER_NAMES: PackedStringArray = ["spawner", "spawners"]
 ## Root-level container whose direct Node2D children mark one permanent bamboo plant each.
 const BAMBOO_CONTAINER_NAME: String = "bamboo"
@@ -110,7 +110,7 @@ func _load_level() -> void:
 	for layer_name in LEVEL_LAYER_NAMES:
 		var layer: Node = level_root.get_node_or_null(NodePath(layer_name))
 		if layer == null:
-			if layer_name == "fences":
+			if layer_name == "fences" or layer_name == "special_tiles":
 				continue
 			push_warning("LevelLoader: level '%s' is missing layer '%s'." % [scene_to_load.resource_path, layer_name])
 			continue
@@ -119,6 +119,12 @@ func _load_level() -> void:
 			continue
 		level_root.remove_child(layer)
 		layer.name = layer_name
+		if layer_name == "special_tiles":
+			var special_tiles: TileMapLayer = layer as TileMapLayer
+			if special_tiles != null:
+				special_tiles.visible = false
+				special_tiles.collision_enabled = false
+				special_tiles.navigation_enabled = false
 		_clear_owner_recursive(layer)
 		host.add_child(layer)
 	_ensure_optional_fences_layer(host)

@@ -17,6 +17,9 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EXIT_WALL_ATLAS: Vector2i = Vector2i(13, 0)
 const SPAWNER_KIND_MONSTER: StringName = &"monster"
 const SPAWNER_KIND_CLIENT: StringName = &"client"
+const SPAWNER_KIND_MERCHANT: StringName = &"merchant"
+const CLIENT_ONE_WAY_FIELD_ID: int = 1
+const NO_TRAVERSAL_FIELD_ID: int = -1
 const ROUTE_KIND_MONSTER_INBOUND: StringName = &"monster_inbound"
 const ROUTE_KIND_CLIENT_INBOUND: StringName = &"client_inbound"
 const ROUTE_KIND_CLIENT_OUTBOUND: StringName = &"client_outbound"
@@ -228,6 +231,7 @@ func _prepare_preview_routes(
 			"walkability_revision": _approach_generation,
 			"route_kind": route.get("route_kind", ROUTE_KIND_MONSTER_INBOUND) as StringName,
 			"block_fences": bool(route.get("block_fences", false)),
+			"traversal_field_id": int(route.get("traversal_field_id", NO_TRAVERSAL_FIELD_ID)),
 		}
 	return deferred
 
@@ -258,6 +262,7 @@ func _build_client_outbound_preview_descriptor(inbound: Dictionary, topology_rev
 		"walkability_revision": _approach_generation,
 		"route_kind": ROUTE_KIND_CLIENT_OUTBOUND,
 		"block_fences": true,
+		"traversal_field_id": CLIENT_ONE_WAY_FIELD_ID,
 	}
 
 
@@ -427,11 +432,14 @@ func _ensure_approach_flow(spawner_cell: Vector2i) -> Dictionary:
 	if not _flow_is_ready() or not _spawners().has(spawner_cell):
 		return {}
 	var route: Dictionary = _spawner_routes.get(spawner_cell, {}) as Dictionary
-	var block_fences: bool = _route_blocks_fences(spawner_cell)
+	var policy: Dictionary = _route_policy(spawner_cell)
+	var block_fences: bool = bool(policy["block_fences"])
+	var traversal_field_id: int = int(policy["traversal_field_id"])
 	var generation_current: bool = int(route.get("approach_generation", -1)) == _approach_generation
 	var policy_current: bool = (
 		route.has("approach_block_fences")
 		and bool(route["approach_block_fences"]) == block_fences
+		and int(route.get("approach_traversal_field_id", NO_TRAVERSAL_FIELD_ID)) == traversal_field_id
 	)
 	if generation_current and policy_current:
 		return route
@@ -460,12 +468,13 @@ func _ensure_approach_flow(spawner_cell: Vector2i) -> Dictionary:
 		return {}
 	# Same navigation policy as the agents that leave this spawner, straight from
 	# _route_blocks_fences: monsters walk through fences, clients/merchants do not.
-	request_group_flow_rebuild_with_policy(approach_group, target_world, block_fences,
+	request_group_flow_rebuild_with_policy(approach_group, target_world, block_fences, traversal_field_id,
 		"spawner %s approach" % str(spawner_cell))
 	route["approach_group"] = approach_group
 	route["approach_target_cell"] = target_cell
 	route["approach_target_world"] = target_world
 	route["approach_block_fences"] = block_fences
+	route["approach_traversal_field_id"] = traversal_field_id
 	route["approach_ready"] = true
 	route["approach_generation"] = _approach_generation
 	_spawner_routes[spawner_cell] = route
@@ -474,7 +483,9 @@ func _ensure_approach_flow(spawner_cell: Vector2i) -> Dictionary:
 
 func _store_unavailable_approach(spawner_cell: Vector2i, route: Dictionary) -> Dictionary:
 	route["approach_target_cell"] = INVALID_CELL
-	route["approach_block_fences"] = _route_blocks_fences(spawner_cell)
+	var policy: Dictionary = _route_policy(spawner_cell)
+	route["approach_block_fences"] = bool(policy["block_fences"])
+	route["approach_traversal_field_id"] = int(policy["traversal_field_id"])
 	route["approach_ready"] = false
 	route["approach_generation"] = _approach_generation
 	_spawner_routes[spawner_cell] = route
@@ -600,7 +611,7 @@ func rebuild_exit_wall_escapes_budgeted(token: int) -> bool:
 		if not _is_finite_world(escape_world):
 			release_exit_wall_escape(exit_cell)
 			continue
-		request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
+		request_group_flow_rebuild_with_policy(escape_group, escape_world, false, NO_TRAVERSAL_FIELD_ID, "exit wall %s" % str(exit_cell))
 		escape["escape_group"] = escape_group
 		escape["escape_target_cell"] = target_cell
 		escape["escape_world"] = escape_world
@@ -694,7 +705,8 @@ func initialize_spawner_route(spawner_cell: Vector2i) -> void:
 				route["route_initialized"] = true
 				_spawner_routes[spawner_cell] = route
 				return
-			request_group_flow_rebuild(escape_group, escape_world, "spawner %s escape" % str(spawner_cell))
+			var policy: Dictionary = _route_policy(spawner_cell)
+			request_group_flow_rebuild_with_policy(escape_group, escape_world, bool(policy["block_fences"]), int(policy["traversal_field_id"]), "spawner %s escape" % str(spawner_cell))
 			route["escape_group"] = escape_group
 			route["escape_world"] = escape_world
 			route["escape_ready"] = true
@@ -728,8 +740,10 @@ func rebuild_spawner_plant_ff(spawner_cell: Vector2i) -> void:
 		route["entry_world"] = entry_world
 		route["ready"] = false
 		route["flow_requested"] = true
-		var block_fences: bool = bool(route.get("block_fences", _route_blocks_fences(spawner_cell)))
-		request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences,
+		var policy: Dictionary = _route_policy(spawner_cell)
+		var block_fences: bool = bool(route.get("block_fences", policy["block_fences"]))
+		var traversal_field_id: int = int(route.get("traversal_field_id", policy["traversal_field_id"]))
+		request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences, traversal_field_id,
 			"spawner %s garden %d" % [str(spawner_cell), garden_id])
 		garden_routes[garden_id] = route
 	_spawner_garden_routes[spawner_cell] = garden_routes
@@ -744,7 +758,8 @@ func rebuild_spawner_escape_ff(spawner_cell: Vector2i) -> void:
 	if escape_group <= IDLE_GROUP:
 		return
 	var escape_world: Vector2 = _cell_center(target_cell)
-	request_group_flow_rebuild(escape_group, escape_world, "spawner %s escape" % str(spawner_cell))
+	var policy: Dictionary = _route_policy(spawner_cell)
+	request_group_flow_rebuild_with_policy(escape_group, escape_world, bool(policy["block_fences"]), int(policy["traversal_field_id"]), "spawner %s escape" % str(spawner_cell))
 	route["escape_world"] = escape_world
 	_spawner_routes[spawner_cell] = route
 
@@ -793,7 +808,7 @@ func rebuild_exit_wall_escapes(_use_async_requests: bool = false) -> void:
 			])
 			release_exit_wall_escape(exit_cell)
 			continue
-		request_group_flow_rebuild(escape_group, escape_world, "exit wall %s" % str(exit_cell))
+		request_group_flow_rebuild_with_policy(escape_group, escape_world, false, NO_TRAVERSAL_FIELD_ID, "exit wall %s" % str(exit_cell))
 		escape["escape_group"] = escape_group
 		escape["escape_target_cell"] = target_cell
 		escape["escape_world"] = escape_world
@@ -831,10 +846,10 @@ func nearest_reachable_exit_escape(world_pos: Vector2) -> Dictionary:
 
 
 func request_group_flow_rebuild(group_id: int, goal_world: Vector2, label: String = "") -> void:
-	request_group_flow_rebuild_with_policy(group_id, goal_world, _fences_block_navigation(), label)
+	request_group_flow_rebuild_with_policy(group_id, goal_world, false, NO_TRAVERSAL_FIELD_ID, label)
 
 
-func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, block_fences: bool, label: String = "") -> void:
+func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, block_fences: bool, traversal_field_id: int, label: String = "") -> void:
 	if not _is_finite_world(goal_world):
 		push_warning("LOST-AGENT-GUARD: refused flow goal %s for group %d" % [goal_world, group_id])
 		return
@@ -854,6 +869,7 @@ func request_group_flow_rebuild_with_policy(group_id: int, goal_world: Vector2, 
 		"group_id": group_id,
 		"goal_world": goal_world,
 		"block_fences": block_fences,
+		"traversal_field_id": traversal_field_id,
 		"label": resolved_label,
 	}
 	if _queued_flow_group_ids.has(group_id):
@@ -888,7 +904,8 @@ func process_queued_flow_requests(max_requests: int = 1, budget_us: int = 0) -> 
 		_queued_flow_group_ids.erase(group_id)
 		var goal_world: Vector2 = request.get("goal_world", Vector2.ZERO) as Vector2
 		var block_fences: bool = bool(request.get("block_fences", false))
-		_submit_group_flow_rebuild(group_id, goal_world, block_fences)
+		var traversal_field_id: int = int(request.get("traversal_field_id", NO_TRAVERSAL_FIELD_ID))
+		_submit_group_flow_rebuild(group_id, goal_world, block_fences, traversal_field_id)
 		processed += 1
 		_batch_count += 1
 	if _flow_request_queue.is_empty():
@@ -905,12 +922,12 @@ func _reindex_queued_flow_groups() -> void:
 		_queued_flow_group_ids[int(request.get("group_id", IDLE_GROUP))] = index
 
 
-func _submit_group_flow_rebuild(group_id: int, goal_world: Vector2, block_fences: bool) -> void:
+func _submit_group_flow_rebuild(group_id: int, goal_world: Vector2, block_fences: bool, traversal_field_id: int) -> void:
 	var flow: Node = _flow()
 	if flow_uses_async_requests():
-		flow.call("request_flow_to_group", group_id, goal_world, block_fences)
+		flow.call("request_flow_to_group", group_id, goal_world, block_fences, traversal_field_id)
 	elif flow_supports_sync_assign():
-		flow.call("assign_flow_to_group", group_id, goal_world, block_fences)
+		flow.call("assign_flow_to_group", group_id, goal_world, block_fences, traversal_field_id)
 
 
 func rebuild_spawner_garden_route_cache() -> void:
@@ -983,7 +1000,11 @@ func garden_route_is_current(route: Dictionary, garden_id: int) -> bool:
 	var spawner_cell: Vector2i = route.get("spawner_cell", INVALID_CELL) as Vector2i
 	if spawner_cell == INVALID_CELL:
 		return false
-	return bool(route.get("block_fences", true)) == _route_blocks_fences(spawner_cell)
+	var policy: Dictionary = _route_policy(spawner_cell)
+	return (
+		bool(route.get("block_fences", true)) == bool(policy["block_fences"])
+		and int(route.get("traversal_field_id", NO_TRAVERSAL_FIELD_ID)) == int(policy["traversal_field_id"])
+	)
 
 
 func spawner_garden_route_flow_ready(route: Dictionary, spawner_cell: Vector2i) -> bool:
@@ -1032,8 +1053,10 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		plant_group = int(agent_manager.call("create_group"))
 	if plant_group <= IDLE_GROUP:
 		return {"ready": false}
-	var block_fences: bool = _route_blocks_fences(spawner_cell)
-	request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences,
+	var policy: Dictionary = _route_policy(spawner_cell)
+	var block_fences: bool = bool(policy["block_fences"])
+	var traversal_field_id: int = int(policy["traversal_field_id"])
+	request_group_flow_rebuild_with_policy(plant_group, entry_world, block_fences, traversal_field_id,
 		"spawner %s garden %d" % [str(spawner_cell), garden_id])
 	var route: Dictionary = {
 		"spawner_cell": spawner_cell,
@@ -1044,8 +1067,9 @@ func get_or_create_spawner_garden_route(spawner_cell: Vector2i, garden_id: int) 
 		"group_id": plant_group,
 		"ready": spawner_garden_route_flow_ready({"plant_group": plant_group}, spawner_cell),
 		"flow_requested": true,
-		"route_kind": ROUTE_KIND_MONSTER_INBOUND if not block_fences else ROUTE_KIND_CLIENT_INBOUND,
+		"route_kind": ROUTE_KIND_CLIENT_INBOUND if _spawner_kind(spawner_cell) == SPAWNER_KIND_CLIENT else ROUTE_KIND_MONSTER_INBOUND,
 		"block_fences": block_fences,
+		"traversal_field_id": traversal_field_id,
 		"garden_version": int(garden.get("version", 0)),
 		"garden_epoch": int(garden.get("epoch", -1)),
 		"approach_generation": _approach_generation,
@@ -1180,9 +1204,30 @@ func _fences_block_navigation() -> bool:
 	return _manager._fences_block_navigation()
 
 
+func _spawner_kind(spawner_cell: Vector2i) -> StringName:
+	return _spawner_kind_by_cell().get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
+
+
+func _route_policy(spawner_cell: Vector2i) -> Dictionary:
+	var spawner_kind: StringName = _spawner_kind(spawner_cell)
+	if spawner_kind == SPAWNER_KIND_CLIENT:
+		return {
+			"block_fences": true,
+			"traversal_field_id": CLIENT_ONE_WAY_FIELD_ID,
+		}
+	if spawner_kind == SPAWNER_KIND_MERCHANT:
+		return {
+			"block_fences": true,
+			"traversal_field_id": NO_TRAVERSAL_FIELD_ID,
+		}
+	return {
+		"block_fences": false,
+		"traversal_field_id": NO_TRAVERSAL_FIELD_ID,
+	}
+
+
 func _route_blocks_fences(spawner_cell: Vector2i) -> bool:
-	var spawner_kind: StringName = _spawner_kind_by_cell().get(spawner_cell, SPAWNER_KIND_MONSTER) as StringName
-	return spawner_kind != SPAWNER_KIND_MONSTER
+	return bool(_route_policy(spawner_cell)["block_fences"])
 
 
 func _nearest_garden_entry(garden_id: int, spawner_cell: Vector2i) -> Vector2i:
