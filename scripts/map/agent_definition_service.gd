@@ -21,8 +21,10 @@ const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.225
 const BIG_MONSTER_WALK_SQUASH: float = 0.03
 const VILLAGER_CONTACT_PUSH_POWER: float = 0.0
-const VILLAGER_CONTACT_PUSH_RESIST: float = 1.0
+const VILLAGER_CONTACT_PUSH_RESIST: float = 2.0
 const VILLAGER_CONTACT_PUSH_COOLDOWN: float = 0.2
+const VILLAGER_CONTACT_PUSH_FRICTION_LOSS: float = 0.995
+const VILLAGER_CONTACT_CONTROL_SUPPRESSION_SECONDS: float = 0.1
 
 var _manager: Node
 
@@ -77,6 +79,8 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 	agent.set_meta("agent_contact_push_power", data.contact_push_power)
 	agent.set_meta("agent_contact_push_resist", data.contact_push_resist)
 	agent.set_meta("agent_contact_push_cooldown", data.contact_push_cooldown)
+	agent.set_meta("agent_contact_push_friction_loss", data.contact_push_friction_loss)
+	agent.set_meta("agent_contact_control_suppression_seconds", data.contact_control_suppression_seconds)
 	agent.set_meta("monster_smash_resist", data.smash_resist_scale)
 	if agent is CanvasItem:
 		var canvas_item: CanvasItem = agent as CanvasItem
@@ -170,6 +174,8 @@ func _apply_villager_traits(agent: Node, crushes_placeables: bool = true) -> voi
 	agent.set_meta("agent_contact_push_power", VILLAGER_CONTACT_PUSH_POWER)
 	agent.set_meta("agent_contact_push_resist", VILLAGER_CONTACT_PUSH_RESIST)
 	agent.set_meta("agent_contact_push_cooldown", VILLAGER_CONTACT_PUSH_COOLDOWN)
+	agent.set_meta("agent_contact_push_friction_loss", VILLAGER_CONTACT_PUSH_FRICTION_LOSS)
+	agent.set_meta("agent_contact_control_suppression_seconds", VILLAGER_CONTACT_CONTROL_SUPPRESSION_SECONDS)
 	if crushes_placeables:
 		_mark_crushes_placeables(agent)
 

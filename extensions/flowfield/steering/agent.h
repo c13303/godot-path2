@@ -54,6 +54,11 @@ namespace ffcore
         double contact_push_power = 0.0;
         double contact_push_resist = 1.0;
         double contact_push_cooldown = 0.20;
+        // Contact-only impulse damping and autonomous-control suppression. Defaults
+        // preserve the previous native contact behavior for profiles that do not
+        // supply an override.
+        double contact_push_friction_loss = 0.65;
+        double contact_control_suppression_seconds = 0.20;
         // Resistance to smash/knockback impulses (see apply_smash_impulse). 1.0 =
         // normal; 2.0 halves the received impulse velocity (twice the inertia).
         double smash_resist = 1.0;

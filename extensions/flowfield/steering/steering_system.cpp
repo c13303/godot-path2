@@ -150,6 +150,8 @@ AgentProfile SteeringSystem::sanitize_agent_profile(const AgentProfile &profile)
     sanitized.contact_push_power = std::isfinite(sanitized.contact_push_power) ? std::max(0.0, sanitized.contact_push_power) : 0.0;
     sanitized.contact_push_resist = std::isfinite(sanitized.contact_push_resist) ? std::max(0.001, sanitized.contact_push_resist) : 1.0;
     sanitized.contact_push_cooldown = std::isfinite(sanitized.contact_push_cooldown) ? std::max(0.0, sanitized.contact_push_cooldown) : 0.20;
+    sanitized.contact_push_friction_loss = std::isfinite(sanitized.contact_push_friction_loss) ? std::clamp(sanitized.contact_push_friction_loss, 0.0, 1.0) : 0.65;
+    sanitized.contact_control_suppression_seconds = std::isfinite(sanitized.contact_control_suppression_seconds) ? std::max(0.0, sanitized.contact_control_suppression_seconds) : 0.20;
     sanitized.smash_resist = (std::isfinite(sanitized.smash_resist) && sanitized.smash_resist > 0.0) ? sanitized.smash_resist : 1.0;
     sanitized.world_radius = std::isfinite(sanitized.world_radius) && sanitized.world_radius > 0.0 ? sanitized.world_radius : cfg.tile_size * cfg.agent_world_diameter_ratio * 0.5;
     sanitized.foot_offset_y = std::isfinite(sanitized.foot_offset_y) ? sanitized.foot_offset_y : cfg.agent_offset_y;
@@ -776,19 +778,17 @@ void SteeringSystem::apply_contact_pushes(double delta)
             Vec2 impulse_dir = net_pressure > 0.0 ? dir : dir * -1.0;
             double force = std::abs(net_pressure);
             double cooldown = std::max(agent.profile.contact_push_cooldown, neighbor.profile.contact_push_cooldown);
+            const AgentData &target = net_pressure > 0.0 ? neighbor : agent;
 
-            // The contact cooldown is also the short autonomous-control suppression window;
-            // this prevents path/flow steering from cancelling the physical contact impulse
-            // before the next contact may be generated.
             queue_smash_impulse(
                 target_id,
                 impulse_dir,
                 force,
-                0.65,
+                target.profile.contact_push_friction_loss,
                 0.0,
                 false,
                 1.0,
-                cooldown,
+                target.profile.contact_control_suppression_seconds,
                 false,
                 static_cast<int>(ImpulseQueuePriority::Contact));
             contact_push_cooldowns[agent.id][neighbor.id] = cooldown;

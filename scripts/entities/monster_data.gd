@@ -51,6 +51,12 @@ class_name MonsterData
 ## pressure before normal smash resistance is applied.
 @export_range(0.05, 100.0, 0.01, "or_greater") var contact_push_resist: float = 1.0
 @export_range(0.0, 2.0, 0.01, "or_greater") var contact_push_cooldown: float = 0.2
+## Fraction of contact impulse velocity removed per second. This applies only to
+## direct agent contact and does not affect weapon or explosion knockback.
+@export_range(0.0, 1.0, 0.001) var contact_push_friction_loss: float = 0.65
+## Time autonomous steering yields after direct contact. This is intentionally
+## independent from the interval before another contact impulse may be applied.
+@export_range(0.0, 2.0, 0.01, "or_greater") var contact_control_suppression_seconds: float = 0.2
 ## Resistance to smash / knockback impulses. 1.0 = normal,
 ## 2.0 = receives half the knockback velocity (twice the inertia).
 @export_range(0.05, 100.0, 0.01, "or_greater") var smash_resist_scale: float = 1.0

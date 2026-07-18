@@ -263,9 +263,9 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
     else if (node->is_in_group(StringName("main_chars")))
         profile.smash_class = ffcore::SMASH_CLASS_MAIN_CHAR;
 
-    // Per-agent stat overrides pushed from the game side (see MonsterData / the
-    // "monster bible"). Absent metas leave the profile defaults untouched, so
-    // non-monster agents are unaffected.
+    // Per-agent stat overrides pushed from game-side definitions. Absent metas
+    // leave the profile defaults untouched, so unrelated agent types keep their
+    // default contact behavior.
     if (node->has_meta(StringName("monster_speed_scale")))
     {
         double scale = (double)node->get_meta(StringName("monster_speed_scale"));
@@ -295,6 +295,18 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         double cooldown = (double)node->get_meta(StringName("agent_contact_push_cooldown"));
         if (std::isfinite(cooldown) && cooldown >= 0.0)
             profile.contact_push_cooldown = cooldown;
+    }
+    if (node->has_meta(StringName("agent_contact_push_friction_loss")))
+    {
+        double friction_loss = (double)node->get_meta(StringName("agent_contact_push_friction_loss"));
+        if (std::isfinite(friction_loss))
+            profile.contact_push_friction_loss = friction_loss;
+    }
+    if (node->has_meta(StringName("agent_contact_control_suppression_seconds")))
+    {
+        double suppression_seconds = (double)node->get_meta(StringName("agent_contact_control_suppression_seconds"));
+        if (std::isfinite(suppression_seconds) && suppression_seconds >= 0.0)
+            profile.contact_control_suppression_seconds = suppression_seconds;
     }
     if (node->has_meta(StringName("monster_smash_resist")))
     {

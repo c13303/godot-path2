@@ -20,6 +20,10 @@ const GREEN_MONSTER_HEALTH_SCALE: float = 0.5
 const GREEN_MONSTER_SPEED_SCALE: float = 1.5
 const BIG_MONSTER_SPRITE_SCALE: Vector2 = Vector2(0.75, 0.75)
 const BIG_MONSTER_SPRITE_OFFSET: Vector2 = Vector2(0.0, -48.0)
+const SMALL_CONTACT_PUSH_RESIST: float = 2.0
+const SMALL_CONTACT_PUSH_COOLDOWN: float = 0.2
+const SMALL_CONTACT_PUSH_FRICTION_LOSS: float = 0.995
+const SMALL_CONTACT_CONTROL_SUPPRESSION_SECONDS: float = 0.1
 const MONSTER_ID_ORDER: Array[StringName] = [BASIC_ID, GREEN_MONSTER_ID, BIG_MONSTER_ID]
 
 
@@ -85,8 +89,10 @@ static func _make_ordinary_monster(id: StringName, display_name: String, texture
 	data.speed_scale = 1.0
 	data.crowd_resist_scale = 1.0
 	data.contact_push_power = 0.0
-	data.contact_push_resist = 1.0
-	data.contact_push_cooldown = 0.2
+	data.contact_push_resist = SMALL_CONTACT_PUSH_RESIST
+	data.contact_push_cooldown = SMALL_CONTACT_PUSH_COOLDOWN
+	data.contact_push_friction_loss = SMALL_CONTACT_PUSH_FRICTION_LOSS
+	data.contact_control_suppression_seconds = SMALL_CONTACT_CONTROL_SUPPRESSION_SECONDS
 	data.smash_resist_scale = 1.0
 	return data
 
