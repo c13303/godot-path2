@@ -559,6 +559,27 @@ func get_turret_world_position(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _building_objects.blocking_buildings
 	return layer.to_global(layer.map_to_local(cell))
 
+
+func is_world_position_in_straight_line(
+	turret_cell: Vector2i,
+	world_position: Vector2,
+	direction: Vector2i,
+	activation_range: float
+) -> bool:
+	if direction == Vector2i.ZERO or activation_range <= 0.0:
+		return false
+	var layer: TileMapLayer = _building_objects.blocking_buildings
+	if layer == null:
+		return false
+	var target_cell: Vector2i = layer.local_to_map(layer.to_local(world_position))
+	var step: int = _line_step_for_offset(target_cell - turret_cell, direction)
+	if step <= 0:
+		return false
+	var tile_size: float = _tile_size_pixels(layer)
+	var max_steps: int = ceili(activation_range / maxf(1.0, tile_size))
+	return step <= max_steps
+
+
 func turret_can_see_world_position(turret_cell: Vector2i, world_position: Vector2) -> bool:
 	var state: Dictionary = _turrets.get(turret_cell, {}) as Dictionary
 	if int(state.get("los_status", LOS_PENDING)) != LOS_READY:

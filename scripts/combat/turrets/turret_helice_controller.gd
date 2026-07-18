@@ -113,6 +113,10 @@ func _has_eligible_agent(cell: Vector2i, state: Dictionary, data: TurretData) ->
 
 func _process_active_query(cell: Vector2i, state: Dictionary, data: TurretData, steering: Node) -> void:
 	var origin: Vector2 = _turret_system.get_turret_world_position(cell)
+	var direction: Vector2i = state.get("direction", Vector2i.RIGHT) as Vector2i
+	var impulse_direction: Vector2 = Vector2(float(direction.x), float(direction.y)).normalized()
+	if impulse_direction.is_zero_approx():
+		return
 	var repulse_wait_by_agent: Dictionary = state.get("repulse_wait_by_agent", {}) as Dictionary
 	var eligible_ids: Dictionary = {}
 	for agent: Node2D in _tracker.get_all_agents_in_world_radius(origin, data.shooting_range):
@@ -122,11 +126,8 @@ func _process_active_query(cell: Vector2i, state: Dictionary, data: TurretData, 
 		eligible_ids[instance_id] = true
 		if float(repulse_wait_by_agent.get(instance_id, 0.0)) > 0.0:
 			continue
-		var impulse_direction: Vector2 = agent.global_position - origin
-		if impulse_direction.is_zero_approx():
-			impulse_direction = Vector2(float((state.get("direction", Vector2i.RIGHT) as Vector2i).x), float((state.get("direction", Vector2i.RIGHT) as Vector2i).y))
 		var nav_id: int = int(agent.get("nav_id"))
-		steering.call("apply_smash_impulse", nav_id, impulse_direction.normalized(), data.wind_force, data.wind_friction_loss, 0.0, false, data.wind_control_suppression, data.wind_control_suppression_duration)
+		steering.call("apply_smash_impulse", nav_id, impulse_direction, data.wind_force, data.wind_friction_loss, 0.0, false, data.wind_control_suppression, data.wind_control_suppression_duration)
 		repulse_wait_by_agent[instance_id] = data.wind_repulse_frequency
 	for raw_instance_id: Variant in repulse_wait_by_agent.keys():
 		if not eligible_ids.has(int(raw_instance_id)):
@@ -159,6 +160,9 @@ func _is_eligible(agent: Node2D, cell: Vector2i, state: Dictionary, data: Turret
 	if origin.distance_squared_to(agent.global_position) > data.shooting_range * data.shooting_range:
 		return false
 	var direction: Vector2i = state.get("direction", Vector2i.RIGHT) as Vector2i
-	if not TurretGeometry.is_within_directional_angle(origin, agent.global_position, direction, data.activation_angle_degrees):
+	if data.straight_line_detection:
+		if not _turret_system.is_world_position_in_straight_line(cell, agent.global_position, direction, data.shooting_range):
+			return false
+	elif not TurretGeometry.is_within_directional_angle(origin, agent.global_position, direction, data.activation_angle_degrees):
 		return false
 	return _turret_system.turret_can_see_world_position(cell, agent.global_position)
