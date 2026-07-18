@@ -230,6 +230,12 @@ func set_turret_refractory_active(cell: Vector2i, active: bool) -> void:
 		runtime_node.call("set_refractory_active", active)
 
 
+func set_turret_activity_active(cell: Vector2i, active: bool) -> void:
+	var runtime_node: Node = _valid_runtime_node(cell)
+	if runtime_node != null and runtime_node.has_method("set_activity_active"):
+		runtime_node.call("set_activity_active", active)
+
+
 func get_building_cells_by_item_id(item_id: String) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	for raw_cell: Variant in _buildings_by_cell.keys():

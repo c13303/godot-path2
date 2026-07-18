@@ -441,6 +441,14 @@ func _current_floor_cell(agent: Node2D) -> Vector2i:
 
 
 func get_agents_in_world_radius(center: Vector2, radius: float, category: StringName) -> Array[Node2D]:
+	return _get_agents_in_world_radius(center, radius, category, false)
+
+
+func get_all_agents_in_world_radius(center: Vector2, radius: float) -> Array[Node2D]:
+	return _get_agents_in_world_radius(center, radius, &"", true)
+
+
+func _get_agents_in_world_radius(center: Vector2, radius: float, category: StringName, include_all_categories: bool) -> Array[Node2D]:
 	var result: Array[Node2D] = []
 	if _manager == null or _manager.floorz == null or radius <= 0.0:
 		return result
@@ -460,7 +468,7 @@ func get_agents_in_world_radius(center: Vector2, radius: float, category: String
 				if _suspended.has(id):
 					continue
 				var record: Dictionary = _agents.get(id, {}) as Dictionary
-				if record.is_empty() or (record["category"] as StringName) != category:
+				if record.is_empty() or (not include_all_categories and (record["category"] as StringName) != category):
 					continue
 				var agent: Node2D = (record["ref"] as WeakRef).get_ref() as Node2D
 				if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion():

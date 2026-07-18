@@ -31,9 +31,17 @@ const BLUEPRINT_DEFS: Dictionary = {
 		"automatic": false,
 		"initially_published": false,
 	},
+	&"turret_helice": {
+		"build_item_id": &"turret_helice",
+		"currency": &"money",
+		"price": 10,
+		"prerequisites": [],
+		"automatic": false,
+		"initially_published": false,
+	},
 }
 
-const PAID_BLUEPRINT_ORDER: Array[StringName] = [&"ronce", &"fence", &"kraken"]
+const PAID_BLUEPRINT_ORDER: Array[StringName] = [&"ronce", &"fence", &"kraken", &"turret_helice"]
 
 var _progression: Node
 var _unlocked_ids: Dictionary = {}

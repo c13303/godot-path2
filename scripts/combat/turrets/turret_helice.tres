@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="TurretData" format=3]
+
+[ext_resource type="Script" path="res://scripts/combat/turrets/turret_data.gd" id="1_data"]
+
+[resource]
+script = ExtResource("1_data")
+id = "turret_helice"
+behavior = 1
+shooting_range = 160.0
+directional = true
+straight_line_detection = false
+activation_angle_degrees = 90.0
+wind_active_duration = 1.0
+wind_cooldown_duration = 3.0
+wind_force = 220.0
+wind_friction_loss = 0.9
+wind_control_suppression = 1.0
+wind_control_suppression_duration = 0.5
+wind_repulse_frequency = 0.5
+wind_query_interval = 0.1
+build_in_range = true
+build_range = 200.0
+eatable_by_monsters = true

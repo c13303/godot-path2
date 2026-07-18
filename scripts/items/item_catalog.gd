@@ -3,6 +3,8 @@ class_name ItemCatalog
 
 const TURRET_EPINE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_epine.tres")
 const TURRET_EPINE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_epine.png")
+const TURRET_HELICE_DATA: TurretData = preload("res://scripts/combat/turrets/turret_helice.tres")
+const TURRET_HELICE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/turret_helice.png")
 const TILESET_32_TEXTURE: Texture2D = preload("res://assets/sprites/tilesets/tileset32x32.png")
 const PASTEQUE_TEXTURE: Texture2D = preload("res://assets/sprites/house/pasteque.png")
 const KRAKEN_VISUAL_SCENE: PackedScene = preload("res://scenes/combat/kraken_visual.tscn")
@@ -544,6 +546,50 @@ const ITEM_DEFS: Dictionary = {
 		},
 		"max_stack": 999,
 	},
+	"turret_helice": {
+		"id": "turret_helice",
+		"name": "Fan Turret",
+		"currency": &"gem",
+		"type": "placeable",
+		"category": "turret",
+		"frame": 6,
+		"price": 10,
+		"target_layer": "blocking_buildings",
+		"atlas": INVISIBLE_BUILDING_MARKER_ATLAS,
+		"occupies_cell": true,
+		"isWall": false,
+		"blocks_movement": false,
+		"blocks_player_movement": false,
+		"blocks_projectiles": false,
+		"speed_multiplier": 0.5,
+		"requires_walkable_floor": true,
+		"requires_grass_green_floor": true,
+		"pad_skip_preview": true,
+		"directional": true,
+		"runtime_id": "turret_helice",
+		"max_health": 50,
+		"leaves_debris_on_destroy": true,
+		"agent_contact_enabled": true,
+		"agent_contact_behavior": &"stomp_damage",
+		"stompable": true,
+		"recheck_agents_on_place": true,
+		"turret_data": TURRET_HELICE_DATA,
+		"turret_sprite_visual": {
+			"texture": TURRET_HELICE_TEXTURE,
+			"frame_size": Vector2i(32, 32),
+			"frame_padding": Vector2i(2, 2),
+			"frame_stride_x": 36,
+			"base_frame": 0,
+			"head_frame": 1,
+			"refractory_frame": 2,
+			"head_offset": Vector2(0.0, -16.0),
+			"attachment_frames": [3, 4, 5, 6],
+			"attachment_frame_duration": 0.08,
+			"attachment_offset": Vector2(16.0, 0.0),
+			"attachment_z_index": 2,
+		},
+		"max_stack": 999,
+	},
 	"kraken": {
 		"id": "kraken",
 		"name": "Kraken Vine",
@@ -787,7 +833,7 @@ static func get_gardening_shop_item_ids() -> Array[StringName]:
 		var category: String = str(item_def.get("category", ""))
 		if category == "plant" or category == "terrain" or category == "turret" or category == "irrigation" or category == "trap":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"kraken"])
+	return _ordered_known_first(ids, [&"rose", &"imperial_seed", &"ronce", &"pasteque", &"turret_epine", &"turret_helice", &"kraken"])
 
 static func get_hammer_shop_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []

@@ -9,8 +9,6 @@ const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const CHOICE_OK: String = "ok"
 const BUILD_HOUSE_ID: String = "buildhouse"
 const HOUSE_MENU_ICON_PLACEHOLDER: String = "{house_menu_icon}"
-const INTRO_REWARD_GEMS: int = 40
-const GEM_CURRENCY: StringName = &"gem"
 
 @export var dialog: DialogUI
 @export var game_ui: Node
@@ -121,7 +119,7 @@ func _is_builder_interactable() -> bool:
 	return true
 
 
-func _on_choice_selected(choice_id: String, source_global_position: Vector2) -> void:
+func _on_choice_selected(choice_id: String, _source_global_position: Vector2) -> void:
 	if choice_id != CHOICE_OK:
 		return
 	if building_manager == null:
@@ -136,23 +134,10 @@ func _on_choice_selected(choice_id: String, source_global_position: Vector2) -> 
 	if accepted:
 		if game_ui != null and game_ui.has_method("refresh_quickbar_availability"):
 			game_ui.call("refresh_quickbar_availability")
-		_award_intro_gems(source_global_position)
 
 
 func _on_closed(_reason: StringName) -> void:
 	pass
-
-
-func _award_intro_gems(source_global_position: Vector2) -> void:
-	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * source_global_position
-	if game_ui != null and game_ui.has_method("collect_currency_from_world"):
-		var started: bool = bool(game_ui.call("collect_currency_from_world", GEM_CURRENCY, world_position, INTRO_REWARD_GEMS))
-		if started:
-			return
-	var scene: Node = get_tree().current_scene
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_gems"):
-		progression_node.call("update_gems", INTRO_REWARD_GEMS)
 
 
 func _speaker_name() -> String:

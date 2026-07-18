@@ -5,6 +5,7 @@ const TURRET_SHOW_RADIUS: bool = true
 const LOS_PRECOMPUTE_BUDGET_MS: float = 1.5
 const LOS_PENDING: int = 0
 const LOS_READY: int = 1
+const TURRET_HELICE_CONTROLLER_SCRIPT: Script = preload("res://scripts/combat/turrets/turret_helice_controller.gd")
 
 # Fill drawn over the tiles a hovered turret can actually see (LOS-aware coverage),
 # shown only while hovering a single turret and never for all turrets at once.
@@ -30,6 +31,8 @@ var _preview_turret_direction: Vector2i = Vector2i(1, 0)
 var _debug_acquisition_scans: int = 0
 var _debug_spatial_candidates: int = 0
 var _debug_los_checks: int = 0
+var _helice_controller: TurretHeliceController
+var _los_invalidation_queued: bool = false
 
 func _ready() -> void:
 	_fight_system = get_parent() as FightSystem
@@ -48,6 +51,10 @@ func _ready() -> void:
 	z_index = 4095
 	_building_objects.building_added.connect(_on_building_added)
 	_building_objects.building_removed.connect(_on_building_removed)
+	if _wall_layer != null and _wall_layer.has_signal(&"changed"):
+		_wall_layer.connect(&"changed", Callable(self, "_on_los_blockers_changed"))
+	_helice_controller = TURRET_HELICE_CONTROLLER_SCRIPT.new() as TurretHeliceController
+	_helice_controller.setup(_agent_tracker, building_manager, _building_objects, _fight_system, self)
 	for cell: Vector2i in _building_objects.get_building_cells():
 		var building: Dictionary = _building_objects.get_building(cell)
 		var item_id: String = str(building.get("item_id", ""))
@@ -61,10 +68,12 @@ func _process(delta: float) -> void:
 	_update_preview_turret()
 	if _fight_system and _fight_system.has_method("is_paused") and bool(_fight_system.call("is_paused")):
 		return
+	if _helice_controller != null:
+		_helice_controller.process(delta)
 	for cell: Vector2i in _active_turret_cells:
 		var state: Dictionary = _turrets[cell] as Dictionary
 		state["acquisition_wait"] = maxf(0.0, float(state.get("acquisition_wait", 0.0)) - delta)
-		var origin: Vector2 = _turret_world_position(cell)
+		var origin: Vector2 = get_turret_world_position(cell)
 		var activation_range: float = float(state.get("shooting_range", 0.0))
 		if bool(state.get("shot_active", false)):
 			_advance_turret_shot(cell, state, origin, activation_range, delta)
@@ -210,7 +219,7 @@ func _draw_visible_by_turret(layer: TileMapLayer) -> void:
 	if bool(state.get("straight_line_detection", false)):
 		_collect_line_cells(layer, _hovered_turret_cell, state.get("direction", Vector2i(1, 0)) as Vector2i, float(state.get("shooting_range", 0.0)), cells)
 	else:
-		_collect_range_cells(layer, _hovered_turret_cell, float(state.get("shooting_range", 0.0)), cells)
+		_collect_range_cells(layer, _hovered_turret_cell, float(state.get("shooting_range", 0.0)), cells, state.get("direction", Vector2i.RIGHT) as Vector2i, float(state.get("activation_angle_degrees", 360.0)))
 	_fill_cells(layer, cells.keys(), visible_by_turret_color)
 
 func _draw_preview_turret_coverage(layer: TileMapLayer) -> void:
@@ -221,21 +230,21 @@ func _draw_preview_turret_coverage(layer: TileMapLayer) -> void:
 	if turret_data.straight_line_detection:
 		_collect_line_cells(layer, _preview_turret_cell, _preview_turret_direction, turret_data.shooting_range, cells)
 	else:
-		_collect_range_cells(layer, _preview_turret_cell, turret_data.shooting_range, cells)
+		_collect_range_cells(layer, _preview_turret_cell, turret_data.shooting_range, cells, _preview_turret_direction, turret_data.activation_angle_degrees)
 	_fill_cells(layer, cells.keys(), visible_by_turret_color)
 
-func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range: float, out_cells: Dictionary) -> void:
+func _collect_range_cells(layer: TileMapLayer, cell: Vector2i, activation_range: float, out_cells: Dictionary, direction: Vector2i = Vector2i.RIGHT, activation_angle_degrees: float = 360.0) -> void:
 	if activation_range <= 0.0:
 		return
 	var tile_size: float = _tile_size_pixels(layer)
 	var radius_cells: int = ceili(activation_range / maxf(1.0, tile_size))
-	var origin: Vector2 = _turret_world_position(cell)
+	var origin: Vector2 = get_turret_world_position(cell)
 	var range_squared: float = activation_range * activation_range
 	for y_offset: int in range(-radius_cells, radius_cells + 1):
 		for x_offset: int in range(-radius_cells, radius_cells + 1):
 			var target_cell: Vector2i = cell + Vector2i(x_offset, y_offset)
 			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
-			if origin.distance_squared_to(target_world) <= range_squared:
+			if origin.distance_squared_to(target_world) <= range_squared and TurretGeometry.is_within_directional_angle(origin, target_world, direction, activation_angle_degrees):
 				out_cells[target_cell] = true
 
 func _collect_line_cells(layer: TileMapLayer, cell: Vector2i, direction: Vector2i, activation_range: float, out_cells: Dictionary) -> void:
@@ -263,11 +272,37 @@ func _on_building_added(cell: Vector2i, item_id: String) -> void:
 func _on_building_removed(cell: Vector2i, item_id: String) -> void:
 	if not _is_turret_item(item_id):
 		return
-	_fight_system.remove_turret_spray(cell)
+	var removed_state: Dictionary = _turrets.get(cell, {}) as Dictionary
+	var removed_data: TurretData = removed_state.get("data", null) as TurretData
+	if removed_data != null and removed_data.behavior == TurretData.Behavior.WEAPON:
+		_fight_system.remove_turret_spray(cell)
+	if _helice_controller != null:
+		_helice_controller.unregister_turret(cell)
 	_turrets.erase(cell)
 	_active_turret_cells.erase(cell)
 	if _has_hovered_turret and _hovered_turret_cell == cell:
 		_has_hovered_turret = false
+	if TURRET_SHOW_RADIUS:
+		queue_redraw()
+
+
+func _on_los_blockers_changed() -> void:
+	if _los_invalidation_queued:
+		return
+	_los_invalidation_queued = true
+	call_deferred("_invalidate_turret_los")
+
+
+func _invalidate_turret_los() -> void:
+	_los_invalidation_queued = false
+	for raw_cell: Variant in _turrets.keys():
+		var cell: Vector2i = raw_cell as Vector2i
+		var state: Dictionary = _turrets[cell] as Dictionary
+		var generation: int = _next_los_generation()
+		state["los_generation"] = generation
+		state["los_status"] = LOS_PENDING
+		state["visible_cells"] = {}
+		call_deferred("_compute_turret_los_async", cell, generation)
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
 
@@ -300,6 +335,7 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"direction": direction,
 		"directional": turret_data.directional,
 		"straight_line_detection": turret_data.straight_line_detection,
+		"activation_angle_degrees": turret_data.activation_angle_degrees,
 		"shot_release_delay": release_delay,
 		"shot_cycle_duration": cycle_duration,
 		"shot_active": false,
@@ -315,10 +351,12 @@ func _register_turret(cell: Vector2i, item_id: String) -> void:
 		"target_ref": null,
 		"acquisition_wait": _initial_acquisition_offset(cell),
 	}
-	if not _active_turret_cells.has(cell):
+	if turret_data.behavior == TurretData.Behavior.WEAPON and not _active_turret_cells.has(cell):
 		_active_turret_cells.append(cell)
-	if not _fight_system.is_gun(weapon_id):
+	if turret_data.behavior == TurretData.Behavior.WEAPON and not _fight_system.is_gun(weapon_id):
 		_fight_system.create_turret_spray(cell)
+	if turret_data.behavior == TurretData.Behavior.WIND and _helice_controller != null:
+		_helice_controller.register_turret(cell, turret_data, direction, _initial_acquisition_offset(cell))
 	call_deferred("_compute_turret_los_async", cell, int((_turrets[cell] as Dictionary).get("los_generation", 0)))
 	if TURRET_SHOW_RADIUS:
 		queue_redraw()
@@ -429,7 +467,7 @@ func _nearest_enemy_in_line(turret_cell: Vector2i, origin: Vector2, activation_r
 			continue
 		if CppDebugOptions.logs_enabled:
 			_debug_los_checks += 1
-		if not _turret_can_see_world_position(turret_cell, enemy.global_position):
+		if not turret_can_see_world_position(turret_cell, enemy.global_position):
 			continue
 		nearest = enemy
 		nearest_step = step
@@ -460,7 +498,7 @@ func _nearest_enemy_in_range(turret_cell: Vector2i, origin: Vector2, activation_
 			continue
 		if CppDebugOptions.logs_enabled:
 			_debug_los_checks += 1
-		if _turret_can_see_world_position(turret_cell, enemy.global_position):
+		if turret_can_see_world_position(turret_cell, enemy.global_position):
 			nearest = enemy
 			nearest_distance_squared = distance_squared
 	return nearest
@@ -493,7 +531,7 @@ func _target_is_valid_for_turret(target: Node2D, turret_cell: Vector2i, state: D
 			return false
 	if CppDebugOptions.logs_enabled:
 		_debug_los_checks += 1
-	return _turret_can_see_world_position(turret_cell, target.global_position)
+	return turret_can_see_world_position(turret_cell, target.global_position)
 
 
 func _is_targetable_monster(target: Node2D) -> bool:
@@ -517,11 +555,11 @@ func acquisition_debug_stats() -> Dictionary:
 		"los_checks": _debug_los_checks,
 	}
 
-func _turret_world_position(cell: Vector2i) -> Vector2:
+func get_turret_world_position(cell: Vector2i) -> Vector2:
 	var layer: TileMapLayer = _building_objects.blocking_buildings
 	return layer.to_global(layer.map_to_local(cell))
 
-func _turret_can_see_world_position(turret_cell: Vector2i, world_position: Vector2) -> bool:
+func turret_can_see_world_position(turret_cell: Vector2i, world_position: Vector2) -> bool:
 	var state: Dictionary = _turrets.get(turret_cell, {}) as Dictionary
 	if int(state.get("los_status", LOS_PENDING)) != LOS_READY:
 		return false
@@ -552,13 +590,14 @@ func _compute_turret_los_async(cell: Vector2i, generation: int) -> void:
 
 	var tile_size: float = _tile_size_pixels(layer)
 	var radius_cells: int = ceili(activation_range / maxf(1.0, tile_size))
-	var origin_world: Vector2 = _turret_world_position(cell)
+	var origin_world: Vector2 = get_turret_world_position(cell)
 	var range_squared: float = activation_range * activation_range
+	var direction: Vector2i = state.get("direction", Vector2i.RIGHT) as Vector2i
+	var activation_angle_degrees: float = float(state.get("activation_angle_degrees", 360.0))
 	var budget_us: int = maxi(500, int(LOS_PRECOMPUTE_BUDGET_MS * 1000.0))
 	var slice_started_us: int = Time.get_ticks_usec()
 
 	if bool(state.get("straight_line_detection", false)):
-		var direction: Vector2i = state.get("direction", Vector2i(1, 0)) as Vector2i
 		_collect_line_cells(layer, cell, direction, activation_range, visible_cells)
 		_finish_turret_los(cell, generation, visible_cells)
 		return
@@ -575,6 +614,8 @@ func _compute_turret_los_async(cell: Vector2i, generation: int) -> void:
 				continue
 			var target_world: Vector2 = layer.to_global(layer.map_to_local(target_cell))
 			if origin_world.distance_squared_to(target_world) > range_squared:
+				continue
+			if not TurretGeometry.is_within_directional_angle(origin_world, target_world, direction, activation_angle_degrees):
 				continue
 			if _has_line_of_sight_cells(cell, target_cell):
 				visible_cells[target_cell] = true

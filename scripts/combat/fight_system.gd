@@ -134,6 +134,10 @@ func set_paused(paused: bool) -> void:
 func is_paused() -> bool:
 	return _paused
 
+
+func get_steering_system() -> Node:
+	return _steering
+
 func _drain_damage_events() -> void:
 	if not _steering or not _steering.has_method("take_damage_events") or not _agent_manager:
 		return

@@ -30,6 +30,7 @@ const SHOT_BOB_PIXELS: float = CONTACT_BOB_PIXELS * 1.2
 
 var _base_sprite: Sprite2D
 var _head_sprite: Sprite2D
+var _attachment_sprite: Sprite2D
 var _time: float = 0.0
 var _contact_until: float = 0.0
 var _contact_active: bool = false
@@ -50,6 +51,12 @@ var _damage_flash_tween: Tween = null
 var _base_original_modulate: Color = Color.WHITE
 var _head_original_modulate: Color = Color.WHITE
 var _damage_flash_active: bool = false
+var _attachment_frames: Array[int] = []
+var _attachment_frame_duration: float = 0.0
+var _attachment_frame_index: int = 0
+var _attachment_time_left: float = 0.0
+var _activity_active: bool = false
+var _attachment_original_modulate: Color = Color.WHITE
 
 
 func setup(visual_def: Dictionary, direction: Vector2i) -> void:
@@ -67,6 +74,8 @@ func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 	_refractory_frame = int(visual_def.get("refractory_frame", DEFAULT_REFRACTORY_FRAME))
 	var head_offset: Vector2 = _vector2_from_variant(visual_def.get("head_offset", DEFAULT_HEAD_OFFSET), DEFAULT_HEAD_OFFSET)
 	_shot_frames = _shot_frames_from_variant(visual_def.get("shot_frames", DEFAULT_SHOT_FRAMES))
+	_attachment_frames = _int_frames_from_variant(visual_def.get("attachment_frames", []))
+	_attachment_frame_duration = maxf(0.0, float(visual_def.get("attachment_frame_duration", 0.0)))
 	_sway_phase = randf() * TAU
 	_breathe_phase = randf() * TAU
 
@@ -80,6 +89,13 @@ func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 	_head_sprite.position = head_offset
 	_head_sprite.z_index = 1
 	add_child(_head_sprite)
+	if not _attachment_frames.is_empty():
+		_attachment_sprite = _create_frame_sprite(_texture, _frame_region(_attachment_frames[0]))
+		_attachment_sprite.name = "Attachment"
+		_attachment_sprite.position = _vector2_from_variant(visual_def.get("attachment_offset", Vector2.ZERO), Vector2.ZERO)
+		_attachment_sprite.z_index = int(visual_def.get("attachment_z_index", 2))
+		_attachment_sprite.z_as_relative = false
+		_head_sprite.add_child(_attachment_sprite)
 
 	set_direction(direction)
 
@@ -111,6 +127,12 @@ func set_refractory_active(active: bool) -> void:
 	_set_head_frame(_refractory_frame if _refractory_active else _head_idle_frame)
 
 
+func set_activity_active(active: bool) -> void:
+	_activity_active = active
+	if active and _attachment_sprite != null and _attachment_frames.size() > 1:
+		_attachment_time_left = maxf(0.001, _attachment_frame_duration)
+
+
 func play_damage_flash(duration: float) -> void:
 	if _base_sprite == null or _head_sprite == null:
 		return
@@ -118,19 +140,25 @@ func play_damage_flash(duration: float) -> void:
 	if not _damage_flash_active:
 		_base_original_modulate = _base_sprite.modulate
 		_head_original_modulate = _head_sprite.modulate
+		_attachment_original_modulate = _attachment_sprite.modulate if _attachment_sprite != null else Color.WHITE
 		_damage_flash_active = true
 	_base_sprite.modulate = Color(1.0, 0.12, 0.12, _base_original_modulate.a)
 	_head_sprite.modulate = Color(1.0, 0.12, 0.12, _head_original_modulate.a)
+	if _attachment_sprite != null:
+		_attachment_sprite.modulate = Color(1.0, 0.12, 0.12, _attachment_original_modulate.a)
 	_damage_flash_tween = create_tween()
 	_damage_flash_tween.set_parallel(true)
 	_damage_flash_tween.tween_property(_base_sprite, "modulate", _base_original_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_damage_flash_tween.tween_property(_head_sprite, "modulate", _head_original_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	if _attachment_sprite != null:
+		_damage_flash_tween.tween_property(_attachment_sprite, "modulate", _attachment_original_modulate, maxf(0.0, duration)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_damage_flash_tween.finished.connect(Callable(self, "_on_damage_flash_finished"))
 
 
 func _process(delta: float) -> void:
 	_time += delta
 	_process_shot_animation(delta)
+	_process_attachment_animation(delta)
 	if _shot_time_left > 0.0:
 		_apply_dance_transform(
 			SHOT_SWAY_DEGREES,
@@ -196,12 +224,18 @@ func _clear_sprites() -> void:
 		child.queue_free()
 	_base_sprite = null
 	_head_sprite = null
+	_attachment_sprite = null
 	_texture = null
 	_shot_frames.clear()
 	_shot_time_left = 0.0
 	_shot_frame_index = 0
 	_refractory_frame = DEFAULT_REFRACTORY_FRAME
 	_refractory_active = false
+	_attachment_frames.clear()
+	_attachment_frame_duration = 0.0
+	_attachment_frame_index = 0
+	_attachment_time_left = 0.0
+	_activity_active = false
 	_damage_flash_active = false
 
 
@@ -238,6 +272,25 @@ func _set_head_frame(frame: int) -> void:
 	if _head_sprite == null:
 		return
 	_head_sprite.region_rect = _frame_region(frame)
+
+
+func _process_attachment_animation(delta: float) -> void:
+	if not _activity_active or _attachment_sprite == null or _attachment_frames.size() < 2:
+		return
+	_attachment_time_left -= delta
+	while _attachment_time_left <= 0.0:
+		_attachment_frame_index = (_attachment_frame_index + 1) % _attachment_frames.size()
+		_attachment_sprite.region_rect = _frame_region(_attachment_frames[_attachment_frame_index])
+		_attachment_time_left += maxf(0.001, _attachment_frame_duration)
+
+
+func _int_frames_from_variant(value: Variant) -> Array[int]:
+	var frames: Array[int] = []
+	if not (value is Array):
+		return frames
+	for raw_frame: Variant in (value as Array):
+		frames.append(int(raw_frame))
+	return frames
 
 
 func _rotation_for_direction(direction: Vector2i) -> float:

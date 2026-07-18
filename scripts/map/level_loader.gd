@@ -32,9 +32,9 @@ const ALLY_MARKER_NAMES: PackedStringArray = ["fundamental_builder_in", "fundame
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const ENEMY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/spawner.png"
 const FRIENDLY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/clientspawner.png"
-const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken", &"road"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"turret_helice", &"ronce", &"fence", &"kraken", &"road"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"imperial_seed", &"spray", &"beam", &"sword", &"bomb"]
-const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken", &"road", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"turret_helice", &"ronce", &"fence", &"kraken", &"road", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []
@@ -58,10 +58,11 @@ var _loaded_starting_weapons: Array[StringName] = [&"spray"]
 var _loaded_starting_items: Dictionary = {}
 var _loaded_starting_item_toolbuild_hidden: Array[StringName] = []
 var _loaded_monster_drop_seed_chance_percent: int = 0
-var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken"]
+var _loaded_tool_shop_available_items: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"turret_helice", &"ronce", &"fence", &"kraken"]
 var _loaded_tool_shop_prices: Dictionary = {
 	&"rose": 1,
 	&"turret_epine": 10,
+	&"turret_helice": 10,
 	&"ronce": 1,
 	&"fence": 1,
 	&"kraken": 20,

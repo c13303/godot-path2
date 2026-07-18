@@ -32,10 +32,6 @@ const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const MIN_TERRAIN_SPEED_MULTIPLIER: float = 0.05
 const MAX_TERRAIN_SPEED_MULTIPLIER: float = 4.0
 
-# Speed-only placeables that must never reach the hard-topology invalidation path.
-# Used only by the debug assertion in debug_assert_not_hard().
-const SPEED_ONLY_GUARD_IDS: Array[String] = ["turret_epine"]
-
 
 # Classify from item semantics alone, when the caller has an item def but not a layer
 # (e.g. a BuildingObjectManager signal that only carries an item id).
@@ -119,10 +115,11 @@ static func impact_name(impact: Impact) -> String:
 	return "UNKNOWN"
 
 
-# Debug guard: a speed-only placeable (turret_epine) must never be classified
-# as hard topology. Returns true (and errors) when the invariant is violated.
+# Debug guard: any semantically speed-only placeable must never be classified as
+# hard topology. Returns true (and errors) when the invariant is violated.
 static func debug_assert_not_hard(item_id: String, impact: Impact) -> bool:
-	if impact == Impact.HARD_TOPOLOGY and SPEED_ONLY_GUARD_IDS.has(item_id):
+	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
+	if impact == Impact.HARD_TOPOLOGY and _def_has_speed_modifier(item_def) and not _def_is_hard_blocker(item_def):
 		push_error("PlaceableNavImpact: speed-only item '%s' misclassified as HARD_TOPOLOGY" % item_id)
 		return true
 	return false

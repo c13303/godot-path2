@@ -1254,7 +1254,7 @@ starting_items = {
 &"wall": 2
 }
 monster_drop_seed_chance_percent = 10
-tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"kraken", &"rose_shop_counter", &"fence", &"road"])
+tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road"])
 tool_shop_prices = {
 &"fence": 1,
 &"house_builder": 20,
@@ -1270,7 +1270,8 @@ tool_shop_prices = {
 &"ronce": 1,
 &"rose": 1,
 &"rose_shop_counter": 10,
-&"turret_epine": 3
+&"turret_epine": 3,
+&"turret_helice": 10
 }
 tool_shop_growth_price_factors = {
 &"ronce": 1.1,
@@ -1286,7 +1287,7 @@ merchant_prices = {
 &"spray": 10,
 &"sword": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"kraken", &"rose_shop_counter", &"fence", &"road", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road", &"spray", &"beam"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,
@@ -1307,7 +1308,8 @@ shop_prices = {
 &"seed": 2,
 &"spray": 10,
 &"sword": 100,
-&"turret_epine": 3
+&"turret_epine": 3,
+&"turret_helice": 10
 }
 
 [node name="mapBounds" type="StaticBody2D" parent="." unique_id=1027574517]
