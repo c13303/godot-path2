@@ -18,7 +18,7 @@ class_name BambooHarvestController
 const BAMBOO_PLANT_VISUAL_SCRIPT: Script = preload("res://scripts/map/bamboo_plant_visual.gd")
 
 const BAMBOO_CURRENCY: StringName = &"bamboo"
-const HARVEST_AMOUNT: int = 5
+const HARVEST_AMOUNT: int = 10
 ## Permanent slowdown of a bamboo cell. Belongs to the bamboo's presence, not its maturity:
 ## registered once per cell at setup and never touched again, so maturity changes can never
 ## dirty navigation.
@@ -206,9 +206,9 @@ func _check_player_harvest() -> void:
 		_harvest(record)
 
 
-## Reward and saved state change together: GameUI credits all five bamboo before the first
-## icon leaves the plant, so a save taken mid-flight always shows the full reward against an
-## immature plant. The plant turns immature only once the grant is confirmed, and an already
+## Reward and saved state change together: GameUI credits the full HARVEST_AMOUNT before the
+## first icon leaves the plant, so a save taken mid-flight always shows the full reward against
+## an immature plant. The plant turns immature only once the grant is confirmed, and an already
 ## immature plant can never grant again before the next dawn.
 func _harvest(record: BambooRecord) -> void:
 	if _game_ui == null or not _game_ui.has_method("grant_currency_from_world_immediate"):

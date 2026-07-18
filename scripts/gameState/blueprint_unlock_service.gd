@@ -20,7 +20,8 @@ const BLUEPRINT_DEFS: Dictionary = {
 		"price": 10,
 		"prerequisites": [],
 		"automatic": false,
-		"initially_published": true,
+		"initially_published": false,
+		"initially_unlocked": true,
 	},
 	&"kraken": {
 		"build_item_id": &"kraken",
@@ -42,6 +43,7 @@ var _unseen_published_ids: Dictionary = {}
 
 func setup(progression: Node) -> void:
 	_progression = progression
+	_initialize_initial_unlocks()
 	_initialize_initial_publications()
 
 
@@ -140,6 +142,9 @@ func apply_save_data(data: Variant) -> void:
 	_unlocked_ids.clear()
 	_published_ids.clear()
 	_unseen_published_ids.clear()
+	# Baseline unlocks (e.g. Fence) are permanent and never depend on the save, so seed them
+	# before restoring so even a pre-baseline save still starts with them unlocked.
+	_initialize_initial_unlocks()
 	if not (data is Array):
 		_initialize_initial_publications()
 		return
@@ -194,6 +199,14 @@ func _resolve_automatic_unlocks() -> void:
 			if _prerequisites_satisfied(blueprint_id):
 				_unlocked_ids[blueprint_id] = true
 				changed = true
+
+
+func _initialize_initial_unlocks() -> void:
+	for raw_id: Variant in BLUEPRINT_DEFS.keys():
+		var blueprint_id: StringName = raw_id as StringName
+		var definition: Dictionary = _definition(blueprint_id)
+		if bool(definition.get("initially_unlocked", false)):
+			_unlocked_ids[blueprint_id] = true
 
 
 func _initialize_initial_publications() -> void:

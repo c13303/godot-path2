@@ -1241,11 +1241,10 @@ sources/0 = SubResource("TileSetAtlasSource_egp0g")
 position = Vector2(0, -15)
 script = ExtResource("34_spawn_config")
 spawn_playlist = ExtResource("35_spawn_playlist")
-starting_gems = 20
-starting_bamboo = 20
+starting_gems = 25
 starting_currencies = {
-&"bamboo": 20,
-&"gem": 20,
+&"bamboo": 0,
+&"gem": 25,
 &"money": 0,
 &"seed": 20
 }
@@ -1254,6 +1253,7 @@ starting_items = {
 &"pasteque": 1,
 &"wall": 2
 }
+monster_drop_seed_chance_percent = 10
 tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"kraken", &"rose_shop_counter", &"fence", &"road"])
 tool_shop_prices = {
 &"fence": 1,
