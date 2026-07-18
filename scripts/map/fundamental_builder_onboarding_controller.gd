@@ -116,10 +116,17 @@ func should_show_followup_dialog_text() -> bool:
 
 
 func accept_fundamental_builder_dialog() -> bool:
-	if _builder_house_tutorial_state == TUTORIAL_NOT_STARTED:
+	if _builder_house_tutorial_state != TUTORIAL_NOT_STARTED:
+		return false
+	# The player may already own a builder house (e.g. built on day 1, before the Builder
+	# arrived). Its build step would then nag for a second, pointless house, and the placement
+	# event that advances the step never re-fires, so it would hang. Skip straight to the
+	# merchant-house step a completed builder house normally leads to.
+	if _house_already_built(HOUSE_BUILDER_ITEM_ID):
+		_builder_house_tutorial_state = TUTORIAL_MERCHANT_HOUSE_ACTIVE
+	else:
 		_builder_house_tutorial_state = TUTORIAL_ACTIVE
-		return true
-	return false
+	return true
 
 
 func accept_followup_dialog() -> bool:
@@ -200,6 +207,17 @@ func _on_cutscene_completed(context: StringName, _release_spawning: bool) -> voi
 	if context != CUTSCENE_CONTEXT:
 		return
 	_manager.clear_tutorial_alert(TUTORIAL_KEY_BUILDER_HERE)
+
+
+## True when at least one building of `item_id` already exists in the world. Read live off the
+## building object system so it reflects houses placed before onboarding started.
+func _house_already_built(item_id: String) -> bool:
+	if _manager == null:
+		return false
+	var objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if objects == null or not objects.has_method("count_buildings_by_item_id"):
+		return false
+	return int(objects.count_buildings_by_item_id(item_id)) > 0
 
 
 func _valid_tutorial_state(value: int) -> int:
