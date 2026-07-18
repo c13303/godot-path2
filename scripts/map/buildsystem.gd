@@ -4,10 +4,12 @@ class_name BuildSystem
 signal build_preview_changed(is_active: bool)
 
 const BUILD_FX_SCENE: PackedScene = preload("res://scenes/particles/buildFX.tscn")
-const TERRAIN_SPEED_MODIFIER_SERVICE: Script = preload("res://scripts/map/terrain_speed_modifier_service.gd")
+const FLOOR_REPLACEMENT_REGISTRY_SCRIPT: Script = preload("res://scripts/map/floor_replacement_registry.gd")
 const BUILD_FX_Z_INDEX: int = -62
-const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
-const TERRAIN_SPEED_SOURCE_PREFIX: String = "buildsystem:"
+# BuildingNavigationSyncService uses the same source key. Both placement-time and
+# signal-time refreshes therefore replace one semantic cell contribution instead of stacking
+# duplicate copies in the shared terrain index.
+const TERRAIN_SPEED_SOURCE_PREFIX: String = "cell:"
 # DIRECTION_* are fence-adjacency neighbor offsets used by the fence autotiler below.
 # Build orientation rules (facing rotation, direction -> tile alternative) live in
 # BuildDirectionRules, not here.
@@ -64,7 +66,8 @@ var _atlas_source_id: int = -1
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
 var _steering_system: Node = null
-var _terrain_speed: RefCounted = TERRAIN_SPEED_MODIFIER_SERVICE.new()
+var _terrain_speed: RefCounted = null
+var _floor_replacements: FloorReplacementRegistry = FLOOR_REPLACEMENT_REGISTRY_SCRIPT.new()
 var _building_manager: Object = null
 var _build_preview: BuildPreviewController = null
 var _placement_service: BuildPlacementService = null
@@ -87,6 +90,8 @@ func _ready() -> void:
 	set_process_input(false)
 	_resolve_level_layers()
 	_resolve_atlas_source_id()
+	_terrain_speed = _resolve_shared_terrain_speed_service()
+	_floor_replacements.setup(floorz, _terrain_speed, _atlas_source_id)
 	if not _create_controllers():
 		push_error("BuildSystem failed to create build controllers; build input is disabled.")
 		return
@@ -373,6 +378,10 @@ func _set_remove_progress_value(cell: Vector2i, value: float) -> void:
 func _commit_removal(removal: Dictionary) -> bool:
 	return _removal_service.commit_removal(removal)
 
+
+func _commit_floor_replacement_removals(removals: Array[Dictionary]) -> int:
+	return _removal_service.commit_floor_replacement_removals(removals)
+
 func _resolve_atlas_source_id() -> void:
 	var ref: TileMapLayer = previewbuild if previewbuild else wallz
 	if not ref or not ref.tile_set:
@@ -502,7 +511,7 @@ func _blocking_building_blocks_player(cell: Vector2i) -> bool:
 
 func _sync_terrain_speed_cells() -> void:
 	var steering: Node = _resolve_steering_system()
-	if steering == null:
+	if steering == null or _terrain_speed == null:
 		return
 	if not steering.has_method("replace_terrain_speed_channel"):
 		return
@@ -529,23 +538,22 @@ func _sync_terrain_speed_cells() -> void:
 
 # Startup terrain-speed seed for one cell. Pushes both the all-agent and the player
 # multiplier (a rose slows every agent but never the player -- see
-# PlaceableNavImpact.def_player_speed_multiplier). This walks the layers itself rather
-# than reusing BuildingNavigationSyncService: BuildSystem._ready() runs before
-# BuildingManager's (it is the earlier sibling under Map), so the service does not exist
-# yet at seed time. The "who does a def slow" rule is shared, only the walk is duplicated.
+# PlaceableNavImpact.def_player_speed_multiplier). This walks the layers itself because
+# BuildSystem._ready() runs before BuildingManager's synchronization service is configured;
+# both coordinators still write through the one shared terrain-speed service instance.
 func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
 	var steering: Node = _resolve_steering_system()
-	if steering == null or not steering.has_method("set_terrain_speed_cell"):
+	if steering == null or _terrain_speed == null or not steering.has_method("set_terrain_speed_cell"):
 		return
 	_terrain_speed.set_steering(steering)
-	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var speed_multipliers: Array[float] = []
+	var player_speed_multipliers: Array[float] = []
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
 		if logical_plant_item_id != "":
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
-			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
-			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
+			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
+			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
@@ -553,14 +561,16 @@ func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
 		if layer_item_id == "":
 			continue
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
-		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
-		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+		speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(layer_item_def))
+		player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
 	if building_object_manager != null and building_object_manager.has_method("get_placeable_item_id"):
 		var runtime_item_id: String = str(building_object_manager.call("get_placeable_item_id", cell))
 		if runtime_item_id != "":
 			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
-			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
-			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
+			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
+			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
+	var speed_multiplier: float = _terrain_speed.compose_multipliers(speed_multipliers)
+	var player_speed_multiplier: float = _terrain_speed.compose_multipliers(player_speed_multipliers)
 	_terrain_speed.set_cell_contribution_pair(cell, StringName(TERRAIN_SPEED_SOURCE_PREFIX + str(cell)), speed_multiplier, player_speed_multiplier, upload)
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
@@ -627,6 +637,34 @@ func _resolve_steering_system() -> Node:
 	if scene:
 		_steering_system = scene.get_node_or_null("CPP/SteeringSystemNative")
 	return _steering_system
+
+
+func _resolve_shared_terrain_speed_service() -> RefCounted:
+	var building_manager: Object = _resolve_building_manager()
+	if building_manager != null and building_manager.has_method("get_terrain_speed_modifier_service"):
+		return building_manager.call("get_terrain_speed_modifier_service") as RefCounted
+	return null
+
+
+func get_floor_replacement_registry() -> FloorReplacementRegistry:
+	return _floor_replacements
+
+
+func serialize_floor_replacements_for_save() -> Array[Dictionary]:
+	if _floor_replacements != null:
+		return _floor_replacements.serialize_state()
+	var empty: Array[Dictionary] = []
+	return empty
+
+
+func restore_floor_replacements_from_save(saved_state: Array) -> void:
+	if _floor_replacements != null:
+		_floor_replacements.restore_state(saved_state)
+
+
+func refresh_floor_replacement_terrain_modifiers() -> void:
+	if _floor_replacements != null:
+		_floor_replacements.refresh_terrain_modifiers()
 
 # Typed access to the house owner for the placement/preview services (houses are placed and
 # previewed as one logical object, not through the generic tile path).

@@ -175,6 +175,23 @@ const ITEM_DEFS: Dictionary = {
 		"max_health": 100,
 		"max_stack": 999,
 	},
+	"road": {
+		"id": "road",
+		"name": "Road",
+		"currency": &"gem",
+		"type": "placeable",
+		"category": "floor_replacement",
+		"frame": 30,
+		"price": 10,
+		"target_layer": "floor",
+		"atlas": Vector2i(10, 6),
+		"floor_replacement_kind": &"road",
+		"occupies_cell": true,
+		"blocks_movement": false,
+		"blocks_projectiles": false,
+		"speed_multiplier": 1.5,
+		"max_stack": 999,
+	},
 	# Legacy saves may still contain item_id "house"; normalize_house_item_id() maps it to
 	# house_merchant. Keep this definition out of house build lists by leaving it without
 	# special_placement_kind.
@@ -644,6 +661,10 @@ static func is_house_placeable(item_id: String) -> bool:
 	return StringName(get_item_def(item_id).get("special_placement_kind", &"")) == &"house"
 
 
+static func is_floor_replacement(item_id: String) -> bool:
+	return StringName(get_item_def(item_id).get("floor_replacement_kind", &"")) != &""
+
+
 ## The full house sprite texture (house1.png) used by the preview and the built world object.
 ## Null for non-house items.
 static func get_house_texture(item_id: String) -> Texture2D:
@@ -776,9 +797,9 @@ static func get_hammer_shop_item_ids() -> Array[StringName]:
 		if str(item_def.get("type", "")) != "placeable":
 			continue
 		var category: String = str(item_def.get("category", ""))
-		if category == "shop_counter" or category == "wall" or category == "fence" or category == "furniture":
+		if category == "shop_counter" or category == "wall" or category == "fence" or category == "furniture" or category == "floor_replacement":
 			ids.append(StringName(item_id))
-	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"fence"])
+	return _ordered_known_first(ids, [&"rose_shop_counter", &"wall", &"fence", &"road"])
 
 static func get_house_build_item_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []

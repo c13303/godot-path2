@@ -9,10 +9,9 @@ class_name BuildingNavigationSyncService
 # (the exported layers, the flow node) and thin compatibility wrappers, and this reads them
 # back through the typed _manager reference (BuildingManager) rather than string lookups.
 #
-# Behavior note: this is an extraction only. Which items block flow, which block the
-# player, fence slow behavior, the min/clamp speed logic, the layer order, and the
-# missing-definition fallbacks are all preserved exactly as they were inline in
-# BuildingManager.
+# Blocking behavior, layer order, and missing-definition fallbacks remain the same as the
+# original BuildingManager implementation. Speed contributions now use the shared
+# source-aware composition rule so slowdowns and speedups can coexist predictably.
 
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const DEFAULT_TERRAIN_SPEED_CHANNEL: int = 0
@@ -104,6 +103,23 @@ func set_static_terrain_speed_multiplier(cell: Vector2i, multiplier: float, play
 	_terrain_speed.set_cell_contribution_pair(
 		cell,
 		StringName(STATIC_TERRAIN_SOURCE_PREFIX + str(cell)),
+		multiplier,
+		player_multiplier
+	)
+
+
+func set_static_terrain_speed_multipliers(
+	cells: Array[Vector2i],
+	source_id: StringName,
+	multiplier: float,
+	player_multiplier: float
+) -> void:
+	if cells.is_empty() or source_id == &"":
+		return
+	_terrain_speed.set_steering(_get_steering_system())
+	_terrain_speed.set_cells_contribution_pair(
+		cells,
+		source_id,
 		multiplier,
 		player_multiplier
 	)
@@ -219,22 +235,22 @@ func refresh_cell_speed(cell: Vector2i) -> void:
 
 
 ## Effective terrain speed on a cell: x = every agent, y = the player. The two differ on
-## cells slowed only by a def that opts out of slowing the player (a rose), which the
-## player then walks at full speed. Both are the minimum over every speed-carrying source
-## on the cell, so the slowest thing that applies to that reader always wins.
+## cells modified only by a def that opts out of affecting the player (a rose), which the
+## player then walks at full speed. Composition is delegated to TerrainSpeedModifierService,
+## so slowdown priority and speed-up selection have one authoritative implementation.
 func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 	var plantz: TileMapLayer = _manager.plantz
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
-	var speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
-	var player_speed_multiplier: float = DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	var speed_multipliers: Array[float] = []
+	var player_speed_multipliers: Array[float] = []
 	var plant_manager: Node = _manager.plant_manager
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
 		if logical_plant_item_id != "":
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
-			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
-			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
+			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
+			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
 	for layer: TileMapLayer in [plantz, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
@@ -242,16 +258,21 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 		if layer_item_id == "":
 			continue
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
-		speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(layer_item_def))
-		player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+		speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(layer_item_def))
+		player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
 	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
 	if building_objects != null:
 		var runtime_item_id: String = building_objects.get_placeable_item_id(cell)
 		if runtime_item_id != "":
 			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
-			speed_multiplier = minf(speed_multiplier, PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
-			player_speed_multiplier = minf(player_speed_multiplier, PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
-	return Vector2(speed_multiplier, player_speed_multiplier)
+			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
+			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
+	if _terrain_speed == null:
+		return Vector2(DEFAULT_TERRAIN_SPEED_MULTIPLIER, DEFAULT_TERRAIN_SPEED_MULTIPLIER)
+	return Vector2(
+		_terrain_speed.compose_multipliers(speed_multipliers),
+		_terrain_speed.compose_multipliers(player_speed_multipliers)
+	)
 
 
 ## All-agent terrain speed on a cell. Kept for the nav-speed telemetry / BuildingManager

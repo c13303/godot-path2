@@ -20,7 +20,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # Version 9 replaces live runtime-agent serialization with semantic runtime_simulation checkpoints.
 # Version 10 adds permanent inventor blueprint unlocks.
 # Version 11 makes Kraken a paid blueprint after Ronce and Fence instead of an automatic unlock.
-const SAVE_VERSION: int = 11
+# Version 12 adds semantic floor replacements (Road hidden dry/wet underlays).
+const SAVE_VERSION: int = 12
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -601,6 +602,7 @@ func _save_progression_impl(
 	var gameplay_phase: String = gameplay_phase_override if gameplay_phase_override != "" else _get_gameplay_phase()
 	var plant_states: Array[Dictionary] = _get_plant_states(scene)
 	var bamboo_states: Array[Dictionary] = _get_bamboo_states(scene)
+	var floor_replacements: Array[Dictionary] = _get_floor_replacements(scene)
 	var counter_stock: Array[Dictionary] = _get_counter_stock(scene)
 	var ground_collectibles: Array[Dictionary] = _get_ground_collectibles(scene)
 	var runtime_result: Dictionary = _get_runtime_simulation(scene)
@@ -626,6 +628,7 @@ func _save_progression_impl(
 		"layers": layer_data,
 		"plant_states": plant_states,
 		"bamboo_states": bamboo_states,
+		"floor_replacements": floor_replacements,
 		"counter_stock": counter_stock,
 		"ground_collectibles": ground_collectibles,
 		"player_placeable_durability": player_placeable_durability,
@@ -820,6 +823,8 @@ func _migrate_save_data_to_current(data: Dictionary) -> Dictionary:
 				if str(raw_blueprint_id) != "kraken":
 					migrated_blueprints.append(raw_blueprint_id)
 			migrated["unlocked_blueprints"] = migrated_blueprints
+	if save_version <= 11:
+		migrated["floor_replacements"] = []
 	migrated["version"] = SAVE_VERSION
 	return migrated
 
@@ -1006,6 +1011,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	# After the authored layers and normal plants, and before _restore_gameplay_phase emits the
 	# restored phase signals — a restored dawn must not re-mature bamboo saved as harvested.
 	_restore_bamboo_states(scene, data.get("bamboo_states", []))
+	_restore_floor_replacements(scene, data.get("floor_replacements", []))
 	_restore_counter_stock(scene, data.get("counter_stock", []))
 	_restore_ground_collectibles(scene, data.get("ground_collectibles", []))
 	# Rebuild player-built houses (sprites + six-cell registry) from the restored wallz blockers,
@@ -1137,6 +1143,19 @@ func _get_bamboo_states(scene: Node) -> Array[Dictionary]:
 	if building_manager == null or not building_manager.has_method("serialize_bamboo_states_for_save"):
 		return states
 	var raw_states: Variant = building_manager.call("serialize_bamboo_states_for_save")
+	if raw_states is Array:
+		for raw_entry: Variant in (raw_states as Array):
+			if raw_entry is Dictionary:
+				states.append(raw_entry as Dictionary)
+	return states
+
+
+func _get_floor_replacements(scene: Node) -> Array[Dictionary]:
+	var states: Array[Dictionary] = []
+	var build_system: Node = scene.get_node_or_null("Map/BuildSystem") if scene else null
+	if build_system == null or not build_system.has_method("serialize_floor_replacements_for_save"):
+		return states
+	var raw_states: Variant = build_system.call("serialize_floor_replacements_for_save")
 	if raw_states is Array:
 		for raw_entry: Variant in (raw_states as Array):
 			if raw_entry is Dictionary:
@@ -1362,6 +1381,17 @@ func _restore_bamboo_states(scene: Node, raw_states: Variant) -> void:
 	_log("Bamboo states restored: %d entries" % states.size())
 
 
+func _restore_floor_replacements(scene: Node, raw_states: Variant) -> void:
+	var build_system: Node = scene.get_node_or_null("Map/BuildSystem") if scene else null
+	if build_system == null or not build_system.has_method("restore_floor_replacements_from_save"):
+		return
+	var states: Array = []
+	if raw_states is Array:
+		states = raw_states as Array
+	build_system.call("restore_floor_replacements_from_save", states)
+	_log("Floor replacements restored: %d entries" % states.size())
+
+
 func _restore_gameplay_phase(scene: Node, phase: String, raw_state: Variant, has_phase_resume_state: bool, legacy_phase: String) -> void:
 	if phase == "":
 		return
@@ -1446,6 +1476,8 @@ func _validate_save(data: Dictionary) -> String:
 		for raw_blueprint_id: Variant in (data["unlocked_blueprints"] as Array):
 			if not (raw_blueprint_id is String):
 				return "invalid unlocked blueprint id"
+	if save_version >= 12 and not data.has("floor_replacements"):
+		return "missing floor replacements"
 
 	var layers: Dictionary = data["layers"] as Dictionary
 	for layer_name in LAYER_NAMES:
@@ -1586,6 +1618,22 @@ func _validate_save(data: Dictionary) -> String:
 			for coordinate: String in ["x", "y"]:
 				if not (entry[coordinate] is int or entry[coordinate] is float):
 					return "invalid bamboo state coordinate"
+	if data.has("floor_replacements"):
+		if not (data["floor_replacements"] is Array):
+			return "invalid floor replacements"
+		var floor_replacements: Array = data["floor_replacements"] as Array
+		for raw_entry: Variant in floor_replacements:
+			if not (raw_entry is Dictionary):
+				return "invalid floor replacement entry"
+			var entry: Dictionary = raw_entry as Dictionary
+			for field: String in ["x", "y", "item_id", "hidden_wet"]:
+				if not entry.has(field):
+					return "invalid floor replacement entry"
+			if str(entry["item_id"]) != "road" or not (entry["hidden_wet"] is bool):
+				return "invalid floor replacement value"
+			for coordinate: String in ["x", "y"]:
+				if not (entry[coordinate] is int or entry[coordinate] is float):
+					return "invalid floor replacement coordinate"
 	if data.has("ground_collectibles"):
 		if not (data["ground_collectibles"] is Array):
 			return "invalid ground collectibles"

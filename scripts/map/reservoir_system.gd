@@ -27,6 +27,7 @@ const PASTEQUE_DEFAULT_IRRIGATION_RADIUS_TILES: int = 9
 # a neighbouring patch shrinks.
 var _sources: Dictionary = {}
 var _ring_timer: float = 0.0
+var _floor_replacements: FloorReplacementRegistry = null
 
 func _ready() -> void:
 	GameState.set_reservoir_destroyed(false)
@@ -176,6 +177,10 @@ func _resolve_level_nodes() -> void:
 		wallz = get_node_or_null("../MonTilemap/wallz") as TileMapLayer
 	if building_object_manager == null:
 		building_object_manager = get_node_or_null("../BuildingObjectManager")
+	if _floor_replacements == null:
+		var build_system: Node = get_node_or_null("../BuildSystem")
+		if build_system != null and build_system.has_method("get_floor_replacement_registry"):
+			_floor_replacements = build_system.call("get_floor_replacement_registry") as FloorReplacementRegistry
 
 # Grass spreads through open ground only: missing floor (off-map), a wall tile, or a
 # water tile stops the fill. That is what keeps a patch from appearing on the far side of
@@ -190,6 +195,11 @@ func _is_spread_blocked(cell: Vector2i) -> bool:
 
 func _irrigate_floor_cell(cell: Vector2i) -> bool:
 	if floorz == null:
+		return false
+	if (
+		_floor_replacements != null
+		and _floor_replacements.set_hidden_underlay_wet(cell, true)
+	):
 		return false
 	var source_id: int = floorz.get_cell_source_id(cell)
 	if source_id < 0:
@@ -206,6 +216,11 @@ func _irrigate_floor_cell(cell: Vector2i) -> bool:
 
 func _restore_floor_cell(cell: Vector2i, restore_atlas: Vector2i) -> bool:
 	if floorz == null:
+		return false
+	if (
+		_floor_replacements != null
+		and _floor_replacements.set_hidden_underlay_wet(cell, false)
+	):
 		return false
 	var source_id: int = floorz.get_cell_source_id(cell)
 	if source_id < 0:

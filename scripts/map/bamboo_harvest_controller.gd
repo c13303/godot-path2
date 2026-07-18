@@ -26,6 +26,7 @@ const TERRAIN_SPEED_MULTIPLIER: float = 0.5
 ## Bamboo never slows the PLAYER, only the agents crossing it (same rule as roses, see the
 ## rose's "slows_player" in ItemCatalog): you walk your own grove at full speed.
 const PLAYER_TERRAIN_SPEED_MULTIPLIER: float = 1.0
+const TERRAIN_SPEED_SOURCE: StringName = &"bamboo"
 
 
 ## One authored bamboo. `world_position` is cached because authored cells never move.
@@ -64,6 +65,7 @@ func setup(
 	if level_loader != null:
 		for cell: Vector2i in level_loader.get_loaded_bamboo_cells():
 			_add_record(cell)
+	refresh_terrain_slowdowns()
 	# Exactly the gem/ground-drop pickup rule, from the one shared helper.
 	var pickup_radius: float = GroundDropManager.pickup_radius_for_floor(_floor_layer)
 	_pickup_radius_squared = pickup_radius * pickup_radius
@@ -136,7 +138,6 @@ func _add_record(cell: Vector2i) -> void:
 	record.visual = _create_visual(record)
 	_records.append(record)
 	_record_by_cell[cell] = record
-	_register_terrain_slowdown(cell)
 
 
 func _create_visual(record: BambooRecord) -> BambooPlantVisual:
@@ -155,18 +156,21 @@ func _create_visual(record: BambooRecord) -> BambooPlantVisual:
 ## which every native-steered agent reads live — no flow rebuild, no route invalidation, no
 ## garden topology work, and no per-species branch. The player is exempt (see
 ## PLAYER_TERRAIN_SPEED_MULTIPLIER).
-func _register_terrain_slowdown(cell: Vector2i) -> void:
-	if _navigation_sync == null:
-		return
-	_navigation_sync.set_static_terrain_speed_multiplier(cell, TERRAIN_SPEED_MULTIPLIER, PLAYER_TERRAIN_SPEED_MULTIPLIER)
-
-
 ## Re-publishes controller-owned terrain contributions after a bulk terrain-channel rebuild.
 ## Save restoration replaces world layers and rebuilds their composed speed map; that rebuild
 ## deliberately clears every prior source, including these authored bamboo entries.
 func refresh_terrain_slowdowns() -> void:
+	if _navigation_sync == null or _records.is_empty():
+		return
+	var cells: Array[Vector2i] = []
 	for record: BambooRecord in _records:
-		_register_terrain_slowdown(record.cell)
+		cells.append(record.cell)
+	_navigation_sync.set_static_terrain_speed_multipliers(
+		cells,
+		TERRAIN_SPEED_SOURCE,
+		TERRAIN_SPEED_MULTIPLIER,
+		PLAYER_TERRAIN_SPEED_MULTIPLIER
+	)
 
 
 func _cell_center_world(cell: Vector2i) -> Vector2:

@@ -818,7 +818,7 @@ func is_build_item_available(item_id: String) -> bool:
 				if str(raw_item_id) == item_id:
 					return true
 			return false
-	return item_id == "rose" or item_id == "wall" or item_id == "ronce" or item_id == "fence"
+	return item_id == "rose" or item_id == "wall" or item_id == "ronce" or item_id == "fence" or item_id == "road"
 
 
 func _is_house_build_item_available(item_id: String) -> bool:

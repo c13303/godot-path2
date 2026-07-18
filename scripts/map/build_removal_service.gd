@@ -44,6 +44,8 @@ func try_remove_at_cell(cell: Vector2i) -> bool:
 func commit_removal(removal: Dictionary) -> bool:
 	if bool(removal.get("is_house", false)):
 		return _commit_house_removal(removal)
+	if bool(removal.get("floor_replacement", false)):
+		return _commit_floor_replacement_removal(removal)
 	var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
 	var item_id: String = str(removal.get("item_id", ""))
 	var layer: TileMapLayer = removal.get("layer") as TileMapLayer
@@ -61,6 +63,42 @@ func commit_removal(removal: Dictionary) -> bool:
 	if game_ui and game_ui.has_method("refund_build"):
 		game_ui.call("refund_build", item_id, refund_world_position(cell), 1)
 	return true
+
+
+func _commit_floor_replacement_removal(removal: Dictionary) -> bool:
+	var removals: Array[Dictionary] = [removal]
+	return commit_floor_replacement_removals(removals) == 1
+
+
+## Commits one queued run of floor replacements together, so drag-unbuilding Roads produces
+## one floor/autotile update and one native batch per terrain channel.
+func commit_floor_replacement_removals(removals: Array[Dictionary]) -> int:
+	var cells: Array[Vector2i] = []
+	var item_id: String = ""
+	for removal: Dictionary in removals:
+		if not bool(removal.get("floor_replacement", false)):
+			continue
+		var cell: Vector2i = removal.get("cell", Vector2i.ZERO) as Vector2i
+		var candidate_item_id: String = str(removal.get("item_id", ""))
+		var current: Dictionary = removable_at_cell(cell)
+		if current.is_empty() or str(current.get("item_id", "")) != candidate_item_id:
+			continue
+		if item_id == "":
+			item_id = candidate_item_id
+		if candidate_item_id == item_id:
+			cells.append(cell)
+	if cells.is_empty() or item_id == "":
+		return 0
+	var floor_replacements: FloorReplacementRegistry = _manager.get_floor_replacement_registry()
+	var removed: Array[Vector2i] = []
+	if floor_replacements != null:
+		removed = floor_replacements.remove_roads(cells)
+	if removed.is_empty():
+		return 0
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui != null and game_ui.has_method("refund_build"):
+		game_ui.call("refund_build", item_id, refund_world_position(removed[0]), removed.size())
+	return removed.size()
 
 
 func _commit_runtime_placeable_removal(removal: Dictionary) -> bool:
@@ -243,6 +281,15 @@ func removable_at_cell(cell: Vector2i) -> Dictionary:
 	var house_removal: Dictionary = _house_removable_at_cell(cell)
 	if not house_removal.is_empty():
 		return house_removal
+	var floor_replacements: FloorReplacementRegistry = _manager.get_floor_replacement_registry()
+	if floor_replacements != null and floor_replacements.has_replacement_at(cell):
+		var replacement_item_id: String = floor_replacements.item_id_at(cell)
+		if replacement_item_id != "":
+			return {
+				"item_id": replacement_item_id,
+				"cell": cell,
+				"floor_replacement": true,
+			}
 	var logical_plant_removal: Dictionary = logical_plant_removable_at_cell(cell)
 	if not logical_plant_removal.is_empty():
 		return logical_plant_removal

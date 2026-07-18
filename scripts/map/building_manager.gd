@@ -1121,6 +1121,9 @@ func resync_terrain_speed_after_world_restore() -> void:
 	_building_navigation_sync.sync_all_terrain_speed_cells()
 	if _bamboo_harvest_controller != null:
 		_bamboo_harvest_controller.refresh_terrain_slowdowns()
+	var build_system: Node = get_node_or_null("../BuildSystem")
+	if build_system != null and build_system.has_method("refresh_floor_replacement_terrain_modifiers"):
+		build_system.call("refresh_floor_replacement_terrain_modifiers")
 
 # Plant additions are phase-agnostic: they only dirty the plant layout, and the budgeted
 # invalidation pipeline rebuilds garden topology and retargets agents later (see

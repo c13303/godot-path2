@@ -32,9 +32,9 @@ const ALLY_MARKER_NAMES: PackedStringArray = ["fundamental_builder_in", "fundame
 const CLIENT_FREQUENCY_META: StringName = &"frequency_client"
 const ENEMY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/spawner.png"
 const FRIENDLY_SPAWNER_TEXTURE_PATH: String = "res://assets/sprites/legval/clientspawner.png"
-const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken"]
+const DEFAULT_TOOL_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken", &"road"]
 const DEFAULT_MERCHANT_AVAILABLE_ITEM_IDS: Array[StringName] = [&"seed", &"imperial_seed", &"spray", &"beam", &"sword", &"bomb"]
-const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken", &"seed", &"spray", &"beam", &"sword", &"bomb"]
+const DEFAULT_LEGACY_SHOP_AVAILABLE_ITEM_IDS: Array[StringName] = [&"rose", &"imperial_seed", &"turret_epine", &"ronce", &"fence", &"kraken", &"road", &"seed", &"spray", &"beam", &"sword", &"bomb"]
 var _loaded_level_scene_path: String = ""
 var _loaded_spawn_playlist: LevelSpawnPlaylist
 var _loaded_spawner_bindings: Array[SpawnerBinding] = []

@@ -229,6 +229,25 @@ func finish_removal() -> void:
 	if current_removal.is_empty() or str(current_removal.get("item_id", "")) != removed_item_id:
 		cancel_removal()
 		return
+	if bool(removal.get("floor_replacement", false)):
+		var batch: Array[Dictionary] = [removal]
+		while not _remove_queue.is_empty():
+			var queued: Dictionary = _remove_queue[0] as Dictionary
+			if (
+				not bool(queued.get("floor_replacement", false))
+				or str(queued.get("item_id", "")) != removed_item_id
+			):
+				break
+			batch.append(_remove_queue.pop_front() as Dictionary)
+		for batch_removal: Dictionary in batch:
+			_free_remove_progress_for_cell(batch_removal.get("cell", Vector2i.ZERO) as Vector2i)
+		if _manager._commit_floor_replacement_removals(batch) <= 0:
+			cancel_removal()
+			return
+		_remove_elapsed = 0.0
+		if _remove_queue.is_empty():
+			cancel_removal()
+		return
 
 	_free_remove_progress_for_cell(removed_cell)
 	if not _manager._commit_removal(removal):

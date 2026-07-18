@@ -69,6 +69,9 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	if ItemCatalog.is_house_placeable(item_id):
 		_apply_house_placeable(placeable_def, cell)
 		return
+	if ItemCatalog.is_floor_replacement(item_id):
+		_apply_floor_replacement(placeable_def, cell)
+		return
 	if is_runtime_traversable_placeable(placeable_def):
 		_apply_runtime_traversable_placeable(placeable_def, cell)
 		return
@@ -132,6 +135,34 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(cell)
 	_play_build_fx_at_cell(cell, target_layer)
+	clear_build_selection_if_unaffordable(item_id)
+
+
+func _apply_floor_replacement(placeable_def: Dictionary, cell: Vector2i) -> void:
+	var item_id: String = str(placeable_def.get("id", ""))
+	var floorz: TileMapLayer = _floorz()
+	if floorz == null or not is_valid_placeable_cell(cell, floorz, placeable_def):
+		_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+		return
+	if not can_afford(item_id):
+		_notify("can't afford")
+		return
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui == null or not game_ui.has_method("try_purchase_build"):
+		return
+	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
+		_notify("can't afford")
+		return
+	var requested: Array[Vector2i] = [cell]
+	var floor_replacements: FloorReplacementRegistry = _manager.get_floor_replacement_registry()
+	var placed: Array[Vector2i] = []
+	if floor_replacements != null:
+		placed = floor_replacements.place_roads(requested)
+	if placed.is_empty():
+		if game_ui.has_method("refund_build"):
+			game_ui.call("refund_build", item_id, _cell_world_position(cell), 1)
+		return
+	_play_build_fx_at_cell(cell, floorz)
 	clear_build_selection_if_unaffordable(item_id)
 
 
@@ -268,6 +299,8 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 		or is_disabled_for_placement(definition_item_id)
 	):
 		return false
+	if ItemCatalog.is_floor_replacement(item_id):
+		return _commit_floor_replacement_drag(placeable_def, item_id, start_cell, end_cell)
 	var target_layer: TileMapLayer = target_tile_layer(str(placeable_def.get("target_layer", "wallz")))
 	var atlas_coords: Vector2i = atlas_coords_from_placeable(placeable_def)
 	var available: int = affordable_quantity(item_id)
@@ -314,6 +347,45 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 		Sfx.play_sound(sound)
 	clear_build_selection_if_unaffordable(item_id)
 	return true
+
+
+func _commit_floor_replacement_drag(
+	placeable_def: Dictionary,
+	item_id: String,
+	start_cell: Vector2i,
+	end_cell: Vector2i
+) -> bool:
+	var floorz: TileMapLayer = _floorz()
+	if floorz == null:
+		return false
+	var available: int = affordable_quantity(item_id)
+	var cells: Array[Vector2i] = drag_build_rectangle_cells(
+		start_cell,
+		end_cell,
+		floorz,
+		placeable_def,
+		available
+	)
+	if cells.is_empty():
+		_show_tutorial_alert(ALERT_NON_BUILDABLE_FLOOR_KEY)
+		return false
+	var game_ui: CanvasLayer = _game_ui()
+	if game_ui == null or not game_ui.has_method("try_purchase_build"):
+		return false
+	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
+		return false
+	var floor_replacements: FloorReplacementRegistry = _manager.get_floor_replacement_registry()
+	var placed: Array[Vector2i] = []
+	if floor_replacements != null:
+		placed = floor_replacements.place_roads(cells)
+	if placed.size() != cells.size():
+		var failed_count: int = cells.size() - placed.size()
+		if failed_count > 0 and game_ui.has_method("refund_build"):
+			game_ui.call("refund_build", item_id, _cell_world_position(cells[0]), failed_count)
+	for cell: Vector2i in placed:
+		_play_build_fx_at_cell(cell, floorz)
+	clear_build_selection_if_unaffordable(item_id)
+	return not placed.is_empty()
 
 
 func drag_build_sound(item_id: String) -> StringName:
@@ -384,6 +456,8 @@ func drag_build_candidate_blocked_by_batch(
 
 
 func target_tile_layer(layer_name: String) -> TileMapLayer:
+	if layer_name == "floor":
+		return _floorz()
 	if layer_name == "plantz":
 		return _plantz()
 	if layer_name == "traversable_buildings":
@@ -462,7 +536,13 @@ func is_placeable_occupied(cell: Vector2i, target_layer: TileMapLayer, placeable
 	var traversable_buildings: TileMapLayer = _traversable_buildings()
 	var blocking_buildings: TileMapLayer = _blocking_buildings()
 	var fences: TileMapLayer = _fences()
-	if bool(placeable_def.get("occupies_cell", true)) and target_layer != null and target_layer.get_cell_source_id(cell) >= 0 and not (target_layer == plantz and is_debris_cell(cell)):
+	if (
+		bool(placeable_def.get("occupies_cell", true))
+		and not ItemCatalog.is_floor_replacement(str(placeable_def.get("id", "")))
+		and target_layer != null
+		and target_layer.get_cell_source_id(cell) >= 0
+		and not (target_layer == plantz and is_debris_cell(cell))
+	):
 		return true
 	var building_object_manager: Node = _building_object_manager()
 	if building_object_manager and building_object_manager.has_method("has_building") and bool(building_object_manager.call("has_building", cell)):
