@@ -1,6 +1,7 @@
 extends Node
 
 const CONTEXT: StringName = &"fundamental_builder"
+const INTERACTION_BUBBLE_REASON: StringName = &"fundamental_builder_interaction"
 const BUILDER_TEXTURE: Texture2D = preload("res://assets/sprites/legval/fundamental_builder.png")
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const BUILDER_FRAME_COUNT: float = 4.0
@@ -59,6 +60,11 @@ func get_interaction_radius_tiles() -> int:
 func set_interaction_selected(value: bool) -> void:
 	if building_manager != null and building_manager.has_method("set_fundamental_builder_interaction_selected"):
 		building_manager.call("set_fundamental_builder_interaction_selected", value)
+	_set_interaction_bubble(value, false)
+
+
+func set_interaction_input_mode(is_gamepad: bool) -> void:
+	_set_interaction_bubble(true, is_gamepad)
 
 
 func request_interaction() -> bool:
@@ -67,6 +73,15 @@ func request_interaction() -> bool:
 
 func is_interaction_open() -> bool:
 	return is_dialog_open()
+
+
+func _set_interaction_bubble(active: bool, is_gamepad: bool) -> void:
+	if building_manager == null or not building_manager.has_method("get_fundamental_builder_node"):
+		return
+	var agent: Node2D = building_manager.call("get_fundamental_builder_node") as Node2D
+	if agent != null and agent.has_method("set_bubble_notification_frame"):
+		var frame: int = 2 if is_gamepad else 1
+		agent.call("set_bubble_notification_frame", INTERACTION_BUBBLE_REASON, active, frame)
 
 
 func _open_dialog() -> void:

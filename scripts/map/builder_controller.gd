@@ -9,6 +9,7 @@ const VISITOR_CATEGORY: StringName = &"builders"
 # Canonical house-resident identity shared by every villager (see HouseResidentController).
 const HOUSE_RESIDENTS_GROUP: StringName = &"house_residents"
 const RESIDENT_TYPE_FUNDAMENTAL_BUILDER: StringName = &"fundamental_builder"
+const BUBBLE_REASON_NO_HOME: StringName = &"fundamental_builder_no_home"
 const FUNDAMENTAL_BUILDER_IN_ID: StringName = &"fundamental_builder_in"
 const FUNDAMENTAL_BUILDER_SPOT_ID: StringName = &"fundamental_builder_spot"
 const FUNDAMENTAL_BUILDER_OUT_ID: StringName = &"fundamental_builder_out"
@@ -182,6 +183,7 @@ func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Ve
 		agent.set_meta("home_entrance_cell", entrance_cell)
 	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
 		return_builder_to_idle_area(_fundamental_builder_id)
+	_sync_fundamental_builder_bubble()
 
 
 func clear_fundamental_builder_house_assignment() -> void:
@@ -200,6 +202,7 @@ func clear_fundamental_builder_house_assignment() -> void:
 		agent.set_meta("home_entrance_cell", spot_cell)
 	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
 		return_builder_to_idle_area(_fundamental_builder_id)
+	_sync_fundamental_builder_bubble()
 
 
 func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vector2i, exact_anchor: bool, for_house_destruction_escape: bool = false) -> int:
@@ -250,6 +253,7 @@ func _spawn_fundamental_builder_at_anchor(house_id: StringName, anchor_cell: Vec
 		agent.set_meta("home_entrance_cell", anchor_cell)
 		if house_id != &"":
 			agent.set_meta("resident_house_id", house_id)
+	_sync_fundamental_builder_bubble()
 	return builder_id
 
 
@@ -292,6 +296,19 @@ func fundamental_builder_world_position() -> Vector2:
 
 func fundamental_builder_node() -> Node2D:
 	return _builder_agent_node(_fundamental_builder_id) if _fundamental_builder_id >= 0 else null
+
+
+func _sync_fundamental_builder_bubble() -> void:
+	var agent: Node2D = fundamental_builder_node()
+	if agent == null or not agent.has_method("set_bubble_notification"):
+		return
+	var house_id: StringName = StringName(_house_id_by_builder_id.get(_fundamental_builder_id, &""))
+	var has_completed_home: bool = false
+	if house_id != &"" and _manager != null:
+		var house_manager: HouseManager = _manager.get_house_manager()
+		var snapshot: HouseManager.HouseSnapshot = house_manager.get_house_snapshot(house_id) if house_manager != null else null
+		has_completed_home = snapshot != null and snapshot.completed and snapshot.resident_role == HouseManager.RESIDENT_ROLE_FUNDAMENTAL_BUILDER
+	agent.call("set_bubble_notification", BUBBLE_REASON_NO_HOME, not has_completed_home)
 
 
 func retire_fundamental_builder() -> void:
@@ -951,6 +968,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_home_cell_by_builder_id.erase(builder_id)
 		if _fundamental_builder_id == builder_id:
 			_fundamental_builder_id = -1
+			# The agent is already leaving the scene; no visual cleanup is needed.
 		_clear_idle_return_state(builder_id)
 		_idle_home_probe_elapsed_by_builder_id.erase(builder_id)
 		_debug_idle_home_probes_by_builder_id.erase(builder_id)

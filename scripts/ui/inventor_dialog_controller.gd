@@ -11,6 +11,8 @@ extends Node
 
 const CONTEXT: StringName = &"inventor"
 const RESIDENT_TYPE: StringName = &"inventor"
+const BUBBLE_REASON: StringName = &"inventor_new_blueprints"
+const INTERACTION_BUBBLE_REASON: StringName = &"inventor_interaction"
 const INTERACT_RADIUS_TILES: int = 2
 const INVENTOR_TEXTURE: Texture2D = preload("res://assets/sprites/legval/inventor.png")
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
@@ -36,6 +38,11 @@ func _ready() -> void:
 	_portrait = _build_portrait_texture()
 	_money_icon = _build_money_icon_texture()
 	add_to_group(&"interaction_targets")
+	if building_manager != null and building_manager.has_signal("house_resident_agent_changed"):
+		building_manager.connect("house_resident_agent_changed", _on_house_resident_agent_changed)
+	if progression != null and progression.has_signal("blueprint_publication_changed"):
+		progression.connect("blueprint_publication_changed", _on_blueprint_publication_changed)
+	call_deferred("_sync_blueprint_bubble")
 
 
 # --- InteractionRouter contract ----------------------------------------------
@@ -57,6 +64,11 @@ func get_interaction_radius_tiles() -> int:
 func set_interaction_selected(value: bool) -> void:
 	if building_manager != null and building_manager.has_method("set_house_resident_interaction_selected"):
 		building_manager.call("set_house_resident_interaction_selected", RESIDENT_TYPE, value)
+	_set_interaction_bubble(value, false)
+
+
+func set_interaction_input_mode(is_gamepad: bool) -> void:
+	_set_interaction_bubble(true, is_gamepad)
 
 
 func request_interaction() -> bool:
@@ -93,7 +105,7 @@ func _open_dialog() -> void:
 		_portrait,
 		_build_choices(),
 		_on_choice,
-		Callable(),
+		_on_closed,
 		{
 			"blocks_gameplay_input": true,
 			"body_icons": {MONEY_ICON_PLACEHOLDER: _money_icon},
@@ -140,6 +152,40 @@ func _on_choice(choice_id: String, _source_global_position: Vector2) -> void:
 		return
 	Sfx.play_sound(&"buy")
 	dialog.refresh_choices(_build_choices())
+
+
+func _on_closed(_reason: StringName) -> void:
+	if progression != null and progression.has_method("mark_published_blueprints_seen"):
+		progression.call("mark_published_blueprints_seen")
+	_sync_blueprint_bubble()
+
+
+func _on_house_resident_agent_changed(resident_type: StringName) -> void:
+	if resident_type == RESIDENT_TYPE:
+		_sync_blueprint_bubble()
+
+
+func _on_blueprint_publication_changed() -> void:
+	_sync_blueprint_bubble()
+
+
+func _sync_blueprint_bubble() -> void:
+	if building_manager == null or progression == null or not building_manager.has_method("get_house_resident_agent"):
+		return
+	var agent: Node2D = building_manager.call("get_house_resident_agent", RESIDENT_TYPE) as Node2D
+	if agent == null or not agent.has_method("set_bubble_notification"):
+		return
+	var has_unseen: bool = progression.has_method("has_unseen_published_blueprints") and bool(progression.call("has_unseen_published_blueprints"))
+	agent.call("set_bubble_notification", BUBBLE_REASON, has_unseen)
+
+
+func _set_interaction_bubble(active: bool, is_gamepad: bool) -> void:
+	if building_manager == null or not building_manager.has_method("get_house_resident_agent"):
+		return
+	var agent: Node2D = building_manager.call("get_house_resident_agent", RESIDENT_TYPE) as Node2D
+	if agent != null and agent.has_method("set_bubble_notification_frame"):
+		var frame: int = 2 if is_gamepad else 1
+		agent.call("set_bubble_notification_frame", INTERACTION_BUBBLE_REASON, active, frame)
 
 
 func _is_inventor_active() -> bool:

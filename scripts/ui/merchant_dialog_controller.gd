@@ -8,6 +8,9 @@ extends Node
 ## economy/inventory logic stays in game_ui.gd; this controller only calls it.
 
 const CONTEXT: StringName = &"seed_merchant"
+const RESIDENT_TYPE: StringName = &"seed_merchant"
+const BUBBLE_REASON: StringName = &"merchant_reward"
+const INTERACTION_BUBBLE_REASON: StringName = &"merchant_interaction"
 const MERCHANT_TEXTURE: Texture2D = preload("res://assets/sprites/legval/merchent.png")
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
@@ -22,6 +25,7 @@ const REWARD_ID_PREFIX: String = "reward:"
 @export var game_ui: Node
 @export var player_controller: PlayerController
 @export var building_manager: Node
+@export var progression: Node
 
 # Cached portrait (first frame of the merchant sheet) and currency icon atlases.
 var _portrait: Texture2D
@@ -35,6 +39,11 @@ func _ready() -> void:
 	for currency: StringName in CurrencyCatalog.get_currency_ids():
 		_currency_icons[currency] = _region_texture(CurrencyCatalog.get_icon_region(currency))
 	add_to_group(&"interaction_targets")
+	if building_manager != null and building_manager.has_signal("house_resident_agent_changed"):
+		building_manager.connect("house_resident_agent_changed", _on_house_resident_agent_changed)
+	if progression != null and progression.has_signal("day_started"):
+		progression.connect("day_started", _on_day_started)
+	call_deferred("_sync_reward_bubble")
 	set_process(true)
 
 
@@ -88,6 +97,11 @@ func get_interaction_radius_tiles() -> int:
 func set_interaction_selected(value: bool) -> void:
 	if building_manager != null and building_manager.has_method("set_house_resident_interaction_selected"):
 		building_manager.call("set_house_resident_interaction_selected", &"seed_merchant", value)
+	_set_interaction_bubble(value, false)
+
+
+func set_interaction_input_mode(is_gamepad: bool) -> void:
+	_set_interaction_bubble(true, is_gamepad)
 
 
 func request_interaction() -> bool:
@@ -219,11 +233,38 @@ func _claim_reward(reward_key: String, source_global_position: Vector2) -> void:
 		Sfx.play_sound(&"buy")
 		_last_signature = _offer_signature()
 		dialog.refresh_choices(_build_choices())
+		_sync_reward_bubble()
 
 
 func _on_closed(_reason: StringName) -> void:
 	# DialogUI restores the gameplay input lock itself; nothing merchant-specific to undo.
 	_last_signature = ""
+
+
+func _on_house_resident_agent_changed(resident_type: StringName) -> void:
+	if resident_type == RESIDENT_TYPE:
+		_sync_reward_bubble()
+
+
+func _on_day_started(_day_number: int) -> void:
+	_sync_reward_bubble()
+
+
+func _sync_reward_bubble() -> void:
+	if building_manager == null or not building_manager.has_method("get_house_resident_agent"):
+		return
+	var agent: Node2D = building_manager.call("get_house_resident_agent", RESIDENT_TYPE) as Node2D
+	if agent != null and agent.has_method("set_bubble_notification"):
+		agent.call("set_bubble_notification", BUBBLE_REASON, not _active_reward_list().is_empty())
+
+
+func _set_interaction_bubble(active: bool, is_gamepad: bool) -> void:
+	if building_manager == null or not building_manager.has_method("get_house_resident_agent"):
+		return
+	var agent: Node2D = building_manager.call("get_house_resident_agent", RESIDENT_TYPE) as Node2D
+	if agent != null and agent.has_method("set_bubble_notification_frame"):
+		var frame: int = 2 if is_gamepad else 1
+		agent.call("set_bubble_notification_frame", INTERACTION_BUBBLE_REASON, active, frame)
 
 
 ## Replays the existing fly-to-HUD / fly-to-inventory purchase feedback from the row's origin.

@@ -2,6 +2,7 @@ extends Node
 
 signal day_started(day_number: int)
 signal values_changed
+signal blueprint_publication_changed
 
 const SAVE_GAME_SERVICE_SCRIPT: Script = preload("res://scripts/gameState/save_game_service.gd")
 const BLUEPRINT_UNLOCK_SERVICE_SCRIPT: Script = preload("res://scripts/gameState/blueprint_unlock_service.gd")
@@ -21,7 +22,8 @@ const SAVE_PATH: String = "user://progression_save.json"
 # Version 10 adds permanent inventor blueprint unlocks.
 # Version 11 makes Kraken a paid blueprint after Ronce and Fence instead of an automatic unlock.
 # Version 12 adds semantic floor replacements (Road hidden dry/wet underlays).
-const SAVE_VERSION: int = 12
+# Version 13 persists Inventor blueprint publication and acknowledgement state.
+const SAVE_VERSION: int = 13
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -173,6 +175,17 @@ func try_purchase_blueprint(blueprint_id: StringName) -> bool:
 	return _blueprint_unlock_service.try_purchase_blueprint(blueprint_id)
 
 
+func has_unseen_published_blueprints() -> bool:
+	return _blueprint_unlock_service.has_unseen_published_blueprints()
+
+
+func mark_published_blueprints_seen() -> bool:
+	var changed: bool = _blueprint_unlock_service.mark_published_blueprints_seen()
+	if changed:
+		blueprint_publication_changed.emit()
+	return changed
+
+
 ## Spend a positive amount of a progression prop and refresh its UI.
 ## Returns false without changing the value when there is not enough available.
 func spend(key: StringName, amount: int) -> bool:
@@ -203,6 +216,8 @@ func advance_day(amount: int = 1) -> bool:
 	progression.add(&"nDays", amount)
 	var day_number: int = progression.get_value(&"nDays")
 	_update_day_label(day_number)
+	if _blueprint_unlock_service.publish_newly_eligible_blueprints_for_dawn():
+		blueprint_publication_changed.emit()
 	day_started.emit(day_number)
 	_log("Day advanced: Day %d" % day_number)
 	_update_progression_ui()
@@ -622,6 +637,7 @@ func _save_progression_impl(
 		"level_scene_path": _get_loaded_level_scene_path(scene),
 		"progression": progression.to_dict(),
 		"unlocked_blueprints": _blueprint_unlock_service.get_save_data(),
+		"blueprint_publication": _blueprint_unlock_service.get_publication_save_data(),
 		"night_rewards": GameState.get_special_reward_claim_save_data(),
 		"gameplay_phase": gameplay_phase,
 		"gameplay_phase_state": gameplay_phase_state,
@@ -980,6 +996,7 @@ func _apply_save_to_fresh_scene(data: Dictionary) -> void:
 	_log("Progression restored: %s" % str(progression.to_dict()))
 	# Blueprint state must be restored before the selected build item is validated.
 	_blueprint_unlock_service.apply_save_data(data.get("unlocked_blueprints", []))
+	_blueprint_unlock_service.apply_publication_save_data(data.get("blueprint_publication", {}))
 
 	var raw_night_rewards: Variant = data.get("night_rewards", {})
 	var night_reward_data: Dictionary = {}

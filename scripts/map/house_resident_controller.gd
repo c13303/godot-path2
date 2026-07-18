@@ -1,6 +1,8 @@
 extends HouseResidentHandler
 class_name HouseResidentController
 
+signal agent_changed(resident_type: StringName)
+
 ## Reusable lifecycle for one ordinary one-house/one-resident villager (the seed merchant, the
 ## future Inventor, ...). It owns everything a normal villager shares:
 ##   * one resident reconstructed from one completed house (never serialized independently);
@@ -151,6 +153,7 @@ func on_agent_removed(agent: Node2D) -> void:
 	_reset_state()
 	if _config.role != null:
 		_config.role.on_cleared()
+	agent_changed.emit(_config.resident_type)
 
 
 func owns_agent(agent: Node2D) -> bool:
@@ -163,6 +166,7 @@ func clear(free_agents: bool) -> void:
 	_reset_state()
 	if _config.role != null:
 		_config.role.on_cleared()
+	agent_changed.emit(_config.resident_type)
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +217,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_de
 	_stamp_identity()
 	if _config.role != null and not for_house_destruction_escape:
 		_config.role.on_spawned(self)
+	agent_changed.emit(_config.resident_type)
 	return true
 
 

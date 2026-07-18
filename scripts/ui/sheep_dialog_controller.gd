@@ -11,6 +11,7 @@ extends Node
 
 const CONTEXT: StringName = &"sheep"
 const RESIDENT_TYPE: StringName = &"sheep"
+const INTERACTION_BUBBLE_REASON: StringName = &"sheep_interaction"
 const INTERACT_RADIUS_TILES: int = 2
 const SHEEP_TEXTURE: Texture2D = preload("res://assets/sprites/legval/sheep_villager.png")
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
@@ -54,6 +55,11 @@ func get_interaction_radius_tiles() -> int:
 func set_interaction_selected(value: bool) -> void:
 	if building_manager != null and building_manager.has_method("set_house_resident_interaction_selected"):
 		building_manager.call("set_house_resident_interaction_selected", RESIDENT_TYPE, value)
+	_set_interaction_bubble(value, false)
+
+
+func set_interaction_input_mode(is_gamepad: bool) -> void:
+	_set_interaction_bubble(true, is_gamepad)
 
 
 func request_interaction() -> bool:
@@ -62,6 +68,15 @@ func request_interaction() -> bool:
 
 func is_interaction_open() -> bool:
 	return dialog != null and dialog.is_open_for(CONTEXT)
+
+
+func _set_interaction_bubble(active: bool, is_gamepad: bool) -> void:
+	if building_manager == null or not building_manager.has_method("get_house_resident_agent"):
+		return
+	var agent: Node2D = building_manager.call("get_house_resident_agent", RESIDENT_TYPE) as Node2D
+	if agent != null and agent.has_method("set_bubble_notification_frame"):
+		var frame: int = 2 if is_gamepad else 1
+		agent.call("set_bubble_notification_frame", INTERACTION_BUBBLE_REASON, active, frame)
 
 
 # --- Opening -----------------------------------------------------------------

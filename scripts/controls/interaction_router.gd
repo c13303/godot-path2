@@ -24,6 +24,7 @@ var _state_by_target_id: Dictionary = {}
 var _selected_target: Node = null
 var _player_cell: Vector2i = INVALID_CELL
 var _refresh_elapsed: float = 0.0
+var _gamepad_input_mode: bool = false
 
 
 func setup(tree: SceneTree, player: Node2D, floor_layer: TileMapLayer) -> void:
@@ -67,6 +68,11 @@ func process(delta: float) -> void:
 
 func selected_target() -> Node:
 	return _selected_target if _selected_target != null and is_instance_valid(_selected_target) else null
+
+
+func set_selected_target_input_mode(is_gamepad: bool) -> void:
+	_gamepad_input_mode = is_gamepad
+	_apply_selected_target_input_mode()
 
 
 ## True while any registered interaction dialog is open (used to suppress other UI input).
@@ -174,7 +180,14 @@ func _set_selected_target(target: Node) -> void:
 	if _selected_target != null and is_instance_valid(_selected_target) \
 			and _selected_target.has_method("set_interaction_selected"):
 		_selected_target.call("set_interaction_selected", true)
+	_apply_selected_target_input_mode()
 	selected_target_changed.emit(_selected_target)
+
+
+func _apply_selected_target_input_mode() -> void:
+	if _selected_target != null and is_instance_valid(_selected_target) \
+			and _selected_target.has_method("set_interaction_input_mode"):
+		_selected_target.call("set_interaction_input_mode", _gamepad_input_mode)
 
 
 func _clear_selected_target() -> void:

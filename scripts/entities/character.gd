@@ -95,6 +95,7 @@ const MONSTER_FRAME_DROWNING: int = 3
 const CLIENT_FRAME_ANGRY: int = 4
 @onready var _monster_sprite: Sprite2D = $MonsterSprite2D
 var _held_object_visual: AgentHeldObjectVisual = AgentHeldObjectVisual.new()
+var _bubble_notification_visual: AgentBubbleNotificationVisual = AgentBubbleNotificationVisual.new()
 # Set while the generic held object is being driven by the legacy rose metadata bridge,
 # so the bridge can never clear an object another system put in the agent's hand.
 var _legacy_rose_held: bool = false
@@ -117,12 +118,21 @@ func _ready() -> void:
 	health = max(1, max_health)
 	_setup_flash_material()
 	_held_object_visual.setup(self)
+	_bubble_notification_visual.setup(self)
 	_facing_state.min_change_interval = FACING_CHANGE_MIN_SECONDS
 	_facing_state.diagonal_hysteresis_ratio = FACING_DIAGONAL_HYSTERESIS_RATIO
 	_last_facing_position = global_position
 	queue_redraw()
 	if use_native_steering:
 		set_physics_process(false)
+
+
+func set_bubble_notification(reason: StringName, active: bool) -> void:
+	_bubble_notification_visual.set_bubble_notification(reason, active)
+
+
+func set_bubble_notification_frame(reason: StringName, active: bool, frame: int) -> void:
+	_bubble_notification_visual.set_bubble_notification_frame(reason, active, frame)
 
 func _process(delta: float) -> void:
 	if not _external_capture_active:

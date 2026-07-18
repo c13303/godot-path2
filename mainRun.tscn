@@ -51,7 +51,6 @@
 [ext_resource type="PackedScene" uid="uid://de6aqnminose" path="res://scenes/visual_fx/garden_hose.tscn" id="45_garden_hose"]
 [ext_resource type="Script" uid="uid://oelg5dafhog7" path="res://scripts/ui/phase_toggle_button.gd" id="45_phase_toggle"]
 [ext_resource type="Script" uid="uid://b5hv7y5vibnla" path="res://scripts/ui/planificator.gd" id="45_s6agy"]
-[ext_resource type="Script" uid="uid://cwlj3h4n7r42t" path="res://scripts/ui/interaction_prompt.gd" id="46_interaction_prompt"]
 [ext_resource type="Texture2D" uid="uid://c3b8p1lam2n4d" path="res://assets/sprites/textures/water_animated_bg.png" id="47_wateranim"]
 [ext_resource type="Script" uid="uid://boopddejx6wku" path="res://scripts/ui/possessed_items_hud.gd" id="48_possessed_hud"]
 [ext_resource type="Script" uid="uid://bsx7w4vvhi5ey" path="res://scripts/map/imperial_plant_visuals.gd" id="49_imperial_visuals"]
@@ -1355,12 +1354,6 @@ script = ExtResource("11_62xsw")
 [node name="PauseOverlay" type="Panel" parent="GameUI/CanvasLayer" unique_id=1601357046]
 script = ExtResource("12_vj62y")
 
-[node name="InteractionPrompt" type="Control" parent="GameUI" unique_id=700000030]
-layout_mode = 3
-anchors_preset = 0
-mouse_filter = 2
-script = ExtResource("46_interaction_prompt")
-
 [node name="Toolbuild" type="Control" parent="GameUI" unique_id=18988893]
 layout_mode = 3
 anchors_preset = 15
@@ -1424,12 +1417,13 @@ offset_right = 72.0
 offset_bottom = 72.0
 mouse_filter = 2
 
-[node name="MerchantDialogController" type="Node" parent="GameUI" unique_id=343104799 node_paths=PackedStringArray("dialog", "game_ui", "player_controller", "building_manager")]
+[node name="MerchantDialogController" type="Node" parent="GameUI" unique_id=343104799 node_paths=PackedStringArray("dialog", "game_ui", "player_controller", "building_manager", "progression")]
 script = ExtResource("61_mdc")
 dialog = NodePath("../Dialog")
 game_ui = NodePath("..")
 player_controller = NodePath("../../Player/PlayerController")
 building_manager = NodePath("../../Map/BuildingManager")
+progression = NodePath("../../progression")
 
 [node name="FundamentalBuilderDialogController" type="Node" parent="GameUI" unique_id=343104800 node_paths=PackedStringArray("dialog", "game_ui", "building_manager")]
 script = ExtResource("62_builder_dialog")

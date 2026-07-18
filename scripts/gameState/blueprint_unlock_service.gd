@@ -12,6 +12,7 @@ const BLUEPRINT_DEFS: Dictionary = {
 		"price": 10,
 		"prerequisites": [],
 		"automatic": false,
+		"initially_published": true,
 	},
 	&"fence": {
 		"build_item_id": &"fence",
@@ -19,6 +20,7 @@ const BLUEPRINT_DEFS: Dictionary = {
 		"price": 10,
 		"prerequisites": [],
 		"automatic": false,
+		"initially_published": true,
 	},
 	&"kraken": {
 		"build_item_id": &"kraken",
@@ -26,6 +28,7 @@ const BLUEPRINT_DEFS: Dictionary = {
 		"price": 10,
 		"prerequisites": [&"ronce", &"fence"],
 		"automatic": false,
+		"initially_published": false,
 	},
 }
 
@@ -33,10 +36,13 @@ const PAID_BLUEPRINT_ORDER: Array[StringName] = [&"ronce", &"fence", &"kraken"]
 
 var _progression: Node
 var _unlocked_ids: Dictionary = {}
+var _published_ids: Dictionary = {}
+var _unseen_published_ids: Dictionary = {}
 
 
 func setup(progression: Node) -> void:
 	_progression = progression
+	_initialize_initial_publications()
 
 
 func is_blueprint_buildable(item_id: String) -> bool:
@@ -51,7 +57,7 @@ func is_blueprint_unlocked(item_id: String) -> bool:
 func get_purchasable_blueprint_ids() -> Array[StringName]:
 	var ids: Array[StringName] = []
 	for blueprint_id: StringName in PAID_BLUEPRINT_ORDER:
-		if not _unlocked_ids.has(blueprint_id) and _prerequisites_satisfied(blueprint_id):
+		if _published_ids.has(blueprint_id) and not _unlocked_ids.has(blueprint_id):
 			ids.append(blueprint_id)
 	return ids
 
@@ -70,7 +76,7 @@ func can_purchase_blueprint(blueprint_id: StringName) -> bool:
 	var definition: Dictionary = _definition(blueprint_id)
 	if definition.is_empty() or bool(definition.get("automatic", false)):
 		return false
-	if _unlocked_ids.has(blueprint_id) or not _prerequisites_satisfied(blueprint_id):
+	if _unlocked_ids.has(blueprint_id) or not _published_ids.has(blueprint_id):
 		return false
 	var currency: StringName = get_blueprint_currency(blueprint_id)
 	var price: int = get_blueprint_price(blueprint_id)
@@ -97,6 +103,29 @@ func try_purchase_blueprint(blueprint_id: StringName) -> bool:
 	return true
 
 
+func publish_newly_eligible_blueprints_for_dawn() -> bool:
+	var changed: bool = false
+	for blueprint_id: StringName in PAID_BLUEPRINT_ORDER:
+		if _unlocked_ids.has(blueprint_id) or _published_ids.has(blueprint_id):
+			continue
+		if _prerequisites_satisfied(blueprint_id):
+			_published_ids[blueprint_id] = true
+			_unseen_published_ids[blueprint_id] = true
+			changed = true
+	return changed
+
+
+func has_unseen_published_blueprints() -> bool:
+	return not _unseen_published_ids.is_empty()
+
+
+func mark_published_blueprints_seen() -> bool:
+	if _unseen_published_ids.is_empty():
+		return false
+	_unseen_published_ids.clear()
+	return true
+
+
 func get_save_data() -> Array[String]:
 	var data: Array[String] = []
 	for raw_id: Variant in BLUEPRINT_DEFS.keys():
@@ -109,7 +138,10 @@ func get_save_data() -> Array[String]:
 
 func apply_save_data(data: Variant) -> void:
 	_unlocked_ids.clear()
+	_published_ids.clear()
+	_unseen_published_ids.clear()
 	if not (data is Array):
+		_initialize_initial_publications()
 		return
 	for raw_id: Variant in (data as Array):
 		if not (raw_id is String):
@@ -124,6 +156,30 @@ func apply_save_data(data: Variant) -> void:
 		if not bool(definition.get("automatic", false)):
 			_unlocked_ids[blueprint_id] = true
 	_resolve_automatic_unlocks()
+	_initialize_initial_publications()
+
+
+func get_publication_save_data() -> Dictionary:
+	var published: Array[String] = _string_ids(_published_ids)
+	var unseen: Array[String] = _string_ids(_unseen_published_ids)
+	return {"published": published, "unseen": unseen}
+
+
+func apply_publication_save_data(data: Variant) -> void:
+	# Old saves did not persist publication state. They retain the authored initial
+	# offers and do not gain a simulated dawn during load.
+	if not (data is Dictionary):
+		return
+	var saved: Dictionary = data as Dictionary
+	if not saved.has("published") and not saved.has("unseen"):
+		return
+	_published_ids.clear()
+	_unseen_published_ids.clear()
+	_apply_saved_id_list(saved.get("published", []), _published_ids)
+	_apply_saved_id_list(saved.get("unseen", []), _unseen_published_ids)
+	for raw_id: Variant in _unseen_published_ids.keys():
+		if not _published_ids.has(raw_id):
+			_unseen_published_ids.erase(raw_id)
 
 
 func _resolve_automatic_unlocks() -> void:
@@ -138,6 +194,31 @@ func _resolve_automatic_unlocks() -> void:
 			if _prerequisites_satisfied(blueprint_id):
 				_unlocked_ids[blueprint_id] = true
 				changed = true
+
+
+func _initialize_initial_publications() -> void:
+	for blueprint_id: StringName in PAID_BLUEPRINT_ORDER:
+		var definition: Dictionary = _definition(blueprint_id)
+		if bool(definition.get("initially_published", false)):
+			_published_ids[blueprint_id] = true
+			_unseen_published_ids[blueprint_id] = true
+
+
+func _apply_saved_id_list(data: Variant, target: Dictionary) -> void:
+	if not (data is Array):
+		return
+	for raw_id: Variant in (data as Array):
+		var blueprint_id: StringName = StringName(str(raw_id))
+		if BLUEPRINT_DEFS.has(blueprint_id):
+			target[blueprint_id] = true
+
+
+func _string_ids(ids: Dictionary) -> Array[String]:
+	var result: Array[String] = []
+	for raw_id: Variant in ids.keys():
+		result.append(String(raw_id))
+	result.sort()
+	return result
 
 
 func _prerequisites_satisfied(blueprint_id: StringName) -> bool:

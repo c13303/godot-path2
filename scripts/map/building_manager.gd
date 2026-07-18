@@ -16,6 +16,7 @@ signal startup_loading_progress(progress: float, label: String)
 signal startup_loading_finished
 signal counter_stock_changed(previous: int, value: int)
 signal planificator_data_changed
+signal house_resident_agent_changed(resident_type: StringName)
 # Emitted from plant_contact_dance_router.gd; ignore the false unused-signal warning.
 @warning_ignore("unused_signal")
 signal plant_contact_dance_requested(layer_name: StringName, cell: Vector2i, item_id: String, duration: float)
@@ -757,6 +758,7 @@ func _setup_ally_housing() -> void:
 	merchant_config.role = _seed_merchant
 	merchant_config.interaction_hold_radius_tiles = 2
 	_merchant_resident.setup(self, _house_manager, merchant_config)
+	_merchant_resident.agent_changed.connect(_on_house_resident_agent_changed)
 	_seed_merchant.set_resident(_merchant_resident)
 	# The Inventor: same registration shape as the merchant, but with no role. Its identity/lifecycle
 	# come entirely from the generic HouseResidentController; its dialog lives in a scene controller.
@@ -770,6 +772,7 @@ func _setup_ally_housing() -> void:
 	inventor_config.role = null
 	inventor_config.interaction_hold_radius_tiles = 2
 	_inventor_resident.setup(self, _house_manager, inventor_config)
+	_inventor_resident.agent_changed.connect(_on_house_resident_agent_changed)
 	# The sheep: same registration shape again, with a role that sends it on garden-work errands.
 	# Its dialog lives in SheepDialogController, like the Inventor's.
 	var sheep_config: HouseResidentConfig = HouseResidentConfig.new()
@@ -782,6 +785,7 @@ func _setup_ally_housing() -> void:
 	sheep_config.role = _sheep_garden
 	sheep_config.interaction_hold_radius_tiles = 2
 	_sheep_resident.setup(self, _house_manager, sheep_config)
+	_sheep_resident.agent_changed.connect(_on_house_resident_agent_changed)
 	var ordinary_residents: Array[HouseResidentController] = [_merchant_resident, _inventor_resident, _sheep_resident]
 	_ally_housing.setup(self, _house_manager, _builder, ordinary_residents)
 
@@ -1780,6 +1784,15 @@ func has_house_resident_reached_spot(resident_type: StringName) -> bool:
 func get_house_resident_world_position(resident_type: StringName) -> Vector2:
 	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
 	return resident.get_agent_world_position() if resident != null else Vector2.ZERO
+
+
+func get_house_resident_agent(resident_type: StringName) -> Node2D:
+	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
+	return resident.agent_node() if resident != null else null
+
+
+func _on_house_resident_agent_changed(resident_type: StringName) -> void:
+	house_resident_agent_changed.emit(resident_type)
 
 
 func set_house_resident_interaction_selected(resident_type: StringName, value: bool) -> void:

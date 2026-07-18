@@ -220,6 +220,7 @@ func _set_control_mode(mode: String) -> void:
 	_apply_control_mode_mouse_visibility()
 	if _control_mode == INPUT_MODE_KMOUSE:
 		_deactivate_pad_build_cursor()
+	_interaction_router.set_selected_target_input_mode(_control_mode == INPUT_MODE_PAD)
 
 func _apply_control_mode_mouse_visibility() -> void:
 	if _control_mode == INPUT_MODE_PAD:
@@ -233,11 +234,7 @@ func get_control_mode() -> String:
 
 func _finish_interaction_setup() -> void:
 	_interaction_router.register_scene_targets()
-	var prompt: Node = game_ui.get_node_or_null("InteractionPrompt") if game_ui != null else null
-	if prompt == null or not prompt.has_method("set_target"):
-		return
-	_interaction_router.selected_target_changed.connect(Callable(prompt, "set_target"))
-	prompt.call("set_target", _interaction_router.selected_target())
+	_interaction_router.set_selected_target_input_mode(_control_mode == INPUT_MODE_PAD)
 
 func is_gamepad_control_mode() -> bool:
 	return _control_mode == INPUT_MODE_PAD
