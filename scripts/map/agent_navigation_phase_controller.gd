@@ -331,8 +331,11 @@ func consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i)
 			_manager.spawn_plant_parts_burst(_manager.cell_center(plant_cell))
 			var source_id: int = plantz.get_cell_source_id(plant_cell)
 			var alternative_tile: int = plantz.get_cell_alternative_tile(plant_cell)
-			plantz.set_cell(plant_cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
-			_manager._flush_plant_layer_visuals()
+			var plant_manager: Node = _manager.get_plant_manager()
+			if plant_manager != null and plant_manager.has_method("create_debris"):
+				plant_manager.call("create_debris", plant_cell, source_id, alternative_tile)
+			else:
+				push_warning("AgentNavigationPhaseController: PlantManager debris API unavailable at %s." % str(plant_cell))
 	_debug_telemetry.warn_garden_task_lag_us("_consume_plant", Time.get_ticks_usec() - consume_us,
 		"plant=%s" % str(plant_cell))
 

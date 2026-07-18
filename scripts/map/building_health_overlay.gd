@@ -37,7 +37,9 @@ func refresh() -> void:
 func _draw() -> void:
 	if building_manager == null or _durability == null:
 		return
-	for raw_record: Variant in _durability.damaged_records():
+	var started_us: int = Time.get_ticks_usec()
+	var damaged: Array = _durability.damaged_records()
+	for raw_record: Variant in damaged:
 		var record: Dictionary = raw_record as Dictionary
 		var health: int = int(record.get("health", 0))
 		var max_health: int = int(record.get("max_health", 0))
@@ -52,3 +54,8 @@ func _draw() -> void:
 		var ratio: float = float(health) / float(maxi(1, max_health))
 		var fill_size: Vector2 = Vector2((BAR_SIZE.x - 2.0) * ratio, BAR_SIZE.y - 2.0)
 		draw_rect(Rect2(bar_position + Vector2.ONE, fill_size), FILL_COLOR)
+	var elapsed_us: int = Time.get_ticks_usec() - started_us
+	var telemetry: BuildingDebugTelemetry = building_manager.get_building_debug_telemetry()
+	if telemetry != null and telemetry.over_garden_threshold_us(elapsed_us):
+		telemetry.warn_garden_task_lag_us("BuildingHealthOverlay._draw", elapsed_us,
+			"damaged_targets=%d" % damaged.size())

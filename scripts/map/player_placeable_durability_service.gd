@@ -46,6 +46,9 @@ var _build_system: Node = null
 #   { "key": String, "cell": Vector2i, "item_id": String, "layer_name": String,
 #     "health": int, "max_health": int }
 var _targets_by_key: Dictionary = {}
+## Health-overlay and sheep-repair queries only need damaged targets. Keep that
+## subset incrementally instead of filtering every registered durability record.
+var _damaged_by_key: Dictionary = {}
 # cell(Vector2i) -> Dictionary[key(String) -> true]. Multiple target layers may
 # legally share one cell (for example a plant-layer target and a structure), so
 # provenance removal must be keyed by layer + cell when the caller knows the layer.
@@ -79,6 +82,7 @@ func revision() -> int:
 func clear() -> void:
 	_targets_by_key.clear()
 	_keys_by_cell.clear()
+	_damaged_by_key.clear()
 	_bump_target_revision_and_refresh()
 
 
@@ -285,18 +289,13 @@ func nearest_target_key(from_world: Vector2, rejected: Dictionary = {}) -> Strin
 
 func damaged_records() -> Array:
 	var out: Array = []
-	for raw_key: Variant in _targets_by_key.keys():
+	for raw_key: Variant in _damaged_by_key.keys():
 		var key: String = str(raw_key)
-		# Skip records whose underlying structure no longer exists, so the health
-		# overlay never draws a bar above a destroyed/removed building. Pure check:
-		# no pruning side effects here (that stays on the selection paths).
+		# The index is maintained at every health/registration mutation. Keep this
+		# validity guard for externally removed tiles, without scanning full targets.
 		if not is_target_valid(key):
 			continue
-		var rec: Dictionary = _targets_by_key[key] as Dictionary
-		var health: int = int(rec.get("health", 0))
-		var max_health: int = int(rec.get("max_health", 0))
-		if health > 0 and health < max_health:
-			out.append(rec)
+		out.append(_damaged_by_key[key] as Dictionary)
 	return out
 
 
@@ -311,6 +310,7 @@ func apply_damage(key: String, amount: int) -> bool:
 	var health: int = maxi(0, int(rec.get("health", 0)) - amount)
 	rec["health"] = health
 	_targets_by_key[key] = rec
+	_update_damaged_index(key, rec)
 	_emit_placeable_damaged(rec)
 	if health <= 0:
 		destroy_target(key)
@@ -351,6 +351,7 @@ func apply_repair(key: String, amount: int) -> int:
 	var restored: int = mini(amount, max_health - health)
 	rec["health"] = health + restored
 	_targets_by_key[key] = rec
+	_update_damaged_index(key, rec)
 	_refresh_overlay()
 	return restored
 
@@ -436,6 +437,7 @@ func serialize() -> Array[Dictionary]:
 func restore(saved: Array) -> void:
 	_targets_by_key.clear()
 	_keys_by_cell.clear()
+	_damaged_by_key.clear()
 	var ignored: int = 0
 	for raw_entry: Variant in saved:
 		if not (raw_entry is Dictionary):
@@ -511,6 +513,7 @@ func restore(saved: Array) -> void:
 	if ignored > 0:
 		push_warning("PlayerPlaceableDurabilityService: ignored %d stale/invalid durability records on load." % ignored)
 	register_live_destructible_targets()
+	_rebuild_damaged_index()
 	_bump_target_revision_and_refresh()
 
 
@@ -528,6 +531,22 @@ func _bump_target_revision_and_refresh() -> void:
 func _refresh_overlay() -> void:
 	if _overlay != null and is_instance_valid(_overlay) and _overlay.has_method("refresh"):
 		_overlay.call("refresh")
+
+
+func _update_damaged_index(key: String, record: Dictionary) -> void:
+	var health: int = int(record.get("health", 0))
+	var max_health: int = int(record.get("max_health", 0))
+	if health > 0 and health < max_health:
+		_damaged_by_key[key] = record
+	else:
+		_damaged_by_key.erase(key)
+
+
+func _rebuild_damaged_index() -> void:
+	_damaged_by_key.clear()
+	for raw_key: Variant in _targets_by_key.keys():
+		var key: String = str(raw_key)
+		_update_damaged_index(key, _targets_by_key[key] as Dictionary)
 
 
 func _emit_placeable_damaged(record: Dictionary) -> void:
@@ -637,7 +656,9 @@ func _erase_records_at_cell(cell: Vector2i) -> bool:
 		return false
 	var keys: Dictionary = _keys_by_cell[cell] as Dictionary
 	for raw_key: Variant in keys.keys():
-		_targets_by_key.erase(str(raw_key))
+		var key: String = str(raw_key)
+		_targets_by_key.erase(key)
+		_damaged_by_key.erase(key)
 	_keys_by_cell.erase(cell)
 	return true
 
@@ -648,6 +669,7 @@ func _erase_record_by_key(key: String) -> void:
 	var rec: Dictionary = _targets_by_key[key] as Dictionary
 	var cell: Vector2i = rec.get("cell", INVALID_CELL) as Vector2i
 	_targets_by_key.erase(key)
+	_damaged_by_key.erase(key)
 	if _keys_by_cell.has(cell):
 		var keys: Dictionary = _keys_by_cell[cell] as Dictionary
 		keys.erase(key)

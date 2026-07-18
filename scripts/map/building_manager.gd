@@ -1141,6 +1141,7 @@ func resync_terrain_speed_after_world_restore() -> void:
 # and restore code can still add plants then — they take this same deferred path rather than a
 # synchronous full rebuild inside the signal callback.
 func _on_plant_added(_cell: Vector2i) -> void:
+	_building_path_service.invalidate_sheep_topology("plant_added")
 	# A rose just appeared: re-check any client/merchant already standing on the cell
 	# so a stationary agent still tramples it (agent-movement alone would miss this).
 	_agent_cell_tracker.invalidate_cell(_cell)
@@ -1161,6 +1162,7 @@ func _on_plant_visual_changed(cell: Vector2i, _plant_kind: String, _stage: int, 
 # queue when the garden actually became empty. Full rebuilds are reserved for real
 # topology changes (plant addition, walls/buildings, level load, manual rebuild).
 func _on_plant_removed(cell: Vector2i) -> void:
+	_building_path_service.invalidate_sheep_topology("plant_removed")
 	_agent_cell_tracker.invalidate_cell(cell)
 	_sync_building_cell_speed(cell, "debris")
 	if not _runtime_agents_active():
@@ -2151,6 +2153,15 @@ func is_night_start_cutscene_active() -> bool:
 	return _spawner_reveal_phase.night_reveal_active()
 
 
+## Dev-only: instantly ends whichever spawner-reveal cutscene is playing (night or
+## client) and snaps the camera back to the player. Each abort is guarded by its own
+## context, so this is a safe no-op when no reveal cutscene is running. The camera
+## reset happens inside the cutscene's own abort/finish path.
+func abort_active_reveal_cutscene_for_dev() -> void:
+	_spawner_reveal_phase.abort_night_reveal()
+	_spawner_reveal_phase.abort_client_reveal()
+
+
 func is_client_reveal_cutscene_active() -> bool:
 	return _spawner_reveal_phase.client_reveal_active()
 
@@ -2757,8 +2768,11 @@ func leave_destroyed_placeable_debris(cell: Vector2i, layer_name: String) -> voi
 	if plantz.get_cell_source_id(cell) >= 0:
 		return
 	var alternative_tile: int = source_layer.get_cell_alternative_tile(cell)
-	plantz.set_cell(cell, source_id, PlantManager.DEBRIS_ATLAS, alternative_tile)
-	_flush_plant_layer_visuals()
+	if plant_manager != null and plant_manager.has_method("create_debris"):
+		plant_manager.call("create_debris", cell, source_id, alternative_tile)
+	else:
+		push_warning("BuildingManager: PlantManager debris API unavailable at %s." % str(cell))
+		return
 	_sync_building_cell_speed(cell, "debris")
 
 
@@ -3364,6 +3378,9 @@ func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> Packe
 
 func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
 	return _building_path_service.find_sheep_path(from_tile, to_tile)
+
+func ensure_sheep_path_topology_synced() -> void:
+	_building_path_service.ensure_sheep_topology_synced()
 
 func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	return _building_path_service.find_path_in_zone(from_tile, to_tile, garden_id)

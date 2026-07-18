@@ -13,6 +13,17 @@ var _manager: BuildingManager
 var _garden_topology: GardenTopologyService
 var _debug_telemetry: BuildingDebugTelemetry
 var _last_zone_blocker_us: int = 0
+## Sheep errands share the normal native pathfinder, so this cache tracks both the
+## GDScript walkability snapshot and whether that snapshot is currently uploaded.
+## Other path callers may overwrite the native state; that only causes one upload
+## before the next sheep query, never a full floor scan per candidate.
+var _sheep_walkable_tiles: Dictionary = {}
+var _sheep_topology_dirty: bool = true
+var _sheep_native_synced: bool = false
+var _syncing_sheep_topology: bool = false
+var _sheep_navigation_revision: int = -1
+var _sheep_topology_rebuilds: int = 0
+var _sheep_path_queries: int = 0
 
 
 func setup(manager: BuildingManager) -> void:
@@ -54,22 +65,53 @@ func find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> Packed
 
 func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
 	var pf: Node = _pathfinder()
-	var floorz: TileMapLayer = _floorz()
-	if pf == null or not pf.has_method("find_path") or floorz == null:
+	if pf == null or not pf.has_method("find_path"):
 		return PackedVector2Array()
-	var path_tiles: Dictionary = {}
-	for raw_cell: Variant in floorz.get_used_cells():
-		var cell: Vector2i = raw_cell as Vector2i
-		if _manager.is_sheep_walkable_cell(cell):
-			path_tiles[cell] = true
-	if path_tiles.is_empty():
+	ensure_sheep_topology_synced()
+	if _sheep_walkable_tiles.is_empty():
 		return PackedVector2Array()
-	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
-	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
+	var start_tile: Vector2i = from_tile if _sheep_walkable_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, _sheep_walkable_tiles)
+	var end_tile: Vector2i = to_tile if _sheep_walkable_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, _sheep_walkable_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
-	sync_pathfinder_zone_tiles(path_tiles)
+	_sheep_path_queries += 1
 	return pf.call("find_path", start_tile, end_tile) as PackedVector2Array
+
+
+func invalidate_sheep_topology(_reason: String) -> void:
+	_sheep_topology_dirty = true
+
+
+func ensure_sheep_topology_synced() -> void:
+	var navigation_revision: int = _manager.navigation_revision()
+	if navigation_revision != _sheep_navigation_revision:
+		_sheep_topology_dirty = true
+	if _sheep_topology_dirty:
+		_rebuild_sheep_topology(navigation_revision)
+	if not _sheep_native_synced and not _sheep_walkable_tiles.is_empty():
+		_syncing_sheep_topology = true
+		sync_pathfinder_zone_tiles(_sheep_walkable_tiles)
+		_syncing_sheep_topology = false
+		_sheep_native_synced = true
+
+
+func _rebuild_sheep_topology(navigation_revision: int) -> void:
+	var started_us: int = Time.get_ticks_usec()
+	_sheep_walkable_tiles.clear()
+	var floorz: TileMapLayer = _floorz()
+	if floorz != null:
+		for raw_cell: Variant in floorz.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
+			if _manager.is_sheep_walkable_cell(cell):
+				_sheep_walkable_tiles[cell] = true
+	_sheep_topology_dirty = false
+	_sheep_native_synced = false
+	_sheep_navigation_revision = navigation_revision
+	_sheep_topology_rebuilds += 1
+	var elapsed_us: int = Time.get_ticks_usec() - started_us
+	if _debug_telemetry.over_garden_threshold_us(elapsed_us):
+		_debug_telemetry.warn_garden_task_lag_us("_rebuild_sheep_topology", elapsed_us,
+			"rebuilds=%d tiles=%d queries=%d" % [_sheep_topology_rebuilds, _sheep_walkable_tiles.size(), _sheep_path_queries])
 
 func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
 	var pf: Node = _pathfinder()
@@ -142,6 +184,8 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 	return result
 
 func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
+	if not _syncing_sheep_topology:
+		_sheep_native_synced = false
 	_last_zone_blocker_us = 0
 	var pf: Node = _pathfinder()
 	if pf == null:

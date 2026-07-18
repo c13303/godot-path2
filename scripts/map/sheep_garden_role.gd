@@ -21,7 +21,6 @@ const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const EAT_SECONDS: float = 2.0
 ## Seconds to heal a building's whole health bar. A partial repair costs proportionally less.
 const REPAIR_FULL_SECONDS: float = 2.0
-const DEBRIS_RESCAN_SECONDS: float = 0.5
 ## How often an idle sheep with nothing to do looks for a new job. Scanning for one walks every
 ## damaged durability target (and every debris cell), so the search is polled at this cadence
 ## rather than every frame; finishing a job still picks the next one immediately.
@@ -44,7 +43,6 @@ var _repair_key: String = ""
 var _repair_rate: float = 0.0
 var _repair_progress: float = 0.0
 var _eat_timer: float = 0.0
-var _rescan_timer: float = 0.0
 var _idle_scan_timer: float = 0.0
 var _debris_cells: Dictionary = {}
 var _unreachable_debris: Dictionary = {}
@@ -100,7 +98,6 @@ func process(resident: HouseResidentController, delta: float) -> void:
 		return
 	if GameState.is_night:
 		return
-	_refresh_debris_index_tick(delta)
 	# The sheep only works once it has settled in town, and never while the player is holding it
 	# in conversation (the interaction hold pauses its movement, so starting a walk would stall).
 	if not resident.has_reached_idle_spot() or resident.is_interaction_held():
@@ -147,6 +144,7 @@ func _pick_next_task(resident: HouseResidentController) -> void:
 	var from_cell: Vector2i = resident.current_cell()
 	if from_cell == INVALID_CELL:
 		return
+	_manager.ensure_sheep_path_topology_synced()
 	for task: Dictionary in _nearest_tasks(from_cell):
 		if _start_task(resident, from_cell, task):
 			return
@@ -288,11 +286,9 @@ func _process_eating(resident: HouseResidentController, delta: float) -> void:
 
 func _consume_debris(cell: Vector2i) -> void:
 	var reward_position: Vector2 = _manager.cell_center(cell)
-	var plantz: TileMapLayer = _manager.get_plantz()
-	if plantz != null:
-		plantz.erase_cell(cell)
-		plantz.update_internals()
-		plantz.queue_redraw()
+	var plant_manager: Node = _manager.get_plant_manager()
+	if plant_manager != null and plant_manager.has_method("remove_debris"):
+		plant_manager.call("remove_debris", cell)
 	_manager.refresh_runtime_cell_speed(cell)
 	_debris_cells.erase(cell)
 	_unreachable_debris.erase(cell)
@@ -436,42 +432,37 @@ func _credit_debris_reward_gem() -> void:
 # Debris index.
 # ---------------------------------------------------------------------------
 
-func _refresh_debris_index_tick(delta: float) -> void:
-	_rescan_timer -= delta
-	if _rescan_timer > 0.0:
-		return
-	_rescan_timer = DEBRIS_RESCAN_SECONDS
-	_rebuild_debris_index()
-
-
 func _rebuild_debris_index() -> void:
 	_debris_cells.clear()
-	var plantz: TileMapLayer = _manager.get_plantz()
-	if plantz == null:
+	var plant_manager: Node = _manager.get_plant_manager() if _manager != null else null
+	if plant_manager == null or not plant_manager.has_method("debris_cells"):
 		return
-	for raw_cell: Variant in plantz.get_used_cells():
+	var registry: Dictionary = plant_manager.call("debris_cells") as Dictionary
+	for raw_cell: Variant in registry.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		if plantz.get_cell_atlas_coords(cell) == PlantManager.DEBRIS_ATLAS:
-			_debris_cells[cell] = true
+		_debris_cells[cell] = true
 
 
 func _is_debris_cell(cell: Vector2i) -> bool:
 	if cell == INVALID_CELL:
 		return false
-	var plantz: TileMapLayer = _manager.get_plantz()
-	return plantz != null and plantz.get_cell_source_id(cell) >= 0 and plantz.get_cell_atlas_coords(cell) == PlantManager.DEBRIS_ATLAS
+	var plant_manager: Node = _manager.get_plant_manager() if _manager != null else null
+	return plant_manager != null and plant_manager.has_method("has_debris") and bool(plant_manager.call("has_debris", cell))
 
 
 func _connect_plant_manager() -> void:
 	var plant_manager: Node = _manager.get_plant_manager() if _manager != null else null
-	if plant_manager == null or not plant_manager.has_signal("plant_removed"):
+	if plant_manager == null:
 		return
-	var callback: Callable = Callable(self, "_on_plant_removed")
-	if not plant_manager.is_connected("plant_removed", callback):
-		plant_manager.connect("plant_removed", callback)
+	for signal_name: StringName in [&"debris_added", &"debris_removed"]:
+		if not plant_manager.has_signal(signal_name):
+			continue
+		var callback: Callable = Callable(self, "_on_debris_registry_changed")
+		if not plant_manager.is_connected(signal_name, callback):
+			plant_manager.connect(signal_name, callback)
 
 
-func _on_plant_removed(cell: Vector2i) -> void:
+func _on_debris_registry_changed(cell: Vector2i) -> void:
 	if _is_debris_cell(cell):
 		_debris_cells[cell] = true
 	else:

@@ -328,6 +328,8 @@ func _is_game_paused() -> bool:
 ## produced, so skipping does not cost the run its drops; while the day's client step
 ## is pending or active it only skips that step (see _skip_dev_client_sale); outside
 ## both it refills the water reserve and grants 100 seeds/gems/money/bamboo plus 100 walls.
+## Any of those cases first instantly ends a running night/client reveal cutscene and
+## snaps the camera back to the player.
 ## Numpad 1/2/0 force-spawn one agent from each
 ## registered enemy/client spawner. K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
@@ -388,6 +390,9 @@ func _get_progression() -> Node:
 ## The three Numpad + actions are exclusive and resolved in phase order: skip the
 ## night, else skip the day's client step, else grant the plain day cheats.
 func _handle_dev_skip_key() -> void:
+	# A running spawner-reveal cutscene (night or client) is ended instantly first, so the
+	# camera snaps back to the player before the skip runs instead of finishing its pan.
+	_abort_active_reveal_cutscene()
 	if GameState.is_night:
 		# The night loot must be counted before _end_dev_night() clears the monsters.
 		_grant_skipped_night_loot()
@@ -477,6 +482,14 @@ func _grant_skipped_night_loot() -> void:
 	if gem_count > 0:
 		_call_if_available(progression, "update_gems", gem_count)
 	CppDebugOptions.dlog("dev_keys: night skip paid %d seed(s) + %d gem(s) for %d remaining monster(s)" % [seed_count, gem_count, monster_count])
+
+
+## Instantly ends any running night/client reveal cutscene and returns the camera to the
+## player. Safe no-op when no cutscene is playing or the command is unavailable.
+func _abort_active_reveal_cutscene() -> void:
+	var manager: Node = _get_building_manager()
+	if manager != null and manager.has_method("abort_active_reveal_cutscene_for_dev"):
+		manager.call("abort_active_reveal_cutscene_for_dev")
 
 
 func _complete_dev_wip_houses() -> void:

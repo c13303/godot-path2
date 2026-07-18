@@ -5,6 +5,10 @@ signal plant_added(cell: Vector2i)
 signal plant_removed(cell: Vector2i)
 signal plant_state_changed(cell: Vector2i, atlas_coords: Vector2i)
 signal plant_visual_changed(cell: Vector2i, plant_kind: String, stage: int, watered: bool)
+## Debris is a plant-layer occupant but not a live plant. Keep its authoritative
+## registry here so consumers never need to poll TileMapLayer.get_used_cells().
+signal debris_added(cell: Vector2i)
+signal debris_removed(cell: Vector2i)
 signal new_day_finished
 signal day_seed_harvest_finished
 
@@ -22,6 +26,7 @@ const DEFAULT_ALTERNATIVE_TILE: int = 0
 const IMPERIAL_MAX_STAGE: int = 5
 const NEW_DAY_DELAY: int = 3000
 const GROWNUP_BLOOM_TOTAL_SECONDS: float = 1.5
+const DEBRIS_REGISTRY_WARN_US: int = 15000
 
 @export var plantz: TileMapLayer
 @export var bucket_size: int = 16
@@ -30,6 +35,7 @@ var _plants: Dictionary = {}
 var _plant_tiles: Dictionary = {}
 var _buckets: Dictionary = {}
 var _hidden_visual_cells: Dictionary = {}
+var _debris_cells: Dictionary = {}
 var _initialized: bool = false
 var _plant_layer_flush_queued: bool = false
 var _last_rose_rot_day: int = -1
@@ -103,27 +109,73 @@ func mark_rose_rot_handled_for_current_day() -> void:
 		_last_rose_rot_day = current_day
 
 func initialize_from_layer() -> void:
+	var started_us: int = Time.get_ticks_usec()
 	_configure_plant_layer_depth_sorting()
+	var previous_debris: Dictionary = _debris_cells.duplicate()
 	_plants.clear()
 	_plant_tiles.clear()
 	_buckets.clear()
 	_hidden_visual_cells.clear()
+	_debris_cells.clear()
 	if not plantz:
 		_initialized = true
 		return
 	for raw_cell in plantz.get_used_cells():
 		var cell: Vector2i = raw_cell
+		if plantz.get_cell_atlas_coords(cell) == DEBRIS_ATLAS:
+			_debris_cells[cell] = true
+			continue
 		if not _is_rose_atlas(plantz.get_cell_atlas_coords(cell)):
 			continue
 		_capture_tile_metadata(cell)
 		_index_cell(cell)
 	_initialized = true
+	for raw_cell: Variant in previous_debris.keys():
+		var removed_cell: Vector2i = raw_cell as Vector2i
+		if not _debris_cells.has(removed_cell):
+			debris_removed.emit(removed_cell)
+	for raw_cell: Variant in _debris_cells.keys():
+		var added_cell: Vector2i = raw_cell as Vector2i
+		if not previous_debris.has(added_cell):
+			debris_added.emit(added_cell)
+	var elapsed_us: int = Time.get_ticks_usec() - started_us
+	if elapsed_us >= DEBRIS_REGISTRY_WARN_US:
+		push_warning("PlantManager: debris registry initial scan took %dms for %d debris cells." % [
+			int(round(float(elapsed_us) / 1000.0)), _debris_cells.size()])
 
 func is_initialized() -> bool:
 	return _initialized
 
 func has_plant(cell: Vector2i) -> bool:
 	return _plants.has(cell)
+
+
+func debris_cells() -> Dictionary:
+	return _debris_cells.duplicate()
+
+
+func has_debris(cell: Vector2i) -> bool:
+	return _debris_cells.has(cell)
+
+
+func create_debris(cell: Vector2i, source_id: int, alternative_tile: int = DEFAULT_ALTERNATIVE_TILE) -> bool:
+	if plantz == null or source_id < 0:
+		return false
+	plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
+	_register_debris(cell)
+	_queue_plant_layer_flush()
+	return true
+
+
+func remove_debris(cell: Vector2i) -> bool:
+	if not _debris_cells.has(cell):
+		push_warning("PlantManager: debris removal requested for unknown cell %s." % str(cell))
+		return false
+	if plantz != null:
+		plantz.erase_cell(cell)
+	_unregister_debris(cell)
+	_queue_plant_layer_flush()
+	return true
 
 func is_empty() -> bool:
 	return _plants.is_empty()
@@ -373,7 +425,7 @@ func _convert_grownup_rose_to_debris(cell: Vector2i) -> void:
 	if alternative_tile < 0:
 		alternative_tile = DEFAULT_ALTERNATIVE_TILE
 	if source_id >= 0:
-		plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
+		create_debris(cell, source_id, alternative_tile)
 	plant_removed.emit(cell)
 
 
@@ -635,10 +687,22 @@ func consume_plant(cell: Vector2i) -> void:
 	if alternative_tile < 0:
 		alternative_tile = DEFAULT_ALTERNATIVE_TILE
 	if source_id >= 0:
-		plantz.set_cell(cell, source_id, DEBRIS_ATLAS, alternative_tile)
-		_flush_plant_layer_now()
-		_queue_plant_layer_flush()
+		create_debris(cell, source_id, alternative_tile)
 	plant_removed.emit(cell)
+
+
+func _register_debris(cell: Vector2i) -> void:
+	if _debris_cells.has(cell):
+		return
+	_debris_cells[cell] = true
+	debris_added.emit(cell)
+
+
+func _unregister_debris(cell: Vector2i) -> void:
+	if not _debris_cells.has(cell):
+		return
+	_debris_cells.erase(cell)
+	debris_removed.emit(cell)
 
 func _capture_tile_metadata(cell: Vector2i) -> void:
 	if not plantz:

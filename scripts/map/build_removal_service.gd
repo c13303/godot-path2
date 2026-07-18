@@ -176,6 +176,10 @@ func remove_tile(layer: TileMapLayer, cell: Vector2i, item_id: String = "") -> v
 	var plantz: TileMapLayer = _plantz()
 	if layer == plantz:
 		var plant_manager: Node = _plant_manager()
+		if plant_manager and plant_manager.has_method("has_debris") and bool(plant_manager.call("has_debris", cell)):
+			plant_manager.call("remove_debris", cell)
+			_refresh_cell_terrain_speed(cell)
+			return
 		if plant_manager and plant_manager.has_method("remove_plant"):
 			plant_manager.call("remove_plant", cell, true)
 		if plantz.get_cell_source_id(cell) >= 0:
