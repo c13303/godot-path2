@@ -25,8 +25,8 @@ class FloorReplacementRecord:
 		hidden_wet = p_hidden_wet
 
 
-func setup(floor: TileMapLayer, terrain_speed: RefCounted, atlas_source_id: int) -> void:
-	_floor = floor
+func setup(p_floor: TileMapLayer, terrain_speed: RefCounted, atlas_source_id: int) -> void:
+	_floor = p_floor
 	_terrain_speed = terrain_speed
 	_atlas_source_id = atlas_source_id
 

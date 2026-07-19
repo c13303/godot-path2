@@ -466,10 +466,10 @@ func _create_record() -> Dictionary:
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.centered = true
 	sprite.z_index = 0
-	var material: ShaderMaterial = ShaderMaterial.new()
-	material.shader = FLOAT_SHADER
-	material.set_shader_parameter("float_speed", FLOAT_SPEED)
-	sprite.material = material
+	var float_material: ShaderMaterial = ShaderMaterial.new()
+	float_material.shader = FLOAT_SHADER
+	float_material.set_shader_parameter("float_speed", FLOAT_SPEED)
+	sprite.material = float_material
 	root.add_child(shadow)
 	root.add_child(sprite)
 	add_child(root)

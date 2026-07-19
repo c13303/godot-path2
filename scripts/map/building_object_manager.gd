@@ -310,13 +310,43 @@ func restore_runtime_placeables(saved_records: Array) -> void:
 			var layer: TileMapLayer = _layer_for_name(target_layer)
 			if layer != null:
 				restored_def["direction"] = BuildDirectionRules.direction_from_alternative(layer.get_cell_alternative_tile(cell))
+		_restore_canonical_marker_tile(cell, restored_def)
 		add_building(cell, restored_def)
 		var raw_state: Variant = record.get("state", {})
 		if raw_state is Dictionary:
 			_restore_runtime_node_state(cell, raw_state as Dictionary)
+	if blocking_buildings != null:
+		blocking_buildings.update_internals()
 	if ignored > 0:
 		push_warning("BuildingObjectManager: ignored %d invalid runtime placeable records on load." % ignored)
 	restore_batch_finished.emit()
+
+
+func _restore_canonical_marker_tile(cell: Vector2i, item_def: Dictionary) -> void:
+	# Multi-atlas placeables such as fences choose their tile from neighbor state; their
+	# catalog atlas is only a default and must not replace the saved autotile variant.
+	if item_def.has("tile_atlases"):
+		return
+	var target_layer: TileMapLayer = _layer_for_name(str(item_def.get("target_layer", "")))
+	if target_layer == null:
+		return
+	var source_id: int = target_layer.get_cell_source_id(cell)
+	if source_id < 0:
+		return
+	var raw_atlas: Variant = item_def.get("atlas", Vector2i(-1, -1))
+	if not (raw_atlas is Vector2i):
+		return
+	var atlas: Vector2i = raw_atlas as Vector2i
+	if atlas == Vector2i(-1, -1):
+		return
+	var alternative_tile: int = target_layer.get_cell_alternative_tile(cell)
+	if bool(item_def.get("directional", false)):
+		var direction: Vector2i = item_def.get("direction", BuildDirectionRules.DIRECTION_RIGHT) as Vector2i
+		alternative_tile = BuildDirectionRules.alternative_from_direction(direction)
+	if target_layer.get_cell_atlas_coords(cell) == atlas \
+			and target_layer.get_cell_alternative_tile(cell) == alternative_tile:
+		return
+	target_layer.set_cell(cell, source_id, atlas, alternative_tile)
 
 
 func count_buildings_by_item_id(item_id: String) -> int:

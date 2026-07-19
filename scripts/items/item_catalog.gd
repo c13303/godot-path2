@@ -555,7 +555,7 @@ const ITEM_DEFS: Dictionary = {
 		"frame": 6,
 		"price": 10,
 		"target_layer": "blocking_buildings",
-		"atlas": INVISIBLE_BUILDING_MARKER_ATLAS,
+		"atlas": Vector2i(9, 0),
 		"occupies_cell": true,
 		"isWall": false,
 		"blocks_movement": false,

@@ -182,18 +182,18 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_de
 		return false
 	if entrance_cell == INVALID_CELL:
 		return false
-	var idle_cell: Vector2i = _house_manager.get_resident_idle_cell(entrance_cell)
-	if not _manager.is_walkable_cell(idle_cell):
+	var resident_idle_cell: Vector2i = _house_manager.get_resident_idle_cell(entrance_cell)
+	if not _manager.is_walkable_cell(resident_idle_cell):
 		push_warning("HouseResidentController: %s house idle cell %s is not walkable; resident not spawned." % [
-			String(_config.resident_type), idle_cell])
+			String(_config.resident_type), resident_idle_cell])
 		return false
 	var emerges_from_house: bool = GameState.is_dawn_phase or for_house_destruction_escape
-	var source_cell: Vector2i = idle_cell if emerges_from_house else _manager.named_authored_spot_cell(ENTER_MARKER_ID)
+	var source_cell: Vector2i = resident_idle_cell if emerges_from_house else _manager.named_authored_spot_cell(ENTER_MARKER_ID)
 	if source_cell == INVALID_CELL:
 		push_warning("HouseResidentController: %s cannot enter; required marker '%s' is missing." % [
 			String(_config.resident_type), String(ENTER_MARKER_ID)])
 		return false
-	var spawn_cell: Vector2i = idle_cell if emerges_from_house else _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
+	var spawn_cell: Vector2i = resident_idle_cell if emerges_from_house else _manager.find_free_cell_near_spawner(source_cell, _manager.occupied_cells_for_spawning())
 	if spawn_cell == INVALID_CELL:
 		push_warning("HouseResidentController: %s cannot enter; no free spawn cell near %s." % [
 			String(_config.resident_type), str(source_cell)])
@@ -201,7 +201,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_de
 	if not _visitor.spawn(
 			source_cell,
 			spawn_cell,
-			idle_cell,
+			resident_idle_cell,
 			_config.agent_kind,
 			_config.scene_group,
 			_config.tracking_category,
@@ -210,7 +210,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_de
 		return false
 	_resident_house_id = house_id
 	_home_entrance_cell = entrance_cell
-	_idle_cell = idle_cell
+	_idle_cell = resident_idle_cell
 	_has_reached_idle_spot = _visitor.is_waiting()
 	_returning_home = false
 	_evacuating = false
