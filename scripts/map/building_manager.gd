@@ -2684,10 +2684,11 @@ func credit_client_purchase_money(amount: int = 1) -> void:
 
 
 func _spawn_client_payment_money_visual(world_position: Vector2) -> void:
+	# Money was already credited by credit_client_purchase_money; this is visual only.
 	var scene: Node = get_tree().current_scene
-	var money_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/moneyIcon") if scene != null else null
-	if money_icon != null and money_icon.has_method("animate_money_harvest_visual_only"):
-		money_icon.call("animate_money_harvest_visual_only", world_position, 0)
+	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui != null and game_ui.has_method("show_currency_pickup_from_world"):
+		game_ui.call("show_currency_pickup_from_world", &"money", world_position, 1)
 
 
 # A client that has taken its rose (from a counter or a garden plant) leaves the map

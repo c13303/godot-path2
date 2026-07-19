@@ -13,14 +13,6 @@ signal build_selection_changed(active: bool)
 const ItemSlotScript = preload("res://scripts/ui/item_slot.gd")
 const INVENTORY_SLOT_COUNT: int = 32
 const INVENTORY_COLUMNS: int = 8
-const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
-const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
-const PURCHASE_FLIGHT_SIZE: Vector2 = Vector2(28.0, 28.0)
-const PURCHASE_FLIGHT_DURATION: float = 0.72
-# Cap on how many currency sprites fly for one night-reward payout; any overflow is
-# credited instantly so huge bonuses never spawn thousands of sprites.
-const REWARD_ANIM_CAP: int = 15
-
 const SEED_KEY: StringName = &"seeds"
 const GEM_KEY: StringName = &"gems"
 const MONEY_KEY: StringName = &"money"
@@ -55,6 +47,9 @@ const TOOLBAR_PADDING: Vector2 = Vector2(8.0, 6.0)
 @onready var inventory_content: VBoxContainer = $Modals/inventoryModal/MarginContainer/Content
 @onready var tile_hover_info: Node = $"../CPP/TileHoverInfo"
 @onready var toolbuild: Control = get_node_or_null("Toolbuild") as Control
+# Visual-only pickup feedback (world/screen source -> player, above-head pop). Owns no reward
+# state; every grant is committed here before feedback is requested.
+@onready var _pickup_feedback: PlayerPickupFeedbackController = get_node_or_null("PlayerPickupFeedback") as PlayerPickupFeedbackController
 
 var inventory_slots: Array[Dictionary] = []
 # Quickbar activity. false = play mode: menus closed, no labels, the equipped weapon (or
@@ -571,198 +566,61 @@ func refresh_quickbar_availability() -> void:
 	call_deferred("_fit_toolbar_panel_to_slots")
 
 
-func animate_inventory_item_to_slot(
-	item_id: String,
-	start_global_position: Vector2,
-	sequence_index: int = 0,
-	stagger_seconds: float = 0.0
-) -> bool:
-	var target_slot: Control = _find_inventory_item_slot(item_id)
-	if target_slot == null or not is_instance_valid(target_slot):
+## Grant `count` units of `currency` in one atomic operation, then fly one icon per unit from the
+## world source to the player. The whole reward reaches progression before the first icon moves, so
+## a save mid-flight can never lose it — loose ground drops and bamboo harvests use this. A missing
+## controller/player still keeps the credited reward and reports success; false means the credit
+## itself was rejected.
+func grant_currency_from_world(currency: StringName, world_position: Vector2, count: int) -> bool:
+	if not _grant_currency(currency, count):
 		return false
-	return _animate_inventory_item_to_position(
-		item_id,
-		start_global_position,
-		target_slot.get_global_rect().get_center(),
-		sequence_index,
-		stagger_seconds
-	)
+	play_pickup_from_world(CurrencyCatalog.get_item_id(currency), world_position, count)
+	return true
 
 
+## Visual-only currency feedback from a world source: the currency was already credited elsewhere
+## (a client sale credits money the instant the rose is taken). No grant, no sound.
+func show_currency_pickup_from_world(currency: StringName, world_position: Vector2, count: int = 1) -> void:
+	play_pickup_from_world(CurrencyCatalog.get_item_id(currency), world_position, count)
+
+
+## Add `count` of an inventory item collected from the world, then fly the icons to the player.
+## Capacity is checked first (add_inventory is all-or-nothing): a full inventory grants nothing,
+## consumes nothing and shows no feedback, so the caller must not consume the world source.
 func collect_inventory_item_from_world(item_id: String, world_position: Vector2, count: int = 1) -> bool:
 	if count <= 0:
 		return false
 	if not add_inventory(item_id, count):
 		return false
-	var start_global_position: Vector2 = get_viewport().get_canvas_transform() * world_position
-	var target_position: Vector2 = _inventory_backed_refund_target_position(item_id)
-	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
-	for i: int in range(count):
-		_animate_inventory_item_to_position(item_id, start_global_position, target_position, i, stagger)
+	play_pickup_from_world(item_id, world_position, count)
 	return true
 
 
-func collect_currency_from_world(
-	currency: StringName,
-	world_position: Vector2,
-	count: int = 1,
-	finished_callback: Callable = Callable()
-) -> bool:
-	if count <= 0:
+## Fly `quantity` pickup icons of `item_id` from a world position to the player. Visual only.
+func play_pickup_from_world(item_id: String, world_position: Vector2, quantity: int = 1) -> bool:
+	if _pickup_feedback == null:
 		return false
-	var icon: Node = _currency_icon_node(currency)
-	var animate_method: String = _currency_animate_method(currency)
-	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
-	if icon == null or not icon.has_method(animate_method):
-		return false
-	var started_any: bool = false
-	for i: int in range(count):
-		var started: bool = false
-		if currency == &"seed":
-			started = bool(icon.call(animate_method, world_position, i, Callable(), true, stagger, finished_callback))
-		else:
-			started = bool(icon.call(animate_method, world_position, i, stagger, finished_callback))
-		started_any = started_any or started
-	return started_any
+	return _pickup_feedback.play_from_world(item_id, world_position, quantity)
 
 
-## Credit `count` units of `currency` in one go, then fly one visual-only icon per unit from
-## `world_position` to the HUD. Unlike collect_currency_from_world above — which loose ground
-## drops use, and which credits one unit per icon on arrival — the whole reward reaches
-## progression before the first icon moves. Persistent world sources need that: they mark
-## their own saved state as harvested immediately, so a save during the flight must never
-## persist the spent source without its reward.
-##
-## Returns false only when the currency or count is invalid, or the credit itself fails. A
-## missing HUD icon still keeps the credited reward and reports success.
-func grant_currency_from_world_immediate(
-	currency: StringName,
-	world_position: Vector2,
-	count: int
-) -> bool:
-	if not CurrencyCatalog.has_currency(currency) or count <= 0:
+## Fly `quantity` pickup icons of `item_id` from a screen position (e.g. a dialog row) to the
+## player. Visual only.
+func play_pickup_from_screen(item_id: String, screen_position: Vector2, quantity: int = 1) -> bool:
+	if _pickup_feedback == null:
 		return false
-	if _progression_node == null or not _progression_node.has_method("update_currency"):
+	return _pickup_feedback.play_from_screen(item_id, screen_position, quantity)
+
+
+## Credit `amount` of `currency` atomically and play the single acquisition sound. This is the one
+## owner of the currency-acquisition "bag" sound, so a reward makes exactly one sound however many
+## icons fly. Returns false when the credit is rejected (invalid currency/amount, missing progression).
+func _grant_currency(currency: StringName, amount: int) -> bool:
+	if _progression_node == null or amount <= 0 or not _progression_node.has_method("update_currency"):
 		return false
-	if not bool(_progression_node.call("update_currency", currency, count)):
+	if not bool(_progression_node.call("update_currency", currency, amount)):
 		return false
-	var icon: Node = _currency_icon_node(currency)
-	if icon == null or not icon.has_method("animate_currency_flight_only"):
-		return true
-	# Same compressed stagger as currency rewards: the whole reward flies within ~1s
-	# regardless of the amount.
-	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
-	for i: int in range(count):
-		icon.call("animate_currency_flight_only", world_position, i, stagger)
+	Sfx.play_sound(&"bag")
 	return true
-
-
-func _animate_inventory_item_to_position(
-	item_id: String,
-	start_global_position: Vector2,
-	end_global_position: Vector2,
-	sequence_index: int = 0,
-	stagger_seconds: float = 0.0
-) -> bool:
-	var texture: AtlasTexture = _inventory_item_texture(item_id)
-	if texture == null:
-		return false
-	var start_delay: float = float(sequence_index) * maxf(0.0, stagger_seconds)
-	if start_delay <= 0.0:
-		return _start_inventory_item_flight(item_id, start_global_position, end_global_position)
-	var delay_tween: Tween = create_tween()
-	delay_tween.tween_interval(start_delay)
-	delay_tween.tween_callback(Callable(self, "_start_inventory_item_flight").bind(item_id, start_global_position, end_global_position))
-	return true
-
-
-func _start_inventory_item_flight(item_id: String, start_global_position: Vector2, end_global_position: Vector2) -> bool:
-	var texture: AtlasTexture = _inventory_item_texture(item_id)
-	if texture == null:
-		return false
-	var item_sprite: TextureRect = TextureRect.new()
-	item_sprite.texture = texture
-	item_sprite.custom_minimum_size = PURCHASE_FLIGHT_SIZE
-	item_sprite.size = PURCHASE_FLIGHT_SIZE
-	item_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	item_sprite.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	item_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	item_sprite.pivot_offset = PURCHASE_FLIGHT_SIZE * 0.5
-	add_child(item_sprite)
-
-	var distance: float = start_global_position.distance_to(end_global_position)
-	var arc_height: float = clampf(distance * 0.22, 70.0, 180.0)
-	var curve_position: Vector2 = (start_global_position + end_global_position) * 0.5 + Vector2(0.0, -arc_height)
-	item_sprite.position = start_global_position - PURCHASE_FLIGHT_SIZE * 0.5
-	item_sprite.scale = Vector2(0.45, 0.45)
-
-	var flight_tween: Tween = create_tween()
-	flight_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	flight_tween.tween_method(
-		Callable(self, "_update_purchase_flight").bind(item_sprite, start_global_position, curve_position, end_global_position),
-		0.0,
-		1.0,
-		PURCHASE_FLIGHT_DURATION
-	)
-	flight_tween.parallel().tween_property(item_sprite, "scale", Vector2.ONE, 0.18)
-	flight_tween.parallel().tween_property(item_sprite, "rotation", TAU, PURCHASE_FLIGHT_DURATION)
-	flight_tween.tween_callback(Callable(self, "_finish_purchase_flight").bind(item_sprite))
-	return true
-
-
-func _find_inventory_item_slot(item_id: String) -> Control:
-	# Weapons are represented by the single weapon quick slot; everything else flies to its
-	# backpack slot.
-	if ItemCatalog.is_weapon(item_id) and not _toolbar_slot_nodes.is_empty():
-		return _toolbar_slot_nodes[0]
-	for i: int in range(inventory_slots.size()):
-		if _slot_item_id(inventory_slots[i]) == item_id and i < _inventory_slot_nodes.size():
-			return _inventory_slot_nodes[i]
-	return null
-
-
-func _inventory_backed_refund_target_position(item_id: String) -> Vector2:
-	var possessed_hud: Node = get_node_or_null("currenciesUI")
-	if possessed_hud != null and possessed_hud.has_method("get_item_flight_target_global_position"):
-		return possessed_hud.call("get_item_flight_target_global_position", item_id) as Vector2
-	var target_slot: Control = _find_inventory_item_slot(item_id)
-	if target_slot != null and is_instance_valid(target_slot):
-		return target_slot.get_global_rect().get_center()
-	return Vector2.ZERO
-
-
-func _inventory_item_texture(item_id: String) -> AtlasTexture:
-	var item_def: Dictionary = ItemCatalog.get_item_def(item_id)
-	var frame: int = int(item_def.get("frame", -1))
-	if frame < 0:
-		return null
-	var atlas_texture: AtlasTexture = AtlasTexture.new()
-	atlas_texture.atlas = ITEMS_TEXTURE
-	atlas_texture.region = Rect2(Vector2(float(frame) * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
-	return atlas_texture
-
-
-func _update_purchase_flight(
-	progress: float,
-	item_sprite: TextureRect,
-	start_position: Vector2,
-	curve_position: Vector2,
-	end_position: Vector2
-) -> void:
-	if not is_instance_valid(item_sprite):
-		return
-	var inverse_progress: float = 1.0 - progress
-	var curved_position: Vector2 = (
-		inverse_progress * inverse_progress * start_position
-		+ 2.0 * inverse_progress * progress * curve_position
-		+ progress * progress * end_position
-	)
-	item_sprite.position = curved_position - PURCHASE_FLIGHT_SIZE * 0.5
-
-
-func _finish_purchase_flight(item_sprite: TextureRect) -> void:
-	if is_instance_valid(item_sprite):
-		item_sprite.queue_free()
 
 ## Maps an item's catalog currency to its progression prop key.
 func _build_currency_prog_key(item_id: String) -> StringName:
@@ -1214,9 +1072,9 @@ func get_active_night_reward() -> Dictionary:
 	return {"rewards": rewards, "night_index": night_index, "day": day, "one_time": one_time}
 
 
-## Collect one current-night special reward row: records the claim (so that row hides) and
-## grants its currency with a fly-to-HUD animation. Returns false when nothing is claimable.
-## `start_global_position` is where the reward sprites launch from.
+## Collect one current-night special reward row: records the claim (so that row hides) and grants
+## its currency or item atomically, then flies pickup feedback to the player. Returns false when
+## nothing is claimable. `start_global_position` is the screen point the feedback icons launch from.
 func claim_active_night_reward(start_global_position: Vector2, reward_key: String = "") -> bool:
 	var info: Dictionary = get_active_night_reward()
 	if info.is_empty():
@@ -1242,69 +1100,24 @@ func claim_active_night_reward(start_global_position: Vector2, reward_key: Strin
 	return false
 
 
+## Credit the whole currency reward atomically, then fly feedback icons from the reward row to the
+## player. The full amount is credited before any icon moves, so a save mid-flight keeps it.
 func _award_reward_currency(currency: String, amount: int, start_global_position: Vector2) -> void:
-	if amount <= 0:
+	if not _grant_currency(StringName(currency), amount):
 		return
-	var icon: Node = _reward_icon_node(currency)
-	var animate_method: String = _currency_animate_method(StringName(currency))
-	if icon != null and not icon.has_method(animate_method):
-		icon = null
-	var animated: int = mini(amount, REWARD_ANIM_CAP) if icon != null else 0
-	# Overflow past the animation cap (and everything when the icon is missing) is
-	# credited straight away; each flying sprite credits one unit as it lands.
-	var immediate: int = amount - animated
-	if immediate > 0:
-		_credit_reward_currency(currency, immediate)
-	if animated <= 0:
-		return
-	var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
-	for i: int in range(animated):
-		var currency_id: StringName = StringName(currency)
-		if currency_id == &"seed":
-			icon.call(animate_method, world_position, i, Callable(), true)
-		else:
-			icon.call(animate_method, world_position, i)
+	play_pickup_from_screen(CurrencyCatalog.get_item_id(StringName(currency)), start_global_position, amount)
 
 
-## Grant an item reward into the inventory, flying one item sprite per unit (capped) to the
-## inventory as feedback. Returns false without granting when the inventory can't hold it, so
-## the caller leaves the reward unclaimed.
+## Grant an item reward into the inventory, then fly feedback icons from the reward row to the
+## player. Returns false without granting when the inventory can't hold it, so the caller leaves
+## the reward unclaimed.
 func _award_reward_item(item_id: String, quantity: int, start_global_position: Vector2) -> bool:
 	if item_id == "" or quantity <= 0:
 		return false
 	if not add_inventory(item_id, quantity):
 		return false
-	var animated: int = mini(quantity, REWARD_ANIM_CAP)
-	var stagger: float = minf(0.06, 1.0 / float(maxi(animated - 1, 1)))
-	for i: int in range(animated):
-		animate_inventory_item_to_slot(item_id, start_global_position, i, stagger)
+	play_pickup_from_screen(item_id, start_global_position, quantity)
 	return true
-
-
-func _credit_reward_currency(currency: String, amount: int) -> void:
-	if _progression_node == null or amount <= 0:
-		return
-	if _progression_node.has_method("update_currency"):
-		_progression_node.call("update_currency", StringName(currency), amount)
-
-
-func _reward_icon_node(currency: String) -> Node:
-	return _currency_icon_node(StringName(currency))
-
-
-func _currency_icon_node(currency: StringName) -> Node:
-	return get_node_or_null("currenciesUI/" + CurrencyCatalog.get_icon_node_name(currency))
-
-
-func _currency_animate_method(currency: StringName) -> String:
-	match currency:
-		&"seed":
-			return "animate_seed_harvest"
-		&"gem":
-			return "animate_gem_harvest"
-		&"money":
-			return "animate_money_harvest"
-	return "animate_currency_harvest"
 
 
 ## Public: how many more of item_id may still be placed given its per-world build
@@ -1373,10 +1186,9 @@ func _build_tile_layer_for_item_def(item_def: Dictionary) -> TileMapLayer:
 			return scene.get_node_or_null("Map/MonTilemap/wallz") as TileMapLayer
 	return null
 
-## Refund the full price of `count` removed units back to the matching currency,
-## flying one currency icon per unit from `world_position` to the HUD and crediting
-## on arrival — exactly like the normal currency harvest. Falls back to an instant credit
-## if the HUD icon is unavailable so a refund is never lost.
+## Refund the full price of `count` removed units back to the matching currency, crediting the
+## whole amount atomically and then flying feedback icons from the removed building to the player.
+## The refund is credited up front, so it is never lost if the feedback cannot play.
 func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> void:
 	if count <= 0:
 		return
@@ -1390,32 +1202,15 @@ func refund_build(item_id: String, world_position: Vector2, count: int = 1) -> v
 	if units <= 0:
 		return
 	var currency: StringName = ItemCatalog.get_currency(item_id)
-	var icon: Node = _currency_icon_node(currency)
-	var animate_method: String = _currency_animate_method(currency)
-	if icon != null and icon.has_method(animate_method):
-		# Deconstruct refunds fly the whole building's worth of currency within ~1s
-		# regardless of the amount, by compressing the per-icon stagger delay.
-		var stagger: float = minf(0.06, 1.0 / float(maxi(units - 1, 1)))
-		for i: int in range(units):
-			if animate_method == "animate_seed_harvest":
-				icon.call(animate_method, world_position, i, Callable(), true, stagger)
-			else:
-				icon.call(animate_method, world_position, i, stagger)
+	if not _grant_currency(currency, units):
 		return
-	# Fallback: no HUD icon to animate, so credit immediately.
-	var key: StringName = _build_currency_prog_key(item_id)
-	if key != &"" and _progression_node != null:
-		_progression_node.call("update_value", key, units)
+	play_pickup_from_world(CurrencyCatalog.get_item_id(currency), world_position, units)
 
 
 func _refund_inventory_backed_build(item_id: String, world_position: Vector2, count: int) -> void:
-	var target_position: Vector2 = _inventory_backed_refund_target_position(item_id)
 	if not add_inventory(item_id, count):
 		return
-	var start_global_position: Vector2 = get_viewport().get_canvas_transform() * world_position
-	var stagger: float = minf(0.06, 1.0 / float(maxi(count - 1, 1)))
-	for i: int in range(count):
-		_animate_inventory_item_to_position(item_id, start_global_position, target_position, i, stagger)
+	play_pickup_from_world(item_id, world_position, count)
 
 func _setup_starting_inventory() -> void:
 	inventory_slots.resize(INVENTORY_SLOT_COUNT)

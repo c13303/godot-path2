@@ -33,9 +33,7 @@
 [ext_resource type="Texture2D" uid="uid://dag3l51rkdn8e" path="res://assets/sprites/legval/items.png" id="27_shop_items"]
 [ext_resource type="Script" uid="uid://cmtc0riw00lkr" path="res://scripts/gameState/difficulty.gd" id="28_g12xc"]
 [ext_resource type="Script" uid="uid://cuedmqtd4cmb0" path="res://scripts/shop/toolbuild.gd" id="28_shop"]
-[ext_resource type="Script" uid="uid://dr7tdy3wc5lvx" path="res://scripts/ui/seed_icon.gd" id="29_seed_icon"]
-[ext_resource type="Script" uid="uid://dra5t5sj6lov5" path="res://scripts/ui/gem_icon.gd" id="30_gem_icon"]
-[ext_resource type="Script" uid="uid://bmoneyicon13q" path="res://scripts/ui/money_icon.gd" id="31_money_icon"]
+[ext_resource type="Script" uid="uid://bpf7k2v3nx8yq" path="res://scripts/ui/player_pickup_feedback_controller.gd" id="29_pickup_feedback"]
 [ext_resource type="Script" uid="uid://ddklovsi2tle0" path="res://scripts/animations/characterAnimation.gd" id="32_anim"]
 [ext_resource type="Script" uid="uid://sfwpyffffhdb" path="res://scripts/ui/menus.gd" id="35_ikr28"]
 [ext_resource type="Script" uid="uid://bmti7g3rbm2dg" path="res://scripts/map/level_loader.gd" id="36_lvload"]
@@ -964,10 +962,6 @@ offset_right = 208.0
 offset_bottom = -73.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_seed_icon")
-script = ExtResource("29_seed_icon")
-delay_between_seeds = 0.2
-animation_speed = 0.5
-curve_strength = 2.0
 
 [node name="seedQT" type="RichTextLabel" parent="GameUI/currenciesUI/seedIcon" unique_id=618629205]
 layout_mode = 0
@@ -988,10 +982,6 @@ offset_right = 207.0
 offset_bottom = -24.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_gem_icon")
-script = ExtResource("30_gem_icon")
-delay_between_gems = 0.2
-animation_speed = 0.5
-curve_strength = 2.0
 
 [node name="gemQT" type="RichTextLabel" parent="GameUI/currenciesUI/gemIcon" unique_id=1609902140]
 layout_mode = 0
@@ -1012,10 +1002,6 @@ offset_right = 205.0
 offset_bottom = -125.0
 mouse_filter = 2
 texture = SubResource("AtlasTexture_money_icon")
-script = ExtResource("31_money_icon")
-delay_between_money = 0.2
-animation_speed = 0.5
-curve_strength = 2.0
 
 [node name="moneyQT" type="RichTextLabel" parent="GameUI/currenciesUI/moneyIcon" unique_id=1319827880]
 layout_mode = 0
@@ -1094,6 +1080,16 @@ theme_override_styles/background = SubResource("StyleBoxFlat_water_reserve_backg
 theme_override_styles/fill = SubResource("StyleBoxFlat_water_reserve_fill")
 value = 100.0
 show_percentage = false
+
+[node name="PlayerPickupFeedback" type="Control" parent="GameUI" unique_id=966875779]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("29_pickup_feedback")
 
 [node name="Modals" type="Control" parent="GameUI" unique_id=966875778]
 visible = false

@@ -211,10 +211,10 @@ func _check_player_harvest() -> void:
 ## an immature plant. The plant turns immature only once the grant is confirmed, and an already
 ## immature plant can never grant again before the next dawn.
 func _harvest(record: BambooRecord) -> void:
-	if _game_ui == null or not _game_ui.has_method("grant_currency_from_world_immediate"):
+	if _game_ui == null or not _game_ui.has_method("grant_currency_from_world"):
 		return
 	var granted: bool = bool(_game_ui.call(
-		"grant_currency_from_world_immediate",
+		"grant_currency_from_world",
 		BAMBOO_CURRENCY,
 		record.world_position,
 		HARVEST_AMOUNT

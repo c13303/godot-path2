@@ -2,10 +2,6 @@ extends Control
 class_name PossessedItemsHud
 
 const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
-const SEED_ICON_SCRIPT: Script = preload("res://scripts/ui/seed_icon.gd")
-const GEM_ICON_SCRIPT: Script = preload("res://scripts/ui/gem_icon.gd")
-const MONEY_ICON_SCRIPT: Script = preload("res://scripts/ui/money_icon.gd")
-const GENERIC_CURRENCY_ICON_SCRIPT: Script = preload("res://scripts/ui/generic_currency_icon.gd")
 # Numeric font theme for the quantity readouts (icon + "x N"), distinct from body text.
 const NUMBER_THEME: Theme = preload("res://assets/themes/number_theme.tres")
 const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
@@ -74,20 +70,6 @@ func refresh() -> void:
 		if label != null:
 			label.text = "x %d" % quantity
 	_layout_rows(ordered_ids, counts)
-
-
-func get_item_flight_target_global_position(item_id: String) -> Vector2:
-	if item_id == "":
-		return global_position
-	if not _rows.has(item_id):
-		_ensure_row(item_id)
-	var row: Control = _rows.get(item_id, null) as Control
-	if row == null:
-		return global_position
-	var rect: Rect2 = row.get_global_rect()
-	if row.visible:
-		return rect.get_center()
-	return rect.position
 
 
 func _collect_possessed_counts() -> Dictionary:
@@ -168,7 +150,6 @@ func _ensure_row(item_id: String) -> void:
 	icon.texture = _item_texture(item_id)
 	icon.custom_minimum_size = ROW_SIZE
 	icon.size = ROW_SIZE
-	_apply_currency_animation_script(icon, item_id)
 
 	var label_name: String = CurrencyCatalog.get_label_node_name(currency) if currency != &"" else "quantity"
 	var label: RichTextLabel = icon.get_node_or_null(label_name) as RichTextLabel
@@ -193,23 +174,6 @@ func _ensure_row(item_id: String) -> void:
 	_labels[item_id] = label
 
 
-func _apply_currency_animation_script(icon: TextureRect, item_id: String) -> void:
-	if icon.get_script() != null:
-		return
-	match item_id:
-		"seed":
-			icon.set_script(SEED_ICON_SCRIPT)
-		"gem":
-			icon.set_script(GEM_ICON_SCRIPT)
-		"money":
-			icon.set_script(MONEY_ICON_SCRIPT)
-		_:
-			var currency: StringName = _currency_for_item_id(item_id)
-			if currency != &"":
-				icon.set_script(GENERIC_CURRENCY_ICON_SCRIPT)
-				icon.set("currency_id", currency)
-
-
 func _item_texture(item_id: String) -> AtlasTexture:
 	var texture: AtlasTexture = AtlasTexture.new()
 	texture.atlas = ITEMS_TEXTURE
@@ -232,10 +196,7 @@ func _item_frame(item_id: String) -> int:
 
 
 func _currency_for_item_id(item_id: String) -> StringName:
-	for currency: StringName in CurrencyCatalog.get_currency_ids():
-		if CurrencyCatalog.get_item_id(currency) == item_id:
-			return currency
-	return &""
+	return CurrencyCatalog.get_currency_for_item_id(item_id)
 
 
 func _connect_plant_refresh_signals() -> void:

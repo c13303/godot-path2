@@ -238,8 +238,8 @@ func update_seeds(delta: int) -> bool:
 	return true
 
 
-## Single entry point for changing the gem count. Gems are credited when their
-## monster-drop animation reaches the HUD icon.
+## Single entry point for changing the gem count. Gems are credited atomically at the moment of
+## acquisition; the pickup feedback that flies to the player is purely visual.
 func update_gems(delta: int) -> bool:
 	if delta < 0 and progression.get_value(GEM_KEY) < -delta:
 		return false
@@ -249,8 +249,8 @@ func update_gems(delta: int) -> bool:
 	return true
 
 
-## Single entry point for changing the money count. Clients pay money when their
-## payment animation reaches the HUD icon.
+## Single entry point for changing the money count. A client's payment is credited the instant the
+## sale completes; the money that flies to the player afterward is purely visual feedback.
 func update_money(delta: int) -> bool:
 	if delta < 0 and progression.get_value(MONEY_KEY) < -delta:
 		return false

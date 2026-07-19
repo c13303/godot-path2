@@ -93,7 +93,6 @@ func spawn_collectible_currency(currency: StringName, world_position: Vector2) -
 	record["vertical_velocity"] = randf_range(160.0, 255.0)
 	record["rotation_velocity"] = randf_range(-2.2, 2.2)
 	record["float_phase"] = randf_range(0.0, TAU)
-	record["pickup_pending"] = false
 	var sprite: Sprite2D = record["sprite"] as Sprite2D
 	sprite.texture = _currency_texture(currency)
 	sprite.centered = true
@@ -114,7 +113,6 @@ func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, la
 	record["vertical_velocity"] = GRAVITY * travel_seconds * 0.5
 	record["rotation_velocity"] = randf_range(-2.2, 2.2)
 	record["float_phase"] = randf_range(0.0, TAU)
-	record["pickup_pending"] = false
 	var sprite: Sprite2D = record["sprite"] as Sprite2D
 	sprite.texture = _currency_texture(currency)
 	sprite.centered = true
@@ -187,7 +185,6 @@ func restore_state(saved_items: Array) -> void:
 		record["rotation"] = float(item_data.get("rotation", 0.0))
 		record["rotation_velocity"] = float(item_data.get("rotation_velocity", 0.0))
 		record["float_phase"] = float(item_data.get("float_phase", randf_range(0.0, TAU)))
-		record["pickup_pending"] = false
 		var sprite: Sprite2D = record["sprite"] as Sprite2D
 		sprite.texture = _currency_texture(currency)
 		sprite.scale = Vector2(0.72, 0.72)
@@ -348,18 +345,15 @@ func _update_record_visual(record: Dictionary) -> void:
 		shadow.modulate = Color(1.0, 1.0, 1.0, 0.45)
 
 
-func _finish_currency_pickup(record: Dictionary) -> void:
-	if bool(record.get("active", false)):
-		_release_record(record)
-
-
-func _start_currency_pickup(currency: StringName, world_position: Vector2, record: Dictionary) -> bool:
+## Grants one unit of the drop's currency to the player and requests pickup feedback. The grant is
+## atomic inside GameUI, so the caller releases the drop the moment this succeeds — the retired
+## drop no longer waits on any flight callback.
+func _grant_currency_pickup(currency: StringName, world_position: Vector2) -> bool:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui == null or not game_ui.has_method("collect_currency_from_world"):
+	if game_ui == null or not game_ui.has_method("grant_currency_from_world"):
 		return false
-	var finished: Callable = Callable(self, "_finish_currency_pickup").bind(record)
-	return bool(game_ui.call("collect_currency_from_world", currency, world_position, 1, finished))
+	return bool(game_ui.call("grant_currency_from_world", currency, world_position, 1))
 
 
 ## The shared ground-currency pickup radius for a floor layer. Gems, coins and every other
@@ -404,7 +398,6 @@ func _configure_record_base(record: Dictionary, kind: StringName, world_position
 	record["fade_timer"] = 0.0
 	record["currency"] = &""
 	record["float_phase"] = 0.0
-	record["pickup_pending"] = false
 	sprite.set_instance_shader_parameter("float_amplitude", 0.0)
 	root.visible = true
 	root.global_position = world_position
@@ -534,10 +527,9 @@ func _part_texture(atlas: Texture2D, frame_index: int) -> AtlasTexture:
 	return texture
 
 
+## The loose-drop sprite texture for a currency, resolved straight from CurrencyCatalog rather than
+## reading the HUD icon node's texture, so ground drops no longer depend on GameUI/currenciesUI.
 func _currency_texture(currency: StringName) -> Texture2D:
-	var icon_texture: Texture2D = _currency_ui_texture(currency)
-	if icon_texture != null:
-		return icon_texture
 	var texture: AtlasTexture = AtlasTexture.new()
 	texture.atlas = ITEMS_TEXTURE
 	if CurrencyCatalog.has_currency(currency):
@@ -545,15 +537,6 @@ func _currency_texture(currency: StringName) -> Texture2D:
 	else:
 		texture.region = Rect2(Vector2(8.0 * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
 	return texture
-
-
-func _currency_ui_texture(currency: StringName) -> Texture2D:
-	var scene: Node = get_tree().current_scene
-	if scene == null:
-		return null
-	var icon_name: String = CurrencyCatalog.get_icon_node_name(currency)
-	var icon: TextureRect = scene.get_node_or_null("GameUI/currenciesUI/" + icon_name) as TextureRect
-	return icon.texture if icon != null else null
 
 
 func _register_settled_record(record: Dictionary) -> void:
@@ -602,18 +585,16 @@ func _check_nearby_pickups() -> void:
 
 
 func _check_record_pickup(record: Dictionary, player: Node2D) -> void:
-	if player == null or not is_instance_valid(player) or bool(record.get("pickup_pending", false)):
+	if player == null or not is_instance_valid(player):
 		return
 	var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
 	if player.global_position.distance_squared_to(ground_position) > _pickup_radius_squared:
 		return
 	var currency: StringName = StringName(record.get("currency", &"gem"))
-	if not _start_currency_pickup(currency, ground_position, record):
+	if not _grant_currency_pickup(currency, ground_position):
 		return
-	record["pickup_pending"] = true
-	var root: Node2D = record["root"] as Node2D
-	if root != null:
-		root.visible = false
+	# Reward granted atomically: retire the drop now, independent of the pickup feedback.
+	_release_record(record)
 
 
 func _world_to_floor_cell(world_position: Vector2) -> Vector2i:

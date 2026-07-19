@@ -2,7 +2,7 @@ extends Node
 
 ## Seed-merchant adapter for the generic DialogUI. It owns everything merchant-specific:
 ## deciding when the shop may open, converting the merchant inventory (and any active night
-## reward) into generic dialog choices, purchasing, reward claiming, purchase animations,
+## reward) into generic dialog choices, purchasing, reward claiming, purchase feedback,
 ## and refreshing rows after a purchase. Once opened, only the player's dialog commands close
 ## it; merchant movement, range, phase, and lifecycle changes never close it automatically. All
 ## economy/inventory logic stays in game_ui.gd; this controller only calls it.
@@ -267,18 +267,13 @@ func _set_interaction_bubble(active: bool, is_gamepad: bool) -> void:
 		agent.call("set_bubble_notification_frame", INTERACTION_BUBBLE_REASON, active, frame)
 
 
-## Replays the existing fly-to-HUD / fly-to-inventory purchase feedback from the row's origin.
+## Plays the generic pickup feedback for a purchase, launching from the dialog row's screen
+## position and flying to the player. Visual only: the purchase itself already completed in
+## _purchase_item, so a missing controller never affects the sale.
 func _animate_purchase_to_ui(item_id: String, start_global_position: Vector2) -> void:
-	if game_ui == null:
+	if game_ui == null or not game_ui.has_method("play_pickup_from_screen"):
 		return
-	if item_id == SEED_ITEM_ID:
-		var world_position: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * start_global_position
-		var seed_icon: Node = game_ui.get_node_or_null("currenciesUI/seedIcon")
-		if seed_icon != null and seed_icon.has_method("animate_seed_harvest"):
-			seed_icon.call("animate_seed_harvest", world_position, 0, Callable(), false)
-		return
-	if game_ui.has_method("animate_inventory_item_to_slot"):
-		game_ui.call("animate_inventory_item_to_slot", item_id, start_global_position)
+	game_ui.call("play_pickup_from_screen", item_id, start_global_position, 1)
 
 
 # --- game_ui queries ---------------------------------------------------------

@@ -79,6 +79,16 @@ static func get_item_id(currency: StringName) -> String:
 	return str(get_currency_def(currency).get("item_id", String(currency)))
 
 
+## The currency whose canonical item_id matches `item_id`, or &"" when the item is not a currency.
+## Single owner of the "item id -> currency id" lookup: the possessed HUD and the pickup feedback
+## controller both ask here instead of scanning the currency defs themselves.
+static func get_currency_for_item_id(item_id: String) -> StringName:
+	for currency: StringName in get_currency_ids():
+		if get_item_id(currency) == item_id:
+			return currency
+	return &""
+
+
 static func get_icon_node_name(currency: StringName) -> String:
 	return str(get_currency_def(currency).get("icon_node_name", "%sIcon" % String(currency)))
 

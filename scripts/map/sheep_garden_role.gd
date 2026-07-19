@@ -408,24 +408,23 @@ func _durability() -> PlayerPlaceableDurabilityService:
 # Rewards.
 # ---------------------------------------------------------------------------
 
+## Grants the debris gem reward through the canonical GameUI façade: the gems are credited
+## atomically, then feedback flies them to the player. A missing GameUI falls back to a direct
+## progression credit so the reward is never lost.
 func _spawn_debris_reward_gems(world_position: Vector2) -> void:
 	var scene: Node = _manager.get_tree().current_scene
-	var gem_icon: Node = scene.get_node_or_null("GameUI/currenciesUI/gemIcon") if scene != null else null
-	if gem_icon != null and gem_icon.has_method("animate_gem_harvest"):
-		for i: int in range(DEBRIS_REWARD_GEMS):
-			var started: bool = bool(gem_icon.call("animate_gem_harvest", world_position, i))
-			if not started:
-				_credit_debris_reward_gem()
-		return
-	for i: int in range(DEBRIS_REWARD_GEMS):
-		_credit_debris_reward_gem()
+	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
+	if game_ui != null and game_ui.has_method("grant_currency_from_world"):
+		if bool(game_ui.call("grant_currency_from_world", &"gem", world_position, DEBRIS_REWARD_GEMS)):
+			return
+	_credit_debris_reward_gem()
 
 
 func _credit_debris_reward_gem() -> void:
 	var scene: Node = _manager.get_tree().current_scene
 	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
 	if progression_node != null and progression_node.has_method("update_gems"):
-		progression_node.call("update_gems", 1)
+		progression_node.call("update_gems", DEBRIS_REWARD_GEMS)
 
 
 # ---------------------------------------------------------------------------

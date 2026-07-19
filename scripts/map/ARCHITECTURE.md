@@ -261,7 +261,7 @@ Notes:
 - Bamboo is authored and permanent: absent from PlantManager, BuildingObjectManager, PlayerPlaceableDurabilityService, BuildRemovalService, garden topology and every damage/target system. No health, collision or removal callbacks. A harvest changes only maturity.
 - The `0.5` slowdown belongs to the bamboo's presence, not its maturity: registered once per cell at setup and never touched again, so maturity changes never dirty navigation.
 - Harvest range and scan cadence are reused from GroundDropManager (`pickup_radius_for_floor`, `PICKUP_CHECK_INTERVAL`), never re-declared. No Area2D or physics body.
-- Reward is atomic: GameUI credits all five bamboo before the icons fly (`grant_currency_from_world_immediate`), so a save mid-flight cannot lose it. The controller never calls Progression directly.
+- Reward is atomic: GameUI credits the full harvest amount before the pickup icons fly to the player (`grant_currency_from_world`), so a save mid-flight cannot lose it. The controller never calls Progression directly.
 - Restored dawn signals are ignored (`GameState.is_emitting_restored_phase_signals`), so loading a dawn save does not re-mature harvested bamboo.
 - Set up synchronously in `BuildingManager._ready()`, which the scene orders ahead of `progression`, so the restore facade is always ready before Progression uses it.
 
