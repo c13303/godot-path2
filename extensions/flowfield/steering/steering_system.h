@@ -129,6 +129,7 @@ namespace ffcore
         void set_agent_position(int id, const Vec2 &position, bool clear_velocity = true);
         void set_agent_traffic_state(int id, std::int64_t traffic_group_id, int traffic_priority);
         void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
+        void apply_navigation_preserving_impulse(int id, const Vec2 &direction, double force, double friction_loss);
         void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
@@ -304,7 +305,7 @@ namespace ffcore
         void apply_traffic_right_of_way(double delta);
         bool is_agent_waiting_for_flow(const AgentData &agent) const;
         void clear_pending_smash_slot(AgentData &agent);
-        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority);
+        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control = false);
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);

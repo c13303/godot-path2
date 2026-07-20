@@ -1416,6 +1416,13 @@ void SteeringSystem::apply_smash_impulse(int id, const Vec2 &direction, double f
     queue_smash_impulse(id, direction, force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration, true, static_cast<int>(ImpulseQueuePriority::Gameplay));
 }
 
+void SteeringSystem::apply_navigation_preserving_impulse(int id, const Vec2 &direction, double force, double friction_loss)
+{
+    // Reuse the established impulse damping/collision pipeline, but keep the
+    // agent's target velocity active as an independent movement contribution.
+    queue_smash_impulse(id, direction, force, friction_loss, 0.0, false, 0.0, 0.0, true, static_cast<int>(ImpulseQueuePriority::Gameplay), true);
+}
+
 void SteeringSystem::clear_pending_smash_slot(AgentData &agent)
 {
     agent.pending_smash = Vec2(0, 0);
@@ -1424,10 +1431,11 @@ void SteeringSystem::clear_pending_smash_slot(AgentData &agent)
     agent.pending_smash_friction = -1.0;
     agent.pending_smash_control_suppression = 1.0;
     agent.pending_smash_control_suppression_duration = 0.0;
+    agent.pending_smash_preserves_control = false;
     agent.pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
 }
 
-void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority)
+void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control)
 {
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
@@ -1464,6 +1472,7 @@ void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double f
     agent.pending_smash_friction = std::clamp(friction_loss, 0.0, 1.0);
     agent.pending_smash_control_suppression = std::clamp(control_suppression, 0.0, 1.0);
     agent.pending_smash_control_suppression_duration = std::max(0.0, control_suppression_duration);
+    agent.pending_smash_preserves_control = preserve_control;
     agent.pending_smash_priority = sanitized_priority;
     agent.smash_pending = true;
     agent.smash_force = Vec2(0, 0);
@@ -1828,6 +1837,7 @@ void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seco
         a.smash_friction = -1.0;
         a.smash_control_suppression = 1.0;
         a.smash_control_suppression_timer = 0.0;
+        a.smash_preserves_control = false;
         a.smash_just_reset = false;
         a.is_propelled = false;
         a.propelled_timer = 0.0;
@@ -2060,6 +2070,7 @@ void SteeringSystem::update_all(double delta)
             a.smash_friction = -1.0;
             a.smash_control_suppression = 1.0;
             a.smash_control_suppression_timer = 0.0;
+            a.smash_preserves_control = false;
             continue;
         }
         if (a.smash_pending)
@@ -2071,6 +2082,7 @@ void SteeringSystem::update_all(double delta)
                 a.smash_friction = a.pending_smash_friction;
                 a.smash_control_suppression = a.pending_smash_control_suppression;
                 a.smash_control_suppression_timer = a.pending_smash_control_suppression_duration;
+                a.smash_preserves_control = a.pending_smash_preserves_control;
                 clear_pending_smash_slot(a);
                 a.smash_just_reset = true;
             }
@@ -2119,6 +2131,7 @@ void SteeringSystem::update_all(double delta)
                 a.smash_friction = -1.0;
                 a.smash_control_suppression = 1.0;
                 a.smash_control_suppression_timer = 0.0;
+                a.smash_preserves_control = false;
                 a.velocity = Vec2(0, 0);
             }
         }
@@ -2302,7 +2315,7 @@ void SteeringSystem::update_all(double delta)
             if (desired_dir.is_zero())
                 desired_dir = nav_dir;
 
-            if (a.is_propelled && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
+            if (a.is_propelled && !a.smash_preserves_control && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
             {
                 a.is_propelled = false;
                 a.propelled_timer = 0.0;
@@ -2731,7 +2744,7 @@ void SteeringSystem::update_all(double delta)
         if (desired_dir.is_zero() && dist_to_target > 0.0)
             desired_dir = safe_normalize(to_goal);
 
-        if (a.is_propelled && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
+        if (a.is_propelled && !a.smash_preserves_control && active_control_suppression <= 0.0 && !target_velocity.is_zero() && a.velocity.dot(target_velocity) <= 0.0)
         {
             a.is_propelled = false;
             a.propelled_timer = 0.0;

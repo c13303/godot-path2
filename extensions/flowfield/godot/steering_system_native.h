@@ -91,6 +91,7 @@ namespace godot
         void replace_terrain_speed_channel(const PackedVector2Array &cells, const PackedFloat32Array &multipliers, int channel = 0);
         void clear_terrain_speed_channel(int channel = 0);
         void apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
+        void apply_navigation_preserving_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss);
         void apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vector2 &position, double radius, const Vector2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vector2 &position, double radius, double intensity, double friction_loss);

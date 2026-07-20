@@ -103,11 +103,15 @@ namespace ffcore
         double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global
         double smash_control_suppression = 1.0;
         double smash_control_suppression_timer = 0.0;
+        // Navigation-preserving impulses contribute external velocity without
+        // disabling or cancelling autonomous movement in the opposite direction.
+        bool smash_preserves_control = false;
         Vec2 pending_smash{};
         double smash_delay = 0.0;
         double pending_smash_friction = -1.0;
         double pending_smash_control_suppression = 1.0;
         double pending_smash_control_suppression_duration = 0.0;
+        bool pending_smash_preserves_control = false;
         int pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
         bool smash_pending = false;
         bool was_in_t2 = false;

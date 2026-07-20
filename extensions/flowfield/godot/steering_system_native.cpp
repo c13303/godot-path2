@@ -61,6 +61,7 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("replace_terrain_speed_channel", "cells", "multipliers", "channel"), &SteeringSystemNative::replace_terrain_speed_channel, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("clear_terrain_speed_channel", "channel"), &SteeringSystemNative::clear_terrain_speed_channel, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
+    ClassDB::bind_method(D_METHOD("apply_navigation_preserving_impulse", "agent_id", "direction", "force", "friction_loss"), &SteeringSystemNative::apply_navigation_preserving_impulse);
     ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_area_smash);
     ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
@@ -310,6 +311,11 @@ Array SteeringSystemNative::take_damage_events()
 void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration)
 {
     system.apply_smash_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss, delay, detach_flow, control_suppression, control_suppression_duration);
+}
+
+void SteeringSystemNative::apply_navigation_preserving_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss)
+{
+    system.apply_navigation_preserving_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss);
 }
 
 void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)

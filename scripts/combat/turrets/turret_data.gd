@@ -25,8 +25,6 @@ enum Behavior {
 @export_range(0.0, 60.0, 0.001, "or_greater") var wind_cooldown_duration: float = 3.0
 @export_range(0.0, 10000.0, 1.0, "or_greater") var wind_force: float = 220.0
 @export_range(0.0, 1.0, 0.01) var wind_friction_loss: float = 0.9
-@export_range(0.0, 1.0, 0.01) var wind_control_suppression: float = 1.0
-@export_range(0.0, 60.0, 0.001, "or_greater") var wind_control_suppression_duration: float = 0.5
 @export_range(0.01, 60.0, 0.001, "or_greater") var wind_repulse_frequency: float = 0.5
 @export_range(0.01, 60.0, 0.001, "or_greater") var wind_query_interval: float = 0.1
 

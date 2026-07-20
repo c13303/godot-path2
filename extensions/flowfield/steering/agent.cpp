@@ -57,11 +57,13 @@ void AgentData::reset()
     smash_friction = -1.0;
     smash_control_suppression = 1.0;
     smash_control_suppression_timer = 0.0;
+    smash_preserves_control = false;
     pending_smash = Vec2(0, 0);
     smash_delay = 0.0;
     pending_smash_friction = -1.0;
     pending_smash_control_suppression = 1.0;
     pending_smash_control_suppression_duration = 0.0;
+    pending_smash_preserves_control = false;
     pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
     smash_pending = false;
 }

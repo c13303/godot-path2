@@ -127,7 +127,7 @@ func _process_active_query(cell: Vector2i, state: Dictionary, data: TurretData, 
 		if float(repulse_wait_by_agent.get(instance_id, 0.0)) > 0.0:
 			continue
 		var nav_id: int = int(agent.get("nav_id"))
-		steering.call("apply_smash_impulse", nav_id, impulse_direction, data.wind_force, data.wind_friction_loss, 0.0, false, data.wind_control_suppression, data.wind_control_suppression_duration)
+		steering.call("apply_navigation_preserving_impulse", nav_id, impulse_direction, data.wind_force, data.wind_friction_loss)
 		repulse_wait_by_agent[instance_id] = data.wind_repulse_frequency
 	for raw_instance_id: Variant in repulse_wait_by_agent.keys():
 		if not eligible_ids.has(int(raw_instance_id)):
@@ -148,6 +148,10 @@ func _is_eligible(agent: Node2D, cell: Vector2i, state: Dictionary, data: Turret
 		return false
 	if agent.is_in_group(&"player") or agent.is_in_group(&"players"):
 		return false
+	if agent.has_meta("monster_type"):
+		var monster_type: StringName = StringName(str(agent.get_meta("monster_type")))
+		if monster_type == MonsterCatalog.BIG_MONSTER_ID:
+			return false
 	if _tracker.is_agent_suspended(agent):
 		return false
 	if agent.has_method("is_external_capture_active") and bool(agent.call("is_external_capture_active")):
