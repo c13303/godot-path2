@@ -72,7 +72,7 @@ const ITEM_DEFS: Dictionary = {
 	"seed": {
 		"id": "seed",
 		"name": "Seed",
-		"currency": &"gem",
+		"currency": &"money",
 		"type": "resource",
 		"category": "resources",
 		"price": 2,
