@@ -88,7 +88,7 @@ sunrise transition, no phase started yet
 --- MORNING harvest phase ---
 
 never placed a rose_shop_counter yet + client sale not started
-    = "Placez les comptoirs du magasin" / "Place the Shop"  [tutorial.place_shop]
+    = "Construisez un comptoir de vente de roses" / "Place the Shop"  [tutorial.place_shop]
     (one-time step: dawn only, before the client phase — so first seen on day 2.
      It never returns once the first counter is placed, and the afternoon build
      phase never raises it.)

@@ -13,17 +13,21 @@ extends RichTextLabel
 ##   1. fundamental Builder onboarding .............. allow entry / talk / build house
 ##   2. unbuild tool selected ....................... Select objects to dismantle
 ##   3. empty water reserve ......................... Refill your water
-##   4. dawn harvest (grown roses) .................. Harvest / add counters / place shop
-##   5. client sale phase ........................... nothing (only the tantrum alert)
-##   6. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
-##   7. seeds left, day 2+ ......................... Plant roses, once per day
-##   8. planted roses still dry ..................... Water your roses
-##   9. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
-##  10. day 1 not enough roses for tomorrow ......... Plant more roses
-##  11. all roses watered, clients done ............. Hold to start night
+##   4. day 2, less than 10 bamboo .................. Collect bamboo (world arrow on the grove)
+##   5. dawn harvest (grown roses) .................. Harvest / add counters / place shop
+##   6. client sale phase ........................... nothing (only the tantrum alert)
+##   7. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
+##   8. seeds left, day 2+ ......................... Plant roses, once per day
+##   9. planted roses still dry ..................... Water your roses
+##  10. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
+##  11. day 1 not enough roses for tomorrow ......... Plant more roses
+##  12. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
+const BAMBOO_KEY: StringName = &"bamboo"
+## Bamboo the player must own before the "collect bamboo" step considers itself answered.
+const REQUIRED_BAMBOO: int = 10
 const TutorialArrowScript: Script = preload("res://scripts/misc/tutorial_arrow.gd")
 const TutorialWorldArrowScript: Script = preload("res://scripts/misc/tutorial_world_arrow.gd")
 
@@ -35,6 +39,7 @@ const KEY_PLANT_PASTEQUE: String = "tutorial.plant_pasteque"
 const KEY_PLANT_TURRET_EPINE: String = "tutorial.plant_turret_epine"
 const KEY_PASS_NIGHT: String = "tutorial.pass_night"
 const KEY_REFILL_WATER: String = "tutorial.refill_water"
+const KEY_COLLECT_BAMBOO: String = "tutorial.collect_bamboo"
 const KEY_PLACE_SHOP: String = "tutorial.place_shop"
 const KEY_ADD_COUNTERS_TO_SELL_ROSES: String = "tutorial.add_counters_to_sell_roses"
 const KEY_HARVEST_ROSE: String = "tutorial.harvest_rose"
@@ -515,6 +520,9 @@ func _current_message_key() -> String:
 	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
 		return ""
+	# Stock step: bamboo is gathered in the field, so it precedes every step that spends it.
+	if _should_prompt_collect_bamboo():
+		return KEY_COLLECT_BAMBOO
 	if GameState.is_dawn_phase:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			if _has_counter_room_for_harvest():
@@ -889,6 +897,17 @@ func _rose_shop_counter_count() -> int:
 	return int(_building_manager.call("rose_shop_counter_count"))
 
 
+## Day-2 only: the player owns less than REQUIRED_BAMBOO. Bamboo is harvested from the field,
+## so the step points the world arrow at the authored bamboo grove. Within day 2 it is not a
+## one-time step: spending back below the threshold asks for more bamboo again.
+func _should_prompt_collect_bamboo() -> bool:
+	if not _is_day_two():
+		return false
+	if _progression == null or not _progression.has_method("get_value"):
+		return false
+	return int(_progression.call("get_value", BAMBOO_KEY)) < REQUIRED_BAMBOO
+
+
 ## Dawn step: the player has no counter at all, so building the first one is the current
 ## requirement. Not a one-time step — removing the last counter brings it back. It belongs to
 ## dawn only, before the client sale: the afternoon build phase must not raise it. An unknown
@@ -1042,30 +1061,10 @@ func _update_tutorial_arrow(key: String) -> void:
 		_hide_tutorial_arrow()
 		return
 	if key == KEY_BLOCK_PASSAGE_WALL:
-		if _is_hammer_menu_open():
-			var wall_rect: Rect2 = _visible_build_item_rect(WALL_ITEM_ID)
-			if wall_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_right_at(wall_rect, get_process_delta_time())
-				return
-		else:
-			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
-			if hammer_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
-				return
-		_hide_tutorial_arrow()
+		_point_to_hammer_build_item(WALL_ITEM_ID)
 		return
 	if key == KEY_PLACE_SHOP and _is_day_two():
-		if _is_hammer_menu_open():
-			var counter_rect: Rect2 = _visible_build_item_rect(COUNTER_ITEM_ID)
-			if counter_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_right_at(counter_rect, get_process_delta_time())
-				return
-		else:
-			var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
-			if hammer_rect.size != Vector2.ZERO:
-				_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
-				return
-		_hide_tutorial_arrow()
+		_point_to_hammer_build_item(COUNTER_ITEM_ID)
 		return
 	if key == KEY_BUILD_BUILDER_HOUSE:
 		_point_to_house_build_item(HOUSE_BUILDER_ITEM_ID)
@@ -1090,6 +1089,25 @@ func _update_tutorial_arrow(key: String) -> void:
 	_hide_tutorial_arrow()
 
 
+## Points at a buildable reached through the hammer: the item inside the open hammer menu, or
+## the hammer quick slot to open it. Shows nothing once the item is armed for placement — the
+## player is already holding it, and pointing back at the hammer slot would send them backwards.
+func _point_to_hammer_build_item(item_id: String) -> void:
+	if _tutorial_arrow == null:
+		return
+	if _is_hammer_menu_open():
+		var item_rect: Rect2 = _visible_build_item_rect(item_id)
+		if item_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_right_at(item_rect, get_process_delta_time())
+			return
+	elif not _is_build_item_equipped(item_id):
+		var hammer_rect: Rect2 = _quick_slot_rect(HAMMER_TOOL_ID)
+		if hammer_rect.size != Vector2.ZERO:
+			_tutorial_arrow.point_down_at(hammer_rect, get_process_delta_time())
+			return
+	_hide_tutorial_arrow()
+
+
 func _point_to_house_build_item(item_id: String) -> void:
 	if _tutorial_arrow == null:
 		return
@@ -1098,7 +1116,7 @@ func _point_to_house_build_item(item_id: String) -> void:
 		if house_rect.size != Vector2.ZERO:
 			_tutorial_arrow.point_right_at(house_rect, get_process_delta_time())
 			return
-	else:
+	elif not _is_build_item_equipped(item_id):
 		var buildhouse_rect: Rect2 = _quick_slot_rect(BUILD_HOUSE_TOOL_ID)
 		if buildhouse_rect.size != Vector2.ZERO:
 			_tutorial_arrow.point_down_at(buildhouse_rect, get_process_delta_time())
@@ -1143,6 +1161,8 @@ func _world_arrow_target_for_key(key: String) -> String:
 		return "tuto1"
 	if key == KEY_PLANT_TURRET_EPINE:
 		return "tuto3"
+	if key == KEY_COLLECT_BAMBOO:
+		return "tuto4_bamboo"
 	return ""
 
 
@@ -1177,6 +1197,16 @@ func _is_hammer_menu_open() -> bool:
 		_game_ui != null
 		and _game_ui.has_method("get_selected_build_tool_id")
 		and str(_game_ui.call("get_selected_build_tool_id")) == HAMMER_TOOL_ID
+	)
+
+
+## True while this exact buildable is armed for placement (build preview in hand). The steps that
+## point at a quick slot use it to stand down once the player has the item out.
+func _is_build_item_equipped(item_id: String) -> bool:
+	return (
+		_game_ui != null
+		and _game_ui.has_method("get_selected_build_item_id")
+		and str(_game_ui.call("get_selected_build_item_id")) == item_id
 	)
 
 
