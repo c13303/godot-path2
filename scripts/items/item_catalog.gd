@@ -387,7 +387,12 @@ const ITEM_DEFS: Dictionary = {
 		"requires_grass_green_floor": true,
 		"runtime_id": "ronce",
 		"drag_buildable": false,
-		"speed_multiplier": 0.3,
+		# Ordinary monsters retain 80% speed. Player and bigmonster retain 50%.
+		"speed_multiplier": 0.8,
+		"player_speed_multiplier": 0.5,
+		"big_monster_speed_multiplier": 0.5,
+		# Walking over ronce never damages the ronce itself.
+		"stompable": false,
 		"agent_contact_enabled": true,
 		"agent_contact_behavior": &"contact_visual_only",
 		"building_sprite_visual": {

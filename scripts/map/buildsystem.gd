@@ -536,9 +536,8 @@ func _sync_terrain_speed_cells() -> void:
 			_refresh_cell_terrain_speed(cell, false)
 	_terrain_speed.upload_all_channels()
 
-# Startup terrain-speed seed for one cell. Pushes both the all-agent and the player
-# multiplier (a rose slows every agent but never the player -- see
-# PlaceableNavImpact.def_player_speed_multiplier). This walks the layers itself because
+# Startup terrain-speed seed for one cell. Pushes ordinary-agent, player, and bigmonster
+# multipliers (see PlaceableNavImpact). This walks the layers itself because
 # BuildSystem._ready() runs before BuildingManager's synchronization service is configured;
 # both coordinators still write through the one shared terrain-speed service instance.
 func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
@@ -548,12 +547,14 @@ func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
 	_terrain_speed.set_steering(steering)
 	var speed_multipliers: Array[float] = []
 	var player_speed_multipliers: Array[float] = []
+	var big_monster_speed_multipliers: Array[float] = []
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
 		if logical_plant_item_id != "":
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
 			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
 			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
+			big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(logical_plant_item_def))
 	for layer: TileMapLayer in [plantz, traversable_buildings, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
@@ -563,15 +564,25 @@ func _refresh_cell_terrain_speed(cell: Vector2i, upload: bool = true) -> void:
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
 		speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(layer_item_def))
 		player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+		big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(layer_item_def))
 	if building_object_manager != null and building_object_manager.has_method("get_placeable_item_id"):
 		var runtime_item_id: String = str(building_object_manager.call("get_placeable_item_id", cell))
 		if runtime_item_id != "":
 			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
 			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
 			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
+			big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(runtime_item_def))
 	var speed_multiplier: float = _terrain_speed.compose_multipliers(speed_multipliers)
 	var player_speed_multiplier: float = _terrain_speed.compose_multipliers(player_speed_multipliers)
-	_terrain_speed.set_cell_contribution_pair(cell, StringName(TERRAIN_SPEED_SOURCE_PREFIX + str(cell)), speed_multiplier, player_speed_multiplier, upload)
+	var big_monster_speed_multiplier: float = _terrain_speed.compose_multipliers(big_monster_speed_multipliers)
+	_terrain_speed.set_cell_contribution_triplet(
+		cell,
+		StringName(TERRAIN_SPEED_SOURCE_PREFIX + str(cell)),
+		speed_multiplier,
+		player_speed_multiplier,
+		big_monster_speed_multiplier,
+		upload
+	)
 
 func _refresh_fence_autotiles_for_cells(cells: Array[Vector2i]) -> void:
 	var touched: Dictionary = {}

@@ -20,6 +20,7 @@ const CLIENT_SPRITE_HFRAMES: int = 7
 const CLIENT_SPRITE_FRAME_LAYOUT: StringName = &"client_directional_7_horizontal"
 const BIG_MONSTER_BOUNCE_HEIGHT: float = 0.225
 const BIG_MONSTER_WALK_SQUASH: float = 0.03
+const BIG_MONSTER_TERRAIN_SPEED_CHANNEL: int = 2
 const VILLAGER_CONTACT_PUSH_POWER: float = 0.0
 const VILLAGER_CONTACT_PUSH_RESIST: float = 2.0
 const VILLAGER_CONTACT_PUSH_COOLDOWN: float = 0.2
@@ -86,6 +87,7 @@ func apply_monster_data(agent: Node, monster_type: StringName) -> void:
 		var canvas_item: CanvasItem = agent as CanvasItem
 		canvas_item.queue_redraw()
 	if monster_type == MonsterCatalog.BIG_MONSTER_ID:
+		agent.set_meta("terrain_speed_channel", BIG_MONSTER_TERRAIN_SPEED_CHANNEL)
 		_apply_bigmonster_animation(agent)
 
 

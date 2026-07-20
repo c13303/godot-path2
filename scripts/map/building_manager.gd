@@ -1973,6 +1973,10 @@ func get_client_tantrum_controller() -> ClientTantrumController:
 	return _client_tantrum
 
 
+func is_client_tantrum_active() -> bool:
+	return _client_tantrum.is_active()
+
+
 func get_client_sale_controller() -> ClientSaleController:
 	return _client_sale
 

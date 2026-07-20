@@ -46,7 +46,7 @@ var _build_system: Node = null
 #   { "key": String, "cell": Vector2i, "item_id": String, "layer_name": String,
 #     "health": int, "max_health": int }
 var _targets_by_key: Dictionary = {}
-## Health-overlay and sheep-repair queries only need damaged targets. Keep that
+## Health-overlay, sheep-repair, and Builder-repair queries only need damaged targets. Keep that
 ## subset incrementally instead of filtering every registered durability record.
 var _damaged_by_key: Dictionary = {}
 # cell(Vector2i) -> Dictionary[key(String) -> true]. Multiple target layers may

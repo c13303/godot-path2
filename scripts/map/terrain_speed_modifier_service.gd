@@ -6,9 +6,12 @@ class_name TerrainSpeedModifierService
 ## `_contributions` is: Vector2i cell -> int channel -> StringName source -> float.
 ## Missing cells are neutral. Player-channel entries may deliberately contain a neutral
 ## contribution so native channel 1 overrides channel 0 (roses and bamboo use this).
+## Bigmonster channel 2 is stored only where it differs from channel 0, preserving native
+## fallback to ordinary terrain everywhere else.
 
 const DEFAULT_CHANNEL: int = 0
 const PLAYER_CHANNEL: int = 1
+const BIG_MONSTER_CHANNEL: int = 2
 const NEUTRAL_MULTIPLIER: float = 1.0
 const MIN_MULTIPLIER: float = 0.05
 const MAX_MULTIPLIER: float = 4.0
@@ -113,6 +116,60 @@ func set_cells_contribution_pair(
 		_upload_cells_for_channel(player_changed, PLAYER_CHANNEL)
 
 
+func set_cell_contribution_triplet(
+	cell: Vector2i,
+	source_id: StringName,
+	default_multiplier: float,
+	player_multiplier: float,
+	big_monster_multiplier: float,
+	upload: bool = true
+) -> void:
+	var cells: Array[Vector2i] = [cell]
+	set_cells_contribution_triplet(
+		cells,
+		source_id,
+		default_multiplier,
+		player_multiplier,
+		big_monster_multiplier,
+		upload
+	)
+
+
+func set_cells_contribution_triplet(
+	cells: Array[Vector2i],
+	source_id: StringName,
+	default_multiplier: float,
+	player_multiplier: float,
+	big_monster_multiplier: float,
+	upload: bool = true
+) -> void:
+	if source_id == &"" or cells.is_empty():
+		return
+	set_cells_contribution_pair(cells, source_id, default_multiplier, player_multiplier, false)
+	var normalized_default: float = _sanitize_multiplier(default_multiplier)
+	var normalized_big_monster: float = _sanitize_multiplier(big_monster_multiplier)
+	var big_monster_changed: Array[Vector2i] = []
+	var seen: Dictionary = {}
+	for cell: Vector2i in cells:
+		if seen.has(cell):
+			continue
+		seen[cell] = true
+		var before_multiplier: float = effective_multiplier(cell, BIG_MONSTER_CHANNEL)
+		var before_explicit: bool = _has_channel_contribution(cell, BIG_MONSTER_CHANNEL)
+		# Matching values need no channel-2 entry: native lookup then falls back to
+		# channel 0 and keeps unrelated default-channel sources (road, water, etc.).
+		if is_equal_approx(normalized_big_monster, normalized_default):
+			_remove_local_contribution(cell, source_id, BIG_MONSTER_CHANNEL)
+		else:
+			_set_local_contribution(cell, source_id, normalized_big_monster, BIG_MONSTER_CHANNEL)
+		if _effective_state_changed(cell, BIG_MONSTER_CHANNEL, before_multiplier, before_explicit):
+			big_monster_changed.append(cell)
+	if upload:
+		_upload_cells_for_channel(cells, DEFAULT_CHANNEL)
+		_upload_cells_for_channel(cells, PLAYER_CHANNEL)
+		_upload_cells_for_channel(big_monster_changed, BIG_MONSTER_CHANNEL)
+
+
 func clear_cell_contribution(
 	cell: Vector2i,
 	source_id: StringName,
@@ -156,6 +213,7 @@ func clear_cells_contribution_pair(cells: Array[Vector2i], source_id: StringName
 		return
 	var default_changed: Array[Vector2i] = []
 	var player_changed: Array[Vector2i] = []
+	var big_monster_changed: Array[Vector2i] = []
 	var seen: Dictionary = {}
 	for cell: Vector2i in cells:
 		if seen.has(cell):
@@ -165,15 +223,21 @@ func clear_cells_contribution_pair(cells: Array[Vector2i], source_id: StringName
 		var default_explicit_before: bool = _has_channel_contribution(cell, DEFAULT_CHANNEL)
 		var player_before: float = effective_multiplier(cell, PLAYER_CHANNEL)
 		var player_explicit_before: bool = _has_channel_contribution(cell, PLAYER_CHANNEL)
+		var big_monster_before: float = effective_multiplier(cell, BIG_MONSTER_CHANNEL)
+		var big_monster_explicit_before: bool = _has_channel_contribution(cell, BIG_MONSTER_CHANNEL)
 		_remove_local_contribution(cell, source_id, DEFAULT_CHANNEL)
 		_remove_local_contribution(cell, source_id, PLAYER_CHANNEL)
+		_remove_local_contribution(cell, source_id, BIG_MONSTER_CHANNEL)
 		if _effective_state_changed(cell, DEFAULT_CHANNEL, default_before, default_explicit_before):
 			default_changed.append(cell)
 		if _effective_state_changed(cell, PLAYER_CHANNEL, player_before, player_explicit_before):
 			player_changed.append(cell)
+		if _effective_state_changed(cell, BIG_MONSTER_CHANNEL, big_monster_before, big_monster_explicit_before):
+			big_monster_changed.append(cell)
 	if upload:
 		_upload_cells_for_channel(default_changed, DEFAULT_CHANNEL)
 		_upload_cells_for_channel(player_changed, PLAYER_CHANNEL)
+		_upload_cells_for_channel(big_monster_changed, BIG_MONSTER_CHANNEL)
 
 
 func upload_all_channels() -> void:
@@ -181,12 +245,16 @@ func upload_all_channels() -> void:
 	var default_multipliers: PackedFloat32Array = PackedFloat32Array()
 	var player_cells: PackedVector2Array = PackedVector2Array()
 	var player_multipliers: PackedFloat32Array = PackedFloat32Array()
+	var big_monster_cells: PackedVector2Array = PackedVector2Array()
+	var big_monster_multipliers: PackedFloat32Array = PackedFloat32Array()
 	for raw_cell: Variant in _contributions.keys():
 		var cell: Vector2i = raw_cell as Vector2i
 		_append_effective(default_cells, default_multipliers, cell, DEFAULT_CHANNEL)
 		_append_effective(player_cells, player_multipliers, cell, PLAYER_CHANNEL)
+		_append_effective(big_monster_cells, big_monster_multipliers, cell, BIG_MONSTER_CHANNEL)
 	_replace_channel(default_cells, default_multipliers, DEFAULT_CHANNEL)
 	_replace_channel(player_cells, player_multipliers, PLAYER_CHANNEL)
+	_replace_channel(big_monster_cells, big_monster_multipliers, BIG_MONSTER_CHANNEL)
 
 
 func clear_all_native_channels() -> void:
@@ -194,6 +262,7 @@ func clear_all_native_channels() -> void:
 		return
 	_steering.call("clear_terrain_speed_channel", DEFAULT_CHANNEL)
 	_steering.call("clear_terrain_speed_channel", PLAYER_CHANNEL)
+	_steering.call("clear_terrain_speed_channel", BIG_MONSTER_CHANNEL)
 
 
 func clear_local_contributions() -> void:

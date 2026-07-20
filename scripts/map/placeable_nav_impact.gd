@@ -93,12 +93,22 @@ static func def_speed_multiplier(item_def: Dictionary) -> float:
 
 # Speed multiplier this def imposes on the PLAYER. Defs opting out with
 # "slows_player": false (roses: the player is never slowed by their own crop) impose
-# nothing on the player while still slowing every other agent. Everything else
-# (ronce, debris, fences, turrets, water, bamboo) slows the player like anyone else.
-# Single authority for the rule: both terrain-speed call sites ask this.
+# nothing on the player while still slowing every other agent. A definition may instead
+# provide an explicit player_speed_multiplier (ronce). Single authority for the rule:
+# both terrain-speed call sites ask this.
 static func def_player_speed_multiplier(item_def: Dictionary) -> float:
 	if not bool(item_def.get("slows_player", true)):
 		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	if item_def.has("player_speed_multiplier"):
+		return _validated_speed_multiplier(item_def.get("player_speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER))
+	return def_speed_multiplier(item_def)
+
+
+## Speed multiplier for bigmonster's dedicated terrain channel. Most placeables
+## inherit the ordinary-agent value; only definitions with an explicit override differ.
+static func def_big_monster_speed_multiplier(item_def: Dictionary) -> float:
+	if item_def.has("big_monster_speed_multiplier"):
+		return _validated_speed_multiplier(item_def.get("big_monster_speed_multiplier", DEFAULT_TERRAIN_SPEED_MULTIPLIER))
 	return def_speed_multiplier(item_def)
 
 
@@ -152,3 +162,10 @@ static func _def_has_speed_modifier(item_def: Dictionary) -> bool:
 		return false
 	var multiplier: float = def_speed_multiplier(item_def)
 	return not is_equal_approx(multiplier, DEFAULT_TERRAIN_SPEED_MULTIPLIER)
+
+
+static func _validated_speed_multiplier(raw_multiplier: Variant) -> float:
+	var multiplier: float = float(raw_multiplier)
+	if is_nan(multiplier) or is_inf(multiplier) or multiplier <= 0.0:
+		return DEFAULT_TERRAIN_SPEED_MULTIPLIER
+	return clampf(multiplier, MIN_TERRAIN_SPEED_MULTIPLIER, MAX_TERRAIN_SPEED_MULTIPLIER)

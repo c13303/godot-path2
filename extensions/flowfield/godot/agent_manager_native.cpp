@@ -317,6 +317,12 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         if (std::isfinite(resist) && resist > 0.0)
             profile.smash_resist = resist;
     }
+    if (node->has_meta(StringName("terrain_speed_channel")))
+    {
+        int channel = (int)node->get_meta(StringName("terrain_speed_channel"));
+        if (channel >= ffcore::DEFAULT_TERRAIN_SPEED_CHANNEL)
+            profile.terrain_speed_channel = channel;
+    }
 
     steering->set_agent_profile(nav_id, profile);
     core_mgr->add_agent_to_group(nav_id, group_id);

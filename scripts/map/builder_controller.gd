@@ -37,7 +37,7 @@ var _claimed_cells: Dictionary = {}  # Vector2i -> DayVisitorMovementController
 var _visitor_ids: Dictionary = {}  # DayVisitorMovementController -> int
 var _visitors_by_id: Dictionary = {}  # int -> DayVisitorMovementController
 var _state_by_builder_id: Dictionary = {}  # int -> StringName
-var _work_house_by_builder_id: Dictionary = {}  # int -> StringName
+var _work_task_by_builder_id: Dictionary = {}  # int -> StringName
 var _house_id_by_builder_id: Dictionary = {}  # int -> StringName
 var _builder_id_by_house_id: Dictionary = {}  # StringName -> int
 var _home_cell_by_builder_id: Dictionary = {}  # int -> Vector2i
@@ -93,7 +93,7 @@ func on_night_started() -> void:
 		_release_claim_for(visitor)
 		var builder_id: int = _builder_id_for_visitor(visitor)
 		if builder_id >= 0:
-			_work_house_by_builder_id.erase(builder_id)
+			_work_task_by_builder_id.erase(builder_id)
 			if _house_id_by_builder_id.has(builder_id):
 				var home_cell: Vector2i = _builder_home_cell(builder_id)
 				if home_cell != INVALID_CELL and visitor.repath_to_target(home_cell):
@@ -182,7 +182,7 @@ func assign_fundamental_builder_to_house(house_id: StringName, entrance_cell: Ve
 		agent.set_meta("fundamental_builder", true)
 		agent.set_meta("resident_house_id", house_id)
 		agent.set_meta("home_entrance_cell", entrance_cell)
-	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
+	if not _work_task_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
 		return_builder_to_idle_area(_fundamental_builder_id)
 	_sync_fundamental_builder_bubble()
 
@@ -201,7 +201,7 @@ func clear_fundamental_builder_house_assignment() -> void:
 		agent.set_meta("fundamental_builder", true)
 		agent.remove_meta("resident_house_id")
 		agent.set_meta("home_entrance_cell", spot_cell)
-	if not _work_house_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
+	if not _work_task_by_builder_id.has(_fundamental_builder_id) and not is_builder_leaving(_fundamental_builder_id):
 		return_builder_to_idle_area(_fundamental_builder_id)
 	_sync_fundamental_builder_bubble()
 
@@ -262,12 +262,12 @@ func fundamental_builder_active() -> bool:
 	return _fundamental_builder_id >= 0 and is_builder_active(_fundamental_builder_id)
 
 
-# True from the moment the fundamental Builder is assigned a house job until it is released,
-# so it covers both walking to the site and hammering on it.
+# True from the moment the fundamental Builder is assigned construction or repair work until it is
+# released, so it covers both walking to the site and hammering on it.
 func fundamental_builder_working() -> bool:
 	if not fundamental_builder_active():
 		return false
-	return _work_house_by_builder_id.has(_fundamental_builder_id)
+	return _work_task_by_builder_id.has(_fundamental_builder_id)
 
 
 func fundamental_builder_idle_at_spot() -> bool:
@@ -328,7 +328,7 @@ func retire_fundamental_builder() -> void:
 		_fundamental_builder_id = -1
 		return
 	_release_claim_for(visitor)
-	_work_house_by_builder_id.erase(_fundamental_builder_id)
+	_work_task_by_builder_id.erase(_fundamental_builder_id)
 	_start_builder_evacuating_to_out(_fundamental_builder_id, visitor)
 
 
@@ -343,7 +343,7 @@ func evacuate_builder(builder_id: int) -> void:
 	if visitor == null:
 		return
 	_release_claim_for(visitor)
-	_work_house_by_builder_id.erase(builder_id)
+	_work_task_by_builder_id.erase(builder_id)
 	_start_builder_evacuating_to_out(builder_id, visitor)
 
 
@@ -407,7 +407,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_visitor_ids.clear()
 	_visitors_by_id.clear()
 	_state_by_builder_id.clear()
-	_work_house_by_builder_id.clear()
+	_work_task_by_builder_id.clear()
 	_house_id_by_builder_id.clear()
 	_builder_id_by_house_id.clear()
 	_home_cell_by_builder_id.clear()
@@ -440,7 +440,7 @@ func repath_for_walkability_change() -> void:
 		if visitor == null or not visitor.is_active() or visitor.is_leaving():
 			continue
 		var builder_id: int = _builder_id_for_visitor(visitor)
-		if builder_id >= 0 and _work_house_by_builder_id.has(builder_id):
+		if builder_id >= 0 and _work_task_by_builder_id.has(builder_id):
 			continue
 		var target: Vector2i = visitor.target_cell()
 		if _claim_still_valid(visitor, target):
@@ -531,7 +531,7 @@ func repath_builder_to_current_target(builder_id: int) -> bool:
 	return repathed
 
 
-func assign_builder_to_work_cell(builder_id: int, house_id: StringName, target_cell: Vector2i) -> bool:
+func assign_builder_to_work_cell(builder_id: int, work_id: StringName, target_cell: Vector2i) -> bool:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	if visitor == null or not visitor.is_active() or visitor.is_leaving():
 		return false
@@ -547,7 +547,7 @@ func assign_builder_to_work_cell(builder_id: int, house_id: StringName, target_c
 		_reset_builder_motion_watch(builder_id)
 		return false
 	_state_by_builder_id[builder_id] = STATE_TRAVELLING_TO_WORK
-	_work_house_by_builder_id[builder_id] = house_id
+	_work_task_by_builder_id[builder_id] = work_id
 	_clear_idle_return_state(builder_id)
 	_reset_builder_motion_watch(builder_id)
 	return true
@@ -557,7 +557,7 @@ func request_builder_local_work_move(builder_id: int, target_cell: Vector2i) -> 
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	if visitor == null or not visitor.is_active() or visitor.is_leaving():
 		return false
-	if not _work_house_by_builder_id.has(builder_id):
+	if not _work_task_by_builder_id.has(builder_id):
 		return false
 	if not _is_candidate_available(target_cell, visitor):
 		return false
@@ -635,7 +635,7 @@ func release_builder_from_work(builder_id: int) -> void:
 	var visitor: DayVisitorMovementController = _visitor_for_id(builder_id)
 	if visitor != null:
 		_release_claim_for(visitor)
-	_work_house_by_builder_id.erase(builder_id)
+	_work_task_by_builder_id.erase(builder_id)
 	if visitor != null and visitor.is_active() and not visitor.is_leaving():
 		var current_state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
 		if current_state != STATE_LEAVING and current_state != STATE_RETURNING_HOME and current_state != STATE_EVACUATING:
@@ -675,7 +675,7 @@ func return_builder_to_idle_area(builder_id: int) -> bool:
 		_park_builder_at_current_cell(builder_id, visitor)
 		_reset_builder_motion_watch(builder_id)
 		return false
-	_work_house_by_builder_id.erase(builder_id)
+	_work_task_by_builder_id.erase(builder_id)
 	_state_by_builder_id[builder_id] = STATE_RETURNING_IDLE
 	_clear_idle_return_state(builder_id)
 	_reset_builder_motion_watch(builder_id)
@@ -688,7 +688,7 @@ func _park_builder_at_current_cell(builder_id: int, visitor: DayVisitorMovementC
 		return
 	_release_claim_for(visitor)
 	_claimed_cells[current_cell] = visitor
-	_work_house_by_builder_id.erase(builder_id)
+	_work_task_by_builder_id.erase(builder_id)
 	_state_by_builder_id[builder_id] = STATE_IDLE
 	visitor.park_at_current_cell(current_cell)
 	_reset_builder_motion_watch(builder_id)
@@ -810,7 +810,7 @@ func _eligible_for_idle_home_correction(builder_id: int, visitor: DayVisitorMove
 		return false
 	if GameState.is_night or is_builder_leaving(builder_id):
 		return false
-	if _work_house_by_builder_id.has(builder_id):
+	if _work_task_by_builder_id.has(builder_id):
 		return false
 	if StringName(_state_by_builder_id.get(builder_id, &"")) != STATE_IDLE:
 		return false
@@ -918,15 +918,15 @@ func _update_builder_motion_watch(builder_id: int, visitor: DayVisitorMovementCo
 func _builder_stall_warning(builder_id: int, visitor: DayVisitorMovementController, current_position: Vector2, stalled_for: float) -> String:
 	var current_cell: Vector2i = builder_current_cell(builder_id)
 	var target_cell: Vector2i = visitor.target_cell()
-	var house_id: StringName = StringName(_work_house_by_builder_id.get(builder_id, &""))
+	var work_id: StringName = StringName(_work_task_by_builder_id.get(builder_id, &""))
 	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
 	var nav_id: int = visitor.nav_id()
 	var home_cell: Vector2i = _builder_home_cell(builder_id)
-	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s house=%s current_cell=%s target_cell=%s home=%s current_world=%s target_world=%s stalled_for=%.1fs." % [
+	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s work=%s current_cell=%s target_cell=%s home=%s current_world=%s target_world=%s stalled_for=%.1fs." % [
 		builder_id,
 		nav_id,
 		String(state),
-		String(house_id),
+		String(work_id),
 		current_cell,
 		target_cell,
 		home_cell,
@@ -970,7 +970,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_visitor_ids.erase(visitor)
 		_visitors_by_id.erase(builder_id)
 		_state_by_builder_id.erase(builder_id)
-		_work_house_by_builder_id.erase(builder_id)
+		_work_task_by_builder_id.erase(builder_id)
 		var house_id: StringName = StringName(_house_id_by_builder_id.get(builder_id, &""))
 		if house_id != &"":
 			_builder_id_by_house_id.erase(house_id)

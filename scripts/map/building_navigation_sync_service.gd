@@ -54,12 +54,13 @@ func sync_all_terrain_speed_cells() -> void:
 			touched[runtime_cell] = true
 	for raw_cell: Variant in touched.keys():
 		var cell: Vector2i = raw_cell as Vector2i
-		var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
-		_terrain_speed.set_cell_contribution_pair(
+		var multipliers: Vector3 = effective_cell_speed_profile(cell)
+		_terrain_speed.set_cell_contribution_triplet(
 			cell,
 			StringName(CELL_TERRAIN_SOURCE_PREFIX + str(cell)),
 			multipliers.x,
 			multipliers.y,
+			multipliers.z,
 			false
 		)
 	# Water carries its slowdown on the WaterSources layer rather than a catalog def, so it is not
@@ -82,9 +83,10 @@ func _sync_water_terrain_speed_cells() -> void:
 		WATER_TERRAIN_SPEED_MAX_MULTIPLIER
 	)
 	for raw_cell: Variant in watersources.get_used_cells():
-		_terrain_speed.set_cell_contribution_pair(
+		_terrain_speed.set_cell_contribution_triplet(
 			raw_cell as Vector2i,
 			WATER_TERRAIN_SOURCE,
+			multiplier,
 			multiplier,
 			multiplier,
 			false
@@ -224,13 +226,14 @@ func sync_building_cell_speed(cell: Vector2i, item_id: String) -> void:
 
 
 func refresh_cell_speed(cell: Vector2i) -> void:
-	var multipliers: Vector2 = effective_cell_speed_multipliers(cell)
+	var multipliers: Vector3 = effective_cell_speed_profile(cell)
 	_terrain_speed.set_steering(_get_steering_system())
-	_terrain_speed.set_cell_contribution_pair(
+	_terrain_speed.set_cell_contribution_triplet(
 		cell,
 		StringName(CELL_TERRAIN_SOURCE_PREFIX + str(cell)),
 		multipliers.x,
-		multipliers.y
+		multipliers.y,
+		multipliers.z
 	)
 
 
@@ -239,11 +242,20 @@ func refresh_cell_speed(cell: Vector2i) -> void:
 ## player then walks at full speed. Composition is delegated to TerrainSpeedModifierService,
 ## so slowdown priority and speed-up selection have one authoritative implementation.
 func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
+	var profile: Vector3 = effective_cell_speed_profile(cell)
+	return Vector2(profile.x, profile.y)
+
+
+## Effective terrain speed profile: x = ordinary agents, y = player,
+## z = bigmonster. The third channel normally mirrors x and only differs for
+## placeables with an explicit big-monster override such as ronce.
+func effective_cell_speed_profile(cell: Vector2i) -> Vector3:
 	var plantz: TileMapLayer = _manager.plantz
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
 	var fences: TileMapLayer = _manager.fences
 	var speed_multipliers: Array[float] = []
 	var player_speed_multipliers: Array[float] = []
+	var big_monster_speed_multipliers: Array[float] = []
 	var plant_manager: Node = _manager.plant_manager
 	if plant_manager != null and plant_manager.has_method("get_plant_item_id"):
 		var logical_plant_item_id: String = str(plant_manager.call("get_plant_item_id", cell))
@@ -251,6 +263,7 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 			var logical_plant_item_def: Dictionary = ItemCatalog.get_item_def(logical_plant_item_id)
 			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(logical_plant_item_def))
 			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(logical_plant_item_def))
+			big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(logical_plant_item_def))
 	for layer: TileMapLayer in [plantz, blocking_buildings, fences]:
 		if layer == null or layer.get_cell_source_id(cell) < 0:
 			continue
@@ -260,6 +273,7 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 		var layer_item_def: Dictionary = ItemCatalog.get_item_def(layer_item_id)
 		speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(layer_item_def))
 		player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(layer_item_def))
+		big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(layer_item_def))
 	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
 	if building_objects != null:
 		var runtime_item_id: String = building_objects.get_placeable_item_id(cell)
@@ -267,11 +281,13 @@ func effective_cell_speed_multipliers(cell: Vector2i) -> Vector2:
 			var runtime_item_def: Dictionary = ItemCatalog.get_item_def(runtime_item_id)
 			speed_multipliers.append(PlaceableNavImpact.def_speed_multiplier(runtime_item_def))
 			player_speed_multipliers.append(PlaceableNavImpact.def_player_speed_multiplier(runtime_item_def))
+			big_monster_speed_multipliers.append(PlaceableNavImpact.def_big_monster_speed_multiplier(runtime_item_def))
 	if _terrain_speed == null:
-		return Vector2(DEFAULT_TERRAIN_SPEED_MULTIPLIER, DEFAULT_TERRAIN_SPEED_MULTIPLIER)
-	return Vector2(
+		return Vector3(DEFAULT_TERRAIN_SPEED_MULTIPLIER, DEFAULT_TERRAIN_SPEED_MULTIPLIER, DEFAULT_TERRAIN_SPEED_MULTIPLIER)
+	return Vector3(
 		_terrain_speed.compose_multipliers(speed_multipliers),
-		_terrain_speed.compose_multipliers(player_speed_multipliers)
+		_terrain_speed.compose_multipliers(player_speed_multipliers),
+		_terrain_speed.compose_multipliers(big_monster_speed_multipliers)
 	)
 
 
