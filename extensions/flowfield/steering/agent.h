@@ -59,6 +59,9 @@ namespace ffcore
         // supply an override.
         double contact_push_friction_loss = 0.65;
         double contact_control_suppression_seconds = 0.20;
+        // Source-side presentation policy for contact shoves. Physics is unchanged;
+        // false only suppresses the receiver's impaired-control visual feedback.
+        bool contact_push_shows_control_impaired_feedback = true;
         // Resistance to smash/knockback impulses (see apply_smash_impulse). 1.0 =
         // normal; 2.0 halves the received impulse velocity (twice the inertia).
         double smash_resist = 1.0;
@@ -106,12 +109,20 @@ namespace ffcore
         // Navigation-preserving impulses contribute external velocity without
         // disabling or cancelling autonomous movement in the opposite direction.
         bool smash_preserves_control = false;
+        // Contact shoves end with their brief control-suppression window. Other
+        // gameplay knockbacks keep their established propelled duration/friction.
+        bool smash_stops_on_control_restore = false;
+        // Whether this impulse's control suppression should produce the existing
+        // red impaired-control feedback on the receiving scene node.
+        bool smash_shows_control_impaired_feedback = true;
         Vec2 pending_smash{};
         double smash_delay = 0.0;
         double pending_smash_friction = -1.0;
         double pending_smash_control_suppression = 1.0;
         double pending_smash_control_suppression_duration = 0.0;
         bool pending_smash_preserves_control = false;
+        bool pending_smash_stops_on_control_restore = false;
+        bool pending_smash_shows_control_impaired_feedback = true;
         int pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
         bool smash_pending = false;
         bool was_in_t2 = false;

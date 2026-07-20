@@ -311,6 +311,8 @@ int AgentManagerNative::spawn_agent(Node2D *node, int group_id)
         if (std::isfinite(suppression_seconds) && suppression_seconds >= 0.0)
             profile.contact_control_suppression_seconds = suppression_seconds;
     }
+    if (node->has_meta(StringName("agent_contact_push_shows_control_impaired_feedback")))
+        profile.contact_push_shows_control_impaired_feedback = (bool)node->get_meta(StringName("agent_contact_push_shows_control_impaired_feedback"));
     if (node->has_meta(StringName("monster_smash_resist")))
     {
         double resist = (double)node->get_meta(StringName("monster_smash_resist"));

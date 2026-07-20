@@ -386,6 +386,8 @@ void SteeringSystemNative::set_agent_profile(int agent_id, const Dictionary &pro
         native_profile.contact_push_friction_loss = double(profile["contact_push_friction_loss"]);
     if (profile.has("contact_control_suppression_seconds"))
         native_profile.contact_control_suppression_seconds = double(profile["contact_control_suppression_seconds"]);
+    if (profile.has("contact_push_shows_control_impaired_feedback"))
+        native_profile.contact_push_shows_control_impaired_feedback = bool(profile["contact_push_shows_control_impaired_feedback"]);
     if (profile.has("world_radius"))
         native_profile.world_radius = double(profile["world_radius"]);
     if (profile.has("max_speed"))
@@ -895,7 +897,10 @@ void SteeringSystemNative::_process(double delta)
         if (it_propelled_state != agent_propelled_states.end())
             prev_propelled = it_propelled_state->second;
 
-        bool control_impaired = a->is_propelled && a->smash_control_suppression_timer > 0.0 && a->smash_control_suppression > 0.001;
+        bool control_impaired = a->is_propelled
+            && a->smash_control_suppression_timer > 0.0
+            && a->smash_control_suppression > 0.001
+            && a->smash_shows_control_impaired_feedback;
         auto it_control_impaired_state = agent_control_impaired_states.find(id);
         bool prev_control_impaired = false;
         if (it_control_impaired_state != agent_control_impaired_states.end())

@@ -17,6 +17,11 @@ using namespace ffcore; // Utilisation de l’espace de noms du moteur
 
 static constexpr double DROWNING_VELOCITY_DAMPING_PER_SEC = 35.0;
 static constexpr double DROWNING_STOP_SPEED = 8.0;
+// Contact right-of-way only treats normalized manual input inside this deadzone as idle.
+static constexpr double CONTACT_MANUAL_IDLE_INPUT_MAX_LENGTH_SQ = 1e-4;
+// Autonomous steering must have real intent and point substantially into the contact.
+static constexpr double CONTACT_AUTONOMOUS_INTENT_MIN_LENGTH_SQ = 1e-4;
+static constexpr double CONTACT_AUTONOMOUS_FORWARD_MIN_DOT = 0.35;
 
 /* declaration generale du system pour partage */
 static SteeringSystem *g_steering = nullptr;
@@ -723,6 +728,61 @@ void SteeringSystem::update_contact_push_cooldowns(double delta)
     }
 }
 
+bool SteeringSystem::autonomous_can_shove_idle_manual(
+    const AgentData &agent,
+    const AgentData &neighbor,
+    const Vec2 &agent_to_neighbor) const
+{
+    const AgentData *idle_manual_agent = nullptr;
+    const AgentData *autonomous_agent = nullptr;
+    if (agent.control_mode == AgentControlMode::Manual
+        && neighbor.control_mode == AgentControlMode::FlowField)
+    {
+        idle_manual_agent = &agent;
+        autonomous_agent = &neighbor;
+    }
+    else if (neighbor.control_mode == AgentControlMode::Manual
+        && agent.control_mode == AgentControlMode::FlowField)
+    {
+        idle_manual_agent = &neighbor;
+        autonomous_agent = &agent;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (!idle_manual_agent->active
+        || idle_manual_agent->paused
+        || idle_manual_agent->manual_input_dir.length_squared() > CONTACT_MANUAL_IDLE_INPUT_MAX_LENGTH_SQ
+        || (idle_manual_agent->is_propelled && !idle_manual_agent->smash_stops_on_control_restore)
+        || !autonomous_agent->active
+        || autonomous_agent->paused
+        || autonomous_agent->is_propelled
+        || autonomous_agent->smash_pending
+        || (!autonomous_agent->path_active && autonomous_agent->flow == nullptr)
+        || is_agent_waiting_for_flow(*autonomous_agent))
+    {
+        return false;
+    }
+
+    // Route intent comes first so local contact avoidance cannot hide that the
+    // agent's actual path continues through the manual agent.
+    Vec2 autonomous_intent = autonomous_agent->debug_nav_dir;
+    if (autonomous_intent.length_squared() <= CONTACT_AUTONOMOUS_INTENT_MIN_LENGTH_SQ)
+        autonomous_intent = autonomous_agent->debug_desired_dir;
+
+    double intent_length_sq = autonomous_intent.length_squared();
+    if (intent_length_sq <= CONTACT_AUTONOMOUS_INTENT_MIN_LENGTH_SQ)
+        return false;
+
+    Vec2 toward_manual = autonomous_agent == &agent ? agent_to_neighbor : agent_to_neighbor * -1.0;
+    double forward_dot = autonomous_intent.dot(toward_manual);
+    return forward_dot > 0.0
+        && forward_dot * forward_dot >= CONTACT_AUTONOMOUS_FORWARD_MIN_DOT
+            * CONTACT_AUTONOMOUS_FORWARD_MIN_DOT * intent_length_sq;
+}
+
 void SteeringSystem::apply_contact_pushes(double delta)
 {
     (void)delta;
@@ -768,17 +828,26 @@ void SteeringSystem::apply_contact_pushes(double delta)
             if (dir.is_zero())
                 dir = hashed_unit_dir(agent.id);
 
+            // Profile pressure remains the default winner. The sole exception is an
+            // autonomous mover heading into an idle manual agent: in that case the
+            // manual agent yields, using the same pair pressure and impulse pipeline.
+            bool autonomous_shoves_idle_manual = autonomous_can_shove_idle_manual(agent, neighbor, dir);
+
             double agent_pressure = agent.profile.contact_push_power / std::max(0.001, neighbor.profile.contact_push_resist);
             double neighbor_pressure = neighbor.profile.contact_push_power / std::max(0.001, agent.profile.contact_push_resist);
             double net_pressure = agent_pressure - neighbor_pressure;
             if (std::abs(net_pressure) < 1e-3)
                 continue;
 
-            int target_id = net_pressure > 0.0 ? neighbor.id : agent.id;
-            Vec2 impulse_dir = net_pressure > 0.0 ? dir : dir * -1.0;
+            bool push_neighbor = autonomous_shoves_idle_manual
+                ? neighbor.control_mode == AgentControlMode::Manual
+                : net_pressure > 0.0;
+            int target_id = push_neighbor ? neighbor.id : agent.id;
+            Vec2 impulse_dir = push_neighbor ? dir : dir * -1.0;
             double force = std::abs(net_pressure);
             double cooldown = std::max(agent.profile.contact_push_cooldown, neighbor.profile.contact_push_cooldown);
-            const AgentData &target = net_pressure > 0.0 ? neighbor : agent;
+            const AgentData &target = push_neighbor ? neighbor : agent;
+            const AgentData &source = push_neighbor ? agent : neighbor;
 
             queue_smash_impulse(
                 target_id,
@@ -790,7 +859,9 @@ void SteeringSystem::apply_contact_pushes(double delta)
                 1.0,
                 target.profile.contact_control_suppression_seconds,
                 false,
-                static_cast<int>(ImpulseQueuePriority::Contact));
+                static_cast<int>(ImpulseQueuePriority::Contact),
+                false,
+                source.profile.contact_push_shows_control_impaired_feedback);
             contact_push_cooldowns[agent.id][neighbor.id] = cooldown;
             contact_push_cooldowns[neighbor.id][agent.id] = cooldown;
         }
@@ -1432,10 +1503,12 @@ void SteeringSystem::clear_pending_smash_slot(AgentData &agent)
     agent.pending_smash_control_suppression = 1.0;
     agent.pending_smash_control_suppression_duration = 0.0;
     agent.pending_smash_preserves_control = false;
+    agent.pending_smash_stops_on_control_restore = false;
+    agent.pending_smash_shows_control_impaired_feedback = true;
     agent.pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
 }
 
-void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control)
+void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control, bool show_control_impaired_feedback)
 {
     auto it = id_to_index.find(id);
     if (it == id_to_index.end())
@@ -1473,6 +1546,9 @@ void SteeringSystem::queue_smash_impulse(int id, const Vec2 &direction, double f
     agent.pending_smash_control_suppression = std::clamp(control_suppression, 0.0, 1.0);
     agent.pending_smash_control_suppression_duration = std::max(0.0, control_suppression_duration);
     agent.pending_smash_preserves_control = preserve_control;
+    agent.pending_smash_stops_on_control_restore = sanitized_priority == static_cast<int>(ImpulseQueuePriority::Contact)
+        && agent.pending_smash_control_suppression_duration > 0.0;
+    agent.pending_smash_shows_control_impaired_feedback = show_control_impaired_feedback;
     agent.pending_smash_priority = sanitized_priority;
     agent.smash_pending = true;
     agent.smash_force = Vec2(0, 0);
@@ -1838,6 +1914,8 @@ void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seco
         a.smash_control_suppression = 1.0;
         a.smash_control_suppression_timer = 0.0;
         a.smash_preserves_control = false;
+        a.smash_stops_on_control_restore = false;
+        a.smash_shows_control_impaired_feedback = true;
         a.smash_just_reset = false;
         a.is_propelled = false;
         a.propelled_timer = 0.0;
@@ -2071,6 +2149,8 @@ void SteeringSystem::update_all(double delta)
             a.smash_control_suppression = 1.0;
             a.smash_control_suppression_timer = 0.0;
             a.smash_preserves_control = false;
+            a.smash_stops_on_control_restore = false;
+            a.smash_shows_control_impaired_feedback = true;
             continue;
         }
         if (a.smash_pending)
@@ -2083,6 +2163,8 @@ void SteeringSystem::update_all(double delta)
                 a.smash_control_suppression = a.pending_smash_control_suppression;
                 a.smash_control_suppression_timer = a.pending_smash_control_suppression_duration;
                 a.smash_preserves_control = a.pending_smash_preserves_control;
+                a.smash_stops_on_control_restore = a.pending_smash_stops_on_control_restore;
+                a.smash_shows_control_impaired_feedback = a.pending_smash_shows_control_impaired_feedback;
                 clear_pending_smash_slot(a);
                 a.smash_just_reset = true;
             }
@@ -2103,6 +2185,19 @@ void SteeringSystem::update_all(double delta)
         }
         if (a.smash_control_suppression_timer > 0.0)
             a.smash_control_suppression_timer = std::max(0.0, a.smash_control_suppression_timer - delta);
+
+        if (a.is_propelled && a.smash_stops_on_control_restore && a.smash_control_suppression_timer <= 0.0)
+        {
+            a.is_propelled = false;
+            a.propelled_timer = 0.0;
+            a.smash_force = Vec2(0, 0);
+            a.smash_friction = -1.0;
+            a.smash_control_suppression = 1.0;
+            a.smash_preserves_control = false;
+            a.smash_stops_on_control_restore = false;
+            a.smash_shows_control_impaired_feedback = true;
+            a.velocity = Vec2(0, 0);
+        }
 
         if (a.smash_just_reset)
         {
@@ -2132,6 +2227,8 @@ void SteeringSystem::update_all(double delta)
                 a.smash_control_suppression = 1.0;
                 a.smash_control_suppression_timer = 0.0;
                 a.smash_preserves_control = false;
+                a.smash_stops_on_control_restore = false;
+                a.smash_shows_control_impaired_feedback = true;
                 a.velocity = Vec2(0, 0);
             }
         }

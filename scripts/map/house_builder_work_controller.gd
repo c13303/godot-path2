@@ -2,7 +2,8 @@ extends RefCounted
 class_name HouseBuilderWorkController
 
 ## Owns the Builder work queue. New-house construction remains the first priority; when no WIP
-## house is available, an idle Builder repairs the nearest reachable damaged player placeable.
+## house is available, an idle Builder repairs the nearest reachable damaged player placeable that
+## regular citizens cannot crush. Stompable plant-like targets are reserved for the sheep.
 ## PlayerPlaceableDurabilityService remains the sole owner of building health.
 
 const HOUSE_WORK_CELL_SEARCH_RADIUS: int = 3
@@ -475,6 +476,11 @@ func _is_repairable_key(repair_key: String) -> bool:
 
 func _is_repairable_record(record: Dictionary) -> bool:
 	if record.is_empty():
+		return false
+	var item_id: String = str(record.get("item_id", ""))
+	# Builders are regular citizens and can crush stompable plants by walking onto them. Leave
+	# those repairs to the sheep, whose movement and repair role are explicitly plant-safe.
+	if ItemCatalog.is_stompable(item_id):
 		return false
 	var health: int = int(record.get("health", 0))
 	var max_health: int = int(record.get("max_health", 0))

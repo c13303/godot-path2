@@ -26,6 +26,7 @@ const VILLAGER_CONTACT_PUSH_RESIST: float = 2.0
 const VILLAGER_CONTACT_PUSH_COOLDOWN: float = 0.2
 const VILLAGER_CONTACT_PUSH_FRICTION_LOSS: float = 0.995
 const VILLAGER_CONTACT_CONTROL_SUPPRESSION_SECONDS: float = 0.1
+const VILLAGER_CONTACT_PUSH_SHOWS_CONTROL_IMPAIRED_FEEDBACK: bool = false
 
 var _manager: Node
 
@@ -178,6 +179,10 @@ func _apply_villager_traits(agent: Node, crushes_placeables: bool = true) -> voi
 	agent.set_meta("agent_contact_push_cooldown", VILLAGER_CONTACT_PUSH_COOLDOWN)
 	agent.set_meta("agent_contact_push_friction_loss", VILLAGER_CONTACT_PUSH_FRICTION_LOSS)
 	agent.set_meta("agent_contact_control_suppression_seconds", VILLAGER_CONTACT_CONTROL_SUPPRESSION_SECONDS)
+	agent.set_meta(
+		"agent_contact_push_shows_control_impaired_feedback",
+		VILLAGER_CONTACT_PUSH_SHOWS_CONTROL_IMPAIRED_FEEDBACK
+	)
 	if crushes_placeables:
 		_mark_crushes_placeables(agent)
 

@@ -301,11 +301,12 @@ namespace ffcore
 
         double movement_priority(const AgentData &agent) const;
         void update_contact_push_cooldowns(double delta);
+        bool autonomous_can_shove_idle_manual(const AgentData &agent, const AgentData &neighbor, const Vec2 &agent_to_neighbor) const;
         void apply_contact_pushes(double delta);
         void apply_traffic_right_of_way(double delta);
         bool is_agent_waiting_for_flow(const AgentData &agent) const;
         void clear_pending_smash_slot(AgentData &agent);
-        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control = false);
+        void queue_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration, bool respect_weapon_immune, int impulse_priority, bool preserve_control = false, bool show_control_impaired_feedback = true);
         Vec2 force_voisine(const AgentData &agent);
         // Soft static obstacle repulsion (pushes agents away from circular obstacles).
         Vec2 static_obstacle_repulsion_force(const AgentData &agent);
