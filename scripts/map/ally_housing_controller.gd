@@ -26,6 +26,9 @@ class_name AllyHousingController
 
 const HOUSE_BUILDER_ID: StringName = &"house_builder"
 const HOUSE_MERCHANT_ID: StringName = &"house_merchant"
+# Shared policy for every villager, including the specialized fundamental Builder.
+# Interaction targeting and dialogs remain active when this movement hold is disabled.
+const PAUSE_VILLAGERS_NEAR_PLAYER_ENABLED: bool = false
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null

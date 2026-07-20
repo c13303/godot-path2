@@ -1666,7 +1666,7 @@ func get_fundamental_builder_node() -> Node2D:
 
 
 func set_fundamental_builder_interaction_selected(value: bool) -> void:
-	_builder.set_fundamental_builder_paused(value)
+	_builder.set_fundamental_builder_interaction_selected(value)
 
 
 func is_any_reveal_cutscene_active() -> bool:
@@ -1774,8 +1774,8 @@ func get_seed_merchant_world_position() -> Vector2:
 func is_player_near_house_resident(resident_type: StringName, radius_tiles: int) -> bool:
 	var resident: HouseResidentController = _ally_housing.get_ordinary_resident(resident_type)
 	# Compatibility wrapper for older scene/dynamic callers. Proximity ownership now lives in the
-	# player interaction coordinator; an interaction-held resident is the selected in-range one.
-	return radius_tiles > 0 and resident != null and resident.is_active() and resident.is_interaction_held()
+	# player interaction coordinator; an interaction-selected resident is the in-range one.
+	return radius_tiles > 0 and resident != null and resident.is_active() and resident.is_interaction_selected()
 
 
 func has_house_resident_reached_spot(resident_type: StringName) -> bool:

@@ -7,7 +7,8 @@ class_name SheepGardenRole
 ## send_on_errand(). The sheep's dialog lives in SheepDialogController.
 ##
 ## Whenever it is free the sheep takes the nearest of two jobs:
-##   * eat a plant debris  -> the debris is cleared and the player is paid a gem;
+##   * eat a plant debris  -> the debris is cleared and a gem drops on the ground for the player
+##     to collect (same loose-drop system as monster death drops);
 ##   * mend a damaged wet-grass building (rose, imperial plant, ronce, epine turret, kraken)
 ##     -> its health is healed back, REPAIR_FULL_SECONDS for a full bar and proportionally less
 ##        for a partial one. Health ownership stays with PlayerPlaceableDurabilityService; this
@@ -408,23 +409,11 @@ func _durability() -> PlayerPlaceableDurabilityService:
 # Rewards.
 # ---------------------------------------------------------------------------
 
-## Grants the debris gem reward through the canonical GameUI façade: the gems are credited
-## atomically, then feedback flies them to the player. A missing GameUI falls back to a direct
-## progression credit so the reward is never lost.
+## Drops the debris reward as loose collectible gems on the ground, exactly like a monster death
+## drop: the player picks them up by walking over them (GroundDropManager owns that flow).
 func _spawn_debris_reward_gems(world_position: Vector2) -> void:
-	var scene: Node = _manager.get_tree().current_scene
-	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui != null and game_ui.has_method("grant_currency_from_world"):
-		if bool(game_ui.call("grant_currency_from_world", &"gem", world_position, DEBRIS_REWARD_GEMS)):
-			return
-	_credit_debris_reward_gem()
-
-
-func _credit_debris_reward_gem() -> void:
-	var scene: Node = _manager.get_tree().current_scene
-	var progression_node: Node = scene.get_node_or_null("progression") if scene != null else null
-	if progression_node != null and progression_node.has_method("update_gems"):
-		progression_node.call("update_gems", DEBRIS_REWARD_GEMS)
+	for i: int in range(maxi(0, DEBRIS_REWARD_GEMS)):
+		_manager.spawn_collectible_currency(&"gem", world_position)
 
 
 # ---------------------------------------------------------------------------

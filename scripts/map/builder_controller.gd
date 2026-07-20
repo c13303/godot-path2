@@ -50,6 +50,7 @@ var _idle_home_probe_elapsed_by_builder_id: Dictionary = {}  # int -> float
 var _idle_displacement_seconds_by_builder_id: Dictionary = {}  # int -> float
 var _idle_return_retry_cooldown_by_builder_id: Dictionary = {}  # int -> float
 var _pending_idle_return_by_builder_id: Dictionary = {}  # int -> true
+var _fundamental_builder_interaction_selected: bool = false
 var _fundamental_builder_paused: bool = false
 var _debug_idle_home_probes_by_builder_id: Dictionary = {}
 var _debug_idle_home_requests_by_builder_id: Dictionary = {}
@@ -87,7 +88,7 @@ func begin_day() -> void:
 
 
 func on_night_started() -> void:
-	set_fundamental_builder_paused(false)
+	set_fundamental_builder_interaction_selected(false)
 	for visitor: DayVisitorMovementController in _visitors:
 		_release_claim_for(visitor)
 		var builder_id: int = _builder_id_for_visitor(visitor)
@@ -285,8 +286,15 @@ func set_fundamental_builder_paused(value: bool) -> void:
 		visitor.set_autonomous_paused(value)
 
 
+func set_fundamental_builder_interaction_selected(value: bool) -> void:
+	_fundamental_builder_interaction_selected = value
+	set_fundamental_builder_paused(
+		value and AllyHousingController.PAUSE_VILLAGERS_NEAR_PLAYER_ENABLED
+	)
+
+
 func is_fundamental_builder_interaction_selected() -> bool:
-	return _fundamental_builder_paused
+	return _fundamental_builder_interaction_selected
 
 
 func fundamental_builder_world_position() -> Vector2:
@@ -316,6 +324,7 @@ func retire_fundamental_builder() -> void:
 		return
 	var visitor: DayVisitorMovementController = _visitor_for_id(_fundamental_builder_id)
 	if visitor == null:
+		set_fundamental_builder_interaction_selected(false)
 		_fundamental_builder_id = -1
 		return
 	_release_claim_for(visitor)
@@ -410,6 +419,7 @@ func clear_active_builders(free_agents: bool) -> void:
 	_debug_idle_home_repaths_by_builder_id.clear()
 	_idle_home_probe_elapsed_by_builder_id.clear()
 	_fundamental_builder_id = -1
+	_fundamental_builder_interaction_selected = false
 	_fundamental_builder_paused = false
 	_hammer_visual.clear_all()
 	_clear_motion_watch()
@@ -967,6 +977,7 @@ func _remove_visitor(visitor: DayVisitorMovementController) -> void:
 		_house_id_by_builder_id.erase(builder_id)
 		_home_cell_by_builder_id.erase(builder_id)
 		if _fundamental_builder_id == builder_id:
+			set_fundamental_builder_interaction_selected(false)
 			_fundamental_builder_id = -1
 			# The agent is already leaving the scene; no visual cleanup is needed.
 		_clear_idle_return_state(builder_id)

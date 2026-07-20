@@ -29,7 +29,7 @@ waves = Array[ExtResource("4_wave")]([SubResource("Resource_jab7j")])
 [sub_resource type="Resource" id="Resource_yn215"]
 script = ExtResource("4_rk5yt")
 currency = "gem"
-amount = 10
+amount = 40
 
 [sub_resource type="Resource" id="Resource_1hais"]
 script = ExtResource("2_night_playlist")

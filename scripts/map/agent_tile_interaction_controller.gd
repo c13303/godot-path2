@@ -20,6 +20,8 @@ const RECHECK_STATE_CHANGED: int = 4
 const STOMP_DAMAGE_INTERVAL_SECONDS: float = 1.0
 const NORMAL_STOMP_DAMAGE: int = 20
 const BIG_MONSTER_STOMP_DAMAGE: int = 40
+const RONCE_BIG_MONSTER_ENTRY_DAMAGE: int = 10
+const RONCE_ITEM_ID: String = "ronce"
 
 var _manager: BuildingManager = null
 
@@ -39,6 +41,8 @@ func setup(manager: BuildingManager) -> void:
 
 func evaluate(agent: Node2D, category: StringName, cell: Vector2i, reasons: int) -> void:
 	if _manager == null or agent == null or not is_instance_valid(agent):
+		return
+	if (reasons & RECHECK_CELL_ENTERED) != 0 and _apply_ronce_entry_damage(agent, category, cell):
 		return
 	var agent_id: int = agent.get_instance_id()
 	if not _agent_can_stomp(agent, category):
@@ -244,6 +248,36 @@ func _resolve_building_target(cell: Vector2i) -> Dictionary:
 	if layer_name == &"buildings":
 		layer_name = &"traversable_buildings"
 	return _target_from_durability(cell, layer_name, item_id)
+
+
+## Ronce is an entry hazard only for big monsters. Rechecks caused by placement or
+## state changes deliberately do not deal damage; the agent must cross into the cell.
+## Returns true when the hit killed the monster and scheduled authoritative removal.
+func _apply_ronce_entry_damage(agent: Node2D, category: StringName, cell: Vector2i) -> bool:
+	if category != CATEGORY_MONSTERS or not _is_big_monster(agent):
+		return false
+	var building_objects: BuildingObjectManager = _manager.get_building_object_manager()
+	if building_objects == null:
+		return false
+	var placeable: Dictionary = building_objects.get_placeable_instance(cell)
+	if str(placeable.get("item_id", "")) != RONCE_ITEM_ID:
+		return false
+	if not agent.has_method("take_damage"):
+		return false
+	var died: bool = bool(agent.call("take_damage", RONCE_BIG_MONSTER_ENTRY_DAMAGE))
+	_manager.show_damage_number(agent.global_position, RONCE_BIG_MONSTER_ENTRY_DAMAGE)
+	if died:
+		# AgentCellTracker is iterating its transition queue here. Defer removal so its
+		# membership arrays are not mutated in the middle of that iteration.
+		Callable(_manager, "remove_dead_monster").call_deferred(agent)
+	return died
+
+
+func _is_big_monster(agent: Node2D) -> bool:
+	if agent == null or not is_instance_valid(agent) or not agent.has_meta("monster_type"):
+		return false
+	var monster_type: StringName = StringName(str(agent.get_meta("monster_type")))
+	return monster_type == MonsterCatalog.BIG_MONSTER_ID
 
 
 func _target_from_durability(cell: Vector2i, layer_name: StringName, item_id: String) -> Dictionary:

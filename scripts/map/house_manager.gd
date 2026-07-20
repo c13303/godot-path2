@@ -713,6 +713,28 @@ func count_completed_houses(item_id: StringName) -> int:
 	return count
 
 
+## Houses of `item_id` the player built, finished or still under construction. Authored level
+## houses are excluded: the authored seed-merchant house registers as a completed "house_merchant",
+## which must not answer a step that asks the player to build one themselves.
+func count_player_built_houses(item_id: StringName) -> int:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var count: int = 0
+	for record: HouseRecord in _houses:
+		if record.player_built and record.item_id == normalized_id:
+			count += 1
+	return count
+
+
+## Player-built houses of `item_id` that are finished (see count_player_built_houses).
+func count_completed_player_built_houses(item_id: StringName) -> int:
+	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
+	var count: int = 0
+	for record: HouseRecord in _houses:
+		if record.player_built and record.item_id == normalized_id and record.status == HOUSE_STATUS_COMPLETED:
+			count += 1
+	return count
+
+
 func count_existing_houses(item_id: StringName) -> int:
 	var normalized_id: String = ItemCatalog.normalize_house_item_id(String(item_id))
 	var count: int = 0

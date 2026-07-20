@@ -36,6 +36,10 @@ const IDLE_HOME_RETRY_COOLDOWN_SECONDS: float = 1.0
 # Native steering accepts a path waypoint at 0.50 tile. Correction starts farther out so local
 # avoidance and the path endpoint's authored dispersion cannot oscillate around arrival.
 const IDLE_HOME_DISPLACEMENT_TILE_FACTOR: float = 0.75
+enum SpawnOrigin {
+	TOWN_ENTRANCE,
+	HOUSE,
+}
 
 var _manager: BuildingManager = null
 var _house_manager: HouseManager = null
@@ -51,6 +55,7 @@ var _idle_home_check_elapsed: float = 0.0
 var _idle_displacement_seconds: float = 0.0
 var _idle_return_retry_cooldown: float = 0.0
 var _idle_return_pending: bool = false
+var _interaction_selected: bool = false
 var _interaction_held: bool = false
 var _debug_idle_home_probes: int = 0
 var _debug_idle_home_requests: int = 0
@@ -85,7 +90,8 @@ func reconcile_houses() -> void:
 	var snapshot: HouseManager.HouseSnapshot = _house_manager.get_house_snapshot(ids[0])
 	if snapshot == null:
 		return
-	spawn_for_house(snapshot.id, snapshot.entrance_cell)
+	var spawn_origin: int = SpawnOrigin.HOUSE if GameState.is_dawn_phase else SpawnOrigin.TOWN_ENTRANCE
+	spawn_for_house(snapshot.id, snapshot.entrance_cell, false, spawn_origin)
 
 
 func process(_delta: float) -> void:
@@ -101,6 +107,7 @@ func process_phase(_delta: float) -> void:
 
 
 func on_night_started() -> void:
+	_interaction_selected = false
 	_set_interaction_hold(false)
 	if _config.role != null:
 		_config.role.on_night_started(self)
@@ -133,6 +140,8 @@ func on_house_completed(snapshot: HouseManager.HouseSnapshot) -> void:
 		return
 	if _visitor.is_active():
 		return
+	# Completion always introduces a new resident from the town entrance, even when construction
+	# happens to finish during the dawn phase.
 	spawn_for_house(snapshot.id, snapshot.entrance_cell)
 
 
@@ -141,13 +150,19 @@ func on_house_removing(snapshot: HouseManager.HouseSnapshot) -> void:
 		return
 	if _resident_house_id == snapshot.id:
 		evacuate()
-	elif GameState.is_night and snapshot.completed and spawn_for_house(snapshot.id, snapshot.entrance_cell, true):
+	elif GameState.is_night and snapshot.completed and spawn_for_house(
+			snapshot.id,
+			snapshot.entrance_cell,
+			true,
+			SpawnOrigin.HOUSE
+	):
 		evacuate()
 
 
 func on_agent_removed(agent: Node2D) -> void:
 	if not _visitor.owns_agent(agent):
 		return
+	_interaction_selected = false
 	_set_interaction_hold(false)
 	_visitor.forget_agent()
 	_reset_state()
@@ -161,6 +176,7 @@ func owns_agent(agent: Node2D) -> bool:
 
 
 func clear(free_agents: bool) -> void:
+	_interaction_selected = false
 	_set_interaction_hold(false)
 	_visitor.clear(free_agents)
 	_reset_state()
@@ -173,11 +189,16 @@ func clear(free_agents: bool) -> void:
 # Spawn / reconcile.
 # ---------------------------------------------------------------------------
 
-## Spawns the resident for its house and stamps canonical identity. At dawn the resident emerges
-## at the exact idle tile below its own house entrance; a first-time daytime resident still walks
-## in from the shared town entrance. Returns false on any failure and refuses to create a duplicate
-## while a resident is already active.
-func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_destruction_escape: bool = false) -> bool:
+## Spawns the resident for its house and stamps canonical identity. The caller explicitly chooses
+## whether this lifecycle event starts at the town entrance or at the house: new completions walk
+## in, while dawn reconstruction and destruction evacuation emerge from the house. Returns false
+## on any failure and refuses to create a duplicate while a resident is already active.
+func spawn_for_house(
+		house_id: StringName,
+		entrance_cell: Vector2i,
+		for_house_destruction_escape: bool = false,
+		spawn_origin: int = SpawnOrigin.TOWN_ENTRANCE
+) -> bool:
 	if (GameState.is_night and not for_house_destruction_escape) or _visitor.is_active():
 		return false
 	if entrance_cell == INVALID_CELL:
@@ -187,7 +208,7 @@ func spawn_for_house(house_id: StringName, entrance_cell: Vector2i, for_house_de
 		push_warning("HouseResidentController: %s house idle cell %s is not walkable; resident not spawned." % [
 			String(_config.resident_type), resident_idle_cell])
 		return false
-	var emerges_from_house: bool = GameState.is_dawn_phase or for_house_destruction_escape
+	var emerges_from_house: bool = spawn_origin == SpawnOrigin.HOUSE
 	var source_cell: Vector2i = resident_idle_cell if emerges_from_house else _manager.named_authored_spot_cell(ENTER_MARKER_ID)
 	if source_cell == INVALID_CELL:
 		push_warning("HouseResidentController: %s cannot enter; required marker '%s' is missing." % [
@@ -227,6 +248,7 @@ func evacuate() -> void:
 	if not _visitor.is_active():
 		clear(false)
 		return
+	_interaction_selected = false
 	_set_interaction_hold(false)
 	if _config.role != null:
 		_config.role.on_leaving(self)
@@ -276,6 +298,10 @@ func resident_type() -> StringName:
 
 func is_interaction_held() -> bool:
 	return _interaction_held
+
+
+func is_interaction_selected() -> bool:
+	return _interaction_selected
 
 
 ## The resident's own idle spot below its house, so a role can send it back home after an errand.
@@ -426,7 +452,7 @@ func _clear_idle_return_state() -> void:
 
 
 func set_interaction_selected(value: bool) -> void:
-	var allowed: bool = value \
+	var selected: bool = value \
 		and _config.interaction_hold_radius_tiles > 0 \
 		and _visitor.is_active() \
 		and not GameState.is_night \
@@ -434,9 +460,10 @@ func set_interaction_selected(value: bool) -> void:
 		and not _evacuating \
 		and not _returning_home \
 		and has_reached_idle_spot()
-	_set_interaction_hold(allowed)
+	_interaction_selected = selected
+	_set_interaction_hold(selected and AllyHousingController.PAUSE_VILLAGERS_NEAR_PLAYER_ENABLED)
 	if _config.role != null:
-		_config.role.on_interaction_selected(self, allowed)
+		_config.role.on_interaction_selected(self, selected)
 
 
 func _set_interaction_hold(value: bool) -> void:
@@ -460,6 +487,7 @@ func _stamp_identity() -> void:
 
 
 func _reset_state() -> void:
+	_interaction_selected = false
 	_interaction_held = false
 	_resident_house_id = &""
 	_home_entrance_cell = INVALID_CELL

@@ -15,8 +15,8 @@ class_name HouseResidentConfig
 ##   visual_setup       Callable(agent) that applies the role's sprite/visuals
 ##   role               optional HouseResidentRole for role-specific side effects (null = none)
 ##   interaction_hold_radius_tiles
-##                      0 disables automatic native movement hold; positive values pause
-##                      autonomous movement while the player remains within that tile radius
+##                      0 disables automatic native movement hold; positive values permit the
+##                      shared villager policy to pause movement within that tile radius
 
 var resident_type: StringName = &""
 var house_item_id: StringName = &""

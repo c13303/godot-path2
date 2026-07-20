@@ -67,11 +67,12 @@ func should_suppress_normal_tutorials() -> bool:
 	)
 
 
+## Drives the "let the Builder build" hint, which is onboarding for the very first house only:
+## it plays while the first builder house is under construction and never again. The merchant
+## house that follows is waited out silently — by then the player has seen a Builder work once.
+## should_suppress_normal_tutorials() still covers that wait, so no other hint fills the gap.
 func is_waiting_house_completion() -> bool:
-	return (
-		_builder_house_tutorial_state == TUTORIAL_WAITING_HOUSE_COMPLETION
-		or _builder_house_tutorial_state == TUTORIAL_WAITING_MERCHANT_HOUSE_COMPLETION
-	)
+	return _builder_house_tutorial_state == TUTORIAL_WAITING_HOUSE_COMPLETION
 
 
 func is_merchant_house_tutorial_active() -> bool:
@@ -118,14 +119,11 @@ func should_show_followup_dialog_text() -> bool:
 func accept_fundamental_builder_dialog() -> bool:
 	if _builder_house_tutorial_state != TUTORIAL_NOT_STARTED:
 		return false
-	# The player may already own a builder house (e.g. built on day 1, before the Builder
-	# arrived). Its build step would then nag for a second, pointless house, and the placement
-	# event that advances the step never re-fires, so it would hang. Skip straight to the
-	# merchant-house step a completed builder house normally leads to.
-	if _house_already_built(HOUSE_BUILDER_ITEM_ID):
-		_builder_house_tutorial_state = TUTORIAL_MERCHANT_HOUSE_ACTIVE
-	else:
-		_builder_house_tutorial_state = TUTORIAL_ACTIVE
+	_builder_house_tutorial_state = TUTORIAL_ACTIVE
+	# The player may already own the houses these steps ask for (e.g. built on day 1, before the
+	# Builder arrived), so start from the first step that still has something to do.
+	_skip_steps_for_standing_houses()
+	_debug_trace("accept_dialog")
 	return true
 
 
@@ -142,6 +140,7 @@ func notify_player_house_placed(item_id: String) -> void:
 		_builder_house_tutorial_state = TUTORIAL_WAITING_HOUSE_COMPLETION
 	elif _builder_house_tutorial_state == TUTORIAL_MERCHANT_HOUSE_ACTIVE and item_id == HOUSE_MERCHANT_ITEM_ID:
 		_builder_house_tutorial_state = TUTORIAL_WAITING_MERCHANT_HOUSE_COMPLETION
+	_debug_trace("house_placed '%s'" % item_id)
 
 
 func notify_house_completed(item_id: String) -> void:
@@ -153,6 +152,7 @@ func notify_house_completed(item_id: String) -> void:
 				or _builder_house_tutorial_state == TUTORIAL_WAITING_MERCHANT_HOUSE_COMPLETION
 			):
 		_builder_house_tutorial_state = TUTORIAL_COMPLETED
+	_debug_trace("house_completed '%s'" % item_id)
 
 
 ## Only the one-shot latch is saved; the pending flag is deliberately left out. A cutscene
@@ -169,6 +169,9 @@ func restore_state(data: Dictionary) -> void:
 	_intro_cutscene_played = bool(data.get("intro_cutscene_played", false))
 	_builder_house_tutorial_state = _valid_tutorial_state(int(data.get("builder_house_tutorial_state", TUTORIAL_NOT_STARTED)))
 	_intro_start_requested = false
+	# Player-built houses are restored before this (see Progression's deferred runtime-simulation
+	# restore), so the world is already authoritative about what is standing.
+	_skip_steps_for_standing_houses()
 
 
 func _try_start_requested_intro() -> void:
@@ -209,15 +212,65 @@ func _on_cutscene_completed(context: StringName, _release_spawning: bool) -> voi
 	_manager.clear_tutorial_alert(TUTORIAL_KEY_BUILDER_HERE)
 
 
-## True when at least one building of `item_id` already exists in the world. Read live off the
-## building object system so it reflects houses placed before onboarding started.
-func _house_already_built(item_id: String) -> bool:
+## Advances past every house step whose house is already standing, so a step never nags for a
+## second, pointless house. This matters because completion is a live signal that fires once:
+## a step left waiting on a house that is already up would wait forever, and while it waits
+## should_suppress_normal_tutorials() keeps every other hint off. A house still under
+## construction is not skipped — it lands on that house's wait step instead.
+func _skip_steps_for_standing_houses() -> void:
+	if _builder_house_tutorial_state == TUTORIAL_ACTIVE \
+			or _builder_house_tutorial_state == TUTORIAL_WAITING_HOUSE_COMPLETION:
+		if _completed_house_count(HOUSE_BUILDER_ITEM_ID) > 0:
+			_builder_house_tutorial_state = TUTORIAL_MERCHANT_HOUSE_ACTIVE
+		elif _standing_house_count(HOUSE_BUILDER_ITEM_ID) > 0:
+			_builder_house_tutorial_state = TUTORIAL_WAITING_HOUSE_COMPLETION
+	# Not `elif`: when the builder house above was already done, the merchant step it just
+	# advanced to may be done too, and both must be skipped in one pass.
+	if _builder_house_tutorial_state == TUTORIAL_MERCHANT_HOUSE_ACTIVE \
+			or _builder_house_tutorial_state == TUTORIAL_WAITING_MERCHANT_HOUSE_COMPLETION:
+		if _completed_house_count(HOUSE_MERCHANT_ITEM_ID) > 0:
+			_builder_house_tutorial_state = TUTORIAL_COMPLETED
+		elif _standing_house_count(HOUSE_MERCHANT_ITEM_ID) > 0:
+			_builder_house_tutorial_state = TUTORIAL_WAITING_MERCHANT_HOUSE_COMPLETION
+
+
+## Player-built houses of `item_id` that are finished. Read live off HouseManager, the only owner
+## of houses: they are never registered as building objects. Authored level houses do not count —
+## these steps ask the player to build one themselves.
+func _completed_house_count(item_id: String) -> int:
+	var houses: HouseManager = _house_manager()
+	if houses == null:
+		return 0
+	return houses.count_completed_player_built_houses(StringName(item_id))
+
+
+## Player-built houses of `item_id` standing, whether finished or still under construction.
+func _standing_house_count(item_id: String) -> int:
+	var houses: HouseManager = _house_manager()
+	if houses == null:
+		return 0
+	return houses.count_player_built_houses(StringName(item_id))
+
+
+func _house_manager() -> HouseManager:
 	if _manager == null:
-		return false
-	var objects: BuildingObjectManager = _manager.get_building_object_manager()
-	if objects == null or not objects.has_method("count_buildings_by_item_id"):
-		return false
-	return int(objects.count_buildings_by_item_id(item_id)) > 0
+		return null
+	return _manager.get_house_manager()
+
+
+## TEMPORARY onboarding-step trace. Gated behind Debug Enabled, no gameplay effect.
+## Remove once the "build a builder house" step stops re-showing.
+func _debug_trace(tag: String) -> void:
+	if not CppDebugOptions.logs_enabled:
+		return
+	CppDebugOptions.dlog("[BUILDER-ONBOARDING] %s -> state=%d builder(done=%d standing=%d) merchant(done=%d standing=%d)" % [
+		tag,
+		_builder_house_tutorial_state,
+		_completed_house_count(HOUSE_BUILDER_ITEM_ID),
+		_standing_house_count(HOUSE_BUILDER_ITEM_ID),
+		_completed_house_count(HOUSE_MERCHANT_ITEM_ID),
+		_standing_house_count(HOUSE_MERCHANT_ITEM_ID),
+	])
 
 
 func _valid_tutorial_state(value: int) -> int:

@@ -73,7 +73,7 @@ func begin_phase() -> void:
 ## merchant is doing (walking in, parked at the spot, or walking back out). Drives the interaction
 ## prompt, the shop, and the walk-in shop-open path.
 func is_player_near() -> bool:
-	return _resident != null and _resident.is_interaction_held()
+	return _resident != null and _resident.is_interaction_selected()
 
 
 func is_paused_agent(agent: Node2D) -> bool:
