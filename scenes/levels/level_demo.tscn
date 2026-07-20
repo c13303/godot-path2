@@ -1254,7 +1254,7 @@ starting_items = {
 &"wall": 2
 }
 monster_drop_seed_chance_percent = 10
-tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road"])
+tool_shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road"])
 tool_shop_prices = {
 &"fence": 1,
 &"house_builder": 20,
@@ -1282,12 +1282,12 @@ merchant_prices = {
 &"beam": 100,
 &"bomb": 100,
 &"imperial_seed": 20,
-&"pasteque": 10,
+&"pasteque": 5,
 &"seed": 1,
 &"spray": 10,
 &"sword": 100
 }
-shop_available_items = Array[StringName]([&"rose", &"ronce", &"pasteque", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road", &"seed", &"spray", &"beam"])
+shop_available_items = Array[StringName]([&"rose", &"ronce", &"turret_epine", &"turret_helice", &"kraken", &"rose_shop_counter", &"fence", &"road", &"seed", &"spray", &"beam", &"pasteque"])
 shop_prices = {
 &"beam": 100,
 &"bomb": 100,
@@ -1299,7 +1299,7 @@ shop_prices = {
 &"imperial_seed": 20,
 &"kraken": 20,
 &"lamp": 0,
-&"pasteque": 10,
+&"pasteque": 5,
 &"reservoir": 100,
 &"road": 10,
 &"ronce": 1,

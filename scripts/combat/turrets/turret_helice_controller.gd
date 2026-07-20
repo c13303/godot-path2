@@ -124,6 +124,8 @@ func _process_active_query(cell: Vector2i, state: Dictionary, data: TurretData, 
 			continue
 		var instance_id: int = agent.get_instance_id()
 		eligible_ids[instance_id] = true
+		if not _can_be_pushed(agent):
+			continue
 		if float(repulse_wait_by_agent.get(instance_id, 0.0)) > 0.0:
 			continue
 		var nav_id: int = int(agent.get("nav_id"))
@@ -143,15 +145,19 @@ func _decrement_repulse_waits(state: Dictionary, delta: float) -> void:
 	state["repulse_wait_by_agent"] = repulse_wait_by_agent
 
 
+# Big monsters trigger the turret (detection) but are too heavy to be blown away.
+func _can_be_pushed(agent: Node2D) -> bool:
+	if not agent.has_meta("monster_type"):
+		return true
+	var monster_type: StringName = StringName(str(agent.get_meta("monster_type")))
+	return monster_type != MonsterCatalog.BIG_MONSTER_ID
+
+
 func _is_eligible(agent: Node2D, cell: Vector2i, state: Dictionary, data: TurretData, origin: Vector2) -> bool:
 	if agent == null or not is_instance_valid(agent) or agent.is_queued_for_deletion() or not agent.visible:
 		return false
 	if agent.is_in_group(&"player") or agent.is_in_group(&"players"):
 		return false
-	if agent.has_meta("monster_type"):
-		var monster_type: StringName = StringName(str(agent.get_meta("monster_type")))
-		if monster_type == MonsterCatalog.BIG_MONSTER_ID:
-			return false
 	if _tracker.is_agent_suspended(agent):
 		return false
 	if agent.has_method("is_external_capture_active") and bool(agent.call("is_external_capture_active")):
