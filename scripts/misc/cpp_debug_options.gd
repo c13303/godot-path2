@@ -31,9 +31,10 @@ static func save_log(message: String) -> void:
 		debug_enabled = value
 		_apply_debug_settings()
 
-## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, and money
-## during the day, and at night skips the night while paying out the loot the
-## night's remaining monsters would have dropped.
+## When ON, dev cheat keys are active: Numpad + grants 100 seeds, gems, money, bamboo,
+## walls and watermelons and unlocks every Inventor blueprint during the day, and at
+## night skips the night while paying out the loot the night's remaining monsters
+## would have dropped.
 @export var dev_keys: bool = false:
 	set(value):
 		dev_keys = value
@@ -327,7 +328,8 @@ func _is_game_paused() -> bool:
 ## every monster, ends the night) and pays out the loot the night would still have
 ## produced, so skipping does not cost the run its drops; while the day's client step
 ## is pending or active it only skips that step (see _skip_dev_client_sale); outside
-## both it refills the water reserve and grants 100 seeds/gems/money/bamboo plus 100 walls.
+## both it refills the water reserve, grants 100 seeds/gems/money/bamboo plus 100 walls
+## and 100 watermelons, and unlocks every Inventor blueprint.
 ## Any of those cases first instantly ends a running night/client reveal cutscene and
 ## snaps the camera back to the player.
 ## Numpad 1/2/0 force-spawn one agent from each
@@ -429,17 +431,29 @@ func _grant_dev_currency() -> void:
 	_call_if_available(progression, "update_gems", 100)
 	_call_if_available(progression, "update_money", 100)
 	_call_if_available(progression, "update_bamboo", 100)
-	_grant_dev_walls(100)
+	_grant_dev_inventory_item("wall", 100)
+	_grant_dev_inventory_item("pasteque", 100)
+	_unlock_all_dev_blueprints(progression)
 
 
-## Grants inventory-backed wall items straight into the player's inventory. Silently
+## Grants an inventory-backed item straight into the player's inventory. Silently
 ## no-ops when the GameUI or its inventory API is missing, or when the inventory is full.
-func _grant_dev_walls(count: int) -> void:
+func _grant_dev_inventory_item(item_id: String, count: int) -> void:
 	var game_ui: Node = _get_game_ui()
 	if game_ui == null or not game_ui.has_method("add_inventory"):
 		push_warning("dev_keys: GameUI inventory API not found")
 		return
-	game_ui.call("add_inventory", "wall", count)
+	game_ui.call("add_inventory", item_id, count)
+
+
+## Unlocks every Inventor blueprint. Progression owns the blueprint list, so blueprints
+## added later are covered without touching this cheat.
+func _unlock_all_dev_blueprints(progression: Node) -> void:
+	if not progression.has_method("unlock_all_blueprints_for_dev"):
+		push_warning("dev_keys: progression blueprint unlock API not found")
+		return
+	if bool(progression.call("unlock_all_blueprints_for_dev")):
+		CppDebugOptions.dlog("dev_keys: unlocked all Inventor blueprints")
 
 
 func _get_game_ui() -> Node:

@@ -175,6 +175,15 @@ func try_purchase_blueprint(blueprint_id: StringName) -> bool:
 	return _blueprint_unlock_service.try_purchase_blueprint(blueprint_id)
 
 
+## Dev cheat entry point: unlocks every known blueprint at once. Returns true when
+## something changed, and refreshes the Inventor UI through the publication signal.
+func unlock_all_blueprints_for_dev() -> bool:
+	var changed: bool = _blueprint_unlock_service.unlock_all_blueprints_for_dev()
+	if changed:
+		blueprint_publication_changed.emit()
+	return changed
+
+
 func has_unseen_published_blueprints() -> bool:
 	return _blueprint_unlock_service.has_unseen_published_blueprints()
 

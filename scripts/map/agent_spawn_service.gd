@@ -35,17 +35,26 @@ func spawn_agent_from(
 		else _manager.select_garden_for_spawner_result(spawner_cell)
 	)
 	var garden_id: int = int(selection.get("garden_id", 0))
+	var selection_status: StringName = selection.get(
+		"status",
+		SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE
+	) as StringName
+	# A client with no obtainable sale target must still consume its scheduled spawn.
+	# This includes roses that exist but cannot be reached from this client spawner;
+	# retrying that permanent result forever would leave the morning phase locked.
+	# A pending approach field remains transient and is handled by the retry below.
 	var spawn_directly_into_tantrum: bool = (
 		agent_kind == SPAWNER_KIND_CLIENT
-		and _manager.total_counter_stock() <= 0
-		and _manager.grownup_rose_count() <= 0
+		and (
+			(_manager.total_counter_stock() <= 0 and _manager.grownup_rose_count() <= 0)
+			or (garden_id <= 0 and selection_status == SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE)
+		)
 	)
 	var sel_us: int = Time.get_ticks_usec() - t_sel
 	if telemetry.over_garden_threshold_us(sel_us):
 		telemetry.warn_garden_task_lag_us("_process_spawners.select_garden", sel_us,
 			"spawner_cell=%s gardens=%d garden=%d" % [str(spawner_cell), _manager.get_garden_topology_service().gardens().size(), garden_id])
 	if garden_id <= 0 and not spawn_directly_into_tantrum:
-		var selection_status: StringName = selection.get("status", SpawnerRouteService.APPROACH_STATUS_UNAVAILABLE) as StringName
 		if selection_status == SpawnerRouteService.APPROACH_STATUS_PENDING:
 			# Transient, not a verdict: this spawner's approach field is still computing,
 			# so no garden can be scored yet. Refuse the attempt without consuming the
@@ -160,7 +169,7 @@ func spawn_agent_from(
 				_manager._unregister_runtime_agent(agent)
 				agent.remove_from_group(&"clients")
 				agent.queue_free()
-				telemetry.log_spawn_failure("spawner %s could not start rose-less client tantrum" % spawner_cell)
+				telemetry.log_spawn_failure("spawner %s could not start unserved client tantrum" % spawner_cell)
 				return false
 			_manager.get_spawn_tick_controller().increment_assigned_count()
 			telemetry.log("spawned tantrum client nav_id=%d spawn_cell=%s spawner=%s" % [

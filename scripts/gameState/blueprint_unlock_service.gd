@@ -113,6 +113,24 @@ func try_purchase_blueprint(blueprint_id: StringName) -> bool:
 	return true
 
 
+## Dev cheat: unlocks every blueprint defined here, including ones added later, since it
+## walks BLUEPRINT_DEFS instead of a hand-written list. Everything is also marked published
+## and seen, so the Inventor shows no leftover offer or "new blueprint" badge afterwards.
+## True when this actually changed something.
+func unlock_all_blueprints_for_dev() -> bool:
+	var changed: bool = not _unseen_published_ids.is_empty()
+	_unseen_published_ids.clear()
+	for raw_id: Variant in BLUEPRINT_DEFS.keys():
+		var blueprint_id: StringName = raw_id as StringName
+		if not _unlocked_ids.has(blueprint_id):
+			_unlocked_ids[blueprint_id] = true
+			changed = true
+		if not _published_ids.has(blueprint_id):
+			_published_ids[blueprint_id] = true
+			changed = true
+	return changed
+
+
 func publish_newly_eligible_blueprints_for_dawn() -> bool:
 	var changed: bool = false
 	for blueprint_id: StringName in PAID_BLUEPRINT_ORDER:
