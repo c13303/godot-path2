@@ -94,7 +94,6 @@ func setup(visual_def: Dictionary, direction: Vector2i) -> void:
 		_attachment_sprite.name = "Attachment"
 		_attachment_sprite.position = _vector2_from_variant(visual_def.get("attachment_offset", Vector2.ZERO), Vector2.ZERO)
 		_attachment_sprite.z_index = int(visual_def.get("attachment_z_index", 2))
-		_attachment_sprite.z_as_relative = false
 		_head_sprite.add_child(_attachment_sprite)
 
 	set_direction(direction)

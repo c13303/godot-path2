@@ -4,12 +4,11 @@ class_name PathPreviewRoutePlanner
 # Turns a prepared flow group into the exact chain of tile centers its route visits, so the
 # path preview can travel through cell centers instead of drifting along tile edges.
 #
-# The native field stores a Dijkstra route cost per cell: 0.0 at the goal, +INF where
-# unreachable, and one step of +1.0 (orthogonal) or +1.4142 (diagonal) per cell away from
-# it. Walking that cost downhill from the spawner cell replays the same route the field's
-# own directions encode, one whole cell at a time. Sampling the field's interpolated
-# direction instead is what used to smear the preview along tile edges: it blends the four
-# cells around the sample point, so it never resolves to "this cell, then that cell".
+# The native group field stores both a Dijkstra route cost and the exact selected outgoing
+# direction for each cell. Following that stored direction is required for directed edges
+# such as client one-way tiles: route costs alone cannot prove that a cheaper neighbouring
+# cell is connected by a legal outgoing edge. Directions are sampled at tile centers and
+# converted to whole-cell steps, so the preview remains a chain of tile centers.
 #
 # Read-only: this never asks for a flow group, a rebuild, or any topology work. It is built
 # once per prepared route by PathPreviewController, not per frame and not per arrow.
@@ -24,18 +23,6 @@ const COST_STEP_EPSILON: float = 0.01
 # A route longer than this is a bug, not a map: bail rather than walk forever.
 const MAX_ROUTE_CELLS: int = 4096
 
-const STEP_DIRECTIONS: Array[Vector2i] = [
-	Vector2i(1, 0),
-	Vector2i(-1, 0),
-	Vector2i(0, 1),
-	Vector2i(0, -1),
-	Vector2i(1, 1),
-	Vector2i(-1, 1),
-	Vector2i(1, -1),
-	Vector2i(-1, -1),
-]
-
-
 # World-space tile centers from start_cell to goal_cell along the group's prepared route.
 # Empty when the group's flow is not ready, the route is blocked, or the walk fails to land
 # on goal_cell — callers treat an empty path as "nothing to draw yet".
@@ -49,7 +36,11 @@ static func build_cell_center_path(
 	var path: PackedVector2Array = PackedVector2Array()
 	if manager == null or group_id <= IDLE_GROUP:
 		return path
-	if flow == null or not flow.has_method("group_route_cost_at_world"):
+	if (
+		flow == null
+		or not flow.has_method("group_route_cost_at_world")
+		or not flow.has_method("compute_group_flow_dir")
+	):
 		return path
 	var cell: Vector2i = start_cell
 	var cost: float = _route_cost_at_cell(flow, manager, group_id, cell)
@@ -70,8 +61,9 @@ static func build_cell_center_path(
 	return path
 
 
-# The neighbour the field's own Dijkstra expanded this cell from: strictly cheaper, and
-# exactly one step cheaper. Returns from_cell when the route dead-ends or has arrived.
+# Follows the exact outgoing direction stored in the group field. The route-cost check is
+# retained as fail-closed validation that the sampled step belongs to this ready route.
+# Returns from_cell when the route dead-ends or has arrived.
 static func _next_route_cell(
 	flow: Node,
 	manager: BuildingManager,
@@ -81,35 +73,25 @@ static func _next_route_cell(
 ) -> Vector2i:
 	if from_cost <= GOAL_ROUTE_COST:
 		return from_cell
-	var best_cell: Vector2i = from_cell
-	var best_cost: float = from_cost
-	for step: Vector2i in STEP_DIRECTIONS:
-		var is_diagonal: bool = step.x != 0 and step.y != 0
-		var neighbour: Vector2i = from_cell + step
-		var neighbour_cost: float = _route_cost_at_cell(flow, manager, group_id, neighbour)
-		if not is_finite(neighbour_cost) or neighbour_cost >= from_cost:
-			continue
-		# Cells outside the field read back as cost 0.0, which would otherwise look like
-		# the goal. Requiring the neighbour to sit exactly one step below this cell keeps
-		# the walk on cells the field actually computed.
-		var step_cost: float = DIAGONAL_STEP_COST if is_diagonal else ORTHOGONAL_STEP_COST
-		if absf(from_cost - (neighbour_cost + step_cost)) > COST_STEP_EPSILON:
-			continue
-		# The field only relaxes a diagonal when both orthogonal neighbours are open, so a
-		# diagonal that clips a wall corner was never part of the real route.
-		if is_diagonal:
-			if not _cell_is_reachable(flow, manager, group_id, from_cell + Vector2i(step.x, 0)):
-				continue
-			if not _cell_is_reachable(flow, manager, group_id, from_cell + Vector2i(0, step.y)):
-				continue
-		if neighbour_cost < best_cost:
-			best_cost = neighbour_cost
-			best_cell = neighbour
-	return best_cell
-
-
-static func _cell_is_reachable(flow: Node, manager: BuildingManager, group_id: int, cell: Vector2i) -> bool:
-	return is_finite(_route_cost_at_cell(flow, manager, group_id, cell))
+	var direction: Vector2 = flow.call(
+		"compute_group_flow_dir",
+		group_id,
+		manager.cell_center(from_cell)
+	) as Vector2
+	if not is_finite(direction.x) or not is_finite(direction.y):
+		return from_cell
+	var step: Vector2i = Vector2i(roundi(direction.x), roundi(direction.y))
+	if step == Vector2i.ZERO or absi(step.x) > 1 or absi(step.y) > 1:
+		return from_cell
+	var next_cell: Vector2i = from_cell + step
+	var next_cost: float = _route_cost_at_cell(flow, manager, group_id, next_cell)
+	if not is_finite(next_cost) or next_cost >= from_cost:
+		return from_cell
+	var is_diagonal: bool = step.x != 0 and step.y != 0
+	var step_cost: float = DIAGONAL_STEP_COST if is_diagonal else ORTHOGONAL_STEP_COST
+	if absf(from_cost - (next_cost + step_cost)) > COST_STEP_EPSILON:
+		return from_cell
+	return next_cell
 
 
 static func _route_cost_at_cell(flow: Node, manager: BuildingManager, group_id: int, cell: Vector2i) -> float:

@@ -93,6 +93,11 @@ never placed a rose_shop_counter yet + client sale not started
      It never returns once the first counter is placed, and the afternoon build
      phase never raises it.)
 
+day 2 + the pending step is "Place the Shop" + fewer than 10 bamboo
+    = "Ramassez des bambous" / "Collect bamboo"               [tutorial.collect_bamboo]
+    (one-time prerequisite for the counter-building step. Once the player reaches
+     10 bamboo it never returns, even if bamboo is spent later.)
+
 no grown-up roses to sell
     = "Pas de roses, pas de clients aujourd'hui" / "No roses, No clients today"
                                                             [tutorial.no_roses_no_clients]

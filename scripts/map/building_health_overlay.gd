@@ -15,6 +15,9 @@ const BAR_SIZE: Vector2 = Vector2(22.0, 3.0)
 const BAR_Y_OFFSET: float = -14.0
 const BG_COLOR: Color = Color(0.05, 0.05, 0.05, 0.85)
 const FILL_COLOR: Color = Color(0.9, 0.05, 0.05, 1.0)
+# Runtime buildings and agents use their world Y as z-index. Keep health bars above
+# that world-depth range, but below Kraken/combat overlays (4094) and build previews (4095).
+const HEALTH_BAR_Z_INDEX: int = 4093
 
 var building_manager: BuildingManager = null
 var _durability: PlayerPlaceableDurabilityService = null
@@ -22,7 +25,7 @@ var _durability: PlayerPlaceableDurabilityService = null
 
 func _ready() -> void:
 	z_as_relative = false
-	z_index = 320
+	z_index = HEALTH_BAR_Z_INDEX
 
 
 func setup(manager: BuildingManager, durability: PlayerPlaceableDurabilityService) -> void:

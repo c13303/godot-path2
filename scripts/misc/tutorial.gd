@@ -13,7 +13,7 @@ extends RichTextLabel
 ##   1. fundamental Builder onboarding .............. allow entry / talk / build house
 ##   2. unbuild tool selected ....................... Select objects to dismantle
 ##   3. empty water reserve ......................... Refill your water
-##   4. day 2, less than 10 bamboo .................. Collect bamboo (world arrow on the grove)
+##   4. first day-2 place-counter step, <10 bamboo .. Collect bamboo (world arrow on the grove)
 ##   5. dawn harvest (grown roses) .................. Harvest / add counters / place shop
 ##   6. client sale phase ........................... nothing (only the tantrum alert)
 ##   7. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
@@ -137,6 +137,9 @@ var _sun_rising: bool = false
 # their first rose. Day 2 onward the rose step latches off for the rest of that day, so it
 # plays once instead of nagging while seeds remain. -1 means no rose planted yet this run.
 var _rose_step_done_day: int = -1
+# Once the player reaches the required stock during the counter-building sequence, spending
+# bamboo later must not restart this onboarding step.
+var _collect_bamboo_step_completed: bool = false
 
 
 func _ready() -> void:
@@ -520,9 +523,6 @@ func _current_message_key() -> String:
 	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
 		return ""
-	# Stock step: bamboo is gathered in the field, so it precedes every step that spends it.
-	if _should_prompt_collect_bamboo():
-		return KEY_COLLECT_BAMBOO
 	if GameState.is_dawn_phase:
 		if _building_manager != null and _building_manager.has_method("has_grownup_roses_to_harvest") and bool(_building_manager.call("has_grownup_roses_to_harvest")):
 			if _has_counter_room_for_harvest():
@@ -531,14 +531,14 @@ func _current_message_key() -> String:
 			# exist right now, never on whether one existed earlier in the run.
 			var counter_count: int = _rose_shop_counter_count()
 			if counter_count == 0:
-				return KEY_PLACE_SHOP
+				return _place_shop_step_key()
 			if counter_count > 0:
 				return KEY_ADD_COUNTERS_TO_SELL_ROSES
 			return ""
 		if _client_sale_requested_without_roses():
 			return KEY_NO_ROSES_NO_CLIENTS
 		if not _client_sale_start_requested() and _should_prompt_place_shop():
-			return KEY_PLACE_SHOP
+			return _place_shop_step_key()
 		return ""
 	# Client sale in progress: only the water-empty hint (handled above) and the
 	# persistent tantrum alert may show, so suppress every economy hint here.
@@ -897,15 +897,27 @@ func _rose_shop_counter_count() -> int:
 	return int(_building_manager.call("rose_shop_counter_count"))
 
 
-## Day-2 only: the player owns less than REQUIRED_BAMBOO. Bamboo is harvested from the field,
-## so the step points the world arrow at the authored bamboo grove. Within day 2 it is not a
-## one-time step: spending back below the threshold asks for more bamboo again.
+## Resolves the pending counter-building step. The bamboo prerequisite may replace that exact
+## step on day 2, but it never interrupts unrelated tutorials.
+func _place_shop_step_key() -> String:
+	if _should_prompt_collect_bamboo():
+		return KEY_COLLECT_BAMBOO
+	return KEY_PLACE_SHOP
+
+
+## Day-2-only, one-time prerequisite for the counter-building step. Reaching the required
+## stock permanently answers it for this tutorial instance, so spending bamboo later cannot
+## make the prompt return.
 func _should_prompt_collect_bamboo() -> bool:
-	if not _is_day_two():
+	if _collect_bamboo_step_completed or not _is_day_two():
 		return false
 	if _progression == null or not _progression.has_method("get_value"):
 		return false
-	return int(_progression.call("get_value", BAMBOO_KEY)) < REQUIRED_BAMBOO
+	var bamboo: int = int(_progression.call("get_value", BAMBOO_KEY))
+	if bamboo >= REQUIRED_BAMBOO:
+		_collect_bamboo_step_completed = true
+		return false
+	return true
 
 
 ## Dawn step: the player has no counter at all, so building the first one is the current
