@@ -108,8 +108,8 @@ static func _make_bigmonster() -> MonsterData:
 	data.sprite_frame_layout = FRAME_LAYOUT_DIRECTIONAL_4_HORIZONTAL
 	data.sprite_scale = BIG_MONSTER_SPRITE_SCALE
 	data.sprite_offset = BIG_MONSTER_SPRITE_OFFSET
-	data.max_health = 1000
-	data.speed_scale = 0.5
+	data.max_health = 2000
+	data.speed_scale = 1.0
 	data.crowd_resist_scale = 2.0
 	data.contact_push_power = 520.0
 	data.contact_push_resist = 8.0

@@ -36,6 +36,10 @@ func set_bubble_notification_frame(reason: StringName, active: bool, frame: int)
 		sprite.visible = not _active_reasons.is_empty()
 
 
+func has_bubble_notification(reason: StringName) -> bool:
+	return reason != &"" and _active_reasons.has(reason)
+
+
 func _visible_frame() -> int:
 	var frame: int = FRAME_NORMAL
 	for raw_frame: Variant in _active_reasons.values():

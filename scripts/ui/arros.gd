@@ -15,6 +15,7 @@ extends CanvasLayer
 
 const MONSTER_GROUP: StringName = &"monsters"
 const MERCHANT_GROUP: StringName = &"merchants"
+const MERCHANT_REWARD_BUBBLE_REASON: StringName = &"merchant_reward"
 
 var _pool: Array[Sprite2D] = []
 var _targets: Array[Node2D] = []
@@ -57,8 +58,23 @@ func _rebuild_pool() -> void:
 func _refresh_targets() -> void:
 	_targets.clear()
 	_target_textures.clear()
-	_append_group_targets(MERCHANT_GROUP, green_arro_texture)
+	_append_reward_merchant_targets()
 	_append_group_targets(MONSTER_GROUP, red_arro_texture)
+
+
+func _append_reward_merchant_targets() -> void:
+	if _targets.size() >= maximum_arros:
+		return
+	for raw_node: Node in get_tree().get_nodes_in_group(MERCHANT_GROUP):
+		if _targets.size() >= maximum_arros:
+			return
+		var target: FlowAgent = raw_node as FlowAgent
+		if target == null or not target.is_inside_tree():
+			continue
+		if not target.has_bubble_notification(MERCHANT_REWARD_BUBBLE_REASON):
+			continue
+		_targets.append(target)
+		_target_textures.append(green_arro_texture)
 
 
 func _append_group_targets(group_name: StringName, texture: Texture2D) -> void:

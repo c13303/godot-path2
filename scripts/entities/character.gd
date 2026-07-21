@@ -134,6 +134,10 @@ func set_bubble_notification(reason: StringName, active: bool) -> void:
 func set_bubble_notification_frame(reason: StringName, active: bool, frame: int) -> void:
 	_bubble_notification_visual.set_bubble_notification_frame(reason, active, frame)
 
+
+func has_bubble_notification(reason: StringName) -> bool:
+	return _bubble_notification_visual.has_bubble_notification(reason)
+
 func _process(delta: float) -> void:
 	if not _external_capture_active:
 		z_index = int(position.y)

@@ -20,6 +20,8 @@ class_name DialogUI
 ##   "icon_badge_text": String    - small badge drawn over the icon (e.g. reward amount)
 ##   "visible": bool              - whether the row is shown at all (default true)
 ##   "enabled": bool              - whether activating it does anything (default true)
+##   "selectable": bool           - whether navigation/clicks can select it (default true)
+##   "show_frame": bool           - whether the row uses the standard button frame (default true)
 ##   "close_on_select": bool      - close the dialog after the handler runs (default false)
 ##
 ## Options dictionary fields:
@@ -71,6 +73,8 @@ class Choice:
 	var icon_badge_text: String = ""
 	var visible: bool = true
 	var enabled: bool = true
+	var selectable: bool = true
+	var show_frame: bool = true
 	var close_on_select: bool = false
 	var button: Button = null
 
@@ -517,6 +521,8 @@ func _parse_choice(raw: Dictionary) -> Choice:
 	choice.icon_badge_text = str(raw.get("icon_badge_text", ""))
 	choice.visible = bool(raw.get("visible", true))
 	choice.enabled = bool(raw.get("enabled", true))
+	choice.selectable = bool(raw.get("selectable", true))
+	choice.show_frame = bool(raw.get("show_frame", true))
 	choice.close_on_select = bool(raw.get("close_on_select", false))
 	return choice
 
@@ -524,9 +530,13 @@ func _parse_choice(raw: Dictionary) -> Choice:
 func _build_choice_row(choice: Choice) -> Button:
 	var button: Button = Button.new()
 	button.focus_mode = Control.FOCUS_NONE
+	button.disabled = not choice.selectable
 	button.custom_minimum_size = Vector2(0.0, CHOICE_ROW_HEIGHT)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_apply_choice_row_style(button, false, choice.enabled)
+	if choice.show_frame:
+		_apply_choice_row_style(button, false, choice.enabled)
+	else:
+		_apply_frameless_row_style(button)
 	button.pressed.connect(_on_choice_button_pressed.bind(choice.id))
 	button.mouse_entered.connect(_on_choice_button_hovered.bind(choice.id))
 	button.gui_input.connect(_on_dialog_surface_gui_input)
@@ -660,7 +670,7 @@ func _move_selection(step: int) -> void:
 	var index: int = start
 	for _i: int in range(count):
 		index = wrapi(index + step, 0, count)
-		if _choices[index].visible:
+		if _choices[index].visible and _choices[index].selectable:
 			_set_selection(index)
 			return
 
@@ -672,7 +682,7 @@ func _activate_selected() -> void:
 
 
 func _activate_choice(choice: Choice) -> void:
-	if not choice.visible or not choice.enabled:
+	if not choice.visible or not choice.enabled or not choice.selectable:
 		return
 	var center: Vector2 = Vector2.ZERO
 	if choice.button != null:
@@ -684,16 +694,16 @@ func _activate_choice(choice: Choice) -> void:
 
 
 func _first_selectable_index() -> int:
-	# Prefer the first enabled row; fall back to the first visible row.
-	var first_visible: int = -1
+	# Prefer the first enabled selectable row; fall back to a disabled selectable row.
+	var first_selectable: int = -1
 	for i: int in range(_choices.size()):
-		if not _choices[i].visible:
+		if not _choices[i].visible or not _choices[i].selectable:
 			continue
-		if first_visible < 0:
-			first_visible = i
+		if first_selectable < 0:
+			first_selectable = i
 		if _choices[i].enabled:
 			return i
-	return first_visible
+	return first_selectable
 
 
 func _nearest_selectable_index(around: int) -> int:
@@ -703,10 +713,10 @@ func _nearest_selectable_index(around: int) -> int:
 	var clamped: int = clampi(around, 0, count - 1)
 	for offset: int in range(count):
 		var down: int = clamped + offset
-		if down < count and _choices[down].visible:
+		if down < count and _choices[down].visible and _choices[down].selectable:
 			return down
 		var up: int = clamped - offset
-		if up >= 0 and _choices[up].visible:
+		if up >= 0 and _choices[up].visible and _choices[up].selectable:
 			return up
 	return _first_selectable_index()
 
@@ -715,7 +725,7 @@ func _index_of_choice(id: String) -> int:
 	if id == "":
 		return -1
 	for i: int in range(_choices.size()):
-		if _choices[i].id == id and _choices[i].visible:
+		if _choices[i].id == id and _choices[i].visible and _choices[i].selectable:
 			return i
 	return -1
 
@@ -898,6 +908,12 @@ func _apply_choice_row_style(button: Button, selected: bool, enabled: bool) -> v
 		style.border_color = Color(0.92, 0.78, 0.34)
 	for state_name: String in ["normal", "hover", "pressed", "focus", "disabled"]:
 		button.add_theme_stylebox_override(state_name, style)
+
+
+func _apply_frameless_row_style(button: Button) -> void:
+	var empty_style: StyleBoxEmpty = StyleBoxEmpty.new()
+	for state_name: String in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state_name, empty_style)
 
 
 func _apply_close_button_style() -> void:

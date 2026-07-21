@@ -84,6 +84,8 @@
 	"merchant.free": "free",
 	"merchant.seed.name": "Seed Merchant",
 	"merchant.seed.greeting": "Hey, Rose! I've got some things for you!",
+	"merchant.seed.claim_rewards": "Collect my rewards",
+	"merchant.seed.shop_prompt": "Would you like to buy something?",
 	"inventor.name": "Inventor",
 	"inventor.greeting": "Hi Rose! In exchange for {money_icon}, I can give you new ideas!",
 	"sheep.name": "Sheep",

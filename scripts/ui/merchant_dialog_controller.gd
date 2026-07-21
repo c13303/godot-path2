@@ -1,9 +1,9 @@
 extends Node
 
 ## Seed-merchant adapter for the generic DialogUI. It owns everything merchant-specific:
-## deciding when the shop may open, converting the merchant inventory (and any active night
-## reward) into generic dialog choices, purchasing, reward claiming, purchase feedback,
-## and refreshing rows after a purchase. Once opened, only the player's dialog commands close
+## deciding when the shop may open, presenting any active night rewards before the shop,
+## converting the merchant inventory into generic dialog choices, purchasing, reward claiming,
+## purchase feedback, and refreshing rows after a purchase. Once opened, only the player's dialog commands close
 ## it; merchant movement, range, phase, and lifecycle changes never close it automatically. All
 ## economy/inventory logic stays in game_ui.gd; this controller only calls it.
 
@@ -17,9 +17,8 @@ const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 # The merchant sprite sheet holds this many horizontal frames; the first is the portrait.
 const MERCHANT_FRAME_COUNT: float = 4.0
 const SEED_ITEM_ID: String = "seed"
-# Reward choice ids are the shared prefix plus the reward's key, so each granted reward gets
-# its own selectable row that _on_choice can route back to a claim.
-const REWARD_ID_PREFIX: String = "reward:"
+const CLAIM_REWARDS_CHOICE_ID: String = "claim_rewards"
+const REWARD_REOPEN_DELAY_SECONDS: float = 1.0
 
 @export var dialog: DialogUI
 @export var game_ui: Node
@@ -32,6 +31,8 @@ var _portrait: Texture2D
 var _currency_icons: Dictionary = {}
 # Signature of the currently rendered offer, so rows are only rebuilt when it actually changes.
 var _last_signature: String = ""
+var _showing_reward_page: bool = false
+var _reward_transition_active: bool = false
 
 
 func _ready() -> void:
@@ -50,10 +51,10 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if dialog == null or not dialog.is_open_for(CONTEXT):
 		return
-	var signature: String = _offer_signature()
+	var signature: String = _current_page_signature()
 	if signature != _last_signature:
 		_last_signature = signature
-		dialog.refresh_choices(_build_choices())
+		dialog.refresh_choices(_build_current_page_choices())
 
 
 # --- Public API --------------------------------------------------------------
@@ -66,6 +67,8 @@ func _process(_delta: float) -> void:
 func request_shop_toggle() -> bool:
 	if dialog == null:
 		return false
+	if _reward_transition_active:
+		return true
 	if dialog.is_open_for(CONTEXT):
 		return true
 	if not _is_merchant_active():
@@ -118,13 +121,14 @@ func _open_shop() -> void:
 	# Close any open build/weapon quickbar menu so it does not linger under the modal.
 	if game_ui != null and game_ui.has_method("deactivate_quickbar"):
 		game_ui.call("deactivate_quickbar")
-	_last_signature = _offer_signature()
+	_showing_reward_page = not _active_reward_list().is_empty()
+	_last_signature = _current_page_signature()
 	dialog.open_dialog(
 		CONTEXT,
 		_speaker_name(),
-		_greeting(),
+		_reward_greeting() if _showing_reward_page else _shop_prompt(),
 		_portrait,
-		_build_choices(),
+		_build_current_page_choices(),
 		_on_choice,
 		_on_closed,
 		{"blocks_gameplay_input": true}
@@ -143,21 +147,39 @@ func _is_merchant_active() -> bool:
 
 # --- Choice building ---------------------------------------------------------
 
-func _build_choices() -> Array[Dictionary]:
+func _build_current_page_choices() -> Array[Dictionary]:
+	if _showing_reward_page:
+		return _build_reward_choices()
+	return _build_shop_choices()
+
+
+func _build_reward_choices() -> Array[Dictionary]:
 	var choices: Array[Dictionary] = []
-	# Active night rewards are pinned before the normal shop items.
 	for reward: Dictionary in _active_reward_list():
 		var item_id: String = str(reward.get("item_id", ""))
 		var currency: String = str(reward.get("currency", ""))
 		choices.append({
-			"id": REWARD_ID_PREFIX + str(reward.get("key", "")),
+			"id": "reward_display:" + str(reward.get("key", "")),
 			"label": _display_name(item_id) if item_id != "" else _special_reward_label(),
 			"icon": _reward_icon(item_id, currency),
 			"price_text": "",
 			"icon_badge_text": str(int(reward.get("amount", 0))),
 			"enabled": true,
+			"selectable": false,
+			"show_frame": false,
 			"close_on_select": false,
 		})
+	choices.append({
+		"id": CLAIM_REWARDS_CHOICE_ID,
+		"label": Translations.t("merchant.seed.claim_rewards"),
+		"enabled": true,
+		"close_on_select": false,
+	})
+	return choices
+
+
+func _build_shop_choices() -> Array[Dictionary]:
+	var choices: Array[Dictionary] = []
 	for item_id_sn: StringName in ItemCatalog.get_merchant_shop_item_ids():
 		var item_id: String = String(item_id_sn)
 		if not _is_merchant_item_available(item_id):
@@ -174,15 +196,23 @@ func _build_choices() -> Array[Dictionary]:
 	return choices
 
 
-## A stable string describing the current offer (visible items, their prices/affordability,
-## and any reward rows) so the per-frame refresh only rebuilds rows when something changed.
-func _offer_signature() -> String:
+## Stable descriptions keep the per-frame refresh from rebuilding unchanged rows.
+func _current_page_signature() -> String:
+	return _reward_signature() if _showing_reward_page else _shop_signature()
+
+
+func _reward_signature() -> String:
 	var parts: PackedStringArray = PackedStringArray()
 	for reward: Dictionary in _active_reward_list():
 		parts.append("r:%s:%s:%s:%d" % [
 			str(reward.get("key", "")), str(reward.get("currency", "")),
 			str(reward.get("item_id", "")), int(reward.get("amount", 0))
 		])
+	return "|".join(parts)
+
+
+func _shop_signature() -> String:
+	var parts: PackedStringArray = PackedStringArray()
 	for item_id_sn: StringName in ItemCatalog.get_merchant_shop_item_ids():
 		var item_id: String = String(item_id_sn)
 		if not _is_merchant_item_available(item_id):
@@ -196,8 +226,8 @@ func _offer_signature() -> String:
 # --- Choice activation -------------------------------------------------------
 
 func _on_choice(choice_id: String, source_global_position: Vector2) -> void:
-	if choice_id.begins_with(REWARD_ID_PREFIX):
-		_claim_reward(choice_id.substr(REWARD_ID_PREFIX.length()), source_global_position)
+	if choice_id == CLAIM_REWARDS_CHOICE_ID:
+		_claim_all_rewards()
 		return
 	_purchase_item(choice_id, source_global_position)
 
@@ -220,20 +250,48 @@ func _purchase_item(item_id: String, source_global_position: Vector2) -> void:
 	_animate_purchase_to_ui(item_id, source_global_position)
 	# Rebuild rows, preferring to keep the purchased item selected. If it vanished (a weapon the
 	# player now owns), DialogUI moves the selection to the nearest remaining row.
-	_last_signature = _offer_signature()
-	dialog.refresh_choices(_build_choices(), item_id)
+	_last_signature = _shop_signature()
+	dialog.refresh_choices(_build_shop_choices(), item_id)
 
 
-func _claim_reward(reward_key: String, source_global_position: Vector2) -> void:
+func _claim_all_rewards() -> void:
 	if GameState.is_night or game_ui == null or not game_ui.has_method("claim_active_night_reward"):
 		return
-	# A full inventory makes an item reward fail; it then stays claimable (get_active_night_reward
-	# still returns it, so _build_choices keeps the row).
-	if bool(game_ui.call("claim_active_night_reward", source_global_position, reward_key)):
+	if _reward_transition_active:
+		return
+	var rewards: Array[Dictionary] = _active_reward_list()
+	if rewards.is_empty():
+		return
+	_reward_transition_active = true
+	dialog.close_dialog(&"reward_claimed")
+	var merchant_world_position: Vector2 = get_interaction_world_position()
+	var claimed_any: bool = false
+	for reward: Dictionary in rewards:
+		var reward_key: String = str(reward.get("key", ""))
+		if bool(game_ui.call("claim_active_night_reward", merchant_world_position, reward_key)):
+			claimed_any = true
+	if claimed_any:
 		Sfx.play_sound(&"buy")
-		_last_signature = _offer_signature()
-		dialog.refresh_choices(_build_choices())
-		_sync_reward_bubble()
+	_sync_reward_bubble()
+	await get_tree().create_timer(REWARD_REOPEN_DELAY_SECONDS).timeout
+	_reward_transition_active = false
+	if not _is_merchant_active() or dialog == null or dialog.is_open():
+		return
+	# Inventory-backed rewards that could not fit remain claimable instead of being lost.
+	# In that exceptional case the reward page reopens so the player can close it, make room,
+	# and retry. A complete claim proceeds to the regular shop page.
+	_showing_reward_page = not _active_reward_list().is_empty()
+	_last_signature = _current_page_signature()
+	dialog.open_dialog(
+		CONTEXT,
+		_speaker_name(),
+		_reward_greeting() if _showing_reward_page else _shop_prompt(),
+		_portrait,
+		_build_current_page_choices(),
+		_on_choice,
+		_on_closed,
+		{"blocks_gameplay_input": true}
+	)
 
 
 func _on_closed(_reason: StringName) -> void:
@@ -312,8 +370,12 @@ func _speaker_name() -> String:
 	return Translations.t("merchant.seed.name")
 
 
-func _greeting() -> String:
+func _reward_greeting() -> String:
 	return Translations.t("merchant.seed.greeting")
+
+
+func _shop_prompt() -> String:
+	return Translations.t("merchant.seed.shop_prompt")
 
 
 func _special_reward_label() -> String:

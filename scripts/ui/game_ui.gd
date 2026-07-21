@@ -1085,8 +1085,8 @@ func get_active_night_reward() -> Dictionary:
 
 ## Collect one current-night special reward row: records the claim (so that row hides) and grants
 ## its currency or item atomically, then flies pickup feedback to the player. Returns false when
-## nothing is claimable. `start_global_position` is the screen point the feedback icons launch from.
-func claim_active_night_reward(start_global_position: Vector2, reward_key: String = "") -> bool:
+## nothing is claimable. `world_position` is where the feedback physically launches in the world.
+func claim_active_night_reward(world_position: Vector2, reward_key: String = "") -> bool:
 	var info: Dictionary = get_active_night_reward()
 	if info.is_empty():
 		return false
@@ -1100,10 +1100,10 @@ func claim_active_night_reward(start_global_position: Vector2, reward_key: Strin
 		# Item rewards can fail to grant when the inventory is full; leave the row unclaimed
 		# in that case so the player can retry after freeing space. Currency always grants.
 		if reward_item_id != "":
-			if not _award_reward_item(reward_item_id, amount, start_global_position):
+			if not _award_reward_item(reward_item_id, amount, world_position):
 				return false
 		else:
-			_award_reward_currency(String(reward["currency"]), amount, start_global_position)
+			_award_reward_currency(String(reward["currency"]), amount, world_position)
 		GameState.record_special_reward_claim(
 			int(info["night_index"]), int(info["day"]), bool(info["one_time"]), current_key
 		)
@@ -1111,23 +1111,21 @@ func claim_active_night_reward(start_global_position: Vector2, reward_key: Strin
 	return false
 
 
-## Credit the whole currency reward atomically, then fly feedback icons from the reward row to the
-## player. The full amount is credited before any icon moves, so a save mid-flight keeps it.
-func _award_reward_currency(currency: String, amount: int, start_global_position: Vector2) -> void:
+## Credit the whole currency reward atomically, then fly feedback from its world source.
+func _award_reward_currency(currency: String, amount: int, world_position: Vector2) -> void:
 	if not _grant_currency(StringName(currency), amount):
 		return
-	play_pickup_from_screen(CurrencyCatalog.get_item_id(StringName(currency)), start_global_position, amount)
+	var item_id: String = CurrencyCatalog.get_item_id(StringName(currency))
+	play_pickup_from_world(item_id, world_position, amount)
 
 
-## Grant an item reward into the inventory, then fly feedback icons from the reward row to the
-## player. Returns false without granting when the inventory can't hold it, so the caller leaves
-## the reward unclaimed.
-func _award_reward_item(item_id: String, quantity: int, start_global_position: Vector2) -> bool:
+## Grant an item reward into the inventory, then fly feedback from its world source.
+func _award_reward_item(item_id: String, quantity: int, world_position: Vector2) -> bool:
 	if item_id == "" or quantity <= 0:
 		return false
 	if not add_inventory(item_id, quantity):
 		return false
-	play_pickup_from_screen(item_id, start_global_position, quantity)
+	play_pickup_from_world(item_id, world_position, quantity)
 	return true
 
 
