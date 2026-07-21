@@ -7,12 +7,15 @@ const FLOOR_SPLASH_Z_INDEX: int = -99
 @export var refill_amount: int = 10
 @export var refill_interval_seconds: float = 0.1
 @export_range(0.01, 1.0, 0.01) var player_slowdown: float = 0.5
-@export_range(0.0, 1.0, 0.01) var drowning_coverage_threshold: float = 0.8
+## Zero commits drownable agents as soon as their foot sample enters water. Navigation
+## remains coverage-blocked separately, while the drowning phase's directional field
+## carries the captured agent visibly inward instead of leaving it on the shoreline.
+@export_range(0.0, 1.0, 0.01) var drowning_coverage_threshold: float = 0.0
 @export_range(0.0, 1.0, 0.01) var navigation_blocking_coverage_threshold: float = 0.8
 @export var foot_sample_offset: Vector2 = Vector2.ZERO
 @export_group("Waterpools")
 @export var waterpool_drift_enabled: bool = true
-@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_speed: float = 9.0
+@export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_speed: float = 64.0
 @export var waterpool_drift_sample_offset: Vector2 = Vector2.ZERO
 @export_range(0.0, 128.0, 1.0, "or_greater") var waterpool_drift_sample_radius: float = 24.0
 @export var waterpool_directional_field_id: int = 1

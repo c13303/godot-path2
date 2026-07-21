@@ -2612,6 +2612,13 @@ void SteeringSystem::update_all(double delta)
             {
                 a.lost_timer = 0.0;
             }
+            else if (!a.external_velocity.current_velocity().is_zero())
+            {
+                // A missing flow direction only removes autonomous guidance. Generic
+                // environmental motion (wind, currents, conveyors, etc.) still owns
+                // displacement and must not be swallowed by the lost-flow brake.
+                a.lost_timer = 0.0;
+            }
             else
             {
                 a.lost_timer = std::max(0.0, a.lost_timer - delta);
@@ -2689,6 +2696,33 @@ void SteeringSystem::update_all(double delta)
         {
             if (!a.is_propelled)
             {
+                const Vec2 external_velocity = a.external_velocity.current_velocity();
+                if (!external_velocity.is_zero())
+                {
+                    // Integrate only the external source. Do not invent an autonomous
+                    // direction or start the land-recovery slide while another movement
+                    // owner is deliberately carrying the agent through this physically
+                    // passable cell. terrain_scaled_step keeps terrain slowdown and the
+                    // normal environmental-speed cap in one shared pipeline.
+                    a.lost_timer = 0.0;
+                    a.lost_slide_accum = 0.0;
+                    a.velocity = Vec2(0, 0);
+                    Vec2 old_pos = a.position;
+                    Vec2 step = terrain_scaled_step(a, nav, Vec2(0, 0), delta);
+                    a.position = apply_walk_with_walls(a, step, nav);
+                    if (nav)
+                        ultimate_wall_correction(a, nav, delta);
+                    resolve_static_obstacle_overlap(a);
+                    grid->update(a.id, old_pos + offset, agent_foot_point(a));
+                    a.debug_nav_dir = Vec2(0, 0);
+                    a.debug_wall_repel = wall_repel;
+                    a.debug_separation = agent_separation;
+                    a.debug_desired_dir = safe_normalize(external_velocity);
+                    a.debug_target_velocity = external_velocity;
+                    a.update_motion_state(delta, cfg, safe_len(external_velocity) > 1.0);
+                    continue;
+                }
+
                 // The agent is on a cell with no flow arrow (non-navigable but
                 // physics-passable, e.g. a water edge tile it was shoved onto).
                 // It can neither be routed nor repelled off. Phase 1: freeze for one
