@@ -2,16 +2,15 @@ extends Node2D
 class_name GroundDropManager
 
 # Owns pooled ground drops: temporary corpse parts and persistent collectible
-# currency items. Coordinates are absolute world positions; tile queries are only
+# items. Every collectible uses the same launch, floor shadow, bounce, rest and
+# pickup path. Coordinates are absolute world positions; tile queries are only
 # used to keep final resting positions out of walls.
 
 const BLOOD_PARTS_TEXTURE: Texture2D = preload("res://assets/sprites/fx/blood_parts.png")
 const PLANT_PARTS_TEXTURE: Texture2D = preload("res://assets/sprites/fx/plant_parts.png")
-const TINY_SHADOW_TEXTURE: Texture2D = preload("res://assets/sprites/fx/tiny_shadow.png")
-const ITEMS_TEXTURE: Texture2D = preload("res://assets/sprites/legval/items.png")
+const GROUND_ITEM_VISUAL_SCRIPT: Script = preload("res://scripts/map/ground_item_visual.gd")
 const FLOAT_SHADER: Shader = preload("res://scripts/map/ground_drop_float.gdshader")
 const PART_FRAME_SIZE: Vector2 = Vector2(16.0, 16.0)
-const ITEM_FRAME_SIZE: Vector2 = Vector2(32.0, 32.0)
 const KIND_CORPSE: StringName = &"corpse"
 const KIND_COLLECTIBLE: StringName = &"collectible"
 const STATE_FALLING: StringName = &"falling"
@@ -84,9 +83,18 @@ func spawn_plant_parts_burst(world_position: Vector2) -> void:
 
 
 func spawn_collectible_currency(currency: StringName, world_position: Vector2) -> void:
+	spawn_collectible_item(CurrencyCatalog.get_item_id(currency), world_position)
+
+
+## Generic entry point for any catalog item that should become a grabbable floor drop.
+## Currency item ids are credited to progression; every other item enters the inventory.
+func spawn_collectible_item(item_id: String, world_position: Vector2) -> void:
+	if not _is_valid_collectible_item(item_id):
+		push_warning("GroundDropManager: refusing unknown collectible item '%s'." % item_id)
+		return
 	var record: Dictionary = _acquire_record()
 	_configure_record_base(record, KIND_COLLECTIBLE, world_position)
-	record["currency"] = currency
+	record["item_id"] = item_id
 	record["state"] = STATE_FALLING
 	record["velocity"] = _random_horizontal_velocity(70.0, 145.0)
 	record["height"] = randf_range(18.0, 38.0)
@@ -94,16 +102,23 @@ func spawn_collectible_currency(currency: StringName, world_position: Vector2) -
 	record["rotation_velocity"] = randf_range(-2.2, 2.2)
 	record["float_phase"] = randf_range(0.0, TAU)
 	var sprite: Sprite2D = record["sprite"] as Sprite2D
-	sprite.texture = _currency_texture(currency)
+	sprite.texture = GROUND_ITEM_VISUAL_SCRIPT.item_texture(item_id)
 	sprite.centered = true
-	sprite.scale = Vector2(0.72, 0.72)
+	sprite.scale = GROUND_ITEM_VISUAL_SCRIPT.DEFAULT_ITEM_SCALE
 	_activate_record(record)
 
 
 func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, landing_target: Vector2) -> void:
+	spawn_collectible_item_toward(CurrencyCatalog.get_item_id(currency), origin, landing_target)
+
+
+func spawn_collectible_item_toward(item_id: String, origin: Vector2, landing_target: Vector2) -> void:
+	if not _is_valid_collectible_item(item_id):
+		push_warning("GroundDropManager: refusing unknown collectible item '%s'." % item_id)
+		return
 	var record: Dictionary = _acquire_record()
 	_configure_record_base(record, KIND_COLLECTIBLE, origin)
-	record["currency"] = currency
+	record["item_id"] = item_id
 	record["state"] = STATE_FALLING
 	record["landing_target"] = landing_target
 	var offset: Vector2 = landing_target - origin
@@ -114,9 +129,9 @@ func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, la
 	record["rotation_velocity"] = randf_range(-2.2, 2.2)
 	record["float_phase"] = randf_range(0.0, TAU)
 	var sprite: Sprite2D = record["sprite"] as Sprite2D
-	sprite.texture = _currency_texture(currency)
+	sprite.texture = GROUND_ITEM_VISUAL_SCRIPT.item_texture(item_id)
 	sprite.centered = true
-	sprite.scale = Vector2(0.72, 0.72)
+	sprite.scale = GROUND_ITEM_VISUAL_SCRIPT.DEFAULT_ITEM_SCALE
 	_activate_record(record)
 
 
@@ -149,11 +164,11 @@ func serialize_state() -> Array[Dictionary]:
 	for record: Dictionary in _active:
 		if StringName(record.get("kind", &"")) != KIND_COLLECTIBLE:
 			continue
-			var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
-			var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
-			result.append({
-				"currency": String(StringName(record.get("currency", &"gem"))),
-				"state": String(StringName(record.get("state", STATE_READY))),
+		var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
+		var velocity: Vector2 = record.get("velocity", Vector2.ZERO) as Vector2
+		result.append({
+			"item_id": str(record.get("item_id", "gem")),
+			"state": String(StringName(record.get("state", STATE_READY))),
 			"x": ground_position.x,
 			"y": ground_position.y,
 			"vx": velocity.x,
@@ -173,11 +188,17 @@ func restore_state(saved_items: Array) -> void:
 		if not (raw_item is Dictionary):
 			continue
 		var item_data: Dictionary = raw_item as Dictionary
-		var currency: StringName = StringName(str(item_data.get("currency", "gem")))
+		var item_id: String = str(item_data.get("item_id", ""))
+		if item_id == "":
+			# Compatibility with saves written before ground drops became generic items.
+			var legacy_currency: StringName = StringName(str(item_data.get("currency", "gem")))
+			item_id = CurrencyCatalog.get_item_id(legacy_currency)
+		if not _is_valid_collectible_item(item_id):
+			continue
 		var drop_position: Vector2 = Vector2(float(item_data.get("x", 0.0)), float(item_data.get("y", 0.0)))
 		var record: Dictionary = _acquire_record()
 		_configure_record_base(record, KIND_COLLECTIBLE, drop_position)
-		record["currency"] = currency
+		record["item_id"] = item_id
 		record["state"] = StringName(str(item_data.get("state", "ready")))
 		record["velocity"] = Vector2(float(item_data.get("vx", 0.0)), float(item_data.get("vy", 0.0)))
 		record["height"] = maxf(0.0, float(item_data.get("height", 0.0)))
@@ -186,8 +207,8 @@ func restore_state(saved_items: Array) -> void:
 		record["rotation_velocity"] = float(item_data.get("rotation_velocity", 0.0))
 		record["float_phase"] = float(item_data.get("float_phase", randf_range(0.0, TAU)))
 		var sprite: Sprite2D = record["sprite"] as Sprite2D
-		sprite.texture = _currency_texture(currency)
-		sprite.scale = Vector2(0.72, 0.72)
+		sprite.texture = GROUND_ITEM_VISUAL_SCRIPT.item_texture(item_id)
+		sprite.scale = GROUND_ITEM_VISUAL_SCRIPT.DEFAULT_ITEM_SCALE
 		_activate_record(record)
 		_update_record_visual(record)
 
@@ -315,7 +336,7 @@ func _process_fading(record: Dictionary, delta: float) -> void:
 	var shadow: Sprite2D = record["shadow"] as Sprite2D
 	var alpha: float = clampf(fade_timer / CORPSE_FADE_SECONDS, 0.0, 1.0)
 	sprite.modulate = Color(1.0, 1.0, 1.0, alpha)
-	shadow.modulate = Color(1.0, 1.0, 1.0, alpha * 0.45)
+	GROUND_ITEM_VISUAL_SCRIPT.set_floor_shadow_alpha(shadow, alpha)
 	if fade_timer <= 0.0:
 		_release_record(record)
 
@@ -337,26 +358,31 @@ func _update_record_visual(record: Dictionary) -> void:
 	var scale_y: float = maxf(0.001, absf(sprite.scale.y))
 	sprite.set_instance_shader_parameter("float_amplitude", FLOAT_AMPLITUDE / scale_y if is_settled_collectible else 0.0)
 	sprite.set_instance_shader_parameter("float_phase", float(record.get("float_phase", 0.0)))
-	shadow.position = Vector2.ZERO
-	var shadow_scale: float = clampf(1.0 - height / 96.0, 0.35, 1.0)
-	shadow.scale = Vector2(shadow_scale, shadow_scale * 0.8)
+	GROUND_ITEM_VISUAL_SCRIPT.update_floor_shadow(shadow, height)
 	if StringName(record.get("state", STATE_READY)) != STATE_FADING:
 		sprite.modulate = Color.WHITE
-		shadow.modulate = Color(1.0, 1.0, 1.0, 0.45)
+		GROUND_ITEM_VISUAL_SCRIPT.set_floor_shadow_alpha(shadow, 1.0)
 
 
-## Grants one unit of the drop's currency to the player and requests pickup feedback. The grant is
-## atomic inside GameUI, so the caller releases the drop the moment this succeeds — the retired
-## drop no longer waits on any flight callback.
-func _grant_currency_pickup(currency: StringName, world_position: Vector2) -> bool:
+## Grants one unit of the dropped item and requests pickup feedback. Currency ids use progression;
+## all other catalog items use inventory. Both grants are atomic inside GameUI, so the caller can
+## release the world drop immediately when this succeeds.
+func _grant_item_pickup(item_id: String, world_position: Vector2) -> bool:
 	var scene: Node = get_tree().current_scene
 	var game_ui: Node = scene.get_node_or_null("GameUI") if scene != null else null
-	if game_ui == null or not game_ui.has_method("grant_currency_from_world"):
+	if game_ui == null:
 		return false
-	return bool(game_ui.call("grant_currency_from_world", currency, world_position, 1))
+	var currency: StringName = CurrencyCatalog.get_currency_for_item_id(item_id)
+	if currency != &"":
+		if not game_ui.has_method("grant_currency_from_world"):
+			return false
+		return bool(game_ui.call("grant_currency_from_world", currency, world_position, 1))
+	if not game_ui.has_method("collect_inventory_item_from_world"):
+		return false
+	return bool(game_ui.call("collect_inventory_item_from_world", item_id, world_position, 1))
 
 
-## The shared ground-currency pickup radius for a floor layer. Gems, coins and every other
+## The shared ground-item pickup radius for a floor layer. Gems, inventory items and every other
 ## loose drop are collected at this distance; BambooHarvestController reuses this helper so
 ## bamboo harvests at exactly the same range instead of duplicating the constants.
 static func pickup_radius_for_floor(floor_layer: TileMapLayer) -> float:
@@ -396,7 +422,7 @@ func _configure_record_base(record: Dictionary, kind: StringName, world_position
 	record["rotation"] = randf_range(-0.35, 0.35)
 	record["rotation_velocity"] = 0.0
 	record["fade_timer"] = 0.0
-	record["currency"] = &""
+	record["item_id"] = ""
 	record["float_phase"] = 0.0
 	sprite.set_instance_shader_parameter("float_amplitude", 0.0)
 	root.visible = true
@@ -404,9 +430,7 @@ func _configure_record_base(record: Dictionary, kind: StringName, world_position
 	sprite.visible = true
 	sprite.modulate = Color.WHITE
 	sprite.rotation = float(record["rotation"])
-	shadow.visible = true
-	shadow.texture = TINY_SHADOW_TEXTURE
-	shadow.modulate = Color(1.0, 1.0, 1.0, 0.45)
+	GROUND_ITEM_VISUAL_SCRIPT.reset_floor_shadow(shadow)
 
 
 func _activate_record(record: Dictionary) -> void:
@@ -452,10 +476,7 @@ func _create_record() -> Dictionary:
 	var root: Node2D = Node2D.new()
 	root.visible = false
 	root.z_as_relative = false
-	var shadow: Sprite2D = Sprite2D.new()
-	shadow.texture = TINY_SHADOW_TEXTURE
-	shadow.centered = true
-	shadow.z_index = -1
+	var shadow: Sprite2D = GROUND_ITEM_VISUAL_SCRIPT.create_floor_shadow()
 	var sprite: Sprite2D = Sprite2D.new()
 	sprite.centered = true
 	sprite.z_index = 0
@@ -527,16 +548,8 @@ func _part_texture(atlas: Texture2D, frame_index: int) -> AtlasTexture:
 	return texture
 
 
-## The loose-drop sprite texture for a currency, resolved straight from CurrencyCatalog rather than
-## reading the HUD icon node's texture, so ground drops no longer depend on GameUI/currenciesUI.
-func _currency_texture(currency: StringName) -> Texture2D:
-	var texture: AtlasTexture = AtlasTexture.new()
-	texture.atlas = ITEMS_TEXTURE
-	if CurrencyCatalog.has_currency(currency):
-		texture.region = CurrencyCatalog.get_icon_region(currency)
-	else:
-		texture.region = Rect2(Vector2(8.0 * ITEM_FRAME_SIZE.x, 0.0), ITEM_FRAME_SIZE)
-	return texture
+func _is_valid_collectible_item(item_id: String) -> bool:
+	return GROUND_ITEM_VISUAL_SCRIPT.has_item_texture(item_id)
 
 
 func _register_settled_record(record: Dictionary) -> void:
@@ -590,8 +603,8 @@ func _check_record_pickup(record: Dictionary, player: Node2D) -> void:
 	var ground_position: Vector2 = record.get("ground_position", Vector2.ZERO) as Vector2
 	if player.global_position.distance_squared_to(ground_position) > _pickup_radius_squared:
 		return
-	var currency: StringName = StringName(record.get("currency", &"gem"))
-	if not _grant_currency_pickup(currency, ground_position):
+	var item_id: String = str(record.get("item_id", "gem"))
+	if not _grant_item_pickup(item_id, ground_position):
 		return
 	# Reward granted atomically: retire the drop now, independent of the pickup feedback.
 	_release_record(record)

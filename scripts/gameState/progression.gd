@@ -1668,12 +1668,20 @@ func _validate_save(data: Dictionary) -> String:
 			if not (raw_entry is Dictionary):
 				return "invalid ground collectible entry"
 			var item: Dictionary = raw_entry as Dictionary
-			for field: String in ["currency", "state", "x", "y"]:
+			for field: String in ["state", "x", "y"]:
 				if not item.has(field):
 					return "invalid ground collectible entry"
-			var currency: String = str(item["currency"])
-			if not CurrencyCatalog.has_currency(StringName(currency)):
-				return "invalid ground collectible currency"
+			var item_id: String = str(item.get("item_id", ""))
+			if item_id == "":
+				# Compatibility with currency-only ground drops from older saves.
+				var currency: StringName = StringName(str(item.get("currency", "")))
+				if not CurrencyCatalog.has_currency(currency):
+					return "invalid ground collectible currency"
+				item_id = CurrencyCatalog.get_item_id(currency)
+			var is_currency_item: bool = CurrencyCatalog.get_currency_for_item_id(item_id) != &""
+			var has_item_frame: bool = int(ItemCatalog.get_item_def(item_id).get("frame", -1)) >= 0
+			if not is_currency_item and not has_item_frame:
+				return "invalid ground collectible item"
 			var state: String = str(item["state"])
 			if not ["falling", "ready"].has(state):
 				return "invalid ground collectible state"

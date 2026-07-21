@@ -2452,6 +2452,11 @@ func _animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, cl
 		counter_cell, pile_index, client, Callable(self, "_on_client_rose_arrived").bind(client))
 
 
+func _animate_world_rose_to_client(start_world: Vector2, client: Node2D) -> void:
+	_counter_stock_manager.animate_world_rose_to_client(
+		start_world, client, Callable(self, "_on_client_rose_arrived").bind(client))
+
+
 # Called when the rose that left the counter pile reaches the buying client: only now
 # does the client show the pinned rose sprite (character.gd gates it on this meta).
 func _on_client_rose_arrived(client: Node2D) -> void:
@@ -2580,6 +2585,7 @@ func _consume_plant(eater: Node2D, _spawner_cell: Vector2i, plant_cell: Vector2i
 
 
 func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
+	var rose_world: Vector2 = cell_center(plant_cell)
 	if plant_manager and plant_manager.has_method("remove_plant"):
 		plant_manager.call("remove_plant", plant_cell, true)
 	elif plantz:
@@ -2587,11 +2593,11 @@ func _start_client_payment(agent: Node2D, plant_cell: Vector2i) -> void:
 		_flush_plant_layer_visuals()
 	credit_client_purchase_money()
 	agent.set_meta("client_has_rose", true)
-	# Garden plant purchase has no counter-pile flight, so the pinned rose shows at once.
-	agent.set_meta("client_rose_visible", true)
+	agent.set_meta("client_rose_visible", false)
 	_finish_client_purchase(agent)
+	_animate_world_rose_to_client(rose_world, agent)
 	_spawn_client_payment_money_visual(agent.global_position)
-	spawn_plant_parts_burst(cell_center(plant_cell))
+	spawn_plant_parts_burst(rose_world)
 
 
 func _process_client_counter_arrivals() -> void:
@@ -2939,9 +2945,19 @@ func spawn_collectible_currency(currency: StringName, world_position: Vector2) -
 		_ground_drop_manager.spawn_collectible_currency(currency, world_position)
 
 
+func spawn_collectible_item(item_id: String, world_position: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_collectible_item(item_id, world_position)
+
+
 func spawn_collectible_currency_toward(currency: StringName, origin: Vector2, landing_target: Vector2) -> void:
 	if _ground_drop_manager != null:
 		_ground_drop_manager.spawn_collectible_currency_toward(currency, origin, landing_target)
+
+
+func spawn_collectible_item_toward(item_id: String, origin: Vector2, landing_target: Vector2) -> void:
+	if _ground_drop_manager != null:
+		_ground_drop_manager.spawn_collectible_item_toward(item_id, origin, landing_target)
 
 
 func nearest_valid_dry_floor_world(origin: Vector2) -> Vector2:

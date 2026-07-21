@@ -2,9 +2,12 @@ extends Node
 class_name CounterStockManager
 
 const ROSE_TEXTURE: Texture2D = preload("res://assets/sprites/legval/rose.png")
+const GROUND_ITEM_VISUAL_SCRIPT: Script = preload("res://scripts/map/ground_item_visual.gd")
 const ROSE_TEXTURE_FRAME_COUNT: int = 3
 const ROSE_TEXTURE_FRAME: int = 0
 const HARVEST_ROSE_FLIGHT_SECONDS: float = 0.65
+const HARVEST_ROSE_ARC_HEIGHT: float = 32.0
+const CLIENT_ROSE_ARC_HEIGHT: float = 24.0
 const COUNTER_PILE_ROSE_SCALE: float = 0.56
 const COUNTER_BOUQUET_BASE_OFFSET: Vector2 = Vector2(0.0, -8.0)
 const COUNTER_BOUQUET_SLOT_OFFSETS: Array[Vector2] = [
@@ -27,6 +30,7 @@ const CLIENT_COUNTER_RADIUS_TILES: int = 2
 const CLIENT_EARLY_FETCH_TARGET_RADIUS_TILES: int = 2
 const INVALID_CELL: Vector2i = Vector2i(2147483647, 2147483647)
 const ROSE_SHOP_COUNTER_ID: String = "rose_shop_counter"
+const ROSE_ITEM_ID: String = "rose"
 # Total duration of the nightfall "counters emptying" animation. The per-rose tick is
 # derived from this so the whole sequence always finishes in exactly this many seconds.
 const NIGHTFALL_DISSOLVE_SECONDS: float = 3.0
@@ -347,27 +351,23 @@ func nearest_counter_access_cell(counter_cell: Vector2i, from_cell: Vector2i) ->
 
 
 func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> void:
-	var sprite: Sprite2D = Sprite2D.new()
-	sprite.texture = ROSE_TEXTURE
-	sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
-	sprite.frame = ROSE_TEXTURE_FRAME
-	sprite.centered = true
-	sprite.scale = Vector2(0.75, 0.75)
-	sprite.global_position = start_world
-	sprite.z_index = int(start_world.y) + 10
-	_resolve_pile_parent().add_child(sprite)
+	var visual: GroundItemVisual = GROUND_ITEM_VISUAL_SCRIPT.new()
+	if not visual.setup_catalog_item(ROSE_ITEM_ID):
+		visual.free()
+		return
+	_resolve_pile_parent().add_child(visual)
+	visual.set_flight_pose(start_world, 0.0, 10)
 	var end_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _bouquet_offset(maxi(0, stock(counter_cell) - 1))
-	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -64.0)
 	var tween: Tween = create_tween()
 	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_method(
-		Callable(self, "_update_harvest_rose_flight").bind(sprite, start_world, mid_world, end_world),
+		Callable(self, "_update_harvest_rose_flight").bind(visual, start_world, end_world),
 		0.0,
 		1.0,
 		HARVEST_ROSE_FLIGHT_SECONDS
 	)
-	tween.parallel().tween_property(sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
-	tween.tween_callback(Callable(sprite, "queue_free"))
+	tween.parallel().tween_property(visual.sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
+	tween.tween_callback(Callable(visual, "queue_free"))
 
 
 # Symmetric counterpart to animate_harvested_rose: a rose leaves its filled bouquet
@@ -377,30 +377,42 @@ func animate_harvested_rose(start_world: Vector2, counter_cell: Vector2i) -> voi
 # flight endpoint tracks its live position every tick; `on_arrival` fires once the rose
 # catches up (the caller uses this to show the pinned rose sprite).
 func animate_counter_rose_to_client(counter_cell: Vector2i, pile_index: int, target: Node2D, on_arrival: Callable) -> void:
+	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _bouquet_offset(maxi(0, pile_index))
+	animate_world_rose_to_client(
+		start_world,
+		target,
+		on_arrival
+	)
+
+
+## Shared rose-to-client flight for both counter stock and a rose bought directly from a garden.
+func animate_world_rose_to_client(
+	start_world: Vector2,
+	target: Node2D,
+	on_arrival: Callable
+) -> void:
 	if target == null or not is_instance_valid(target):
 		if not on_arrival.is_null():
 			on_arrival.call()
 		return
-	var start_world: Vector2 = _call_vector2(_cell_center, counter_cell) + _bouquet_offset(maxi(0, pile_index))
-	var sprite: Sprite2D = Sprite2D.new()
-	sprite.texture = ROSE_TEXTURE
-	sprite.hframes = ROSE_TEXTURE_FRAME_COUNT
-	sprite.frame = ROSE_TEXTURE_FRAME
-	sprite.centered = true
-	sprite.scale = Vector2(COUNTER_PILE_ROSE_SCALE, COUNTER_PILE_ROSE_SCALE)
-	sprite.global_position = start_world
-	sprite.z_index = int(start_world.y) + 20
-	_resolve_pile_parent().add_child(sprite)
+	var visual: GroundItemVisual = GROUND_ITEM_VISUAL_SCRIPT.new()
+	if not visual.setup_catalog_item(ROSE_ITEM_ID):
+		visual.free()
+		if not on_arrival.is_null():
+			on_arrival.call()
+		return
+	_resolve_pile_parent().add_child(visual)
+	visual.set_flight_pose(start_world, 0.0, 20)
 	var tween: Tween = create_tween()
 	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_method(
-		Callable(self, "_update_counter_rose_to_client_flight").bind(sprite, start_world, target),
+		Callable(self, "_update_counter_rose_to_client_flight").bind(visual, start_world, target),
 		0.0,
 		1.0,
 		HARVEST_ROSE_FLIGHT_SECONDS
 	)
-	tween.parallel().tween_property(sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
-	tween.tween_callback(Callable(self, "_on_counter_rose_reached_client").bind(sprite, on_arrival))
+	tween.parallel().tween_property(visual.sprite, "rotation", TAU, HARVEST_ROSE_FLIGHT_SECONDS)
+	tween.tween_callback(Callable(self, "_on_counter_rose_reached_client").bind(visual, on_arrival))
 
 
 func can_install_new_counter() -> bool:
@@ -497,40 +509,25 @@ func _pop_last_bouquet_slots(piles: Array) -> void:
 			sprite.visible = false
 
 
-func _update_harvest_rose_flight(progress: float, sprite: Sprite2D, start_world: Vector2, mid_world: Vector2, end_world: Vector2) -> void:
-	if not is_instance_valid(sprite):
+func _update_harvest_rose_flight(progress: float, visual: GroundItemVisual, start_world: Vector2, end_world: Vector2) -> void:
+	if not is_instance_valid(visual):
 		return
-	var inverse_progress: float = 1.0 - progress
-	var pos: Vector2 = (
-		inverse_progress * inverse_progress * start_world
-		+ 2.0 * inverse_progress * progress * mid_world
-		+ progress * progress * end_world
-	)
-	sprite.global_position = pos
-	sprite.z_index = int(pos.y) + 10
+	visual.set_arc_flight_pose(start_world, end_world, progress, HARVEST_ROSE_ARC_HEIGHT, 0.0, 0.0, 10)
 
 
-func _update_counter_rose_to_client_flight(progress: float, sprite: Sprite2D, start_world: Vector2, target: Node2D) -> void:
-	if not is_instance_valid(sprite):
+func _update_counter_rose_to_client_flight(progress: float, visual: GroundItemVisual, start_world: Vector2, target: Node2D) -> void:
+	if not is_instance_valid(visual):
 		return
 	# Endpoint re-read every tick so the rose homes onto the walking-away client.
 	var end_world: Vector2 = start_world
 	if target != null and is_instance_valid(target):
 		end_world = target.global_position
-	var mid_world: Vector2 = (start_world + end_world) * 0.5 + Vector2(0.0, -48.0)
-	var inverse_progress: float = 1.0 - progress
-	var pos: Vector2 = (
-		inverse_progress * inverse_progress * start_world
-		+ 2.0 * inverse_progress * progress * mid_world
-		+ progress * progress * end_world
-	)
-	sprite.global_position = pos
-	sprite.z_index = int(pos.y) + 20
+	visual.set_arc_flight_pose(start_world, end_world, progress, CLIENT_ROSE_ARC_HEIGHT, 0.0, 0.0, 20)
 
 
-func _on_counter_rose_reached_client(sprite: Sprite2D, on_arrival: Callable) -> void:
-	if is_instance_valid(sprite):
-		sprite.queue_free()
+func _on_counter_rose_reached_client(visual: GroundItemVisual, on_arrival: Callable) -> void:
+	if is_instance_valid(visual):
+		visual.queue_free()
 	if not on_arrival.is_null():
 		on_arrival.call()
 
