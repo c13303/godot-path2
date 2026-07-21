@@ -37,19 +37,20 @@ var _has_player_screen: bool = false
 var _visuals: Array[PickupVisual] = []
 
 
-## One flying icon's state. Flight runs first (from the source to the player), then a compact
-## above-head bounce. `flight_elapsed` starts negative so an icon can wait out its launch stagger
-## before it appears.
+## One flying icon's state. Incoming flights finish with a compact above-head bounce; outbound
+## world flights finish on their target. `flight_elapsed` starts negative for launch staggering.
 class PickupVisual:
 	var texture: AtlasTexture = null
 	var screen_sprite: TextureRect = null
 	var world_visual: GroundItemVisual = null
 	var start_position: Vector2 = Vector2.ZERO
+	var target_position: Vector2 = Vector2.ZERO
 	var spread_offset: Vector2 = Vector2.ZERO
 	var rotation_velocity: float = 0.0
 	var flight_elapsed: float = 0.0
 	var bounce_elapsed: float = 0.0
 	var in_bounce: bool = false
+	var flies_to_player: bool = false
 
 
 func _ready() -> void:
@@ -75,6 +76,33 @@ func play_from_world(item_id: String, world_position: Vector2, quantity: int = 1
 	var stagger: float = _launch_stagger(spawn_count)
 	for i: int in range(spawn_count):
 		_spawn_world_visual(texture, world_parent, world_position, i, spawn_count, float(i) * stagger)
+	set_process(true)
+	return true
+
+
+## Generic outbound world transfer: launch an item from the player and land it on a
+## successfully placed tile. This remains visual-only; placement and spending already committed.
+func play_from_player_to_world(item_id: String, world_position: Vector2, quantity: int = 1) -> bool:
+	var texture: AtlasTexture = GROUND_ITEM_VISUAL_SCRIPT.item_texture(item_id)
+	var player: Node2D = _player_node()
+	var world_parent: Node2D = _world_visual_parent()
+	if texture == null or player == null or world_parent == null or quantity <= 0:
+		return false
+	var spawn_count: int = _spawn_count(quantity)
+	if spawn_count <= 0:
+		return false
+	var stagger: float = _launch_stagger(spawn_count)
+	for i: int in range(spawn_count):
+		_spawn_world_visual(
+			texture,
+			world_parent,
+			player.global_position,
+			i,
+			spawn_count,
+			float(i) * stagger,
+			false,
+			world_position
+		)
 	set_process(true)
 	return true
 
@@ -123,7 +151,9 @@ func _spawn_world_visual(
 	world_start: Vector2,
 	index: int,
 	count: int,
-	delay: float
+	delay: float,
+	flies_to_player: bool = true,
+	target_position: Vector2 = Vector2.ZERO
 ) -> void:
 	var item_visual: GroundItemVisual = GROUND_ITEM_VISUAL_SCRIPT.new()
 	item_visual.setup_item(texture, 1, 0, GROUND_ITEM_VISUAL_SCRIPT.DEFAULT_ITEM_SCALE)
@@ -134,9 +164,11 @@ func _spawn_world_visual(
 	visual.texture = texture
 	visual.world_visual = item_visual
 	visual.start_position = world_start
+	visual.target_position = target_position
 	visual.spread_offset = _spread_offset(index, count)
 	visual.rotation_velocity = randf_range(-2.2, 2.2)
 	visual.flight_elapsed = -delay
+	visual.flies_to_player = flies_to_player
 	_visuals.append(visual)
 
 
@@ -202,6 +234,8 @@ func _update_visual(visual: PickupVisual, delta: float) -> bool:
 		else:
 			return false
 		if t >= 1.0:
+			if visual.world_visual != null and not visual.flies_to_player:
+				return false
 			_start_screen_bounce(visual)
 		return true
 
@@ -220,15 +254,20 @@ func _update_visual(visual: PickupVisual, delta: float) -> bool:
 func _update_world_flight(visual: PickupVisual, delta: float, eased: float) -> void:
 	var item_visual: GroundItemVisual = visual.world_visual
 	item_visual.visible = true
-	var player: Node2D = _player_node()
-	var target_world: Vector2 = player.global_position if player != null else visual.start_position
+	var target_world: Vector2 = visual.target_position
+	if visual.flies_to_player:
+		var player: Node2D = _player_node()
+		target_world = player.global_position if player != null else visual.start_position
+	var catch_height: float = _player_catch_world_height()
+	var start_height: float = 0.0 if visual.flies_to_player else catch_height
+	var end_height: float = catch_height if visual.flies_to_player else 0.0
 	item_visual.set_arc_flight_pose(
 		visual.start_position,
 		target_world,
 		eased,
 		ARC_HEIGHT,
-		0.0,
-		_player_catch_world_height(),
+		start_height,
+		end_height,
 		0,
 		visual.spread_offset
 	)

@@ -603,6 +603,13 @@ func play_pickup_from_world(item_id: String, world_position: Vector2, quantity: 
 	return _pickup_feedback.play_from_world(item_id, world_position, quantity)
 
 
+## Visual-only reverse pickup used after a placement has successfully committed its cost.
+func play_item_from_player_to_world(item_id: String, world_position: Vector2, quantity: int = 1) -> bool:
+	if _pickup_feedback == null:
+		return false
+	return _pickup_feedback.play_from_player_to_world(item_id, world_position, quantity)
+
+
 ## Fly `quantity` pickup icons of `item_id` from a screen position (e.g. a dialog row) to the
 ## player. Visual only.
 func play_pickup_from_screen(item_id: String, screen_position: Vector2, quantity: int = 1) -> bool:
@@ -708,6 +715,10 @@ func get_build_price(item_id: String) -> int:
 		return base_price
 	var placed_count: int = _placed_build_count(item_id)
 	return _growth_build_price(base_price, factor, placed_count)
+
+
+func get_build_price_total_for_next(item_id: String, count: int) -> int:
+	return _build_price_total_for_next(item_id, count)
 
 
 func _base_build_price(item_id: String) -> int:

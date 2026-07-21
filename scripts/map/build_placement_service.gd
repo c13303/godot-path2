@@ -5,6 +5,7 @@ class_name BuildPlacementService
 # preview, selection state, drag state, removal, and save/load coordination.
 
 const FLOOR_TILE_CATALOG: Script = preload("res://scripts/map/floor_tile_catalog.gd")
+const BUILD_COST_VISUAL_FEEDBACK: Script = preload("res://scripts/map/build_cost_visual_feedback.gd")
 const DEFAULT_TERRAIN_SPEED_MULTIPLIER: float = 1.0
 const ALERT_NEEDS_GRASS_KEY: String = "alert.needs_grass"
 const ALERT_NON_BUILDABLE_FLOOR_KEY: String = "alert.non_buildable_floor"
@@ -104,6 +105,7 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	var game_ui: CanvasLayer = _game_ui()
 	if not game_ui or not game_ui.has_method("try_purchase_build"):
 		return
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, 1)
 	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
 		_notify("can't afford")
 		return
@@ -135,6 +137,7 @@ func try_apply_placeable(placeable_def: Dictionary, cell: Vector2i) -> void:
 	if item_id == FENCE_ITEM_ID:
 		_refresh_fence_autotiles_around(cell)
 	_play_build_fx_at_cell(cell, target_layer)
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cell(game_ui, cost_visual, cell, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 
 
@@ -150,6 +153,7 @@ func _apply_floor_replacement(placeable_def: Dictionary, cell: Vector2i) -> void
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui == null or not game_ui.has_method("try_purchase_build"):
 		return
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, 1)
 	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
 		_notify("can't afford")
 		return
@@ -163,6 +167,7 @@ func _apply_floor_replacement(placeable_def: Dictionary, cell: Vector2i) -> void
 			game_ui.call("refund_build", item_id, _cell_world_position(cell), 1)
 		return
 	_play_build_fx_at_cell(cell, floorz)
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cell(game_ui, cost_visual, cell, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 
 
@@ -186,6 +191,7 @@ func _apply_runtime_traversable_placeable(placeable_def: Dictionary, cell: Vecto
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui == null or not game_ui.has_method("try_purchase_build"):
 		return
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, 1)
 	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
 		_notify("can't afford")
 		return
@@ -196,6 +202,7 @@ func _apply_runtime_traversable_placeable(placeable_def: Dictionary, cell: Vecto
 		var displaced_cells: Array[Vector2i] = [cell]
 		_actor_displacement.displace_from_cells(displaced_cells)
 	_play_build_fx_at_cell(cell, reference_layer)
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cell(game_ui, cost_visual, cell, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 
 
@@ -217,6 +224,7 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui == null or not game_ui.has_method("try_purchase_build"):
 		return
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, 1)
 	if not bool(game_ui.call("try_purchase_build", item_id, 1)):
 		_notify("can't afford")
 		return
@@ -232,6 +240,7 @@ func _apply_house_placeable(placeable_def: Dictionary, entrance: Vector2i) -> vo
 	if _manager != null and _manager.has_method("notify_player_house_placed"):
 		_manager.call("notify_player_house_placed", item_id)
 	_play_build_fx_at_cell(entrance, _wallz())
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cell(game_ui, cost_visual, entrance, _wallz())
 	# A house is placed one at a time (never dragged), so the tool always deselects after a
 	# successful placement and control returns to play mode, even when another one is affordable.
 	_clear_build_selection()
@@ -318,6 +327,7 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 	if not game_ui or not game_ui.has_method("try_purchase_build"):
 		_clear_build_selection()
 		return false
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, cells.size())
 	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
 		_clear_build_selection()
 		return false
@@ -345,6 +355,7 @@ func commit_drag_build(placeable_def: Dictionary, item_id: String, start_cell: V
 	var sound: StringName = drag_build_sound(item_id)
 	if sound != &"":
 		Sfx.play_sound(sound)
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cells(game_ui, cost_visual, cells, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 	return true
 
@@ -372,6 +383,7 @@ func _commit_floor_replacement_drag(
 	var game_ui: CanvasLayer = _game_ui()
 	if game_ui == null or not game_ui.has_method("try_purchase_build"):
 		return false
+	var cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.capture(game_ui, item_id, cells.size())
 	if not bool(game_ui.call("try_purchase_build", item_id, cells.size())):
 		return false
 	var floor_replacements: FloorReplacementRegistry = _manager.get_floor_replacement_registry()
@@ -384,6 +396,8 @@ func _commit_floor_replacement_drag(
 			game_ui.call("refund_build", item_id, _cell_world_position(cells[0]), failed_count)
 	for cell: Vector2i in placed:
 		_play_build_fx_at_cell(cell, floorz)
+	var placed_cost_visual: Dictionary = BUILD_COST_VISUAL_FEEDBACK.scaled(cost_visual, placed.size(), cells.size())
+	BUILD_COST_VISUAL_FEEDBACK.play_at_cells(game_ui, placed_cost_visual, placed, _wallz())
 	clear_build_selection_if_unaffordable(item_id)
 	return not placed.is_empty()
 
