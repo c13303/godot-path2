@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.h"
+#include "external_velocity_accumulator.h"
 #include "terrain_speed_grid.h"
 #include <cstdint>
 #include <limits>
@@ -81,6 +82,7 @@ namespace ffcore
         int id = -1;
         Vec2 position;
         Vec2 velocity;
+        ExternalVelocityAccumulator external_velocity;
         double max_speed = 50.0;
         bool active = true;
         AgentProfile profile{};

@@ -101,7 +101,24 @@ static inline double terrain_speed_multiplier_for_agent(const AgentData &a, Flow
 
 static inline Vec2 terrain_scaled_step(const AgentData &a, FlowField *nav, const Vec2 &velocity, double delta)
 {
-    return velocity * delta * terrain_speed_multiplier_for_agent(a, nav);
+    Vec2 movement_velocity = velocity;
+    if (a.phase != AgentPhase::Drowning)
+    {
+        const Vec2 external_velocity = a.external_velocity.current_velocity();
+        movement_velocity = movement_velocity + external_velocity;
+
+        // Environmental motion may accelerate ordinary travel, but bounded normal
+        // movement prevents stacked sources from producing runaway speed. Smash
+        // velocity remains uncapped here so wind never weakens an existing knockback.
+        if (!a.is_propelled && !external_velocity.is_zero())
+        {
+            const double max_environmental_speed = a.max_speed * 1.5;
+            const double movement_speed = safe_len(movement_velocity);
+            if (max_environmental_speed > 0.0 && movement_speed > max_environmental_speed)
+                movement_velocity = movement_velocity * (max_environmental_speed / movement_speed);
+        }
+    }
+    return movement_velocity * delta * terrain_speed_multiplier_for_agent(a, nav);
 }
 
 static inline Vec2 propelled_move_velocity(const AgentData &a, const Vec2 &target_velocity, double control_factor)
@@ -1494,6 +1511,31 @@ void SteeringSystem::apply_navigation_preserving_impulse(int id, const Vec2 &dir
     queue_smash_impulse(id, direction, force, friction_loss, 0.0, false, 0.0, 0.0, true, static_cast<int>(ImpulseQueuePriority::Gameplay), true);
 }
 
+int SteeringSystem::create_external_velocity_source()
+{
+    return next_external_velocity_source_id++;
+}
+
+void SteeringSystem::set_agent_external_velocity(int id, int source_id, const Vec2 &velocity, double response_seconds, double expiry_seconds)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end() || source_id < 0)
+        return;
+
+    AgentData &agent = agents[it->second];
+    if (is_drowning_agent(agent))
+        return;
+    agent.external_velocity.refresh_source(source_id, velocity, response_seconds, expiry_seconds);
+}
+
+void SteeringSystem::release_agent_external_velocity(int id, int source_id)
+{
+    auto it = id_to_index.find(id);
+    if (it == id_to_index.end())
+        return;
+    agents[it->second].external_velocity.release_source(source_id);
+}
+
 void SteeringSystem::clear_pending_smash_slot(AgentData &agent)
 {
     agent.pending_smash = Vec2(0, 0);
@@ -1908,6 +1950,7 @@ void SteeringSystem::set_agent_phase(int id, AgentPhase phase, float eating_seco
     a.eating_seconds = eating_seconds;
     if (phase == AgentPhase::Drowning)
     {
+        a.external_velocity.clear();
         clear_pending_smash_slot(a);
         a.smash_force = Vec2(0, 0);
         a.smash_friction = -1.0;
@@ -2255,6 +2298,8 @@ void SteeringSystem::update_all(double delta)
 
     for (auto &a : agents)
     {
+        a.external_velocity.update(delta);
+
         // A paused agent freezes autonomous navigation, but contact impulses are
         // still allowed to displace it so dialog villagers do not become walls.
         if (a.paused)
@@ -2490,7 +2535,7 @@ void SteeringSystem::update_all(double delta)
                 Vec2 combined = wall_repel + local_avoidance;
 
                 Vec2 local_dir = safe_normalize(combined);
-                if (local_dir.is_zero())
+                if (local_dir.is_zero() && a.external_velocity.current_velocity().is_zero())
                 {
                     /*  godot::UtilityFunctions::print("Agent dont recevied force"); */
                     Vec2 target_velocity = Vec2(0, 0);

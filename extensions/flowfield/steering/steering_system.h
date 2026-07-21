@@ -130,6 +130,9 @@ namespace ffcore
         void set_agent_traffic_state(int id, std::int64_t traffic_group_id, int traffic_priority);
         void apply_smash_impulse(int id, const Vec2 &direction, double force, double friction_loss, double delay, bool detach_flow, double control_suppression, double control_suppression_duration);
         void apply_navigation_preserving_impulse(int id, const Vec2 &direction, double force, double friction_loss);
+        int create_external_velocity_source();
+        void set_agent_external_velocity(int id, int source_id, const Vec2 &velocity, double response_seconds, double expiry_seconds);
+        void release_agent_external_velocity(int id, int source_id);
         void apply_area_smash(const Vec2 &pos, double radius, const Vec2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_cone_smash(const Vec2 &pos, double radius, const Vec2 &direction, double angle_degrees, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes);
         void apply_explosion(const Vec2 &pos, double radius, double intensity, double friction_loss);
@@ -267,6 +270,7 @@ namespace ffcore
         std::unordered_map<int, int> id_to_index;
         int next_id = 1;
         int next_continuous_aoe_id = 1;
+        int next_external_velocity_source_id = 1;
         std::vector<ActiveAoE> active_aoes;
         std::vector<DamageEvent> damage_events;
         std::unordered_map<int, std::unordered_map<int, double>> contact_push_cooldowns;

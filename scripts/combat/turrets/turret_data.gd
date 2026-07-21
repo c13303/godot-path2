@@ -23,9 +23,11 @@ enum Behavior {
 @export_range(0.0, 360.0, 0.1) var activation_angle_degrees: float = 360.0
 @export_range(0.0, 60.0, 0.001, "or_greater") var wind_active_duration: float = 1.0
 @export_range(0.0, 60.0, 0.001, "or_greater") var wind_cooldown_duration: float = 3.0
-@export_range(0.0, 10000.0, 1.0, "or_greater") var wind_force: float = 220.0
-@export_range(0.0, 1.0, 0.01) var wind_friction_loss: float = 0.9
-@export_range(0.01, 60.0, 0.001, "or_greater") var wind_repulse_frequency: float = 0.5
+# Wind is an environmental velocity target, not a smash impulse. Response controls
+# both the organic ramp-up while exposed and the ramp-down after release/expiry.
+@export_range(0.0, 10000.0, 0.5, "or_greater") var wind_speed: float = 262.5
+@export_range(0.0, 10.0, 0.01, "or_greater") var wind_response_seconds: float = 0.2
+@export_range(0.01, 10.0, 0.01, "or_greater") var wind_expiry_seconds: float = 0.25
 @export_range(0.01, 60.0, 0.001, "or_greater") var wind_query_interval: float = 0.1
 
 @export_group("Building")

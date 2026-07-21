@@ -62,6 +62,9 @@ void SteeringSystemNative::_bind_methods()
     ClassDB::bind_method(D_METHOD("clear_terrain_speed_channel", "channel"), &SteeringSystemNative::clear_terrain_speed_channel, DEFVAL(0));
     ClassDB::bind_method(D_METHOD("apply_smash_impulse", "agent_id", "direction", "force", "friction_loss", "delay", "detach_flow", "control_suppression", "control_suppression_duration"), &SteeringSystemNative::apply_smash_impulse);
     ClassDB::bind_method(D_METHOD("apply_navigation_preserving_impulse", "agent_id", "direction", "force", "friction_loss"), &SteeringSystemNative::apply_navigation_preserving_impulse);
+    ClassDB::bind_method(D_METHOD("create_external_velocity_source"), &SteeringSystemNative::create_external_velocity_source);
+    ClassDB::bind_method(D_METHOD("set_agent_external_velocity", "agent_id", "source_id", "velocity", "response_seconds", "expiry_seconds"), &SteeringSystemNative::set_agent_external_velocity);
+    ClassDB::bind_method(D_METHOD("release_agent_external_velocity", "agent_id", "source_id"), &SteeringSystemNative::release_agent_external_velocity);
     ClassDB::bind_method(D_METHOD("apply_area_smash", "position", "radius", "direction", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_area_smash);
     ClassDB::bind_method(D_METHOD("apply_cone_smash", "position", "radius", "direction", "angle_degrees", "force", "friction_loss", "falloff", "detach_flow", "control_suppression", "control_suppression_duration", "ignored_agent_id", "affected_smash_classes"), &SteeringSystemNative::apply_cone_smash);
     ClassDB::bind_method(D_METHOD("apply_explosion", "position", "radius", "intensity", "friction_loss"), &SteeringSystemNative::apply_explosion);
@@ -316,6 +319,21 @@ void SteeringSystemNative::apply_smash_impulse(int agent_id, const Vector2 &dire
 void SteeringSystemNative::apply_navigation_preserving_impulse(int agent_id, const Vector2 &direction, double force, double friction_loss)
 {
     system.apply_navigation_preserving_impulse(agent_id, ffcore::Vec2(direction.x, direction.y), force, friction_loss);
+}
+
+int SteeringSystemNative::create_external_velocity_source()
+{
+    return system.create_external_velocity_source();
+}
+
+void SteeringSystemNative::set_agent_external_velocity(int agent_id, int source_id, const Vector2 &velocity, double response_seconds, double expiry_seconds)
+{
+    system.set_agent_external_velocity(agent_id, source_id, ffcore::Vec2(velocity.x, velocity.y), response_seconds, expiry_seconds);
+}
+
+void SteeringSystemNative::release_agent_external_velocity(int agent_id, int source_id)
+{
+    system.release_agent_external_velocity(agent_id, source_id);
 }
 
 void SteeringSystemNative::apply_area_smash(const Vector2 &position, double radius, const Vector2 &direction, double force, double friction_loss, double falloff, bool detach_flow, double control_suppression, double control_suppression_duration, int ignored_agent_id, int affected_smash_classes)
@@ -778,6 +796,9 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["foot_position"] = Vector2(foot.x, foot.y);
     d["velocity"] = velocity;
     d["speed"] = speed;
+    const ffcore::Vec2 external_velocity = a->external_velocity.current_velocity();
+    d["external_velocity"] = Vector2(external_velocity.x, external_velocity.y);
+    d["external_speed"] = external_velocity.length();
     d["max_speed"] = a->max_speed;
     d["speed_ratio"] = a->max_speed > 0.001 ? speed / a->max_speed : 0.0;
     d["nav_dir"] = nav_dir;

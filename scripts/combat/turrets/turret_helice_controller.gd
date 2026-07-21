@@ -38,13 +38,17 @@ func register_turret(cell: Vector2i, data: TurretData, direction: Vector2i, acqu
 		"cooldown_time_left": 0.0,
 		"acquisition_wait": acquisition_wait,
 		"query_wait": 0.0,
-		"repulse_wait_by_agent": {},
+		"external_velocity_source_id": -1,
+		"affected_nav_ids": {},
 	}
 	_building_objects.set_turret_activity_active(cell, false)
 	_building_objects.set_turret_refractory_active(cell, false)
 
 
 func unregister_turret(cell: Vector2i) -> void:
+	if _states.has(cell):
+		var state: Dictionary = _states[cell] as Dictionary
+		_release_external_velocity_source(state)
 	_states.erase(cell)
 
 
@@ -59,6 +63,7 @@ func process(delta: float) -> void:
 		if not _states.has(cell):
 			continue
 		var state: Dictionary = _states[cell] as Dictionary
+		_ensure_external_velocity_source(state, steering)
 		var data: TurretData = state.get("data", null) as TurretData
 		if data == null:
 			continue
@@ -89,8 +94,8 @@ func process(delta: float) -> void:
 func _process_active(cell: Vector2i, state: Dictionary, data: TurretData, steering: Node, delta: float) -> void:
 	var active_left: float = float(state.get("active_time_left", 0.0)) - delta
 	state["active_time_left"] = active_left
-	_decrement_repulse_waits(state, delta)
 	if active_left <= 0.0:
+		_release_external_velocity_source(state, steering)
 		state["state"] = State.COOLDOWN
 		state["cooldown_time_left"] = data.wind_cooldown_duration
 		_building_objects.set_turret_activity_active(cell, false)
@@ -114,35 +119,52 @@ func _has_eligible_agent(cell: Vector2i, state: Dictionary, data: TurretData) ->
 func _process_active_query(cell: Vector2i, state: Dictionary, data: TurretData, steering: Node) -> void:
 	var origin: Vector2 = _turret_system.get_turret_world_position(cell)
 	var direction: Vector2i = state.get("direction", Vector2i.RIGHT) as Vector2i
-	var impulse_direction: Vector2 = Vector2(float(direction.x), float(direction.y)).normalized()
-	if impulse_direction.is_zero_approx():
+	var wind_direction: Vector2 = Vector2(float(direction.x), float(direction.y)).normalized()
+	if wind_direction.is_zero_approx():
 		return
-	var repulse_wait_by_agent: Dictionary = state.get("repulse_wait_by_agent", {}) as Dictionary
-	var eligible_ids: Dictionary = {}
+	var source_id: int = int(state.get("external_velocity_source_id", -1))
+	if source_id < 0:
+		return
+	var affected_nav_ids: Dictionary = state.get("affected_nav_ids", {}) as Dictionary
+	var current_nav_ids: Dictionary = {}
 	for agent: Node2D in _tracker.get_all_agents_in_world_radius(origin, data.shooting_range):
 		if not _is_eligible(agent, cell, state, data, origin):
 			continue
-		var instance_id: int = agent.get_instance_id()
-		eligible_ids[instance_id] = true
 		if not _can_be_pushed(agent):
 			continue
-		if float(repulse_wait_by_agent.get(instance_id, 0.0)) > 0.0:
-			continue
 		var nav_id: int = int(agent.get("nav_id"))
-		steering.call("apply_navigation_preserving_impulse", nav_id, impulse_direction, data.wind_force, data.wind_friction_loss)
-		repulse_wait_by_agent[instance_id] = data.wind_repulse_frequency
-	for raw_instance_id: Variant in repulse_wait_by_agent.keys():
-		if not eligible_ids.has(int(raw_instance_id)):
-			repulse_wait_by_agent.erase(raw_instance_id)
-	state["repulse_wait_by_agent"] = repulse_wait_by_agent
+		current_nav_ids[nav_id] = true
+		steering.call(
+			"set_agent_external_velocity",
+			nav_id,
+			source_id,
+			wind_direction * data.wind_speed,
+			data.wind_response_seconds,
+			data.wind_expiry_seconds
+		)
+	for raw_nav_id: Variant in affected_nav_ids.keys():
+		var previous_nav_id: int = int(raw_nav_id)
+		if not current_nav_ids.has(previous_nav_id):
+			steering.call("release_agent_external_velocity", previous_nav_id, source_id)
+	state["affected_nav_ids"] = current_nav_ids
 
 
-func _decrement_repulse_waits(state: Dictionary, delta: float) -> void:
-	var repulse_wait_by_agent: Dictionary = state.get("repulse_wait_by_agent", {}) as Dictionary
-	for raw_instance_id: Variant in repulse_wait_by_agent.keys():
-		var instance_id: int = int(raw_instance_id)
-		repulse_wait_by_agent[instance_id] = maxf(0.0, float(repulse_wait_by_agent[instance_id]) - delta)
-	state["repulse_wait_by_agent"] = repulse_wait_by_agent
+func _ensure_external_velocity_source(state: Dictionary, steering: Node) -> void:
+	if int(state.get("external_velocity_source_id", -1)) >= 0:
+		return
+	state["external_velocity_source_id"] = int(steering.call("create_external_velocity_source"))
+
+
+func _release_external_velocity_source(state: Dictionary, steering: Node = null) -> void:
+	var resolved_steering: Node = steering
+	if resolved_steering == null and _fight_system != null:
+		resolved_steering = _fight_system.get_steering_system()
+	var source_id: int = int(state.get("external_velocity_source_id", -1))
+	if resolved_steering != null and source_id >= 0:
+		var affected_nav_ids: Dictionary = state.get("affected_nav_ids", {}) as Dictionary
+		for raw_nav_id: Variant in affected_nav_ids.keys():
+			resolved_steering.call("release_agent_external_velocity", int(raw_nav_id), source_id)
+	state["affected_nav_ids"] = {}
 
 
 # Big monsters trigger the turret (detection) but are too heavy to be blown away.

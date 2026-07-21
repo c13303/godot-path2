@@ -33,6 +33,7 @@ void AgentData::reset()
 {
     active = false;
     velocity = Vec2(0, 0);
+    external_velocity.clear();
     flow = nullptr;
     micro_osc = 0;
     micro_osc_timer = 0.0;
