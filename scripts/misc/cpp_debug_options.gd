@@ -332,8 +332,9 @@ func _is_game_paused() -> bool:
 ## and 100 watermelons, and unlocks every Inventor blueprint.
 ## Any of those cases first instantly ends a running night/client reveal cutscene and
 ## snaps the camera back to the player.
-## Numpad 1/2/0 force-spawn one agent from each
-## registered enemy/client spawner. K completes every WIP house.
+## Numpad 1/2 spawn one monster on the mouse tile, attributed to the first
+## registered enemy spawner. Numpad 0 spawns one client from each client spawner.
+## K completes every WIP house.
 ## F1 advances the current day, but only while daytime is active.
 ## ² (top-left key) restarts the level with debug forced ON.
 func _unhandled_input(event: InputEvent) -> void:
@@ -347,10 +348,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_handle_dev_skip_key()
 	elif _is_key(key_event, KEY_KP_1):
 		get_viewport().set_input_as_handled()
-		_spawn_dev_agents_from_spawners(&"monster", &"basic")
+		_spawn_dev_monster_at_mouse(&"basic")
 	elif _is_key(key_event, KEY_KP_2):
 		get_viewport().set_input_as_handled()
-		_spawn_dev_agents_from_spawners(&"monster", &"bigmonster")
+		_spawn_dev_monster_at_mouse(&"bigmonster")
 	elif _is_key(key_event, KEY_KP_0):
 		get_viewport().set_input_as_handled()
 		_spawn_dev_agents_from_spawners(&"client", &"basic")
@@ -525,6 +526,36 @@ func _advance_dev_day() -> void:
 		return
 	if progression.has_method("advance_day"):
 		progression.call("advance_day")
+
+
+func _spawn_dev_monster_at_mouse(monster_type: StringName) -> void:
+	var manager: Node = _get_building_manager()
+	if manager == null:
+		push_warning("dev_keys: BuildingManager node not found")
+		return
+	if not manager.has_method("get_spawners") \
+		or not manager.has_method("spawner_kind_by_cell") \
+		or not manager.has_method("world_to_cell") \
+		or not manager.has_method("spawn_monster_at_cell"):
+		push_warning("dev_keys: BuildingManager mouse-spawn API not found")
+		return
+	var spawners: Dictionary = manager.call("get_spawners") as Dictionary
+	var spawner_kind_by_cell: Dictionary = manager.call("spawner_kind_by_cell") as Dictionary
+	for raw_cell: Variant in spawners.keys():
+		var spawner_cell: Vector2i = raw_cell as Vector2i
+		var kind: StringName = spawner_kind_by_cell.get(spawner_cell, &"monster") as StringName
+		if kind != &"monster":
+			continue
+		var spawn_cell: Vector2i = manager.call("world_to_cell", _mouse_world_position()) as Vector2i
+		var spawned: bool = bool(manager.call("spawn_monster_at_cell", spawner_cell, spawn_cell, monster_type))
+		CppDebugOptions.dlog("dev_keys: mouse-spawned %s=%s at %s from spawner %s" % [
+			String(monster_type),
+			str(spawned),
+			str(spawn_cell),
+			str(spawner_cell),
+		])
+		return
+	push_warning("dev_keys: no registered monster spawner found")
 
 
 func _spawn_dev_agents_from_spawners(spawner_kind: StringName, monster_type: StringName) -> void:

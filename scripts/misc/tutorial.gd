@@ -53,6 +53,7 @@ const KEY_TALK_BUILDER: String = "tutorial.talk_builder"
 const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
 const KEY_WAIT_BUILDER_BUILD: String = "tutorial.wait_builder_build"
 const KEY_BUILD_MERCHANT_HOUSE: String = "tutorial.build_merchant_house"
+const KEY_PREPARE_NEXT_NIGHT: String = "tutorial.prepare_next_night"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
 const KEY_START_CLIENTS_SPACE: String = "tutorial.hold_start_clients_space"
@@ -69,10 +70,10 @@ const HOLD_CONFIRM_SECONDS: float = 1.0
 ## it binds the same input, but it requests a cutscene rather than moving the phase on, so the
 ## phase-toggle button must stay grey and inert while it owns the input.
 const PHASE_HOLD_ACTIONS: Array[StringName] = [HOLD_ACTION_START_CLIENTS, HOLD_ACTION_START_NIGHT]
-## Last day on which the "hold to start night" hint is shown. It is onboarding: it plays before
-## night 1 (day 1) and night 2 (day 2), then stops for the rest of the run. `nDays` increments
-## at dawn, so day N is the day preceding night N. Only the hint stops — the hold itself and
-## the phase-toggle button keep working every day.
+## Last day on which a start-night tutorial hint is shown. Day 1 uses the keyboard/gamepad
+## instruction; day 2 uses the preparation message; it stops for the rest of the run after that.
+## `nDays` increments at dawn, so day N is the day preceding night N. Only the hint stops — the
+## hold itself and the phase-toggle button keep working every day.
 const START_NIGHT_PROMPT_LAST_DAY: int = 2
 
 const ALERT_DURATION: float = 3.0
@@ -793,6 +794,8 @@ func _hold_translation_key(action: StringName) -> String:
 	if action == HOLD_ACTION_START_CLIENTS:
 		return KEY_START_CLIENTS_PAD if pad_mode else KEY_START_CLIENTS_SPACE
 	if action == HOLD_ACTION_START_NIGHT:
+		if _is_day_two():
+			return KEY_PREPARE_NEXT_NIGHT
 		return KEY_START_NIGHT_PAD if pad_mode else KEY_START_NIGHT_SPACE
 	return ""
 

@@ -92,6 +92,7 @@
 	"sheep.greeting": "Hi Rose! My thing is eating plant debris, to give you back some {gem_icon}!",
 	"tutorial.hold_start_night_space": "Hold Space to start the night",
 	"tutorial.hold_start_night_pad": "Hold X to start the night",
+	"tutorial.prepare_next_night": "Prepare your defenses for the next night, and start it when you're ready",
 	"tutorial.hold_start_clients_space": "Hold Space to let clients come in",
 	"tutorial.hold_start_clients_pad": "Hold X to let clients come in",
 	"tutorial.unbuild_selection": "Select the objects to dismantle"

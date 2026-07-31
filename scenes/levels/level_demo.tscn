@@ -1348,7 +1348,6 @@ navigation_enabled = false
 script = ExtResource("33_watersources")
 refill_amount = 1
 refill_interval_seconds = 0.01
-waterpool_drift_speed = 64.0
 metadata/water = false
 
 [node name="wallz" type="TileMapLayer" parent="." unique_id=220307932]

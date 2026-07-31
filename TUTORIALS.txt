@@ -54,6 +54,11 @@ ready to end day, gamepad
     = "Maintenir X pour démarrer la nuit" / "Hold X to start the night"
                                                             [tutorial.hold_start_night_pad]
 
+day 2, ready to end day
+    = "Préparez vos défenses pour la prochaine nuit, et déclenchez-la quand vous êtes prêt·e"
+      / "Prepare your defenses for the next night, and start it when you're ready"
+                                                            [tutorial.prepare_next_night]
+
 --- contextual BUILD alerts (3s, while placing a building anywhere in day) ---
 
 placing a plant/turret on non-grass tile

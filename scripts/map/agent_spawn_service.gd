@@ -21,7 +21,8 @@ func spawn_agent_from(
 	spawner_cell: Vector2i,
 	monster_type: StringName = &"basic",
 	agent_kind: StringName = SPAWNER_KIND_MONSTER,
-	resume_state: Dictionary = {}
+	resume_state: Dictionary = {},
+	spawn_cell_override: Vector2i = INVALID_CELL
 ) -> bool:
 	var agent_scene: PackedScene = _manager._resolve_monster_scene(monster_type)
 	if agent_scene == null:
@@ -105,17 +106,21 @@ func spawn_agent_from(
 		telemetry.warn_garden_task_lag_us("_process_spawners.occupied_cells", occ_us,
 			"spawner_cell=%s occupied=%d" % [str(spawner_cell), occupied.size()])
 
-	# Free-cell search: spirals out from the spawner doing per-cell walkable/wall
-	# (TileMap) lookups until a free cell is found. Can spike when the spawner is
-	# boxed in.
+	# Normal spawns search outward from the source spawner. Dev spawns may provide
+	# an exact physical cell while retaining the real spawner for route ownership.
 	var t_free: int = Time.get_ticks_usec()
-	var spawn_cell: Vector2i = _manager._find_free_cell_near(spawner_cell, occupied)
+	var spawn_cell: Vector2i = spawn_cell_override
+	if spawn_cell == INVALID_CELL:
+		spawn_cell = _manager._find_free_cell_near(spawner_cell, occupied)
 	var free_us: int = Time.get_ticks_usec() - t_free
 	if telemetry.over_garden_threshold_us(free_us):
 		telemetry.warn_garden_task_lag_us("_process_spawners.find_free_cell", free_us,
 			"spawner_cell=%s spawn_cell=%s" % [str(spawner_cell), str(spawn_cell)])
 	if spawn_cell == INVALID_CELL or not _manager._is_sane_cell(spawn_cell):
 		telemetry.log_spawn_failure("spawner %s could not find a sane walkable spawn cell (got %s)" % [spawner_cell, spawn_cell])
+		return false
+	if spawn_cell_override != INVALID_CELL and not _manager.is_walkable_cell(spawn_cell):
+		telemetry.log_spawn_failure("dev spawn cell %s is not walkable" % spawn_cell)
 		return false
 
 	# Instantiate + add_child + group registration of the agent scene.

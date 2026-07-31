@@ -2298,6 +2298,11 @@ func find_path_on_walkable_map(from_cell: Vector2i, to_cell: Vector2i) -> Packed
 func cell_center(cell: Vector2i) -> Vector2:
 	return _cell_center(cell)
 
+func world_to_cell(world_position: Vector2) -> Vector2i:
+	if floorz == null:
+		return INVALID_CELL
+	return floorz.local_to_map(floorz.to_local(world_position))
+
 
 func register_runtime_agent(agent: Node2D, category: StringName) -> void:
 	_register_runtime_agent(agent, category)
@@ -2520,6 +2525,10 @@ func _spawn_monster_from(spawner_cell: Vector2i, monster_type: StringName = &"ba
 
 func spawn_monster_from_spawner(spawner_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
 	return _spawn_monster_from(spawner_cell, monster_type)
+
+
+func spawn_monster_at_cell(spawner_cell: Vector2i, spawn_cell: Vector2i, monster_type: StringName = &"basic") -> bool:
+	return _agent_spawn_service.spawn_agent_from(spawner_cell, monster_type, SPAWNER_KIND_MONSTER, {}, spawn_cell)
 
 
 func spawn_resumed_monster_from_spawner(spawner_cell: Vector2i, monster_type: StringName, resume_state: Dictionary) -> bool:
