@@ -13,15 +13,16 @@ extends RichTextLabel
 ##   1. fundamental Builder onboarding .............. allow entry / talk / build house
 ##   2. unbuild tool selected ....................... Select objects to dismantle
 ##   3. empty water reserve ......................... Refill your water
-##   4. first day-2 place-counter step, <10 bamboo .. Collect bamboo (world arrow on the grove)
-##   5. dawn harvest (grown roses) .................. Harvest / add counters / place shop
-##   6. client sale phase ........................... nothing (only the tantrum alert)
-##   7. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
-##   8. seeds left, day 2+ ......................... Plant roses, once per day
-##   9. planted roses still dry ..................... Water your roses
-##  10. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
-##  11. day 1 not enough roses for tomorrow ......... Plant more roses
-##  12. all roses watered, clients done ............. Hold to start night
+##   4. day-2 first merchant reward ................ Talk to the Merchant
+##   5. first day-2 place-counter step, <10 bamboo .. Collect bamboo (world arrow on the grove)
+##   6. dawn harvest (grown roses) .................. Harvest / add counters / place shop
+##   7. client sale phase ........................... nothing (only the tantrum alert)
+##   8. seeds left, day 1 .......................... Buy roses (equip the tool) / Plant roses
+##   9. seeds left, day 2+ ......................... Plant roses, once per day
+##  10. planted roses still dry ..................... Water your roses
+##  11. day 1 build steps (wall/pasteque/turret) .... Block passage / plant pasteque / turret
+##  12. day 1 not enough roses for tomorrow ......... Plant more roses
+##  13. all roses watered, clients done ............. Hold to start night
 
 const SEED_KEY: StringName = &"seeds"
 const WATER_RESERVE_KEY: StringName = &"water_reserve"
@@ -53,6 +54,7 @@ const KEY_TALK_BUILDER: String = "tutorial.talk_builder"
 const KEY_BUILD_BUILDER_HOUSE: String = "tutorial.build_builder_house"
 const KEY_WAIT_BUILDER_BUILD: String = "tutorial.wait_builder_build"
 const KEY_BUILD_MERCHANT_HOUSE: String = "tutorial.build_merchant_house"
+const KEY_TALK_MERCHANT: String = "tutorial.talk_merchant"
 const KEY_PREPARE_NEXT_NIGHT: String = "tutorial.prepare_next_night"
 const KEY_START_NIGHT_SPACE: String = "tutorial.hold_start_night_space"
 const KEY_START_NIGHT_PAD: String = "tutorial.hold_start_night_pad"
@@ -520,6 +522,8 @@ func _current_message_key() -> String:
 		return KEY_WAIT_BUILDER_BUILD
 	if _merchant_house_tutorial_active():
 		return KEY_BUILD_MERCHANT_HOUSE
+	if _merchant_reward_tutorial_active():
+		return KEY_TALK_MERCHANT
 	# Sunrise transition after a night: dawn growth has not finished, so falling through
 	# would wrongly show "pass the night". Stay blank until the dawn harvest starts.
 	if _sun_rising and not GameState.is_night:
@@ -1031,6 +1035,25 @@ func _merchant_house_tutorial_active() -> bool:
 	return _building_manager != null \
 		and _building_manager.has_method("is_merchant_house_tutorial_active") \
 		and bool(_building_manager.call("is_merchant_house_tutorial_active"))
+
+
+## Day-2's first merchant arrival gets one dedicated prompt. The reward claim owns the
+## completion flag, so this remains visible until the player has actually collected it.
+func _merchant_reward_tutorial_active() -> bool:
+	if GameState.seed_merchant_first_reward_claimed or not _is_day_two():
+		return false
+	if _building_manager == null or not _building_manager.has_method("has_seed_merchant_reached_spot"):
+		return false
+	if not bool(_building_manager.call("has_seed_merchant_reached_spot")):
+		return false
+	return _active_merchant_reward_exists()
+
+
+func _active_merchant_reward_exists() -> bool:
+	if _game_ui == null or not _game_ui.has_method("get_active_night_reward"):
+		return false
+	var reward_info: Dictionary = _game_ui.call("get_active_night_reward") as Dictionary
+	return not reward_info.is_empty()
 
 
 func _planted_rose_count() -> int:

@@ -264,6 +264,7 @@ func _claim_all_rewards() -> void:
 		return
 	_reward_transition_active = true
 	dialog.close_dialog(&"reward_claimed")
+	_set_transition_input_locked(true)
 	var merchant_world_position: Vector2 = get_interaction_world_position()
 	var claimed_any: bool = false
 	for reward: Dictionary in rewards:
@@ -274,8 +275,9 @@ func _claim_all_rewards() -> void:
 		Sfx.play_sound(&"buy")
 	_sync_reward_bubble()
 	await get_tree().create_timer(REWARD_REOPEN_DELAY_SECONDS).timeout
-	_reward_transition_active = false
 	if not _is_merchant_active() or dialog == null or dialog.is_open():
+		_set_transition_input_locked(false)
+		_reward_transition_active = false
 		return
 	# Inventory-backed rewards that could not fit remain claimable instead of being lost.
 	# In that exceptional case the reward page reopens so the player can close it, make room,
@@ -292,11 +294,18 @@ func _claim_all_rewards() -> void:
 		_on_closed,
 		{"blocks_gameplay_input": true}
 	)
+	_set_transition_input_locked(false)
+	_reward_transition_active = false
 
 
 func _on_closed(_reason: StringName) -> void:
 	# DialogUI restores the gameplay input lock itself; nothing merchant-specific to undo.
 	_last_signature = ""
+
+
+func _set_transition_input_locked(locked: bool) -> void:
+	if player_controller != null and player_controller.has_method("set_transition_input_locked"):
+		player_controller.call("set_transition_input_locked", locked)
 
 
 func _on_house_resident_agent_changed(resident_type: StringName) -> void:

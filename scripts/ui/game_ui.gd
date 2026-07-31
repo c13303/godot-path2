@@ -1107,6 +1107,7 @@ func claim_active_night_reward(world_position: Vector2, reward_key: String = "")
 		GameState.record_special_reward_claim(
 			int(info["night_index"]), int(info["day"]), bool(info["one_time"]), current_key
 		)
+		GameState.mark_seed_merchant_first_reward_claimed()
 		return true
 	return false
 

@@ -6,14 +6,15 @@ const PLAYER_PATH: NodePath = ^"../../Player"
 const WATERSOURCES_PATH: NodePath = ^"../../Map/MonTilemap/watersources"
 
 @export var splash_pool_size: int = 50
-@export var splash_freq: float = 0.1
 
 var _player: Node2D
 var _watersources: WaterSources
 var _pool: Array[Node2D] = []
 var _pool_cursor: int = 0
-var _repeat_time_left: float = 0.0
-var _was_in_water: bool = false
+var _water_cell: Vector2i = WaterSources.INVALID_WATER_CELL
+var _last_player_position: Vector2 = Vector2.ZERO
+var _has_last_player_position: bool = false
+var _was_player_moving: bool = false
 
 
 func _ready() -> void:
@@ -22,22 +23,25 @@ func _ready() -> void:
 	_preload_pool()
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if _player == null or _watersources == null:
 		return
 
-	var in_water: bool = _watersources.has_water_at_foot_position(_player.global_position)
-	if not in_water:
-		_was_in_water = false
-		_repeat_time_left = 0.0
+	var water_cell: Vector2i = _watersources.water_cell_at_foot_position(_player.global_position)
+	var current_position: Vector2 = _player.global_position
+	var moved: bool = _has_last_player_position and current_position.distance_squared_to(_last_player_position) > WaterSources.SPLASH_MOVEMENT_EPSILON * WaterSources.SPLASH_MOVEMENT_EPSILON
+	if water_cell == WaterSources.INVALID_WATER_CELL:
+		_water_cell = WaterSources.INVALID_WATER_CELL
+		_has_last_player_position = false
+		_was_player_moving = false
 		return
 
-	_repeat_time_left = maxf(_repeat_time_left - delta, 0.0)
-	if not _was_in_water or _repeat_time_left <= 0.0:
+	if water_cell != _water_cell or (moved and not _was_player_moving):
 		_play_splash(_player.global_position)
-		_repeat_time_left = maxf(splash_freq, 0.0)
-
-	_was_in_water = true
+	_water_cell = water_cell
+	_last_player_position = current_position
+	_has_last_player_position = true
+	_was_player_moving = moved
 
 
 # Public one-shot: fire a pooled splash at an arbitrary world position (e.g. an

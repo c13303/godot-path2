@@ -37,6 +37,9 @@ var is_run_won: bool = false
 ## visit. Reset each time a new merchant phase begins; drives the "close the transaction"
 ## tutorial prompt once the player walks away from the (now hidden) merchant shop.
 var seed_merchant_purchase_made: bool = false
+## True once the first merchant reward has been claimed in this run. This also persists with
+## reward claims so the one-shot merchant tutorial cannot return after loading a save.
+var seed_merchant_first_reward_claimed: bool = false
 
 ## Night special-reward claim tracking. Per-reward keys are "night_index:reward_key".
 ## `_claimed_one_time_night_rewards` also accepts legacy integer night indices from older
@@ -65,6 +68,7 @@ func reset_transient_run_state() -> void:
 	is_reservoir_destroyed = false
 	is_run_won = false
 	seed_merchant_purchase_made = false
+	seed_merchant_first_reward_claimed = false
 
 
 ## Restore a canonical phase without running transition side effects. Runtime systems
@@ -74,6 +78,7 @@ func restore_gameplay_phase_flags(phase_name: String) -> void:
 	is_client_phase = gameplay_phase == GameplayPhase.MORNING
 	is_seed_merchant_phase = false
 	seed_merchant_purchase_made = false
+	seed_merchant_first_reward_claimed = false
 
 
 func emit_restored_phase_signals() -> void:
@@ -309,6 +314,11 @@ func reset_special_reward_claims() -> void:
 	_claimed_one_time_night_rewards.clear()
 	_special_reward_claim_days.clear()
 	_special_reward_legacy_claim_day = -1
+	seed_merchant_first_reward_claimed = false
+
+
+func mark_seed_merchant_first_reward_claimed() -> void:
+	seed_merchant_first_reward_claimed = true
 
 
 ## Serialize claim state for the save file.
@@ -320,6 +330,7 @@ func get_special_reward_claim_save_data() -> Dictionary:
 		"claimed_one_time": claimed,
 		"claim_day": _special_reward_legacy_claim_day,
 		"claim_days": _special_reward_claim_days.duplicate(),
+		"seed_merchant_first_reward_claimed": seed_merchant_first_reward_claimed,
 	}
 
 
@@ -335,6 +346,7 @@ func apply_special_reward_claim_save_data(data: Dictionary) -> void:
 		for raw_key: Variant in (raw_claim_days as Dictionary).keys():
 			_special_reward_claim_days[str(raw_key)] = int((raw_claim_days as Dictionary)[raw_key])
 	_special_reward_legacy_claim_day = int(data.get("claim_day", -1))
+	seed_merchant_first_reward_claimed = bool(data.get("seed_merchant_first_reward_claimed", false))
 
 
 func _special_reward_claim_key(night_index: int, reward_key: String) -> String:

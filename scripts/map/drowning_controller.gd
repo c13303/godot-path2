@@ -138,30 +138,42 @@ func process_drowning_timeline(delta: float) -> void:
 		_manager.remove_dead_monster(agent, false)
 
 
-# Emits the throttled pooled splash for one agent standing over water. Driven each
-# frame by AgentCellTracker only for the active water-candidate subset. Keeps its
-# own foot-water guard so a sub-cell move off water stops splashing cleanly.
-func tick_splash(agent: Node2D, delta: float) -> void:
-	# Any monster over the water emits a pooled splash, throttled per-monster.
-	# The timer lives on the node itself (meta) so it is freed with the monster
-	# and never accumulates stale entries.
+# Emits one pooled splash when an agent enters a water tile or starts moving again
+# after stopping. Driven each frame by AgentCellTracker only for the active
+# water-candidate subset. The transition state lives on the agent so it is freed
+# with the agent and cannot go stale.
+func tick_splash(agent: Node2D, _delta: float) -> void:
 	var watersources: WaterSources = _watersources()
 	if watersources == null:
 		return
-	if not watersources.has_water_at_foot_position(agent.global_position):
-		if agent.has_meta(&"water_splash_timer"):
-			agent.remove_meta(&"water_splash_timer")
+	var water_cell: Vector2i = watersources.water_cell_at_foot_position(agent.global_position)
+	if water_cell == WaterSources.INVALID_WATER_CELL:
+		stop_splash(agent)
 		return
-	var time_left: float = float(agent.get_meta(&"water_splash_timer", 0.0)) - delta
-	if time_left <= 0.0:
+	var current_position: Vector2 = agent.global_position
+	var has_previous_position: bool = agent.has_meta(&"water_splash_position")
+	var previous_position: Vector2 = agent.get_meta(&"water_splash_position", current_position) as Vector2
+	var moved: bool = has_previous_position and current_position.distance_squared_to(previous_position) > WaterSources.SPLASH_MOVEMENT_EPSILON * WaterSources.SPLASH_MOVEMENT_EPSILON
+	var previous_water_cell: Vector2i = agent.get_meta(
+		&"water_splash_cell",
+		WaterSources.INVALID_WATER_CELL
+	) as Vector2i
+	var was_moving: bool = bool(agent.get_meta(&"water_splash_was_moving", false))
+	if water_cell != previous_water_cell or (moved and not was_moving):
 		watersources.play_splash_at(agent.global_position)
-		time_left = maxf(watersources.splash_repeat_seconds, 0.0)
-	agent.set_meta(&"water_splash_timer", time_left)
+		agent.set_meta(&"water_splash_cell", water_cell)
+	agent.set_meta(&"water_splash_position", current_position)
+	agent.set_meta(&"water_splash_was_moving", moved)
 
 
 func stop_splash(agent: Node2D) -> void:
-	if agent != null and is_instance_valid(agent) and agent.has_meta(&"water_splash_timer"):
-		agent.remove_meta(&"water_splash_timer")
+	if agent != null and is_instance_valid(agent) and agent.has_meta(&"water_splash_cell"):
+		agent.remove_meta(&"water_splash_cell")
+	if agent != null and is_instance_valid(agent):
+		if agent.has_meta(&"water_splash_position"):
+			agent.remove_meta(&"water_splash_position")
+		if agent.has_meta(&"water_splash_was_moving"):
+			agent.remove_meta(&"water_splash_was_moving")
 
 
 func _agent_can_drown(agent: Node2D) -> bool:

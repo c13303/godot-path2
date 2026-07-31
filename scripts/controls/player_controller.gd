@@ -49,6 +49,7 @@ var _interaction_router: InteractionRouter = InteractionRouter.new()
 var _paused: bool = false
 var _pause_hold_count: int = 0
 var _cutscene_input_locked: bool = false
+var _transition_input_locked: bool = false
 var _mouse_was_locked_before_pause: bool = false
 var player_nav_id: int = -1
 var _reported_missing_manual_api: bool = false
@@ -94,7 +95,7 @@ func _input(event: InputEvent) -> void:
 	if _startup_loading_active():
 		get_viewport().set_input_as_handled()
 		return
-	if _cutscene_input_locked:
+	if _gameplay_input_locked():
 		return
 
 	if event is InputEventJoypadButton:
@@ -199,7 +200,7 @@ func _process(delta: float) -> void:
 	_interaction_router.process(delta)
 	if _startup_loading_active():
 		return
-	if _cutscene_input_locked:
+	if _gameplay_input_locked():
 		_update_player_input(delta)
 		_update_gun_fire(delta)
 		_update_lance_sprite()
@@ -374,7 +375,7 @@ func _is_interaction_dialog_open() -> bool:
 
 
 func _should_pad_open_quickbar_from_dpad() -> bool:
-	if _paused or _cutscene_input_locked or _is_inventory_open():
+	if _paused or _gameplay_input_locked() or _is_inventory_open():
 		return false
 	if _is_quickbar_active():
 		return false
@@ -387,7 +388,7 @@ func _activate_last_quickbar_slot() -> void:
 		game_ui.call("activate_last_quickbar_slot")
 
 func _handle_pad_accept() -> void:
-	if _paused or _cutscene_input_locked or _is_inventory_open():
+	if _paused or _gameplay_input_locked() or _is_inventory_open():
 		return
 	if toolbuild != null and toolbuild.has_method("activate_pad_selection") and bool(toolbuild.call("activate_pad_selection")):
 		return
@@ -401,7 +402,7 @@ func _handle_pad_accept() -> void:
 		build_system.call("pad_place_selected_at_cursor")
 
 func _handle_pad_cancel() -> void:
-	if _paused or _cutscene_input_locked or _is_inventory_open():
+	if _paused or _gameplay_input_locked() or _is_inventory_open():
 		return
 	if _is_quickbar_active():
 		_clear_build_selection()
@@ -430,7 +431,7 @@ func _handle_pad_cancel() -> void:
 		_select_unbuild_tool()
 
 func _handle_pad_rotate_build() -> void:
-	if _paused or _cutscene_input_locked or _is_inventory_open():
+	if _paused or _gameplay_input_locked() or _is_inventory_open():
 		return
 	if not _build_controls_active() or build_system == null:
 		return
@@ -470,7 +471,7 @@ func _update_gun_fire(delta: float) -> void:
 	var pad_aim: Vector2 = _gamepad_stick_vector(JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y)
 	var direction: Vector2 = pad_aim if _control_mode == INPUT_MODE_PAD else get_global_mouse_position() - origin
 	var weapon_id: String = ""
-	var trigger_allowed: bool = not _paused and not _cutscene_input_locked and not _is_inventory_open()
+	var trigger_allowed: bool = not _paused and not _gameplay_input_locked() and not _is_inventory_open()
 	if _control_mode == INPUT_MODE_PAD:
 		trigger_allowed = trigger_allowed and pad_aim != Vector2.ZERO
 	else:
@@ -667,7 +668,7 @@ func _update_player_input(delta: float) -> void:
 		return
 
 	var dir: Vector2 = Vector2.ZERO
-	if not _paused and not _cutscene_input_locked:
+	if not _paused and not _gameplay_input_locked():
 		if _is_any_key_pressed([KEY_Z, KEY_W, KEY_UP]):
 			dir.y -= 1.0
 		if _is_any_key_pressed([KEY_S, KEY_DOWN]):
@@ -685,7 +686,7 @@ func _update_player_input(delta: float) -> void:
 	var shift_pressed: bool = _is_any_key_pressed([KEY_SHIFT])
 	var rush_pressed: bool = shift_pressed or _pad_rush_pressed()
 	var rush_started: bool = false
-	if _paused or _cutscene_input_locked:
+	if _paused or _gameplay_input_locked():
 		_stop_rush()
 	elif rush_pressed and not _rush_input_was_pressed and not _rush_active:
 		var start_direction: Vector2 = dir if dir.length_squared() > 0.0 else _last_move_direction
@@ -919,6 +920,16 @@ func set_cutscene_input_locked(locked: bool) -> void:
 
 func is_cutscene_input_locked() -> bool:
 	return _cutscene_input_locked
+
+
+## Temporary lock used by short UI transitions. It stays separate from the dialog's
+## cutscene lock so opening the next dialog does not inherit a stale previous lock state.
+func set_transition_input_locked(locked: bool) -> void:
+	_transition_input_locked = locked
+
+
+func _gameplay_input_locked() -> bool:
+	return _cutscene_input_locked or _transition_input_locked
 
 func is_paused() -> bool:
 	return _paused

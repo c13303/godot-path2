@@ -3,6 +3,8 @@ class_name WaterSources
 
 const SPLASH_SCENE: PackedScene = preload("res://scenes/particles/splash.tscn")
 const FLOOR_SPLASH_Z_INDEX: int = -99
+const INVALID_WATER_CELL: Vector2i = Vector2i(2147483647, 2147483647)
+const SPLASH_MOVEMENT_EPSILON: float = 0.5
 
 @export var refill_amount: int = 10
 @export var refill_interval_seconds: float = 0.1
@@ -22,7 +24,6 @@ const FLOOR_SPLASH_Z_INDEX: int = -99
 @export var waterpool_bound_phase: int = 7
 @export_group("Visual FX")
 @export var pre_instantiated_splashes: int = 32
-@export_range(0.0, 2.0, 0.01, "or_greater") var splash_repeat_seconds: float = 0.1
 @export_group("")
 
 var _splash_pool: Array[Node2D] = []
@@ -34,9 +35,14 @@ func _ready() -> void:
 
 
 func has_water_at_foot_position(world_position: Vector2) -> bool:
+	return water_cell_at_foot_position(world_position) != INVALID_WATER_CELL
+
+func water_cell_at_foot_position(world_position: Vector2) -> Vector2i:
 	var sample_position: Vector2 = world_position + foot_sample_offset
 	var cell: Vector2i = local_to_map(to_local(sample_position))
-	return get_cell_source_id(cell) != -1
+	if get_cell_source_id(cell) == -1:
+		return INVALID_WATER_CELL
+	return cell
 
 func water_coverage_of_world_rect(world_rect: Rect2) -> float:
 	var rect_area: float = world_rect.get_area()
