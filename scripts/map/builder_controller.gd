@@ -863,10 +863,6 @@ func _clear_idle_return_state(builder_id: int) -> void:
 
 
 func _process_builder_motion_watchdog(delta: float) -> void:
-	if not CppDebugOptions.logs_enabled:
-		if not _last_watch_position_by_builder_id.is_empty() or not _stall_seconds_by_builder_id.is_empty() or not _stall_warning_cooldown_by_builder_id.is_empty():
-			_clear_motion_watch()
-		return
 	if delta <= 0.0:
 		return
 	var active_ids: Dictionary = {}
@@ -911,18 +907,29 @@ func _update_builder_motion_watch(builder_id: int, visitor: DayVisitorMovementCo
 	_stall_warning_cooldown_by_builder_id[builder_id] = cooldown
 	if stalled_for < STALL_WARNING_SECONDS or cooldown > 0.0:
 		return
-	push_warning(_builder_stall_warning(builder_id, visitor, current_position, stalled_for))
+	var repathed: bool = visitor.repath_to_current_target()
+	push_warning(_builder_stall_warning(builder_id, visitor, current_position, stalled_for, repathed))
+	if repathed:
+		_reset_builder_motion_watch(builder_id)
+		return
 	_stall_warning_cooldown_by_builder_id[builder_id] = STALL_WARNING_REPEAT_SECONDS
 
 
-func _builder_stall_warning(builder_id: int, visitor: DayVisitorMovementController, current_position: Vector2, stalled_for: float) -> String:
+func _builder_stall_warning(
+		builder_id: int,
+		visitor: DayVisitorMovementController,
+		current_position: Vector2,
+		stalled_for: float,
+		repath_succeeded: bool
+) -> String:
 	var current_cell: Vector2i = builder_current_cell(builder_id)
 	var target_cell: Vector2i = visitor.target_cell()
 	var work_id: StringName = StringName(_work_task_by_builder_id.get(builder_id, &""))
 	var state: StringName = StringName(_state_by_builder_id.get(builder_id, &""))
 	var nav_id: int = visitor.nav_id()
 	var home_cell: Vector2i = _builder_home_cell(builder_id)
-	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s work=%s current_cell=%s target_cell=%s home=%s current_world=%s target_world=%s stalled_for=%.1fs." % [
+	var recovery: String = "repath_assigned" if repath_succeeded else "repath_failed"
+	return "BuilderController: Builder appears stalled; id=%d nav_id=%d state=%s work=%s current_cell=%s target_cell=%s home=%s current_world=%s target_world=%s stalled_for=%.1fs recovery=%s." % [
 		builder_id,
 		nav_id,
 		String(state),
@@ -933,6 +940,7 @@ func _builder_stall_warning(builder_id: int, visitor: DayVisitorMovementControll
 		current_position,
 		_manager.cell_center(target_cell) if target_cell != INVALID_CELL else Vector2.ZERO,
 		stalled_for,
+		recovery,
 	]
 
 

@@ -792,6 +792,17 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
     d["path_arrived"] = a->path_arrived;
     d["path_index"] = a->path_index;
     d["path_count"] = static_cast<int>(a->path_waypoints.size());
+    const bool has_current_path_waypoint =
+        a->path_active &&
+        a->path_index >= 0 &&
+        a->path_index < static_cast<int>(a->path_waypoints.size());
+    d["has_current_path_waypoint"] = has_current_path_waypoint;
+    if (has_current_path_waypoint)
+    {
+        const ffcore::Vec2 &waypoint = a->path_waypoints[a->path_index];
+        d["current_path_waypoint"] = Vector2(waypoint.x, waypoint.y);
+        d["current_path_waypoint_distance"] = (waypoint - foot).length();
+    }
     d["position"] = Vector2(a->position.x, a->position.y);
     d["foot_position"] = Vector2(foot.x, foot.y);
     d["velocity"] = velocity;

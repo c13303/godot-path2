@@ -663,14 +663,21 @@ func _nearest_clicked_agent() -> Node2D:
 	var click_world: Vector2 = _mouse_world_position()
 	var best_agent: Node2D = null
 	var best_distance_squared: float = click_agent_radius * click_agent_radius
-	for raw_agent: Node in get_tree().get_nodes_in_group(&"monsters"):
-		var agent: Node2D = raw_agent as Node2D
-		if agent == null or not is_instance_valid(agent):
-			continue
-		var distance_squared: float = agent.global_position.distance_squared_to(click_world)
-		if distance_squared <= best_distance_squared:
-			best_distance_squared = distance_squared
-			best_agent = agent
+	var inspected_agents: Dictionary = {}
+	var inspect_groups: Array[StringName] = [&"monsters", AgentDefinitionService.VILLAGERS_GROUP]
+	for group_name: StringName in inspect_groups:
+		for raw_agent: Node in get_tree().get_nodes_in_group(group_name):
+			var agent: Node2D = raw_agent as Node2D
+			if agent == null or not is_instance_valid(agent):
+				continue
+			var instance_id: int = agent.get_instance_id()
+			if inspected_agents.has(instance_id):
+				continue
+			inspected_agents[instance_id] = true
+			var distance_squared: float = agent.global_position.distance_squared_to(click_world)
+			if distance_squared <= best_distance_squared:
+				best_distance_squared = distance_squared
+				best_agent = agent
 	return best_agent
 
 func _mouse_world_position() -> Vector2:

@@ -2447,7 +2447,13 @@ void SteeringSystem::update_all(double delta)
             Vec2 to_wp = a.path_waypoints[a.path_index] - foot;
             Vec2 nav_dir = safe_normalize(to_wp);
 
-            Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, wall_repel, agent_separation, static_obstacle_repel, a.max_speed);
+            // An explicit A* path already provides safe cell-center route intent.
+            // Feeding soft wall repulsion into that direction can invert it inside a
+            // one-tile corridor: the wall force may be stronger than flow_weight and
+            // point the agent away from its waypoint forever. Hard footprint collision
+            // and sliding below remain authoritative, so walls still cannot be crossed.
+            const Vec2 no_soft_wall_repel(0, 0);
+            Vec2 target_velocity = desired_velocity_for_flow(a, nav, nav_dir, no_soft_wall_repel, agent_separation, static_obstacle_repel, a.max_speed);
             Vec2 desired_dir = safe_normalize(target_velocity);
             if (desired_dir.is_zero())
                 desired_dir = nav_dir;
