@@ -112,6 +112,53 @@ func _run() -> void:
 	var projectile_damage: Array = crowd_runtime.call(&"take_damage_events") as Array
 	_assert(not projectile_damage.is_empty(), "projectile gameplay effect")
 
+	crowd.call(&"clear_agent_forces", target_handle)
+	crowd_runtime.call(&"set_agent_position", target_handle, Vector2(100.0, 0.0), true)
+	var second_target: Node2D = Node2D.new()
+	second_target.add_to_group(&"monsters")
+	second_target.global_position = Vector2(115.0, 0.0)
+	harness.add_child(second_target)
+	var second_handle: int = int(registry.call(&"spawn_agent", second_target, 0))
+	_assert(second_handle != 0, "second budget target registration")
+	crowd_runtime.call(&"apply_projectile_effect", {
+		"hit_agent_handle": target_handle,
+		"position": Vector2(100.0, 0.0),
+		"direction": Vector2.RIGHT,
+		"owner_agent_handle": 0,
+	}, {
+		"aoe_radius": 32.0,
+		"smash_force": 40.0,
+		"smash_friction_loss": 0.5,
+		"smash_falloff": 0.0,
+		"smash_budget_enabled": true,
+		"target_category_mask": 4,
+		"damage": 1,
+	})
+	var budget_states: Dictionary = crowd.call(&"get_active_impulse_states") as Dictionary
+	_assert(
+		budget_states.has(target_handle) and not budget_states.has(second_handle),
+		"shared projectile force budget is allocated direct-hit first"
+	)
+	var budget_damage: Array = crowd_runtime.call(&"take_damage_events") as Array
+	_assert(budget_damage.size() == 2, "budget does not suppress area damage")
+
+	crowd_runtime.call(&"set_agent_phase", target_handle, 7, 0.0)
+	crowd_runtime.call(&"apply_projectile_effect", {
+		"hit_agent_handle": target_handle,
+		"position": Vector2(100.0, 0.0),
+		"direction": Vector2.RIGHT,
+	}, {
+		"aoe_radius": 16.0,
+		"smash_force": 40.0,
+		"direct_hit_only": true,
+		"target_category_mask": 4,
+		"damage": 5,
+	})
+	_assert(
+		(crowd_runtime.call(&"take_damage_events") as Array).is_empty(),
+		"force-isolated phase rejects projectile damage"
+	)
+
 	print("game_runtime_adapter_smoke: PASS")
 	quit(0)
 

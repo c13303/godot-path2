@@ -50,24 +50,3 @@ env.SharedLibrary(
     target=os.path.join(cpathlib_bin, "cpathlib"),
     source=generic_sources,
 )
-
-# The host module preserves the project's established native API while its callers
-# are migrated. It owns all gameplay-facing code and only consumes the portable
-# CPathLib implementation; CPathLib never depends on this module.
-portable_sources = [
-    source
-    for source in generic_sources
-    if "/godot/" not in norm(source) and not source.endswith("CPathLib/register_types.cpp")
-]
-host_sources = [
-    source
-    for source in glob.glob("rabbit_game_native/**/*.cpp", recursive=True)
-    if "/tests/" not in norm(source)
-]
-
-host_bin = norm(os.path.join(root, "rabbit_game_native", "bin"))
-os.makedirs(host_bin, exist_ok=True)
-env.SharedLibrary(
-    target=os.path.join(host_bin, "rabbit_game_native"),
-    source=portable_sources + host_sources,
-)

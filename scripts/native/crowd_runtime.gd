@@ -6,6 +6,7 @@ class_name CrowdRuntime
 
 const INVALID_HANDLE: int = 0
 const EFFECT_TICK: int = 1
+const GAMEPLAY_IMPULSE_PRIORITY: int = 100
 
 @export var crowd_path: NodePath = NodePath("../CrowdWorld")
 @export var registry_path: NodePath = NodePath("../AgentRegistry")
@@ -129,6 +130,40 @@ func set_agent_profile(agent_handle: int, profile: Dictionary) -> void:
 			&"set_agent_collision_offset", agent_handle,
 			collision_offset
 		)
+	if _crowd.has_method(&"set_agent_avoidance_profile"):
+		_crowd.call(
+			&"set_agent_avoidance_profile", agent_handle,
+			maxf(float(profile.get(
+				"crowd_push_strength", current.get("avoidance_push_strength", 1.0)
+			)), 0.0),
+			maxf(float(profile.get(
+				"crowd_resist_strength", current.get("avoidance_resistance", 1.0)
+			)), 0.001)
+		)
+	if _crowd.has_method(&"set_agent_impulse_resistance"):
+		_crowd.call(
+			&"set_agent_impulse_resistance", agent_handle,
+			maxf(float(profile.get(
+				"smash_resist", current.get("impulse_resistance", 1.0)
+			)), 0.001)
+		)
+	if _crowd.has_method(&"set_agent_query_shape"):
+		var query_offset: Vector2 = current.get(
+			"query_shape_offset", Vector2.ZERO
+		) as Vector2
+		if profile.has("fight_offset_y"):
+			query_offset.y = float(profile["fight_offset_y"])
+		var query_half_extents: Vector2 = current.get(
+			"query_shape_half_extents", Vector2.ZERO
+		) as Vector2
+		if profile.has("fight_half_w"):
+			query_half_extents.x = maxf(float(profile["fight_half_w"]), 0.0)
+		if profile.has("fight_half_h"):
+			query_half_extents.y = maxf(float(profile["fight_half_h"]), 0.0)
+		_crowd.call(
+			&"set_agent_query_shape", agent_handle,
+			query_offset, query_half_extents
+		)
 	_crowd.call(
 		&"set_agent_contact_profile", agent_handle,
 		maxf(float(profile.get(
@@ -146,7 +181,11 @@ func set_agent_profile(agent_handle: int, profile: Dictionary) -> void:
 		maxf(float(profile.get(
 			"contact_control_suppression_seconds",
 			current.get("contact_control_suppression", 0.2)
-		)), 0.0)
+		)), 0.0),
+		bool(profile.get(
+			"contact_push_shows_control_impaired_feedback",
+			current.get("contact_feedback_enabled", true)
+		))
 	)
 
 
@@ -274,6 +313,8 @@ func set_agent_phase(agent_handle: int, phase: int, eating_seconds: float = 0.0)
 		_registry.set_project_state(agent_handle, state)
 	if _crowd == null:
 		return
+	if _crowd.has_method(&"set_agent_forces_enabled"):
+		_crowd.call(&"set_agent_forces_enabled", agent_handle, phase != 7)
 	if not _directional_field_by_phase.has(phase):
 		var diagnostics: Dictionary = _crowd.call(&"get_agent_diagnostics", agent_handle) as Dictionary
 		if int(diagnostics.get("navigation_source", 0)) == 4:
@@ -325,7 +366,7 @@ func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_
 			"direction": direction.normalized(),
 			"radial": angle_degrees >= 359.9,
 			"force": force, "decay": maxf(friction, 0.0),
-			"falloff": falloff, "preserve_navigation": false,
+			"falloff": falloff, "preserve_navigation": not detach_flow,
 			"control_suppression": control_suppression_duration if control_suppression > 0.0 else 0.0,
 			"damage": damage,
 		}
@@ -337,23 +378,101 @@ func apply_projectile_effect(impact: Dictionary, config: Dictionary) -> void:
 	var position: Vector2 = impact.get("position", Vector2.ZERO) as Vector2
 	var handles: PackedInt64Array = PackedInt64Array()
 	var radius: float = float(config.get("aoe_radius", config.get("radius", 0.0)))
-	if bool(config.get("direct_hit_only", false)) and hit_handle != INVALID_HANDLE:
+	var direct_hit_only: bool = bool(config.get("direct_hit_only", false))
+	if direct_hit_only and hit_handle != INVALID_HANDLE:
 		handles.append(hit_handle)
 	elif radius > 0.0 and _crowd != null:
 		handles = _crowd.call(&"query_agents_in_circle", position, radius, int(config.get("target_category_mask", -1)), int(impact.get("owner_agent_handle", INVALID_HANDLE))) as PackedInt64Array
-	for agent_handle: int in handles:
-		_apply_gameplay_effect(agent_handle, position, {
+	var effect: Dictionary = {
 			"origin": position,
 			"direction": impact.get("direction", Vector2.RIGHT),
 			"radial": false,
 			"force": float(config.get("smash_force", 0.0)),
 			"decay": float(config.get("smash_friction_loss", 0.0)),
 			"falloff": float(config.get("smash_falloff", 0.0)),
-			"preserve_navigation": false,
+			"preserve_navigation": not bool(config.get("smash_detach_flow", false)),
 			"control_suppression": float(config.get("smash_control_suppression_duration", 0.0)) if float(config.get("smash_control_suppression", 0.0)) > 0.0 else 0.0,
 			"damage": int(config.get("damage", 0)),
 			"radius": radius,
-		})
+		}
+	if direct_hit_only:
+		effect["falloff"] = 0.0
+	if bool(config.get("smash_budget_enabled", false)) and not direct_hit_only:
+		_apply_budgeted_projectile_effect(handles, hit_handle, position, effect)
+		return
+	for agent_handle: int in handles:
+		_apply_gameplay_effect(agent_handle, position, effect)
+
+
+func _apply_budgeted_projectile_effect(
+	handles: PackedInt64Array, direct_hit_handle: int,
+	origin: Vector2, effect: Dictionary
+) -> void:
+	var direction: Vector2 = (effect.get("direction", Vector2.RIGHT) as Vector2).normalized()
+	if direction == Vector2.ZERO:
+		direction = Vector2.RIGHT
+	var candidates: Array[Dictionary] = []
+	for agent_handle: int in handles:
+		var metrics: Dictionary = _query_shape_metrics(agent_handle, origin, direction)
+		if metrics.is_empty():
+			continue
+		metrics["agent_handle"] = agent_handle
+		metrics["direct_hit"] = agent_handle == direct_hit_handle
+		candidates.append(metrics)
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if bool(a["direct_hit"]) != bool(b["direct_hit"]):
+			return bool(a["direct_hit"])
+		if float(a["leading_edge"]) != float(b["leading_edge"]):
+			return float(a["leading_edge"]) < float(b["leading_edge"])
+		if float(a["lateral_distance"]) != float(b["lateral_distance"]):
+			return float(a["lateral_distance"]) < float(b["lateral_distance"])
+		return int(a["agent_handle"]) < int(b["agent_handle"])
+	)
+	var total_force: float = maxf(float(effect.get("force", 0.0)), 0.0)
+	var remaining_force: float = total_force
+	var radius: float = maxf(float(effect.get("radius", 0.0)), 0.001)
+	var falloff: float = maxf(float(effect.get("falloff", 0.0)), 0.0)
+	for candidate: Dictionary in candidates:
+		var distance: float = float(candidate["distance"])
+		var attenuation: float = pow(maxf(0.0, 1.0 - distance / radius), falloff)
+		var allocated_force: float = minf(total_force * attenuation, remaining_force)
+		var allocated_effect: Dictionary = effect.duplicate()
+		allocated_effect["force"] = maxf(allocated_force, 0.0)
+		allocated_effect["falloff"] = 0.0
+		_apply_gameplay_effect(int(candidate["agent_handle"]), origin, allocated_effect)
+		remaining_force = maxf(remaining_force - allocated_force, 0.0)
+
+
+func _query_shape_metrics(
+	agent_handle: int, origin: Vector2, direction: Vector2
+) -> Dictionary:
+	if _crowd == null:
+		return {}
+	var diagnostics: Dictionary = _crowd.call(
+		&"get_agent_diagnostics", agent_handle
+	) as Dictionary
+	if not bool(diagnostics.get("valid", false)) \
+			or not bool(diagnostics.get("forces_enabled", true)):
+		return {}
+	var center: Vector2 = (diagnostics.get("position", Vector2.ZERO) as Vector2) \
+		+ (diagnostics.get("query_shape_offset", Vector2.ZERO) as Vector2)
+	var half_extents: Vector2 = diagnostics.get(
+		"query_shape_half_extents", Vector2.ZERO
+	) as Vector2
+	if half_extents == Vector2.ZERO:
+		half_extents = Vector2.ONE * float(diagnostics.get("radius", 0.0))
+	var offset: Vector2 = center - origin
+	var outside: Vector2 = Vector2(
+		maxf(absf(offset.x) - half_extents.x, 0.0),
+		maxf(absf(offset.y) - half_extents.y, 0.0)
+	)
+	return {
+		"distance": outside.length(),
+		"leading_edge": offset.dot(direction) \
+			- absf(direction.x) * half_extents.x \
+			- absf(direction.y) * half_extents.y,
+		"lateral_distance": absf(offset.x * direction.y - offset.y * direction.x),
+	}
 
 
 func take_damage_events() -> Array:
@@ -391,15 +510,23 @@ func get_agent_debug_snapshot(agent_handle: int) -> Dictionary:
 func _apply_gameplay_effect(agent_handle: int, origin: Vector2, config: Dictionary) -> void:
 	if agent_handle == INVALID_HANDLE or _crowd == null:
 		return
+	if _registry != null and int(_registry.get_project_state(agent_handle).get(
+		"phase", 0
+	)) == 7:
+		return
 	var position: Vector2 = get_agent_position(agent_handle)
 	var radius: float = maxf(float(config.get("radius", 1.0)), 1.0)
 	var direction: Vector2 = (position - origin).normalized() if bool(config.get("radial", true)) else (config.get("direction", Vector2.RIGHT) as Vector2).normalized()
 	if direction == Vector2.ZERO:
 		direction = Vector2.RIGHT
-	var attenuation: float = pow(maxf(0.0, 1.0 - position.distance_to(origin) / radius), maxf(float(config.get("falloff", 0.0)), 0.0))
+	var metrics: Dictionary = _query_shape_metrics(agent_handle, origin, direction)
+	if metrics.is_empty():
+		return
+	var distance: float = float(metrics.get("distance", position.distance_to(origin)))
+	var attenuation: float = pow(maxf(0.0, 1.0 - distance / radius), maxf(float(config.get("falloff", 0.0)), 0.0))
 	var force: float = maxf(float(config.get("force", 0.0)), 0.0) * attenuation
 	if force > 0.0:
-		_crowd.call(&"apply_impulse", agent_handle, direction * force, 0.0, maxf(float(config.get("decay", 0.0)), 0.0), maxf(float(config.get("control_suppression", 0.0)), 0.0), bool(config.get("preserve_navigation", true)), 0)
+		_crowd.call(&"apply_impulse", agent_handle, direction * force, 0.0, maxf(float(config.get("decay", 0.0)), 0.0), maxf(float(config.get("control_suppression", 0.0)), 0.0), bool(config.get("preserve_navigation", true)), GAMEPLAY_IMPULSE_PRIORITY, true)
 	var damage: int = int(config.get("damage", 0))
 	if damage > 0:
 		_damage_events.append({"agent_id": agent_handle, "damage": damage, "position": position})

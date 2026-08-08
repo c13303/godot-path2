@@ -171,13 +171,28 @@ namespace godot
         result["navigation_source"] = static_cast<int>(agent->navigation_source);
         result["route_progress"] = static_cast<int>(agent->route_progress);
         result["paused"] = agent->paused;
+        result["navigation_suspended"] = agent->navigation_suspended;
+        result["forces_enabled"] = agent->forces_enabled;
+        result["continue_at_flow_goal"] = agent->continue_at_flow_goal;
+        result["bottleneck_waiting"] = agent->bottleneck_waiting;
+        result["impulse_active"] = crowd.is_impulse_active(decode_handle(agent_handle));
+        result["impulse_control_suppression_remaining"] =
+            crowd.impulse_suppression_remaining(decode_handle(agent_handle));
         result["radius"] = agent->profile.radius;
         result["maximum_speed"] = agent->profile.maximum_speed;
         result["acceleration"] = agent->profile.acceleration;
         result["deceleration"] = agent->profile.deceleration;
         result["separation_radius"] = agent->profile.separation_radius;
         result["separation_weight"] = agent->profile.separation_weight;
+        result["avoidance_push_strength"] = agent->profile.avoidance_push_strength;
+        result["avoidance_resistance"] = agent->profile.avoidance_resistance;
+        result["impulse_resistance"] = agent->profile.impulse_resistance;
         result["arrival_radius"] = agent->profile.arrival_radius;
+        result["query_shape_offset"] = Vector2(
+            agent->profile.query_shape_offset.x, agent->profile.query_shape_offset.y);
+        result["query_shape_half_extents"] = Vector2(
+            agent->profile.query_shape_half_extents.x,
+            agent->profile.query_shape_half_extents.y);
         result["terrain_speed_channel"] = agent->profile.terrain_speed_channel;
         result["category_mask"] = static_cast<std::int64_t>(agent->profile.category_mask);
         result["collision_offset"] = Vector2(
@@ -189,8 +204,25 @@ namespace godot
         result["contact_impulse_decay"] = agent->profile.contact_impulse_decay;
         result["contact_control_suppression"] =
             agent->profile.contact_control_suppression;
+        result["contact_feedback_enabled"] = agent->profile.contact_feedback_enabled;
         result["directional_field_handle"] = encode_directional_field_handle(
             agent->directional_field_handle);
+        return result;
+    }
+
+    Dictionary CrowdWorld2D::get_active_impulse_states() const
+    {
+        Dictionary result;
+        for (ffcore::AgentHandle handle : crowd.active_agents())
+        {
+            if (!crowd.is_impulse_active(handle))
+                continue;
+            Dictionary state;
+            state["control_suppression_remaining"] =
+                crowd.impulse_suppression_remaining(handle);
+            state["feedback_enabled"] = crowd.impulse_feedback_enabled(handle);
+            result[encode_handle(handle)] = state;
+        }
         return result;
     }
 

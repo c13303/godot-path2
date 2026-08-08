@@ -50,7 +50,10 @@ func _initialize() -> void:
 		_fail("host runtime boundary setup failed")
 		return
 
+	var stale_selection_cohort: int = registry.create_cohort()
 	var cohort_handle: int = registry.create_cohort()
+	registry.set_current_selected_group(cohort_handle)
+	registry.cleanup_groups()
 	var actor: Node2D = Node2D.new()
 	actor.position = Vector2(5.0, 5.0)
 	root.add_child(actor)
@@ -59,6 +62,9 @@ func _initialize() -> void:
 	)
 	if cohort_handle == 0 or agent_handle == 0 or registry.find_node(agent_handle) != actor:
 		_fail("agent/cohort registration failed")
+		return
+	if registry.assign_agent_to_cohort(agent_handle, stale_selection_cohort):
+		_fail("unused selection cohort was not released")
 		return
 	if coordinator.request_flow(cohort_handle, Vector2(75.0, 5.0), -1) == 0:
 		_fail("cohort flow request failed")

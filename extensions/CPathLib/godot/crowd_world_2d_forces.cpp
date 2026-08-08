@@ -6,11 +6,12 @@ namespace godot
 {
     bool CrowdWorld2D::set_agent_contact_profile(
         std::int64_t agent_handle, double push_strength, double resistance,
-        double cooldown, double impulse_decay, double control_suppression)
+        double cooldown, double impulse_decay, double control_suppression,
+        bool feedback_enabled)
     {
         return crowd.set_agent_contact_profile(
             decode_handle(agent_handle), push_strength, resistance,
-            cooldown, impulse_decay, control_suppression);
+            cooldown, impulse_decay, control_suppression, feedback_enabled);
     }
 
     bool CrowdWorld2D::set_agent_traffic_state(
@@ -38,7 +39,7 @@ namespace godot
     void CrowdWorld2D::apply_impulse(
         std::int64_t agent_handle, Vector2 velocity, double delay,
         double decay_per_second, double control_suppression_seconds,
-        bool preserve_navigation, int priority)
+        bool preserve_navigation, int priority, bool apply_agent_resistance)
     {
         ffcore::ImpulseRequest request;
         request.velocity = {velocity.x, velocity.y};
@@ -47,6 +48,7 @@ namespace godot
         request.control_suppression_seconds = control_suppression_seconds;
         request.preserve_navigation = preserve_navigation;
         request.priority = priority;
+        request.apply_agent_resistance = apply_agent_resistance;
         crowd.apply_impulse(decode_handle(agent_handle), request);
     }
 
@@ -54,7 +56,7 @@ namespace godot
         const PackedInt64Array &agent_handles,
         const PackedVector2Array &velocities, double delay,
         double decay_per_second, double control_suppression_seconds,
-        bool preserve_navigation, int priority)
+        bool preserve_navigation, int priority, bool apply_agent_resistance)
     {
         if (agent_handles.size() != velocities.size())
             return 0;
@@ -73,6 +75,7 @@ namespace godot
         settings.control_suppression_seconds = control_suppression_seconds;
         settings.preserve_navigation = preserve_navigation;
         settings.priority = priority;
+        settings.apply_agent_resistance = apply_agent_resistance;
         return static_cast<int>(crowd.apply_impulses(
             converted_handles, converted_velocities, settings));
     }

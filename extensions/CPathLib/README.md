@@ -15,10 +15,11 @@ Features include:
 - typed routes across world, portal, and local-area segments;
 - capacity, priority, timeout, direction, and fairness controls for bottlenecks;
 - optional crowd agents, reusable profiles, cohorts, per-agent flows, separation, terrain speed,
-  impulses, control suppression, and external velocities;
+  arrival/recovery policies, impulses, resistance, control suppression, and external velocities;
 - generational static circular obstacles with avoidance and hard depenetration;
 - per-agent sparse directional-motion fields with exact and radius-fallback sampling;
-- filtered circle and navigation-cell agent queries plus neutral per-agent diagnostics;
+- filtered circle, cone, AABB, and navigation-cell queries, optional per-agent query AABBs, and
+  neutral per-agent diagnostics;
 - delayed and prioritized impulses, generational external-velocity sources, contact pressure,
   and traffic right-of-way;
 - generational circle/cone effect volumes with enter, tick, and exit events;
@@ -117,7 +118,9 @@ let the consumer associate events with its own rules without putting those rules
 `ProjectileWorld2D` owns reusable projectile-type handles and fixed-size pools. Connect it to a
 `CrowdWorld2D`, upload a static collider-mask grid, then spawn projectiles with optional inherited
 velocity, owner handle, and caller token. Swept collision produces agent, static-collider, or
-lifetime-expiry records. The consuming project decides what each impact means.
+lifetime-expiry records. Agent sweeps use the profile's optional query AABB, falling back to its
+world radius. Force-isolated agents are omitted from projectile targeting. The consuming project
+decides what each impact means.
 
 Gardens are the friendly Godot API name for optional navigation areas. Create one explicitly with
 `create_garden()` or flood-fill it from a seed with `create_garden_from_seed()`, add directional

@@ -24,6 +24,14 @@ namespace ffcore
         CrowdInteractionConfig interactions;
         double static_obstacle_query_padding = 0.0;
         double static_obstacle_repulsion_strength = 1.0;
+        bool automatic_bottleneck_gating = true;
+        double bottleneck_wait_speed_ratio = 0.05;
+        double flow_goal_stop_delay = 1.0;
+        double flow_goal_group_delay = 0.005;
+        double flow_goal_slow_speed_ratio = 0.6;
+        double zero_flow_retry_seconds = 0.6;
+        double zero_flow_recovery_speed_ratio = 0.25;
+        double blocked_motion_retry_seconds = 0.6;
         bool paused = false;
     };
 
@@ -46,6 +54,7 @@ namespace ffcore
         std::unordered_map<std::uint64_t, FlowField> installed_flows;
         FlowHandle default_flow_handle;
         double maximum_agent_radius = 0.0;
+        double maximum_query_shape_radius = 0.0;
 
         static Vec2 approach(const Vec2 &current, const Vec2 &target, double maximum_change);
         static std::uint64_t key(AgentHandle handle);
@@ -64,6 +73,7 @@ namespace ffcore
         Vec2 resolve_motion(const CrowdAgentState &agent, const Vec2 &candidate,
                             const FlowField *flow) const;
         void recompute_maximum_agent_radius();
+        void reset_navigation_transients(CrowdAgentState &agent);
 
     public:
         explicit CrowdWorld(double spatial_cell_size = 32.0)
@@ -90,9 +100,15 @@ namespace ffcore
         bool set_agent_motion_limits(AgentHandle agent, double maximum_speed,
                                      double acceleration, double deceleration);
         bool set_agent_collision_offset(AgentHandle agent, const Vec2 &offset);
+        bool set_agent_avoidance_profile(AgentHandle agent, double push_strength,
+                                         double resistance);
+        bool set_agent_impulse_resistance(AgentHandle agent, double resistance);
+        bool set_agent_query_shape(AgentHandle agent, const Vec2 &offset,
+                                   const Vec2 &half_extents);
         bool set_agent_contact_profile(
             AgentHandle agent, double push_strength, double resistance,
-            double cooldown, double impulse_decay, double control_suppression);
+            double cooldown, double impulse_decay, double control_suppression,
+            bool feedback_enabled = true);
         bool set_agent_traffic_state(AgentHandle agent, std::int64_t group_token, int priority);
         std::vector<AgentHandle> query_agents(
             const Vec2 &position, double radius,
@@ -124,6 +140,16 @@ namespace ffcore
         bool follow_directional_field(AgentHandle handle, DirectionalMotionFieldHandle field);
         bool stop_navigation(AgentHandle handle);
         bool set_paused(AgentHandle handle, bool paused);
+        bool set_pause_allows_impulses(AgentHandle handle, bool enabled);
+        bool set_navigation_suspended(AgentHandle handle, bool suspended);
+        bool set_forces_enabled(AgentHandle handle, bool enabled);
+        bool set_continue_at_flow_goal(AgentHandle handle, bool enabled);
+        void clear_agent_forces(AgentHandle handle);
+        bool is_impulse_active(AgentHandle handle) const { return impulses.active(handle); }
+        double impulse_suppression_remaining(AgentHandle handle) const
+        { return impulses.suppression_remaining(handle); }
+        bool impulse_feedback_enabled(AgentHandle handle) const
+        { return impulses.feedback_enabled(handle); }
 
         void apply_impulse(AgentHandle handle, const ImpulseRequest &request);
         std::size_t apply_impulses(const std::vector<AgentHandle> &handles,

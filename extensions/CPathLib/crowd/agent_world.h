@@ -52,6 +52,16 @@ namespace ffcore
         std::vector<Vec2> path;
         std::size_t path_index = 0;
         bool paused = false;
+        bool allow_impulses_while_paused = false;
+        bool navigation_suspended = false;
+        bool forces_enabled = true;
+        bool continue_at_flow_goal = false;
+        double flow_goal_timer = 0.0;
+        double zero_flow_retry_remaining = 0.0;
+        bool zero_flow_retry_started = false;
+        double blocked_motion_seconds = 0.0;
+        int completed_bottleneck = -1;
+        bool bottleneck_waiting = false;
         std::int64_t traffic_group_token = 0;
         int traffic_priority = 0;
         ExternalVelocityAccumulator external_velocity;

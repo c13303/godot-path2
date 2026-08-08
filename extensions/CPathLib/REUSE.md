@@ -19,6 +19,10 @@ CPathLib is designed so this directory can become the root of a separate private
 9. Preserve the dependency direction: host adapter to CPathLib Godot API to portable core.
 10. Keep the repository private unless its owner deliberately chooses and adds a license.
 
+The copied repository must have one descriptor (`cpathlib.gdextension`) and one native entry point.
+Do not bring a consuming project's compatibility extension, scene adapters, or build target into
+the CPathLib repository.
+
 Multiple navigation and crowd worlds can coexist. Consumers must not add process-wide navigation
 singletons or callbacks from CPathLib into a host project.
 
@@ -46,3 +50,8 @@ Effect caller tokens, projectile caller tokens, category masks, traffic group to
 collision channel bits are deliberately opaque. CPathLib stores, filters, and returns them but does
 not assign project meanings. Consumers should drain effect and projectile events every simulation
 step and resolve those tokens in their own systems.
+
+Per-agent query offsets/extents, avoidance push/resistance, impulse resistance, pause-impulse policy,
+force isolation, continue-at-goal behavior, and contact-feedback policy are neutral profile/runtime
+inputs. Consumer adapters may derive them from sprites or gameplay data, but CPathLib must never
+learn the source metadata names or category meanings.

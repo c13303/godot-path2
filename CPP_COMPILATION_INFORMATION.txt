@@ -55,12 +55,10 @@ The project build command is:
 It uses C++17 and compiles the C++ files under:
 
     extensions/CPathLib/**/*.cpp
-    extensions/rabbit_game_native/**/*.cpp
 
-The output library is written to:
+The single output library is written to:
 
     extensions/CPathLib/bin/cpathlib.dll
-    extensions/rabbit_game_native/bin/rabbit_game_native.dll
 
 
 First-time setup checklist

@@ -241,24 +241,63 @@ namespace ffcore
         for (AgentHandle handle : candidates)
         {
             const CrowdAgentState *agent = crowd->get_agent(handle);
-            if (agent == nullptr)
+            if (agent == nullptr || !agent->forces_enabled)
                 continue;
-            const double radius = profile.radius + agent->profile.radius;
-            const Vec2 offset = from - agent->position;
-            const double a = delta.length_squared();
-            const double b = 2.0 * offset.dot(delta);
-            const double c = offset.length_squared() - radius * radius;
             double fraction = 0.0;
-            if (c > 0.0)
+            const Vec2 half = agent->profile.query_shape_half_extents;
+            if (half.x > 0.0 || half.y > 0.0)
             {
-                if (a <= 1e-12)
+                const Vec2 box_center = agent->position + agent->profile.query_shape_offset;
+                const Vec2 expanded(half.x + profile.radius, half.y + profile.radius);
+                double entry = 0.0;
+                double exit = 1.0;
+                const double origins[2] = {from.x, from.y};
+                const double directions[2] = {delta.x, delta.y};
+                const double minimums[2] = {
+                    box_center.x - expanded.x, box_center.y - expanded.y};
+                const double maximums[2] = {
+                    box_center.x + expanded.x, box_center.y + expanded.y};
+                bool intersects = true;
+                for (int axis = 0; axis < 2; ++axis)
+                {
+                    if (std::abs(directions[axis]) <= 1e-12)
+                    {
+                        if (origins[axis] < minimums[axis] || origins[axis] > maximums[axis])
+                            intersects = false;
+                        continue;
+                    }
+                    double near_fraction = (minimums[axis] - origins[axis]) / directions[axis];
+                    double far_fraction = (maximums[axis] - origins[axis]) / directions[axis];
+                    if (near_fraction > far_fraction)
+                        std::swap(near_fraction, far_fraction);
+                    entry = std::max(entry, near_fraction);
+                    exit = std::min(exit, far_fraction);
+                    if (entry > exit)
+                        intersects = false;
+                }
+                if (!intersects || entry < 0.0 || entry > 1.0)
                     continue;
-                const double discriminant = b * b - 4.0 * a * c;
-                if (discriminant < 0.0)
-                    continue;
-                fraction = (-b - std::sqrt(discriminant)) / (2.0 * a);
-                if (fraction < 0.0 || fraction > 1.0)
-                    continue;
+                fraction = entry;
+            }
+            else
+            {
+                const double radius = profile.radius + agent->profile.radius;
+                const Vec2 center = agent->position + agent->profile.query_shape_offset;
+                const Vec2 offset = from - center;
+                const double a = delta.length_squared();
+                const double b = 2.0 * offset.dot(delta);
+                const double c = offset.length_squared() - radius * radius;
+                if (c > 0.0)
+                {
+                    if (a <= 1e-12)
+                        continue;
+                    const double discriminant = b * b - 4.0 * a * c;
+                    if (discriminant < 0.0)
+                        continue;
+                    fraction = (-b - std::sqrt(discriminant)) / (2.0 * a);
+                    if (fraction < 0.0 || fraction > 1.0)
+                        continue;
+                }
             }
             if (fraction < best_fraction ||
                 (fraction == best_fraction && (!best.is_valid() || handle.index < best.index)))

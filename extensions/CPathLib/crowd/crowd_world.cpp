@@ -36,6 +36,21 @@ namespace ffcore
         config.interactions.right_of_way_control_suppression =
             std::isfinite(config.interactions.right_of_way_control_suppression)
             ? std::max(0.0, config.interactions.right_of_way_control_suppression) : 0.18;
+        config.bottleneck_wait_speed_ratio = std::isfinite(config.bottleneck_wait_speed_ratio)
+            ? std::clamp(config.bottleneck_wait_speed_ratio, 0.0, 1.0) : 0.05;
+        config.flow_goal_stop_delay = std::isfinite(config.flow_goal_stop_delay)
+            ? std::max(0.0, config.flow_goal_stop_delay) : 1.0;
+        config.flow_goal_group_delay = std::isfinite(config.flow_goal_group_delay)
+            ? std::max(0.0, config.flow_goal_group_delay) : 0.005;
+        config.flow_goal_slow_speed_ratio = std::isfinite(config.flow_goal_slow_speed_ratio)
+            ? std::clamp(config.flow_goal_slow_speed_ratio, 0.0, 1.0) : 0.6;
+        config.zero_flow_retry_seconds = std::isfinite(config.zero_flow_retry_seconds)
+            ? std::max(0.0, config.zero_flow_retry_seconds) : 0.6;
+        config.zero_flow_recovery_speed_ratio =
+            std::isfinite(config.zero_flow_recovery_speed_ratio)
+            ? std::clamp(config.zero_flow_recovery_speed_ratio, 0.0, 1.0) : 0.25;
+        config.blocked_motion_retry_seconds = std::isfinite(config.blocked_motion_retry_seconds)
+            ? std::max(0.0, config.blocked_motion_retry_seconds) : 0.6;
     }
 
     ProfileHandle CrowdWorld::create_profile(const CrowdAgentProfile &profile)
@@ -62,8 +77,7 @@ namespace ffcore
     {
         const AgentHandle handle = agents.create(position, config.default_agent_profile);
         spatial.insert(static_cast<int>(handle.index), position);
-        maximum_agent_radius = std::max(
-            maximum_agent_radius, agents.get(handle)->profile.radius);
+        recompute_maximum_agent_radius();
         return handle;
     }
 
@@ -71,8 +85,7 @@ namespace ffcore
     {
         const AgentHandle handle = agents.create(position, profile);
         spatial.insert(static_cast<int>(handle.index), position);
-        maximum_agent_radius = std::max(
-            maximum_agent_radius, agents.get(handle)->profile.radius);
+        recompute_maximum_agent_radius();
         return handle;
     }
 
@@ -84,7 +97,7 @@ namespace ffcore
         const AgentHandle handle = agents.create(position, *profile);
         agents.get(handle)->profile_handle = profile_handle;
         spatial.insert(static_cast<int>(handle.index), position);
-        maximum_agent_radius = std::max(maximum_agent_radius, profile->radius);
+        recompute_maximum_agent_radius();
         return handle;
     }
 
@@ -159,7 +172,8 @@ namespace ffcore
 
     bool CrowdWorld::set_agent_contact_profile(
         AgentHandle agent_handle, double push_strength, double resistance,
-        double cooldown, double impulse_decay, double control_suppression)
+        double cooldown, double impulse_decay, double control_suppression,
+        bool feedback_enabled)
     {
         CrowdAgentState *agent = agents.get(agent_handle);
         if (agent == nullptr)
@@ -170,6 +184,7 @@ namespace ffcore
         requested.contact_push_cooldown = cooldown;
         requested.contact_impulse_decay = impulse_decay;
         requested.contact_control_suppression = control_suppression;
+        requested.contact_feedback_enabled = feedback_enabled;
         agent->profile = CrowdProfileStore::sanitize(requested);
         return true;
     }
@@ -295,6 +310,7 @@ namespace ffcore
         agent->directional_field_handle = {};
         agent->navigation_source = NavigationSource::FlowField;
         agent->route_progress = RouteProgress::Following;
+        reset_navigation_transients(*agent);
         return true;
     }
 
@@ -309,6 +325,7 @@ namespace ffcore
         agent->flow_handle = {};
         agent->directional_field_handle = {};
         agent->route_progress = RouteProgress::Following;
+        reset_navigation_transients(*agent);
         return true;
     }
 
@@ -322,6 +339,7 @@ namespace ffcore
         agent->flow_handle = {};
         agent->directional_field_handle = {};
         agent->route_progress = RouteProgress::Following;
+        reset_navigation_transients(*agent);
         return true;
     }
 
@@ -335,6 +353,7 @@ namespace ffcore
         agent->navigation_source = NavigationSource::DirectionalField;
         agent->flow_handle = {};
         agent->route_progress = RouteProgress::Following;
+        reset_navigation_transients(*agent);
         return true;
     }
 
@@ -349,6 +368,7 @@ namespace ffcore
         agent->route_progress = RouteProgress::Idle;
         agent->path.clear();
         agent->path_index = 0;
+        reset_navigation_transients(*agent);
         return true;
     }
 
@@ -358,13 +378,73 @@ namespace ffcore
         if (agent == nullptr)
             return false;
         agent->paused = paused;
+        if (paused)
+            agent->velocity = {};
         return true;
+    }
+
+    bool CrowdWorld::set_pause_allows_impulses(AgentHandle handle, bool enabled)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return false;
+        agent->allow_impulses_while_paused = enabled;
+        return true;
+    }
+
+    bool CrowdWorld::set_navigation_suspended(AgentHandle handle, bool suspended)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return false;
+        agent->navigation_suspended = suspended;
+        if (suspended)
+            agent->velocity = {};
+        return true;
+    }
+
+    bool CrowdWorld::set_forces_enabled(AgentHandle handle, bool enabled)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return false;
+        agent->forces_enabled = enabled;
+        if (!enabled)
+            clear_agent_forces(handle);
+        return true;
+    }
+
+    bool CrowdWorld::set_continue_at_flow_goal(AgentHandle handle, bool enabled)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return false;
+        agent->continue_at_flow_goal = enabled;
+        agent->flow_goal_timer = 0.0;
+        if (enabled && agent->route_progress == RouteProgress::Arrived)
+            agent->route_progress = RouteProgress::Following;
+        return true;
+    }
+
+    void CrowdWorld::clear_agent_forces(AgentHandle handle)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return;
+        impulses.remove(handle);
+        agent->external_velocity.clear();
     }
 
     void CrowdWorld::apply_impulse(AgentHandle handle, const ImpulseRequest &request)
     {
-        if (agents.get(handle) != nullptr)
-            impulses.apply(handle, request);
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr || !agent->forces_enabled)
+            return;
+        ImpulseRequest adjusted = request;
+        if (adjusted.apply_agent_resistance)
+            adjusted.velocity = adjusted.velocity /
+                std::max(0.001, agent->profile.impulse_resistance);
+        impulses.apply(handle, adjusted);
     }
 
     std::size_t CrowdWorld::apply_impulses(
@@ -379,8 +459,14 @@ namespace ffcore
         {
             if (agents.get(handles[index]) == nullptr)
                 continue;
+            CrowdAgentState *agent = agents.get(handles[index]);
+            if (agent == nullptr || !agent->forces_enabled)
+                continue;
             ImpulseRequest request = settings;
             request.velocity = velocities[index];
+            if (request.apply_agent_resistance)
+                request.velocity = request.velocity /
+                    std::max(0.001, agent->profile.impulse_resistance);
             impulses.apply(handles[index], request);
             ++applied;
         }
@@ -395,7 +481,8 @@ namespace ffcore
         double expiry_seconds)
     {
         CrowdAgentState *agent = agents.get(handle);
-        if (agent == nullptr || !external_velocity_sources.contains(source))
+        if (agent == nullptr || !agent->forces_enabled ||
+            !external_velocity_sources.contains(source))
             return false;
         agent->external_velocity.refresh_source(
             encode_external_velocity_source(source), velocity,
@@ -648,6 +735,24 @@ namespace ffcore
             handles_by_index[static_cast<int>(handle.index)] = handle;
         }
 
+        std::unordered_map<std::uint64_t, std::unordered_map<int, int>>
+            bottleneck_core_occupancy;
+        if (config.automatic_bottleneck_gating)
+        {
+            for (AgentHandle handle : handles)
+            {
+                const CrowdAgentState *agent = agents.get(handle);
+                const FlowField *flow = flow_for(*agent);
+                if (flow == nullptr || agent->navigation_source != NavigationSource::FlowField)
+                    continue;
+                const Vec2i cell = flow->world_to_cell(
+                    agent->position + agent->profile.collision_offset);
+                const int core = flow->bottleneck_core_at_cell(cell);
+                if (core >= 0)
+                    ++bottleneck_core_occupancy[key(agent->flow_handle)][core];
+            }
+        }
+
         const std::vector<CrowdInteractionImpulse> interaction_impulses =
             interactions.collect(delta, agents, spatial, config.interactions);
         for (const CrowdInteractionImpulse &submission : interaction_impulses)
@@ -661,17 +766,151 @@ namespace ffcore
         for (AgentHandle handle : handles)
         {
             CrowdAgentState *agent = agents.get(handle);
-            agent->external_velocity.update(delta);
+            if (agent->forces_enabled)
+                agent->external_velocity.update(delta);
             const FlowField *flow = flow_for(*agent);
             const DirectionalMotionField *directional_field = directional_field_for(*agent);
             const DirectionalMotionSample directional_sample = directional_field == nullptr
                 ? DirectionalMotionSample() : directional_field->sample(agent->position);
-            const Vec2 navigation = agent->navigation_source == NavigationSource::DirectionalField
+            Vec2 navigation = agent->navigation_source == NavigationSource::DirectionalField
                 ? directional_sample.velocity.normalized()
                 : SteeringSolver::navigation_direction(*agent, flow);
-            const Vec2 separation = SteeringSolver::separation(
-                *agent, agents, spatial, handles_by_index);
-            const Vec2 obstacle_repulsion = static_obstacle_repulsion(*agent);
+            bool hard_freeze = agent->navigation_suspended;
+            bool autonomous_stop = false;
+            double navigation_speed_scale = 1.0;
+
+            if (agent->blocked_motion_seconds < 0.0)
+            {
+                agent->blocked_motion_seconds = std::min(
+                    0.0, agent->blocked_motion_seconds + delta);
+                hard_freeze = true;
+            }
+
+            if (flow != nullptr && agent->navigation_source == NavigationSource::FlowField)
+            {
+                const Vec2 sample_position = agent->position + agent->profile.collision_offset;
+                const Vec2i cell = flow->world_to_cell(sample_position);
+                const Vec2 goal_offset = flow->goal_center_world() - sample_position;
+                const double goal_distance = goal_offset.length();
+                const CohortHandle cohort = cohorts.find_cohort(handle);
+                const std::size_t cohort_size = cohort.is_valid()
+                    ? cohorts.get(cohort)->members.size() : 1;
+                constexpr double pi = 3.14159265358979323846;
+                const double spread_cells = std::ceil(std::sqrt(
+                    static_cast<double>(cohort_size > 0 ? cohort_size - 1 : 0) / pi));
+                const double goal_radius = (spread_cells + 1.0) * flow->tile_size();
+
+                if (agent->route_progress == RouteProgress::Arrived &&
+                    !agent->continue_at_flow_goal)
+                {
+                    navigation = {};
+                    autonomous_stop = true;
+                }
+                else if (!agent->continue_at_flow_goal && cohort_size <= 2 &&
+                         goal_distance <= flow->tile_size() * 0.5)
+                {
+                    agent->route_progress = RouteProgress::Arrived;
+                    agent->velocity = {};
+                    navigation = {};
+                    autonomous_stop = true;
+                }
+                else if (!agent->continue_at_flow_goal && goal_distance <= goal_radius)
+                {
+                    navigation_speed_scale = config.flow_goal_slow_speed_ratio;
+                    if (agent->flow_goal_timer <= 0.0)
+                        agent->flow_goal_timer = config.flow_goal_stop_delay +
+                            static_cast<double>(cohort_size) * config.flow_goal_group_delay;
+                    agent->flow_goal_timer -= delta;
+                    if (agent->flow_goal_timer <= 0.0)
+                    {
+                        agent->route_progress = RouteProgress::Arrived;
+                        agent->velocity = {};
+                        navigation = {};
+                        autonomous_stop = true;
+                    }
+                }
+
+                const double lost_goal_margin = std::max(flow->tile_size() * 0.5, goal_radius);
+                if (navigation.is_zero() && goal_distance > lost_goal_margin &&
+                    agent->route_progress != RouteProgress::Arrived)
+                {
+                    const bool force_owned_motion = is_impulse_active(handle) ||
+                        !agent->external_velocity.current_velocity().is_zero();
+                    if (force_owned_motion)
+                    {
+                        agent->zero_flow_retry_started = false;
+                        agent->zero_flow_retry_remaining = 0.0;
+                    }
+                    else if (!agent->zero_flow_retry_started)
+                    {
+                        agent->zero_flow_retry_started = true;
+                        agent->zero_flow_retry_remaining = config.zero_flow_retry_seconds;
+                    }
+                    if (!force_owned_motion && agent->zero_flow_retry_remaining > 0.0)
+                    {
+                        agent->zero_flow_retry_remaining = std::max(
+                            0.0, agent->zero_flow_retry_remaining - delta);
+                        hard_freeze = true;
+                    }
+                    else if (!force_owned_motion)
+                    {
+                        const Vec2i nearest = flow->find_nearest_navigable(cell);
+                        navigation = (flow->cell_to_world(nearest) - sample_position).normalized();
+                        navigation_speed_scale *= config.zero_flow_recovery_speed_ratio;
+                    }
+                }
+                else if (!navigation.is_zero() || goal_distance <= lost_goal_margin)
+                {
+                    agent->zero_flow_retry_started = false;
+                    agent->zero_flow_retry_remaining = 0.0;
+                }
+
+                agent->bottleneck_waiting = false;
+                if (config.automatic_bottleneck_gating)
+                {
+                    const int core = flow->bottleneck_core_at_cell(cell);
+                    const int zone = flow->bottleneck_zone_at_cell(cell);
+                    if (core >= 0)
+                        agent->completed_bottleneck = core;
+                    else if (agent->completed_bottleneck >= 0 &&
+                             zone != agent->completed_bottleneck)
+                        agent->completed_bottleneck = -1;
+
+                    const int next = flow->next_bottleneck_at_cell(cell);
+                    if (next >= 0 && next != agent->completed_bottleneck)
+                    {
+                        const BottleneckInfo *info = flow->bottleneck_at(next);
+                        if (info != nullptr && flow->route_cost_at_cell(cell) >= info->route_cost)
+                        {
+                            const Vec2 toward_core =
+                                (flow->cell_to_world(info->cell) - sample_position).normalized();
+                            if (!toward_core.is_zero())
+                                navigation = toward_core;
+                        }
+                    }
+
+                    const auto field_occupancy =
+                        bottleneck_core_occupancy.find(key(agent->flow_handle));
+                    if (zone >= 0 && zone != agent->completed_bottleneck &&
+                        field_occupancy != bottleneck_core_occupancy.end())
+                    {
+                        const auto occupied = field_occupancy->second.find(zone);
+                        if (occupied != field_occupancy->second.end() && occupied->second > 0)
+                        {
+                            agent->bottleneck_waiting = true;
+                            navigation_speed_scale *= config.bottleneck_wait_speed_ratio;
+                        }
+                    }
+                }
+            }
+
+            if (hard_freeze || agent->paused)
+                navigation = {};
+            const Vec2 separation = hard_freeze || agent->paused || autonomous_stop
+                ? Vec2() : SteeringSolver::separation(
+                    *agent, agents, spatial, handles_by_index);
+            const Vec2 obstacle_repulsion = hard_freeze || agent->paused || autonomous_stop
+                ? Vec2() : static_obstacle_repulsion(*agent);
             Vec2 desired_direction = navigation + separation + obstacle_repulsion;
             if (!desired_direction.is_zero())
                 desired_direction = desired_direction.normalized();
@@ -689,9 +928,10 @@ namespace ffcore
                     absolute_cell,
                     agent->profile.terrain_speed_channel);
             }
-            const double navigation_speed =
+            const double navigation_speed = (
                 agent->navigation_source == NavigationSource::DirectionalField && directional_sample.found
-                ? directional_sample.velocity.length() : agent->profile.maximum_speed;
+                ? directional_sample.velocity.length() : agent->profile.maximum_speed) *
+                navigation_speed_scale;
             const Vec2 desired_velocity = desired_direction *
                 (navigation_speed * impulses.navigation_control(handle));
             impulses.cancel_if_navigation_opposes(handle, desired_velocity);
@@ -700,16 +940,33 @@ namespace ffcore
             agent->velocity = approach(agent->velocity, desired_velocity, rate * delta);
 
             Vec2 total_velocity;
-            if (!agent->paused)
+            if (!hard_freeze && (!agent->paused || agent->allow_impulses_while_paused))
             {
-                total_velocity = agent->velocity;
-                total_velocity += impulses.velocity(handle);
-                total_velocity += agent->external_velocity.current_velocity();
+                if (!agent->paused)
+                    total_velocity = agent->velocity;
+                if (agent->forces_enabled)
+                {
+                    total_velocity += impulses.velocity(handle);
+                    if (!agent->paused)
+                        total_velocity += agent->external_velocity.current_velocity();
+                }
             }
             const Vec2 resolved = resolve_motion(
                 *agent,
                 agent->position + total_velocity * (delta * terrain_multiplier),
                 flow);
+            const bool blocked = agent->navigation_source == NavigationSource::FlowField &&
+                (resolved - agent->position).length_squared() < 1e-12 &&
+                !desired_velocity.is_zero() && impulses.velocity(handle).is_zero();
+            if (blocked)
+            {
+                agent->blocked_motion_seconds += delta;
+                if (config.blocked_motion_retry_seconds > 0.0 &&
+                    agent->blocked_motion_seconds >= config.blocked_motion_retry_seconds)
+                    agent->blocked_motion_seconds = -config.zero_flow_retry_seconds;
+            }
+            else if (agent->blocked_motion_seconds > 0.0)
+                agent->blocked_motion_seconds = 0.0;
             if ((resolved - agent->position).length_squared() < 1e-12 && !total_velocity.is_zero())
                 agent->velocity = {};
             agent->position = resolved;

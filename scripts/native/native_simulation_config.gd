@@ -9,6 +9,8 @@ class_name NativeSimulationConfig
 @export_range(0.0, 10.0, 0.05) var flow_wall_clearance_weight: float = 0.5
 @export_range(0, 2, 1) var bottleneck_zone_radius_tiles: int = 2
 @export_range(0.0, 10.0, 0.05) var bottleneck_reservation_seconds: float = 1.0
+@export var automatic_bottleneck_gating: bool = true
+@export_range(0.0, 1.0, 0.01) var bottleneck_wait_speed_ratio: float = 0.05
 
 @export_group("Agent Profile")
 @export_range(0.0, 1000.0, 1.0) var agent_maximum_speed: float = 150.0
@@ -18,6 +20,12 @@ class_name NativeSimulationConfig
 @export_range(0.0, 256.0, 1.0) var separation_radius: float = 32.0
 @export_range(0.0, 1000.0, 1.0) var separation_weight: float = 600.0
 @export_range(0.0, 256.0, 1.0) var arrival_radius: float = 16.0
+@export_range(0.0, 10.0, 0.05) var flow_goal_stop_delay: float = 1.0
+@export_range(0.0, 1.0, 0.001) var flow_goal_group_delay: float = 0.005
+@export_range(0.0, 1.0, 0.01) var flow_goal_slow_speed_ratio: float = 0.6
+@export_range(0.0, 10.0, 0.05) var zero_flow_retry_seconds: float = 0.6
+@export_range(0.0, 1.0, 0.01) var zero_flow_recovery_speed_ratio: float = 0.25
+@export_range(0.0, 10.0, 0.05) var blocked_motion_retry_seconds: float = 0.6
 
 @export_group("Interactions")
 @export var contact_push_enabled: bool = true
@@ -83,5 +91,12 @@ func apply_to_crowd(crowd_world: Node) -> bool:
 		&"configure_agent_interactions", contact_push_enabled,
 		right_of_way_enabled, right_of_way_push_speed,
 		right_of_way_cooldown, right_of_way_control_suppression
+	)
+	crowd_world.call(
+		&"configure_navigation_behavior", automatic_bottleneck_gating,
+		bottleneck_wait_speed_ratio, flow_goal_stop_delay,
+		flow_goal_group_delay, flow_goal_slow_speed_ratio,
+		zero_flow_retry_seconds, zero_flow_recovery_speed_ratio,
+		blocked_motion_retry_seconds
 	)
 	return true

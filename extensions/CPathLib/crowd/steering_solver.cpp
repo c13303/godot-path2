@@ -53,7 +53,10 @@ namespace ffcore
                 agent.profile.radius + other->profile.radius);
             if (distance <= 1e-8 || distance >= desired_distance)
                 continue;
-            contribution += away * ((desired_distance - distance) / (desired_distance * distance));
+            const double pressure = other->profile.avoidance_push_strength /
+                std::max(0.001, agent.profile.avoidance_resistance);
+            contribution += away * (((desired_distance - distance) /
+                (desired_distance * distance)) * pressure);
         }
         return contribution * agent.profile.separation_weight;
     }

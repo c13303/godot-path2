@@ -15,8 +15,8 @@ the host project's legacy API.
 - Host gameplay remains in GDScript and composes generic handles, masks, profiles, queries, events,
   navigation sources, and motion constraints.
 
-The current `extensions/rabbit_game_native` directory is migration input only. It must be deleted
-in pass 8.
+The former `extensions/rabbit_game_native` directory was migration input only. It was deleted when
+the final live-caller, parity, descriptor, and build-target gates passed.
 
 ## Implementation progress
 
@@ -41,9 +41,11 @@ in pass 8.
   category/channel masks, caller tokens, and neutral impact/expiry events.
 - Pass 6 complete: the host owns an `AgentHandleRegistry`, explicit simulation configuration,
   TileMap-to-grid upload, and flow/cohort lifecycle coordination. An isolated runtime smoke test
-  drives a scene node through CPathLib only. The main scene remains on the legacy runtime until the
-  pass-7 combat/event consumer and agent cutover can be applied atomically.
-- Passes 7-8 remain required; the temporary legacy extension is still active.
+  drives a scene node through CPathLib only.
+- Pass 7 complete: the main scene, combat/event consumers, agents, and projectiles use CPathLib
+  through the project-owned Godot adapters.
+- Pass 8 complete: parity gaps were closed, the second extension/source/build target was removed,
+  and CPathLib is the only native runtime boundary.
 
 ## Source-file disposition
 

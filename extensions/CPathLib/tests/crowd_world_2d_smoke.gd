@@ -65,6 +65,22 @@ func _initialize() -> void:
 			)):
 		_fail("stale external-velocity source handle remained usable")
 		return
+	crowd.call(&"clear_agent_forces", second)
+	if not bool(crowd.call(&"set_agent_pause_allows_impulses", second, true)) \
+			or not bool(crowd.call(&"set_agent_paused", second, true)):
+		_fail("paused impulse policy setup failed")
+		return
+	var paused_before: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	crowd.call(
+		&"apply_impulse", second, Vector2(10.0, 0.0),
+		0.0, 0.0, 0.0, true, 10
+	)
+	crowd.call(&"step", 0.1)
+	var paused_after: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	if paused_after.x <= paused_before.x:
+		_fail("paused agent did not accept explicitly allowed impulse displacement")
+		return
+	crowd.call(&"set_agent_paused", second, false)
 
 	var handles: PackedInt64Array = crowd.call(&"get_agent_handles") as PackedInt64Array
 	var positions: PackedVector2Array = crowd.call(&"get_agent_positions") as PackedVector2Array

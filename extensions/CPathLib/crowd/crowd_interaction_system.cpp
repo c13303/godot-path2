@@ -61,7 +61,8 @@ namespace ffcore
         for (AgentHandle first_handle : handles)
         {
             const CrowdAgentState *first = agents.get(first_handle);
-            if (first == nullptr || first->paused)
+            if (first == nullptr || !first->forces_enabled ||
+                (first->paused && !first->allow_impulses_while_paused))
                 continue;
             const double query_radius = first->profile.radius + maximum_radius;
             for (int neighbor_index : spatial.query_neighbors(first->position, query_radius))
@@ -72,7 +73,8 @@ namespace ffcore
                     static_cast<std::uint32_t>(neighbor_index),
                     agents.generation_at(static_cast<std::uint32_t>(neighbor_index))};
                 const CrowdAgentState *second = agents.get(second_handle);
-                if (second == nullptr || second->paused)
+                if (second == nullptr || !second->forces_enabled ||
+                    (second->paused && !second->allow_impulses_while_paused))
                     continue;
                 const double combined_radius = first->profile.radius + second->profile.radius;
                 const Vec2 difference = second->position - first->position;
@@ -96,12 +98,14 @@ namespace ffcore
                     {
                         const bool push_second = net > 0.0;
                         const CrowdAgentState *target = push_second ? second : first;
+                        const CrowdAgentState *source = push_second ? first : second;
                         ImpulseRequest impulse;
                         impulse.velocity = (push_second ? direction : -direction) * std::abs(net);
                         impulse.decay_per_second = target->profile.contact_impulse_decay;
                         impulse.control_suppression_seconds =
                             target->profile.contact_control_suppression;
                         impulse.stop_on_control_restore = true;
+                        impulse.feedback_enabled = source->profile.contact_feedback_enabled;
                         impulse.priority = config.contact_impulse_priority;
                         result.push_back({push_second ? second_handle : first_handle, impulse});
                         const double cooldown = std::max(

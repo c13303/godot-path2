@@ -85,9 +85,15 @@ namespace godot
         bool set_agent_motion_limits(std::int64_t agent_handle, double maximum_speed,
                                      double acceleration, double deceleration);
         bool set_agent_collision_offset(std::int64_t agent_handle, Vector2 offset);
+        bool set_agent_avoidance_profile(std::int64_t agent_handle,
+                                         double push_strength, double resistance);
+        bool set_agent_impulse_resistance(std::int64_t agent_handle, double resistance);
+        bool set_agent_query_shape(std::int64_t agent_handle, Vector2 offset,
+                                   Vector2 half_extents);
         bool set_agent_contact_profile(
             std::int64_t agent_handle, double push_strength, double resistance,
-            double cooldown, double impulse_decay, double control_suppression);
+            double cooldown, double impulse_decay, double control_suppression,
+            bool feedback_enabled = true);
         bool set_agent_traffic_state(std::int64_t agent_handle,
                                      std::int64_t group_token, int priority);
         void configure_agent_interactions(
@@ -106,6 +112,16 @@ namespace godot
         bool set_manual_direction(std::int64_t agent_handle, Vector2 direction);
         bool stop_navigation(std::int64_t agent_handle);
         bool set_agent_paused(std::int64_t agent_handle, bool paused);
+        bool set_agent_pause_allows_impulses(std::int64_t agent_handle, bool enabled);
+        bool set_agent_navigation_suspended(std::int64_t agent_handle, bool suspended);
+        bool set_agent_forces_enabled(std::int64_t agent_handle, bool enabled);
+        bool set_agent_continue_at_flow_goal(std::int64_t agent_handle, bool enabled);
+        void clear_agent_forces(std::int64_t agent_handle);
+        void configure_navigation_behavior(
+            bool automatic_bottleneck_gating, double bottleneck_wait_speed_ratio,
+            double flow_goal_stop_delay, double flow_goal_group_delay,
+            double flow_goal_slow_speed_ratio, double zero_flow_retry_seconds,
+            double zero_flow_recovery_speed_ratio, double blocked_motion_retry_seconds);
         void configure_static_obstacle_avoidance(double strength, double query_padding);
         std::int64_t create_static_obstacle(Vector2 position, double radius,
                                             double push_strength = 1.0);
@@ -128,12 +144,14 @@ namespace godot
                                              std::int64_t field_handle);
         void apply_impulse(std::int64_t agent_handle, Vector2 velocity, double delay,
                            double decay_per_second, double control_suppression_seconds,
-                           bool preserve_navigation, int priority);
+                           bool preserve_navigation, int priority,
+                           bool apply_agent_resistance = false);
         int apply_impulse_batch(
             const PackedInt64Array &agent_handles,
             const PackedVector2Array &velocities, double delay,
             double decay_per_second, double control_suppression_seconds,
-            bool preserve_navigation, int priority);
+            bool preserve_navigation, int priority,
+            bool apply_agent_resistance = false);
         std::int64_t create_external_velocity_source();
         bool remove_external_velocity_source(std::int64_t source_handle);
         bool refresh_external_velocity(std::int64_t agent_handle, std::int64_t source_handle,
@@ -168,6 +186,7 @@ namespace godot
         Vector2 get_agent_velocity(std::int64_t agent_handle) const;
         int get_agent_route_progress(std::int64_t agent_handle) const;
         Dictionary get_agent_diagnostics(std::int64_t agent_handle) const;
+        Dictionary get_active_impulse_states() const;
         PackedInt64Array query_agents_in_circle(
             Vector2 position, double radius, std::int64_t category_mask,
             std::int64_t ignored_agent_handle = 0) const;

@@ -50,6 +50,7 @@ namespace ffcore
                     state.suppression_remaining = state.pending.control_suppression_seconds;
                     state.preserve_navigation = state.pending.preserve_navigation;
                     state.stop_on_control_restore = state.pending.stop_on_control_restore;
+                    state.feedback_enabled = state.pending.feedback_enabled;
                     state.has_pending = false;
                     activated_this_update = true;
                 }
@@ -106,5 +107,17 @@ namespace ffcore
     bool ImpulseSystem::active(AgentHandle handle) const
     {
         return states.find(key(handle)) != states.end();
+    }
+
+    double ImpulseSystem::suppression_remaining(AgentHandle handle) const
+    {
+        const auto state = states.find(key(handle));
+        return state == states.end() ? 0.0 : state->second.suppression_remaining;
+    }
+
+    bool ImpulseSystem::feedback_enabled(AgentHandle handle) const
+    {
+        const auto state = states.find(key(handle));
+        return state == states.end() || state->second.feedback_enabled;
     }
 } // namespace ffcore

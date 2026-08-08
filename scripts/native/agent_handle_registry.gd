@@ -18,6 +18,7 @@ const CATEGORY_HOSTILE: int = 1 << 2
 @export var crowd_path: NodePath = NodePath("../CrowdWorld")
 @export var crowd_runtime_path: NodePath = NodePath("../CrowdRuntime")
 @export var simulation_config_path: NodePath = NodePath("../SimulationConfig")
+@export var flow_coordinator_path: NodePath = NodePath("../NavigationRuntime/FlowCoordinator")
 
 var _crowd: Node
 var _nodes_by_handle: Dictionary = {}
@@ -29,6 +30,8 @@ var _automatic_step: bool = true
 var _paused: bool = false
 var _current_selected_cohort: int = IDLE_COHORT
 var _flow_wait_by_cohort: Dictionary = {}
+var _known_cohorts: Dictionary = {}
+var _cohort_has_order: Dictionary = {}
 
 
 func _ready() -> void:
@@ -147,7 +150,11 @@ func handle_for_node(node: Node) -> int:
 func create_cohort() -> int:
 	if _crowd == null:
 		return INVALID_HANDLE
-	return int(_crowd.call(&"create_cohort"))
+	var cohort_handle: int = int(_crowd.call(&"create_cohort"))
+	if cohort_handle != INVALID_HANDLE:
+		_known_cohorts[cohort_handle] = true
+		_cohort_has_order[cohort_handle] = false
+	return cohort_handle
 
 
 func create_group() -> int:
@@ -166,7 +173,17 @@ func remove_cohort(cohort_handle: int) -> bool:
 		var agent_handle: int = int(raw_handle)
 		_crowd.call(&"stop_navigation", agent_handle)
 		_cohort_by_agent.erase(agent_handle)
-	return bool(_crowd.call(&"remove_cohort", cohort_handle))
+	var coordinator: Node = get_node_or_null(flow_coordinator_path)
+	if coordinator != null and coordinator.has_method(&"release_cohort_flow"):
+		coordinator.call(&"release_cohort_flow", cohort_handle)
+	var removed: bool = bool(_crowd.call(&"remove_cohort", cohort_handle))
+	if removed:
+		_known_cohorts.erase(cohort_handle)
+		_cohort_has_order.erase(cohort_handle)
+		_flow_wait_by_cohort.erase(cohort_handle)
+		if _current_selected_cohort == cohort_handle:
+			_current_selected_cohort = IDLE_COHORT
+	return removed
 
 
 func dissolve_group(cohort_handle: int) -> void:
@@ -175,17 +192,26 @@ func dissolve_group(cohort_handle: int) -> void:
 
 
 func cleanup_groups() -> void:
-	# Generational cohorts have no fixed pool pressure. Empty cohorts are removed
-	# explicitly by their routing owner, so selection cleanup has no hidden mutation.
-	pass
+	var empty_cohorts: Array[int] = []
+	for raw_handle: Variant in _known_cohorts:
+		var cohort_handle: int = int(raw_handle)
+		if cohort_handle == _current_selected_cohort:
+			continue
+		if count_group_route_references(cohort_handle) == 0 \
+				or not bool(_cohort_has_order.get(cohort_handle, false)) \
+				or _cohort_has_arrived(cohort_handle):
+			empty_cohorts.append(cohort_handle)
+	for cohort_handle: int in empty_cohorts:
+		remove_cohort(cohort_handle)
 
 
 func set_current_selected_group(cohort_handle: int) -> void:
 	_current_selected_cohort = cohort_handle
 
 
-func mark_group_has_order(_cohort_handle: int) -> void:
-	pass
+func mark_group_has_order(cohort_handle: int) -> void:
+	if _known_cohorts.has(cohort_handle):
+		_cohort_has_order[cohort_handle] = true
 
 
 func count_group_members(cohort_handle: int) -> int:
@@ -208,6 +234,25 @@ func get_group_flow_wait(cohort_handle: int) -> int:
 func set_group_flow_wait(cohort_handle: int, state: int) -> void:
 	if cohort_handle != IDLE_COHORT:
 		_flow_wait_by_cohort[cohort_handle] = state
+		if state != 0:
+			mark_group_has_order(cohort_handle)
+		_set_cohort_flow_navigation_suspended(cohort_handle, state != 0)
+
+
+func _cohort_has_arrived(cohort_handle: int) -> bool:
+	var found_member: bool = false
+	for raw_handle: Variant in _cohort_by_agent:
+		var agent_handle: int = int(raw_handle)
+		if int(_cohort_by_agent[agent_handle]) != cohort_handle:
+			continue
+		found_member = true
+		var diagnostics: Dictionary = _crowd.call(
+			&"get_agent_diagnostics", agent_handle
+		) as Dictionary
+		if int(diagnostics.get("navigation_source", 0)) != 1 \
+				or int(diagnostics.get("route_progress", 0)) != 2:
+			return false
+	return found_member
 
 
 func assign_agent_to_cohort(agent_handle: int, cohort_handle: int) -> bool:
@@ -222,6 +267,9 @@ func assign_agent_to_cohort(agent_handle: int, cohort_handle: int) -> bool:
 	))
 	if assigned:
 		_cohort_by_agent[agent_handle] = cohort_handle
+		if int(_flow_wait_by_cohort.get(cohort_handle, 0)) != 0 \
+				and _crowd.has_method(&"set_agent_navigation_suspended"):
+			_crowd.call(&"set_agent_navigation_suspended", agent_handle, true)
 	return assigned
 
 
@@ -296,12 +344,16 @@ func set_agent_waiting_flow_group(agent_handle: int, cohort_handle: int) -> void
 	var state: Dictionary = get_project_state(agent_handle)
 	state["waiting_flow_cohort"] = cohort_handle
 	set_project_state(agent_handle, state)
+	if _crowd != null and _crowd.has_method(&"set_agent_navigation_suspended"):
+		_crowd.call(&"set_agent_navigation_suspended", agent_handle, cohort_handle != IDLE_COHORT)
 
 
 func set_agent_never_rest(agent_handle: int, value: bool) -> void:
 	var state: Dictionary = get_project_state(agent_handle)
 	state["never_rest"] = value
 	set_project_state(agent_handle, state)
+	if _crowd != null and _crowd.has_method(&"set_agent_continue_at_flow_goal"):
+		_crowd.call(&"set_agent_continue_at_flow_goal", agent_handle, value)
 
 
 func set_agent_phase(agent_handle: int, phase: int, eating_seconds: float = 0.0) -> void:
@@ -316,9 +368,11 @@ func set_agent_phase(agent_handle: int, phase: int, eating_seconds: float = 0.0)
 
 
 func set_agent_paused(agent_handle: int, paused: bool) -> bool:
-	return _crowd != null and bool(_crowd.call(
-		&"set_agent_paused", agent_handle, paused
-	))
+	if _crowd == null:
+		return false
+	if _crowd.has_method(&"set_agent_pause_allows_impulses"):
+		_crowd.call(&"set_agent_pause_allows_impulses", agent_handle, true)
+	return bool(_crowd.call(&"set_agent_paused", agent_handle, paused))
 
 
 func set_agent_traffic_state(agent_handle: int, group_token: int, priority: int) -> bool:
@@ -388,13 +442,31 @@ func _apply_profile(agent_handle: int, profile: Dictionary) -> void:
 			&"set_agent_collision_offset", agent_handle,
 			profile.get("collision_offset", Vector2.ZERO) as Vector2
 		)
+	if _crowd.has_method(&"set_agent_avoidance_profile"):
+		_crowd.call(
+			&"set_agent_avoidance_profile", agent_handle,
+			maxf(float(profile.get("crowd_push_strength", 1.0)), 0.0),
+			maxf(float(profile.get("crowd_resist_strength", 1.0)), 0.001)
+		)
+	if _crowd.has_method(&"set_agent_impulse_resistance"):
+		_crowd.call(
+			&"set_agent_impulse_resistance", agent_handle,
+			maxf(float(profile.get("smash_resist", 1.0)), 0.001)
+		)
+	if _crowd.has_method(&"set_agent_query_shape"):
+		_crowd.call(
+			&"set_agent_query_shape", agent_handle,
+			profile.get("query_shape_offset", Vector2.ZERO) as Vector2,
+			profile.get("query_shape_half_extents", Vector2.ZERO) as Vector2
+		)
 	_crowd.call(
 		&"set_agent_contact_profile", agent_handle,
 		maxf(float(profile.get("contact_push_strength", 0.0)), 0.0),
 		maxf(float(profile.get("contact_push_resistance", 1.0)), 0.0001),
 		maxf(float(profile.get("contact_push_cooldown", 0.2)), 0.0),
 		maxf(float(profile.get("contact_impulse_decay", 0.65)), 0.0),
-		maxf(float(profile.get("contact_control_suppression", 0.2)), 0.0)
+		maxf(float(profile.get("contact_control_suppression", 0.2)), 0.0),
+		bool(profile.get("contact_feedback_enabled", true))
 	)
 
 
@@ -412,6 +484,7 @@ func _profile_for_scene_node(node: Node2D) -> Dictionary:
 		if requested_speed > 0.0:
 			maximum_speed = requested_speed
 	maximum_speed *= maxf(float(node.get_meta("monster_speed_scale", 1.0)), 0.001)
+	var query_shape: Dictionary = _query_shape_for_scene_node(node)
 	return {
 		"radius": config.get_agent_world_radius() if config != null else 14.4,
 		"maximum_speed": maximum_speed,
@@ -419,6 +492,11 @@ func _profile_for_scene_node(node: Node2D) -> Dictionary:
 		"deceleration": 1200.0,
 		"separation_radius": 32.0,
 		"separation_weight": 600.0,
+		"crowd_push_strength": 1.0,
+		"crowd_resist_strength": float(node.get_meta("monster_crowd_resist", 1.0)),
+		"smash_resist": float(node.get_meta("monster_smash_resist", 1.0)),
+		"query_shape_offset": query_shape["offset"],
+		"query_shape_half_extents": query_shape["half_extents"],
 		"arrival_radius": 16.0,
 		"terrain_speed_channel": int(node.get_meta("terrain_speed_channel", 0)),
 		"category_mask": category_mask,
@@ -429,7 +507,46 @@ func _profile_for_scene_node(node: Node2D) -> Dictionary:
 		"contact_control_suppression": float(node.get_meta(
 			"agent_contact_control_suppression_seconds", 0.2
 		)),
+		"contact_feedback_enabled": bool(node.get_meta(
+			"agent_contact_push_shows_control_impaired_feedback", true
+		)),
 	}
+
+
+func _query_shape_for_scene_node(node: Node2D) -> Dictionary:
+	var offset: Vector2 = Vector2(0.0, -32.0) if node.is_in_group(&"player") \
+		else Vector2.ZERO
+	var half_extents: Vector2 = Vector2(32.0, 32.0)
+	for child: Node in node.get_children():
+		var sprite: Sprite2D = child as Sprite2D
+		if sprite == null or sprite.texture == null:
+			continue
+		var frame_size: Vector2 = sprite.texture.get_size()
+		if sprite.hframes > 1:
+			frame_size.x /= float(sprite.hframes)
+		if sprite.vframes > 1:
+			frame_size.y /= float(sprite.vframes)
+		half_extents = frame_size * sprite.scale.abs() * 0.5
+		offset = sprite.position
+		if not sprite.centered:
+			offset += half_extents
+		break
+	return {"offset": offset, "half_extents": half_extents}
+
+
+func _set_cohort_flow_navigation_suspended(cohort_handle: int, suspended: bool) -> void:
+	if _crowd == null or not _crowd.has_method(&"set_agent_navigation_suspended"):
+		return
+	for raw_handle: Variant in _cohort_by_agent:
+		var agent_handle: int = int(raw_handle)
+		if int(_cohort_by_agent[agent_handle]) != cohort_handle:
+			continue
+		var diagnostics: Dictionary = _crowd.call(
+			&"get_agent_diagnostics", agent_handle
+		) as Dictionary
+		if suspended and int(diagnostics.get("navigation_source", 0)) != 1:
+			continue
+		_crowd.call(&"set_agent_navigation_suspended", agent_handle, suspended)
 
 
 func _cleanup_stale_nodes() -> void:
@@ -446,6 +563,9 @@ func _sync_nodes_from_crowd() -> void:
 	var handles: PackedInt64Array = _crowd.call(&"get_agent_handles") as PackedInt64Array
 	var positions: PackedVector2Array = _crowd.call(&"get_agent_positions") as PackedVector2Array
 	var velocities: PackedVector2Array = _crowd.call(&"get_agent_velocities") as PackedVector2Array
+	var impulse_states: Dictionary = {}
+	if _crowd.has_method(&"get_active_impulse_states"):
+		impulse_states = _crowd.call(&"get_active_impulse_states") as Dictionary
 	var count: int = mini(handles.size(), mini(positions.size(), velocities.size()))
 	for index: int in range(count):
 		var agent_handle: int = int(handles[index])
@@ -455,3 +575,23 @@ func _sync_nodes_from_crowd() -> void:
 		node.global_position = positions[index]
 		if node.has_method(&"set_velocity_len"):
 			node.call(&"set_velocity_len", velocities[index].length())
+		var project_state: Dictionary = get_project_state(agent_handle)
+		var impulse_state: Dictionary = impulse_states.get(agent_handle, {}) as Dictionary
+		var feedback_enabled: bool = bool(impulse_state.get("feedback_enabled", true))
+		var propelled: bool = not impulse_state.is_empty() and feedback_enabled
+		var controls_impaired: bool = feedback_enabled and float(impulse_state.get(
+			"control_suppression_remaining", 0.0
+		)) > 0.0
+		var was_propelled: bool = bool(project_state.get("propelled", false))
+		var was_controls_impaired: bool = bool(project_state.get(
+			"controls_impaired", false
+		))
+		if propelled != was_propelled or controls_impaired != was_controls_impaired:
+			project_state["propelled"] = propelled
+			project_state["controls_impaired"] = controls_impaired
+			set_project_state(agent_handle, project_state)
+			send_agent_event(&"propelled_state_update", agent_handle, {
+				"is_propelled": propelled,
+				"controls_impaired": controls_impaired,
+				"velocity_len": velocities[index].length(),
+			})

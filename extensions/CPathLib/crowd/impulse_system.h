@@ -14,6 +14,8 @@ namespace ffcore
         double control_suppression_seconds = 0.0;
         bool preserve_navigation = false;
         bool stop_on_control_restore = false;
+        bool apply_agent_resistance = false;
+        bool feedback_enabled = true;
         int priority = 0;
     };
 
@@ -29,6 +31,7 @@ namespace ffcore
             double suppression_remaining = 0.0;
             bool preserve_navigation = false;
             bool stop_on_control_restore = false;
+            bool feedback_enabled = true;
             int priority = 0;
         };
 
@@ -44,5 +47,7 @@ namespace ffcore
         bool cancel_if_navigation_opposes(AgentHandle handle,
                                           const Vec2 &navigation_velocity);
         bool active(AgentHandle handle) const;
+        double suppression_remaining(AgentHandle handle) const;
+        bool feedback_enabled(AgentHandle handle) const;
     };
 } // namespace ffcore

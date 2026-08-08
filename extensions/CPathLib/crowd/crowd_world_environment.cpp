@@ -5,6 +5,55 @@
 
 namespace ffcore
 {
+    void CrowdWorld::reset_navigation_transients(CrowdAgentState &agent)
+    {
+        agent.flow_goal_timer = 0.0;
+        agent.zero_flow_retry_remaining = 0.0;
+        agent.zero_flow_retry_started = false;
+        agent.blocked_motion_seconds = 0.0;
+        agent.completed_bottleneck = -1;
+        agent.bottleneck_waiting = false;
+    }
+
+    bool CrowdWorld::set_agent_avoidance_profile(
+        AgentHandle agent_handle, double push_strength, double resistance)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        CrowdAgentProfile requested = agent->profile;
+        requested.avoidance_push_strength = push_strength;
+        requested.avoidance_resistance = resistance;
+        agent->profile = CrowdProfileStore::sanitize(requested);
+        return true;
+    }
+
+    bool CrowdWorld::set_agent_impulse_resistance(
+        AgentHandle agent_handle, double resistance)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        CrowdAgentProfile requested = agent->profile;
+        requested.impulse_resistance = resistance;
+        agent->profile = CrowdProfileStore::sanitize(requested);
+        return true;
+    }
+
+    bool CrowdWorld::set_agent_query_shape(
+        AgentHandle agent_handle, const Vec2 &offset, const Vec2 &half_extents)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        CrowdAgentProfile requested = agent->profile;
+        requested.query_shape_offset = offset;
+        requested.query_shape_half_extents = half_extents;
+        agent->profile = CrowdProfileStore::sanitize(requested);
+        recompute_maximum_agent_radius();
+        return true;
+    }
+
     std::vector<AgentHandle> CrowdWorld::query_agents(
         const Vec2 &position, double radius,
         std::uint32_t category_mask, AgentHandle ignored) const
@@ -12,7 +61,7 @@ namespace ffcore
         std::vector<AgentHandle> result;
         if (!std::isfinite(radius) || radius < 0.0)
             return result;
-        for (int index : spatial.query_neighbors(position, radius + maximum_agent_radius))
+        for (int index : spatial.query_neighbors(position, radius + maximum_query_shape_radius))
         {
             if (index <= 0)
                 continue;
@@ -23,7 +72,13 @@ namespace ffcore
             if (candidate == nullptr || candidate_handle == ignored ||
                 (candidate->profile.category_mask & category_mask) == 0)
                 continue;
-            if (candidate->position.distance_to(position) <= radius + candidate->profile.radius)
+            const Vec2 half = candidate->profile.query_shape_half_extents;
+            const bool uses_box = half.x > 0.0 || half.y > 0.0;
+            const Vec2 center = candidate->position + candidate->profile.query_shape_offset;
+            const bool overlaps = uses_box
+                ? point_aabb_distance(position, center, half.x, half.y) <= radius
+                : center.distance_to(position) <= radius + candidate->profile.radius;
+            if (overlaps)
                 result.push_back(candidate_handle);
         }
         std::sort(result.begin(), result.end(), [](AgentHandle left, AgentHandle right)
@@ -37,9 +92,18 @@ namespace ffcore
     void CrowdWorld::recompute_maximum_agent_radius()
     {
         maximum_agent_radius = 0.0;
+        maximum_query_shape_radius = 0.0;
         for (AgentHandle handle : agents.active_handles())
+        {
+            const CrowdAgentProfile &profile = agents.get(handle)->profile;
             maximum_agent_radius = std::max(
-                maximum_agent_radius, agents.get(handle)->profile.radius);
+                maximum_agent_radius, profile.radius);
+            const double box_radius = profile.query_shape_offset.length() +
+                std::sqrt(profile.query_shape_half_extents.x * profile.query_shape_half_extents.x +
+                          profile.query_shape_half_extents.y * profile.query_shape_half_extents.y);
+            maximum_query_shape_radius = std::max(
+                maximum_query_shape_radius, std::max(profile.radius, box_radius));
+        }
     }
 
     std::vector<AgentHandle> CrowdWorld::query_agents_in_cone(
@@ -56,9 +120,14 @@ namespace ffcore
         for (AgentHandle handle : query_agents(position, radius, category_mask, ignored))
         {
             const CrowdAgentState *agent = agents.get(handle);
-            const Vec2 offset = agent->position - position;
+            const Vec2 half = agent->profile.query_shape_half_extents;
+            const bool uses_box = half.x > 0.0 || half.y > 0.0;
+            const Vec2 center = agent->position + agent->profile.query_shape_offset;
+            const Vec2 nearest = uses_box
+                ? closest_point_on_aabb(position, center, half.x, half.y) : center;
+            const Vec2 offset = nearest - position;
             const double distance = offset.length();
-            if (clamped_angle >= 360.0 || distance <= agent->profile.radius)
+            if (clamped_angle >= 360.0 || distance <= (uses_box ? 1e-8 : agent->profile.radius))
             {
                 result.push_back(handle);
                 continue;
@@ -66,7 +135,7 @@ namespace ffcore
 
             // Agents are discs, so include a disc whose edge intersects the cone
             // even when its center lies just outside the angular boundary.
-            const double angular_margin = std::asin(std::clamp(
+            const double angular_margin = uses_box ? 0.0 : std::asin(std::clamp(
                 agent->profile.radius / distance, 0.0, 1.0));
             const double effective_half_angle = std::min(pi, half_angle + angular_margin);
             if (offset.normalized().dot(facing) >= std::cos(effective_half_angle))
@@ -88,9 +157,15 @@ namespace ffcore
         for (AgentHandle handle : query_agents(center, query_radius, category_mask, ignored))
         {
             const CrowdAgentState *agent = agents.get(handle);
-            if (circle_overlaps_aabb(
-                    agent->position, agent->profile.radius,
-                    center, half_width, half_height))
+            const Vec2 query_half = agent->profile.query_shape_half_extents;
+            const bool uses_box = query_half.x > 0.0 || query_half.y > 0.0;
+            const Vec2 query_center = agent->position + agent->profile.query_shape_offset;
+            const bool overlaps = uses_box
+                ? std::abs(query_center.x - center.x) <= query_half.x + half_width &&
+                  std::abs(query_center.y - center.y) <= query_half.y + half_height
+                : circle_overlaps_aabb(query_center, agent->profile.radius,
+                                       center, half_width, half_height);
+            if (overlaps)
                 result.push_back(handle);
         }
         return result;

@@ -29,7 +29,10 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_agent_position", "agent_handle", "position", "clear_velocity"), &CrowdWorld2D::set_agent_position, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("set_agent_motion_limits", "agent_handle", "maximum_speed", "acceleration", "deceleration"), &CrowdWorld2D::set_agent_motion_limits);
         ClassDB::bind_method(D_METHOD("set_agent_collision_offset", "agent_handle", "offset"), &CrowdWorld2D::set_agent_collision_offset);
-        ClassDB::bind_method(D_METHOD("set_agent_contact_profile", "agent_handle", "push_strength", "resistance", "cooldown", "impulse_decay", "control_suppression"), &CrowdWorld2D::set_agent_contact_profile);
+        ClassDB::bind_method(D_METHOD("set_agent_avoidance_profile", "agent_handle", "push_strength", "resistance"), &CrowdWorld2D::set_agent_avoidance_profile);
+        ClassDB::bind_method(D_METHOD("set_agent_impulse_resistance", "agent_handle", "resistance"), &CrowdWorld2D::set_agent_impulse_resistance);
+        ClassDB::bind_method(D_METHOD("set_agent_query_shape", "agent_handle", "offset", "half_extents"), &CrowdWorld2D::set_agent_query_shape);
+        ClassDB::bind_method(D_METHOD("set_agent_contact_profile", "agent_handle", "push_strength", "resistance", "cooldown", "impulse_decay", "control_suppression", "feedback_enabled"), &CrowdWorld2D::set_agent_contact_profile, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("set_agent_traffic_state", "agent_handle", "group_token", "priority"), &CrowdWorld2D::set_agent_traffic_state);
         ClassDB::bind_method(D_METHOD("configure_agent_interactions", "contact_push_enabled", "right_of_way_enabled", "right_of_way_push_speed", "right_of_way_cooldown", "right_of_way_control_suppression"), &CrowdWorld2D::configure_agent_interactions);
         ClassDB::bind_method(D_METHOD("create_cohort"), &CrowdWorld2D::create_cohort);
@@ -44,6 +47,12 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_manual_direction", "agent_handle", "direction"), &CrowdWorld2D::set_manual_direction);
         ClassDB::bind_method(D_METHOD("stop_navigation", "agent_handle"), &CrowdWorld2D::stop_navigation);
         ClassDB::bind_method(D_METHOD("set_agent_paused", "agent_handle", "paused"), &CrowdWorld2D::set_agent_paused);
+        ClassDB::bind_method(D_METHOD("set_agent_pause_allows_impulses", "agent_handle", "enabled"), &CrowdWorld2D::set_agent_pause_allows_impulses);
+        ClassDB::bind_method(D_METHOD("set_agent_navigation_suspended", "agent_handle", "suspended"), &CrowdWorld2D::set_agent_navigation_suspended);
+        ClassDB::bind_method(D_METHOD("set_agent_forces_enabled", "agent_handle", "enabled"), &CrowdWorld2D::set_agent_forces_enabled);
+        ClassDB::bind_method(D_METHOD("set_agent_continue_at_flow_goal", "agent_handle", "enabled"), &CrowdWorld2D::set_agent_continue_at_flow_goal);
+        ClassDB::bind_method(D_METHOD("clear_agent_forces", "agent_handle"), &CrowdWorld2D::clear_agent_forces);
+        ClassDB::bind_method(D_METHOD("configure_navigation_behavior", "automatic_bottleneck_gating", "bottleneck_wait_speed_ratio", "flow_goal_stop_delay", "flow_goal_group_delay", "flow_goal_slow_speed_ratio", "zero_flow_retry_seconds", "zero_flow_recovery_speed_ratio", "blocked_motion_retry_seconds"), &CrowdWorld2D::configure_navigation_behavior);
         ClassDB::bind_method(D_METHOD("configure_static_obstacle_avoidance", "strength", "query_padding"), &CrowdWorld2D::configure_static_obstacle_avoidance);
         ClassDB::bind_method(D_METHOD("create_static_obstacle", "position", "radius", "push_strength"), &CrowdWorld2D::create_static_obstacle, DEFVAL(1.0));
         ClassDB::bind_method(D_METHOD("update_static_obstacle", "obstacle_handle", "position", "radius", "push_strength"), &CrowdWorld2D::update_static_obstacle, DEFVAL(1.0));
@@ -55,8 +64,8 @@ namespace godot
         ClassDB::bind_method(D_METHOD("remove_directional_motion_field", "field_handle"), &CrowdWorld2D::remove_directional_motion_field);
         ClassDB::bind_method(D_METHOD("clear_directional_motion_fields"), &CrowdWorld2D::clear_directional_motion_fields);
         ClassDB::bind_method(D_METHOD("follow_directional_motion_field", "agent_handle", "field_handle"), &CrowdWorld2D::follow_directional_motion_field);
-        ClassDB::bind_method(D_METHOD("apply_impulse", "agent_handle", "velocity", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority"), &CrowdWorld2D::apply_impulse);
-        ClassDB::bind_method(D_METHOD("apply_impulse_batch", "agent_handles", "velocities", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority"), &CrowdWorld2D::apply_impulse_batch);
+        ClassDB::bind_method(D_METHOD("apply_impulse", "agent_handle", "velocity", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority", "apply_agent_resistance"), &CrowdWorld2D::apply_impulse, DEFVAL(false));
+        ClassDB::bind_method(D_METHOD("apply_impulse_batch", "agent_handles", "velocities", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority", "apply_agent_resistance"), &CrowdWorld2D::apply_impulse_batch, DEFVAL(false));
         ClassDB::bind_method(D_METHOD("create_external_velocity_source"), &CrowdWorld2D::create_external_velocity_source);
         ClassDB::bind_method(D_METHOD("remove_external_velocity_source", "source_handle"), &CrowdWorld2D::remove_external_velocity_source);
         ClassDB::bind_method(D_METHOD("refresh_external_velocity", "agent_handle", "source_handle", "velocity", "response_seconds", "expiry_seconds"), &CrowdWorld2D::refresh_external_velocity);
@@ -80,6 +89,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("get_agent_velocity", "agent_handle"), &CrowdWorld2D::get_agent_velocity);
         ClassDB::bind_method(D_METHOD("get_agent_route_progress", "agent_handle"), &CrowdWorld2D::get_agent_route_progress);
         ClassDB::bind_method(D_METHOD("get_agent_diagnostics", "agent_handle"), &CrowdWorld2D::get_agent_diagnostics);
+        ClassDB::bind_method(D_METHOD("get_active_impulse_states"), &CrowdWorld2D::get_active_impulse_states);
         ClassDB::bind_method(D_METHOD("query_agents_in_circle", "position", "radius", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_circle, DEFVAL(0));
         ClassDB::bind_method(D_METHOD("query_agents_in_cone", "position", "radius", "direction", "angle_degrees", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_cone, DEFVAL(0));
         ClassDB::bind_method(D_METHOD("query_agents_in_aabb", "bounds", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_aabb, DEFVAL(0));
@@ -387,6 +397,28 @@ namespace godot
             decode_handle(agent_handle), {offset.x, offset.y});
     }
 
+    bool CrowdWorld2D::set_agent_avoidance_profile(
+        std::int64_t agent_handle, double push_strength, double resistance)
+    {
+        return crowd.set_agent_avoidance_profile(
+            decode_handle(agent_handle), push_strength, resistance);
+    }
+
+    bool CrowdWorld2D::set_agent_impulse_resistance(
+        std::int64_t agent_handle, double resistance)
+    {
+        return crowd.set_agent_impulse_resistance(
+            decode_handle(agent_handle), resistance);
+    }
+
+    bool CrowdWorld2D::set_agent_query_shape(
+        std::int64_t agent_handle, Vector2 offset, Vector2 half_extents)
+    {
+        return crowd.set_agent_query_shape(
+            decode_handle(agent_handle), {offset.x, offset.y},
+            {half_extents.x, half_extents.y});
+    }
+
     std::int64_t CrowdWorld2D::create_cohort()
     {
         return encode_cohort_handle(crowd.create_cohort());
@@ -459,6 +491,53 @@ namespace godot
     bool CrowdWorld2D::set_agent_paused(std::int64_t agent_handle, bool paused)
     {
         return crowd.set_paused(decode_handle(agent_handle), paused);
+    }
+
+    bool CrowdWorld2D::set_agent_pause_allows_impulses(
+        std::int64_t agent_handle, bool enabled)
+    {
+        return crowd.set_pause_allows_impulses(decode_handle(agent_handle), enabled);
+    }
+
+    bool CrowdWorld2D::set_agent_navigation_suspended(
+        std::int64_t agent_handle, bool suspended)
+    {
+        return crowd.set_navigation_suspended(decode_handle(agent_handle), suspended);
+    }
+
+    bool CrowdWorld2D::set_agent_forces_enabled(
+        std::int64_t agent_handle, bool enabled)
+    {
+        return crowd.set_forces_enabled(decode_handle(agent_handle), enabled);
+    }
+
+    bool CrowdWorld2D::set_agent_continue_at_flow_goal(
+        std::int64_t agent_handle, bool enabled)
+    {
+        return crowd.set_continue_at_flow_goal(decode_handle(agent_handle), enabled);
+    }
+
+    void CrowdWorld2D::clear_agent_forces(std::int64_t agent_handle)
+    {
+        crowd.clear_agent_forces(decode_handle(agent_handle));
+    }
+
+    void CrowdWorld2D::configure_navigation_behavior(
+        bool automatic_bottleneck_gating, double bottleneck_wait_speed_ratio,
+        double flow_goal_stop_delay, double flow_goal_group_delay,
+        double flow_goal_slow_speed_ratio, double zero_flow_retry_seconds,
+        double zero_flow_recovery_speed_ratio, double blocked_motion_retry_seconds)
+    {
+        ffcore::CrowdWorldConfig config = crowd.get_config();
+        config.automatic_bottleneck_gating = automatic_bottleneck_gating;
+        config.bottleneck_wait_speed_ratio = bottleneck_wait_speed_ratio;
+        config.flow_goal_stop_delay = flow_goal_stop_delay;
+        config.flow_goal_group_delay = flow_goal_group_delay;
+        config.flow_goal_slow_speed_ratio = flow_goal_slow_speed_ratio;
+        config.zero_flow_retry_seconds = zero_flow_retry_seconds;
+        config.zero_flow_recovery_speed_ratio = zero_flow_recovery_speed_ratio;
+        config.blocked_motion_retry_seconds = blocked_motion_retry_seconds;
+        crowd.set_config(config);
     }
 
     void CrowdWorld2D::configure_bottleneck(

@@ -650,8 +650,8 @@ namespace
         require(crowd.set_manual_direction(manual, {1.0, 0.0}),
                 "manual steering source assignment failed");
         crowd.update(0.25);
-        require(approximately(crowd.get_agent(manual)->position.x, 0.5),
-                "physical wall collision should stop a manual agent");
+        require(crowd.get_agent(manual)->position.x < 0.91,
+                "physical wall collision should stop a manual agent before penetration");
 
         const ffcore::AgentHandle paused = crowd.add_agent({0.5, 1.5}, profile);
         require(crowd.set_manual_direction(paused, {1.0, 0.0}) &&
@@ -660,6 +660,34 @@ namespace
         crowd.update(0.1);
         require(approximately(crowd.get_agent(paused)->position.x, 0.5),
                 "paused agent should preserve its position");
+
+		require(crowd.set_pause_allows_impulses(paused, true),
+				"paused force policy should be configurable");
+		ffcore::ImpulseRequest paused_impulse;
+		paused_impulse.velocity = {1.0, 0.0};
+		crowd.apply_impulse(paused, paused_impulse);
+		crowd.update(0.1);
+		require(crowd.get_agent(paused)->position.x > 0.5,
+				"paused agent should accept forces when explicitly enabled");
+		require(crowd.set_forces_enabled(paused, false),
+				"agent force isolation should be configurable");
+		const ffcore::Vec2 force_isolated_position = crowd.get_agent(paused)->position;
+		crowd.apply_impulse(paused, paused_impulse);
+		crowd.update(0.1);
+		require(approximately(crowd.get_agent(paused)->position.x,
+							  force_isolated_position.x),
+				"force-isolated agent should reject impulses");
+
+		ffcore::CrowdAgentProfile resistant_profile = profile;
+		resistant_profile.impulse_resistance = 2.0;
+		const ffcore::AgentHandle resistant = crowd.add_agent({2.5, 1.0}, resistant_profile);
+		ffcore::ImpulseRequest resisted_impulse;
+		resisted_impulse.velocity = {2.0, 0.0};
+		resisted_impulse.apply_agent_resistance = true;
+		crowd.apply_impulse(resistant, resisted_impulse);
+		crowd.update(0.1);
+		require(approximately(crowd.get_agent(resistant)->position.x, 2.6),
+				"optional impulse resistance should scale the submitted velocity");
 
         ffcore::CrowdAgentProfile slow_profile = profile;
         slow_profile.terrain_speed_channel = 2;
@@ -700,6 +728,10 @@ namespace
         agent_profile.category_mask = 2;
         agent_profile.separation_radius = 0.0;
         const ffcore::AgentHandle target = crowd.add_agent({2.0, 0.5}, agent_profile);
+		ffcore::CrowdAgentProfile shaped_profile = agent_profile;
+		shaped_profile.query_shape_offset = {0.0, 1.0};
+		shaped_profile.query_shape_half_extents = {0.5, 0.5};
+		const ffcore::AgentHandle shaped_target = crowd.add_agent({4.0, -0.5}, shaped_profile);
 
         ffcore::ProjectileWorld projectiles;
         projectiles.set_crowd_world(&crowd);
@@ -721,6 +753,14 @@ namespace
                     impacts[0].kind == ffcore::ProjectileImpactKind::Agent &&
                     impacts[0].hit_agent == target && impacts[0].caller_token == 41,
                 "swept generic projectile-to-agent collision changed");
+
+		require(crowd.set_forces_enabled(target, false),
+				"projectile force-isolation fixture setup failed");
+		projectiles.spawn(type, {2.5, 0.5}, {1.0, 0.0}, {}, {}, 42);
+		projectiles.update(0.3);
+		impacts = projectiles.take_impacts();
+		require(impacts.size() == 1 && impacts[0].hit_agent == shaped_target,
+				"projectile should use query AABBs and skip force-isolated agents");
 
         ffcore::ProjectileStaticGrid grid;
         grid.width = 4;
@@ -851,6 +891,7 @@ namespace
         ffcore::CrowdWorld contact_world(1.0);
         ffcore::CrowdAgentProfile strong = profile;
         strong.contact_push_strength = 4.0;
+        strong.contact_feedback_enabled = false;
         ffcore::CrowdAgentProfile yielding = profile;
         yielding.contact_push_strength = 0.0;
         const ffcore::AgentHandle source = contact_world.add_agent({0.0, 0.0}, strong);
@@ -859,6 +900,9 @@ namespace
         require(contact_world.get_agent(source)->position.x <= 0.0 &&
                     contact_world.get_agent(target)->position.x > 0.5,
                 "contact pressure should push the lower-pressure agent");
+        require(contact_world.is_impulse_active(target) &&
+                    !contact_world.impulse_feedback_enabled(target),
+                "contact source should control neutral impulse-feedback policy");
 
         ffcore::CrowdWorld traffic_world(1.0);
         ffcore::CrowdWorldConfig config;

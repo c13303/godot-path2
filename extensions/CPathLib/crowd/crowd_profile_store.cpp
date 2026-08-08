@@ -18,7 +18,14 @@ namespace ffcore
         profile.deceleration = std::isfinite(profile.deceleration) ? std::max(0.0, profile.deceleration) : 500.0;
         profile.separation_radius = std::isfinite(profile.separation_radius) ? std::max(0.0, profile.separation_radius) : 20.0;
         profile.separation_weight = std::isfinite(profile.separation_weight) ? std::max(0.0, profile.separation_weight) : 1.0;
+        profile.avoidance_push_strength = std::isfinite(profile.avoidance_push_strength) ? std::max(0.0, profile.avoidance_push_strength) : 1.0;
+        profile.avoidance_resistance = std::isfinite(profile.avoidance_resistance) ? std::max(0.001, profile.avoidance_resistance) : 1.0;
+        profile.impulse_resistance = std::isfinite(profile.impulse_resistance) ? std::max(0.001, profile.impulse_resistance) : 1.0;
         profile.arrival_radius = std::isfinite(profile.arrival_radius) ? std::max(0.0, profile.arrival_radius) : 4.0;
+        profile.query_shape_offset.x = std::isfinite(profile.query_shape_offset.x) ? profile.query_shape_offset.x : 0.0;
+        profile.query_shape_offset.y = std::isfinite(profile.query_shape_offset.y) ? profile.query_shape_offset.y : 0.0;
+        profile.query_shape_half_extents.x = std::isfinite(profile.query_shape_half_extents.x) ? std::max(0.0, profile.query_shape_half_extents.x) : 0.0;
+        profile.query_shape_half_extents.y = std::isfinite(profile.query_shape_half_extents.y) ? std::max(0.0, profile.query_shape_half_extents.y) : 0.0;
         profile.contact_push_strength = std::isfinite(profile.contact_push_strength)
             ? std::max(0.0, profile.contact_push_strength) : 0.0;
         profile.contact_push_resistance = std::isfinite(profile.contact_push_resistance)

@@ -154,7 +154,8 @@ namespace ffcore
             for (AgentHandle agent_handle : agent_handles)
             {
                 const CrowdAgentState *agent = agents.get(agent_handle);
-                if (agent == nullptr || agent_handle == slot.config.ignored_agent ||
+                if (agent == nullptr || !agent->forces_enabled ||
+                    agent_handle == slot.config.ignored_agent ||
                     (agent->profile.category_mask & slot.config.category_mask) == 0 ||
                     !contains(slot.config, *agent))
                     continue;
