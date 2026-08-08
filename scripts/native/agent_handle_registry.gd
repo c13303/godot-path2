@@ -1,0 +1,270 @@
+extends Node
+class_name AgentHandleRegistry
+
+## Project-owned bridge between scene nodes and CPathLib agent/cohort handles.
+## It owns no steering algorithm: all movement, navigation and force state stays in
+## CrowdWorld2D. Weak references prevent this registry from extending scene-node life.
+
+signal agent_registered(agent_handle: int, node: Node2D)
+signal agent_unregistered(agent_handle: int)
+signal agent_event(event_name: StringName, agent_handle: int, payload: Dictionary)
+
+const INVALID_HANDLE: int = 0
+
+var _crowd: Node
+var _nodes_by_handle: Dictionary = {}
+var _handles_by_instance_id: Dictionary = {}
+var _instance_id_by_handle: Dictionary = {}
+var _cohort_by_agent: Dictionary = {}
+var _project_state_by_agent: Dictionary = {}
+var _automatic_step: bool = true
+var _paused: bool = false
+
+
+func setup(crowd_world: Node, automatic_step: bool = true) -> bool:
+	if crowd_world == null or not crowd_world.has_method(&"add_agent"):
+		return false
+	_crowd = crowd_world
+	_automatic_step = automatic_step
+	_crowd.set(&"automatic_step", false)
+	set_physics_process(true)
+	return true
+
+
+func crowd_world() -> Node:
+	return _crowd
+
+
+func register_agent(node: Node2D, profile: Dictionary = {}, cohort_handle: int = 0) -> int:
+	if node == null or _crowd == null:
+		return INVALID_HANDLE
+	var existing: int = handle_for_node(node)
+	if existing != INVALID_HANDLE:
+		return existing
+	var radius: float = maxf(float(profile.get("radius", 14.4)), 0.0)
+	var maximum_speed: float = maxf(float(profile.get("maximum_speed", 150.0)), 0.0)
+	var separation_radius: float = maxf(float(profile.get("separation_radius", 32.0)), 0.0)
+	var separation_weight: float = maxf(float(profile.get("separation_weight", 1.0)), 0.0)
+	var profile_handle: int = int(_crowd.call(
+		&"create_profile", radius, maximum_speed,
+		maxf(float(profile.get("acceleration", 900.0)), 0.0),
+		maxf(float(profile.get("deceleration", 1200.0)), 0.0),
+		separation_radius, separation_weight,
+		maxf(float(profile.get("arrival_radius", 16.0)), 0.0),
+		maxi(int(profile.get("terrain_speed_channel", 0)), 0),
+		int(profile.get("category_mask", -1))
+	))
+	if profile_handle == INVALID_HANDLE:
+		return INVALID_HANDLE
+	var handle: int = int(_crowd.call(
+		&"add_agent_with_profile", node.global_position, profile_handle
+	))
+	_crowd.call(&"remove_profile", profile_handle)
+	if handle == INVALID_HANDLE:
+		return INVALID_HANDLE
+	_nodes_by_handle[handle] = weakref(node)
+	var instance_id: int = node.get_instance_id()
+	_handles_by_instance_id[instance_id] = handle
+	_instance_id_by_handle[handle] = instance_id
+	_project_state_by_agent[handle] = {}
+	_apply_profile(handle, profile)
+	if cohort_handle != INVALID_HANDLE and not assign_agent_to_cohort(handle, cohort_handle):
+		unregister_agent(handle)
+		return INVALID_HANDLE
+	agent_registered.emit(handle, node)
+	return handle
+
+
+func unregister_agent(agent_handle: int) -> bool:
+	if agent_handle == INVALID_HANDLE or _crowd == null:
+		return false
+	var instance_id: int = int(_instance_id_by_handle.get(agent_handle, 0))
+	if instance_id != 0:
+		_handles_by_instance_id.erase(instance_id)
+	_instance_id_by_handle.erase(agent_handle)
+	_nodes_by_handle.erase(agent_handle)
+	_cohort_by_agent.erase(agent_handle)
+	_project_state_by_agent.erase(agent_handle)
+	var removed: bool = bool(_crowd.call(&"remove_agent", agent_handle))
+	if removed:
+		agent_unregistered.emit(agent_handle)
+	return removed
+
+
+func find_node(agent_handle: int) -> Node2D:
+	var reference: WeakRef = _nodes_by_handle.get(agent_handle) as WeakRef
+	if reference == null:
+		return null
+	var value: Variant = reference.get_ref()
+	return value as Node2D
+
+
+func handle_for_node(node: Node) -> int:
+	if node == null:
+		return INVALID_HANDLE
+	return int(_handles_by_instance_id.get(node.get_instance_id(), INVALID_HANDLE))
+
+
+func create_cohort() -> int:
+	if _crowd == null:
+		return INVALID_HANDLE
+	return int(_crowd.call(&"create_cohort"))
+
+
+func remove_cohort(cohort_handle: int) -> bool:
+	if _crowd == null or cohort_handle == INVALID_HANDLE:
+		return false
+	var members: Array = []
+	for raw_handle: Variant in _cohort_by_agent:
+		var agent_handle: int = int(raw_handle)
+		if int(_cohort_by_agent[agent_handle]) == cohort_handle:
+			members.append(agent_handle)
+	for raw_handle: Variant in members:
+		var agent_handle: int = int(raw_handle)
+		_crowd.call(&"stop_navigation", agent_handle)
+		_cohort_by_agent.erase(agent_handle)
+	return bool(_crowd.call(&"remove_cohort", cohort_handle))
+
+
+func assign_agent_to_cohort(agent_handle: int, cohort_handle: int) -> bool:
+	if _crowd == null:
+		return false
+	if cohort_handle == INVALID_HANDLE:
+		var detached: bool = bool(_crowd.call(&"remove_agent_from_cohort", agent_handle))
+		_cohort_by_agent.erase(agent_handle)
+		return detached
+	var assigned: bool = bool(_crowd.call(
+		&"assign_agent_to_cohort", agent_handle, cohort_handle
+	))
+	if assigned:
+		_cohort_by_agent[agent_handle] = cohort_handle
+	return assigned
+
+
+func cohort_for_agent(agent_handle: int) -> int:
+	return int(_cohort_by_agent.get(agent_handle, INVALID_HANDLE))
+
+
+func cohort_member_count(cohort_handle: int) -> int:
+	if _crowd == null:
+		return 0
+	return int(_crowd.call(&"get_cohort_member_count", cohort_handle))
+
+
+func follow_path(agent_handle: int, world_points: PackedVector2Array) -> bool:
+	return _crowd != null and bool(_crowd.call(&"follow_path", agent_handle, world_points))
+
+
+func follow_flow(agent_handle: int, flow_handle: int) -> bool:
+	return _crowd != null and bool(_crowd.call(
+		&"follow_flow_handle", agent_handle, flow_handle
+	))
+
+
+func stop_navigation(agent_handle: int) -> bool:
+	return _crowd != null and bool(_crowd.call(&"stop_navigation", agent_handle))
+
+
+func path_arrived(agent_handle: int) -> bool:
+	return _crowd != null and int(_crowd.call(
+		&"get_agent_route_progress", agent_handle
+	)) == 2
+
+
+func set_agent_paused(agent_handle: int, paused: bool) -> bool:
+	return _crowd != null and bool(_crowd.call(
+		&"set_agent_paused", agent_handle, paused
+	))
+
+
+func set_agent_traffic_state(agent_handle: int, group_token: int, priority: int) -> bool:
+	return _crowd != null and bool(_crowd.call(
+		&"set_agent_traffic_state", agent_handle, group_token, priority
+	))
+
+
+func set_project_state(agent_handle: int, state: Dictionary) -> bool:
+	if not _nodes_by_handle.has(agent_handle):
+		return false
+	_project_state_by_agent[agent_handle] = state.duplicate(true)
+	return true
+
+
+func get_project_state(agent_handle: int) -> Dictionary:
+	var state: Dictionary = _project_state_by_agent.get(agent_handle, {}) as Dictionary
+	return state.duplicate(true)
+
+
+func send_agent_event(event_name: StringName, agent_handle: int, payload: Dictionary) -> void:
+	agent_event.emit(event_name, agent_handle, payload)
+
+
+func set_world_paused(paused: bool) -> void:
+	_paused = paused
+	if _crowd != null:
+		_crowd.call(&"set_world_paused", paused)
+
+
+func get_registration_debug_snapshot() -> Dictionary:
+	var handles: PackedInt64Array = PackedInt64Array()
+	if _crowd != null:
+		handles = _crowd.call(&"get_agent_handles") as PackedInt64Array
+	var mapped: PackedInt64Array = PackedInt64Array()
+	for raw_handle: Variant in _nodes_by_handle:
+		mapped.append(int(raw_handle))
+	mapped.sort()
+	return {
+		"crowd_agent_handles": handles,
+		"agent_node_mapping_handles": mapped,
+	}
+
+
+func _physics_process(delta: float) -> void:
+	if _crowd == null:
+		return
+	_cleanup_stale_nodes()
+	if _automatic_step and not _paused:
+		_crowd.call(&"step", delta)
+	_sync_nodes_from_crowd()
+
+
+func _apply_profile(agent_handle: int, profile: Dictionary) -> void:
+	var maximum_speed: float = maxf(float(profile.get("maximum_speed", 150.0)), 0.0)
+	var acceleration: float = maxf(float(profile.get("acceleration", 900.0)), 0.0)
+	var deceleration: float = maxf(float(profile.get("deceleration", 1200.0)), 0.0)
+	_crowd.call(
+		&"set_agent_motion_limits", agent_handle, maximum_speed, acceleration, deceleration
+	)
+	_crowd.call(
+		&"set_agent_contact_profile", agent_handle,
+		maxf(float(profile.get("contact_push_strength", 0.0)), 0.0),
+		maxf(float(profile.get("contact_push_resistance", 1.0)), 0.0001),
+		maxf(float(profile.get("contact_push_cooldown", 0.2)), 0.0),
+		maxf(float(profile.get("contact_impulse_decay", 0.65)), 0.0),
+		maxf(float(profile.get("contact_control_suppression", 0.2)), 0.0)
+	)
+
+
+func _cleanup_stale_nodes() -> void:
+	var stale_handles: Array = []
+	for raw_handle: Variant in _nodes_by_handle:
+		var agent_handle: int = int(raw_handle)
+		if find_node(agent_handle) == null:
+			stale_handles.append(agent_handle)
+	for raw_handle: Variant in stale_handles:
+		unregister_agent(int(raw_handle))
+
+
+func _sync_nodes_from_crowd() -> void:
+	var handles: PackedInt64Array = _crowd.call(&"get_agent_handles") as PackedInt64Array
+	var positions: PackedVector2Array = _crowd.call(&"get_agent_positions") as PackedVector2Array
+	var velocities: PackedVector2Array = _crowd.call(&"get_agent_velocities") as PackedVector2Array
+	var count: int = mini(handles.size(), mini(positions.size(), velocities.size()))
+	for index: int in range(count):
+		var agent_handle: int = int(handles[index])
+		var node: Node2D = find_node(agent_handle)
+		if node == null:
+			continue
+		node.global_position = positions[index]
+		if node.has_method(&"set_velocity_len"):
+			node.call(&"set_velocity_len", velocities[index].length())

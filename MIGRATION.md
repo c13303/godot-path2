@@ -22,7 +22,8 @@ Current completion summary:
 | navigation channels, flow diagnostics, gardens/portals, bottleneck discovery | complete in pass 3 |
 | crowd motion sources, terrain, static obstacles, directional motion, spatial queries | complete in pass 4 |
 | impulses, source handles, contact/traffic forces, effects, generic projectiles | complete in pass 5 |
-| host navigation/agent/combat conversion | pending across passes 6-7 |
+| host navigation/agent boundary | pass 6 complete; atomic live-scene cutover is gated with combat in pass 7 |
+| host combat/projectile conversion | pending in pass 7 |
 | temporary native compatibility extension | must be deleted in pass 8 |
 | separate Git repository and dependency pin | intentionally left to the owner |
 
@@ -45,6 +46,26 @@ portable build has no `godot-cpp`, Rabbit phase, damage, projectile, or global-s
 The separate repository, dependency pin, and licensing decision remain owner-controlled and outside
 this refactor. Instructions for that later mechanical split are checked in at
 `extensions/CPathLib/REUSE.md`.
+
+Pass 6 added the project-owned boundary that will replace the native singletons without putting
+host concepts back into CPathLib:
+
+- `AgentHandleRegistry` owns weak Node-to-handle mapping, cohort membership bookkeeping, scene
+  synchronization, lifecycle signals, and project-owned per-agent state;
+- `NavigationFlowCoordinator` owns the mapping between host routing requests and generic
+  flow/cohort handles, including replacement, cancellation, installation, and release;
+- `NavigationGridUploadService` converts the project's TileMap layers and water-coverage policy to
+  explicit grid cells and blocker channels;
+- `NativeSimulationConfig` is an instance resource whose values are explicitly applied to each
+  navigation/crowd world instead of stored in a native process singleton;
+- `native_runtime_boundary_smoke.gd` verifies configuration, generational registration, async flow
+  installation, cohort-driven motion, unregister, and resource release.
+
+These services are deliberately not active alongside the legacy crowd in `mainRun.tscn`. The old
+projectile system obtains collision targets through the legacy crowd singleton, so switching agents
+first would silently break combat. Pass 7 performs one atomic scene cutover after neutral impact and
+effect events have Godot consumers. This preserves one authoritative runtime world at every point
+instead of temporarily updating the same agents in two simulations.
 
 The original review found that the extension was not ready to be copied into another game because
 portable algorithms and project gameplay shared one source/build boundary. The current physical

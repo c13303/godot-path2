@@ -39,7 +39,11 @@ in pass 8.
   generational effect volumes with neutral enter/tick/exit events, and a `ProjectileWorld` with
   generational type handles, bounded pools, inherited velocity, swept agent/static collision,
   category/channel masks, caller tokens, and neutral impact/expiry events.
-- Passes 6-8 remain required; the temporary legacy extension is still active.
+- Pass 6 complete: the host owns an `AgentHandleRegistry`, explicit simulation configuration,
+  TileMap-to-grid upload, and flow/cohort lifecycle coordination. An isolated runtime smoke test
+  drives a scene node through CPathLib only. The main scene remains on the legacy runtime until the
+  pass-7 combat/event consumer and agent cutover can be applied atomically.
+- Passes 7-8 remain required; the temporary legacy extension is still active.
 
 ## Source-file disposition
 
