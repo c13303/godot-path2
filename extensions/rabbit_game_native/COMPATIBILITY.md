@@ -1,5 +1,9 @@
 # Rabbit Game native compatibility manifest
 
+> Superseded for the final one-extension conversion by
+> [`../../NATIVE_MIGRATION_CONTRACT.md`](../../NATIVE_MIGRATION_CONTRACT.md). This file remains a
+> historical compatibility snapshot until `rabbit_game_native` is deleted.
+
 This manifest protects Rabbit Game while the reusable navigation core is extracted. A public native
 API remains supported until its direct calls, dynamic calls, scene wiring, and manual scenarios have
 been migrated deliberately.

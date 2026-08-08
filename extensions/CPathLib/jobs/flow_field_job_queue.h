@@ -39,6 +39,7 @@ namespace ffcore
         std::uint64_t next_request_id = 1;
         bool stopping = false;
         bool active = false;
+        std::uint64_t active_request_id = 0;
 
         void worker_loop();
 

@@ -2,6 +2,8 @@ extends SceneTree
 
 var _navigation: Node
 var _frames_waited: int = 0
+var _async_flow_handle: int = 0
+var _completed_requests: int = 0
 
 
 func _initialize() -> void:
@@ -99,6 +101,12 @@ func _initialize() -> void:
 	var request_id: int = int(_navigation.call(&"request_flow_to_cell", Vector2i(2, 2)))
 	if request_id <= 0:
 		_fail("asynchronous generic flow request failed")
+		return
+	_async_flow_handle = int(_navigation.call(
+		&"request_flow_handle_to_cell", Vector2i(0, 0)
+	))
+	if _async_flow_handle <= 0:
+		_fail("asynchronous generational flow request failed")
 
 
 func _process(_delta: float) -> bool:
@@ -112,6 +120,19 @@ func _on_flow_ready(_request_id: int, status: int, _topology_revision: int) -> v
 	if status != 0:
 		_fail("asynchronous generic flow returned status %d" % status)
 		return
+	_completed_requests += 1
+	if _completed_requests < 2:
+		return
+	if int(_navigation.call(&"get_flow_status", _async_flow_handle)) != 1:
+		_fail("completed generational flow was not installed as ready")
+		return
+	var reverse_direction: Vector2 = _navigation.call(
+		&"sample_flow", _async_flow_handle, Vector2(132.0, -42.0)
+	) as Vector2
+	if reverse_direction.x >= 0.0:
+		_fail("flow-handle sampling used the wrong destination")
+		return
+	_navigation.call(&"release_flow", _async_flow_handle)
 	_navigation.queue_free()
 	print("NavigationWorld2D smoke test passed")
 	quit(0)

@@ -377,6 +377,119 @@ namespace
         require(crowd.get_agent(flow_agent) == nullptr,
                 "stale generational agent handle should fail safely");
     }
+
+    void test_generational_multi_flow_store()
+    {
+        ffcore::NavigationWorld world;
+        ffcore::GridDefinition definition;
+        definition.width = 5;
+        definition.height = 1;
+        definition.cell_size = 1.0;
+        const ffcore::CellSet walkable_set = rectangle(5, 1);
+        require(world.set_grid(
+                    definition,
+                    std::vector<Vec2i>(walkable_set.begin(), walkable_set.end())),
+                "multi-flow fixture grid setup failed");
+
+        const ffcore::FlowHandle left = world.create_flow({0, 0});
+        const ffcore::FlowHandle right = world.create_flow({4, 0});
+        const ffcore::StoredFlow *left_flow = world.get_flow(left);
+        const ffcore::StoredFlow *right_flow = world.get_flow(right);
+        require(left_flow != nullptr && left_flow->status == ffcore::FlowStatus::Ready,
+                "left flow handle should resolve to a ready field");
+        require(right_flow != nullptr && right_flow->status == ffcore::FlowStatus::Ready,
+                "right flow handle should resolve to a ready field");
+        require(left_flow->field.compute_flow_dir({2.5, 0.5}).x < 0.0 &&
+                    right_flow->field.compute_flow_dir({2.5, 0.5}).x > 0.0,
+                "independent flow handles should preserve different destinations");
+
+        require(world.set_cell_traversal_cost({2, 0}, 2.0),
+                "flow invalidation fixture cost edit failed");
+        require(world.get_flow(left)->status == ffcore::FlowStatus::Stale &&
+                    world.get_flow(right)->status == ffcore::FlowStatus::Stale,
+                "world edits should stale every owned flow");
+        require(world.release_flow(left), "flow release should succeed");
+        const ffcore::FlowHandle replacement = world.create_flow({0, 0});
+        require(replacement.index == left.index && replacement.generation != left.generation,
+                "reused flow slot should advance its generation");
+        require(world.get_flow(left) == nullptr,
+                "stale flow handle should fail safely after slot reuse");
+        const ffcore::FlowHandle cancelled = world.begin_flow_request({4, 0});
+        require(world.set_flow_status(cancelled, ffcore::FlowStatus::Cancelled),
+                "pending flow cancellation should succeed");
+        require(world.set_cell_traversal_cost({3, 0}, 3.0),
+                "cancelled-flow fixture cost edit failed");
+        require(world.get_flow(cancelled)->status == ffcore::FlowStatus::Cancelled,
+                "world invalidation must not resurrect a cancelled flow");
+    }
+
+    void test_profiles_cohorts_and_multi_flow_assignment()
+    {
+        ffcore::FlowFieldBuildRequest left_request;
+        left_request.width = 5;
+        left_request.height = 1;
+        left_request.tile_size = 1.0;
+        left_request.goal_cell = {0, 0};
+        left_request.walkable_cells = rectangle(5, 1);
+        ffcore::FlowFieldBuildRequest right_request = left_request;
+        right_request.goal_cell = {4, 0};
+        const ffcore::FlowFieldBuildResult left = ffcore::FlowFieldBuilder::build(left_request);
+        const ffcore::FlowFieldBuildResult right = ffcore::FlowFieldBuilder::build(right_request);
+        require(left.ok && right.ok, "cohort multi-flow fixtures failed to build");
+
+        ffcore::CrowdWorld first_world(1.0);
+        ffcore::CrowdWorld second_world(1.0);
+        ffcore::CrowdWorldConfig first_config;
+        first_config.default_agent_profile.maximum_speed = 3.0;
+        first_world.set_config(first_config);
+        require(approximately(first_world.get_config().default_agent_profile.maximum_speed, 3.0) &&
+                    approximately(second_world.get_config().default_agent_profile.maximum_speed, 80.0),
+                "crowd defaults must be owned by each world instance");
+
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = 0.1;
+        profile.maximum_speed = 2.0;
+        profile.acceleration = 20.0;
+        profile.deceleration = 20.0;
+        profile.separation_radius = 0.0;
+        const ffcore::ProfileHandle profile_handle = first_world.create_profile(profile);
+        const ffcore::AgentHandle left_agent = first_world.add_agent({3.5, 0.5}, profile_handle);
+        const ffcore::AgentHandle right_agent = first_world.add_agent({1.5, 0.5}, profile_handle);
+        require(left_agent.is_valid() && right_agent.is_valid(),
+                "agents should be created from reusable profiles");
+
+        const ffcore::FlowHandle left_handle = {3, 1};
+        const ffcore::FlowHandle right_handle = {7, 2};
+        require(first_world.install_flow(left_handle, left.field) &&
+                    first_world.install_flow(right_handle, right.field),
+                "crowd should install multiple independent flow handles");
+        const ffcore::CohortHandle left_cohort = first_world.create_cohort();
+        const ffcore::CohortHandle right_cohort = first_world.create_cohort();
+        require(first_world.assign_agent_to_cohort(left_agent, left_cohort) &&
+                    first_world.assign_agent_to_cohort(right_agent, right_cohort),
+                "agents should join independent cohorts");
+        require(first_world.assign_cohort_flow(left_cohort, left_handle) &&
+                    first_world.assign_cohort_flow(right_cohort, right_handle),
+                "cohorts should select independent flows");
+        require(first_world.cohort_member_count(left_cohort) == 1 &&
+                    first_world.cohort_member_count(right_cohort) == 1,
+                "cohort membership counts changed");
+
+        first_world.update(0.1);
+        require(first_world.get_agent(left_agent)->position.x < 3.5 &&
+                    first_world.get_agent(right_agent)->position.x > 1.5,
+                "agents assigned to different cohort flows should move in opposite directions");
+        require(first_world.remove_cohort(left_cohort), "cohort removal should succeed");
+        const ffcore::CohortHandle replacement = first_world.create_cohort();
+        require(replacement.index == left_cohort.index &&
+                    replacement.generation != left_cohort.generation,
+                "reused cohort slot should advance its generation");
+        require(first_world.remove_profile(profile_handle), "profile removal should succeed");
+        const ffcore::ProfileHandle replacement_profile = first_world.create_profile(profile);
+        require(replacement_profile.index == profile_handle.index &&
+                    replacement_profile.generation != profile_handle.generation,
+                "reused profile slot should advance its generation");
+    }
 }
 
 int main()
@@ -397,6 +510,8 @@ int main()
     test_area_building_and_route_segments();
     test_bottleneck_traffic_fairness();
     test_generic_crowd_motion_and_forces();
+    test_generational_multi_flow_store();
+    test_profiles_cohorts_and_multi_flow_assignment();
     std::cout << "FlowFieldAlgorithms tests passed\n";
     return EXIT_SUCCESS;
 }

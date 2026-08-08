@@ -12,10 +12,27 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_automatic_step", "enabled"), &CrowdWorld2D::set_automatic_step);
         ClassDB::bind_method(D_METHOD("is_automatic_step_enabled"), &CrowdWorld2D::is_automatic_step_enabled);
         ClassDB::bind_method(D_METHOD("step", "delta"), &CrowdWorld2D::step);
+        ClassDB::bind_method(D_METHOD("set_world_paused", "paused"), &CrowdWorld2D::set_world_paused);
+        ClassDB::bind_method(D_METHOD("is_world_paused"), &CrowdWorld2D::is_world_paused);
         ClassDB::bind_method(D_METHOD("use_navigation_flow", "navigation"), &CrowdWorld2D::use_navigation_flow);
+        ClassDB::bind_method(D_METHOD("install_navigation_flow", "navigation", "flow_handle"), &CrowdWorld2D::install_navigation_flow);
+        ClassDB::bind_method(D_METHOD("remove_navigation_flow", "flow_handle"), &CrowdWorld2D::remove_navigation_flow);
+        ClassDB::bind_method(D_METHOD("configure_default_profile", "radius", "maximum_speed", "acceleration", "deceleration", "separation_radius", "separation_weight", "arrival_radius", "terrain_speed_channel", "category_mask"), &CrowdWorld2D::configure_default_profile);
+        ClassDB::bind_method(D_METHOD("create_profile", "radius", "maximum_speed", "acceleration", "deceleration", "separation_radius", "separation_weight", "arrival_radius", "terrain_speed_channel", "category_mask"), &CrowdWorld2D::create_profile);
+        ClassDB::bind_method(D_METHOD("update_profile", "profile_handle", "radius", "maximum_speed", "acceleration", "deceleration", "separation_radius", "separation_weight", "arrival_radius", "terrain_speed_channel", "category_mask"), &CrowdWorld2D::update_profile);
+        ClassDB::bind_method(D_METHOD("remove_profile", "profile_handle"), &CrowdWorld2D::remove_profile);
         ClassDB::bind_method(D_METHOD("add_agent", "position", "radius", "maximum_speed", "separation_radius", "separation_weight"), &CrowdWorld2D::add_agent);
+        ClassDB::bind_method(D_METHOD("add_agent_with_profile", "position", "profile_handle"), &CrowdWorld2D::add_agent_with_profile);
         ClassDB::bind_method(D_METHOD("remove_agent", "agent_handle"), &CrowdWorld2D::remove_agent);
+        ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_handle", "profile_handle"), &CrowdWorld2D::set_agent_profile);
+        ClassDB::bind_method(D_METHOD("create_cohort"), &CrowdWorld2D::create_cohort);
+        ClassDB::bind_method(D_METHOD("remove_cohort", "cohort_handle"), &CrowdWorld2D::remove_cohort);
+        ClassDB::bind_method(D_METHOD("assign_agent_to_cohort", "agent_handle", "cohort_handle"), &CrowdWorld2D::assign_agent_to_cohort);
+        ClassDB::bind_method(D_METHOD("remove_agent_from_cohort", "agent_handle"), &CrowdWorld2D::remove_agent_from_cohort);
+        ClassDB::bind_method(D_METHOD("assign_cohort_flow", "cohort_handle", "flow_handle"), &CrowdWorld2D::assign_cohort_flow);
+        ClassDB::bind_method(D_METHOD("get_cohort_member_count", "cohort_handle"), &CrowdWorld2D::get_cohort_member_count);
         ClassDB::bind_method(D_METHOD("follow_flow", "agent_handle"), &CrowdWorld2D::follow_flow);
+        ClassDB::bind_method(D_METHOD("follow_flow_handle", "agent_handle", "flow_handle"), &CrowdWorld2D::follow_flow_handle);
         ClassDB::bind_method(D_METHOD("follow_path", "agent_handle", "world_points"), &CrowdWorld2D::follow_path);
         ClassDB::bind_method(D_METHOD("set_manual_direction", "agent_handle", "direction"), &CrowdWorld2D::set_manual_direction);
         ClassDB::bind_method(D_METHOD("stop_navigation", "agent_handle"), &CrowdWorld2D::stop_navigation);
@@ -36,6 +53,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("get_agent_velocities"), &CrowdWorld2D::get_agent_velocities);
         ClassDB::bind_method(D_METHOD("get_agent_count"), &CrowdWorld2D::get_agent_count);
         ADD_PROPERTY(PropertyInfo(Variant::BOOL, "automatic_step"), "set_automatic_step", "is_automatic_step_enabled");
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL, "world_paused"), "set_world_paused", "is_world_paused");
     }
 
     std::int64_t CrowdWorld2D::encode_handle(ffcore::AgentHandle handle)
@@ -50,6 +68,60 @@ namespace godot
         return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
     }
 
+    std::int64_t CrowdWorld2D::encode_profile_handle(ffcore::ProfileHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::ProfileHandle CrowdWorld2D::decode_profile_handle(std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    std::int64_t CrowdWorld2D::encode_cohort_handle(ffcore::CohortHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::CohortHandle CrowdWorld2D::decode_cohort_handle(std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    ffcore::FlowHandle CrowdWorld2D::decode_flow_handle(std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    ffcore::CrowdAgentProfile CrowdWorld2D::make_profile(
+        double radius,
+        double maximum_speed,
+        double acceleration,
+        double deceleration,
+        double separation_radius,
+        double separation_weight,
+        double arrival_radius,
+        int terrain_speed_channel,
+        std::int64_t category_mask)
+    {
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = radius;
+        profile.maximum_speed = maximum_speed;
+        profile.acceleration = acceleration;
+        profile.deceleration = deceleration;
+        profile.separation_radius = separation_radius;
+        profile.separation_weight = separation_weight;
+        profile.arrival_radius = arrival_radius;
+        profile.terrain_speed_channel = terrain_speed_channel;
+        profile.category_mask = static_cast<std::uint32_t>(category_mask);
+        return profile;
+    }
+
     void CrowdWorld2D::_physics_process(double delta)
     {
         if (automatic_step)
@@ -61,6 +133,18 @@ namespace godot
         crowd.update(delta);
     }
 
+    void CrowdWorld2D::set_world_paused(bool paused)
+    {
+        ffcore::CrowdWorldConfig config = crowd.get_config();
+        config.paused = paused;
+        crowd.set_config(config);
+    }
+
+    bool CrowdWorld2D::is_world_paused() const
+    {
+        return crowd.get_config().paused;
+    }
+
     bool CrowdWorld2D::use_navigation_flow(NavigationWorld2D *navigation)
     {
         if (navigation == nullptr)
@@ -70,6 +154,78 @@ namespace godot
             return false;
         crowd.set_shared_flow(field);
         return true;
+    }
+
+    bool CrowdWorld2D::install_navigation_flow(
+        NavigationWorld2D *navigation,
+        std::int64_t encoded_flow)
+    {
+        if (navigation == nullptr)
+            return false;
+        const ffcore::FlowHandle flow_handle = decode_flow_handle(encoded_flow);
+        ffcore::FlowField field;
+        return navigation->copy_flow(flow_handle, field) && crowd.install_flow(flow_handle, field);
+    }
+
+    bool CrowdWorld2D::remove_navigation_flow(std::int64_t encoded_flow)
+    {
+        return crowd.remove_flow(decode_flow_handle(encoded_flow));
+    }
+
+    void CrowdWorld2D::configure_default_profile(
+        double radius,
+        double maximum_speed,
+        double acceleration,
+        double deceleration,
+        double separation_radius,
+        double separation_weight,
+        double arrival_radius,
+        int terrain_speed_channel,
+        std::int64_t category_mask)
+    {
+        ffcore::CrowdWorldConfig config = crowd.get_config();
+        config.default_agent_profile = make_profile(
+            radius, maximum_speed, acceleration, deceleration, separation_radius,
+            separation_weight, arrival_radius, terrain_speed_channel, category_mask);
+        crowd.set_config(config);
+    }
+
+    std::int64_t CrowdWorld2D::create_profile(
+        double radius,
+        double maximum_speed,
+        double acceleration,
+        double deceleration,
+        double separation_radius,
+        double separation_weight,
+        double arrival_radius,
+        int terrain_speed_channel,
+        std::int64_t category_mask)
+    {
+        return encode_profile_handle(crowd.create_profile(make_profile(
+            radius, maximum_speed, acceleration, deceleration, separation_radius,
+            separation_weight, arrival_radius, terrain_speed_channel, category_mask)));
+    }
+
+    bool CrowdWorld2D::update_profile(
+        std::int64_t encoded_profile,
+        double radius,
+        double maximum_speed,
+        double acceleration,
+        double deceleration,
+        double separation_radius,
+        double separation_weight,
+        double arrival_radius,
+        int terrain_speed_channel,
+        std::int64_t category_mask)
+    {
+        return crowd.update_profile(decode_profile_handle(encoded_profile), make_profile(
+            radius, maximum_speed, acceleration, deceleration, separation_radius,
+            separation_weight, arrival_radius, terrain_speed_channel, category_mask));
+    }
+
+    bool CrowdWorld2D::remove_profile(std::int64_t encoded_profile)
+    {
+        return crowd.remove_profile(decode_profile_handle(encoded_profile));
     }
 
     std::int64_t CrowdWorld2D::add_agent(
@@ -92,9 +248,68 @@ namespace godot
         return crowd.remove_agent(decode_handle(agent_handle));
     }
 
+    std::int64_t CrowdWorld2D::add_agent_with_profile(
+        Vector2 position,
+        std::int64_t encoded_profile)
+    {
+        return encode_handle(crowd.add_agent(
+            {position.x, position.y}, decode_profile_handle(encoded_profile)));
+    }
+
+    bool CrowdWorld2D::set_agent_profile(
+        std::int64_t agent_handle,
+        std::int64_t profile_handle)
+    {
+        return crowd.set_agent_profile(
+            decode_handle(agent_handle), decode_profile_handle(profile_handle));
+    }
+
+    std::int64_t CrowdWorld2D::create_cohort()
+    {
+        return encode_cohort_handle(crowd.create_cohort());
+    }
+
+    bool CrowdWorld2D::remove_cohort(std::int64_t cohort_handle)
+    {
+        return crowd.remove_cohort(decode_cohort_handle(cohort_handle));
+    }
+
+    bool CrowdWorld2D::assign_agent_to_cohort(
+        std::int64_t agent_handle,
+        std::int64_t cohort_handle)
+    {
+        return crowd.assign_agent_to_cohort(
+            decode_handle(agent_handle), decode_cohort_handle(cohort_handle));
+    }
+
+    bool CrowdWorld2D::remove_agent_from_cohort(std::int64_t agent_handle)
+    {
+        return crowd.remove_agent_from_cohort(decode_handle(agent_handle));
+    }
+
+    bool CrowdWorld2D::assign_cohort_flow(
+        std::int64_t cohort_handle,
+        std::int64_t flow_handle)
+    {
+        return crowd.assign_cohort_flow(
+            decode_cohort_handle(cohort_handle), decode_flow_handle(flow_handle));
+    }
+
+    int CrowdWorld2D::get_cohort_member_count(std::int64_t cohort_handle) const
+    {
+        return static_cast<int>(crowd.cohort_member_count(decode_cohort_handle(cohort_handle)));
+    }
+
     bool CrowdWorld2D::follow_flow(std::int64_t agent_handle)
     {
         return crowd.follow_flow(decode_handle(agent_handle));
+    }
+
+    bool CrowdWorld2D::follow_flow_handle(
+        std::int64_t agent_handle,
+        std::int64_t flow_handle)
+    {
+        return crowd.follow_flow(decode_handle(agent_handle), decode_flow_handle(flow_handle));
     }
 
     bool CrowdWorld2D::follow_path(

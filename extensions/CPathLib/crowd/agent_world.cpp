@@ -1,8 +1,5 @@
 #include "agent_world.h"
 
-#include <algorithm>
-#include <cmath>
-
 namespace ffcore
 {
     AgentHandle AgentWorld::create(const Vec2 &position, const CrowdAgentProfile &requested)
@@ -13,21 +10,12 @@ namespace ffcore
         if (index == slots.size())
             slots.push_back({});
 
-        CrowdAgentProfile profile = requested;
-        profile.radius = std::isfinite(profile.radius) ? std::max(0.0, profile.radius) : 8.0;
-        profile.maximum_speed = std::isfinite(profile.maximum_speed) ? std::max(0.0, profile.maximum_speed) : 80.0;
-        profile.acceleration = std::isfinite(profile.acceleration) ? std::max(0.0, profile.acceleration) : 400.0;
-        profile.deceleration = std::isfinite(profile.deceleration) ? std::max(0.0, profile.deceleration) : 500.0;
-        profile.separation_radius = std::isfinite(profile.separation_radius) ? std::max(0.0, profile.separation_radius) : 20.0;
-        profile.separation_weight = std::isfinite(profile.separation_weight) ? std::max(0.0, profile.separation_weight) : 1.0;
-        profile.arrival_radius = std::isfinite(profile.arrival_radius) ? std::max(0.0, profile.arrival_radius) : 4.0;
-
         Slot &slot = slots[index];
         slot.occupied = true;
         slot.state = CrowdAgentState();
         slot.state.handle = {index, slot.generation};
         slot.state.position = position;
-        slot.state.profile = profile;
+        slot.state.profile = CrowdProfileStore::sanitize(requested);
         return slot.state.handle;
     }
 

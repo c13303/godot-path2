@@ -8,7 +8,7 @@ namespace ffcore
     // Generic movement contributed by environmental sources such as wind, water
     // currents or conveyors. Each source approaches its requested velocity smoothly
     // and releases smoothly when it expires, without taking ownership of navigation
-    // or the smash/knockback velocity slot.
+    // or the independent impulse accumulator.
     class ExternalVelocityAccumulator
     {
     public:

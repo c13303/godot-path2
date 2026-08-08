@@ -23,7 +23,7 @@ public:
 
     std::vector<int> query_neighbors(const Vec2& pos, double radius) const;
 
-    // Phase-1 diagnostics (cheap, O(cells)). Used to catch a spatial-grid ID leak:
+    // Initial diagnostics (cheap, O(cells)). Used to catch a spatial-grid ID leak:
     // total_id_count() far exceeding the live agent count means stale/duplicate ids
     // have accumulated; max_cell_occupancy() flags a single hot cell whose oversized
     // list is what makes query_neighbors() (and thus a frame) suddenly explode.

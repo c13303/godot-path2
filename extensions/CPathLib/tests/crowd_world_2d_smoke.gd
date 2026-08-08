@@ -58,6 +58,56 @@ func _initialize() -> void:
 		_fail("batched generic crowd state has an invalid shape")
 		return
 
+	var left_flow: int = int(navigation.call(&"create_flow_to_cell", Vector2i(0, 0)))
+	var right_flow: int = int(navigation.call(&"create_flow_to_cell", Vector2i(5, 0)))
+	if left_flow <= 0 or right_flow <= 0:
+		_fail("generational flow creation failed")
+		return
+	if not bool(crowd.call(&"install_navigation_flow", navigation, left_flow)) \
+			or not bool(crowd.call(&"install_navigation_flow", navigation, right_flow)):
+		_fail("crowd did not install independent navigation flows")
+		return
+
+	var profile: int = int(crowd.call(
+		&"create_profile", 2.0, 30.0, 300.0, 300.0, 0.0, 0.0, 2.0, 0, 1
+	))
+	var left_agent: int = int(crowd.call(&"add_agent_with_profile", Vector2(45.0, 5.0), profile))
+	var right_agent: int = int(crowd.call(&"add_agent_with_profile", Vector2(15.0, 5.0), profile))
+	var left_cohort: int = int(crowd.call(&"create_cohort"))
+	var right_cohort: int = int(crowd.call(&"create_cohort"))
+	if profile <= 0 or left_agent <= 0 or right_agent <= 0 \
+			or left_cohort <= 0 or right_cohort <= 0:
+		_fail("profile, agent, or cohort handle creation failed")
+		return
+	if not bool(crowd.call(&"assign_agent_to_cohort", left_agent, left_cohort)) \
+			or not bool(crowd.call(&"assign_agent_to_cohort", right_agent, right_cohort)) \
+			or not bool(crowd.call(&"assign_cohort_flow", left_cohort, left_flow)) \
+			or not bool(crowd.call(&"assign_cohort_flow", right_cohort, right_flow)):
+		_fail("cohort flow assignment failed")
+		return
+	if int(crowd.call(&"get_cohort_member_count", left_cohort)) != 1:
+		_fail("cohort member accounting failed")
+		return
+
+	var left_before: Vector2 = crowd.call(&"get_agent_position", left_agent) as Vector2
+	var right_before: Vector2 = crowd.call(&"get_agent_position", right_agent) as Vector2
+	crowd.call(&"step", 0.1)
+	var left_after: Vector2 = crowd.call(&"get_agent_position", left_agent) as Vector2
+	var right_after: Vector2 = crowd.call(&"get_agent_position", right_agent) as Vector2
+	if left_after.x >= left_before.x or right_after.x <= right_before.x:
+		_fail("agents did not follow their independent cohort flows")
+		return
+
+	crowd.call(&"remove_agent", left_agent)
+	crowd.call(&"remove_agent", right_agent)
+	crowd.call(&"remove_cohort", left_cohort)
+	crowd.call(&"remove_cohort", right_cohort)
+	crowd.call(&"remove_profile", profile)
+	crowd.call(&"remove_navigation_flow", left_flow)
+	crowd.call(&"remove_navigation_flow", right_flow)
+	navigation.call(&"release_flow", left_flow)
+	navigation.call(&"release_flow", right_flow)
+
 	crowd.queue_free()
 	navigation.queue_free()
 	print("CrowdWorld2D smoke test passed")

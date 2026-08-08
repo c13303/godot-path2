@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../flow/flow_field_builder.h"
+#include "../flow/flow_field_store.h"
 #include "../pathfinding/a_star_solver.h"
 #include "../area/navigation_area.h"
 #include "../area/route_planner.h"
@@ -70,6 +71,7 @@ namespace ffcore
         CellSet physical_wall_cells;
         std::unordered_map<Vec2i, double, CellHash> traversal_costs;
         NavigationAreaStore area_store;
+        FlowFieldStore flow_store;
         std::uint64_t topology_revision = 0;
         std::uint64_t cost_revision = 0;
 
@@ -90,6 +92,15 @@ namespace ffcore
         WorldFlowResult build_flow(
             const Vec2i &goal,
             const DirectionalTraversalConstraints &constraints = {}) const;
+        FlowHandle create_flow(
+            const Vec2i &goal,
+            const DirectionalTraversalConstraints &constraints = {});
+        FlowHandle begin_flow_request(const Vec2i &goal);
+        bool complete_flow_request(FlowHandle handle, const WorldFlowResult &result);
+        bool set_flow_status(FlowHandle handle, FlowStatus status);
+        bool release_flow(FlowHandle handle);
+        const StoredFlow *get_flow(FlowHandle handle) const { return flow_store.get(handle); }
+        std::vector<FlowHandle> active_flows() const { return flow_store.active_handles(); }
         FlowFieldBuildRequest create_flow_request(
             const Vec2i &goal,
             const DirectionalTraversalConstraints &constraints = {}) const;
@@ -102,6 +113,7 @@ namespace ffcore
 
         NavigationAreaStore &areas() { return area_store; }
         const NavigationAreaStore &areas() const { return area_store; }
+        const FlowFieldStore &flows() const { return flow_store; }
 
         const GridDefinition &grid() const { return grid_definition; }
         std::uint64_t get_topology_revision() const { return topology_revision; }

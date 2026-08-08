@@ -13,10 +13,14 @@ CPathLib is designed so this directory can become the root of a separate private
 6. Run both portable test executables and both Godot smoke scripts before updating a consuming
    project's pinned revision.
 7. Treat `NavigationWorld2D`, `NavigationRoute2D`, and `CrowdWorld2D` as the stable Godot boundary.
-8. Keep host-specific TileMap interpretation, scene lookup, gameplay state, combat, projectiles,
+8. Keep host-specific TileMap interpretation, scene lookup, gameplay state, combat/effect rules,
    save formats, and debug presentation in the consuming project.
 9. Preserve the dependency direction: host adapter to CPathLib Godot API to portable core.
 10. Keep the repository private unless its owner deliberately chooses and adds a license.
 
 Multiple navigation and crowd worlds can coexist. Consumers must not add process-wide navigation
 singletons or callbacks from CPathLib into a host project.
+
+Flow, profile, agent, cohort, area, and portal handles are owned by the instance that created them.
+Do not pass handles between unrelated worlds. Explicitly release long-lived flow/profile/cohort
+handles when the consumer no longer needs them; generation checks make stale handles fail safely.

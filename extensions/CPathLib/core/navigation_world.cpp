@@ -1,17 +1,23 @@
 #include "navigation_world.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ffcore
 {
     void NavigationWorld::set_config(const NavigationWorldConfig &new_config)
     {
-        if (config.flow_wall_clearance_weight == new_config.flow_wall_clearance_weight &&
-            config.detect_bottlenecks == new_config.detect_bottlenecks &&
-            config.bottleneck_zone_radius == new_config.bottleneck_zone_radius)
+        NavigationWorldConfig sanitized = new_config;
+        sanitized.flow_wall_clearance_weight = std::isfinite(sanitized.flow_wall_clearance_weight)
+            ? std::max(0.0, sanitized.flow_wall_clearance_weight) : 0.0;
+        sanitized.bottleneck_zone_radius = std::clamp(sanitized.bottleneck_zone_radius, 0, 2);
+        if (config.flow_wall_clearance_weight == sanitized.flow_wall_clearance_weight &&
+            config.detect_bottlenecks == sanitized.detect_bottlenecks &&
+            config.bottleneck_zone_radius == sanitized.bottleneck_zone_radius)
             return;
-        config = new_config;
+        config = sanitized;
         ++cost_revision;
+        flow_store.mark_stale();
     }
 
     bool NavigationWorld::contains_cell(const Vec2i &cell) const
@@ -47,6 +53,7 @@ namespace ffcore
         }
         ++topology_revision;
         ++cost_revision;
+        flow_store.mark_stale();
         return true;
     }
 
@@ -57,7 +64,10 @@ namespace ffcore
         const bool changed = walkable ? walkable_cells.insert(cell).second
                                       : walkable_cells.erase(cell) != 0;
         if (changed)
+        {
             ++topology_revision;
+            flow_store.mark_stale();
+        }
         return changed;
     }
 
@@ -68,7 +78,10 @@ namespace ffcore
         const bool changed = blocked ? physical_wall_cells.insert(cell).second
                                      : physical_wall_cells.erase(cell) != 0;
         if (changed)
+        {
             ++topology_revision;
+            flow_store.mark_stale();
+        }
         return changed;
     }
 
@@ -90,6 +103,7 @@ namespace ffcore
             traversal_costs[cell] = cost;
         }
         ++cost_revision;
+        flow_store.mark_stale();
         return true;
     }
 
@@ -140,6 +154,47 @@ namespace ffcore
         result.field.copy_from(build_result.field);
         result.status = NavigationStatus::Found;
         return result;
+    }
+
+    FlowHandle NavigationWorld::create_flow(
+        const Vec2i &goal,
+        const DirectionalTraversalConstraints &constraints)
+    {
+        const FlowHandle handle = begin_flow_request(goal);
+        complete_flow_request(handle, build_flow(goal, constraints));
+        return handle;
+    }
+
+    FlowHandle NavigationWorld::begin_flow_request(const Vec2i &goal)
+    {
+        return flow_store.create_pending(goal, topology_revision, cost_revision);
+    }
+
+    bool NavigationWorld::complete_flow_request(
+        FlowHandle handle,
+        const WorldFlowResult &result)
+    {
+        StoredFlow *stored = flow_store.get(handle);
+        if (stored == nullptr)
+            return false;
+        if (!revisions_match(result.topology_revision, result.cost_revision))
+            return flow_store.set_status(handle, FlowStatus::Stale);
+        if (result.status != NavigationStatus::Found)
+            return flow_store.set_status(
+                handle, result.status == NavigationStatus::Stale
+                    ? FlowStatus::Stale : FlowStatus::Unreachable);
+        return flow_store.store(
+            handle, result.field, result.topology_revision, result.cost_revision);
+    }
+
+    bool NavigationWorld::set_flow_status(FlowHandle handle, FlowStatus status)
+    {
+        return flow_store.set_status(handle, status);
+    }
+
+    bool NavigationWorld::release_flow(FlowHandle handle)
+    {
+        return flow_store.release(handle);
     }
 
     FlowFieldBuildRequest NavigationWorld::create_flow_request(

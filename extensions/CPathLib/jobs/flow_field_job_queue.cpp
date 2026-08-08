@@ -32,7 +32,6 @@ namespace ffcore
     void FlowFieldJobQueue::cancel(std::uint64_t request_id)
     {
         std::lock_guard<std::mutex> lock(mutex);
-        cancelled.insert(request_id);
         for (auto iterator = pending.begin(); iterator != pending.end();)
         {
             if (iterator->id == request_id)
@@ -40,6 +39,10 @@ namespace ffcore
             else
                 ++iterator;
         }
+        if (active_request_id == request_id)
+            cancelled.insert(request_id);
+        else
+            cancelled.erase(request_id);
         for (auto iterator = completed.begin(); iterator != completed.end();)
         {
             if (iterator->request_id == request_id)
@@ -86,6 +89,7 @@ namespace ffcore
                 request = pending.front();
                 pending.pop_front();
                 active = true;
+                active_request_id = request.id;
             }
 
             FlowFieldJobResult result;
@@ -98,6 +102,7 @@ namespace ffcore
                 if (cancelled.erase(request.id) == 0)
                     completed.push_back(result);
                 active = false;
+                active_request_id = 0;
             }
         }
     }

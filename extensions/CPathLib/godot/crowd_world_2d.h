@@ -20,6 +20,15 @@ namespace godot
 
         static std::int64_t encode_handle(ffcore::AgentHandle handle);
         static ffcore::AgentHandle decode_handle(std::int64_t encoded);
+        static std::int64_t encode_profile_handle(ffcore::ProfileHandle handle);
+        static ffcore::ProfileHandle decode_profile_handle(std::int64_t encoded);
+        static std::int64_t encode_cohort_handle(ffcore::CohortHandle handle);
+        static ffcore::CohortHandle decode_cohort_handle(std::int64_t encoded);
+        static ffcore::FlowHandle decode_flow_handle(std::int64_t encoded);
+        static ffcore::CrowdAgentProfile make_profile(
+            double radius, double maximum_speed, double acceleration, double deceleration,
+            double separation_radius, double separation_weight, double arrival_radius,
+            int terrain_speed_channel, std::int64_t category_mask);
 
     protected:
         static void _bind_methods();
@@ -30,12 +39,39 @@ namespace godot
         void set_automatic_step(bool enabled) { automatic_step = enabled; }
         bool is_automatic_step_enabled() const { return automatic_step; }
         void step(double delta);
+        void set_world_paused(bool paused);
+        bool is_world_paused() const;
 
         bool use_navigation_flow(NavigationWorld2D *navigation);
+        bool install_navigation_flow(NavigationWorld2D *navigation, std::int64_t flow_handle);
+        bool remove_navigation_flow(std::int64_t flow_handle);
+        void configure_default_profile(
+            double radius, double maximum_speed, double acceleration, double deceleration,
+            double separation_radius, double separation_weight, double arrival_radius,
+            int terrain_speed_channel, std::int64_t category_mask);
+        std::int64_t create_profile(
+            double radius, double maximum_speed, double acceleration, double deceleration,
+            double separation_radius, double separation_weight, double arrival_radius,
+            int terrain_speed_channel, std::int64_t category_mask);
+        bool update_profile(
+            std::int64_t profile_handle, double radius, double maximum_speed,
+            double acceleration, double deceleration, double separation_radius,
+            double separation_weight, double arrival_radius, int terrain_speed_channel,
+            std::int64_t category_mask);
+        bool remove_profile(std::int64_t profile_handle);
         std::int64_t add_agent(Vector2 position, double radius, double maximum_speed,
                                double separation_radius, double separation_weight);
+        std::int64_t add_agent_with_profile(Vector2 position, std::int64_t profile_handle);
         bool remove_agent(std::int64_t agent_handle);
+        bool set_agent_profile(std::int64_t agent_handle, std::int64_t profile_handle);
+        std::int64_t create_cohort();
+        bool remove_cohort(std::int64_t cohort_handle);
+        bool assign_agent_to_cohort(std::int64_t agent_handle, std::int64_t cohort_handle);
+        bool remove_agent_from_cohort(std::int64_t agent_handle);
+        bool assign_cohort_flow(std::int64_t cohort_handle, std::int64_t flow_handle);
+        int get_cohort_member_count(std::int64_t cohort_handle) const;
         bool follow_flow(std::int64_t agent_handle);
+        bool follow_flow_handle(std::int64_t agent_handle, std::int64_t flow_handle);
         bool follow_path(std::int64_t agent_handle, const PackedVector2Array &world_points);
         bool set_manual_direction(std::int64_t agent_handle, Vector2 direction);
         bool stop_navigation(std::int64_t agent_handle);

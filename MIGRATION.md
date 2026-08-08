@@ -2,28 +2,36 @@
 
 ## Review status and governing constraints
 
-### In-project refactor outcome
+### Current transition state
 
-The reusable boundary described by this plan is implemented as the independent
-`extensions/CPathLib` source tree and `cpathlib.dll`. It registers only `NavigationWorld2D`,
-`NavigationRoute2D`, and `CrowdWorld2D`. Project-owned compatibility and gameplay code lives in
-`extensions/rabbit_game_native` and is loaded as a separate GDExtension.
+The reusable foundation exists in `extensions/CPathLib`, but the conversion is not complete.
+`extensions/rabbit_game_native` and its second DLL are temporary migration input, not an accepted
+project-owned extension. The final architecture has one generic CPathLib source tree, descriptor,
+entry point, and DLL. All native algorithms move into generic instance-owned CPathLib facilities;
+only gameplay composition and presentation remain in Godot scripts.
 
 Current completion summary:
 
 | Boundary | Status |
 |---|---|
-| portable algorithms and generic Godot adapter | complete in `extensions/CPathLib` |
-| standalone MinGW build and reuse instructions | complete in `extensions/CPathLib` |
-| generic source/game terminology isolation | enforced by the physical source boundary |
+| portable algorithms and initial generic Godot adapters | partial in `extensions/CPathLib` |
+| standalone MinGW build and reuse instructions | available; final API still pending migration |
+| generic source/game terminology isolation | required for every migrated native capability |
 | host A* caller migration | complete; `PathfinderNative` removed |
-| project flow/steering/combat compatibility | project-owned in `extensions/rabbit_game_native` |
+| instance configuration, profiles, handles, cohorts, multi-flow foundation | complete in pass 2 |
+| flow/crowd/force/projectile parity migration | pending across passes 3-7 |
+| temporary native compatibility extension | must be deleted in pass 8 |
 | separate Git repository and dependency pin | intentionally left to the owner |
 
-The project-owned controller is not copied into the standalone repository. Rewriting it is not a
-precondition for CPathLib reuse and would not be behavior-preserving without trajectory parity
-fixtures. Its safe decomposition order is documented in
-`extensions/rabbit_game_native/README.md`.
+The corrected one-extension conversion is governed by
+[`NATIVE_MIGRATION_CONTRACT.md`](NATIVE_MIGRATION_CONTRACT.md). Its pass-1 inventory accounts for
+all 224 legacy bound methods, the signal/property surface, scene wiring, singleton accessors,
+parity-sensitive update order, final owners, and removal gates.
+
+The legacy controller must be decomposed: generic simulation capabilities move into focused
+CPathLib modules, while Rabbit Game decisions move into Godot. Trajectory and lifecycle parity
+fixtures gate that work; the controller must not be copied wholesale or kept as a second native
+implementation.
 
 Completed reusable modules include A*, one synchronous/asynchronous flow builder, wall clearance,
 static bottleneck detection, bottleneck traffic reservations, explicit and seeded areas, multi-cell
@@ -36,9 +44,10 @@ this refactor. Instructions for that later mechanical split are checked in at
 `extensions/CPathLib/REUSE.md`.
 
 The original review found that the extension was not ready to be copied into another game because
-portable algorithms and project gameplay shared one source/build boundary. The physical source and
-GDExtension split resolves that issue. The project-owned module remains a behavior-preserving
-migration boundary until each established caller has a proven generic or project-owned replacement.
+portable algorithms and project gameplay shared one source/build boundary. The current physical
+split provides safe migration staging, but it is not the solution: each legacy responsibility must
+move to its generic CPathLib owner or its Godot gameplay owner, and the second extension must then
+be deleted.
 
 The migration has two equally important outcomes:
 
@@ -68,7 +77,7 @@ The finished package must be suitable as the starting point for any Godot game t
 - transitions between world navigation and local navigation inside an area;
 - crowd steering, separation, wall avoidance, and static-obstacle avoidance;
 - terrain speed modifiers;
-- pushes, knockback, smash forces, and persistent external velocities;
+- impulses, control suppression, and persistent external velocities;
 - asynchronous navigation builds;
 - minimal Godot setup.
 
