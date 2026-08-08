@@ -57,6 +57,10 @@ namespace ffcore
         bool is_collision_shape_passable(const CrowdAgentState &agent,
                                          const Vec2 &position,
                                          const FlowField *flow) const;
+        bool collision_contact_normal(const CrowdAgentState &agent,
+                                      const Vec2 &position,
+                                      const FlowField *flow,
+                                      Vec2 &normal) const;
         Vec2 resolve_motion(const CrowdAgentState &agent, const Vec2 &candidate,
                             const FlowField *flow) const;
         void recompute_maximum_agent_radius();

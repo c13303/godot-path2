@@ -44,7 +44,11 @@ func setup(crowd_world: Node, automatic_step: bool = true) -> bool:
 	_crowd = crowd_world
 	_automatic_step = automatic_step
 	_crowd.set(&"automatic_step", false)
-	set_physics_process(true)
+	# The original project movement owner stepped and synchronized agents during
+	# render processing. Keep that presentation contract here; CPathLib itself
+	# remains usable with its default fixed-physics stepping in other consumers.
+	set_physics_process(false)
+	set_process(true)
 	return true
 
 
@@ -363,7 +367,7 @@ func get_registration_debug_snapshot() -> Dictionary:
 	}
 
 
-func _physics_process(delta: float) -> void:
+func _process(delta: float) -> void:
 	if _crowd == null:
 		return
 	_cleanup_stale_nodes()

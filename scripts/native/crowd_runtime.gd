@@ -77,35 +77,76 @@ func set_agent_profile(agent_handle: int, profile: Dictionary) -> void:
 	if _crowd == null:
 		return
 	var node: Node2D = _registry.find_node(agent_handle) if _registry != null else null
-	var fallback_speed: float = float(node.get("max_speed")) if node != null and "max_speed" in node else 150.0
+	var current: Dictionary = _crowd.call(
+		&"get_agent_diagnostics", agent_handle
+	) as Dictionary
+	if not bool(current.get("valid", false)):
+		return
+	var fallback_speed: float = float(current.get("maximum_speed", 150.0))
+	if fallback_speed <= 0.0 and node != null and "max_speed" in node:
+		fallback_speed = float(node.get("max_speed"))
 	var maximum_speed: float = maxf(float(profile.get("max_speed", profile.get("maximum_speed", fallback_speed))), 0.0)
-	var acceleration: float = maxf(float(profile.get("acceleration", 900.0)), 0.0)
-	var deceleration: float = maxf(float(profile.get("deceleration", 1200.0)), 0.0)
-	var category_mask: int = int(profile.get("smash_class", _category_for_node(node)))
+	var acceleration: float = maxf(float(profile.get(
+		"acceleration", current.get("acceleration", 900.0)
+	)), 0.0)
+	var deceleration: float = maxf(float(profile.get(
+		"deceleration", current.get("deceleration", 1200.0)
+	)), 0.0)
+	var category_mask: int = int(profile.get(
+		"smash_class", profile.get("category_mask", current.get(
+			"category_mask", _category_for_node(node)
+		))
+	))
 	var profile_handle: int = int(_crowd.call(
 		&"create_profile",
-		maxf(float(profile.get("world_radius", 14.4)), 0.0), maximum_speed,
+		maxf(float(profile.get("world_radius", profile.get(
+			"radius", current.get("radius", 14.4)
+		))), 0.0), maximum_speed,
 		acceleration, deceleration,
-		maxf(float(profile.get("separation_radius", 32.0)), 0.0),
-		maxf(float(profile.get("separation_strength", 600.0)), 0.0),
-		maxf(float(profile.get("arrival_radius", 16.0)), 0.0),
-		maxi(int(profile.get("terrain_speed_channel", 0)), 0), category_mask
+		maxf(float(profile.get(
+			"separation_radius", current.get("separation_radius", 32.0)
+		)), 0.0),
+		maxf(float(profile.get("separation_strength", profile.get(
+			"separation_weight", current.get("separation_weight", 600.0)
+		))), 0.0),
+		maxf(float(profile.get(
+			"arrival_radius", current.get("arrival_radius", 16.0)
+		)), 0.0),
+		maxi(int(profile.get(
+			"terrain_speed_channel", current.get("terrain_speed_channel", 0)
+		)), 0), category_mask
 	))
 	if profile_handle != INVALID_HANDLE:
 		_crowd.call(&"set_agent_profile", agent_handle, profile_handle)
 		_crowd.call(&"remove_profile", profile_handle)
 	if _crowd.has_method(&"set_agent_collision_offset"):
+		var collision_offset: Vector2 = current.get(
+			"collision_offset", Vector2.ZERO
+		) as Vector2
+		if profile.has("foot_offset_y"):
+			collision_offset.y = float(profile["foot_offset_y"])
 		_crowd.call(
 			&"set_agent_collision_offset", agent_handle,
-			Vector2(0.0, float(profile.get("foot_offset_y", 0.0)))
+			collision_offset
 		)
 	_crowd.call(
 		&"set_agent_contact_profile", agent_handle,
-		maxf(float(profile.get("contact_push_power", 0.0)), 0.0),
-		maxf(float(profile.get("contact_push_resist", 1.0)), 0.0001),
-		maxf(float(profile.get("contact_push_cooldown", 0.2)), 0.0),
-		maxf(float(profile.get("contact_push_friction_loss", 0.65)), 0.0),
-		maxf(float(profile.get("contact_control_suppression_seconds", 0.2)), 0.0)
+		maxf(float(profile.get(
+			"contact_push_power", current.get("contact_push_strength", 0.0)
+		)), 0.0),
+		maxf(float(profile.get(
+			"contact_push_resist", current.get("contact_push_resistance", 1.0)
+		)), 0.0001),
+		maxf(float(profile.get(
+			"contact_push_cooldown", current.get("contact_push_cooldown", 0.2)
+		)), 0.0),
+		maxf(float(profile.get(
+			"contact_push_friction_loss", current.get("contact_impulse_decay", 0.65)
+		)), 0.0),
+		maxf(float(profile.get(
+			"contact_control_suppression_seconds",
+			current.get("contact_control_suppression", 0.2)
+		)), 0.0)
 	)
 
 
@@ -284,7 +325,7 @@ func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_
 			"direction": direction.normalized(),
 			"radial": angle_degrees >= 359.9,
 			"force": force, "decay": maxf(friction, 0.0),
-			"falloff": falloff, "preserve_navigation": not detach_flow,
+			"falloff": falloff, "preserve_navigation": false,
 			"control_suppression": control_suppression_duration if control_suppression > 0.0 else 0.0,
 			"damage": damage,
 		}
@@ -308,7 +349,7 @@ func apply_projectile_effect(impact: Dictionary, config: Dictionary) -> void:
 			"force": float(config.get("smash_force", 0.0)),
 			"decay": float(config.get("smash_friction_loss", 0.0)),
 			"falloff": float(config.get("smash_falloff", 0.0)),
-			"preserve_navigation": not bool(config.get("smash_detach_flow", false)),
+			"preserve_navigation": false,
 			"control_suppression": float(config.get("smash_control_suppression_duration", 0.0)) if float(config.get("smash_control_suppression", 0.0)) > 0.0 else 0.0,
 			"damage": int(config.get("damage", 0)),
 			"radius": radius,

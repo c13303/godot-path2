@@ -42,6 +42,35 @@ func _run() -> void:
 	harness.add_child(target)
 	var target_handle: int = int(registry.call(&"spawn_agent", target, 0))
 	_assert(target_handle != 0, "agent registration")
+	crowd_runtime.call(&"set_agent_profile", target_handle, {
+		"max_speed": 30.0,
+		"terrain_speed_channel": 5,
+		"foot_offset_y": -7.0,
+		"contact_push_power": 12.0,
+	})
+	crowd_runtime.call(&"set_agent_profile", target_handle, {"max_speed": 40.0})
+	var updated_profile: Dictionary = crowd.call(
+		&"get_agent_diagnostics", target_handle
+	) as Dictionary
+	_assert(
+		is_equal_approx(float(updated_profile.get("maximum_speed", 0.0)), 40.0),
+		"partial profile speed update"
+	)
+	_assert(
+		int(updated_profile.get("terrain_speed_channel", -1)) == 5,
+		"partial profile preserves terrain channel"
+	)
+	var collision_offset: Vector2 = updated_profile.get(
+		"collision_offset", Vector2.ZERO
+	) as Vector2
+	_assert(
+		is_equal_approx(collision_offset.y, -7.0),
+		"partial profile preserves collision offset"
+	)
+	_assert(
+		is_equal_approx(float(updated_profile.get("contact_push_strength", 0.0)), 12.0),
+		"partial profile preserves contact settings"
+	)
 
 	var start: Vector2 = target.global_position
 	crowd_runtime.call(&"set_agent_input", target_handle, Vector2.RIGHT)

@@ -41,6 +41,8 @@ namespace ffcore
         void update(double delta);
         Vec2 velocity(AgentHandle handle) const;
         double navigation_control(AgentHandle handle) const;
+        bool cancel_if_navigation_opposes(AgentHandle handle,
+                                          const Vec2 &navigation_velocity);
         bool active(AgentHandle handle) const;
     };
 } // namespace ffcore

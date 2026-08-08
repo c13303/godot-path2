@@ -69,6 +69,32 @@ func _run() -> void:
 		_fail("player position oscillated while held against a wall: span=%.4f" % settled_span)
 		return
 
+	var slide_fixture: Dictionary = _find_wall_slide_approach(floor_layer, wall_layer)
+	if slide_fixture.is_empty():
+		_fail("no authored wall-slide fixture was found")
+		return
+	wall_cell = slide_fixture["wall_cell"] as Vector2i
+	start_cell = slide_fixture["start_cell"] as Vector2i
+	direction_i = slide_fixture["direction"] as Vector2i
+	var tangent_i: Vector2i = slide_fixture["tangent"] as Vector2i
+	direction = Vector2(direction_i)
+	var tangent: Vector2 = Vector2(tangent_i)
+	start_center = floor_layer.to_global(floor_layer.map_to_local(start_cell))
+	runtime.call(&"set_agent_position", nav_handle, start_center - collision_offset, true)
+	runtime.call(&"set_agent_input", nav_handle, (direction + tangent).normalized())
+	for _index: int in range(12):
+		await physics_frame
+	wall_center = wall_layer.to_global(wall_layer.map_to_local(wall_cell))
+	final_center = player.global_position + collision_offset
+	signed_distance = (final_center - wall_center).dot(direction)
+	var tangential_progress: float = (final_center - start_center).dot(tangent)
+	if signed_distance > -(half_cell + radius) + 0.1:
+		_fail("player footprint crossed a wall while sliding: distance=%.3f" % signed_distance)
+		return
+	if tangential_progress < 6.0:
+		_fail("player did not preserve wall-tangent movement: progress=%.3f" % tangential_progress)
+		return
+
 	var dynamic_fixture: Dictionary = _find_open_approach(floor_layer, wall_layer)
 	if dynamic_fixture.is_empty():
 		_fail("no open-cell dynamic blocker fixture was found")
@@ -138,6 +164,38 @@ func _find_open_approach(floor_layer: TileMapLayer, wall_layer: TileMapLayer) ->
 				"start_cell": start_cell,
 				"direction": direction,
 			}
+	return {}
+
+
+func _find_wall_slide_approach(
+	floor_layer: TileMapLayer, wall_layer: TileMapLayer
+) -> Dictionary:
+	var directions: Array[Vector2i] = [Vector2i.RIGHT, Vector2i.LEFT, Vector2i.DOWN, Vector2i.UP]
+	for wall_cell: Vector2i in wall_layer.get_used_cells():
+		for direction: Vector2i in directions:
+			var start_cell: Vector2i = wall_cell - direction
+			if floor_layer.get_cell_source_id(start_cell) == -1 \
+					or wall_layer.get_cell_source_id(start_cell) != -1:
+				continue
+			var tangents: Array[Vector2i] = [
+				Vector2i(-direction.y, direction.x),
+				Vector2i(direction.y, -direction.x),
+			]
+			for tangent: Vector2i in tangents:
+				var first_slide_cell: Vector2i = start_cell + tangent
+				var second_slide_cell: Vector2i = first_slide_cell + tangent
+				if floor_layer.get_cell_source_id(first_slide_cell) == -1 \
+						or floor_layer.get_cell_source_id(second_slide_cell) == -1:
+					continue
+				if wall_layer.get_cell_source_id(first_slide_cell) != -1 \
+						or wall_layer.get_cell_source_id(second_slide_cell) != -1:
+					continue
+				return {
+					"wall_cell": wall_cell,
+					"start_cell": start_cell,
+					"direction": direction,
+					"tangent": tangent,
+				}
 	return {}
 
 

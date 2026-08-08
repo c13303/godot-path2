@@ -282,11 +282,11 @@ func _initialize() -> void:
 	for y: int in range(3):
 		for x: int in range(5):
 			if Vector2i(x, y) != Vector2i(2, 1):
-				collision_walkable.append(Vector2(x, y))
+				collision_walkable.append(Vector2(x - 3, y + 4))
 	if not bool(collision_navigation.call(
-		&"configure_grid", Rect2i(0, 0, 5, 3), 10.0, Vector2.ZERO,
-		collision_walkable, PackedVector2Array([Vector2(2, 1)])
-	)) or not bool(collision_navigation.call(&"build_flow_to_cell", Vector2i(4, 1))) \
+		&"configure_grid", Rect2i(-3, 4, 5, 3), 10.0, Vector2(30.0, -40.0),
+		collision_walkable, PackedVector2Array([Vector2(-1, 5)])
+	)) or not bool(collision_navigation.call(&"build_flow_to_cell", Vector2i(1, 5))) \
 			or not bool(collision_crowd.call(&"use_navigation_flow", collision_navigation)):
 		_fail("collision fixture setup failed")
 		return
@@ -308,6 +308,80 @@ func _initialize() -> void:
 	if stopped_at_wall.x > 18.01 or absf(stopped_at_wall.y - 17.0) > 0.01:
 		_fail("swept offset-circle collision crossed or jittered at a wall: %s" % stopped_at_wall)
 		return
+	var terrain_profile: int = int(collision_crowd.call(
+		&"create_profile", 1.0, 10.0, 1000.0, 1000.0,
+		0.0, 0.0, 1.0, 5, 1
+	))
+	var terrain_agent: int = int(collision_crowd.call(
+		&"add_agent_with_profile", Vector2(5.0, 15.0), terrain_profile
+	))
+	collision_crowd.call(
+		&"set_agent_collision_offset", terrain_agent, Vector2(0.0, -10.0)
+	)
+	collision_crowd.call(&"set_terrain_speed_cell", Vector2i(-3, 4), 0.5, 5)
+	collision_crowd.call(&"set_manual_direction", terrain_agent, Vector2.RIGHT)
+	collision_crowd.call(&"step", 0.5)
+	var terrain_position: Vector2 = collision_crowd.call(
+		&"get_agent_position", terrain_agent
+	) as Vector2
+	if absf(terrain_position.x - 7.5) > 0.01:
+		_fail("offset terrain sampling or displacement scaling changed speed: %s" % terrain_position)
+		return
+	collision_crowd.call(&"clear_terrain_speed_channel", 5)
+	collision_crowd.call(&"set_agent_collision_offset", terrain_agent, Vector2.ZERO)
+	collision_crowd.call(&"set_agent_position", terrain_agent, Vector2(5.0, 5.0), true)
+	collision_crowd.call(&"set_manual_direction", terrain_agent, Vector2.RIGHT)
+	collision_crowd.call(&"step", 0.5)
+	var cardinal_distance: float = (
+		(collision_crowd.call(&"get_agent_position", terrain_agent) as Vector2)
+		- Vector2(5.0, 5.0)
+	).length()
+	collision_crowd.call(&"set_agent_position", terrain_agent, Vector2(5.0, 5.0), true)
+	collision_crowd.call(
+		&"set_manual_direction", terrain_agent, Vector2(1.0, 1.0)
+	)
+	collision_crowd.call(&"step", 0.5)
+	var diagonal_distance: float = (
+		(collision_crowd.call(&"get_agent_position", terrain_agent) as Vector2)
+		- Vector2(5.0, 5.0)
+	).length()
+	if absf(cardinal_distance - diagonal_distance) > 0.01:
+		_fail(
+			"manual speed changed with direction: cardinal=%.3f diagonal=%.3f"
+			% [cardinal_distance, diagonal_distance]
+		)
+		return
+	collision_crowd.call(&"remove_agent", terrain_agent)
+	collision_crowd.call(&"remove_profile", terrain_profile)
+	var recovery_profile: int = int(collision_crowd.call(
+		&"create_profile", 1.0, 20.0, 1000.0, 1000.0,
+		0.0, 0.0, 1.0, 0, 1
+	))
+	var recovery_agent: int = int(collision_crowd.call(
+		&"add_agent_with_profile", Vector2(1.0, 5.0), recovery_profile
+	))
+	if recovery_agent <= 0 or not bool(collision_crowd.call(
+		&"follow_flow", recovery_agent
+	)):
+		_fail("navigation recovery fixture setup failed")
+		return
+	collision_crowd.call(
+		&"apply_impulse", recovery_agent, Vector2(-40.0, 0.0),
+		0.0, 0.91, 0.15, false, 5
+	)
+	collision_crowd.call(&"step", 0.1)
+	collision_crowd.call(&"step", 0.06)
+	var recovered_position: Vector2 = collision_crowd.call(
+		&"get_agent_position", recovery_agent
+	) as Vector2
+	if recovered_position.x <= 1.5:
+		_fail(
+			"wall-directed impulse kept fighting navigation after control recovery: %s"
+			% recovered_position
+		)
+		return
+	collision_crowd.call(&"remove_agent", recovery_agent)
+	collision_crowd.call(&"remove_profile", recovery_profile)
 	var pusher: int = int(collision_crowd.call(
 		&"add_agent", Vector2(35.0, 5.0), 2.0, 0.0, 0.0, 0.0
 	))

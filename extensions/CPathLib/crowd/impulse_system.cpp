@@ -39,6 +39,7 @@ namespace ffcore
         for (auto iterator = states.begin(); iterator != states.end();)
         {
             State &state = iterator->second;
+            bool activated_this_update = false;
             if (state.has_pending)
             {
                 state.pending.delay -= delta;
@@ -50,6 +51,7 @@ namespace ffcore
                     state.preserve_navigation = state.pending.preserve_navigation;
                     state.stop_on_control_restore = state.pending.stop_on_control_restore;
                     state.has_pending = false;
+                    activated_this_update = true;
                 }
             }
             const double previous_suppression = state.suppression_remaining;
@@ -57,8 +59,13 @@ namespace ffcore
             if (state.stop_on_control_restore && previous_suppression > 0.0 &&
                 state.suppression_remaining <= 0.0)
                 state.active_velocity = {};
-            const double multiplier = std::max(0.0, 1.0 - state.active_decay * delta);
-            state.active_velocity = state.active_velocity * multiplier;
+            if (!activated_this_update)
+            {
+                const double loss = std::clamp(state.active_decay, 0.0, 1.0);
+                const double multiplier = loss >= 1.0
+                    ? 0.0 : std::pow(1.0 - loss, delta);
+                state.active_velocity = state.active_velocity * multiplier;
+            }
             if (state.active_velocity.length_squared() < 1e-8)
                 state.active_velocity = {};
             if (!state.has_pending && state.active_velocity.is_zero() && state.suppression_remaining <= 0.0)
@@ -80,6 +87,20 @@ namespace ffcore
         if (state == states.end() || state->second.preserve_navigation)
             return 1.0;
         return state->second.suppression_remaining > 0.0 ? 0.0 : 1.0;
+    }
+
+    bool ImpulseSystem::cancel_if_navigation_opposes(
+        AgentHandle handle, const Vec2 &navigation_velocity)
+    {
+        const auto state = states.find(key(handle));
+        if (state == states.end() || state->second.preserve_navigation ||
+            state->second.suppression_remaining > 0.0 ||
+            state->second.active_velocity.is_zero() ||
+            navigation_velocity.is_zero() ||
+            state->second.active_velocity.dot(navigation_velocity) > 0.0)
+            return false;
+        states.erase(state);
+        return true;
     }
 
     bool ImpulseSystem::active(AgentHandle handle) const

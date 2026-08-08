@@ -171,7 +171,24 @@ namespace godot
         result["navigation_source"] = static_cast<int>(agent->navigation_source);
         result["route_progress"] = static_cast<int>(agent->route_progress);
         result["paused"] = agent->paused;
+        result["radius"] = agent->profile.radius;
+        result["maximum_speed"] = agent->profile.maximum_speed;
+        result["acceleration"] = agent->profile.acceleration;
+        result["deceleration"] = agent->profile.deceleration;
+        result["separation_radius"] = agent->profile.separation_radius;
+        result["separation_weight"] = agent->profile.separation_weight;
+        result["arrival_radius"] = agent->profile.arrival_radius;
+        result["terrain_speed_channel"] = agent->profile.terrain_speed_channel;
         result["category_mask"] = static_cast<std::int64_t>(agent->profile.category_mask);
+        result["collision_offset"] = Vector2(
+            agent->profile.collision_offset.x,
+            agent->profile.collision_offset.y);
+        result["contact_push_strength"] = agent->profile.contact_push_strength;
+        result["contact_push_resistance"] = agent->profile.contact_push_resistance;
+        result["contact_push_cooldown"] = agent->profile.contact_push_cooldown;
+        result["contact_impulse_decay"] = agent->profile.contact_impulse_decay;
+        result["contact_control_suppression"] =
+            agent->profile.contact_control_suppression;
         result["directional_field_handle"] = encode_directional_field_handle(
             agent->directional_field_handle);
         return result;

@@ -505,6 +505,51 @@ namespace ffcore
         return true;
     }
 
+    bool CrowdWorld::collision_contact_normal(
+        const CrowdAgentState &agent, const Vec2 &position,
+        const FlowField *flow, Vec2 &normal) const
+    {
+        if (flow == nullptr || agent.profile.radius <= 0.0)
+            return false;
+
+        const Vec2 center = position + agent.profile.collision_offset;
+        const double radius = agent.profile.radius;
+        const double cell_size = flow->tile_size();
+        const double half_cell = cell_size * 0.5;
+        const Vec2i center_cell = flow->world_to_cell(center);
+        const int scan_radius = std::max(
+            1, static_cast<int>(std::ceil((radius + half_cell) / cell_size)));
+        Vec2 normal_sum;
+        double total_weight = 0.0;
+        for (int y = -scan_radius; y <= scan_radius; ++y)
+        {
+            for (int x = -scan_radius; x <= scan_radius; ++x)
+            {
+                const Vec2i cell(center_cell.x + x, center_cell.y + y);
+                if (flow->is_cell_physics_passable(cell))
+                    continue;
+                const Vec2 cell_center = flow->cell_to_world(cell);
+                const Vec2 closest = closest_point_on_aabb(
+                    center, cell_center, half_cell, half_cell);
+                const Vec2 away = center - closest;
+                const double distance = away.length();
+                if (distance >= radius - 1e-6)
+                    continue;
+                Vec2 contact_normal = distance > 1e-6
+                    ? away / distance : (center - cell_center).normalized();
+                if (contact_normal.is_zero())
+                    continue;
+                const double penetration = std::max(1e-6, radius - distance);
+                normal_sum += contact_normal * penetration;
+                total_weight += penetration;
+            }
+        }
+        if (total_weight <= 0.0 || normal_sum.is_zero())
+            return false;
+        normal = normal_sum.normalized();
+        return !normal.is_zero();
+    }
+
     Vec2 CrowdWorld::resolve_motion(
         const CrowdAgentState &agent,
         const Vec2 &candidate,
@@ -521,36 +566,64 @@ namespace ffcore
         Vec2 position = agent.position;
         for (int index = 0; index < substep_count; ++index)
         {
-            const Vec2 desired = position + substep;
-            if (is_collision_shape_passable(agent, desired, flow))
+            const Vec2 before_slide = position;
+            Vec2 remaining = substep;
+            bool moved_or_slid = false;
+            for (int slide_iteration = 0; slide_iteration < 3; ++slide_iteration)
             {
-                position = desired;
+                if (remaining.length_squared() < 1e-8)
+                    break;
+                const Vec2 desired = position + remaining;
+                if (is_collision_shape_passable(agent, desired, flow))
+                {
+                    position = desired;
+                    moved_or_slid = true;
+                    remaining = {};
+                    break;
+                }
+
+                double low = 0.0;
+                double high = 1.0;
+                for (int sweep_iteration = 0; sweep_iteration < 8; ++sweep_iteration)
+                {
+                    const double middle = (low + high) * 0.5;
+                    if (is_collision_shape_passable(
+                            agent, position + remaining * middle, flow))
+                        low = middle;
+                    else
+                        high = middle;
+                }
+                if (low > 0.0)
+                {
+                    position += remaining * low;
+                    moved_or_slid = true;
+                }
+
+                Vec2 wall_normal;
+                const Vec2 blocked_position = position + remaining * (high - low);
+                if (!collision_contact_normal(
+                        agent, blocked_position, flow, wall_normal))
+                    break;
+                const Vec2 unused_step = remaining * (1.0 - low);
+                const double into_wall = unused_step.dot(wall_normal);
+                if (into_wall >= -1e-6)
+                    break;
+                remaining = unused_step - wall_normal * into_wall;
+            }
+
+            if (moved_or_slid)
                 continue;
-            }
 
-            double low = 0.0;
-            double high = 1.0;
-            for (int iteration = 0; iteration < 10; ++iteration)
-            {
-                const double middle = (low + high) * 0.5;
-                if (is_collision_shape_passable(
-                        agent, position + substep * middle, flow))
-                    low = middle;
-                else
-                    high = middle;
-            }
-            position += substep * low;
-
-            const Vec2 remaining = substep * (1.0 - low);
-            const Vec2 x_only(position.x + remaining.x, position.y);
-            if (std::abs(remaining.x) > 1e-8 &&
+            position = before_slide;
+            const Vec2 x_only(position.x + substep.x, position.y);
+            if (std::abs(substep.x) > 1e-8 &&
                 is_collision_shape_passable(agent, x_only, flow))
             {
                 position = x_only;
                 continue;
             }
-            const Vec2 y_only(position.x, position.y + remaining.y);
-            if (std::abs(remaining.y) > 1e-8 &&
+            const Vec2 y_only(position.x, position.y + substep.y);
+            if (std::abs(substep.y) > 1e-8 &&
                 is_collision_shape_passable(agent, y_only, flow))
             {
                 position = y_only;
@@ -605,13 +678,23 @@ namespace ffcore
 
             double terrain_multiplier = 1.0;
             if (flow != nullptr)
+            {
+                const Vec2i relative_cell = flow->world_to_cell(
+                    agent->position + agent->profile.collision_offset);
+                const Vec2i &cell_origin = flow->get_cell_origin();
+                const Vec2i absolute_cell(
+                    relative_cell.x + cell_origin.x,
+                    relative_cell.y + cell_origin.y);
                 terrain_multiplier = terrain_speeds.multiplier_at(
-                    flow->world_to_cell(agent->position), agent->profile.terrain_speed_channel);
+                    absolute_cell,
+                    agent->profile.terrain_speed_channel);
+            }
             const double navigation_speed =
                 agent->navigation_source == NavigationSource::DirectionalField && directional_sample.found
                 ? directional_sample.velocity.length() : agent->profile.maximum_speed;
             const Vec2 desired_velocity = desired_direction *
-                (navigation_speed * terrain_multiplier * impulses.navigation_control(handle));
+                (navigation_speed * impulses.navigation_control(handle));
+            impulses.cancel_if_navigation_opposes(handle, desired_velocity);
             const double rate = desired_velocity.length_squared() > agent->velocity.length_squared()
                 ? agent->profile.acceleration : agent->profile.deceleration;
             agent->velocity = approach(agent->velocity, desired_velocity, rate * delta);
@@ -624,7 +707,9 @@ namespace ffcore
                 total_velocity += agent->external_velocity.current_velocity();
             }
             const Vec2 resolved = resolve_motion(
-                *agent, agent->position + total_velocity * delta, flow);
+                *agent,
+                agent->position + total_velocity * (delta * terrain_multiplier),
+                flow);
             if ((resolved - agent->position).length_squared() < 1e-12 && !total_velocity.is_zero())
                 agent->velocity = {};
             agent->position = resolved;
