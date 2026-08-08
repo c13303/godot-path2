@@ -132,6 +132,7 @@ func sync_flow_extra_blocking_cells() -> void:
 	if flow == null or not flow.has_method("set_extra_blocking_cells"):
 		return
 	var blocking_buildings: TileMapLayer = _manager.blocking_buildings
+	var wallz: TileMapLayer = _manager.wallz
 	var fences: TileMapLayer = _manager.fences
 	var cells: PackedVector2Array = PackedVector2Array()
 	if blocking_buildings != null:
@@ -139,6 +140,16 @@ func sync_flow_extra_blocking_cells() -> void:
 			var cell: Vector2i = raw_cell as Vector2i
 			if not _manager._building_cell_blocks_movement(cell):
 				continue
+			cells.append(Vector2(float(cell.x), float(cell.y)))
+	# The static navigation grid is only uploaded once at level load
+	# (NavigationRuntime.compute_distance_field_global, called from FlowFieldCode._ready).
+	# Player-built walls land on this same "wallz" layer at runtime but nothing re-uploads
+	# it afterwards, so a wall placed mid-game never reaches the native flow-field grid
+	# through the static path. Every wallz cell must therefore be re-pushed here, on the
+	# one channel every group flow (monsters, clients, the preview) already blocks against.
+	if wallz != null:
+		for raw_cell: Variant in wallz.get_used_cells():
+			var cell: Vector2i = raw_cell as Vector2i
 			cells.append(Vector2(float(cell.x), float(cell.y)))
 	flow.call("set_extra_blocking_cells", cells)
 	# Fences are kept out of extra_blocking_cells (which feeds player collision and every

@@ -27,6 +27,12 @@ var _debug_draw: bool = false
 var _debug_group: int = 0
 var _baseline_goal_cell: Vector2i = Vector2i.ZERO
 var _baseline_flow_handle: int = INVALID_HANDLE
+# The baseline collision flow is refreshed on the lazy/async request path (see
+# _refresh_baseline_collision_flow) so a wall build never blocks the main thread on a
+# full flow-field rebuild. Only the rare case where the current goal cell itself becomes
+# unreachable falls back to a synchronous scan for a new goal.
+var _baseline_pending_flow_handle: int = INVALID_HANDLE
+var _baseline_pending_goal_cell: Vector2i = Vector2i.ZERO
 
 
 func _ready() -> void:
@@ -38,6 +44,23 @@ func _ready() -> void:
 	add_child(_coordinator)
 	_coordinator.cohort_flow_installed.connect(_on_cohort_flow_finished)
 	_coordinator.cohort_flow_failed.connect(_on_cohort_flow_finished)
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if _baseline_pending_flow_handle == INVALID_HANDLE or _world == null or _crowd == null:
+		return
+	var status: int = int(_world.call(&"get_flow_status", _baseline_pending_flow_handle))
+	if status == 0: # still pending on the worker thread
+		return
+	var pending_handle: int = _baseline_pending_flow_handle
+	var pending_goal: Vector2i = _baseline_pending_goal_cell
+	_baseline_pending_flow_handle = INVALID_HANDLE
+	if status != 1: # rejected/unreachable/stale: fall back to a synchronous goal scan
+		_world.call(&"release_flow", pending_handle)
+		_refresh_baseline_collision_flow_synchronous_fallback()
+		return
+	_install_baseline_collision_flow(pending_handle, pending_goal)
 
 
 func world() -> Node:
@@ -148,36 +171,45 @@ func set_cell_blocked(cell: Vector2i, blocked: bool) -> void:
 func _refresh_baseline_collision_flow() -> void:
 	if _world == null or _crowd == null or _baseline_flow_handle == INVALID_HANDLE:
 		return
-	var replacement: int = _create_collision_flow(_baseline_goal_cell)
-	var replacement_goal: Vector2i = _baseline_goal_cell
-	if replacement == INVALID_HANDLE and _floor_layer != null:
-		for cell: Vector2i in _floor_layer.get_used_cells():
-			if cell == _baseline_goal_cell:
-				continue
-			replacement = _create_collision_flow(cell)
-			if replacement != INVALID_HANDLE:
-				replacement_goal = cell
-				break
-	if replacement == INVALID_HANDLE:
-		return
-	if bool(_crowd.call(&"use_navigation_flow_handle", _world, replacement)):
-		_world.call(&"release_flow", _baseline_flow_handle)
-		_baseline_flow_handle = replacement
-		_baseline_goal_cell = replacement_goal
-	else:
-		_world.call(&"release_flow", replacement)
-
-
-func _create_collision_flow(goal_cell: Vector2i) -> int:
-	var handle: int = int(_world.call(
-		&"create_flow_to_cell_with_options", goal_cell,
+	if _baseline_pending_flow_handle != INVALID_HANDLE:
+		_world.call(&"cancel_flow", _baseline_pending_flow_handle)
+		_world.call(&"release_flow", _baseline_pending_flow_handle)
+	_baseline_pending_flow_handle = int(_world.call(
+		&"request_flow_handle_to_cell_with_options", _baseline_goal_cell,
 		DYNAMIC_BLOCKER_MASK, -1
 	))
-	if handle != INVALID_HANDLE and int(_world.call(&"get_flow_status", handle)) == 1:
-		return handle
-	if handle != INVALID_HANDLE:
-		_world.call(&"release_flow", handle)
-	return INVALID_HANDLE
+	_baseline_pending_goal_cell = _baseline_goal_cell
+
+
+# Rare path: the current baseline goal cell itself became unreachable (e.g. the wall
+# just built sealed it off). Scans for a new reachable goal synchronously, same as the
+# original fallback, since this does not happen on every wall placement.
+func _refresh_baseline_collision_flow_synchronous_fallback() -> void:
+	if _world == null or _crowd == null or _floor_layer == null:
+		return
+	for cell: Vector2i in _floor_layer.get_used_cells():
+		if cell == _baseline_goal_cell:
+			continue
+		var handle: int = int(_world.call(
+			&"create_flow_to_cell_with_options", cell,
+			DYNAMIC_BLOCKER_MASK, -1
+		))
+		if handle == INVALID_HANDLE:
+			continue
+		if int(_world.call(&"get_flow_status", handle)) != 1:
+			_world.call(&"release_flow", handle)
+			continue
+		_install_baseline_collision_flow(handle, cell)
+		return
+
+
+func _install_baseline_collision_flow(flow_handle: int, goal_cell: Vector2i) -> void:
+	if bool(_crowd.call(&"use_navigation_flow_handle", _world, flow_handle)):
+		_world.call(&"release_flow", _baseline_flow_handle)
+		_baseline_flow_handle = flow_handle
+		_baseline_goal_cell = goal_cell
+	else:
+		_world.call(&"release_flow", flow_handle)
 
 
 func set_directional_traversal_field(field_id: int, cells: PackedVector2Array, directions: PackedVector2Array) -> void:

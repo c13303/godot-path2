@@ -48,6 +48,13 @@ func _process(delta: float) -> void:
 	if _refresh_timer <= 0.0:
 		_refresh_timer = refresh_interval
 		_refresh_now()
+	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
+	# While a walkability rebuild is pending/active, _refresh_now() (above) has already
+	# hidden any stale routes; skip restarting walkers so they stay hidden instead of
+	# being started again on the very next frame with their pre-rebuild (possibly now
+	# wall-crossing) path.
+	if invalidation != null and _route_refresh_blocked_by_rebuild(invalidation):
+		return
 	_start_ready_route_walkers()
 
 
@@ -91,6 +98,11 @@ func _prepare_descriptors_for_current_phase() -> void:
 func _refresh_now() -> void:
 	var invalidation: BuildingInvalidationController = _manager.get_building_invalidation_controller()
 	if invalidation != null and _route_refresh_blocked_by_rebuild(invalidation):
+		# Walkability just changed and the rebuild that will produce fresh, wall-aware
+		# routes can take multiple frames (budgeted). Hide the previously planned paths
+		# instead of leaving them animating over ground that may now be walled off;
+		# they come back once a fresh signature is planned after the rebuild completes.
+		_hide_all_route_walkers()
 		return
 	var descriptors: Array[Dictionary] = _prepared_descriptors()
 	var next_signature: String = _route_signature(descriptors)
@@ -383,6 +395,16 @@ func _clear_routes() -> void:
 	for runner: PathPreviewRunner in _runners:
 		runner.recycle()
 	_routes.clear()
+
+
+func _hide_all_route_walkers() -> void:
+	for index: int in range(_routes.size()):
+		var route: Dictionary = _routes[index]
+		if not bool(route.get("walkers_started", false)):
+			continue
+		_recycle_runners_for_route(str(route.get("route_key", "")))
+		route["walkers_started"] = false
+		_routes[index] = route
 
 
 func _recycle_runners_for_route(route_key: String) -> void:
