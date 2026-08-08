@@ -10,9 +10,9 @@ const INPUT_MODE_KMOUSE: String = "kmouse"
 const DEFAULT_LANCE_THROW_OFFSET: float = 8.0
 const LANCE_VISUAL_ANCHOR_OFFSET: Vector2 = Vector2(0.0, -2.0)
 
-@onready var steering: Node = $"../../CPP/SteeringSystemNative"
-@onready var agent_manager: Node = $"../../CPP/AgentManagerNative"
-@onready var projectile_system: Node = $"../../CPP/ProjectileSystemNative"
+@onready var steering: Node = $"../../CPP/CrowdRuntime"
+@onready var agent_manager: Node = $"../../CPP/AgentRegistry"
+@onready var projectile_system: Node = $"../../CPP/ProjectileRuntime"
 @onready var fight_system: FightSystem = $"../../fightSystem"
 @onready var game_ui: CanvasLayer = $"../../GameUI"
 @onready var toolbuild: Control = $"../../GameUI/Toolbuild"
@@ -82,7 +82,7 @@ func _ready() -> void:
 	_apply_control_mode_mouse_visibility()
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
-		global_config_node = scene.get_node_or_null("CPP/GlobalConfigNative")
+		global_config_node = scene.get_node_or_null("CPP/SimulationConfig")
 	var floor_layer: TileMapLayer = scene.get_node_or_null("Map/MonTilemap/floor") as TileMapLayer if scene != null else null
 	if floor_layer == null and scene != null:
 		floor_layer = scene.get_node_or_null("Map/MonTilemap/floorz") as TileMapLayer
@@ -507,7 +507,7 @@ func _setup_player() -> void:
 		steering.call("set_agent_control_mode", player_nav_id, CONTROL_MODE_MANUAL)
 	elif not _reported_missing_manual_api:
 		_reported_missing_manual_api = true
-		push_warning("SteeringSystemNative manual-control API is unavailable. Rebuild the GDExtension DLL.")
+		push_warning("CrowdRuntime manual-control API is unavailable. Rebuild the GDExtension DLL.")
 
 	if steering and steering.has_method("set_agent_manual_motion") and player_nav_id >= 0:
 		steering.call("set_agent_manual_motion", player_nav_id, player.get("acceleration"), player.get("deceleration"))
@@ -664,7 +664,7 @@ func _update_player_input(delta: float) -> void:
 	if not steering.has_method("set_agent_input"):
 		if not _reported_missing_manual_api:
 			_reported_missing_manual_api = true
-			push_warning("SteeringSystemNative.set_agent_input is unavailable. Rebuild the GDExtension DLL.")
+			push_warning("CrowdRuntime.set_agent_input is unavailable. Rebuild the GDExtension DLL.")
 		return
 
 	var dir: Vector2 = Vector2.ZERO

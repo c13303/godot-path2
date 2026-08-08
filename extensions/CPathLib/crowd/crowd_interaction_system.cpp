@@ -101,6 +101,7 @@ namespace ffcore
                         impulse.decay_per_second = target->profile.contact_impulse_decay;
                         impulse.control_suppression_seconds =
                             target->profile.contact_control_suppression;
+                        impulse.stop_on_control_restore = true;
                         impulse.priority = config.contact_impulse_priority;
                         result.push_back({push_second ? second_handle : first_handle, impulse});
                         const double cooldown = std::max(
@@ -136,6 +137,7 @@ namespace ffcore
                 impulse.decay_per_second = 0.65;
                 impulse.control_suppression_seconds =
                     config.right_of_way_control_suppression;
+                impulse.stop_on_control_restore = true;
                 impulse.priority = config.right_of_way_impulse_priority;
                 result.push_back({loser_handle, impulse});
                 right_of_way_cooldowns[key(loser_handle)] = config.right_of_way_cooldown;

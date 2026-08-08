@@ -59,6 +59,11 @@
 [ext_resource type="Script" uid="uid://b3w5g6y628mb8" path="res://scripts/ui/fundamental_builder_dialog_controller.gd" id="62_builder_dialog"]
 [ext_resource type="Script" uid="uid://pxs2r7op080a" path="res://scripts/ui/inventor_dialog_controller.gd" id="63_inventor_dialog"]
 [ext_resource type="Script" uid="uid://b0hxiqllnmr55" path="res://scripts/ui/sheep_dialog_controller.gd" id="64_sheep_dialog"]
+[ext_resource type="Script" path="res://scripts/native/simulation_config_service.gd" id="65_sim_config"]
+[ext_resource type="Script" path="res://scripts/native/agent_handle_registry.gd" id="66_agent_registry"]
+[ext_resource type="Script" path="res://scripts/native/navigation_runtime.gd" id="67_navigation_runtime"]
+[ext_resource type="Script" path="res://scripts/native/crowd_runtime.gd" id="68_crowd_runtime"]
+[ext_resource type="Script" path="res://scripts/native/projectile_runtime.gd" id="69_projectile_runtime"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -750,26 +755,35 @@ debug_gardens_lag_ms = 35.0
 [node name="TileHoverInfo" type="Node" parent="CPP" unique_id=445437880]
 script = ExtResource("8_5nq50")
 
-[node name="GlobalConfigNative" type="GlobalConfigNative" parent="CPP" unique_id=583329240]
+[node name="SimulationConfig" type="Node" parent="CPP" unique_id=583329240]
+script = ExtResource("65_sim_config")
 flow_weight = 5.0
 center_pull = 5.0
 
-[node name="AgentManagerNative" type="AgentManagerNative" parent="CPP" unique_id=1027504485]
+[node name="CrowdWorld" type="CrowdWorld2D" parent="CPP" unique_id=100932911]
 
-[node name="Listener" type="Node" parent="CPP/AgentManagerNative" unique_id=1204077203]
+[node name="CrowdRuntime" type="Node" parent="CPP" unique_id=1185593092]
+script = ExtResource("68_crowd_runtime")
+
+[node name="AgentRegistry" type="Node" parent="CPP" unique_id=1027504485]
+script = ExtResource("66_agent_registry")
+
+[node name="Listener" type="Node" parent="CPP/AgentRegistry" unique_id=1204077203]
 script = ExtResource("9_v7qf8")
 
-[node name="SpatialGridNative" type="SpatialGridNative" parent="CPP" unique_id=100932911]
-
-[node name="FlowFieldNative" type="FlowFieldNative" parent="CPP" unique_id=1111037510]
+[node name="NavigationRuntime" type="Node2D" parent="CPP" unique_id=1111037510]
 z_index = 1
+script = ExtResource("67_navigation_runtime")
 
-[node name="FlowFieldCode" type="Node2D" parent="CPP/FlowFieldNative" unique_id=299614452]
+[node name="World" type="NavigationWorld2D" parent="CPP/NavigationRuntime"]
+
+[node name="FlowFieldCode" type="Node2D" parent="CPP/NavigationRuntime" unique_id=299614452]
 script = ExtResource("10_8g1qu")
 
-[node name="SteeringSystemNative" type="SteeringSystemNative" parent="CPP" unique_id=1185593092]
+[node name="ProjectileWorld" type="ProjectileWorld2D" parent="CPP"]
 
-[node name="ProjectileSystemNative" type="ProjectileSystemNative" parent="CPP" unique_id=1185593093]
+[node name="ProjectileRuntime" type="Node" parent="CPP" unique_id=1185593093]
+script = ExtResource("69_projectile_runtime")
 
 [node name="NavigationWorld" type="NavigationWorld2D" parent="CPP" unique_id=1185593094]
 
@@ -834,7 +848,7 @@ script = ExtResource("49_imperial_visuals")
 script = ExtResource("26_building_objects")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 runtime_parent = NodePath("../BuildingObjects")
-steering_system = NodePath("../../CPP/SteeringSystemNative")
+steering_system = NodePath("../../CPP/CrowdRuntime")
 
 [node name="ReservoirSystem" type="Node" parent="Map" unique_id=730695030 node_paths=PackedStringArray("building_object_manager")]
 script = ExtResource("44_reservoir")
@@ -856,11 +870,11 @@ script = ExtResource("18_vt3yt")
 plantz = NodePath("../MonTilemap/plantz")
 blocking_buildings = NodePath("../MonTilemap/blocking_buildings")
 plant_manager = NodePath("../PlantManager")
-flow = NodePath("../../CPP/FlowFieldNative")
-agent_manager = NodePath("../../CPP/AgentManagerNative")
+flow = NodePath("../../CPP/NavigationRuntime")
+agent_manager = NodePath("../../CPP/AgentRegistry")
 navigation_world = NodePath("../../CPP/NavigationWorld")
 parent_for_agents = NodePath("../..")
-global_config = NodePath("../../CPP/GlobalConfigNative")
+global_config = NodePath("../../CPP/SimulationConfig")
 
 [node name="fightSystem" type="Node" parent="." unique_id=1631584488]
 script = ExtResource("19_gvmlv")

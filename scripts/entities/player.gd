@@ -9,7 +9,7 @@ const HEALTH_BAR_SPRITE_GAP: float = 4.0
 @export var deceleration: float = 1200.0
 @export var max_health: int = 100
 
-## Max movement speed. 0 = inherit the global agent_max_speed from GlobalConfigNative.
+## Max movement speed. 0 = inherit the global agent_max_speed from SimulationConfig.
 @export var max_speed: float = 0.0
 
 @export_group("Sprite")

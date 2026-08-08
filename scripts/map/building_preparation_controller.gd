@@ -144,7 +144,7 @@ func run_night_preparation(token: int) -> bool:
 		return false
 
 	if not _spawner_route_service.flow_uses_async_requests() and not _spawner_route_service.flow_supports_sync_assign():
-		push_error("BuildingManager: FlowFieldNative cannot assign group routes; night preparation cannot spawn monsters.")
+		push_error("BuildingManager: NavigationRuntime cannot assign group routes; night preparation cannot spawn monsters.")
 		# Fail closed: keep the current night preparation token active and unready so
 		# spawning remains gated until an authoritative phase reset cancels it.
 		return false
@@ -177,7 +177,7 @@ func run_client_preparation(token: int) -> bool:
 		return false
 
 	if not _spawner_route_service.flow_uses_async_requests() and not _spawner_route_service.flow_supports_sync_assign():
-		push_error("BuildingManager: FlowFieldNative cannot assign group routes; client preparation cannot spawn clients.")
+		push_error("BuildingManager: NavigationRuntime cannot assign group routes; client preparation cannot spawn clients.")
 		_abort_client_if_current(token)
 		return false
 

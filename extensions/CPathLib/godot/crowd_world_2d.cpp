@@ -15,6 +15,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_world_paused", "paused"), &CrowdWorld2D::set_world_paused);
         ClassDB::bind_method(D_METHOD("is_world_paused"), &CrowdWorld2D::is_world_paused);
         ClassDB::bind_method(D_METHOD("use_navigation_flow", "navigation"), &CrowdWorld2D::use_navigation_flow);
+        ClassDB::bind_method(D_METHOD("use_navigation_flow_handle", "navigation", "flow_handle"), &CrowdWorld2D::use_navigation_flow_handle);
         ClassDB::bind_method(D_METHOD("install_navigation_flow", "navigation", "flow_handle"), &CrowdWorld2D::install_navigation_flow);
         ClassDB::bind_method(D_METHOD("remove_navigation_flow", "flow_handle"), &CrowdWorld2D::remove_navigation_flow);
         ClassDB::bind_method(D_METHOD("configure_default_profile", "radius", "maximum_speed", "acceleration", "deceleration", "separation_radius", "separation_weight", "arrival_radius", "terrain_speed_channel", "category_mask"), &CrowdWorld2D::configure_default_profile);
@@ -27,6 +28,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_handle", "profile_handle"), &CrowdWorld2D::set_agent_profile);
         ClassDB::bind_method(D_METHOD("set_agent_position", "agent_handle", "position", "clear_velocity"), &CrowdWorld2D::set_agent_position, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("set_agent_motion_limits", "agent_handle", "maximum_speed", "acceleration", "deceleration"), &CrowdWorld2D::set_agent_motion_limits);
+        ClassDB::bind_method(D_METHOD("set_agent_collision_offset", "agent_handle", "offset"), &CrowdWorld2D::set_agent_collision_offset);
         ClassDB::bind_method(D_METHOD("set_agent_contact_profile", "agent_handle", "push_strength", "resistance", "cooldown", "impulse_decay", "control_suppression"), &CrowdWorld2D::set_agent_contact_profile);
         ClassDB::bind_method(D_METHOD("set_agent_traffic_state", "agent_handle", "group_token", "priority"), &CrowdWorld2D::set_agent_traffic_state);
         ClassDB::bind_method(D_METHOD("configure_agent_interactions", "contact_push_enabled", "right_of_way_enabled", "right_of_way_push_speed", "right_of_way_cooldown", "right_of_way_control_suppression"), &CrowdWorld2D::configure_agent_interactions);
@@ -243,6 +245,18 @@ namespace godot
         return true;
     }
 
+    bool CrowdWorld2D::use_navigation_flow_handle(
+        NavigationWorld2D *navigation, std::int64_t encoded_flow)
+    {
+        if (navigation == nullptr)
+            return false;
+        ffcore::FlowField field;
+        if (!navigation->copy_flow(decode_flow_handle(encoded_flow), field))
+            return false;
+        crowd.set_shared_flow(field);
+        return true;
+    }
+
     bool CrowdWorld2D::install_navigation_flow(
         NavigationWorld2D *navigation,
         std::int64_t encoded_flow)
@@ -364,6 +378,13 @@ namespace godot
     {
         return crowd.set_agent_motion_limits(
             decode_handle(agent_handle), maximum_speed, acceleration, deceleration);
+    }
+
+    bool CrowdWorld2D::set_agent_collision_offset(
+        std::int64_t agent_handle, Vector2 offset)
+    {
+        return crowd.set_agent_collision_offset(
+            decode_handle(agent_handle), {offset.x, offset.y});
     }
 
     std::int64_t CrowdWorld2D::create_cohort()

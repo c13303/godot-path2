@@ -286,7 +286,7 @@ func _ready() -> void:
 	# upload so water and authored fences participate in both native speed channels.
 	_resolve_level_layers()
 	var scene: Node = get_tree().current_scene
-	_terrain_speed_modifier.setup(scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null)
+	_terrain_speed_modifier.setup(scene.get_node_or_null("CPP/CrowdRuntime") if scene != null else null)
 	_building_navigation_sync.setup(self, _terrain_speed_modifier)
 	_building_navigation_sync.sync_all_terrain_speed_cells()
 	_building_invalidation_controller.setup(self, _preparation_work_gate, _building_navigation_sync)

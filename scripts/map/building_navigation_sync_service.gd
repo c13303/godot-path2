@@ -172,7 +172,7 @@ func _get_steering_system() -> Node:
 	var scene: Node = _manager.get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("CPP/SteeringSystemNative")
+	return scene.get_node_or_null("CPP/CrowdRuntime")
 
 
 func building_item_blocks_player(item_id: String) -> bool:

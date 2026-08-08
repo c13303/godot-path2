@@ -177,7 +177,7 @@ func _steering_system() -> Node:
 	var scene: Node = _manager.get_tree().current_scene
 	if scene == null:
 		return null
-	return scene.get_node_or_null("CPP/SteeringSystemNative")
+	return scene.get_node_or_null("CPP/CrowdRuntime")
 
 
 func _request_actor_cell_recheck(actor: Node2D) -> void:

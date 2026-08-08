@@ -285,7 +285,7 @@ Notes:
 Captures the root-level `bamboo` container's direct Node2D children into stable floor cells (deduplicated, sorted by Y then X) before freeing the authored level shell. The markers are editor aids only: never mutated or reparented as gameplay visuals. A level with no container yields an empty list without error.
 
 ## TerrainSpeedModifierService / BuildingNavigationSyncService
-`TerrainSpeedModifierService` owns terrain-speed composition and native uploads. Contributions are keyed by stable source id per cell/channel, then composed as strongest slowdown first, otherwise strongest speed-up. Native terrain speed lives on `SteeringSystemNative` and affects physical movement only; flow fields and async flow workers do not read or rebuild for terrain speed.
+`TerrainSpeedModifierService` owns terrain-speed composition and native uploads. Contributions are keyed by stable source id per cell/channel, then composed as strongest slowdown first, otherwise strongest speed-up. Native terrain speed lives on `CrowdRuntime` and affects physical movement only; flow fields and async flow workers do not read or rebuild for terrain speed.
 
 Channel `0` is the default terrain-speed channel. Channel `1` is currently assigned to the player profile so player-exempt slowdowns can upload a neutral channel-specific value while other agents fall back to channel `0`. The native side treats channels as integers and does not know which gameplay entity a channel represents.
 

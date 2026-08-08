@@ -775,7 +775,7 @@ func _reset_game_impl() -> void:
 
 func _unregister_scene_agents() -> void:
 	var scene: Node = get_tree().current_scene
-	var agent_manager: Node = scene.get_node_or_null("CPP/AgentManagerNative") if scene else null
+	var agent_manager: Node = scene.get_node_or_null("CPP/AgentRegistry") if scene else null
 	if agent_manager == null or not agent_manager.has_method("unregister_agent"):
 		_log("No native agent manager found before scene reload")
 		return

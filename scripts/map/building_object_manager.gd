@@ -10,7 +10,7 @@ signal restore_batch_finished
 @export var blocking_buildings: TileMapLayer
 @export var fences: TileMapLayer
 @export var runtime_parent: Node2D
-# Generic static-obstacle steering system (CPP/SteeringSystemNative). Blocking buildings
+# Generic static-obstacle steering system (CPP/CrowdRuntime). Blocking buildings
 # register a circular static obstacle here so agents are locally pushed around them.
 @export var steering_system: Node
 # Tile is visually square but a round collision favors sliding; keep it < 0.5.

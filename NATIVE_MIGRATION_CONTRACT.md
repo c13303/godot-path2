@@ -326,19 +326,17 @@ migration source.
 
 ## Current lifecycle and update-order contract
 
-The current main scene instantiates siblings in this order:
+After the pass-7 scene cutover, the main scene instantiates:
 
-1. global configuration;
-2. agent manager;
-3. spatial grid;
-4. flow-field node and its Godot layer-upload child;
-5. steering node;
-6. projectile node;
-7. generic `NavigationWorld2D` used by building A*.
+1. a project-owned `SimulationConfig` node;
+2. one generic `CrowdWorld2D` and its project `CrowdRuntime` interpretation layer;
+3. the project `AgentHandleRegistry`;
+4. one persistent generic `NavigationWorld2D` under `NavigationRuntime` for flow/collision data;
+5. one generic `ProjectileWorld2D` and its project `ProjectileRuntime` interpretation layer;
+6. a separate generic `NavigationWorld2D` used for building A* queries.
 
-Construction-time globals currently make the agent/steering pointers available before `_ready`.
-At runtime, completed async group flows are installed by the flow node before steering updates, and
-projectiles update after steering. The one-world replacement must make this explicit:
+There are no construction-time native globals and no duplicate simulation worlds. Runtime order is
+explicitly owned by the instance nodes and project adapters:
 
 1. poll/install navigation jobs;
 2. update effect volumes and contact/right-of-way requests;

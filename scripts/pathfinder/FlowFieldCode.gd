@@ -3,7 +3,7 @@ extends Node2D
 signal flow_field_ready
 signal loading_progress(progress: float, label: String)
 
-@onready var ff: FlowFieldNative = get_parent()
+@onready var ff: NavigationRuntime = get_parent()
 @onready var floor_layer: TileMapLayer = $"../../../Map/MonTilemap/floor"
 @onready var wall_layer: TileMapLayer = $"../../../Map/MonTilemap/wallz"
 @onready var water_layer: TileMapLayer = $"../../../Map/MonTilemap/watersources"
@@ -28,7 +28,7 @@ func _ready() -> void:
 	CppDebugOptions.dlog("FlowFieldCode: _ready() called")
 
 	if ff == null:
-		print("FlowFieldCode: FlowFieldNative node not found.")
+		print("FlowFieldCode: NavigationRuntime node not found.")
 		return
 
 	#print("FlowFieldCode: assigning layers...")
@@ -114,6 +114,6 @@ func _level_context_suffix(level_context: String) -> String:
 
 func _on_mouse_goal(world_pos: Vector2) -> void:
 	if ff == null:
-		push_warning("FlowFieldCode: FlowFieldNative not ready.")
+		push_warning("FlowFieldCode: NavigationRuntime not ready.")
 		return
 	ff.rebuild_async(world_pos)

@@ -48,10 +48,15 @@ namespace ffcore
                     state.active_decay = state.pending.decay_per_second;
                     state.suppression_remaining = state.pending.control_suppression_seconds;
                     state.preserve_navigation = state.pending.preserve_navigation;
+                    state.stop_on_control_restore = state.pending.stop_on_control_restore;
                     state.has_pending = false;
                 }
             }
+            const double previous_suppression = state.suppression_remaining;
             state.suppression_remaining = std::max(0.0, state.suppression_remaining - delta);
+            if (state.stop_on_control_restore && previous_suppression > 0.0 &&
+                state.suppression_remaining <= 0.0)
+                state.active_velocity = {};
             const double multiplier = std::max(0.0, 1.0 - state.active_decay * delta);
             state.active_velocity = state.active_velocity * multiplier;
             if (state.active_velocity.length_squared() < 1e-8)

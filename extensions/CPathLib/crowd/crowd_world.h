@@ -54,6 +54,9 @@ namespace ffcore
         const DirectionalMotionField *directional_field_for(const CrowdAgentState &agent) const;
         Vec2 static_obstacle_repulsion(const CrowdAgentState &agent) const;
         void resolve_static_obstacle_overlaps(CrowdAgentState &agent) const;
+        bool is_collision_shape_passable(const CrowdAgentState &agent,
+                                         const Vec2 &position,
+                                         const FlowField *flow) const;
         Vec2 resolve_motion(const CrowdAgentState &agent, const Vec2 &candidate,
                             const FlowField *flow) const;
         void recompute_maximum_agent_radius();
@@ -82,6 +85,7 @@ namespace ffcore
         bool set_agent_position(AgentHandle agent, const Vec2 &position, bool clear_velocity);
         bool set_agent_motion_limits(AgentHandle agent, double maximum_speed,
                                      double acceleration, double deceleration);
+        bool set_agent_collision_offset(AgentHandle agent, const Vec2 &offset);
         bool set_agent_contact_profile(
             AgentHandle agent, double push_strength, double resistance,
             double cooldown, double impulse_decay, double control_suppression);

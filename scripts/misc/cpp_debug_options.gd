@@ -254,8 +254,8 @@ func _setup_tile_hover_info() -> void:
 	if not scene:
 		return
 	var floorz: TileMapLayer = scene.get_node_or_null("Map/MonTilemap/floor") as TileMapLayer
-	var steering: Node = get_node_or_null("SteeringSystemNative")
-	var flow: Node = get_node_or_null("FlowFieldNative")
+	var steering: Node = get_node_or_null("CrowdRuntime")
+	var flow: Node = get_node_or_null("NavigationRuntime")
 	var fps_label: Label = scene.get_node_or_null("GameUI/CanvasLayer/CPP_Debug_Label") as Label
 	_fps_label = fps_label
 	var game_ui: Node = scene.get_node_or_null("GameUI")
@@ -291,7 +291,7 @@ func _input(event: InputEvent) -> void:
 ## Point the flow-field debug overlay at the clicked agent's group (0 = clear). Falls back
 ## to the group the agent is waiting on when it has not been attached to a routing group yet.
 func _select_flow_field_for_clicked_agent() -> void:
-	var flow: Node = get_node_or_null("FlowFieldNative")
+	var flow: Node = get_node_or_null("NavigationRuntime")
 	if flow == null or not flow.has_method("set_debug_draw_group"):
 		return
 	var clicked_agent: Node2D = _nearest_clicked_agent()
@@ -302,7 +302,7 @@ func _select_flow_field_for_clicked_agent() -> void:
 	if nav_id < 0:
 		return
 	var group_id: int = 0
-	var steering: Node = get_node_or_null("SteeringSystemNative")
+	var steering: Node = get_node_or_null("CrowdRuntime")
 	if steering and steering.has_method("get_agent_debug_snapshot"):
 		var snapshot: Dictionary = steering.call("get_agent_debug_snapshot", nav_id) as Dictionary
 		group_id = int(snapshot.get("group", 0))
@@ -637,7 +637,7 @@ func _end_dev_night() -> void:
 
 
 func _log_clicked_agent_debug_snapshot() -> void:
-	var steering: Node = get_node_or_null("SteeringSystemNative")
+	var steering: Node = get_node_or_null("CrowdRuntime")
 	if steering == null or not steering.has_method("get_agent_debug_snapshot"):
 		return
 	var clicked_agent: Node2D = _nearest_clicked_agent()
@@ -714,7 +714,7 @@ func _apply_debug_settings() -> void:
 	var eff_enters_exits: bool = show_enters_exits and dbg
 	var eff_verbose: bool = verbose and dbg
 
-	var steering: Node = get_node_or_null("SteeringSystemNative")
+	var steering: Node = get_node_or_null("CrowdRuntime")
 	if steering:
 		_call_if_available(steering, "set_debug_disable_all_debug", not dbg)
 		_call_if_available(steering, "set_debug_draw_world_hitbox", eff_world_hitboxes)
@@ -724,7 +724,7 @@ func _apply_debug_settings() -> void:
 		_call_if_available(steering, "set_debug_show_agent_state_labels", eff_agent_labels)
 		_call_if_available(steering, "set_debug_redraw_interval", refresh_interval)
 
-	var global_config: Node = get_node_or_null("GlobalConfigNative")
+	var global_config: Node = get_node_or_null("SimulationConfig")
 	if global_config:
 		_call_if_available(global_config, "set_draw_flow_field", eff_flow_field)
 		_call_first_available(global_config, [
@@ -748,7 +748,7 @@ func _apply_debug_settings() -> void:
 		_call_if_available(global_config, "set_priority_separation_bias", priority_separation_bias)
 		_apply_speed_multiplier(global_config)
 
-	var flow: Node = get_node_or_null("FlowFieldNative")
+	var flow: Node = get_node_or_null("NavigationRuntime")
 	if flow:
 		_call_if_available(flow, "set_debug_draw", eff_flow_field)
 

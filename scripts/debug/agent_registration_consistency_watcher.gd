@@ -4,7 +4,7 @@ extends Node
 # ---------------------------------------------------------------------------
 # Diagnostic-only watcher for Godot/native agent registration leaks.
 #
-# Agents are registered through AgentManagerNative.spawn_agent() and normally
+# Agents are registered through AgentRegistry.spawn_agent() and normally
 # removed through unregister_agent(). Some Godot navigation-phase collections
 # discard invalid node references without being able to check whether the
 # matching native agent was ever unregistered. An agent freed outside the
@@ -17,7 +17,7 @@ extends Node
 #
 # It NEVER unregisters agents, repairs state, mutates anything, or prints routine
 # status. It reads native state through the read-only, gameplay-agnostic
-# AgentManagerNative.get_registration_debug_snapshot(). When Debug Enabled is off
+# AgentRegistry.get_registration_debug_snapshot(). When Debug Enabled is off
 # it performs no scans and no native calls at all.
 # ---------------------------------------------------------------------------
 
@@ -118,7 +118,7 @@ func _run_check() -> void:
 		_reported_signature = signature
 
 
-## Resolves AgentManagerNative once (a sibling under the shared CPP node) without
+## Resolves AgentRegistry once (a sibling under the shared CPP node) without
 ## hardcoding a level scene name. Re-resolves if the cached reference went stale.
 func _resolve_agent_manager() -> Node:
 	if _agent_manager != null and is_instance_valid(_agent_manager):
@@ -126,7 +126,7 @@ func _resolve_agent_manager() -> Node:
 	var parent: Node = get_parent()
 	if parent == null:
 		return null
-	_agent_manager = parent.get_node_or_null(^"AgentManagerNative")
+	_agent_manager = parent.get_node_or_null(^"AgentRegistry")
 	return _agent_manager
 
 
@@ -152,36 +152,26 @@ func _build_report(agent_manager: Node) -> Dictionary:
 
 	# --- Native registration snapshot ----------------------------------------
 	var snapshot: Dictionary = agent_manager.call(&"get_registration_debug_snapshot") as Dictionary
-	var core_ids: PackedInt32Array = snapshot.get("core_agent_ids", PackedInt32Array()) as PackedInt32Array
-	var steering_ids: PackedInt32Array = snapshot.get("steering_agent_ids", PackedInt32Array()) as PackedInt32Array
-	var agent_node_ids: PackedInt32Array = snapshot.get("agent_node_mapping_ids", PackedInt32Array()) as PackedInt32Array
-	var steering_node_ids: PackedInt32Array = snapshot.get("steering_node_mapping_ids", PackedInt32Array()) as PackedInt32Array
+	var crowd_handles: PackedInt64Array = snapshot.get("crowd_agent_handles", PackedInt64Array()) as PackedInt64Array
+	var mapped_handles: PackedInt64Array = snapshot.get("agent_node_mapping_handles", PackedInt64Array()) as PackedInt64Array
 
-	var core_set: Dictionary = _to_set(core_ids)
-	var steering_set: Dictionary = _to_set(steering_ids)
-	var agent_node_set: Dictionary = _to_set(agent_node_ids)
-	var steering_node_set: Dictionary = _to_set(steering_node_ids)
+	var crowd_set: Dictionary = _to_set(crowd_handles)
+	var mapped_set: Dictionary = _to_set(mapped_handles)
 	var godot_set: Dictionary = _array_to_set(godot_ids)
 
 	# Union of every native structure: an id present in any of them but with no
 	# live Godot node is the leak this watcher exists to find.
 	var native_union: Dictionary = {}
-	_merge_set(native_union, core_set)
-	_merge_set(native_union, steering_set)
-	_merge_set(native_union, agent_node_set)
-	_merge_set(native_union, steering_node_set)
+	_merge_set(native_union, crowd_set)
+	_merge_set(native_union, mapped_set)
 
 	var native_without_godot: Array[int] = _difference(native_union, godot_set)
-	var godot_without_native: Array[int] = _difference(godot_set, core_set)
+	var godot_without_native: Array[int] = _difference(godot_set, crowd_set)
 
 	# Suspicious set disagreements (compare sets, not counts).
-	var core_vs_steering_differ: bool = not _sets_equal(core_set, steering_set)
-	var agent_mapping_differs: bool = not _sets_equal(agent_node_set, core_set)
-	var steering_mapping_differs: bool = not _sets_equal(steering_node_set, steering_set)
+	var agent_mapping_differs: bool = not _sets_equal(mapped_set, crowd_set)
 
-	var has_mismatch: bool = core_vs_steering_differ \
-		or agent_mapping_differs \
-		or steering_mapping_differs \
+	var has_mismatch: bool = agent_mapping_differs \
 		or native_without_godot.size() > 0 \
 		or godot_without_native.size() > 0 \
 		or duplicate_nav_ids.size() > 0 \
@@ -190,17 +180,13 @@ func _build_report(agent_manager: Node) -> Dictionary:
 	var report: Dictionary = {
 		"has_mismatch": has_mismatch,
 		"godot_live_count": godot_ids.size(),
-		"core_count": core_ids.size(),
-		"steering_count": steering_ids.size(),
-		"agent_node_count": agent_node_ids.size(),
-		"steering_node_count": steering_node_ids.size(),
+		"crowd_count": crowd_handles.size(),
+		"mapped_count": mapped_handles.size(),
 		"native_without_godot": native_without_godot,
 		"godot_without_native": godot_without_native,
 		"duplicate_nav_ids": duplicate_nav_ids,
 		"invalid_nav_nodes": invalid_nav_nodes,
-		"core_vs_steering_differ": core_vs_steering_differ,
 		"agent_mapping_differs": agent_mapping_differs,
-		"steering_mapping_differs": steering_mapping_differs,
 	}
 	report["signature"] = _signature_for(report)
 	return report
@@ -250,7 +236,7 @@ func _collect_live_agents(nav_id_to_descriptors: Dictionary, invalid_nav_nodes: 
 # Set helpers (Dictionary used as an int set: id -> true)
 # ---------------------------------------------------------------------------
 
-func _to_set(ids: PackedInt32Array) -> Dictionary:
+func _to_set(ids: PackedInt64Array) -> Dictionary:
 	var out: Dictionary = {}
 	for id: int in ids:
 		out[id] = true
@@ -300,14 +286,12 @@ func _signature_for(report: Dictionary) -> String:
 	var duplicate_keys: Array = (report["duplicate_nav_ids"] as Dictionary).keys()
 	duplicate_keys.sort()
 	var invalid_nav_nodes: Array = report["invalid_nav_nodes"] as Array
-	return "nwg=%s|gwn=%s|dup=%s|inv=%s|cs=%s|am=%s|sm=%s" % [
+	return "nwg=%s|gwn=%s|dup=%s|inv=%s|am=%s" % [
 		str(report["native_without_godot"]),
 		str(report["godot_without_native"]),
 		str(duplicate_keys),
 		str(invalid_nav_nodes),
-		str(report["core_vs_steering_differ"]),
 		str(report["agent_mapping_differs"]),
-		str(report["steering_mapping_differs"]),
 	]
 
 
@@ -321,20 +305,12 @@ func _format_error(report: Dictionary) -> String:
 
 	var lines: Array[String] = []
 	lines.append("[AgentRegistrationWatcher] Persistent Godot/native mismatch:")
-	lines.append("Godot live=%d, core=%d, steering=%d" % [
+	lines.append("Godot live=%d, CPathLib crowd=%d, mapped nodes=%d" % [
 		int(report["godot_live_count"]),
-		int(report["core_count"]),
-		int(report["steering_count"]),
+		int(report["crowd_count"]),
+		int(report["mapped_count"]),
 	])
-	lines.append("native_mapping counts: agent_node=%d, steering_node=%d" % [
-		int(report["agent_node_count"]),
-		int(report["steering_node_count"]),
-	])
-	lines.append("core_vs_steering_differ=%s, agent_mapping_differs=%s, steering_mapping_differs=%s" % [
-		str(report["core_vs_steering_differ"]),
-		str(report["agent_mapping_differs"]),
-		str(report["steering_mapping_differs"]),
-	])
+	lines.append("agent_mapping_differs=%s" % str(report["agent_mapping_differs"]))
 	lines.append("native_without_godot=%s" % str(report["native_without_godot"]))
 	lines.append("godot_without_native=%s" % str(report["godot_without_native"]))
 	lines.append("duplicates=%s" % _format_descriptor_map(report["duplicate_nav_ids"] as Dictionary))

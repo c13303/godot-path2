@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../core/types.h"
+
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -19,6 +21,7 @@ namespace ffcore
     struct CrowdAgentProfile
     {
         double radius = 8.0;
+        Vec2 collision_offset;
         double maximum_speed = 80.0;
         double acceleration = 400.0;
         double deceleration = 500.0;

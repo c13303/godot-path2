@@ -10,6 +10,14 @@ signal agent_unregistered(agent_handle: int)
 signal agent_event(event_name: StringName, agent_handle: int, payload: Dictionary)
 
 const INVALID_HANDLE: int = 0
+const IDLE_COHORT: int = 0
+const CATEGORY_PLAYER: int = 1 << 0
+const CATEGORY_MAIN_CHARACTER: int = 1 << 1
+const CATEGORY_HOSTILE: int = 1 << 2
+
+@export var crowd_path: NodePath = NodePath("../CrowdWorld")
+@export var crowd_runtime_path: NodePath = NodePath("../CrowdRuntime")
+@export var simulation_config_path: NodePath = NodePath("../SimulationConfig")
 
 var _crowd: Node
 var _nodes_by_handle: Dictionary = {}
@@ -19,6 +27,15 @@ var _cohort_by_agent: Dictionary = {}
 var _project_state_by_agent: Dictionary = {}
 var _automatic_step: bool = true
 var _paused: bool = false
+var _current_selected_cohort: int = IDLE_COHORT
+var _flow_wait_by_cohort: Dictionary = {}
+
+
+func _ready() -> void:
+	if _crowd == null:
+		var candidate: Node = get_node_or_null(crowd_path)
+		if candidate != null:
+			setup(candidate, true)
 
 
 func setup(crowd_world: Node, automatic_step: bool = true) -> bool:
@@ -75,6 +92,24 @@ func register_agent(node: Node2D, profile: Dictionary = {}, cohort_handle: int =
 	return handle
 
 
+func spawn_agent(node: Node2D, cohort_handle: int) -> int:
+	var profile: Dictionary = _profile_for_scene_node(node)
+	var handle: int = register_agent(node, profile, cohort_handle)
+	if handle != INVALID_HANDLE:
+		node.set("nav_id", handle)
+		update_godot_agent(node, handle)
+	return handle
+
+
+func update_godot_agent(node: Node2D, agent_handle: int) -> void:
+	if node == null:
+		return
+	send_agent_event(&"spawned", agent_handle, {
+		"node_path": node.get_path(),
+		"position": node.global_position,
+	})
+
+
 func unregister_agent(agent_handle: int) -> bool:
 	if agent_handle == INVALID_HANDLE or _crowd == null:
 		return false
@@ -111,6 +146,10 @@ func create_cohort() -> int:
 	return int(_crowd.call(&"create_cohort"))
 
 
+func create_group() -> int:
+	return create_cohort()
+
+
 func remove_cohort(cohort_handle: int) -> bool:
 	if _crowd == null or cohort_handle == INVALID_HANDLE:
 		return false
@@ -126,6 +165,47 @@ func remove_cohort(cohort_handle: int) -> bool:
 	return bool(_crowd.call(&"remove_cohort", cohort_handle))
 
 
+func dissolve_group(cohort_handle: int) -> void:
+	remove_cohort(cohort_handle)
+	_flow_wait_by_cohort.erase(cohort_handle)
+
+
+func cleanup_groups() -> void:
+	# Generational cohorts have no fixed pool pressure. Empty cohorts are removed
+	# explicitly by their routing owner, so selection cleanup has no hidden mutation.
+	pass
+
+
+func set_current_selected_group(cohort_handle: int) -> void:
+	_current_selected_cohort = cohort_handle
+
+
+func mark_group_has_order(_cohort_handle: int) -> void:
+	pass
+
+
+func count_group_members(cohort_handle: int) -> int:
+	return cohort_member_count(cohort_handle)
+
+
+func count_group_route_references(cohort_handle: int) -> int:
+	var count: int = cohort_member_count(cohort_handle)
+	for raw_handle: Variant in _project_state_by_agent:
+		var state: Dictionary = _project_state_by_agent[raw_handle] as Dictionary
+		if int(state.get("waiting_flow_cohort", IDLE_COHORT)) == cohort_handle:
+			count += 1
+	return count
+
+
+func get_group_flow_wait(cohort_handle: int) -> int:
+	return int(_flow_wait_by_cohort.get(cohort_handle, 0))
+
+
+func set_group_flow_wait(cohort_handle: int, state: int) -> void:
+	if cohort_handle != IDLE_COHORT:
+		_flow_wait_by_cohort[cohort_handle] = state
+
+
 func assign_agent_to_cohort(agent_handle: int, cohort_handle: int) -> bool:
 	if _crowd == null:
 		return false
@@ -139,6 +219,14 @@ func assign_agent_to_cohort(agent_handle: int, cohort_handle: int) -> bool:
 	if assigned:
 		_cohort_by_agent[agent_handle] = cohort_handle
 	return assigned
+
+
+func assign_agent(node: Node2D, cohort_handle: int) -> void:
+	var agent_handle: int = handle_for_node(node)
+	if agent_handle == INVALID_HANDLE and node != null:
+		agent_handle = int(node.get("nav_id"))
+	if agent_handle != INVALID_HANDLE:
+		assign_agent_to_cohort(agent_handle, cohort_handle)
 
 
 func cohort_for_agent(agent_handle: int) -> int:
@@ -171,6 +259,58 @@ func path_arrived(agent_handle: int) -> bool:
 	)) == 2
 
 
+func assign_agent_path(agent_handle: int, world_points: PackedVector2Array) -> void:
+	follow_path(agent_handle, world_points)
+
+
+func detach_agent_path(agent_handle: int) -> void:
+	if _crowd == null:
+		return
+	var diagnostics: Dictionary = _crowd.call(
+		&"get_agent_diagnostics", agent_handle
+	) as Dictionary
+	if int(diagnostics.get("navigation_source", 0)) == 2:
+		_crowd.call(&"stop_navigation", agent_handle)
+
+
+func agent_path_arrived(agent_handle: int) -> bool:
+	return path_arrived(agent_handle)
+
+
+func detach_agent_flow(agent_handle: int) -> void:
+	if _crowd == null:
+		return
+	var diagnostics: Dictionary = _crowd.call(
+		&"get_agent_diagnostics", agent_handle
+	) as Dictionary
+	if int(diagnostics.get("navigation_source", 0)) == 1:
+		_crowd.call(&"stop_navigation", agent_handle)
+	assign_agent_to_cohort(agent_handle, IDLE_COHORT)
+
+
+func set_agent_waiting_flow_group(agent_handle: int, cohort_handle: int) -> void:
+	var state: Dictionary = get_project_state(agent_handle)
+	state["waiting_flow_cohort"] = cohort_handle
+	set_project_state(agent_handle, state)
+
+
+func set_agent_never_rest(agent_handle: int, value: bool) -> void:
+	var state: Dictionary = get_project_state(agent_handle)
+	state["never_rest"] = value
+	set_project_state(agent_handle, state)
+
+
+func set_agent_phase(agent_handle: int, phase: int, eating_seconds: float = 0.0) -> void:
+	var runtime: Node = get_node_or_null(crowd_runtime_path)
+	if runtime != null:
+		runtime.call(&"set_agent_phase", agent_handle, phase, eating_seconds)
+		return
+	var state: Dictionary = get_project_state(agent_handle)
+	state["phase"] = phase
+	state["eating_seconds"] = eating_seconds
+	set_project_state(agent_handle, state)
+
+
 func set_agent_paused(agent_handle: int, paused: bool) -> bool:
 	return _crowd != null and bool(_crowd.call(
 		&"set_agent_paused", agent_handle, paused
@@ -197,6 +337,10 @@ func get_project_state(agent_handle: int) -> Dictionary:
 
 func send_agent_event(event_name: StringName, agent_handle: int, payload: Dictionary) -> void:
 	agent_event.emit(event_name, agent_handle, payload)
+
+
+func find_node_by_agent(agent_handle: int) -> Node2D:
+	return find_node(agent_handle)
 
 
 func set_world_paused(paused: bool) -> void:
@@ -235,6 +379,11 @@ func _apply_profile(agent_handle: int, profile: Dictionary) -> void:
 	_crowd.call(
 		&"set_agent_motion_limits", agent_handle, maximum_speed, acceleration, deceleration
 	)
+	if _crowd.has_method(&"set_agent_collision_offset"):
+		_crowd.call(
+			&"set_agent_collision_offset", agent_handle,
+			profile.get("collision_offset", Vector2.ZERO) as Vector2
+		)
 	_crowd.call(
 		&"set_agent_contact_profile", agent_handle,
 		maxf(float(profile.get("contact_push_strength", 0.0)), 0.0),
@@ -243,6 +392,40 @@ func _apply_profile(agent_handle: int, profile: Dictionary) -> void:
 		maxf(float(profile.get("contact_impulse_decay", 0.65)), 0.0),
 		maxf(float(profile.get("contact_control_suppression", 0.2)), 0.0)
 	)
+
+
+func _profile_for_scene_node(node: Node2D) -> Dictionary:
+	var category_mask: int = CATEGORY_MAIN_CHARACTER
+	if node.is_in_group(&"player"):
+		category_mask = CATEGORY_PLAYER
+	elif node.is_in_group(&"monsters") or node.is_in_group(&"clients") \
+			or node.is_in_group(&"villagers"):
+		category_mask = CATEGORY_HOSTILE
+	var config: SimulationConfigService = get_node_or_null(simulation_config_path) as SimulationConfigService
+	var maximum_speed: float = config.get_agent_max_speed() if config != null else 150.0
+	if node.is_in_group(&"player") and "max_speed" in node:
+		var requested_speed: float = float(node.get("max_speed"))
+		if requested_speed > 0.0:
+			maximum_speed = requested_speed
+	maximum_speed *= maxf(float(node.get_meta("monster_speed_scale", 1.0)), 0.001)
+	return {
+		"radius": config.get_agent_world_radius() if config != null else 14.4,
+		"maximum_speed": maximum_speed,
+		"acceleration": 900.0,
+		"deceleration": 1200.0,
+		"separation_radius": 32.0,
+		"separation_weight": 600.0,
+		"arrival_radius": 16.0,
+		"terrain_speed_channel": int(node.get_meta("terrain_speed_channel", 0)),
+		"category_mask": category_mask,
+		"contact_push_strength": float(node.get_meta("agent_contact_push_power", 0.0)),
+		"contact_push_resistance": float(node.get_meta("agent_contact_push_resist", 1.0)),
+		"contact_push_cooldown": float(node.get_meta("agent_contact_push_cooldown", 0.2)),
+		"contact_impulse_decay": float(node.get_meta("agent_contact_push_friction_loss", 0.65)),
+		"contact_control_suppression": float(node.get_meta(
+			"agent_contact_control_suppression_seconds", 0.2
+		)),
+	}
 
 
 func _cleanup_stale_nodes() -> void:

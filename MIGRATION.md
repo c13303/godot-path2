@@ -22,8 +22,8 @@ Current completion summary:
 | navigation channels, flow diagnostics, gardens/portals, bottleneck discovery | complete in pass 3 |
 | crowd motion sources, terrain, static obstacles, directional motion, spatial queries | complete in pass 4 |
 | impulses, source handles, contact/traffic forces, effects, generic projectiles | complete in pass 5 |
-| host navigation/agent boundary | pass 6 complete; atomic live-scene cutover is gated with combat in pass 7 |
-| host combat/projectile conversion | pending in pass 7 |
+| host navigation/agent boundary | pass 7 live-scene cutover complete |
+| host combat/projectile conversion | pass 7 live-scene cutover complete |
 | temporary native compatibility extension | must be deleted in pass 8 |
 | separate Git repository and dependency pin | intentionally left to the owner |
 
@@ -61,11 +61,16 @@ host concepts back into CPathLib:
 - `native_runtime_boundary_smoke.gd` verifies configuration, generational registration, async flow
   installation, cohort-driven motion, unregister, and resource release.
 
-These services are deliberately not active alongside the legacy crowd in `mainRun.tscn`. The old
-projectile system obtains collision targets through the legacy crowd singleton, so switching agents
-first would silently break combat. Pass 7 performs one atomic scene cutover after neutral impact and
-effect events have Godot consumers. This preserves one authoritative runtime world at every point
-instead of temporarily updating the same agents in two simulations.
+Pass 7 activated the boundary atomically in `mainRun.tscn`. `CrowdWorld2D`,
+`NavigationWorld2D`, and `ProjectileWorld2D` are now the only live native simulation instances.
+Project-owned Godot adapters interpret authored TileMaps, scene-agent ownership, mission phases,
+damage payloads, projectile gameplay data, and debug presentation. The former native scene nodes
+are no longer instantiated, so there is no duplicate agent, flow, steering, or projectile world.
+
+The live adapter cutover is covered by the reusable CPathLib navigation/crowd/projectile smokes,
+the boundary smoke, a project adapter smoke for movement/effects/projectile impacts, and a clean
+headless startup of the real main scene. The final migration pass deletes the now-unreferenced
+`extensions/rabbit_game_native` source, descriptor, and binary after one last reference audit.
 
 The original review found that the extension was not ready to be copied into another game because
 portable algorithms and project gameplay shared one source/build boundary. The current physical

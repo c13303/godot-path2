@@ -13,6 +13,7 @@ namespace ffcore
         double decay_per_second = 4.0;
         double control_suppression_seconds = 0.0;
         bool preserve_navigation = false;
+        bool stop_on_control_restore = false;
         int priority = 0;
     };
 
@@ -27,6 +28,7 @@ namespace ffcore
             double active_decay = 0.0;
             double suppression_remaining = 0.0;
             bool preserve_navigation = false;
+            bool stop_on_control_restore = false;
             int priority = 0;
         };
 

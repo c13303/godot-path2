@@ -9,6 +9,10 @@ namespace ffcore
     {
         CrowdAgentProfile profile = requested;
         profile.radius = std::isfinite(profile.radius) ? std::max(0.0, profile.radius) : 8.0;
+        profile.collision_offset.x = std::isfinite(profile.collision_offset.x)
+            ? profile.collision_offset.x : 0.0;
+        profile.collision_offset.y = std::isfinite(profile.collision_offset.y)
+            ? profile.collision_offset.y : 0.0;
         profile.maximum_speed = std::isfinite(profile.maximum_speed) ? std::max(0.0, profile.maximum_speed) : 80.0;
         profile.acceleration = std::isfinite(profile.acceleration) ? std::max(0.0, profile.acceleration) : 400.0;
         profile.deceleration = std::isfinite(profile.deceleration) ? std::max(0.0, profile.deceleration) : 500.0;

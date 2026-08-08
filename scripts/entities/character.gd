@@ -458,7 +458,7 @@ func _is_currently_damageable() -> bool:
 		return true
 	return status == "drowning" and _is_client_agent()
 
-# Phase label is rendered by the C++ debug overlay (SteeringSystemNative). These
+# Phase label is rendered by the C++ debug overlay (CrowdRuntime). These
 # start_*/stop_* methods just push the agent's mission phase into AgentData so the
 # overlay is a continuous function of state and can never desync from gameplay.
 func _set_phase(phase: int, eating_seconds: float = 0.0) -> void:
@@ -588,7 +588,7 @@ func _get_agent_manager() -> Node:
 		return _agent_manager
 	var root: Node = get_tree().get_root()
 	if root:
-		_agent_manager = root.find_child("AgentManagerNative", true, false)
+		_agent_manager = root.find_child("AgentRegistry", true, false)
 	return _agent_manager
 
 func set_selected(enabled: bool) -> void:

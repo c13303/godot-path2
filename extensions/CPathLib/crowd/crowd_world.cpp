@@ -147,6 +147,16 @@ namespace ffcore
         return true;
     }
 
+    bool CrowdWorld::set_agent_collision_offset(
+        AgentHandle agent_handle, const Vec2 &offset)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr || !std::isfinite(offset.x) || !std::isfinite(offset.y))
+            return false;
+        agent->profile.collision_offset = offset;
+        return true;
+    }
+
     bool CrowdWorld::set_agent_contact_profile(
         AgentHandle agent_handle, double push_strength, double resistance,
         double cooldown, double impulse_decay, double control_suppression)
@@ -459,20 +469,96 @@ namespace ffcore
         return existing == installed_flows.end() ? nullptr : &existing->second;
     }
 
+    bool CrowdWorld::is_collision_shape_passable(
+        const CrowdAgentState &agent, const Vec2 &position,
+        const FlowField *flow) const
+    {
+        if (flow == nullptr)
+            return true;
+        const Vec2 center = position + agent.profile.collision_offset;
+        const double radius = std::max(0.0, agent.profile.radius);
+        const Vec2i center_cell = flow->world_to_cell(center);
+        if (radius <= 0.0)
+            return flow->is_cell_physics_passable(center_cell);
+
+        const double cell_size = flow->tile_size();
+        const double half_cell = cell_size * 0.5;
+        const int scan_radius = std::max(
+            1, static_cast<int>(std::ceil((radius + half_cell) / cell_size)));
+        for (int y = -scan_radius; y <= scan_radius; ++y)
+        {
+            for (int x = -scan_radius; x <= scan_radius; ++x)
+            {
+                const Vec2i cell(center_cell.x + x, center_cell.y + y);
+                if (flow->is_cell_physics_passable(cell))
+                    continue;
+                const Vec2 cell_center = flow->cell_to_world(cell);
+                const double closest_x = std::clamp(
+                    center.x, cell_center.x - half_cell, cell_center.x + half_cell);
+                const double closest_y = std::clamp(
+                    center.y, cell_center.y - half_cell, cell_center.y + half_cell);
+                const Vec2 difference = center - Vec2(closest_x, closest_y);
+                if (difference.length_squared() < radius * radius - 1e-8)
+                    return false;
+            }
+        }
+        return true;
+    }
+
     Vec2 CrowdWorld::resolve_motion(
         const CrowdAgentState &agent,
         const Vec2 &candidate,
         const FlowField *flow) const
     {
-        if (flow == nullptr || flow->is_cell_physics_passable(flow->world_to_cell(candidate)))
+        if (flow == nullptr)
             return candidate;
-        const Vec2 x_only(candidate.x, agent.position.y);
-        if (flow->is_cell_physics_passable(flow->world_to_cell(x_only)))
-            return x_only;
-        const Vec2 y_only(agent.position.x, candidate.y);
-        if (flow->is_cell_physics_passable(flow->world_to_cell(y_only)))
-            return y_only;
-        return agent.position;
+
+        const Vec2 full_step = candidate - agent.position;
+        const double maximum_substep = std::max(1.0, flow->tile_size() * 0.25);
+        const int substep_count = std::max(
+            1, static_cast<int>(std::ceil(full_step.length() / maximum_substep)));
+        const Vec2 substep = full_step / static_cast<double>(substep_count);
+        Vec2 position = agent.position;
+        for (int index = 0; index < substep_count; ++index)
+        {
+            const Vec2 desired = position + substep;
+            if (is_collision_shape_passable(agent, desired, flow))
+            {
+                position = desired;
+                continue;
+            }
+
+            double low = 0.0;
+            double high = 1.0;
+            for (int iteration = 0; iteration < 10; ++iteration)
+            {
+                const double middle = (low + high) * 0.5;
+                if (is_collision_shape_passable(
+                        agent, position + substep * middle, flow))
+                    low = middle;
+                else
+                    high = middle;
+            }
+            position += substep * low;
+
+            const Vec2 remaining = substep * (1.0 - low);
+            const Vec2 x_only(position.x + remaining.x, position.y);
+            if (std::abs(remaining.x) > 1e-8 &&
+                is_collision_shape_passable(agent, x_only, flow))
+            {
+                position = x_only;
+                continue;
+            }
+            const Vec2 y_only(position.x, position.y + remaining.y);
+            if (std::abs(remaining.y) > 1e-8 &&
+                is_collision_shape_passable(agent, y_only, flow))
+            {
+                position = y_only;
+                continue;
+            }
+            break;
+        }
+        return position;
     }
 
     void CrowdWorld::update(double delta)

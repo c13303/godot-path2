@@ -68,9 +68,9 @@ var _static_collider_prepare_generation: int = 0
 var _paused: bool = false
 
 func _ready() -> void:
-	_steering = get_node_or_null("../CPP/SteeringSystemNative")
-	_projectiles = get_node_or_null("../CPP/ProjectileSystemNative")
-	_agent_manager = get_node_or_null("../CPP/AgentManagerNative")
+	_steering = get_node_or_null("../CPP/CrowdRuntime")
+	_projectiles = get_node_or_null("../CPP/ProjectileRuntime")
+	_agent_manager = get_node_or_null("../CPP/AgentRegistry")
 	_building_manager = get_node_or_null("../Map/BuildingManager")
 	_plant_manager = get_node_or_null("../Map/PlantManager")
 	_plant_layer = get_node_or_null("../Map/MonTilemap/plantz") as TileMapLayer
@@ -340,7 +340,7 @@ func prepare_night_static_colliders_budgeted(budget_ms: float) -> bool:
 	# Always snapshot at night start: walls do not emit PlantManager signals, so
 	# `_static_colliders_dirty` alone cannot prove the wall channel is current.
 	if not _projectiles or not _projectiles.has_method("set_static_collision_cells"):
-		push_error("FightSystem: rebuilt ProjectileSystemNative is required for capped night preparation")
+		push_error("FightSystem: rebuilt ProjectileRuntime is required for capped night preparation")
 		return false
 	_static_collider_prepare_generation += 1
 	var generation: int = _static_collider_prepare_generation
@@ -505,6 +505,7 @@ func _register_spray_projectiles() -> void:
 			"direct_hit_only": weapon.spray_projectile_direct_hit_only,
 			"smash_budget_enabled": weapon.spray_projectile_smash_budget_enabled,
 			"static_collision_mask": weapon.spray_projectile_static_collision_mask,
+			"target_category_mask": weapon.affected_smash_classes,
 			"end_of_life_aoe_enabled": false,
 			"pool_size": weapon.spray_projectile_pool_size,
 		}
@@ -564,6 +565,7 @@ func _register_guns() -> void:
 			"damage": gun.damage,
 			"stopped_by_walls": gun.stopped_by_walls,
 			"static_collision_mask": gun.static_collision_mask,
+			"target_category_mask": gun.affected_smash_classes,
 			"end_of_life_aoe_enabled": gun.end_of_life_aoe_enabled,
 			"end_aoe_radius": gun.end_aoe_radius,
 			"end_aoe_force": gun.end_aoe_force,

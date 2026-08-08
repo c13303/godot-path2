@@ -10,7 +10,7 @@ const RUNNER_SCRIPT: Script = preload("res://scripts/map/path_preview_runner.gd"
 const IDLE_GROUP: int = 0
 
 @export var building_manager_path: NodePath = NodePath("../../BuildingManager")
-@export var flow_path: NodePath = NodePath("../../../CPP/FlowFieldNative")
+@export var flow_path: NodePath = NodePath("../../../CPP/NavigationRuntime")
 @export var preview_z_index: int = -50
 @export_range(1.0, 128.0, 1.0, "or_greater") var footstep_stride_distance: float = 16.0
 @export_range(1.0, 128.0, 1.0, "or_greater") var walk_speed: float = 128.0

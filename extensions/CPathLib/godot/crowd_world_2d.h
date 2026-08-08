@@ -57,6 +57,8 @@ namespace godot
         bool is_world_paused() const;
 
         bool use_navigation_flow(NavigationWorld2D *navigation);
+        bool use_navigation_flow_handle(NavigationWorld2D *navigation,
+                                        std::int64_t flow_handle);
         bool install_navigation_flow(NavigationWorld2D *navigation, std::int64_t flow_handle);
         bool remove_navigation_flow(std::int64_t flow_handle);
         void configure_default_profile(
@@ -82,6 +84,7 @@ namespace godot
                                 bool clear_velocity = true);
         bool set_agent_motion_limits(std::int64_t agent_handle, double maximum_speed,
                                      double acceleration, double deceleration);
+        bool set_agent_collision_offset(std::int64_t agent_handle, Vector2 offset);
         bool set_agent_contact_profile(
             std::int64_t agent_handle, double push_strength, double resistance,
             double cooldown, double impulse_decay, double control_suppression);

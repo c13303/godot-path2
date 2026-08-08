@@ -1463,7 +1463,7 @@ func _connect_startup_loading_signals() -> void:
 	if not scene:
 		return
 
-	var flow_code: Node = scene.get_node_or_null("CPP/FlowFieldNative/FlowFieldCode")
+	var flow_code: Node = scene.get_node_or_null("CPP/NavigationRuntime/FlowFieldCode")
 	if flow_code:
 		if flow_code.has_signal("loading_progress"):
 			flow_code.connect("loading_progress", Callable(self, "_on_startup_loading_progress"))

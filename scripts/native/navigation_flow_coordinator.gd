@@ -1,6 +1,9 @@
 extends Node
 class_name NavigationFlowCoordinator
 
+signal cohort_flow_installed(cohort_handle: int)
+signal cohort_flow_failed(cohort_handle: int)
+
 ## Host-side lifecycle coordinator for CPathLib flow and cohort handles.
 ## CPathLib owns construction and sampling; this object only maps host requests
 ## onto explicit generic handles.
@@ -133,11 +136,13 @@ func _process(_delta: float) -> void:
 		_pending_flow_by_cohort.erase(cohort_handle)
 		if not _install_for_cohort(cohort_handle, flow_handle):
 			_navigation.call(&"release_flow", flow_handle)
+			cohort_flow_failed.emit(cohort_handle)
 	for raw_cohort: Variant in rejected:
 		var cohort_handle: int = int(raw_cohort)
 		var flow_handle: int = int(_pending_flow_by_cohort[cohort_handle])
 		_pending_flow_by_cohort.erase(cohort_handle)
 		_navigation.call(&"release_flow", flow_handle)
+		cohort_flow_failed.emit(cohort_handle)
 
 
 func _install_for_cohort(cohort_handle: int, flow_handle: int) -> bool:
@@ -151,4 +156,5 @@ func _install_for_cohort(cohort_handle: int, flow_handle: int) -> bool:
 	if previous != INVALID_HANDLE and previous != flow_handle:
 		_crowd.call(&"remove_navigation_flow", previous)
 		_navigation.call(&"release_flow", previous)
+	cohort_flow_installed.emit(cohort_handle)
 	return true

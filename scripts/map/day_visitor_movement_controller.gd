@@ -30,7 +30,7 @@ func setup(manager: BuildingManager, diagnostic_label: String) -> void:
 	_manager = manager
 	_diagnostic_label = diagnostic_label
 	var scene: Node = manager.get_tree().current_scene if manager != null else null
-	_steering_system = scene.get_node_or_null("CPP/SteeringSystemNative") if scene != null else null
+	_steering_system = scene.get_node_or_null("CPP/CrowdRuntime") if scene != null else null
 
 
 func spawn(

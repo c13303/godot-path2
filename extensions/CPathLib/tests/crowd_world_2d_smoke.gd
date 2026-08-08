@@ -273,6 +273,70 @@ func _initialize() -> void:
 	navigation.call(&"release_flow", left_flow)
 	navigation.call(&"release_flow", right_flow)
 
+	var collision_navigation: Node = ClassDB.instantiate(&"NavigationWorld2D") as Node
+	var collision_crowd: Node = ClassDB.instantiate(&"CrowdWorld2D") as Node
+	root.add_child(collision_navigation)
+	root.add_child(collision_crowd)
+	collision_crowd.set(&"automatic_step", false)
+	var collision_walkable: PackedVector2Array = PackedVector2Array()
+	for y: int in range(3):
+		for x: int in range(5):
+			if Vector2i(x, y) != Vector2i(2, 1):
+				collision_walkable.append(Vector2(x, y))
+	if not bool(collision_navigation.call(
+		&"configure_grid", Rect2i(0, 0, 5, 3), 10.0, Vector2.ZERO,
+		collision_walkable, PackedVector2Array([Vector2(2, 1)])
+	)) or not bool(collision_navigation.call(&"build_flow_to_cell", Vector2i(4, 1))) \
+			or not bool(collision_crowd.call(&"use_navigation_flow", collision_navigation)):
+		_fail("collision fixture setup failed")
+		return
+	var collision_agent: int = int(collision_crowd.call(
+		&"add_agent", Vector2(5.0, 17.0), 2.0, 100.0, 0.0, 0.0
+	))
+	if collision_agent <= 0 or not bool(collision_crowd.call(
+		&"set_agent_collision_offset", collision_agent, Vector2(0.0, -2.0)
+	)) or not bool(collision_crowd.call(
+		&"set_manual_direction", collision_agent, Vector2.RIGHT
+	)):
+		_fail("offset collision-agent setup failed")
+		return
+	for _index: int in range(20):
+		collision_crowd.call(&"step", 0.05)
+	var stopped_at_wall: Vector2 = collision_crowd.call(
+		&"get_agent_position", collision_agent
+	) as Vector2
+	if stopped_at_wall.x > 18.01 or absf(stopped_at_wall.y - 17.0) > 0.01:
+		_fail("swept offset-circle collision crossed or jittered at a wall: %s" % stopped_at_wall)
+		return
+	var pusher: int = int(collision_crowd.call(
+		&"add_agent", Vector2(35.0, 5.0), 2.0, 0.0, 0.0, 0.0
+	))
+	var pushed: int = int(collision_crowd.call(
+		&"add_agent", Vector2(38.0, 5.0), 2.0, 0.0, 0.0, 0.0
+	))
+	collision_crowd.call(
+		&"set_agent_contact_profile", pusher, 20.0, 1.0, 1.0, 0.1, 0.1
+	)
+	collision_crowd.call(
+		&"set_agent_contact_profile", pushed, 0.0, 1.0, 1.0, 0.1, 0.1
+	)
+	collision_crowd.call(&"configure_agent_interactions", true, false, 0.0, 1.0, 0.1)
+	collision_crowd.call(&"step", 0.01)
+	collision_crowd.call(&"configure_agent_interactions", false, false, 0.0, 1.0, 0.1)
+	collision_crowd.call(&"step", 0.11)
+	var restored_position: Vector2 = collision_crowd.call(
+		&"get_agent_position", pushed
+	) as Vector2
+	collision_crowd.call(&"step", 0.5)
+	var after_restore_position: Vector2 = collision_crowd.call(
+		&"get_agent_position", pushed
+	) as Vector2
+	if after_restore_position.distance_to(restored_position) > 0.001:
+		_fail("contact impulse continued after control restoration")
+		return
+	collision_crowd.queue_free()
+	collision_navigation.queue_free()
+
 	crowd.queue_free()
 	navigation.queue_free()
 	print("CrowdWorld2D smoke test passed")

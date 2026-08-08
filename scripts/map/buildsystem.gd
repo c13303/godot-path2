@@ -62,7 +62,7 @@ const FENCE_ATLAS_BY_MASK: Dictionary = {
 # dialogs / cutscenes) so build input does not act underneath them.
 var _player_controller: Node = null
 var _atlas_source_id: int = -1
-# Cached FlowFieldNative used to keep the player's hard wall collision in sync when a
+# Cached NavigationRuntime used to keep the player's hard wall collision in sync when a
 # wall/building is built or removed during the day (see _refresh_cell_collision).
 var _flow_field: Object = null
 var _steering_system: Node = null
@@ -637,7 +637,7 @@ func _resolve_flow_field() -> Object:
 		return _flow_field
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
-		_flow_field = scene.get_node_or_null("CPP/FlowFieldNative")
+		_flow_field = scene.get_node_or_null("CPP/NavigationRuntime")
 	return _flow_field
 
 
@@ -646,7 +646,7 @@ func _resolve_steering_system() -> Node:
 		return _steering_system
 	var scene: Node = get_tree().get_current_scene()
 	if scene:
-		_steering_system = scene.get_node_or_null("CPP/SteeringSystemNative")
+		_steering_system = scene.get_node_or_null("CPP/CrowdRuntime")
 	return _steering_system
 
 
