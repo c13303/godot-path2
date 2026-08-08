@@ -1,6 +1,7 @@
 #include "../core/types.h"
 #include "../core/nav_config.h"
 #include "flow_field_native.h"
+#include "../flow/flow_field_algorithms.h"
 #include "../steering/steering_system.h"
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/node.hpp>
@@ -8,7 +9,6 @@
 #include <godot_cpp/classes/tile_set.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include "../core/nav_services.h"
-#include <queue>
 #include <limits>
 #include <cmath>
 #include <cstdlib>
@@ -25,12 +25,6 @@ namespace
     constexpr double FLOWFIELD_TARGET_RADIUS_PI = 3.14159265358979323846;
 }
 
-struct DijkstraNode
-{
-    double cost;
-    Vector2i cell;
-    bool operator>(const DijkstraNode &other) const { return cost > other.cost; }
-};
 static inline double clamp01(double v)
 {
     return (v < 0.0) ? 0.0 : (v > 1.0 ? 1.0 : v);
@@ -470,45 +464,29 @@ void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iH
                                     std::unordered_map<Vector2i, double, Vector2iHash> &costs,
                                     const DirectionalTraversalConstraints *traversal_constraints)
 {
-    costs.clear();
-    for (const Vector2i &c : walkable_set)
-        costs[c] = std::numeric_limits<double>::infinity();
+    ffcore::CellSet core_walkable;
+    core_walkable.reserve(walkable_set.size());
+    for (const Vector2i &cell : walkable_set)
+        core_walkable.insert({cell.x, cell.y});
 
-    if (!walkable_set.count(goal_cell))
-        return;
-
-    const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    std::priority_queue<DijkstraNode, std::vector<DijkstraNode>, std::greater<DijkstraNode>> pq;
-    costs[goal_cell] = 0.0;
-    pq.push({0.0, goal_cell});
-
-    while (!pq.empty())
+    ffcore::DirectionalTraversalConstraints core_constraints;
+    const ffcore::DirectionalTraversalConstraints *core_constraints_ptr = nullptr;
+    if (traversal_constraints != nullptr)
     {
-        DijkstraNode cur = pq.top();
-        pq.pop();
-        if (cur.cost > costs[cur.cell])
-            continue;
-
-        for (int i = 0; i < 8; i++)
-        {
-            const Vector2i d = dirs8[i];
-            Vector2i nb = cur.cell + d;
-            // Reverse Dijkstra considers the forward edge nb -> cur.cell. The
-            // directional constraint belongs to that predecessor/source cell.
-            if (!can_traverse(nb, cur.cell, walkable_set, traversal_constraints))
-                continue;
-
-            double step = (i < 4) ? 1.0 : 1.41421356237;
-            double new_cost = cur.cost + step;
-            if (new_cost < costs[nb])
-            {
-                costs[nb] = new_cost;
-                pq.push({new_cost, nb});
-            }
-        }
+        core_constraints.reserve(traversal_constraints->size());
+        for (const auto &entry : *traversal_constraints)
+            core_constraints[{entry.first.x, entry.first.y}] = {entry.second.x, entry.second.y};
+        core_constraints_ptr = &core_constraints;
     }
+
+    const ffcore::IntegrationCosts core_costs = ffcore::FlowFieldAlgorithms::compute_integration_costs(
+        core_walkable,
+        {goal_cell.x, goal_cell.y},
+        core_constraints_ptr);
+    costs.clear();
+    costs.reserve(core_costs.size());
+    for (const auto &entry : core_costs)
+        costs[Vector2i(entry.first.x, entry.first.y)] = entry.second;
 }
 
 /// DISTANCE FIELD = la distance de chaque case de chaque mur. On trouve avec ça la case la plus "centrale" d'un couloir pour trouver son centre. = Très utile pour une foule.
@@ -667,47 +645,15 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
 void FlowFieldNative::compute_distance_field(const Rect2i &used,
                                              const std::unordered_set<Vector2i, Vector2iHash> &wall_set)
 {
-    distance_field.clear();
-    distance_field.resize(field.width() * field.height(), 0.0f);
-
-    const int w = field.width();
-    const int h = field.height();
-
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x)
-        {
-            Vector2i c = used.position + Vector2i(x, y);
-            distance_field[y * w + x] = wall_set.count(c) ? 0.0f : 1e9f;
-        }
-
-    for (int y = 0; y < h; ++y)
-        for (int x = 0; x < w; ++x)
-        {
-            float d = distance_field[y * w + x];
-            if (d == 0.0f)
-                continue;
-            if (x > 0)
-                d = Math::min(d, distance_field[y * w + (x - 1)] + 1.0f);
-            if (y > 0)
-                d = Math::min(d, distance_field[(y - 1) * w + x] + 1.0f);
-            if (x > 0 && y > 0)
-                d = Math::min(d, distance_field[(y - 1) * w + (x - 1)] + 1.4142f);
-            distance_field[y * w + x] = d;
-        }
-
-    for (int y = h - 1; y >= 0; --y)
-        for (int x = w - 1; x >= 0; --x)
-        {
-            float d = distance_field[y * w + x];
-            if (x + 1 < w)
-                d = Math::min(d, distance_field[y * w + (x + 1)] + 1.0f);
-            if (y + 1 < h)
-                d = Math::min(d, distance_field[(y + 1) * w + x] + 1.0f);
-            if (x + 1 < w && y + 1 < h)
-                d = Math::min(d, distance_field[(y + 1) * w + (x + 1)] + 1.4142f);
-            distance_field[y * w + x] = d;
-        }
-
+    ffcore::CellSet core_walls;
+    core_walls.reserve(wall_set.size());
+    for (const Vector2i &cell : wall_set)
+        core_walls.insert({cell.x, cell.y});
+    distance_field = ffcore::FlowFieldAlgorithms::compute_wall_distance_field(
+        field.width(),
+        field.height(),
+        {used.position.x, used.position.y},
+        core_walls);
     field.set_distance_field(distance_field);
 }
 
@@ -1213,84 +1159,36 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     if (!walkable_set.count(snapshot.goal_cell))
         return result;
 
-    std::vector<float> local_distance_field(width * height, 0.0f);
-    for (int y = 0; y < height; ++y)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            Vector2i cell = used.position + Vector2i(x, y);
-            local_distance_field[y * width + x] = wall_set.count(cell) ? 0.0f : 1e9f;
-        }
-    }
-
-    for (int y = 0; y < height; ++y)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            float d = local_distance_field[y * width + x];
-            if (d == 0.0f)
-                continue;
-            if (x > 0)
-                d = std::min(d, local_distance_field[y * width + (x - 1)] + 1.0f);
-            if (y > 0)
-                d = std::min(d, local_distance_field[(y - 1) * width + x] + 1.0f);
-            if (x > 0 && y > 0)
-                d = std::min(d, local_distance_field[(y - 1) * width + (x - 1)] + 1.4142f);
-            local_distance_field[y * width + x] = d;
-        }
-    }
-
-    for (int y = height - 1; y >= 0; --y)
-    {
-        for (int x = width - 1; x >= 0; --x)
-        {
-            float d = local_distance_field[y * width + x];
-            if (x + 1 < width)
-                d = std::min(d, local_distance_field[y * width + (x + 1)] + 1.0f);
-            if (y + 1 < height)
-                d = std::min(d, local_distance_field[(y + 1) * width + x] + 1.0f);
-            if (x + 1 < width && y + 1 < height)
-                d = std::min(d, local_distance_field[(y + 1) * width + (x + 1)] + 1.4142f);
-            local_distance_field[y * width + x] = d;
-        }
-    }
+    ffcore::CellSet core_walls;
+    core_walls.reserve(wall_set.size());
+    for (const Vector2i &cell : wall_set)
+        core_walls.insert({cell.x, cell.y});
+    const std::vector<float> local_distance_field = ffcore::FlowFieldAlgorithms::compute_wall_distance_field(
+        width,
+        height,
+        {used.position.x, used.position.y},
+        core_walls);
     computed.set_distance_field(local_distance_field);
 
-    std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    costs.reserve(walkable_set.size());
+    ffcore::CellSet core_walkable;
+    core_walkable.reserve(walkable_set.size());
     for (const Vector2i &cell : walkable_set)
-        costs[cell] = std::numeric_limits<double>::infinity();
+        core_walkable.insert({cell.x, cell.y});
+    ffcore::DirectionalTraversalConstraints core_constraints;
+    core_constraints.reserve(snapshot.traversal_constraints.size());
+    for (const auto &entry : snapshot.traversal_constraints)
+        core_constraints[{entry.first.x, entry.first.y}] = {entry.second.x, entry.second.y};
+    const ffcore::IntegrationCosts core_costs = ffcore::FlowFieldAlgorithms::compute_integration_costs(
+        core_walkable,
+        {snapshot.goal_cell.x, snapshot.goal_cell.y},
+        &core_constraints);
+    std::unordered_map<Vector2i, double, Vector2iHash> costs;
+    costs.reserve(core_costs.size());
+    for (const auto &entry : core_costs)
+        costs[Vector2i(entry.first.x, entry.first.y)] = entry.second;
 
     const Vector2i dirs8[8] = {
         {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    std::priority_queue<DijkstraNode, std::vector<DijkstraNode>, std::greater<DijkstraNode>> pq;
-    costs[snapshot.goal_cell] = 0.0;
-    pq.push({0.0, snapshot.goal_cell});
-
-    while (!pq.empty())
-    {
-        DijkstraNode cur = pq.top();
-        pq.pop();
-        if (cur.cost > costs[cur.cell])
-            continue;
-
-        for (int i = 0; i < 8; i++)
-        {
-            const Vector2i d = dirs8[i];
-            Vector2i nb = cur.cell + d;
-            if (!can_traverse(nb, cur.cell, walkable_set, &snapshot.traversal_constraints))
-                continue;
-
-            double step = (i < 4) ? 1.0 : 1.41421356237;
-            double new_cost = cur.cost + step;
-            if (new_cost < costs[nb])
-            {
-                costs[nb] = new_cost;
-                pq.push({new_cost, nb});
-            }
-        }
-    }
 
     std::vector<double> route_costs(width * height, std::numeric_limits<double>::infinity());
     for (int y = 0; y < height; ++y)

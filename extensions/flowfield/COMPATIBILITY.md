@@ -70,6 +70,38 @@ Manual gameplay checks after A* extraction:
 - builder placement and client attack-path selection still find reachable cells;
 - blocked or deleted garden paths fail safely without new warnings/errors.
 
+## Flow-field extraction: slice 1
+
+The first portable flow-field slice now owns these algorithms for both synchronous and worker
+builds:
+
+- cell-to-cell traversal validation;
+- diagonal corner-cut prevention;
+- per-source directional traversal constraints;
+- reverse-Dijkstra integration costs;
+- the existing two-pass wall-distance transform.
+
+`FlowFieldNative` remains registered with all existing methods, arguments, defaults, layer setters,
+async request behavior, group assignment behavior, debug queries, and scene wiring unchanged. It
+still owns Godot TileMap snapshot capture and converts the captured cells into portable core types.
+
+Behavior locked by portable regression tests:
+
+- cardinal cost `1.0` and diagonal cost `1.41421356237`;
+- reverse traversal applies a directional constraint to the predecessor/source cell;
+- diagonals require both adjacent cardinal cells to be walkable;
+- missing goals leave every walkable integration cost unreachable;
+- arbitrary and non-zero cell origins work in the distance field;
+- walls have zero distance and the legacy distance transform uses `1.4142f` for diagonals.
+
+The following behavior intentionally remains in `FlowFieldNative` for later focused extraction:
+
+- TileMap/layer interpretation and coverage sampling;
+- flow-direction selection, clearance blending, and direction quantization;
+- bottleneck detection and zone annotation;
+- async queue ownership, request serials, group generations, and result installation;
+- group pools, debug drawing, and Rabbit Game compatibility methods.
+
 ## Remaining inventory
 
 Before extracting each later subsystem, extend this manifest with its complete bound methods,
