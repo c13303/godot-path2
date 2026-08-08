@@ -1,0 +1,6 @@
+CPathLib
+========
+
+Reusable two-dimensional grid navigation and optional crowd motion for Godot.
+
+Start with README.md for the API and REUSE.md for standalone repository instructions.

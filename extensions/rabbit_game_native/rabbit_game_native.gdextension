@@ -1,0 +1,19 @@
+[configuration]
+entry_symbol = "rabbit_game_native_library_init"
+compatibility_minimum = "4.5"
+
+[libraries]
+windows.debug.x86_64 = "res://extensions/rabbit_game_native/bin/rabbit_game_native.dll"
+windows.release.x86_64 = "res://extensions/rabbit_game_native/bin/rabbit_game_native.dll"
+
+[dependencies]
+windows.debug.x86_64 = {
+"res://extensions/rabbit_game_native/bin/libgcc_s_seh-1.dll" : "",
+"res://extensions/rabbit_game_native/bin/libstdc++-6.dll" : "",
+"res://extensions/rabbit_game_native/bin/libwinpthread-1.dll" : ""
+}
+windows.release.x86_64 = {
+"res://extensions/rabbit_game_native/bin/libgcc_s_seh-1.dll" : "",
+"res://extensions/rabbit_game_native/bin/libstdc++-6.dll" : "",
+"res://extensions/rabbit_game_native/bin/libwinpthread-1.dll" : ""
+}

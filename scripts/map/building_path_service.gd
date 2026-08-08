@@ -2,8 +2,8 @@ extends RefCounted
 class_name BuildingPathService
 
 # Owns the low-level walkable A* glue extracted from BuildingManager: path queries
-# on the walkable map / per-garden zone, pushing walkable tiles + wall blockers into
-# the pathfinder, and converting cell paths to world positions. BuildingManager keeps
+# on the walkable map / per-garden zone, uploading walkable tiles + wall blockers to
+# CPathLib, and converting cell paths to world positions. BuildingManager keeps
 # the source-of-truth state and thin compatibility wrappers; this service keeps its
 # main service dependencies explicit and reads level layers from the manager.
 
@@ -13,7 +13,7 @@ var _manager: BuildingManager
 var _garden_topology: GardenTopologyService
 var _debug_telemetry: BuildingDebugTelemetry
 var _last_zone_blocker_us: int = 0
-## Sheep errands share the normal native pathfinder, so this cache tracks both the
+## Sheep errands share the normal navigation world, so this cache tracks both the
 ## GDScript walkability snapshot and whether that snapshot is currently uploaded.
 ## Other path callers may overwrite the native state; that only causes one upload
 ## before the next sheep query, never a full floor scan per candidate.
@@ -33,11 +33,11 @@ func setup(manager: BuildingManager) -> void:
 
 
 # ---------------------------------------------------------------------------
-# A* glue: find paths via PathfinderNative.
+# A* glue: find paths via CPathLib's NavigationWorld2D.
 # ---------------------------------------------------------------------------
 func find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
-	var pf: Node = _pathfinder()
-	if pf == null or not pf.has_method("find_path"):
+	var pf: Node = _navigation_world()
+	if pf == null or not pf.has_method("find_path_cells"):
 		return PackedVector2Array()
 	var topo: GardenTopologyService = _garden_topology
 	if topo.walkable_map_tiles().is_empty():
@@ -55,17 +55,17 @@ func find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> Packed
 			path_tiles = topo.walkable_map_tiles().duplicate()
 			path_tiles_copied = true
 		path_tiles[to_tile] = true
-	sync_pathfinder_zone_tiles(path_tiles)
+	sync_navigation_world_zone_tiles(path_tiles)
 	var start_tile: Vector2i = from_tile if path_tiles.has(from_tile) else _nearest_zone_tile_to(from_tile, path_tiles)
 	var end_tile: Vector2i = to_tile if path_tiles.has(to_tile) else _nearest_zone_tile_to(to_tile, path_tiles)
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
-	return pf.call("find_path", start_tile, end_tile) as PackedVector2Array
+	return pf.call("find_path_cells", start_tile, end_tile) as PackedVector2Array
 
 
 func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
-	var pf: Node = _pathfinder()
-	if pf == null or not pf.has_method("find_path"):
+	var pf: Node = _navigation_world()
+	if pf == null or not pf.has_method("find_path_cells"):
 		return PackedVector2Array()
 	ensure_sheep_topology_synced()
 	if _sheep_walkable_tiles.is_empty():
@@ -75,7 +75,7 @@ func find_sheep_path(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Arr
 	if start_tile == INVALID_CELL or end_tile == INVALID_CELL:
 		return PackedVector2Array()
 	_sheep_path_queries += 1
-	return pf.call("find_path", start_tile, end_tile) as PackedVector2Array
+	return pf.call("find_path_cells", start_tile, end_tile) as PackedVector2Array
 
 
 func invalidate_sheep_topology(_reason: String) -> void:
@@ -90,7 +90,7 @@ func ensure_sheep_topology_synced() -> void:
 		_rebuild_sheep_topology(navigation_revision)
 	if not _sheep_native_synced and not _sheep_walkable_tiles.is_empty():
 		_syncing_sheep_topology = true
-		sync_pathfinder_zone_tiles(_sheep_walkable_tiles)
+		sync_navigation_world_zone_tiles(_sheep_walkable_tiles)
 		_syncing_sheep_topology = false
 		_sheep_native_synced = true
 
@@ -114,8 +114,8 @@ func _rebuild_sheep_topology(navigation_revision: int) -> void:
 			"rebuilds=%d tiles=%d queries=%d" % [_sheep_topology_rebuilds, _sheep_walkable_tiles.size(), _sheep_path_queries])
 
 func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 0) -> PackedVector2Array:
-	var pf: Node = _pathfinder()
-	if pf == null or not pf.has_method("find_path"):
+	var pf: Node = _navigation_world()
+	if pf == null or not pf.has_method("find_path_cells"):
 		return PackedVector2Array()
 	var topo: GardenTopologyService = _garden_topology
 	var zone_tiles: Dictionary = topo.plant_zone_tiles()
@@ -150,7 +150,7 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 			"garden=%d zone_tiles=%d from=%s to=%s" % [garden_id, zone_tiles.size(), str(from_tile), str(to_tile)])
 	# .sync_zone: pushes the walkable set + wall blockers into the pathfinder.
 	var sync_us: int = Time.get_ticks_usec()
-	sync_pathfinder_zone_tiles(path_tiles)
+	sync_navigation_world_zone_tiles(path_tiles)
 	var sync_elapsed: int = Time.get_ticks_usec() - sync_us
 	if telemetry.over_garden_threshold_us(sync_elapsed):
 		telemetry.warn_garden_task_lag_us("_find_path_in_zone.sync_zone", sync_elapsed,
@@ -163,7 +163,7 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 		return PackedVector2Array()
 	# .find_path: the pathfinder A* itself.
 	var find_us: int = Time.get_ticks_usec()
-	var result: PackedVector2Array = pf.call("find_path", start_tile, end_tile) as PackedVector2Array
+	var result: PackedVector2Array = pf.call("find_path_cells", start_tile, end_tile) as PackedVector2Array
 	var find_elapsed: int = Time.get_ticks_usec() - find_us
 	var total_elapsed: int = Time.get_ticks_usec() - call_start_us
 	telemetry.record_garden_astar(
@@ -183,11 +183,11 @@ func find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int = 
 	_manager._accumulate_find_path_in_zone(call_start_us, sync_elapsed, _last_zone_blocker_us, find_elapsed, from_tile, to_tile, path_tiles.size())
 	return result
 
-func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
+func sync_navigation_world_zone_tiles(zone_tiles: Dictionary) -> void:
 	if not _syncing_sheep_topology:
 		_sheep_native_synced = false
 	_last_zone_blocker_us = 0
-	var pf: Node = _pathfinder()
+	var pf: Node = _navigation_world()
 	if pf == null:
 		return
 	var zone_arr: PackedVector2Array = PackedVector2Array()
@@ -197,9 +197,7 @@ func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 		var cell: Vector2i = raw_cell
 		zone_arr[i] = Vector2(float(cell.x), float(cell.y))
 		i += 1
-	if pf.has_method("set_walkable_tiles"):
-		pf.call("set_walkable_tiles", zone_arr)
-	if pf.has_method("set_blockers"):
+	if pf.has_method("configure_sparse_grid"):
 		# _wall_blockers_for_cells scans every wall tile against the zone bbox; time it
 		# separately since it can dominate sync on a large wall layer. Gated so context
 		# is built only on a spike (this runs once per path query). The time is also
@@ -212,7 +210,7 @@ func sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
 		if telemetry.over_garden_threshold_us(blocker_elapsed):
 			telemetry.warn_garden_task_lag_us("_wall_blockers_for_cells", blocker_elapsed,
 				"zone_tiles=%d blockers=%d" % [zone_tiles.size(), blockers.size()])
-		pf.call("set_blockers", blockers)
+		pf.call("configure_sparse_grid", zone_arr, blockers)
 
 func wall_blockers_for_cells(cells: Dictionary) -> PackedVector2Array:
 	var blockers: PackedVector2Array = PackedVector2Array()
@@ -298,8 +296,8 @@ func _positive_mod(value: int, divisor: int) -> int:
 # ---------------------------------------------------------------------------
 # Manager callbacks (source-of-truth state / helpers stay on BuildingManager).
 # ---------------------------------------------------------------------------
-func _pathfinder() -> Node:
-	return _manager.pathfinder
+func _navigation_world() -> Node:
+	return _manager.navigation_world
 
 func _floorz() -> TileMapLayer:
 	return _manager.floorz

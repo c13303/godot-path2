@@ -21,7 +21,7 @@ The relevant systems appear to include:
 * `scripts/controls/player_controller.gd`
 * `scripts/map/agent_definition_service.gd`
 * `scripts/entities/monster_catalog.gd`
-* `extensions/flowfield/steering/steering_system.cpp`
+* `extensions/rabbit_game_native/steering/steering_system.cpp`
 
 Current approximate values found during inspection:
 

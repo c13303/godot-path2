@@ -4,10 +4,26 @@
 
 ### In-project refactor outcome
 
-The reusable boundary described by this plan is now implemented inside `extensions/flowfield`.
-`rabbit_compat=no` builds only the portable core and the generic `NavigationWorld2D`,
-`NavigationRoute2D`, and `CrowdWorld2D` adapters. The default `rabbit_compat=yes` build preserves all
-existing Rabbit Game native classes and scene wiring.
+The reusable boundary described by this plan is implemented as the independent
+`extensions/CPathLib` source tree and `cpathlib.dll`. It registers only `NavigationWorld2D`,
+`NavigationRoute2D`, and `CrowdWorld2D`. Project-owned compatibility and gameplay code lives in
+`extensions/rabbit_game_native` and is loaded as a separate GDExtension.
+
+Current completion summary:
+
+| Boundary | Status |
+|---|---|
+| portable algorithms and generic Godot adapter | complete in `extensions/CPathLib` |
+| standalone MinGW build and reuse instructions | complete in `extensions/CPathLib` |
+| generic source/game terminology isolation | enforced by the physical source boundary |
+| host A* caller migration | complete; `PathfinderNative` removed |
+| project flow/steering/combat compatibility | project-owned in `extensions/rabbit_game_native` |
+| separate Git repository and dependency pin | intentionally left to the owner |
+
+The project-owned controller is not copied into the standalone repository. Rewriting it is not a
+precondition for CPathLib reuse and would not be behavior-preserving without trajectory parity
+fixtures. Its safe decomposition order is documented in
+`extensions/rabbit_game_native/README.md`.
 
 Completed reusable modules include A*, one synchronous/asynchronous flow builder, wall clearance,
 static bottleneck detection, bottleneck traffic reservations, explicit and seeded areas, multi-cell
@@ -15,14 +31,14 @@ directional portals, typed enter/exit route segments, instance-owned agents, sep
 speed, motion integration, impulses, control suppression, and persistent external velocities. The
 portable build has no `godot-cpp`, Rabbit phase, damage, projectile, or global-singleton dependency.
 
-The separate repository, dependency pin, licensing decision, and migration of Rabbit Game callers
-to the generic API remain deliberately outside this refactor, per the owner. Instructions for that
-later mechanical split are checked in at `extensions/flowfield/REUSE.md`.
+The separate repository, dependency pin, and licensing decision remain owner-controlled and outside
+this refactor. Instructions for that later mechanical split are checked in at
+`extensions/CPathLib/REUSE.md`.
 
 The original review found that the extension was not ready to be copied into another game because
-portable algorithms and Rabbit gameplay shared one source/build boundary. The implemented
-`rabbit_compat` source selection now resolves that issue without forcing Rabbit Game to migrate its
-existing scene API at the same time.
+portable algorithms and project gameplay shared one source/build boundary. The physical source and
+GDExtension split resolves that issue. The project-owned module remains a behavior-preserving
+migration boundary until each established caller has a proven generic or project-owned replacement.
 
 The migration has two equally important outcomes:
 
@@ -41,7 +57,7 @@ one algorithm behind that contract at a time.
 
 ## Goal
 
-Turn the useful C++ code in `extensions/flowfield` into a generic, tested, working Godot GDExtension library for 2D grid navigation and optional crowd motion.
+Turn the useful C++ code in `extensions/CPathLib` into a generic, tested, working Godot GDExtension library for 2D grid navigation and optional crowd motion.
 
 The finished package must be suitable as the starting point for any Godot game that needs:
 
@@ -138,8 +154,8 @@ Game must be able to lock a known-good revision. Packaged release artifacts can 
 API and platform matrix stabilize. Record both the library version and supported Godot/godot-cpp
 version; never consume an unpinned moving branch in the game.
 
-The current `extensions/flowfield` directory can seed the new repository, but it should not be
-declared reusable merely by moving it. Before the repository split becomes authoritative:
+The current `extensions/CPathLib` directory can seed the new repository. Before the repository
+split becomes authoritative:
 
 1. complete the Stage 0 inventory and compatibility manifest;
 2. decide where `ProjectileSystemNative`, damage/AoE helpers, gameplay phases, and Rabbit-specific
@@ -157,11 +173,10 @@ shared library, never the reverse.
 
 This review found several concrete reasons to perform a staged extraction:
 
-- `extensions/Sconstruct` recursively compiles the navigation, steering, projectile, Godot adapter,
-  and registration sources into one Windows DLL;
-- the extension registers seven Godot classes: `FlowFieldNative`, `SpatialGridNative`,
-  `SteeringSystemNative`, `AgentManagerNative`, `GlobalConfigNative`, `ProjectileSystemNative`, and
-  `PathfinderNative`;
+- `extensions/Sconstruct` now builds generic and project-owned source trees into separate Windows
+  DLLs;
+- the former `PathfinderNative` class and scene node have migrated to `NavigationWorld2D`; the
+  project-owned extension still registers six established compatibility/gameplay classes;
 - native class names or the `CPP/...` scene layout are referenced across the main scene and numerous
   GDScript systems, including dynamic `has_method()`/`call()` compatibility checks;
 - `FlowFieldNative` still owns substantial production flow construction, TileMap interpretation,
@@ -244,7 +259,7 @@ The core should build as a normal static library with CMake so tests can run wit
 ## What can be salvaged from the current C++ code
 
 The reusable pieces are now arranged behind the stable source boundary listed in
-`extensions/flowfield/README.md`; the notes below explain the original extraction choices.
+`extensions/CPathLib/README.md`; the notes below explain the original extraction choices.
 
 Good extraction candidates include:
 
@@ -255,7 +270,7 @@ Good extraction candidates include:
 - `steering/external_velocity_accumulator.*`;
 - `steering/traffic_right_of_way_resolver.*`;
 - the numerical steering, wall, separation, and impulse code in `steering/steering_system.*`;
-- the grid search in `pathfinding/pathfinder.*`;
+- the grid search now owned by `CPathLib/pathfinding/a_star_solver.*`;
 - the production flow building, distance field, clearance, bottleneck, and worker code currently located in `godot/flow_field_native.*`.
 
 The following current design problems should not be carried into the template:
@@ -724,8 +739,8 @@ Exit criterion: a non-Godot test can construct, edit, snapshot, and query a grid
 - Remove Godot types from the algorithm.
 - Add traversal policies, weighted costs, explicit results, cancellation, diagnostics, and reusable workspace.
 - Write correctness and performance tests.
-- Create the new Godot A* API directly. Keep `PathfinderNative` as a thin Rabbit Game wrapper until
-  its existing call sites are deliberately migrated.
+- Create the new Godot A* API directly and migrate the host's sparse-grid callers to
+  `NavigationWorld2D`.
 
 Exit criterion: A* passes the full solver matrix through both C++ and the minimal Godot adapter.
 
@@ -877,7 +892,7 @@ Start with compatibility capture, then the smallest end-to-end vertical slice:
 5. extract `AStarSolver` with no Godot dependency;
 6. add deterministic A* unit tests;
 7. expose the new solver through a minimal `NavigationWorld2D` adapter;
-8. keep `PathfinderNative` as a Rabbit compatibility wrapper;
+8. migrate the host A* scene node and callers to `NavigationWorld2D`;
 9. demonstrate the generic API in the empty example project;
 10. have the user verify the existing Rabbit Game A* scenarios before continuing to flow fields.
 

@@ -79,7 +79,7 @@ const _SANE_CELL_LIMIT: int = 100000
 @export var plant_manager: Node
 @export var flow: Node
 @export var agent_manager: Node
-@export var pathfinder: Node
+@export var navigation_world: Node
 @export var parent_for_agents: Node
 @export var global_config: Node
 @export var debug_logs: bool = false
@@ -3400,7 +3400,7 @@ func _nearest_margin_tile(from_cell: Vector2i) -> Vector2i:
 	return best_cell
 
 # ---------------------------------------------------------------------------
-# A* glue: find paths via PathfinderNative.
+# A* glue: find paths via CPathLib's NavigationWorld2D.
 # ---------------------------------------------------------------------------
 func _find_path_on_walkable_map(from_tile: Vector2i, to_tile: Vector2i) -> PackedVector2Array:
 	return _building_path_service.find_path_on_walkable_map(from_tile, to_tile)
@@ -3422,8 +3422,8 @@ func _find_path_in_zone(from_tile: Vector2i, to_tile: Vector2i, garden_id: int =
 func _accumulate_find_path_in_zone(call_start_us: int, sync_elapsed: int, blocker_elapsed: int, find_elapsed: int, from_tile: Vector2i, to_tile: Vector2i, zone_tiles: int) -> void:
 	_garden_retarget.accumulate_find_path_in_zone(call_start_us, sync_elapsed, blocker_elapsed, find_elapsed, from_tile, to_tile, zone_tiles)
 
-func _sync_pathfinder_zone_tiles(zone_tiles: Dictionary) -> void:
-	_building_path_service.sync_pathfinder_zone_tiles(zone_tiles)
+func _sync_navigation_world_zone_tiles(zone_tiles: Dictionary) -> void:
+	_building_path_service.sync_navigation_world_zone_tiles(zone_tiles)
 
 func _path_cells_to_world(path_cells: PackedVector2Array, nav_id: int = -1, disperse_endpoint: bool = false) -> PackedVector2Array:
 	return _building_path_service.path_cells_to_world(path_cells, nav_id, disperse_endpoint)

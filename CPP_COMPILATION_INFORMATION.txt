@@ -54,12 +54,13 @@ The project build command is:
 
 It uses C++17 and compiles the C++ files under:
 
-    extensions/flowfield/**/*.cpp
-    extensions/register_types.cpp
+    extensions/CPathLib/**/*.cpp
+    extensions/rabbit_game_native/**/*.cpp
 
 The output library is written to:
 
-    extensions/flowfield/bin/flowfield.dll
+    extensions/CPathLib/bin/cpathlib.dll
+    extensions/rabbit_game_native/bin/rabbit_game_native.dll
 
 
 First-time setup checklist

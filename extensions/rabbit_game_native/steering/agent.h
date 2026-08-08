@@ -1,0 +1,183 @@
+#pragma once
+
+#include "CPathLib/core/types.h"
+#include "CPathLib/steering/external_velocity_accumulator.h"
+#include "CPathLib/steering/terrain_speed_grid.h"
+#include <cstdint>
+#include <limits>
+#include <vector>
+
+namespace ffcore
+{
+    struct GlobalConfig;
+    class FlowField;
+
+    enum class AgentControlMode
+    {
+        FlowField = 0,
+        Manual = 1,
+    };
+
+    // High-level mission phase, pushed from GDScript (building_manager / character).
+    // State-derived in C++ for the debug overlay so it never desyncs from gameplay.
+    enum class AgentPhase
+    {
+        None = 0,
+        FlowIn = 1,   // following a flow field toward a garden
+        AstarIn = 2,  // entered a garden, A* toward the plant
+        Eating = 3,   // at the plant, eating (eating_seconds counts down)
+        AstarOut = 4, // finished eating, A* out of the garden
+        FlowOut = 5,  // left the garden, on the flow field toward the exit
+        // Temporary holding state: the agent's garden assignment became invalid
+        // (garden deleted/rebuilt) and it is queued for budgeted retargeting by
+        // building_manager. Not gameplay behavior; the agent follows no path/flow
+        // while in this state. Kept last so existing phase codes are unchanged.
+        WaitingNewStatus = 6,
+        Drowning = 7,
+    };
+
+    constexpr int SMASH_CLASS_PLAYER = 1 << 0;
+    constexpr int SMASH_CLASS_MAIN_CHAR = 1 << 1;
+    constexpr int SMASH_CLASS_MONSTER = 1 << 2;
+
+    enum class ImpulseQueuePriority : int
+    {
+        None = 0,
+        Traffic = 10,
+        Contact = 50,
+        Gameplay = 100,
+    };
+
+    struct AgentProfile
+    {
+        double crowd_push_strength = 1.0;
+        double crowd_resist_strength = 1.0;
+        double contact_push_power = 0.0;
+        double contact_push_resist = 1.0;
+        double contact_push_cooldown = 0.20;
+        // Contact-only impulse damping and autonomous-control suppression. Defaults
+        // preserve the previous native contact behavior for profiles that do not
+        // supply an override.
+        double contact_push_friction_loss = 0.65;
+        double contact_control_suppression_seconds = 0.20;
+        // Source-side presentation policy for contact shoves. Physics is unchanged;
+        // false only suppresses the receiver's impaired-control visual feedback.
+        bool contact_push_shows_control_impaired_feedback = true;
+        // Resistance to smash/knockback impulses (see apply_smash_impulse). 1.0 =
+        // normal; 2.0 halves the received impulse velocity (twice the inertia).
+        double smash_resist = 1.0;
+        double world_radius = 0.0;
+        double max_speed = std::numeric_limits<double>::quiet_NaN(); // NaN => inherit global agent_max_speed
+        double foot_offset_y = std::numeric_limits<double>::quiet_NaN();
+        double fight_offset_y = 0.0;
+        double fight_half_w = 32.0;
+        double fight_half_h = 32.0;
+        int smash_class = SMASH_CLASS_MAIN_CHAR;
+        int terrain_speed_channel = DEFAULT_TERRAIN_SPEED_CHANNEL;
+        bool weapon_immune = false;
+    };
+
+    struct AgentData
+    {
+        int id = -1;
+        Vec2 position;
+        Vec2 velocity;
+        ExternalVelocityAccumulator external_velocity;
+        double max_speed = 50.0;
+        bool active = true;
+        AgentProfile profile{};
+
+        FlowField *flow = nullptr;
+        AgentControlMode control_mode = AgentControlMode::FlowField;
+        Vec2 manual_input_dir{};
+        double manual_acceleration = 900.0;
+        double manual_deceleration = 1200.0;
+
+        bool is_first = false;
+        GroupID group = INVALID_GROUP;
+        // Lazy flow fields: while an agent has been spawned but not yet attached to its
+        // routing group (its flow field is still queued/computing), GDScript stamps the
+        // target group here so the agent can be frozen and labelled ("ff wait" /
+        // "ff being computed") against a group it is not a member of yet. INVALID_GROUP
+        // once attached; cleared automatically when set_agent_group assigns a real group.
+        GroupID waiting_flow_group = INVALID_GROUP;
+        Vec2 smash_force{};
+        bool is_propelled = false;
+        double propelled_timer = 0.0;
+        bool smash_just_reset = false;
+        double smash_friction = -1.0; // perte de vitesse par seconde (0..1), -1 => fallback global
+        double smash_control_suppression = 1.0;
+        double smash_control_suppression_timer = 0.0;
+        // Navigation-preserving impulses contribute external velocity without
+        // disabling or cancelling autonomous movement in the opposite direction.
+        bool smash_preserves_control = false;
+        // Contact shoves end with their brief control-suppression window. Other
+        // gameplay knockbacks keep their established propelled duration/friction.
+        bool smash_stops_on_control_restore = false;
+        // Whether this impulse's control suppression should produce the existing
+        // red impaired-control feedback on the receiving scene node.
+        bool smash_shows_control_impaired_feedback = true;
+        Vec2 pending_smash{};
+        double smash_delay = 0.0;
+        double pending_smash_friction = -1.0;
+        double pending_smash_control_suppression = 1.0;
+        double pending_smash_control_suppression_duration = 0.0;
+        bool pending_smash_preserves_control = false;
+        bool pending_smash_stops_on_control_restore = false;
+        bool pending_smash_shows_control_impaired_feedback = true;
+        int pending_smash_priority = static_cast<int>(ImpulseQueuePriority::None);
+        bool smash_pending = false;
+        bool was_in_t2 = false;
+        std::int64_t traffic_group_id = 0;
+        int traffic_priority = 0;
+
+        Vec2i last_logged_tile = Vec2i(-999999, -999999);
+        bool moving = false;
+        int dir_code = -1;
+        int micro_osc = 0;
+        double micro_osc_timer = 0.0;
+        AgentPhase phase = AgentPhase::None;
+        float eating_seconds = 0.0f;
+        Vec3 debug_color{};
+        Vec2 debug_nav_dir{};
+        Vec2 debug_wall_repel{};
+        Vec2 debug_separation{};
+        Vec2 debug_desired_dir{};
+        Vec2 debug_target_velocity{};
+        int debug_bottleneck_core = -1;
+        int debug_bottleneck_zone = -1;
+        int active_bottleneck = -1;
+        int completed_bottleneck = -1;
+        bool debug_in_bottleneck_state = false;
+        bool debug_bottleneck_wait = false;
+        double debug_log_timer = 0.0;
+        double target_radius_timer = 0.0;
+        double lost_timer = 0.0;
+        double stuck_in_wall_accum = 0.0;
+        // Generic "lost outside the flow field" recovery. When an agent sits on a
+        // cell with no flow arrow (non-navigable but physics-passable, e.g. a water
+        // edge tile it was shoved onto), it can neither be routed nor repelled off.
+        // Once it has stayed lost past the confirm-delay (lost_timer window) this is
+        // > 0, which switches the agent from "freeze and wait" to "slide toward the
+        // nearest navigable cell". Reset to 0 the moment flow is recovered.
+        double lost_slide_accum = 0.0;
+        bool never_rest = false;
+        // Hard freeze pushed from game-side (e.g. the seed merchant halting while the
+        // player browses its shop). While set, the agent's velocity is zeroed every
+        // tick and it skips all movement/path/flow integration, but its path/flow
+        // assignment is preserved so it resumes exactly where it left off on unpause.
+        bool paused = false;
+
+        // Path-follow override: when path_active is true, the desired direction comes
+        // from "toward path_waypoints[path_index]" instead of the flow field. The flow
+        // field pointer is kept so wall-repulsion and bottleneck physics still work.
+        // path_waypoints stores world-space waypoint centers.
+        std::vector<Vec2> path_waypoints;
+        int path_index = 0;
+        bool path_active = false;
+        bool path_arrived = false;
+
+        void reset();
+        void update_motion_state(double delta, const GlobalConfig &cfg, bool force_motion_state = false);
+    };
+} // namespace ffcore

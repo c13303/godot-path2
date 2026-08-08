@@ -1,81 +1,73 @@
-import os, glob
-from SCons.Script import Environment, Dir, ARGUMENTS
+import glob
+import os
 
-def norm(p): return p.replace("\\", "/")
+from SCons.Script import ARGUMENTS, Dir, Environment
 
-root = Dir('.').abspath
+
+def norm(path):
+    return path.replace("\\", "/")
+
+
+root = Dir(".").abspath
 godot_cpp_path = os.path.abspath(os.path.join(root, "../../godot-cpp"))
-godot_cpp_bin  = os.path.join(godot_cpp_path, "bin")
+godot_cpp_bin = os.path.join(godot_cpp_path, "bin")
 
 target = ARGUMENTS.get("target", "template_debug")
 use_mingw = ARGUMENTS.get("use_mingw", "yes")
-rabbit_compat = ARGUMENTS.get("rabbit_compat", "yes")
 
 if use_mingw == "yes":
-    env = Environment(
-        tools=["mingw"],
-        CXX="/mingw64/bin/g++",
-        CC="/mingw64/bin/gcc"
-    )
-else:
-    env = Environment(tools=["default", "msvc"])
-
-if use_mingw == "yes":
+    env = Environment(tools=["mingw"], CXX="/mingw64/bin/g++", CC="/mingw64/bin/gcc")
     env.Append(CXXFLAGS=["-std=c++17"])
 else:
+    env = Environment(tools=["default", "msvc"])
     env.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
 
-env.Append(CPPPATH=[
-    norm(os.path.join(godot_cpp_path, "include")),
-    norm(os.path.join(godot_cpp_path, "gen", "include")),
-    norm(os.path.join(godot_cpp_path, "gdextension")),
-])
-env.Append(LIBPATH=[norm(godot_cpp_bin)])
+env.Append(
+    CPPPATH=[
+        norm(os.path.join(godot_cpp_path, "include")),
+        norm(os.path.join(godot_cpp_path, "gen", "include")),
+        norm(os.path.join(godot_cpp_path, "gdextension")),
+        norm(root),
+    ],
+    LIBPATH=[norm(godot_cpp_bin)],
+    CPPDEFINES=["NOMINMAX"],
+)
 
 if target == "template_debug":
     env.Append(LIBS=["godot-cpp.windows.template_debug.x86_64"])
 else:
     env.Append(LIBS=["godot-cpp.windows.template_release.x86_64"])
 
-env.Append(CPPDEFINES=["NOMINMAX"])
-if rabbit_compat == "yes":
-    env.Append(CPPDEFINES=["REFINED_NAV_RABBIT_COMPAT"])
-
-# Recherche récursive dans flowfield/
-sources = [
-    s for s in glob.glob("flowfield/**/*.cpp", recursive=True)
-    if "legacy" not in s and "test_" not in os.path.basename(s)
+generic_sources = [
+    source
+    for source in glob.glob("CPathLib/**/*.cpp", recursive=True)
+    if "/tests/" not in norm(source)
 ]
 
-if rabbit_compat != "yes":
-    rabbit_owned_sources = (
-        "flowfield/agent_manager/",
-        "flowfield/projectile/",
-        "flowfield/core/global_config.cpp",
-        "flowfield/core/nav_services.cpp",
-        "flowfield/flow/flow_field_manager.cpp",
-        "flowfield/godot/agent_manager_native.cpp",
-        "flowfield/godot/flow_field_native.cpp",
-        "flowfield/godot/global_config_native.cpp",
-        "flowfield/godot/projectile_system_native.cpp",
-        "flowfield/godot/steering_system_native.cpp",
-        "flowfield/pathfinding/pathfinder.cpp",
-        "flowfield/steering/agent.cpp",
-        "flowfield/steering/directional_cell_field.cpp",
-        "flowfield/steering/steering_system.cpp",
-        "flowfield/steering/traffic_right_of_way_resolver.cpp",
-    )
-    sources = [
-        source for source in sources
-        if not any(source.startswith(prefix) for prefix in rabbit_owned_sources)
-    ]
-sources.append("register_types.cpp")
-
-
-target_dir = norm(os.path.join(root, "flowfield", "bin"))
-os.makedirs(target_dir, exist_ok=True)
-
+cpathlib_bin = norm(os.path.join(root, "CPathLib", "bin"))
+os.makedirs(cpathlib_bin, exist_ok=True)
 env.SharedLibrary(
-    target=os.path.join(target_dir, "flowfield"),
-    source=sources
+    target=os.path.join(cpathlib_bin, "cpathlib"),
+    source=generic_sources,
+)
+
+# The host module preserves the project's established native API while its callers
+# are migrated. It owns all gameplay-facing code and only consumes the portable
+# CPathLib implementation; CPathLib never depends on this module.
+portable_sources = [
+    source
+    for source in generic_sources
+    if "/godot/" not in norm(source) and not source.endswith("CPathLib/register_types.cpp")
+]
+host_sources = [
+    source
+    for source in glob.glob("rabbit_game_native/**/*.cpp", recursive=True)
+    if "/tests/" not in norm(source)
+]
+
+host_bin = norm(os.path.join(root, "rabbit_game_native", "bin"))
+os.makedirs(host_bin, exist_ok=True)
+env.SharedLibrary(
+    target=os.path.join(host_bin, "rabbit_game_native"),
+    source=portable_sources + host_sources,
 )

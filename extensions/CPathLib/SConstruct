@@ -1,0 +1,47 @@
+import glob
+import os
+
+from SCons.Script import ARGUMENTS, Dir, Environment
+
+
+def norm(path):
+    return path.replace("\\", "/")
+
+
+root = Dir(".").abspath
+godot_cpp_path = os.path.abspath(ARGUMENTS.get("godot_cpp_dir", "../godot-cpp"))
+target = ARGUMENTS.get("target", "template_debug")
+use_mingw = ARGUMENTS.get("use_mingw", "yes")
+
+if use_mingw == "yes":
+    env = Environment(tools=["mingw"], CXX="/mingw64/bin/g++", CC="/mingw64/bin/gcc")
+    env.Append(CXXFLAGS=["-std=c++17"])
+else:
+    env = Environment(tools=["default", "msvc"])
+    env.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
+
+env.Append(
+    CPPPATH=[
+        norm(os.path.join(godot_cpp_path, "include")),
+        norm(os.path.join(godot_cpp_path, "gen", "include")),
+        norm(os.path.join(godot_cpp_path, "gdextension")),
+        norm(root),
+    ],
+    LIBPATH=[norm(os.path.join(godot_cpp_path, "bin"))],
+    CPPDEFINES=["NOMINMAX"],
+)
+
+if target == "template_debug":
+    env.Append(LIBS=["godot-cpp.windows.template_debug.x86_64"])
+else:
+    env.Append(LIBS=["godot-cpp.windows.template_release.x86_64"])
+
+sources = [
+    source
+    for source in glob.glob("**/*.cpp", recursive=True)
+    if not norm(source).startswith("tests/")
+]
+
+output_dir = norm(os.path.join(root, "bin"))
+os.makedirs(output_dir, exist_ok=True)
+env.SharedLibrary(target=os.path.join(output_dir, "cpathlib"), source=sources)

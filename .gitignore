@@ -7,7 +7,8 @@
 *.o
 *.obj
 extensions/**/*.exe
-extensions/flowfield/bin/
-extensions/.sconsign.dblite
+extensions/CPathLib/bin/
+extensions/rabbit_game_native/bin/
+extensions/**/.sconsign.dblite
 *.TMP
 *~RF*.TMP
