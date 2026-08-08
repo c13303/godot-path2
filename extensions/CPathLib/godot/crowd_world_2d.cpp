@@ -27,6 +27,9 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_handle", "profile_handle"), &CrowdWorld2D::set_agent_profile);
         ClassDB::bind_method(D_METHOD("set_agent_position", "agent_handle", "position", "clear_velocity"), &CrowdWorld2D::set_agent_position, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("set_agent_motion_limits", "agent_handle", "maximum_speed", "acceleration", "deceleration"), &CrowdWorld2D::set_agent_motion_limits);
+        ClassDB::bind_method(D_METHOD("set_agent_contact_profile", "agent_handle", "push_strength", "resistance", "cooldown", "impulse_decay", "control_suppression"), &CrowdWorld2D::set_agent_contact_profile);
+        ClassDB::bind_method(D_METHOD("set_agent_traffic_state", "agent_handle", "group_token", "priority"), &CrowdWorld2D::set_agent_traffic_state);
+        ClassDB::bind_method(D_METHOD("configure_agent_interactions", "contact_push_enabled", "right_of_way_enabled", "right_of_way_push_speed", "right_of_way_cooldown", "right_of_way_control_suppression"), &CrowdWorld2D::configure_agent_interactions);
         ClassDB::bind_method(D_METHOD("create_cohort"), &CrowdWorld2D::create_cohort);
         ClassDB::bind_method(D_METHOD("remove_cohort", "cohort_handle"), &CrowdWorld2D::remove_cohort);
         ClassDB::bind_method(D_METHOD("assign_agent_to_cohort", "agent_handle", "cohort_handle"), &CrowdWorld2D::assign_agent_to_cohort);
@@ -51,8 +54,16 @@ namespace godot
         ClassDB::bind_method(D_METHOD("clear_directional_motion_fields"), &CrowdWorld2D::clear_directional_motion_fields);
         ClassDB::bind_method(D_METHOD("follow_directional_motion_field", "agent_handle", "field_handle"), &CrowdWorld2D::follow_directional_motion_field);
         ClassDB::bind_method(D_METHOD("apply_impulse", "agent_handle", "velocity", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority"), &CrowdWorld2D::apply_impulse);
-        ClassDB::bind_method(D_METHOD("refresh_external_velocity", "agent_handle", "source_id", "velocity", "response_seconds", "expiry_seconds"), &CrowdWorld2D::refresh_external_velocity);
-        ClassDB::bind_method(D_METHOD("release_external_velocity", "agent_handle", "source_id"), &CrowdWorld2D::release_external_velocity);
+        ClassDB::bind_method(D_METHOD("apply_impulse_batch", "agent_handles", "velocities", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority"), &CrowdWorld2D::apply_impulse_batch);
+        ClassDB::bind_method(D_METHOD("create_external_velocity_source"), &CrowdWorld2D::create_external_velocity_source);
+        ClassDB::bind_method(D_METHOD("remove_external_velocity_source", "source_handle"), &CrowdWorld2D::remove_external_velocity_source);
+        ClassDB::bind_method(D_METHOD("refresh_external_velocity", "agent_handle", "source_handle", "velocity", "response_seconds", "expiry_seconds"), &CrowdWorld2D::refresh_external_velocity);
+        ClassDB::bind_method(D_METHOD("release_external_velocity", "agent_handle", "source_handle"), &CrowdWorld2D::release_external_velocity);
+        ClassDB::bind_method(D_METHOD("create_effect_volume", "configuration"), &CrowdWorld2D::create_effect_volume);
+        ClassDB::bind_method(D_METHOD("update_effect_volume", "volume_handle", "position", "direction", "follow_offset"), &CrowdWorld2D::update_effect_volume);
+        ClassDB::bind_method(D_METHOD("remove_effect_volume", "volume_handle"), &CrowdWorld2D::remove_effect_volume);
+        ClassDB::bind_method(D_METHOD("get_effect_volume_count"), &CrowdWorld2D::get_effect_volume_count);
+        ClassDB::bind_method(D_METHOD("take_effect_events"), &CrowdWorld2D::take_effect_events);
         ClassDB::bind_method(D_METHOD("configure_bottleneck", "bottleneck_id", "capacity", "reservation_timeout"), &CrowdWorld2D::configure_bottleneck);
         ClassDB::bind_method(D_METHOD("request_bottleneck", "bottleneck_id", "agent_handle", "direction", "priority"), &CrowdWorld2D::request_bottleneck);
         ClassDB::bind_method(D_METHOD("has_bottleneck_access", "bottleneck_id", "agent_handle"), &CrowdWorld2D::has_bottleneck_access);
@@ -68,6 +79,8 @@ namespace godot
         ClassDB::bind_method(D_METHOD("get_agent_route_progress", "agent_handle"), &CrowdWorld2D::get_agent_route_progress);
         ClassDB::bind_method(D_METHOD("get_agent_diagnostics", "agent_handle"), &CrowdWorld2D::get_agent_diagnostics);
         ClassDB::bind_method(D_METHOD("query_agents_in_circle", "position", "radius", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_circle, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("query_agents_in_cone", "position", "radius", "direction", "angle_degrees", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_cone, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("query_agents_in_aabb", "bounds", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_aabb, DEFVAL(0));
         ClassDB::bind_method(D_METHOD("get_agents_in_navigation_cell", "navigation", "cell"), &CrowdWorld2D::get_agents_in_navigation_cell);
         ClassDB::bind_method(D_METHOD("get_agent_handles"), &CrowdWorld2D::get_agent_handles);
         ClassDB::bind_method(D_METHOD("get_agent_positions"), &CrowdWorld2D::get_agent_positions);
@@ -139,6 +152,33 @@ namespace godot
     }
 
     ffcore::DirectionalMotionFieldHandle CrowdWorld2D::decode_directional_field_handle(
+        std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    std::int64_t CrowdWorld2D::encode_effect_volume_handle(ffcore::EffectVolumeHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::EffectVolumeHandle CrowdWorld2D::decode_effect_volume_handle(
+        std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    std::int64_t CrowdWorld2D::encode_external_velocity_source_handle(
+        ffcore::ExternalVelocitySourceHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::ExternalVelocitySourceHandle CrowdWorld2D::decode_external_velocity_source_handle(
         std::int64_t encoded)
     {
         const std::uint64_t value = static_cast<std::uint64_t>(encoded);
@@ -398,42 +438,6 @@ namespace godot
     bool CrowdWorld2D::set_agent_paused(std::int64_t agent_handle, bool paused)
     {
         return crowd.set_paused(decode_handle(agent_handle), paused);
-    }
-
-    void CrowdWorld2D::apply_impulse(
-        std::int64_t agent_handle,
-        Vector2 velocity,
-        double delay,
-        double decay_per_second,
-        double control_suppression_seconds,
-        bool preserve_navigation,
-        int priority)
-    {
-        ffcore::ImpulseRequest request;
-        request.velocity = {velocity.x, velocity.y};
-        request.delay = delay;
-        request.decay_per_second = decay_per_second;
-        request.control_suppression_seconds = control_suppression_seconds;
-        request.preserve_navigation = preserve_navigation;
-        request.priority = priority;
-        crowd.apply_impulse(decode_handle(agent_handle), request);
-    }
-
-    bool CrowdWorld2D::refresh_external_velocity(
-        std::int64_t agent_handle,
-        int source_id,
-        Vector2 velocity,
-        double response_seconds,
-        double expiry_seconds)
-    {
-        return crowd.refresh_external_velocity(
-            decode_handle(agent_handle), source_id, {velocity.x, velocity.y},
-            response_seconds, expiry_seconds);
-    }
-
-    bool CrowdWorld2D::release_external_velocity(std::int64_t agent_handle, int source_id)
-    {
-        return crowd.release_external_velocity(decode_handle(agent_handle), source_id);
     }
 
     void CrowdWorld2D::configure_bottleneck(

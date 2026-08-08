@@ -15,6 +15,16 @@ namespace ffcore
         profile.separation_radius = std::isfinite(profile.separation_radius) ? std::max(0.0, profile.separation_radius) : 20.0;
         profile.separation_weight = std::isfinite(profile.separation_weight) ? std::max(0.0, profile.separation_weight) : 1.0;
         profile.arrival_radius = std::isfinite(profile.arrival_radius) ? std::max(0.0, profile.arrival_radius) : 4.0;
+        profile.contact_push_strength = std::isfinite(profile.contact_push_strength)
+            ? std::max(0.0, profile.contact_push_strength) : 0.0;
+        profile.contact_push_resistance = std::isfinite(profile.contact_push_resistance)
+            ? std::max(0.001, profile.contact_push_resistance) : 1.0;
+        profile.contact_push_cooldown = std::isfinite(profile.contact_push_cooldown)
+            ? std::max(0.0, profile.contact_push_cooldown) : 0.2;
+        profile.contact_impulse_decay = std::isfinite(profile.contact_impulse_decay)
+            ? std::max(0.0, profile.contact_impulse_decay) : 0.65;
+        profile.contact_control_suppression = std::isfinite(profile.contact_control_suppression)
+            ? std::max(0.0, profile.contact_control_suppression) : 0.2;
         return profile;
     }
 

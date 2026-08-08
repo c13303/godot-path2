@@ -27,6 +27,11 @@ namespace ffcore
         double arrival_radius = 4.0;
         int terrain_speed_channel = 0;
         std::uint32_t category_mask = std::numeric_limits<std::uint32_t>::max();
+        double contact_push_strength = 0.0;
+        double contact_push_resistance = 1.0;
+        double contact_push_cooldown = 0.2;
+        double contact_impulse_decay = 0.65;
+        double contact_control_suppression = 0.2;
     };
 
     class CrowdProfileStore

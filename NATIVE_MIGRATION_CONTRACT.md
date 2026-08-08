@@ -34,7 +34,12 @@ in pass 8.
   avoidance/depenetration, generational sparse directional-motion fields, filtered spatial queries,
   navigation-cell queries, and neutral diagnostics. Deterministic fixtures cover flow, manual,
   path arrival, physical walls, separation, pause, terrain speed, obstacles, and directional motion.
-- Passes 5-8 remain required; the temporary legacy extension is still active.
+- Pass 5 complete: CPathLib owns delayed/prioritized and batched impulses, generational external
+  velocity sources, contact-pressure and traffic right-of-way forces, circle/cone/AABB queries,
+  generational effect volumes with neutral enter/tick/exit events, and a `ProjectileWorld` with
+  generational type handles, bounded pools, inherited velocity, swept agent/static collision,
+  category/channel masks, caller tokens, and neutral impact/expiry events.
+- Passes 6-8 remain required; the temporary legacy extension is still active.
 
 ## Source-file disposition
 

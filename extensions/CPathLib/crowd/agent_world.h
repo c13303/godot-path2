@@ -52,6 +52,8 @@ namespace ffcore
         std::vector<Vec2> path;
         std::size_t path_index = 0;
         bool paused = false;
+        std::int64_t traffic_group_token = 0;
+        int traffic_priority = 0;
         ExternalVelocityAccumulator external_velocity;
     };
 

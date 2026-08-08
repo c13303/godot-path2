@@ -19,6 +19,10 @@ Features include:
 - generational static circular obstacles with avoidance and hard depenetration;
 - per-agent sparse directional-motion fields with exact and radius-fallback sampling;
 - filtered circle and navigation-cell agent queries plus neutral per-agent diagnostics;
+- delayed and prioritized impulses, generational external-velocity sources, contact pressure,
+  and traffic right-of-way;
+- generational circle/cone effect volumes with enter, tick, and exit events;
+- pooled projectiles with swept static/agent collision and neutral impact events;
 - arbitrary rectangular grids, cell sizes, cell origins, and world origins.
 
 ## Ownership and dependencies
@@ -33,6 +37,7 @@ The public Godot classes are:
 - `NavigationWorld2D`: grid topology, paths, flow fields, areas, portals, and asynchronous work;
 - `NavigationRoute2D`: an immutable typed route result;
 - `CrowdWorld2D`: optional instance-owned crowd simulation and bottleneck reservations.
+- `ProjectileWorld2D`: optional pooled projectile simulation and neutral impact reporting.
 
 ## Local Windows build
 
@@ -99,6 +104,21 @@ velocity target during motion, while the latter constrains which grid edges a pa
 Use `query_agents_in_circle()`, `get_agents_in_navigation_cell()`, and
 `get_agent_diagnostics()` for neutral, data-only inspection.
 
+For interaction logic, configure per-agent contact pressure and optional traffic group tokens on
+`CrowdWorld2D`. Circle, cone, and AABB queries return category-filtered generational handles, and
+`apply_impulse_batch()` submits explicit velocities through the same delayed, prioritized impulse
+pipeline. External velocities use world-owned generational source handles so stale sources cannot
+be refreshed after removal.
+
+Effect volumes are optional circle or cone regions. They can follow an agent, filter categories,
+emit neutral enter/tick/exit records, and optionally submit fixed or radial impulses. Caller tokens
+let the consumer associate events with its own rules without putting those rules in CPathLib.
+
+`ProjectileWorld2D` owns reusable projectile-type handles and fixed-size pools. Connect it to a
+`CrowdWorld2D`, upload a static collider-mask grid, then spawn projectiles with optional inherited
+velocity, owner handle, and caller token. Swept collision produces agent, static-collider, or
+lifetime-expiry records. The consuming project decides what each impact means.
+
 Gardens are the friendly Godot API name for optional navigation areas. Create one explicitly with
 `create_garden()` or flood-fill it from a seed with `create_garden_from_seed()`, add directional
 multi-cell portals with `create_garden_portal()`, and request typed enter/exit routes. The neutral
@@ -108,8 +128,9 @@ per-agent paths, and manual directions.
 
 ## Verification and demo
 
-Portable test sources are in `tests/`. The two Godot smoke scripts exercise navigation, routes,
-asynchronous work, crowd motion, bottleneck reservations, and forces. `demo/navigation_demo.tscn`
+Portable test sources are in `tests/`. The Godot smoke scripts exercise navigation, routes,
+asynchronous work, crowd motion, bottleneck reservations, forces, effect volumes, and projectiles.
+`demo/navigation_demo.tscn`
 shows the same features without requiring a TileMap, autoload, or prescribed scene hierarchy.
 
 See [REUSE.md](REUSE.md) for the standalone-repository checklist and API stability rules.

@@ -4,10 +4,13 @@
 #include "cohort_store.h"
 #include "crowd_profile_store.h"
 #include "impulse_system.h"
+#include "effect_volume_system.h"
+#include "crowd_interaction_system.h"
 #include "steering_solver.h"
 #include "../steering/terrain_speed_grid.h"
 #include "../steering/directional_motion_field_store.h"
 #include "../steering/static_obstacle_store.h"
+#include "../steering/external_velocity_source_store.h"
 #include "../bottleneck/bottleneck_traffic_controller.h"
 
 #include <cstdint>
@@ -18,6 +21,7 @@ namespace ffcore
     struct CrowdWorldConfig
     {
         CrowdAgentProfile default_agent_profile;
+        CrowdInteractionConfig interactions;
         double static_obstacle_query_padding = 0.0;
         double static_obstacle_repulsion_strength = 1.0;
         bool paused = false;
@@ -31,13 +35,17 @@ namespace ffcore
         TerrainSpeedGrid terrain_speeds;
         DirectionalMotionFieldStore directional_fields;
         StaticObstacleStore static_obstacles;
+        ExternalVelocitySourceStore external_velocity_sources;
         ImpulseSystem impulses;
+        EffectVolumeSystem effect_volumes;
+        CrowdInteractionSystem interactions;
         BottleneckTrafficController traffic;
         CrowdProfileStore profiles;
         CohortStore cohorts;
         CrowdWorldConfig config;
         std::unordered_map<std::uint64_t, FlowField> installed_flows;
         FlowHandle default_flow_handle;
+        double maximum_agent_radius = 0.0;
 
         static Vec2 approach(const Vec2 &current, const Vec2 &target, double maximum_change);
         static std::uint64_t key(AgentHandle handle);
@@ -48,6 +56,7 @@ namespace ffcore
         void resolve_static_obstacle_overlaps(CrowdAgentState &agent) const;
         Vec2 resolve_motion(const CrowdAgentState &agent, const Vec2 &candidate,
                             const FlowField *flow) const;
+        void recompute_maximum_agent_radius();
 
     public:
         explicit CrowdWorld(double spatial_cell_size = 32.0)
@@ -73,10 +82,21 @@ namespace ffcore
         bool set_agent_position(AgentHandle agent, const Vec2 &position, bool clear_velocity);
         bool set_agent_motion_limits(AgentHandle agent, double maximum_speed,
                                      double acceleration, double deceleration);
+        bool set_agent_contact_profile(
+            AgentHandle agent, double push_strength, double resistance,
+            double cooldown, double impulse_decay, double control_suppression);
+        bool set_agent_traffic_state(AgentHandle agent, std::int64_t group_token, int priority);
         std::vector<AgentHandle> query_agents(
             const Vec2 &position, double radius,
             std::uint32_t category_mask = std::numeric_limits<std::uint32_t>::max(),
             AgentHandle ignored = {}) const;
+        std::vector<AgentHandle> query_agents_in_cone(
+            const Vec2 &position, double radius, const Vec2 &direction,
+            double angle_degrees, std::uint32_t category_mask,
+            AgentHandle ignored = {}) const;
+        std::vector<AgentHandle> query_agents_in_aabb(
+            const Vec2 &center, double half_width, double half_height,
+            std::uint32_t category_mask, AgentHandle ignored = {}) const;
 
         CohortHandle create_cohort();
         bool remove_cohort(CohortHandle handle);
@@ -98,9 +118,28 @@ namespace ffcore
         bool set_paused(AgentHandle handle, bool paused);
 
         void apply_impulse(AgentHandle handle, const ImpulseRequest &request);
-        bool refresh_external_velocity(AgentHandle handle, int source_id, const Vec2 &velocity,
+        std::size_t apply_impulses(const std::vector<AgentHandle> &handles,
+                                   const std::vector<Vec2> &velocities,
+                                   const ImpulseRequest &settings);
+        ExternalVelocitySourceHandle create_external_velocity_source()
+        { return external_velocity_sources.create(); }
+        bool remove_external_velocity_source(ExternalVelocitySourceHandle source);
+        bool refresh_external_velocity(AgentHandle handle, ExternalVelocitySourceHandle source,
+                                       const Vec2 &velocity,
                                        double response_seconds, double expiry_seconds);
-        bool release_external_velocity(AgentHandle handle, int source_id);
+        bool release_external_velocity(AgentHandle handle, ExternalVelocitySourceHandle source);
+        std::size_t external_velocity_source_count() const
+        { return external_velocity_sources.size(); }
+        EffectVolumeHandle create_effect_volume(const EffectVolumeConfig &config)
+        { return effect_volumes.create(config); }
+        bool update_effect_volume(EffectVolumeHandle handle, const Vec2 &position,
+                                  const Vec2 &direction, const Vec2 &follow_offset)
+        { return effect_volumes.update_transform(handle, position, direction, follow_offset); }
+        bool remove_effect_volume(EffectVolumeHandle handle)
+        { return effect_volumes.remove(handle); }
+        std::vector<EffectVolumeEvent> take_effect_events()
+        { return effect_volumes.take_events(); }
+        std::size_t effect_volume_count() const { return effect_volumes.size(); }
         void configure_bottleneck(std::uint64_t bottleneck_id,
                                   const BottleneckTrafficConfig &config);
         bool request_bottleneck(std::uint64_t bottleneck_id, AgentHandle handle,

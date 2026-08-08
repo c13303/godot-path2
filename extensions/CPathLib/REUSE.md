@@ -10,9 +10,10 @@ CPathLib is designed so this directory can become the root of a separate private
 4. Package `cpathlib.gdextension`, `bin/cpathlib.dll`, and the required MinGW runtime DLLs under one
    addon directory while preserving descriptor-relative paths.
 5. Do not commit object files, compiler runtime backups, temporary DLLs, `.godot`, or SCons state.
-6. Run both portable test executables and both Godot smoke scripts before updating a consuming
+6. Run both portable test executables and all Godot smoke scripts before updating a consuming
    project's pinned revision.
-7. Treat `NavigationWorld2D`, `NavigationRoute2D`, and `CrowdWorld2D` as the stable Godot boundary.
+7. Treat `NavigationWorld2D`, `NavigationRoute2D`, `CrowdWorld2D`, and `ProjectileWorld2D` as the
+   stable Godot boundary.
 8. Keep host-specific TileMap interpretation, scene lookup, gameplay state, combat/effect rules,
    save formats, and debug presentation in the consuming project.
 9. Preserve the dependency direction: host adapter to CPathLib Godot API to portable core.
@@ -40,3 +41,8 @@ to `NavigationWorld2D` and constrain path construction. Directional-motion field
 `CrowdWorld2D`, produce velocity targets, and are explicitly assigned to agents. Static obstacles,
 motion fields, terrain channels, and category-mask meanings are owned by the consuming world; keep
 their semantic names in consumer code rather than adding them to CPathLib.
+
+Effect caller tokens, projectile caller tokens, category masks, traffic group tokens, and static
+collision channel bits are deliberately opaque. CPathLib stores, filters, and returns them but does
+not assign project meanings. Consumers should drain effect and projectile events every simulation
+step and resolve those tokens in their own systems.

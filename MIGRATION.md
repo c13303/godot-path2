@@ -21,7 +21,8 @@ Current completion summary:
 | instance configuration, profiles, handles, cohorts, multi-flow foundation | complete in pass 2 |
 | navigation channels, flow diagnostics, gardens/portals, bottleneck discovery | complete in pass 3 |
 | crowd motion sources, terrain, static obstacles, directional motion, spatial queries | complete in pass 4 |
-| contact/traffic forces, effects, projectiles, and host conversion | pending across passes 5-7 |
+| impulses, source handles, contact/traffic forces, effects, generic projectiles | complete in pass 5 |
+| host navigation/agent/combat conversion | pending across passes 6-7 |
 | temporary native compatibility extension | must be deleted in pass 8 |
 | separate Git repository and dependency pin | intentionally left to the owner |
 

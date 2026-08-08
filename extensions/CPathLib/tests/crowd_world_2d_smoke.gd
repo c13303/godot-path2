@@ -51,6 +51,20 @@ func _initialize() -> void:
 	if after_impulse.x <= before_impulse.x:
 		_fail("generic impulse did not alter motion")
 		return
+	var velocity_source: int = int(crowd.call(&"create_external_velocity_source"))
+	if velocity_source <= 0 or not bool(crowd.call(
+		&"refresh_external_velocity", second, velocity_source,
+		Vector2(5.0, 0.0), 0.0, 1.0
+	)):
+		_fail("generic external-velocity source handle failed")
+		return
+	if not bool(crowd.call(&"remove_external_velocity_source", velocity_source)) \
+			or bool(crowd.call(
+				&"refresh_external_velocity", second, velocity_source,
+				Vector2(5.0, 0.0), 0.0, 1.0
+			)):
+		_fail("stale external-velocity source handle remained usable")
+		return
 
 	var handles: PackedInt64Array = crowd.call(&"get_agent_handles") as PackedInt64Array
 	var positions: PackedVector2Array = crowd.call(&"get_agent_positions") as PackedVector2Array
@@ -67,6 +81,33 @@ func _initialize() -> void:
 	if nearby.find(first) < 0:
 		_fail("generic circle query omitted an overlapping agent")
 		return
+	var cone_agents: PackedInt64Array = crowd.call(
+		&"query_agents_in_cone", moved_position, 1.0, Vector2.RIGHT,
+		90.0, -1, 0
+	) as PackedInt64Array
+	var box_agents: PackedInt64Array = crowd.call(
+		&"query_agents_in_aabb", Rect2(moved_position - Vector2.ONE, Vector2(2.0, 2.0)),
+		-1, 0
+	) as PackedInt64Array
+	if cone_agents.find(first) < 0:
+		_fail("generic cone query omitted an overlapping agent")
+		return
+	if box_agents.find(first) < 0:
+		_fail("generic AABB query omitted an overlapping agent")
+		return
+	if int(crowd.call(
+		&"apply_impulse_batch", PackedInt64Array([first]),
+		PackedVector2Array([Vector2.ZERO]), 0.0, 0.0, 0.0, true, 1
+	)) != 1:
+		_fail("generic batched impulse submission failed")
+		return
+	crowd.call(&"configure_agent_interactions", true, true, 10.0, 0.2, 0.1)
+	if not bool(crowd.call(
+		&"set_agent_contact_profile", first, 0.0, 1.0, 0.2, 0.65, 0.2
+	)) or not bool(crowd.call(&"set_agent_traffic_state", first, 1, 1)):
+		_fail("generic contact or traffic configuration failed")
+		return
+	crowd.call(&"set_agent_traffic_state", first, 0, 0)
 	var moved_cell: Vector2i = Vector2i(
 		int(floor(moved_position.x / 10.0)), int(floor(moved_position.y / 10.0))
 	)
@@ -139,6 +180,47 @@ func _initialize() -> void:
 		return
 	if bool(crowd.call(&"follow_directional_motion_field", second, directional_field)):
 		_fail("stale directional-motion field handle remained usable")
+		return
+	var effect_center: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	var effect_volume: int = int(crowd.call(&"create_effect_volume", {
+		"position": effect_center,
+		"radius": 4.0,
+		"duration": 0.5,
+		"tick_interval": 0.0,
+		"category_mask": -1,
+		"caller_token": 95,
+	}))
+	if effect_volume <= 0 or int(crowd.call(&"get_effect_volume_count")) != 1:
+		_fail("generic effect-volume handle creation failed")
+		return
+	crowd.call(&"step", 0.01)
+	var effect_events: Array = crowd.call(&"take_effect_events") as Array
+	var saw_enter: bool = false
+	var saw_tick: bool = false
+	for event_variant: Variant in effect_events:
+		var event: Dictionary = event_variant as Dictionary
+		if int(event.get("agent_handle", 0)) != second:
+			continue
+		if int(event.get("kind", -1)) == 0:
+			saw_enter = true
+		elif int(event.get("kind", -1)) == 1:
+			saw_tick = true
+	if not saw_enter or not saw_tick:
+		_fail("generic effect volume did not emit neutral enter/tick events")
+		return
+	if not bool(crowd.call(
+		&"update_effect_volume", effect_volume,
+		effect_center + Vector2(30.0, 0.0), Vector2.RIGHT, Vector2.ZERO
+	)):
+		_fail("generic effect-volume transform update failed")
+		return
+	crowd.call(&"step", 0.01)
+	effect_events = crowd.call(&"take_effect_events") as Array
+	if effect_events.is_empty() or int(effect_events[0].get("kind", -1)) != 2:
+		_fail("generic effect volume did not emit exit")
+		return
+	if not bool(crowd.call(&"remove_effect_volume", effect_volume)):
+		_fail("generic effect-volume removal failed")
 		return
 
 	var left_flow: int = int(navigation.call(&"create_flow_to_cell", Vector2i(0, 0)))

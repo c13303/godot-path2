@@ -27,6 +27,15 @@ namespace ffcore
         config.static_obstacle_repulsion_strength =
             std::isfinite(config.static_obstacle_repulsion_strength)
             ? std::max(0.0, config.static_obstacle_repulsion_strength) : 1.0;
+        config.interactions.right_of_way_push_speed =
+            std::isfinite(config.interactions.right_of_way_push_speed)
+            ? std::max(0.0, config.interactions.right_of_way_push_speed) : 216.0;
+        config.interactions.right_of_way_cooldown =
+            std::isfinite(config.interactions.right_of_way_cooldown)
+            ? std::max(0.0, config.interactions.right_of_way_cooldown) : 0.18;
+        config.interactions.right_of_way_control_suppression =
+            std::isfinite(config.interactions.right_of_way_control_suppression)
+            ? std::max(0.0, config.interactions.right_of_way_control_suppression) : 0.18;
     }
 
     ProfileHandle CrowdWorld::create_profile(const CrowdAgentProfile &profile)
@@ -53,6 +62,8 @@ namespace ffcore
     {
         const AgentHandle handle = agents.create(position, config.default_agent_profile);
         spatial.insert(static_cast<int>(handle.index), position);
+        maximum_agent_radius = std::max(
+            maximum_agent_radius, agents.get(handle)->profile.radius);
         return handle;
     }
 
@@ -60,6 +71,8 @@ namespace ffcore
     {
         const AgentHandle handle = agents.create(position, profile);
         spatial.insert(static_cast<int>(handle.index), position);
+        maximum_agent_radius = std::max(
+            maximum_agent_radius, agents.get(handle)->profile.radius);
         return handle;
     }
 
@@ -71,6 +84,7 @@ namespace ffcore
         const AgentHandle handle = agents.create(position, *profile);
         agents.get(handle)->profile_handle = profile_handle;
         spatial.insert(static_cast<int>(handle.index), position);
+        maximum_agent_radius = std::max(maximum_agent_radius, profile->radius);
         return handle;
     }
 
@@ -79,10 +93,14 @@ namespace ffcore
         if (agents.get(handle) == nullptr)
             return false;
         impulses.remove(handle);
+        effect_volumes.remove_agent(handle);
         traffic.remove_agent(key(handle));
+        interactions.remove_agent(handle);
         remove_agent_from_cohort(handle);
         spatial.remove(static_cast<int>(handle.index));
-        return agents.remove(handle);
+        const bool removed = agents.remove(handle);
+        recompute_maximum_agent_radius();
+        return removed;
     }
 
     bool CrowdWorld::set_agent_profile(AgentHandle agent_handle, ProfileHandle profile_handle)
@@ -93,6 +111,7 @@ namespace ffcore
             return false;
         agent->profile_handle = profile_handle;
         agent->profile = *profile;
+        recompute_maximum_agent_radius();
         return true;
     }
 
@@ -128,33 +147,32 @@ namespace ffcore
         return true;
     }
 
-    std::vector<AgentHandle> CrowdWorld::query_agents(
-        const Vec2 &position, double radius,
-        std::uint32_t category_mask, AgentHandle ignored) const
+    bool CrowdWorld::set_agent_contact_profile(
+        AgentHandle agent_handle, double push_strength, double resistance,
+        double cooldown, double impulse_decay, double control_suppression)
     {
-        std::vector<AgentHandle> result;
-        if (!std::isfinite(radius) || radius < 0.0)
-            return result;
-        for (int index : spatial.query_neighbors(position, radius))
-        {
-            if (index <= 0)
-                continue;
-            const AgentHandle candidate_handle = {
-                static_cast<std::uint32_t>(index),
-                agents.generation_at(static_cast<std::uint32_t>(index))};
-            const CrowdAgentState *candidate = agents.get(candidate_handle);
-            if (candidate == nullptr || candidate_handle == ignored ||
-                (candidate->profile.category_mask & category_mask) == 0)
-                continue;
-            if (candidate->position.distance_to(position) <= radius + candidate->profile.radius)
-                result.push_back(candidate_handle);
-        }
-        std::sort(result.begin(), result.end(), [](AgentHandle left, AgentHandle right)
-        {
-            return left.index < right.index;
-        });
-        result.erase(std::unique(result.begin(), result.end()), result.end());
-        return result;
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        CrowdAgentProfile requested = agent->profile;
+        requested.contact_push_strength = push_strength;
+        requested.contact_push_resistance = resistance;
+        requested.contact_push_cooldown = cooldown;
+        requested.contact_impulse_decay = impulse_decay;
+        requested.contact_control_suppression = control_suppression;
+        agent->profile = CrowdProfileStore::sanitize(requested);
+        return true;
+    }
+
+    bool CrowdWorld::set_agent_traffic_state(
+        AgentHandle agent_handle, std::int64_t group_token, int priority)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        agent->traffic_group_token = std::max<std::int64_t>(0, group_token);
+        agent->traffic_priority = agent->traffic_group_token == 0 ? 0 : std::max(0, priority);
+        return true;
     }
 
     CohortHandle CrowdWorld::create_cohort()
@@ -339,26 +357,59 @@ namespace ffcore
             impulses.apply(handle, request);
     }
 
+    std::size_t CrowdWorld::apply_impulses(
+        const std::vector<AgentHandle> &handles,
+        const std::vector<Vec2> &velocities,
+        const ImpulseRequest &settings)
+    {
+        if (handles.size() != velocities.size())
+            return 0;
+        std::size_t applied = 0;
+        for (std::size_t index = 0; index < handles.size(); ++index)
+        {
+            if (agents.get(handles[index]) == nullptr)
+                continue;
+            ImpulseRequest request = settings;
+            request.velocity = velocities[index];
+            impulses.apply(handles[index], request);
+            ++applied;
+        }
+        return applied;
+    }
+
     bool CrowdWorld::refresh_external_velocity(
         AgentHandle handle,
-        int source_id,
+        ExternalVelocitySourceHandle source,
         const Vec2 &velocity,
         double response_seconds,
         double expiry_seconds)
     {
         CrowdAgentState *agent = agents.get(handle);
-        if (agent == nullptr)
+        if (agent == nullptr || !external_velocity_sources.contains(source))
             return false;
-        agent->external_velocity.refresh_source(source_id, velocity, response_seconds, expiry_seconds);
+        agent->external_velocity.refresh_source(
+            encode_external_velocity_source(source), velocity,
+            response_seconds, expiry_seconds);
         return true;
     }
 
-    bool CrowdWorld::release_external_velocity(AgentHandle handle, int source_id)
+    bool CrowdWorld::release_external_velocity(
+        AgentHandle handle, ExternalVelocitySourceHandle source)
     {
         CrowdAgentState *agent = agents.get(handle);
-        if (agent == nullptr)
+        if (agent == nullptr || !external_velocity_sources.contains(source))
             return false;
-        agent->external_velocity.release_source(source_id);
+        agent->external_velocity.release_source(encode_external_velocity_source(source));
+        return true;
+    }
+
+    bool CrowdWorld::remove_external_velocity_source(ExternalVelocitySourceHandle source)
+    {
+        if (!external_velocity_sources.remove(source))
+            return false;
+        const std::uint64_t encoded = encode_external_velocity_source(source);
+        for (AgentHandle handle : agents.active_handles())
+            agents.get(handle)->external_velocity.release_source(encoded);
         return true;
     }
 
@@ -438,6 +489,14 @@ namespace ffcore
             handles_by_index[static_cast<int>(handle.index)] = handle;
         }
 
+        const std::vector<CrowdInteractionImpulse> interaction_impulses =
+            interactions.collect(delta, agents, spatial, config.interactions);
+        for (const CrowdInteractionImpulse &submission : interaction_impulses)
+            impulses.apply(submission.agent, submission.impulse);
+        const std::vector<EffectImpulseSubmission> effect_impulses =
+            effect_volumes.update(delta, agents);
+        for (const EffectImpulseSubmission &submission : effect_impulses)
+            impulses.apply(submission.agent, submission.impulse);
         impulses.update(delta);
         traffic.update(delta);
         for (AgentHandle handle : handles)

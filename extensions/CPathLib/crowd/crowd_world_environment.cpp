@@ -5,6 +5,97 @@
 
 namespace ffcore
 {
+    std::vector<AgentHandle> CrowdWorld::query_agents(
+        const Vec2 &position, double radius,
+        std::uint32_t category_mask, AgentHandle ignored) const
+    {
+        std::vector<AgentHandle> result;
+        if (!std::isfinite(radius) || radius < 0.0)
+            return result;
+        for (int index : spatial.query_neighbors(position, radius + maximum_agent_radius))
+        {
+            if (index <= 0)
+                continue;
+            const AgentHandle candidate_handle = {
+                static_cast<std::uint32_t>(index),
+                agents.generation_at(static_cast<std::uint32_t>(index))};
+            const CrowdAgentState *candidate = agents.get(candidate_handle);
+            if (candidate == nullptr || candidate_handle == ignored ||
+                (candidate->profile.category_mask & category_mask) == 0)
+                continue;
+            if (candidate->position.distance_to(position) <= radius + candidate->profile.radius)
+                result.push_back(candidate_handle);
+        }
+        std::sort(result.begin(), result.end(), [](AgentHandle left, AgentHandle right)
+        {
+            return left.index < right.index;
+        });
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
+    }
+
+    void CrowdWorld::recompute_maximum_agent_radius()
+    {
+        maximum_agent_radius = 0.0;
+        for (AgentHandle handle : agents.active_handles())
+            maximum_agent_radius = std::max(
+                maximum_agent_radius, agents.get(handle)->profile.radius);
+    }
+
+    std::vector<AgentHandle> CrowdWorld::query_agents_in_cone(
+        const Vec2 &position, double radius, const Vec2 &direction,
+        double angle_degrees, std::uint32_t category_mask, AgentHandle ignored) const
+    {
+        std::vector<AgentHandle> result;
+        const Vec2 facing = direction.normalized();
+        if (facing.is_zero() || !std::isfinite(angle_degrees))
+            return result;
+        const double clamped_angle = std::clamp(angle_degrees, 0.0, 360.0);
+        constexpr double pi = 3.14159265358979323846;
+        const double half_angle = clamped_angle * 0.5 * pi / 180.0;
+        for (AgentHandle handle : query_agents(position, radius, category_mask, ignored))
+        {
+            const CrowdAgentState *agent = agents.get(handle);
+            const Vec2 offset = agent->position - position;
+            const double distance = offset.length();
+            if (clamped_angle >= 360.0 || distance <= agent->profile.radius)
+            {
+                result.push_back(handle);
+                continue;
+            }
+
+            // Agents are discs, so include a disc whose edge intersects the cone
+            // even when its center lies just outside the angular boundary.
+            const double angular_margin = std::asin(std::clamp(
+                agent->profile.radius / distance, 0.0, 1.0));
+            const double effective_half_angle = std::min(pi, half_angle + angular_margin);
+            if (offset.normalized().dot(facing) >= std::cos(effective_half_angle))
+                result.push_back(handle);
+        }
+        return result;
+    }
+
+    std::vector<AgentHandle> CrowdWorld::query_agents_in_aabb(
+        const Vec2 &center, double half_width, double half_height,
+        std::uint32_t category_mask, AgentHandle ignored) const
+    {
+        std::vector<AgentHandle> result;
+        if (!std::isfinite(half_width) || !std::isfinite(half_height) ||
+            half_width < 0.0 || half_height < 0.0)
+            return result;
+        const double query_radius = std::sqrt(
+            half_width * half_width + half_height * half_height);
+        for (AgentHandle handle : query_agents(center, query_radius, category_mask, ignored))
+        {
+            const CrowdAgentState *agent = agents.get(handle);
+            if (circle_overlaps_aabb(
+                    agent->position, agent->profile.radius,
+                    center, half_width, half_height))
+                result.push_back(handle);
+        }
+        return result;
+    }
+
     DirectionalMotionFieldHandle CrowdWorld::create_directional_field(
         const DirectionalMotionField &field)
     {

@@ -32,6 +32,12 @@ namespace godot
             ffcore::DirectionalMotionFieldHandle handle);
         static ffcore::DirectionalMotionFieldHandle decode_directional_field_handle(
             std::int64_t encoded);
+        static std::int64_t encode_effect_volume_handle(ffcore::EffectVolumeHandle handle);
+        static ffcore::EffectVolumeHandle decode_effect_volume_handle(std::int64_t encoded);
+        static std::int64_t encode_external_velocity_source_handle(
+            ffcore::ExternalVelocitySourceHandle handle);
+        static ffcore::ExternalVelocitySourceHandle decode_external_velocity_source_handle(
+            std::int64_t encoded);
         static ffcore::CrowdAgentProfile make_profile(
             double radius, double maximum_speed, double acceleration, double deceleration,
             double separation_radius, double separation_weight, double arrival_radius,
@@ -42,6 +48,7 @@ namespace godot
 
     public:
         void _physics_process(double delta) override;
+        ffcore::CrowdWorld &core_world() { return crowd; }
 
         void set_automatic_step(bool enabled) { automatic_step = enabled; }
         bool is_automatic_step_enabled() const { return automatic_step; }
@@ -75,6 +82,15 @@ namespace godot
                                 bool clear_velocity = true);
         bool set_agent_motion_limits(std::int64_t agent_handle, double maximum_speed,
                                      double acceleration, double deceleration);
+        bool set_agent_contact_profile(
+            std::int64_t agent_handle, double push_strength, double resistance,
+            double cooldown, double impulse_decay, double control_suppression);
+        bool set_agent_traffic_state(std::int64_t agent_handle,
+                                     std::int64_t group_token, int priority);
+        void configure_agent_interactions(
+            bool contact_push_enabled, bool right_of_way_enabled,
+            double right_of_way_push_speed, double right_of_way_cooldown,
+            double right_of_way_control_suppression);
         std::int64_t create_cohort();
         bool remove_cohort(std::int64_t cohort_handle);
         bool assign_agent_to_cohort(std::int64_t agent_handle, std::int64_t cohort_handle);
@@ -110,10 +126,24 @@ namespace godot
         void apply_impulse(std::int64_t agent_handle, Vector2 velocity, double delay,
                            double decay_per_second, double control_suppression_seconds,
                            bool preserve_navigation, int priority);
-        bool refresh_external_velocity(std::int64_t agent_handle, int source_id,
+        int apply_impulse_batch(
+            const PackedInt64Array &agent_handles,
+            const PackedVector2Array &velocities, double delay,
+            double decay_per_second, double control_suppression_seconds,
+            bool preserve_navigation, int priority);
+        std::int64_t create_external_velocity_source();
+        bool remove_external_velocity_source(std::int64_t source_handle);
+        bool refresh_external_velocity(std::int64_t agent_handle, std::int64_t source_handle,
                                        Vector2 velocity, double response_seconds,
                                        double expiry_seconds);
-        bool release_external_velocity(std::int64_t agent_handle, int source_id);
+        bool release_external_velocity(std::int64_t agent_handle,
+                                       std::int64_t source_handle);
+        std::int64_t create_effect_volume(const Dictionary &configuration);
+        bool update_effect_volume(std::int64_t volume_handle, Vector2 position,
+                                  Vector2 direction, Vector2 follow_offset);
+        bool remove_effect_volume(std::int64_t volume_handle);
+        int get_effect_volume_count() const;
+        Array take_effect_events();
         void configure_bottleneck(std::int64_t bottleneck_id, int capacity,
                                   double reservation_timeout);
         bool request_bottleneck(std::int64_t bottleneck_id, std::int64_t agent_handle,
@@ -137,6 +167,12 @@ namespace godot
         Dictionary get_agent_diagnostics(std::int64_t agent_handle) const;
         PackedInt64Array query_agents_in_circle(
             Vector2 position, double radius, std::int64_t category_mask,
+            std::int64_t ignored_agent_handle = 0) const;
+        PackedInt64Array query_agents_in_cone(
+            Vector2 position, double radius, Vector2 direction, double angle_degrees,
+            std::int64_t category_mask, std::int64_t ignored_agent_handle = 0) const;
+        PackedInt64Array query_agents_in_aabb(
+            Rect2 bounds, std::int64_t category_mask,
             std::int64_t ignored_agent_handle = 0) const;
         PackedInt64Array get_agents_in_navigation_cell(
             NavigationWorld2D *navigation, Vector2i cell) const;

@@ -12,8 +12,8 @@ namespace ffcore
     class ExternalVelocityAccumulator
     {
     public:
-        void refresh_source(int source_id, const Vec2 &target_velocity, double response_seconds, double expiry_seconds);
-        void release_source(int source_id);
+        void refresh_source(std::uint64_t source_id, const Vec2 &target_velocity, double response_seconds, double expiry_seconds);
+        void release_source(std::uint64_t source_id);
         void clear();
         void update(double delta);
 
@@ -29,7 +29,7 @@ namespace ffcore
             double expiry_seconds = 0.0;
         };
 
-        std::unordered_map<int, Source> sources;
+        std::unordered_map<std::uint64_t, Source> sources;
         Vec2 combined_velocity;
     };
 } // namespace ffcore

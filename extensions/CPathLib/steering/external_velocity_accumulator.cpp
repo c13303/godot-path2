@@ -10,9 +10,9 @@ namespace
     constexpr double RELEASE_CUTOFF_SPEED = 0.05;
 }
 
-void ExternalVelocityAccumulator::refresh_source(int source_id, const Vec2 &target_velocity, double response_seconds, double expiry_seconds)
+void ExternalVelocityAccumulator::refresh_source(std::uint64_t source_id, const Vec2 &target_velocity, double response_seconds, double expiry_seconds)
 {
-    if (source_id < 0 || !std::isfinite(target_velocity.x) || !std::isfinite(target_velocity.y))
+    if (source_id == 0 || !std::isfinite(target_velocity.x) || !std::isfinite(target_velocity.y))
         return;
 
     Source &source = sources[source_id];
@@ -21,7 +21,7 @@ void ExternalVelocityAccumulator::refresh_source(int source_id, const Vec2 &targ
     source.expiry_seconds = std::max(0.0, expiry_seconds);
 }
 
-void ExternalVelocityAccumulator::release_source(int source_id)
+void ExternalVelocityAccumulator::release_source(std::uint64_t source_id)
 {
     auto it = sources.find(source_id);
     if (it == sources.end())

@@ -9,6 +9,7 @@
 #include "../bottleneck/bottleneck_traffic_controller.h"
 #include "../crowd/crowd_world.h"
 #include "../jobs/flow_field_job_queue.h"
+#include "../projectile/projectile_world.h"
 
 #include <cmath>
 #include <chrono>
@@ -366,12 +367,19 @@ namespace
         crowd.update(0.1);
         require(crowd.get_agent(impulse_agent)->position.x > 0.5,
                 "immediate generic impulse should alter position");
-        require(crowd.refresh_external_velocity(impulse_agent, 4, {1.0, 0.0}, 0.0, 1.0),
+        const ffcore::ExternalVelocitySourceHandle velocity_source =
+            crowd.create_external_velocity_source();
+        require(crowd.refresh_external_velocity(
+                    impulse_agent, velocity_source, {1.0, 0.0}, 0.0, 1.0),
                 "persistent external velocity source should attach");
         const double before_external = crowd.get_agent(impulse_agent)->position.x;
         crowd.update(0.1);
         require(crowd.get_agent(impulse_agent)->position.x > before_external,
                 "persistent external velocity should contribute motion");
+        require(crowd.remove_external_velocity_source(velocity_source) &&
+                    !crowd.refresh_external_velocity(
+                        impulse_agent, velocity_source, {1.0, 0.0}, 0.0, 1.0),
+                "stale external-velocity source handle should fail safely");
 
         require(crowd.remove_agent(flow_agent), "agent removal should succeed");
         require(crowd.get_agent(flow_agent) == nullptr,
@@ -683,6 +691,193 @@ namespace
                     crowd.get_agent(right)->position.x > 3.2,
                 "separation should move nearby idle agents apart");
     }
+
+    void test_generic_projectile_world()
+    {
+        ffcore::CrowdWorld crowd(1.0);
+        ffcore::CrowdAgentProfile agent_profile;
+        agent_profile.radius = 0.25;
+        agent_profile.category_mask = 2;
+        agent_profile.separation_radius = 0.0;
+        const ffcore::AgentHandle target = crowd.add_agent({2.0, 0.5}, agent_profile);
+
+        ffcore::ProjectileWorld projectiles;
+        projectiles.set_crowd_world(&crowd);
+        ffcore::ProjectileProfile profile;
+        profile.speed = 10.0;
+        profile.lifetime = 1.0;
+        profile.radius = 0.1;
+        profile.static_collision_mask = 0;
+        profile.target_category_mask = 2;
+        profile.pool_size = 2;
+        const ffcore::ProjectileTypeHandle type = projectiles.create_type(profile);
+        require(type.is_valid(), "generic projectile type creation failed");
+        const std::uint64_t instance = projectiles.spawn(
+            type, {0.0, 0.5}, {1.0, 0.0}, {}, {}, 41);
+        require(instance != 0, "generic projectile spawn failed");
+        projectiles.update(0.3);
+        std::vector<ffcore::ProjectileImpactEvent> impacts = projectiles.take_impacts();
+        require(impacts.size() == 1 &&
+                    impacts[0].kind == ffcore::ProjectileImpactKind::Agent &&
+                    impacts[0].hit_agent == target && impacts[0].caller_token == 41,
+                "swept generic projectile-to-agent collision changed");
+
+        ffcore::ProjectileStaticGrid grid;
+        grid.width = 4;
+        grid.height = 1;
+        grid.cell_size = 1.0;
+        grid.masks = {0, 4, 0, 0};
+        require(projectiles.set_static_collision_grid(grid),
+                "generic projectile static grid upload failed");
+        profile.static_collision_mask = 4;
+        profile.target_category_mask = 0;
+        require(projectiles.update_type(type, profile),
+                "generic projectile type update failed");
+        projectiles.spawn(type, {0.25, 0.5}, {1.0, 0.0}, {}, {}, 52);
+        projectiles.update(0.2);
+        impacts = projectiles.take_impacts();
+        require(impacts.size() == 1 &&
+                    impacts[0].kind == ffcore::ProjectileImpactKind::StaticCollider &&
+                    impacts[0].collider_cell == ffcore::Vec2i(1, 0) &&
+                    impacts[0].collider_mask == 4,
+                "swept generic projectile static collision changed");
+
+        projectiles.clear_static_collision_grid();
+        profile.static_collision_mask = 0;
+        profile.lifetime = 0.05;
+        profile.pool_size = 1;
+        require(projectiles.update_type(type, profile),
+                "inactive projectile pool should be resizable");
+        const std::uint64_t first = projectiles.spawn(
+            type, {0.0, 0.0}, {1.0, 0.0}, {}, {}, 1);
+        const std::uint64_t recycled = projectiles.spawn(
+            type, {0.0, 0.0}, {1.0, 0.0}, {1.0, 0.0}, {}, 2);
+        require(first != recycled && projectiles.active_count(type) == 1,
+                "full projectile pool should recycle its oldest active slot");
+        const std::vector<ffcore::ProjectileState> active =
+            projectiles.active_projectiles(type);
+        require(active.size() == 1 && active[0].caller_token == 2 &&
+                    approximately(active[0].velocity.x, 11.0),
+                "projectile recycling or inherited velocity changed");
+        projectiles.update(0.1);
+        impacts = projectiles.take_impacts();
+        require(impacts.size() == 1 &&
+                    impacts[0].kind == ffcore::ProjectileImpactKind::LifetimeExpired,
+                "projectile lifetime expiry event changed");
+
+        require(projectiles.remove_type(type), "projectile type removal failed");
+        require(projectiles.spawn(type, {}, {1.0, 0.0}) == 0,
+                "stale projectile type handle should fail safely");
+        const ffcore::ProjectileTypeHandle replacement = projectiles.create_type(profile);
+        require(replacement.index == type.index && replacement.generation != type.generation,
+                "reused projectile type slot should advance its generation");
+    }
+
+    void test_generic_effect_volumes()
+    {
+        ffcore::CrowdWorld crowd(1.0);
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = 0.1;
+        profile.maximum_speed = 0.0;
+        profile.separation_radius = 0.0;
+        profile.category_mask = 4;
+        const ffcore::AgentHandle agent = crowd.add_agent({0.0, 0.0}, profile);
+
+        ffcore::EffectVolumeConfig config;
+        config.position = {-1.0, 0.0};
+        config.radius = 10.0;
+        config.duration = 1.0;
+        config.tick_interval = 0.1;
+        config.category_mask = 4;
+        config.caller_token = 91;
+        config.apply_impulse_on_tick = true;
+        config.impulse_direction = ffcore::EffectImpulseDirection::Radial;
+        config.impulse_speed = 2.0;
+        config.impulse.decay_per_second = 0.0;
+        config.impulse.preserve_navigation = true;
+        const ffcore::EffectVolumeHandle volume = crowd.create_effect_volume(config);
+        require(volume.is_valid(), "generic effect-volume creation failed");
+        crowd.update(0.05);
+        std::vector<ffcore::EffectVolumeEvent> events = crowd.take_effect_events();
+        require(events.size() == 2 &&
+                    events[0].kind == ffcore::EffectVolumeEventKind::Enter &&
+                    events[1].kind == ffcore::EffectVolumeEventKind::Tick &&
+                    events[1].agent == agent && events[1].caller_token == 91,
+                "effect volume should emit ordered enter/tick events");
+        require(crowd.get_agent(agent)->position.x > 0.0,
+                "effect-volume impulse should enter the normal impulse pipeline");
+
+        crowd.update(0.04);
+        require(crowd.take_effect_events().empty(),
+                "effect-volume tick interval fired too early");
+        crowd.update(0.07);
+        events = crowd.take_effect_events();
+        require(events.size() == 1 && events[0].kind == ffcore::EffectVolumeEventKind::Tick,
+                "continuous effect-volume tick cadence changed");
+        require(crowd.update_effect_volume(
+                    volume, {20.0, 0.0}, {1.0, 0.0}, {}),
+                "effect-volume transform update failed");
+        crowd.update(0.01);
+        events = crowd.take_effect_events();
+        require(events.size() == 1 && events[0].kind == ffcore::EffectVolumeEventKind::Exit,
+                "moving an effect volume away should emit exit");
+        require(crowd.remove_effect_volume(volume), "effect-volume removal failed");
+        require(!crowd.remove_effect_volume(volume),
+                "stale effect-volume handle should fail safely");
+
+        ffcore::EffectVolumeConfig filtered = config;
+        filtered.position = {};
+        filtered.duration = 0.05;
+        filtered.category_mask = 8;
+        filtered.apply_impulse_on_tick = false;
+        const ffcore::EffectVolumeHandle replacement = crowd.create_effect_volume(filtered);
+        require(replacement.index == volume.index && replacement.generation != volume.generation,
+                "reused effect-volume slot should advance its generation");
+        crowd.update(0.1);
+        require(crowd.take_effect_events().empty(),
+                "effect volume category mask should filter nonmatching agents");
+    }
+
+    void test_generic_contact_and_right_of_way_forces()
+    {
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = 0.5;
+        profile.maximum_speed = 0.0;
+        profile.separation_radius = 0.0;
+        profile.contact_push_cooldown = 0.2;
+        profile.contact_impulse_decay = 0.0;
+        profile.contact_control_suppression = 0.0;
+
+        ffcore::CrowdWorld contact_world(1.0);
+        ffcore::CrowdAgentProfile strong = profile;
+        strong.contact_push_strength = 4.0;
+        ffcore::CrowdAgentProfile yielding = profile;
+        yielding.contact_push_strength = 0.0;
+        const ffcore::AgentHandle source = contact_world.add_agent({0.0, 0.0}, strong);
+        const ffcore::AgentHandle target = contact_world.add_agent({0.5, 0.0}, yielding);
+        contact_world.update(0.1);
+        require(contact_world.get_agent(source)->position.x <= 0.0 &&
+                    contact_world.get_agent(target)->position.x > 0.5,
+                "contact pressure should push the lower-pressure agent");
+
+        ffcore::CrowdWorld traffic_world(1.0);
+        ffcore::CrowdWorldConfig config;
+        config.interactions.contact_push_enabled = false;
+        config.interactions.right_of_way_enabled = true;
+        config.interactions.right_of_way_push_speed = 2.0;
+        config.interactions.right_of_way_cooldown = 0.2;
+        config.interactions.right_of_way_control_suppression = 0.0;
+        traffic_world.set_config(config);
+        const ffcore::AgentHandle winner = traffic_world.add_agent({0.0, 0.0}, profile);
+        const ffcore::AgentHandle loser = traffic_world.add_agent({0.5, 0.0}, profile);
+        require(traffic_world.set_manual_direction(winner, {1.0, 0.0}) &&
+                    traffic_world.set_agent_traffic_state(winner, 10, 2) &&
+                    traffic_world.set_agent_traffic_state(loser, 20, 1),
+                "right-of-way fixture setup failed");
+        traffic_world.update(0.1);
+        require(traffic_world.get_agent(loser)->position.x > 0.5,
+                "higher-priority traffic group should push a blocking lower-priority group");
+    }
 }
 
 int main()
@@ -708,6 +903,9 @@ int main()
     test_navigation_channels_and_seeded_gardens();
     test_directional_motion_and_static_obstacles();
     test_crowd_steering_mode_matrix();
+    test_generic_projectile_world();
+    test_generic_effect_volumes();
+    test_generic_contact_and_right_of_way_forces();
     std::cout << "FlowFieldAlgorithms tests passed\n";
     return EXIT_SUCCESS;
 }

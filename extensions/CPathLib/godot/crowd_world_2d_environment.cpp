@@ -192,6 +192,38 @@ namespace godot
         return result;
     }
 
+    PackedInt64Array CrowdWorld2D::query_agents_in_cone(
+        Vector2 position, double radius, Vector2 direction, double angle_degrees,
+        std::int64_t category_mask, std::int64_t ignored_agent_handle) const
+    {
+        const std::vector<ffcore::AgentHandle> handles = crowd.query_agents_in_cone(
+            {position.x, position.y}, radius, {direction.x, direction.y}, angle_degrees,
+            static_cast<std::uint32_t>(category_mask),
+            decode_handle(ignored_agent_handle));
+        PackedInt64Array result;
+        result.resize(static_cast<int>(handles.size()));
+        for (int index = 0; index < static_cast<int>(handles.size()); ++index)
+            result.set(index, encode_handle(handles[index]));
+        return result;
+    }
+
+    PackedInt64Array CrowdWorld2D::query_agents_in_aabb(
+        Rect2 bounds, std::int64_t category_mask,
+        std::int64_t ignored_agent_handle) const
+    {
+        const Vector2 center = bounds.get_center();
+        const Vector2 half_size = bounds.size * 0.5;
+        const std::vector<ffcore::AgentHandle> handles = crowd.query_agents_in_aabb(
+            {center.x, center.y}, half_size.x, half_size.y,
+            static_cast<std::uint32_t>(category_mask),
+            decode_handle(ignored_agent_handle));
+        PackedInt64Array result;
+        result.resize(static_cast<int>(handles.size()));
+        for (int index = 0; index < static_cast<int>(handles.size()); ++index)
+            result.set(index, encode_handle(handles[index]));
+        return result;
+    }
+
     PackedInt64Array CrowdWorld2D::get_agents_in_navigation_cell(
         NavigationWorld2D *navigation, Vector2i cell) const
     {
@@ -210,6 +242,85 @@ namespace godot
                 grid.cell_origin.y + static_cast<int>(std::floor(local.y))};
             if (agent_cell == ffcore::Vec2i(cell.x, cell.y))
                 result.push_back(encode_handle(handle));
+        }
+        return result;
+    }
+
+    std::int64_t CrowdWorld2D::create_effect_volume(const Dictionary &configuration)
+    {
+        ffcore::EffectVolumeConfig config;
+        if (configuration.has("position"))
+        {
+            const Vector2 value = configuration["position"];
+            config.position = {value.x, value.y};
+        }
+        if (configuration.has("direction"))
+        {
+            const Vector2 value = configuration["direction"];
+            config.direction = {value.x, value.y};
+        }
+        if (configuration.has("radius")) config.radius = configuration["radius"];
+        if (configuration.has("angle_degrees")) config.angle_degrees = configuration["angle_degrees"];
+        if (configuration.has("duration")) config.duration = configuration["duration"];
+        if (configuration.has("tick_interval")) config.tick_interval = configuration["tick_interval"];
+        if (configuration.has("category_mask"))
+            config.category_mask = static_cast<std::uint32_t>(
+                static_cast<std::int64_t>(configuration["category_mask"]));
+        if (configuration.has("ignored_agent_handle"))
+            config.ignored_agent = decode_handle(configuration["ignored_agent_handle"]);
+        if (configuration.has("followed_agent_handle"))
+            config.followed_agent = decode_handle(configuration["followed_agent_handle"]);
+        if (configuration.has("follow_offset"))
+        {
+            const Vector2 value = configuration["follow_offset"];
+            config.follow_offset = {value.x, value.y};
+        }
+        if (configuration.has("caller_token")) config.caller_token = configuration["caller_token"];
+        if (configuration.has("apply_impulse_on_tick")) config.apply_impulse_on_tick = configuration["apply_impulse_on_tick"];
+        if (configuration.has("radial_impulse") && bool(configuration["radial_impulse"]))
+            config.impulse_direction = ffcore::EffectImpulseDirection::Radial;
+        if (configuration.has("impulse_speed")) config.impulse_speed = configuration["impulse_speed"];
+        if (configuration.has("impulse_falloff")) config.impulse_falloff = configuration["impulse_falloff"];
+        if (configuration.has("impulse_delay")) config.impulse.delay = configuration["impulse_delay"];
+        if (configuration.has("impulse_decay_per_second")) config.impulse.decay_per_second = configuration["impulse_decay_per_second"];
+        if (configuration.has("control_suppression_seconds")) config.impulse.control_suppression_seconds = configuration["control_suppression_seconds"];
+        if (configuration.has("preserve_navigation")) config.impulse.preserve_navigation = configuration["preserve_navigation"];
+        if (configuration.has("impulse_priority")) config.impulse.priority = configuration["impulse_priority"];
+        return encode_effect_volume_handle(crowd.create_effect_volume(config));
+    }
+
+    bool CrowdWorld2D::update_effect_volume(
+        std::int64_t volume_handle, Vector2 position,
+        Vector2 direction, Vector2 follow_offset)
+    {
+        return crowd.update_effect_volume(
+            decode_effect_volume_handle(volume_handle),
+            {position.x, position.y}, {direction.x, direction.y},
+            {follow_offset.x, follow_offset.y});
+    }
+
+    bool CrowdWorld2D::remove_effect_volume(std::int64_t volume_handle)
+    {
+        return crowd.remove_effect_volume(decode_effect_volume_handle(volume_handle));
+    }
+
+    int CrowdWorld2D::get_effect_volume_count() const
+    {
+        return static_cast<int>(crowd.effect_volume_count());
+    }
+
+    Array CrowdWorld2D::take_effect_events()
+    {
+        Array result;
+        for (const ffcore::EffectVolumeEvent &event : crowd.take_effect_events())
+        {
+            Dictionary item;
+            item["kind"] = static_cast<int>(event.kind);
+            item["volume_handle"] = encode_effect_volume_handle(event.volume);
+            item["agent_handle"] = encode_handle(event.agent);
+            item["position"] = Vector2(event.position.x, event.position.y);
+            item["caller_token"] = event.caller_token;
+            result.push_back(item);
         }
         return result;
     }

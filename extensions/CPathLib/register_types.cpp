@@ -3,6 +3,7 @@
 #include "godot/crowd_world_2d.h"
 #include "godot/navigation_route_2d.h"
 #include "godot/navigation_world_2d.h"
+#include "godot/projectile_world_2d.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/core/class_db.hpp>
@@ -18,6 +19,7 @@ void initialize_cpathlib_module(ModuleInitializationLevel level) {
     ClassDB::register_class<NavigationRoute2D>();
     ClassDB::register_class<NavigationWorld2D>();
     ClassDB::register_class<CrowdWorld2D>();
+    ClassDB::register_class<ProjectileWorld2D>();
 }
 
 void uninitialize_cpathlib_module(ModuleInitializationLevel level) {
