@@ -25,6 +25,8 @@ namespace godot
         ClassDB::bind_method(D_METHOD("add_agent_with_profile", "position", "profile_handle"), &CrowdWorld2D::add_agent_with_profile);
         ClassDB::bind_method(D_METHOD("remove_agent", "agent_handle"), &CrowdWorld2D::remove_agent);
         ClassDB::bind_method(D_METHOD("set_agent_profile", "agent_handle", "profile_handle"), &CrowdWorld2D::set_agent_profile);
+        ClassDB::bind_method(D_METHOD("set_agent_position", "agent_handle", "position", "clear_velocity"), &CrowdWorld2D::set_agent_position, DEFVAL(true));
+        ClassDB::bind_method(D_METHOD("set_agent_motion_limits", "agent_handle", "maximum_speed", "acceleration", "deceleration"), &CrowdWorld2D::set_agent_motion_limits);
         ClassDB::bind_method(D_METHOD("create_cohort"), &CrowdWorld2D::create_cohort);
         ClassDB::bind_method(D_METHOD("remove_cohort", "cohort_handle"), &CrowdWorld2D::remove_cohort);
         ClassDB::bind_method(D_METHOD("assign_agent_to_cohort", "agent_handle", "cohort_handle"), &CrowdWorld2D::assign_agent_to_cohort);
@@ -37,6 +39,17 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_manual_direction", "agent_handle", "direction"), &CrowdWorld2D::set_manual_direction);
         ClassDB::bind_method(D_METHOD("stop_navigation", "agent_handle"), &CrowdWorld2D::stop_navigation);
         ClassDB::bind_method(D_METHOD("set_agent_paused", "agent_handle", "paused"), &CrowdWorld2D::set_agent_paused);
+        ClassDB::bind_method(D_METHOD("configure_static_obstacle_avoidance", "strength", "query_padding"), &CrowdWorld2D::configure_static_obstacle_avoidance);
+        ClassDB::bind_method(D_METHOD("create_static_obstacle", "position", "radius", "push_strength"), &CrowdWorld2D::create_static_obstacle, DEFVAL(1.0));
+        ClassDB::bind_method(D_METHOD("update_static_obstacle", "obstacle_handle", "position", "radius", "push_strength"), &CrowdWorld2D::update_static_obstacle, DEFVAL(1.0));
+        ClassDB::bind_method(D_METHOD("remove_static_obstacle", "obstacle_handle"), &CrowdWorld2D::remove_static_obstacle);
+        ClassDB::bind_method(D_METHOD("clear_static_obstacles"), &CrowdWorld2D::clear_static_obstacles);
+        ClassDB::bind_method(D_METHOD("get_static_obstacle_count"), &CrowdWorld2D::get_static_obstacle_count);
+        ClassDB::bind_method(D_METHOD("create_directional_motion_field", "world_origin", "cell_size", "speed", "cells", "directions", "sample_offset", "fallback_radius"), &CrowdWorld2D::create_directional_motion_field, DEFVAL(Vector2()), DEFVAL(0.0));
+        ClassDB::bind_method(D_METHOD("update_directional_motion_field", "field_handle", "world_origin", "cell_size", "speed", "cells", "directions", "sample_offset", "fallback_radius"), &CrowdWorld2D::update_directional_motion_field, DEFVAL(Vector2()), DEFVAL(0.0));
+        ClassDB::bind_method(D_METHOD("remove_directional_motion_field", "field_handle"), &CrowdWorld2D::remove_directional_motion_field);
+        ClassDB::bind_method(D_METHOD("clear_directional_motion_fields"), &CrowdWorld2D::clear_directional_motion_fields);
+        ClassDB::bind_method(D_METHOD("follow_directional_motion_field", "agent_handle", "field_handle"), &CrowdWorld2D::follow_directional_motion_field);
         ClassDB::bind_method(D_METHOD("apply_impulse", "agent_handle", "velocity", "delay", "decay_per_second", "control_suppression_seconds", "preserve_navigation", "priority"), &CrowdWorld2D::apply_impulse);
         ClassDB::bind_method(D_METHOD("refresh_external_velocity", "agent_handle", "source_id", "velocity", "response_seconds", "expiry_seconds"), &CrowdWorld2D::refresh_external_velocity);
         ClassDB::bind_method(D_METHOD("release_external_velocity", "agent_handle", "source_id"), &CrowdWorld2D::release_external_velocity);
@@ -45,9 +58,17 @@ namespace godot
         ClassDB::bind_method(D_METHOD("has_bottleneck_access", "bottleneck_id", "agent_handle"), &CrowdWorld2D::has_bottleneck_access);
         ClassDB::bind_method(D_METHOD("release_bottleneck", "bottleneck_id", "agent_handle"), &CrowdWorld2D::release_bottleneck);
         ClassDB::bind_method(D_METHOD("replace_terrain_speed_channel", "cells", "multipliers", "channel"), &CrowdWorld2D::replace_terrain_speed_channel);
+        ClassDB::bind_method(D_METHOD("set_terrain_speed_cell", "cell", "multiplier", "channel"), &CrowdWorld2D::set_terrain_speed_cell, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("set_terrain_speed_cells", "cells", "multipliers", "channel"), &CrowdWorld2D::set_terrain_speed_cells, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("clear_terrain_speed_cell", "cell", "channel"), &CrowdWorld2D::clear_terrain_speed_cell, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("clear_terrain_speed_cells", "cells", "channel"), &CrowdWorld2D::clear_terrain_speed_cells, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("clear_terrain_speed_channel", "channel"), &CrowdWorld2D::clear_terrain_speed_channel, DEFVAL(0));
         ClassDB::bind_method(D_METHOD("get_agent_position", "agent_handle"), &CrowdWorld2D::get_agent_position);
         ClassDB::bind_method(D_METHOD("get_agent_velocity", "agent_handle"), &CrowdWorld2D::get_agent_velocity);
         ClassDB::bind_method(D_METHOD("get_agent_route_progress", "agent_handle"), &CrowdWorld2D::get_agent_route_progress);
+        ClassDB::bind_method(D_METHOD("get_agent_diagnostics", "agent_handle"), &CrowdWorld2D::get_agent_diagnostics);
+        ClassDB::bind_method(D_METHOD("query_agents_in_circle", "position", "radius", "category_mask", "ignored_agent_handle"), &CrowdWorld2D::query_agents_in_circle, DEFVAL(0));
+        ClassDB::bind_method(D_METHOD("get_agents_in_navigation_cell", "navigation", "cell"), &CrowdWorld2D::get_agents_in_navigation_cell);
         ClassDB::bind_method(D_METHOD("get_agent_handles"), &CrowdWorld2D::get_agent_handles);
         ClassDB::bind_method(D_METHOD("get_agent_positions"), &CrowdWorld2D::get_agent_positions);
         ClassDB::bind_method(D_METHOD("get_agent_velocities"), &CrowdWorld2D::get_agent_velocities);
@@ -93,6 +114,32 @@ namespace godot
     }
 
     ffcore::FlowHandle CrowdWorld2D::decode_flow_handle(std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    std::int64_t CrowdWorld2D::encode_obstacle_handle(ffcore::StaticObstacleHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::StaticObstacleHandle CrowdWorld2D::decode_obstacle_handle(std::int64_t encoded)
+    {
+        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
+        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
+    }
+
+    std::int64_t CrowdWorld2D::encode_directional_field_handle(
+        ffcore::DirectionalMotionFieldHandle handle)
+    {
+        return static_cast<std::int64_t>(
+            (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index);
+    }
+
+    ffcore::DirectionalMotionFieldHandle CrowdWorld2D::decode_directional_field_handle(
+        std::int64_t encoded)
     {
         const std::uint64_t value = static_cast<std::uint64_t>(encoded);
         return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
@@ -262,6 +309,21 @@ namespace godot
     {
         return crowd.set_agent_profile(
             decode_handle(agent_handle), decode_profile_handle(profile_handle));
+    }
+
+    bool CrowdWorld2D::set_agent_position(
+        std::int64_t agent_handle, Vector2 position, bool clear_velocity)
+    {
+        return crowd.set_agent_position(
+            decode_handle(agent_handle), {position.x, position.y}, clear_velocity);
+    }
+
+    bool CrowdWorld2D::set_agent_motion_limits(
+        std::int64_t agent_handle, double maximum_speed,
+        double acceleration, double deceleration)
+    {
+        return crowd.set_agent_motion_limits(
+            decode_handle(agent_handle), maximum_speed, acceleration, deceleration);
     }
 
     std::int64_t CrowdWorld2D::create_cohort()

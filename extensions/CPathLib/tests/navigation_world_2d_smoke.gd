@@ -3,6 +3,7 @@ extends SceneTree
 var _navigation: Node
 var _frames_waited: int = 0
 var _async_flow_handle: int = 0
+var _option_async_flow_handle: int = 0
 var _completed_requests: int = 0
 
 
@@ -98,6 +99,116 @@ func _initialize() -> void:
 		_fail("fresh generic area route was reported stale")
 		return
 
+	var barrier_cells: PackedVector2Array = PackedVector2Array([
+		Vector2(1, 0), Vector2(1, 1), Vector2(1, 2),
+	])
+	if not bool(_navigation.call(
+		&"replace_blocker_channel", 1, barrier_cells, true, true
+	)):
+		_fail("blocker channel upload failed")
+		return
+	var open_flow: int = int(_navigation.call(
+		&"create_flow_to_cell_with_options", Vector2i(2, 1), 0, -1
+	))
+	var blocked_flow: int = int(_navigation.call(
+		&"create_flow_to_cell_with_options", Vector2i(2, 1), 2, -1
+	))
+	var open_direction: Vector2 = _navigation.call(
+		&"sample_flow", open_flow, Vector2(108.0, -26.0)
+	) as Vector2
+	var blocked_direction: Vector2 = _navigation.call(
+		&"sample_flow", blocked_flow, Vector2(108.0, -26.0)
+	) as Vector2
+	if open_direction.x <= 0.0 or not blocked_direction.is_zero_approx():
+		_fail("selective blocker channel flow behavior changed")
+		return
+	var blocked_cost: float = float(_navigation.call(
+		&"get_flow_route_cost", blocked_flow, Vector2(108.0, -26.0)
+	))
+	if not is_inf(blocked_cost):
+		_fail("unreachable flow route cost should be infinite")
+		return
+	var diagnostics: Dictionary = _navigation.call(
+		&"get_flow_diagnostics", open_flow
+	) as Dictionary
+	if not bool(diagnostics.get("valid", false)) or int(diagnostics.get("status", -1)) != 1:
+		_fail("flow diagnostics did not report a ready handle")
+		return
+	var bottlenecks: Array = _navigation.call(&"get_flow_bottlenecks", open_flow) as Array
+	if bottlenecks.size() != int(diagnostics.get("bottleneck_count", -1)):
+		_fail("flow bottleneck diagnostics disagree")
+		return
+	var flow_handles: PackedInt64Array = _navigation.call(&"get_flow_handles") as PackedInt64Array
+	if flow_handles.find(open_flow) < 0 or flow_handles.find(blocked_flow) < 0:
+		_fail("active flow handle diagnostics are incomplete")
+		return
+
+	var seeded_garden: int = int(_navigation.call(
+		&"create_garden_from_seed", Vector2i(0, 1), 0, 2
+	))
+	var garden_info: Dictionary = _navigation.call(
+		&"get_garden_info", seeded_garden
+	) as Dictionary
+	var garden_cells: PackedVector2Array = garden_info.get(
+		"interior_cells", PackedVector2Array()
+	) as PackedVector2Array
+	if seeded_garden <= 0 or garden_cells.size() != 3:
+		_fail("seeded garden did not respect the blocker channel")
+		return
+	if not bool(_navigation.call(
+		&"set_garden_target_cells", seeded_garden,
+		PackedVector2Array([Vector2(0, 0)])
+	)):
+		_fail("seeded garden target update failed")
+		return
+	var garden_portal: int = int(_navigation.call(
+		&"create_garden_portal", seeded_garden,
+		PackedVector2Array([Vector2(0, 1)]),
+		PackedVector2Array([Vector2(1, 1)]), 0, 2
+	))
+	var portal_info: Dictionary = _navigation.call(
+		&"get_portal_info", garden_portal
+	) as Dictionary
+	if garden_portal <= 0 or int(portal_info.get("capacity", 0)) != 2:
+		_fail("garden portal diagnostics changed")
+		return
+	var garden_route: RefCounted = _navigation.call(
+		&"plan_enter_garden", seeded_garden,
+		Vector2i(2, 1), Vector2i(0, 0), 0
+	) as RefCounted
+	if garden_route == null or int(garden_route.call(&"get_status")) != 0:
+		_fail("option-aware garden enter route failed")
+		return
+	if not bool(_navigation.call(&"remove_portal", garden_portal)) \
+			or not bool(_navigation.call(&"remove_garden", seeded_garden)):
+		_fail("garden or portal removal failed")
+		return
+
+	var directed_cells: PackedVector2Array = barrier_cells
+	var directed_values: PackedVector2Array = PackedVector2Array([
+		Vector2.LEFT, Vector2.LEFT, Vector2.LEFT,
+	])
+	if not bool(_navigation.call(
+		&"replace_directional_traversal_channel", 7,
+		directed_cells, directed_values
+	)):
+		_fail("directional traversal channel upload failed")
+		return
+	var directed_flow: int = int(_navigation.call(
+		&"create_flow_to_cell_with_options", Vector2i(2, 1), 0, 7
+	))
+	var directed_sample: Vector2 = _navigation.call(
+		&"sample_flow", directed_flow, Vector2(108.0, -26.0)
+	) as Vector2
+	if not directed_sample.is_zero_approx():
+		_fail("directional traversal channel was not applied")
+		return
+	_navigation.call(&"release_flow", open_flow)
+	_navigation.call(&"release_flow", blocked_flow)
+	_navigation.call(&"release_flow", directed_flow)
+	_navigation.call(&"clear_blocker_channel", 1)
+	_navigation.call(&"clear_directional_traversal_channel", 7)
+
 	var request_id: int = int(_navigation.call(&"request_flow_to_cell", Vector2i(2, 2)))
 	if request_id <= 0:
 		_fail("asynchronous generic flow request failed")
@@ -107,6 +218,12 @@ func _initialize() -> void:
 	))
 	if _async_flow_handle <= 0:
 		_fail("asynchronous generational flow request failed")
+		return
+	_option_async_flow_handle = int(_navigation.call(
+		&"request_flow_handle_to_cell_with_options", Vector2i(2, 0), 0, -1
+	))
+	if _option_async_flow_handle <= 0:
+		_fail("option-aware asynchronous flow request failed")
 
 
 func _process(_delta: float) -> bool:
@@ -121,7 +238,7 @@ func _on_flow_ready(_request_id: int, status: int, _topology_revision: int) -> v
 		_fail("asynchronous generic flow returned status %d" % status)
 		return
 	_completed_requests += 1
-	if _completed_requests < 2:
+	if _completed_requests < 3:
 		return
 	if int(_navigation.call(&"get_flow_status", _async_flow_handle)) != 1:
 		_fail("completed generational flow was not installed as ready")
@@ -132,7 +249,11 @@ func _on_flow_ready(_request_id: int, status: int, _topology_revision: int) -> v
 	if reverse_direction.x >= 0.0:
 		_fail("flow-handle sampling used the wrong destination")
 		return
+	if int(_navigation.call(&"get_flow_status", _option_async_flow_handle)) != 1:
+		_fail("option-aware asynchronous flow did not become ready")
+		return
 	_navigation.call(&"release_flow", _async_flow_handle)
+	_navigation.call(&"release_flow", _option_async_flow_handle)
 	_navigation.queue_free()
 	print("NavigationWorld2D smoke test passed")
 	quit(0)

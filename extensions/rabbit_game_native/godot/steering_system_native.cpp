@@ -13,6 +13,8 @@
 #include "agent_manager_native.h"
 #include <godot_cpp/variant/dictionary.hpp>
 #include "CPathLib/flow/flow_field.h"
+#include "../flow/flow_field_manager.h"
+#include "../core/nav_services.h"
 #include "../core/global_config.h"
 #include <cstdint>
 #include <cmath>
@@ -873,7 +875,8 @@ Dictionary SteeringSystemNative::get_agent_debug_snapshot(int agent_id) const
         d["flow_goal"] = Vector2(goal.x, goal.y);
         d["dist_to_flow_goal"] = Vector2(goal.x - foot.x, goal.y - foot.y).length();
         d["route_cost"] = a->flow->route_cost_at_cell(rel_cell);
-        d["target_radius"] = a->flow->get_ff_target_radius();
+        ffcore::FlowFieldManager *flow_manager = ffcore::flowfields();
+        d["target_radius"] = flow_manager ? flow_manager->target_radius(a->flow) : 0.0;
         d["bottleneck_core_at_cell"] = a->flow->bottleneck_core_at_cell(rel_cell);
         d["bottleneck_zone_at_cell"] = a->flow->bottleneck_zone_at_cell(rel_cell);
     }

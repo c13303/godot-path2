@@ -490,6 +490,199 @@ namespace
                     replacement_profile.generation != profile_handle.generation,
                 "reused profile slot should advance its generation");
     }
+
+    void test_navigation_channels_and_seeded_gardens()
+    {
+        ffcore::NavigationWorld world;
+        ffcore::GridDefinition definition;
+        definition.width = 5;
+        definition.height = 3;
+        definition.cell_size = 1.0;
+        const ffcore::CellSet walkable_set = rectangle(5, 3);
+        require(world.set_grid(
+                    definition,
+                    std::vector<Vec2i>(walkable_set.begin(), walkable_set.end())),
+                "channel fixture grid setup failed");
+
+        require(world.replace_blocker_channel(
+                    1, {{2, 0}, {2, 1}, {2, 2}}, true, true),
+                "navigation blocker channel upload failed");
+        ffcore::FlowBuildOptions blocked_options;
+        blocked_options.blocker_channel_mask = std::uint64_t(1) << 1;
+        const ffcore::WorldFlowResult blocked = world.build_flow({4, 1}, blocked_options);
+        require(blocked.status == ffcore::NavigationStatus::Found &&
+                    blocked.field.compute_flow_dir({0.5, 1.5}).is_zero(),
+                "selected blocker channel should separate the flow destination");
+        ffcore::FlowBuildOptions open_options;
+        open_options.blocker_channel_mask = 0;
+        const ffcore::WorldFlowResult open = world.build_flow({4, 1}, open_options);
+        require(open.status == ffcore::NavigationStatus::Found &&
+                    open.field.compute_flow_dir({0.5, 1.5}).x > 0.0,
+                "unselected blocker channel must not alter the flow");
+        require(world.find_path({0, 1}, {4, 1}, 0).status == ffcore::NavigationStatus::Found &&
+                    world.find_path({0, 1}, {4, 1}, std::uint64_t(1) << 1).status ==
+                        ffcore::NavigationStatus::Unreachable,
+                "path queries should honor their blocker-channel mask");
+
+        require(world.replace_blocker_channel(2, {{1, 0}}, false, true),
+                "physics-only blocker channel upload failed");
+        ffcore::FlowBuildOptions physics_options;
+        physics_options.blocker_channel_mask = std::uint64_t(1) << 2;
+        const ffcore::WorldFlowResult physics = world.build_flow({4, 0}, physics_options);
+        require(physics.field.is_cell_navigable({1, 0}) &&
+                    !physics.field.is_cell_physics_passable({1, 0}),
+                "physics-only blockers must not remove navigation topology");
+
+        ffcore::DirectionalTraversalConstraints directed;
+        directed[{1, 0}] = {-1, 0};
+        directed[{1, 1}] = {-1, 0};
+        directed[{1, 2}] = {-1, 0};
+        require(world.replace_directional_channel(7, directed),
+                "directional traversal channel upload failed");
+        ffcore::FlowBuildOptions directed_options;
+        directed_options.blocker_channel_mask = 0;
+        directed_options.directional_channel = 7;
+        const ffcore::WorldFlowResult directed_flow = world.build_flow({4, 1}, directed_options);
+        require(directed_flow.field.compute_flow_dir({0.5, 1.5}).is_zero(),
+                "selected directional channel should constrain traversal");
+
+        const ffcore::FlowHandle stored = world.create_flow({4, 1}, open_options);
+        require(world.get_flow(stored)->status == ffcore::FlowStatus::Ready,
+                "channel fixture stored flow should start ready");
+        require(world.set_blocker_channel_cell(1, {1, 1}, true, true, true),
+                "localized blocker-channel edit failed");
+        require(world.get_flow(stored)->status == ffcore::FlowStatus::Stale,
+                "channel edits should stale existing flows");
+
+        const ffcore::AreaHandle garden = world.create_area_from_seed(
+            {0, 1}, 0, std::uint64_t(1) << 1);
+        const ffcore::NavigationArea *garden_state = world.areas().get_area(garden);
+        require(garden_state != nullptr && garden_state->interior_cells.size() == 5,
+                "seeded garden should stop at selected blocker channels");
+        const ffcore::PortalHandle portal = world.areas().create_portal(
+            garden, {{1, 1}}, {{2, 1}}, ffcore::PortalDirection::Both, 2);
+        require(portal.is_valid() && world.areas().area_count() == 1 &&
+                    world.areas().portal_count() == 1,
+                "garden and portal handle diagnostics changed");
+    }
+
+    void test_directional_motion_and_static_obstacles()
+    {
+        ffcore::CrowdWorld crowd(1.0);
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = 0.25;
+        profile.maximum_speed = 1.0;
+        profile.acceleration = 100.0;
+        profile.deceleration = 100.0;
+        profile.separation_radius = 0.0;
+        const ffcore::AgentHandle agent = crowd.add_agent({0.5, 0.5}, profile);
+
+        ffcore::DirectionalMotionField field;
+        field.cell_size = 1.0;
+        field.speed = 3.0;
+        field.directions[{0, 0}] = {1.0, 0.0};
+        const ffcore::DirectionalMotionFieldHandle field_handle =
+            crowd.create_directional_field(field);
+        require(field_handle.is_valid() && crowd.follow_directional_field(agent, field_handle),
+                "agent should accept a generational directional-motion field");
+        crowd.update(0.1);
+        require(crowd.get_agent(agent)->position.x > 0.75,
+                "directional-motion field should provide its configured target speed");
+
+        require(crowd.remove_directional_field(field_handle),
+                "directional-motion field removal should succeed");
+        require(!crowd.follow_directional_field(agent, field_handle),
+                "stale directional-motion field handle should fail safely");
+        const ffcore::DirectionalMotionFieldHandle replacement =
+            crowd.create_directional_field(field);
+        require(replacement.index == field_handle.index &&
+                    replacement.generation != field_handle.generation,
+                "reused directional-motion field slot should advance its generation");
+
+        require(crowd.set_agent_position(agent, {2.0, 2.0}, true),
+                "generic agent teleport should succeed");
+        const ffcore::StaticObstacleHandle obstacle =
+            crowd.create_static_obstacle({2.0, 2.0}, 0.5, 1.0);
+        require(obstacle.is_valid() && crowd.static_obstacle_count() == 1,
+                "generic static-obstacle creation failed");
+        crowd.update(0.1);
+        require(crowd.get_agent(agent)->position.distance_to({2.0, 2.0}) >= 0.749,
+                "static-obstacle overlap should be resolved after integration");
+        require(crowd.update_static_obstacle(obstacle, {4.0, 2.0}, 0.5, 2.0),
+                "generic static-obstacle update failed");
+        require(crowd.remove_static_obstacle(obstacle) && crowd.static_obstacle_count() == 0,
+                "generic static-obstacle removal failed");
+        require(!crowd.remove_static_obstacle(obstacle),
+                "stale static-obstacle handle should fail safely");
+    }
+
+    void test_crowd_steering_mode_matrix()
+    {
+        ffcore::FlowFieldBuildRequest request;
+        request.width = 4;
+        request.height = 2;
+        request.tile_size = 1.0;
+        request.goal_cell = {3, 1};
+        request.walkable_cells = rectangle(4, 2);
+        request.physical_wall_cells = {{1, 0}};
+        const ffcore::FlowFieldBuildResult built = ffcore::FlowFieldBuilder::build(request);
+        require(built.ok, "steering mode fixture flow failed to build");
+
+        ffcore::CrowdAgentProfile profile;
+        profile.radius = 0.1;
+        profile.maximum_speed = 2.0;
+        profile.acceleration = 20.0;
+        profile.deceleration = 20.0;
+        profile.separation_radius = 0.0;
+        profile.arrival_radius = 0.05;
+
+        ffcore::CrowdWorld crowd(1.0);
+        crowd.set_shared_flow(built.field);
+        const ffcore::AgentHandle manual = crowd.add_agent({0.5, 0.5}, profile);
+        require(crowd.set_manual_direction(manual, {1.0, 0.0}),
+                "manual steering source assignment failed");
+        crowd.update(0.25);
+        require(approximately(crowd.get_agent(manual)->position.x, 0.5),
+                "physical wall collision should stop a manual agent");
+
+        const ffcore::AgentHandle paused = crowd.add_agent({0.5, 1.5}, profile);
+        require(crowd.set_manual_direction(paused, {1.0, 0.0}) &&
+                    crowd.set_paused(paused, true),
+                "paused steering fixture setup failed");
+        crowd.update(0.1);
+        require(approximately(crowd.get_agent(paused)->position.x, 0.5),
+                "paused agent should preserve its position");
+
+        ffcore::CrowdAgentProfile slow_profile = profile;
+        slow_profile.terrain_speed_channel = 2;
+        crowd.terrain_speed_grid().set_cell({0, 1}, 0.5, 2);
+        const ffcore::AgentHandle normal = crowd.add_agent({0.5, 1.25}, profile);
+        const ffcore::AgentHandle slow = crowd.add_agent({0.5, 1.75}, slow_profile);
+        require(crowd.follow_flow(normal) && crowd.follow_flow(slow),
+                "terrain fixture agents should attach to flow");
+        crowd.update(0.1);
+        require(crowd.get_agent(normal)->position.x > crowd.get_agent(slow)->position.x,
+                "terrain speed channel should scale integration speed");
+
+        const ffcore::AgentHandle path_agent = crowd.add_agent({2.0, 1.5}, profile);
+        require(crowd.follow_path(path_agent, {{2.2, 1.5}}),
+                "path steering source assignment failed");
+        crowd.update(0.1);
+        crowd.update(0.1);
+        require(crowd.get_agent(path_agent)->route_progress == ffcore::RouteProgress::Arrived,
+                "path steering should report deterministic arrival");
+
+        ffcore::CrowdAgentProfile separation_profile = profile;
+        separation_profile.maximum_speed = 1.0;
+        separation_profile.separation_radius = 1.0;
+        separation_profile.separation_weight = 1.0;
+        const ffcore::AgentHandle left = crowd.add_agent({3.0, 0.25}, separation_profile);
+        const ffcore::AgentHandle right = crowd.add_agent({3.2, 0.25}, separation_profile);
+        crowd.update(0.1);
+        require(crowd.get_agent(left)->position.x < 3.0 &&
+                    crowd.get_agent(right)->position.x > 3.2,
+                "separation should move nearby idle agents apart");
+    }
 }
 
 int main()
@@ -512,6 +705,9 @@ int main()
     test_generic_crowd_motion_and_forces();
     test_generational_multi_flow_store();
     test_profiles_cohorts_and_multi_flow_assignment();
+    test_navigation_channels_and_seeded_gardens();
+    test_directional_motion_and_static_obstacles();
+    test_crowd_steering_mode_matrix();
     std::cout << "FlowFieldAlgorithms tests passed\n";
     return EXIT_SUCCESS;
 }

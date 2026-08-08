@@ -1,4 +1,5 @@
 #include "spatial_grid.h"
+#include <cstdint>
 #include <cmath>
 
 using namespace ffcore;
@@ -11,7 +12,10 @@ void SpatialGrid::clear() {
 }
 
 long long SpatialGrid::cell_key(int x, int y) const {
-    return (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+    const std::uint64_t packed =
+        (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32) |
+        static_cast<std::uint32_t>(y);
+    return static_cast<long long>(packed);
 }
 
 Vec2i SpatialGrid::to_cell(const Vec2& pos) const {

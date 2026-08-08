@@ -57,6 +57,89 @@ func _initialize() -> void:
 	if handles.size() != 2 or positions.size() != 2:
 		_fail("batched generic crowd state has an invalid shape")
 		return
+	if not bool(crowd.call(&"set_agent_motion_limits", first, 30.0, 300.0, 300.0)):
+		_fail("per-agent generic motion limits failed")
+		return
+	moved_position = crowd.call(&"get_agent_position", first) as Vector2
+	var nearby: PackedInt64Array = crowd.call(
+		&"query_agents_in_circle", moved_position, 0.1, -1, 0
+	) as PackedInt64Array
+	if nearby.find(first) < 0:
+		_fail("generic circle query omitted an overlapping agent")
+		return
+	var moved_cell: Vector2i = Vector2i(
+		int(floor(moved_position.x / 10.0)), int(floor(moved_position.y / 10.0))
+	)
+	var cell_agents: PackedInt64Array = crowd.call(
+		&"get_agents_in_navigation_cell", navigation, moved_cell
+	) as PackedInt64Array
+	if cell_agents.find(first) < 0:
+		_fail("generic navigation-cell query omitted an agent")
+		return
+
+	crowd.call(&"set_terrain_speed_cell", Vector2i(1, 0), 0.5, 3)
+	crowd.call(
+		&"set_terrain_speed_cells",
+		PackedVector2Array([Vector2(2, 0)]), PackedFloat64Array([0.75]), 3
+	)
+	crowd.call(&"clear_terrain_speed_cell", Vector2i(1, 0), 3)
+	crowd.call(
+		&"clear_terrain_speed_cells", PackedVector2Array([Vector2(2, 0)]), 3
+	)
+	crowd.call(&"clear_terrain_speed_channel", 3)
+
+	if not bool(crowd.call(&"set_agent_position", second, Vector2(25.0, 15.0), true)):
+		_fail("generic agent teleport failed")
+		return
+	var obstacle: int = int(crowd.call(
+		&"create_static_obstacle", Vector2(25.0, 15.0), 3.0, 1.0
+	))
+	if obstacle <= 0 or int(crowd.call(&"get_static_obstacle_count")) != 1:
+		_fail("generic static-obstacle handle creation failed")
+		return
+	crowd.call(&"step", 0.05)
+	var depenetrated: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	if depenetrated.distance_to(Vector2(25.0, 15.0)) < 4.99:
+		_fail("generic static-obstacle depenetration failed")
+		return
+	if not bool(crowd.call(
+		&"update_static_obstacle", obstacle, Vector2(35.0, 15.0), 3.0, 2.0
+	)) or not bool(crowd.call(&"remove_static_obstacle", obstacle)):
+		_fail("generic static-obstacle update/removal failed")
+		return
+
+	var directional_field: int = int(crowd.call(
+		&"create_directional_motion_field", Vector2.ZERO, 10.0, 20.0,
+		PackedVector2Array([Vector2(0, 1)]), PackedVector2Array([Vector2.RIGHT]),
+		Vector2.ZERO, 0.0
+	))
+	crowd.call(&"set_agent_position", second, Vector2(5.0, 15.0), true)
+	if directional_field <= 0 or not bool(crowd.call(
+		&"follow_directional_motion_field", second, directional_field
+	)):
+		_fail("generic directional-motion field assignment failed")
+		return
+	var directional_before: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	crowd.call(&"step", 0.1)
+	var directional_after: Vector2 = crowd.call(&"get_agent_position", second) as Vector2
+	var directional_diagnostics: Dictionary = crowd.call(
+		&"get_agent_diagnostics", second
+	) as Dictionary
+	if directional_after.x <= directional_before.x \
+			or int(directional_diagnostics.get("navigation_source", -1)) != 4:
+		_fail("generic directional-motion field did not drive the agent")
+		return
+	if not bool(crowd.call(
+		&"update_directional_motion_field", directional_field,
+		Vector2.ZERO, 10.0, 20.0,
+		PackedVector2Array([Vector2(0, 1)]), PackedVector2Array([Vector2.LEFT]),
+		Vector2.ZERO, 0.0
+	)) or not bool(crowd.call(&"remove_directional_motion_field", directional_field)):
+		_fail("generic directional-motion field update/removal failed")
+		return
+	if bool(crowd.call(&"follow_directional_motion_field", second, directional_field)):
+		_fail("stale directional-motion field handle remained usable")
+		return
 
 	var left_flow: int = int(navigation.call(&"create_flow_to_cell", Vector2i(0, 0)))
 	var right_flow: int = int(navigation.call(&"create_flow_to_cell", Vector2i(5, 0)))

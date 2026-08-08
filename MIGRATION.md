@@ -19,7 +19,9 @@ Current completion summary:
 | generic source/game terminology isolation | required for every migrated native capability |
 | host A* caller migration | complete; `PathfinderNative` removed |
 | instance configuration, profiles, handles, cohorts, multi-flow foundation | complete in pass 2 |
-| flow/crowd/force/projectile parity migration | pending across passes 3-7 |
+| navigation channels, flow diagnostics, gardens/portals, bottleneck discovery | complete in pass 3 |
+| crowd motion sources, terrain, static obstacles, directional motion, spatial queries | complete in pass 4 |
+| contact/traffic forces, effects, projectiles, and host conversion | pending across passes 5-7 |
 | temporary native compatibility extension | must be deleted in pass 8 |
 | separate Git repository and dependency pin | intentionally left to the owner |
 

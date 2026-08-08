@@ -21,6 +21,12 @@ namespace ffcore
     {
         config = new_config;
         config.default_agent_profile = CrowdProfileStore::sanitize(new_config.default_agent_profile);
+        config.static_obstacle_query_padding =
+            std::isfinite(config.static_obstacle_query_padding)
+            ? std::max(0.0, config.static_obstacle_query_padding) : 0.0;
+        config.static_obstacle_repulsion_strength =
+            std::isfinite(config.static_obstacle_repulsion_strength)
+            ? std::max(0.0, config.static_obstacle_repulsion_strength) : 1.0;
     }
 
     ProfileHandle CrowdWorld::create_profile(const CrowdAgentProfile &profile)
@@ -45,12 +51,16 @@ namespace ffcore
 
     AgentHandle CrowdWorld::add_agent(const Vec2 &position)
     {
-        return agents.create(position, config.default_agent_profile);
+        const AgentHandle handle = agents.create(position, config.default_agent_profile);
+        spatial.insert(static_cast<int>(handle.index), position);
+        return handle;
     }
 
     AgentHandle CrowdWorld::add_agent(const Vec2 &position, const CrowdAgentProfile &profile)
     {
-        return agents.create(position, profile);
+        const AgentHandle handle = agents.create(position, profile);
+        spatial.insert(static_cast<int>(handle.index), position);
+        return handle;
     }
 
     AgentHandle CrowdWorld::add_agent(const Vec2 &position, ProfileHandle profile_handle)
@@ -60,6 +70,7 @@ namespace ffcore
             return {};
         const AgentHandle handle = agents.create(position, *profile);
         agents.get(handle)->profile_handle = profile_handle;
+        spatial.insert(static_cast<int>(handle.index), position);
         return handle;
     }
 
@@ -70,6 +81,7 @@ namespace ffcore
         impulses.remove(handle);
         traffic.remove_agent(key(handle));
         remove_agent_from_cohort(handle);
+        spatial.remove(static_cast<int>(handle.index));
         return agents.remove(handle);
     }
 
@@ -82,6 +94,67 @@ namespace ffcore
         agent->profile_handle = profile_handle;
         agent->profile = *profile;
         return true;
+    }
+
+    bool CrowdWorld::set_agent_position(
+        AgentHandle agent_handle, const Vec2 &position, bool clear_velocity)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr || !std::isfinite(position.x) || !std::isfinite(position.y))
+            return false;
+        const Vec2 old_position = agent->position;
+        agent->position = position;
+        spatial.update(static_cast<int>(agent_handle.index), old_position, position);
+        if (clear_velocity)
+        {
+            agent->velocity = {};
+            impulses.remove(agent_handle);
+        }
+        return true;
+    }
+
+    bool CrowdWorld::set_agent_motion_limits(
+        AgentHandle agent_handle, double maximum_speed,
+        double acceleration, double deceleration)
+    {
+        CrowdAgentState *agent = agents.get(agent_handle);
+        if (agent == nullptr)
+            return false;
+        CrowdAgentProfile requested = agent->profile;
+        requested.maximum_speed = maximum_speed;
+        requested.acceleration = acceleration;
+        requested.deceleration = deceleration;
+        agent->profile = CrowdProfileStore::sanitize(requested);
+        return true;
+    }
+
+    std::vector<AgentHandle> CrowdWorld::query_agents(
+        const Vec2 &position, double radius,
+        std::uint32_t category_mask, AgentHandle ignored) const
+    {
+        std::vector<AgentHandle> result;
+        if (!std::isfinite(radius) || radius < 0.0)
+            return result;
+        for (int index : spatial.query_neighbors(position, radius))
+        {
+            if (index <= 0)
+                continue;
+            const AgentHandle candidate_handle = {
+                static_cast<std::uint32_t>(index),
+                agents.generation_at(static_cast<std::uint32_t>(index))};
+            const CrowdAgentState *candidate = agents.get(candidate_handle);
+            if (candidate == nullptr || candidate_handle == ignored ||
+                (candidate->profile.category_mask & category_mask) == 0)
+                continue;
+            if (candidate->position.distance_to(position) <= radius + candidate->profile.radius)
+                result.push_back(candidate_handle);
+        }
+        std::sort(result.begin(), result.end(), [](AgentHandle left, AgentHandle right)
+        {
+            return left.index < right.index;
+        });
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
     }
 
     CohortHandle CrowdWorld::create_cohort()
@@ -191,6 +264,7 @@ namespace ffcore
         if (agent == nullptr || installed_flows.find(key(flow)) == installed_flows.end())
             return false;
         agent->flow_handle = flow;
+        agent->directional_field_handle = {};
         agent->navigation_source = NavigationSource::FlowField;
         agent->route_progress = RouteProgress::Following;
         return true;
@@ -205,6 +279,7 @@ namespace ffcore
         agent->path_index = 0;
         agent->navigation_source = NavigationSource::Path;
         agent->flow_handle = {};
+        agent->directional_field_handle = {};
         agent->route_progress = RouteProgress::Following;
         return true;
     }
@@ -217,6 +292,20 @@ namespace ffcore
         agent->manual_direction = direction.normalized();
         agent->navigation_source = NavigationSource::Manual;
         agent->flow_handle = {};
+        agent->directional_field_handle = {};
+        agent->route_progress = RouteProgress::Following;
+        return true;
+    }
+
+    bool CrowdWorld::follow_directional_field(
+        AgentHandle handle, DirectionalMotionFieldHandle field)
+    {
+        CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr || directional_fields.get(field) == nullptr)
+            return false;
+        agent->directional_field_handle = field;
+        agent->navigation_source = NavigationSource::DirectionalField;
+        agent->flow_handle = {};
         agent->route_progress = RouteProgress::Following;
         return true;
     }
@@ -228,6 +317,7 @@ namespace ffcore
             return false;
         agent->navigation_source = NavigationSource::None;
         agent->flow_handle = {};
+        agent->directional_field_handle = {};
         agent->route_progress = RouteProgress::Idle;
         agent->path.clear();
         agent->path_index = 0;
@@ -355,11 +445,16 @@ namespace ffcore
             CrowdAgentState *agent = agents.get(handle);
             agent->external_velocity.update(delta);
             const FlowField *flow = flow_for(*agent);
-            const Vec2 navigation = SteeringSolver::navigation_direction(
-                *agent, flow);
+            const DirectionalMotionField *directional_field = directional_field_for(*agent);
+            const DirectionalMotionSample directional_sample = directional_field == nullptr
+                ? DirectionalMotionSample() : directional_field->sample(agent->position);
+            const Vec2 navigation = agent->navigation_source == NavigationSource::DirectionalField
+                ? directional_sample.velocity.normalized()
+                : SteeringSolver::navigation_direction(*agent, flow);
             const Vec2 separation = SteeringSolver::separation(
                 *agent, agents, spatial, handles_by_index);
-            Vec2 desired_direction = navigation + separation;
+            const Vec2 obstacle_repulsion = static_obstacle_repulsion(*agent);
+            Vec2 desired_direction = navigation + separation + obstacle_repulsion;
             if (!desired_direction.is_zero())
                 desired_direction = desired_direction.normalized();
 
@@ -367,8 +462,11 @@ namespace ffcore
             if (flow != nullptr)
                 terrain_multiplier = terrain_speeds.multiplier_at(
                     flow->world_to_cell(agent->position), agent->profile.terrain_speed_channel);
+            const double navigation_speed =
+                agent->navigation_source == NavigationSource::DirectionalField && directional_sample.found
+                ? directional_sample.velocity.length() : agent->profile.maximum_speed;
             const Vec2 desired_velocity = desired_direction *
-                (agent->profile.maximum_speed * terrain_multiplier * impulses.navigation_control(handle));
+                (navigation_speed * terrain_multiplier * impulses.navigation_control(handle));
             const double rate = desired_velocity.length_squared() > agent->velocity.length_squared()
                 ? agent->profile.acceleration : agent->profile.deceleration;
             agent->velocity = approach(agent->velocity, desired_velocity, rate * delta);
@@ -385,6 +483,13 @@ namespace ffcore
             if ((resolved - agent->position).length_squared() < 1e-12 && !total_velocity.is_zero())
                 agent->velocity = {};
             agent->position = resolved;
+            resolve_static_obstacle_overlaps(*agent);
+        }
+        spatial.clear();
+        for (AgentHandle handle : handles)
+        {
+            const CrowdAgentState *agent = agents.get(handle);
+            spatial.insert(static_cast<int>(handle.index), agent->position);
         }
     }
 } // namespace ffcore

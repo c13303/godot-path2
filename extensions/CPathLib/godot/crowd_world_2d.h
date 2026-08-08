@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 
 namespace godot
 {
@@ -25,6 +26,12 @@ namespace godot
         static std::int64_t encode_cohort_handle(ffcore::CohortHandle handle);
         static ffcore::CohortHandle decode_cohort_handle(std::int64_t encoded);
         static ffcore::FlowHandle decode_flow_handle(std::int64_t encoded);
+        static std::int64_t encode_obstacle_handle(ffcore::StaticObstacleHandle handle);
+        static ffcore::StaticObstacleHandle decode_obstacle_handle(std::int64_t encoded);
+        static std::int64_t encode_directional_field_handle(
+            ffcore::DirectionalMotionFieldHandle handle);
+        static ffcore::DirectionalMotionFieldHandle decode_directional_field_handle(
+            std::int64_t encoded);
         static ffcore::CrowdAgentProfile make_profile(
             double radius, double maximum_speed, double acceleration, double deceleration,
             double separation_radius, double separation_weight, double arrival_radius,
@@ -64,6 +71,10 @@ namespace godot
         std::int64_t add_agent_with_profile(Vector2 position, std::int64_t profile_handle);
         bool remove_agent(std::int64_t agent_handle);
         bool set_agent_profile(std::int64_t agent_handle, std::int64_t profile_handle);
+        bool set_agent_position(std::int64_t agent_handle, Vector2 position,
+                                bool clear_velocity = true);
+        bool set_agent_motion_limits(std::int64_t agent_handle, double maximum_speed,
+                                     double acceleration, double deceleration);
         std::int64_t create_cohort();
         bool remove_cohort(std::int64_t cohort_handle);
         bool assign_agent_to_cohort(std::int64_t agent_handle, std::int64_t cohort_handle);
@@ -76,6 +87,26 @@ namespace godot
         bool set_manual_direction(std::int64_t agent_handle, Vector2 direction);
         bool stop_navigation(std::int64_t agent_handle);
         bool set_agent_paused(std::int64_t agent_handle, bool paused);
+        void configure_static_obstacle_avoidance(double strength, double query_padding);
+        std::int64_t create_static_obstacle(Vector2 position, double radius,
+                                            double push_strength = 1.0);
+        bool update_static_obstacle(std::int64_t obstacle_handle, Vector2 position,
+                                    double radius, double push_strength = 1.0);
+        bool remove_static_obstacle(std::int64_t obstacle_handle);
+        void clear_static_obstacles();
+        int get_static_obstacle_count() const;
+        std::int64_t create_directional_motion_field(
+            Vector2 world_origin, double cell_size, double speed,
+            const PackedVector2Array &cells, const PackedVector2Array &directions,
+            Vector2 sample_offset = Vector2(), double fallback_radius = 0.0);
+        bool update_directional_motion_field(
+            std::int64_t field_handle, Vector2 world_origin, double cell_size, double speed,
+            const PackedVector2Array &cells, const PackedVector2Array &directions,
+            Vector2 sample_offset = Vector2(), double fallback_radius = 0.0);
+        bool remove_directional_motion_field(std::int64_t field_handle);
+        void clear_directional_motion_fields();
+        bool follow_directional_motion_field(std::int64_t agent_handle,
+                                             std::int64_t field_handle);
         void apply_impulse(std::int64_t agent_handle, Vector2 velocity, double delay,
                            double decay_per_second, double control_suppression_seconds,
                            bool preserve_navigation, int priority);
@@ -93,10 +124,22 @@ namespace godot
         void replace_terrain_speed_channel(const PackedVector2Array &cells,
                                            const PackedFloat64Array &multipliers,
                                            int channel);
+        void set_terrain_speed_cell(Vector2i cell, double multiplier, int channel = 0);
+        void set_terrain_speed_cells(const PackedVector2Array &cells,
+                                     const PackedFloat64Array &multipliers, int channel = 0);
+        void clear_terrain_speed_cell(Vector2i cell, int channel = 0);
+        void clear_terrain_speed_cells(const PackedVector2Array &cells, int channel = 0);
+        void clear_terrain_speed_channel(int channel = 0);
 
         Vector2 get_agent_position(std::int64_t agent_handle) const;
         Vector2 get_agent_velocity(std::int64_t agent_handle) const;
         int get_agent_route_progress(std::int64_t agent_handle) const;
+        Dictionary get_agent_diagnostics(std::int64_t agent_handle) const;
+        PackedInt64Array query_agents_in_circle(
+            Vector2 position, double radius, std::int64_t category_mask,
+            std::int64_t ignored_agent_handle = 0) const;
+        PackedInt64Array get_agents_in_navigation_cell(
+            NavigationWorld2D *navigation, Vector2i cell) const;
         PackedInt64Array get_agent_handles() const;
         PackedVector2Array get_agent_positions() const;
         PackedVector2Array get_agent_velocities() const;

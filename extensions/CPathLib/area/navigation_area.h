@@ -74,7 +74,11 @@ namespace ffcore
         AreaHandle create_area(const std::vector<Vec2i> &interior_cells,
                                const std::vector<Vec2i> &target_cells = {});
         bool remove_area(AreaHandle handle);
+        bool set_area_interior_cells(AreaHandle handle, const std::vector<Vec2i> &cells);
+        bool set_area_target_cells(AreaHandle handle, const std::vector<Vec2i> &cells);
         const NavigationArea *get_area(AreaHandle handle) const;
+        std::vector<AreaHandle> active_areas() const;
+        std::size_t area_count() const;
 
         PortalHandle create_portal(AreaHandle area,
                                    const std::vector<Vec2i> &boundary_cells,
@@ -83,5 +87,7 @@ namespace ffcore
                                    std::uint32_t capacity = 1);
         bool remove_portal(PortalHandle handle);
         const AreaPortal *get_portal(PortalHandle handle) const;
+        std::vector<PortalHandle> active_portals() const;
+        std::size_t portal_count() const;
     };
 } // namespace ffcore

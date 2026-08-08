@@ -7,13 +7,6 @@
 
 namespace ffcore
 {
-    struct FormationFootprint
-    {
-        int w = 1;
-        int h = 1;
-        double angle = 0.0; // radians, principal axis of formation
-    };
-
     struct BottleneckInfo
     {
         Vec2i cell;
@@ -79,19 +72,12 @@ namespace ffcore
         double route_cost_at_cell(const Vec2i &cell) const;
         const BottleneckInfo *bottleneck_at(int index) const;
         const std::vector<BottleneckInfo> &get_bottlenecks() const { return bottlenecks; }
-        double get_ff_target_radius() const { return ff_target_radius; }
-        void set_ff_target_radius(double radius) { ff_target_radius = radius; }
-        int arrived_count = 0;
-        bool first_is_arrived = false;
         void copy_from(const FlowField &src);
         bool has_distance_field() const;
         float distance_at_cell(const Vec2i &cell) const;
         Vec2 distance_gradient_at_cell(const Vec2i &cell) const;
         void set_distance_field(const std::vector<float> &df);
         void set_route_cost_field(const std::vector<double> &costs);
-
-        int refcount = 0; /// nbre d'agent dedans pour delete a la fin
-        FlowFieldID id = INVALID_FLOWFIELD;
 
     private:
         int w = 0;
@@ -117,7 +103,6 @@ namespace ffcore
         std::vector<int> next_bottleneck_by_cell;
 
         Vec2i goal_cell = Vec2i(-1, -1);
-        double ff_target_radius = 0.0;
     };
 
 } // namespace ffcore

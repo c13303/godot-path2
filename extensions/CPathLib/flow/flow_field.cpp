@@ -22,7 +22,6 @@ void FlowField::resize(int width, int height)
     distance_field.assign(w * h, 0.0f);
     route_cost_field.assign(w * h, 0.0);
     clear_bottlenecks();
-    ff_target_radius = 0.0;
     ready = (w > 0 && h > 0);
 }
 
@@ -78,7 +77,6 @@ void FlowField::clear()
     std::fill(distance_field.begin(), distance_field.end(), 0.0f);
     std::fill(route_cost_field.begin(), route_cost_field.end(), 0.0);
     clear_bottlenecks();
-    ff_target_radius = 0.0;
     ready = false;
     goal_cell = Vec2i(-1, -1);
     explicit_navigability = false;
@@ -326,7 +324,6 @@ void FlowField::copy_from(const FlowField &src)
     navigable_cells = src.navigable_cells;
     explicit_physics_passability = src.explicit_physics_passability;
     physics_passable_cells = src.physics_passable_cells;
-    ff_target_radius = src.ff_target_radius;
     distance_field = src.distance_field;
     route_cost_field = src.route_cost_field;
     bottlenecks = src.bottlenecks;

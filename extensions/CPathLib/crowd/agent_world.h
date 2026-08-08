@@ -3,6 +3,7 @@
 #include "../core/types.h"
 #include "../flow/flow_field_store.h"
 #include "../steering/external_velocity_accumulator.h"
+#include "../steering/directional_motion_field_store.h"
 #include "crowd_profile_store.h"
 
 #include <cstdint>
@@ -24,7 +25,8 @@ namespace ffcore
         None,
         FlowField,
         Path,
-        Manual
+        Manual,
+        DirectionalField
     };
 
     enum class RouteProgress
@@ -45,6 +47,7 @@ namespace ffcore
         Vec2 manual_direction;
         NavigationSource navigation_source = NavigationSource::None;
         FlowHandle flow_handle;
+        DirectionalMotionFieldHandle directional_field_handle;
         RouteProgress route_progress = RouteProgress::Idle;
         std::vector<Vec2> path;
         std::size_t path_index = 0;
@@ -70,6 +73,7 @@ namespace ffcore
         CrowdAgentState *get(AgentHandle handle);
         const CrowdAgentState *get(AgentHandle handle) const;
         std::vector<AgentHandle> active_handles() const;
+        std::uint32_t generation_at(std::uint32_t index) const;
         std::size_t size() const;
     };
 } // namespace ffcore

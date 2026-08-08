@@ -6,7 +6,12 @@
 namespace ffcore
 {
     class FlowField;
-    struct FormationFootprint;
+    struct FormationFootprint
+    {
+        int w = 1;
+        int h = 1;
+        double angle = 0.0;
+    };
 }
 namespace ffcore
 {

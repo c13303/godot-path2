@@ -2,23 +2,23 @@
 
 #include <godot_cpp/core/class_db.hpp>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <vector>
 
 namespace godot
 {
-    namespace
+    std::vector<ffcore::Vec2i> NavigationWorld2D::convert_cells(
+        const PackedVector2Array &cells)
     {
-        std::vector<ffcore::Vec2i> convert_cells(const PackedVector2Array &cells)
+        std::vector<ffcore::Vec2i> converted;
+        converted.reserve(cells.size());
+        for (int index = 0; index < cells.size(); ++index)
         {
-            std::vector<ffcore::Vec2i> converted;
-            converted.reserve(cells.size());
-            for (int index = 0; index < cells.size(); ++index)
-            {
-                const Vector2 cell = cells[index];
-                converted.push_back({static_cast<int>(cell.x), static_cast<int>(cell.y)});
-            }
-            return converted;
+            const Vector2 cell = cells[index];
+            converted.push_back({static_cast<int>(cell.x), static_cast<int>(cell.y)});
         }
+        return converted;
     }
 
     void NavigationWorld2D::_bind_methods()
@@ -30,23 +30,48 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_cell_physics_blocked", "cell", "blocked"), &NavigationWorld2D::set_cell_physics_blocked);
         ClassDB::bind_method(D_METHOD("set_cell_traversal_cost", "cell", "cost"), &NavigationWorld2D::set_cell_traversal_cost);
         ClassDB::bind_method(D_METHOD("find_path_cells", "start", "goal"), &NavigationWorld2D::find_path_cells);
+        ClassDB::bind_method(D_METHOD("find_path_cells_with_options", "start", "goal", "blocker_channel_mask"), &NavigationWorld2D::find_path_cells_with_options);
+        ClassDB::bind_method(D_METHOD("replace_blocker_channel", "channel", "cells", "blocks_navigation", "blocks_physics"), &NavigationWorld2D::replace_blocker_channel);
+        ClassDB::bind_method(D_METHOD("clear_blocker_channel", "channel"), &NavigationWorld2D::clear_blocker_channel);
+        ClassDB::bind_method(D_METHOD("set_blocker_channel_cell", "channel", "cell", "blocked", "blocks_navigation", "blocks_physics"), &NavigationWorld2D::set_blocker_channel_cell);
+        ClassDB::bind_method(D_METHOD("replace_directional_traversal_channel", "channel", "cells", "directions"), &NavigationWorld2D::replace_directional_traversal_channel);
+        ClassDB::bind_method(D_METHOD("clear_directional_traversal_channel", "channel"), &NavigationWorld2D::clear_directional_traversal_channel);
         ClassDB::bind_method(D_METHOD("build_flow_to_cell", "goal"), &NavigationWorld2D::build_flow_to_cell);
         ClassDB::bind_method(D_METHOD("create_flow_to_cell", "goal"), &NavigationWorld2D::create_flow_to_cell);
+        ClassDB::bind_method(D_METHOD("create_flow_to_cell_with_options", "goal", "blocker_channel_mask", "directional_channel"), &NavigationWorld2D::create_flow_to_cell_with_options);
         ClassDB::bind_method(D_METHOD("request_flow_to_cell", "goal"), &NavigationWorld2D::request_flow_to_cell);
         ClassDB::bind_method(D_METHOD("request_flow_handle_to_cell", "goal"), &NavigationWorld2D::request_flow_handle_to_cell);
+        ClassDB::bind_method(D_METHOD("request_flow_handle_to_cell_with_options", "goal", "blocker_channel_mask", "directional_channel"), &NavigationWorld2D::request_flow_handle_to_cell_with_options);
         ClassDB::bind_method(D_METHOD("cancel_flow_request", "request_id"), &NavigationWorld2D::cancel_flow_request);
         ClassDB::bind_method(D_METHOD("cancel_flow", "flow_handle"), &NavigationWorld2D::cancel_flow);
         ClassDB::bind_method(D_METHOD("release_flow", "flow_handle"), &NavigationWorld2D::release_flow);
         ClassDB::bind_method(D_METHOD("get_flow_status", "flow_handle"), &NavigationWorld2D::get_flow_status);
         ClassDB::bind_method(D_METHOD("sample_flow", "flow_handle", "world_position"), &NavigationWorld2D::sample_flow);
+        ClassDB::bind_method(D_METHOD("get_flow_route_cost", "flow_handle", "world_position"), &NavigationWorld2D::get_flow_route_cost);
+        ClassDB::bind_method(D_METHOD("get_flow_diagnostics", "flow_handle"), &NavigationWorld2D::get_flow_diagnostics);
+        ClassDB::bind_method(D_METHOD("get_flow_bottlenecks", "flow_handle"), &NavigationWorld2D::get_flow_bottlenecks);
+        ClassDB::bind_method(D_METHOD("get_flow_handles"), &NavigationWorld2D::get_flow_handles);
         ClassDB::bind_method(D_METHOD("sample_latest_flow", "world_position"), &NavigationWorld2D::sample_latest_flow);
         ClassDB::bind_method(D_METHOD("get_topology_revision"), &NavigationWorld2D::get_topology_revision);
         ClassDB::bind_method(D_METHOD("get_cost_revision"), &NavigationWorld2D::get_cost_revision);
         ClassDB::bind_method(D_METHOD("create_area", "interior_cells", "target_cells"), &NavigationWorld2D::create_area);
+        ClassDB::bind_method(D_METHOD("create_garden", "interior_cells", "target_cells"), &NavigationWorld2D::create_garden);
+        ClassDB::bind_method(D_METHOD("create_garden_from_seed", "seed", "maximum_cells", "blocker_channel_mask"), &NavigationWorld2D::create_garden_from_seed);
         ClassDB::bind_method(D_METHOD("create_portal", "area_handle", "boundary_cells", "outside_cells", "direction", "capacity"), &NavigationWorld2D::create_portal);
+        ClassDB::bind_method(D_METHOD("create_garden_portal", "garden_handle", "boundary_cells", "outside_cells", "direction", "capacity"), &NavigationWorld2D::create_garden_portal);
         ClassDB::bind_method(D_METHOD("remove_area", "area_handle"), &NavigationWorld2D::remove_area);
+        ClassDB::bind_method(D_METHOD("remove_garden", "garden_handle"), &NavigationWorld2D::remove_garden);
+        ClassDB::bind_method(D_METHOD("set_garden_cells", "garden_handle", "interior_cells"), &NavigationWorld2D::set_garden_cells);
+        ClassDB::bind_method(D_METHOD("set_garden_target_cells", "garden_handle", "target_cells"), &NavigationWorld2D::set_garden_target_cells);
+        ClassDB::bind_method(D_METHOD("remove_portal", "portal_handle"), &NavigationWorld2D::remove_portal);
+        ClassDB::bind_method(D_METHOD("get_garden_info", "garden_handle"), &NavigationWorld2D::get_garden_info);
+        ClassDB::bind_method(D_METHOD("get_portal_info", "portal_handle"), &NavigationWorld2D::get_portal_info);
+        ClassDB::bind_method(D_METHOD("get_garden_handles"), &NavigationWorld2D::get_garden_handles);
+        ClassDB::bind_method(D_METHOD("get_portal_handles"), &NavigationWorld2D::get_portal_handles);
         ClassDB::bind_method(D_METHOD("plan_enter_area", "area_handle", "world_start", "area_destination"), &NavigationWorld2D::plan_enter_area);
         ClassDB::bind_method(D_METHOD("plan_exit_area", "area_handle", "area_start", "world_destination"), &NavigationWorld2D::plan_exit_area);
+        ClassDB::bind_method(D_METHOD("plan_enter_garden", "garden_handle", "world_start", "garden_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_enter_garden);
+        ClassDB::bind_method(D_METHOD("plan_exit_garden", "garden_handle", "garden_start", "world_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_exit_garden);
         ClassDB::bind_method(D_METHOD("is_route_current", "route"), &NavigationWorld2D::is_route_current);
         ADD_SIGNAL(MethodInfo("flow_ready",
                               PropertyInfo(Variant::INT, "request_id"),
@@ -153,6 +178,89 @@ namespace godot
         return converted;
     }
 
+    PackedVector2Array NavigationWorld2D::find_path_cells_with_options(
+        Vector2i start,
+        Vector2i goal,
+        std::int64_t blocker_channel_mask) const
+    {
+        const ffcore::WorldPathResult path = world.find_path(
+            {start.x, start.y}, {goal.x, goal.y},
+            static_cast<std::uint64_t>(blocker_channel_mask));
+        PackedVector2Array converted;
+        converted.resize(static_cast<int>(path.cells.size()));
+        for (int index = 0; index < static_cast<int>(path.cells.size()); ++index)
+            converted.set(index, Vector2(path.cells[index].x, path.cells[index].y));
+        return converted;
+    }
+
+    bool NavigationWorld2D::replace_blocker_channel(
+        int channel,
+        const PackedVector2Array &cells,
+        bool blocks_navigation,
+        bool blocks_physics)
+    {
+        if (channel < 0 || channel >= 64)
+            return false;
+        return world.replace_blocker_channel(
+            static_cast<std::uint32_t>(channel), convert_cells(cells),
+            blocks_navigation, blocks_physics);
+    }
+
+    bool NavigationWorld2D::clear_blocker_channel(int channel)
+    {
+        return channel >= 0 && channel < 64 &&
+               world.clear_blocker_channel(static_cast<std::uint32_t>(channel));
+    }
+
+    bool NavigationWorld2D::set_blocker_channel_cell(
+        int channel,
+        Vector2i cell,
+        bool blocked,
+        bool blocks_navigation,
+        bool blocks_physics)
+    {
+        return channel >= 0 && channel < 64 && world.set_blocker_channel_cell(
+            static_cast<std::uint32_t>(channel), {cell.x, cell.y}, blocked,
+            blocks_navigation, blocks_physics);
+    }
+
+    bool NavigationWorld2D::replace_directional_traversal_channel(
+        int channel,
+        const PackedVector2Array &cells,
+        const PackedVector2Array &directions)
+    {
+        if (channel < 0 || cells.size() != directions.size())
+            return false;
+        ffcore::DirectionalTraversalConstraints constraints;
+        for (int index = 0; index < cells.size(); ++index)
+        {
+            const Vector2 cell = cells[index];
+            const Vector2 direction = directions[index];
+            const ffcore::Vec2i cardinal(
+                static_cast<int>(direction.x), static_cast<int>(direction.y));
+            if (std::abs(cardinal.x) + std::abs(cardinal.y) != 1)
+                continue;
+            constraints[{
+                static_cast<int>(cell.x), static_cast<int>(cell.y)}] = cardinal;
+        }
+        return world.replace_directional_channel(channel, constraints);
+    }
+
+    bool NavigationWorld2D::clear_directional_traversal_channel(int channel)
+    {
+        return channel >= 0 && world.clear_directional_channel(channel);
+    }
+
+    ffcore::FlowBuildOptions NavigationWorld2D::make_flow_options(
+        std::int64_t blocker_channel_mask,
+        int directional_channel)
+    {
+        ffcore::FlowBuildOptions options;
+        options.blocker_channel_mask = static_cast<std::uint64_t>(blocker_channel_mask);
+        options.directional_channel = directional_channel;
+        return options;
+    }
+
     bool NavigationWorld2D::build_flow_to_cell(Vector2i goal)
     {
         const ffcore::FlowHandle handle = world.create_flow({goal.x, goal.y});
@@ -175,9 +283,21 @@ namespace godot
         return encode_flow_handle(handle);
     }
 
+    std::int64_t NavigationWorld2D::create_flow_to_cell_with_options(
+        Vector2i goal,
+        std::int64_t blocker_channel_mask,
+        int directional_channel)
+    {
+        const ffcore::FlowHandle handle = world.create_flow(
+            {goal.x, goal.y},
+            make_flow_options(blocker_channel_mask, directional_channel));
+        return encode_flow_handle(handle);
+    }
+
     std::uint64_t NavigationWorld2D::submit_flow_request(
         Vector2i goal,
         bool publish_as_latest,
+        const ffcore::FlowBuildOptions &options,
         ffcore::FlowHandle &flow_handle)
     {
         const ffcore::GridDefinition &grid = world.grid();
@@ -185,7 +305,7 @@ namespace godot
             return 0;
         flow_handle = world.begin_flow_request({goal.x, goal.y});
         const std::uint64_t id = jobs.submit(
-            world.create_flow_request({goal.x, goal.y}),
+            world.create_flow_request({goal.x, goal.y}, options),
             world.get_topology_revision(),
             world.get_cost_revision());
         flow_by_request[id] = {flow_handle, publish_as_latest};
@@ -195,14 +315,38 @@ namespace godot
     std::int64_t NavigationWorld2D::request_flow_to_cell(Vector2i goal)
     {
         ffcore::FlowHandle flow_handle;
-        const std::uint64_t id = submit_flow_request(goal, true, flow_handle);
+        const ffcore::NavigationWorldConfig &config = world.get_config();
+        ffcore::FlowBuildOptions options;
+        options.blocker_channel_mask = config.default_blocker_channel_mask;
+        options.directional_channel = config.default_directional_channel;
+        const std::uint64_t id = submit_flow_request(
+            goal, true, options, flow_handle);
         return static_cast<std::int64_t>(id);
     }
 
     std::int64_t NavigationWorld2D::request_flow_handle_to_cell(Vector2i goal)
     {
         ffcore::FlowHandle flow_handle;
-        if (submit_flow_request(goal, false, flow_handle) == 0)
+        const ffcore::NavigationWorldConfig &config = world.get_config();
+        ffcore::FlowBuildOptions options;
+        options.blocker_channel_mask = config.default_blocker_channel_mask;
+        options.directional_channel = config.default_directional_channel;
+        if (submit_flow_request(
+                goal, false, options, flow_handle) == 0)
+            return 0;
+        return encode_flow_handle(flow_handle);
+    }
+
+    std::int64_t NavigationWorld2D::request_flow_handle_to_cell_with_options(
+        Vector2i goal,
+        std::int64_t blocker_channel_mask,
+        int directional_channel)
+    {
+        ffcore::FlowHandle flow_handle;
+        if (submit_flow_request(
+                goal, false,
+                make_flow_options(blocker_channel_mask, directional_channel),
+                flow_handle) == 0)
             return 0;
         return encode_flow_handle(flow_handle);
     }
@@ -323,23 +467,84 @@ namespace godot
         return Vector2(direction.x, direction.y);
     }
 
+    double NavigationWorld2D::get_flow_route_cost(
+        std::int64_t encoded,
+        Vector2 world_position) const
+    {
+        const ffcore::StoredFlow *stored = world.get_flow(decode_flow_handle(encoded));
+        if (stored == nullptr || stored->status != ffcore::FlowStatus::Ready)
+            return std::numeric_limits<double>::infinity();
+        const ffcore::Vec2i cell = stored->field.world_to_cell(
+            {world_position.x, world_position.y});
+        if (!stored->field.is_cell_navigable(cell))
+            return std::numeric_limits<double>::infinity();
+        return stored->field.route_cost_at_cell(cell);
+    }
+
+    Dictionary NavigationWorld2D::get_flow_diagnostics(std::int64_t encoded) const
+    {
+        Dictionary diagnostics;
+        const ffcore::StoredFlow *stored = world.get_flow(decode_flow_handle(encoded));
+        if (stored == nullptr)
+        {
+            diagnostics["valid"] = false;
+            return diagnostics;
+        }
+        diagnostics["valid"] = true;
+        diagnostics["status"] = static_cast<int>(stored->status);
+        diagnostics["goal"] = Vector2i(stored->goal.x, stored->goal.y);
+        diagnostics["topology_revision"] = static_cast<std::int64_t>(stored->topology_revision);
+        diagnostics["cost_revision"] = static_cast<std::int64_t>(stored->cost_revision);
+        diagnostics["width"] = stored->field.width();
+        diagnostics["height"] = stored->field.height();
+        diagnostics["bottleneck_count"] =
+            static_cast<int>(stored->field.get_bottlenecks().size());
+        return diagnostics;
+    }
+
+    Array NavigationWorld2D::get_flow_bottlenecks(std::int64_t encoded) const
+    {
+        Array result;
+        const ffcore::StoredFlow *stored = world.get_flow(decode_flow_handle(encoded));
+        if (stored == nullptr || stored->status != ffcore::FlowStatus::Ready)
+            return result;
+        const ffcore::Vec2i origin = stored->field.get_cell_origin();
+        for (const ffcore::BottleneckInfo &bottleneck : stored->field.get_bottlenecks())
+        {
+            Dictionary item;
+            item["cell"] = Vector2i(
+                origin.x + bottleneck.cell.x, origin.y + bottleneck.cell.y);
+            item["axis"] = bottleneck.axis;
+            item["route_cost"] = bottleneck.route_cost;
+            PackedVector2Array zone_cells;
+            zone_cells.resize(static_cast<int>(bottleneck.zone_cells.size()));
+            for (int index = 0; index < static_cast<int>(bottleneck.zone_cells.size()); ++index)
+            {
+                zone_cells.set(index, Vector2(
+                    origin.x + bottleneck.zone_cells[index].x,
+                    origin.y + bottleneck.zone_cells[index].y));
+            }
+            item["zone_cells"] = zone_cells;
+            result.push_back(item);
+        }
+        return result;
+    }
+
+    PackedInt64Array NavigationWorld2D::get_flow_handles() const
+    {
+        const std::vector<ffcore::FlowHandle> handles = world.active_flows();
+        PackedInt64Array result;
+        result.resize(static_cast<int>(handles.size()));
+        for (int index = 0; index < static_cast<int>(handles.size()); ++index)
+            result.set(index, encode_flow_handle(handles[index]));
+        return result;
+    }
+
     std::int64_t NavigationWorld2D::get_topology_revision() const
     { return static_cast<std::int64_t>(world.get_topology_revision()); }
 
     std::int64_t NavigationWorld2D::get_cost_revision() const
     { return static_cast<std::int64_t>(world.get_cost_revision()); }
-
-    std::int64_t NavigationWorld2D::encode_area_handle(ffcore::AreaHandle handle)
-    { return static_cast<std::int64_t>((static_cast<std::uint64_t>(handle.generation) << 32) | handle.index); }
-
-    std::int64_t NavigationWorld2D::encode_portal_handle(ffcore::PortalHandle handle)
-    { return static_cast<std::int64_t>((static_cast<std::uint64_t>(handle.generation) << 32) | handle.index); }
-
-    ffcore::AreaHandle NavigationWorld2D::decode_area_handle(std::int64_t encoded)
-    {
-        const std::uint64_t value = static_cast<std::uint64_t>(encoded);
-        return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
-    }
 
     std::int64_t NavigationWorld2D::encode_flow_handle(ffcore::FlowHandle handle)
     { return static_cast<std::int64_t>((static_cast<std::uint64_t>(handle.generation) << 32) | handle.index); }
@@ -348,67 +553,6 @@ namespace godot
     {
         const std::uint64_t value = static_cast<std::uint64_t>(encoded);
         return {static_cast<std::uint32_t>(value), static_cast<std::uint32_t>(value >> 32)};
-    }
-
-    std::int64_t NavigationWorld2D::create_area(
-        const PackedVector2Array &interior_cells,
-        const PackedVector2Array &target_cells)
-    {
-        return encode_area_handle(world.areas().create_area(
-            convert_cells(interior_cells), convert_cells(target_cells)));
-    }
-
-    std::int64_t NavigationWorld2D::create_portal(
-        std::int64_t area_handle,
-        const PackedVector2Array &boundary_cells,
-        const PackedVector2Array &outside_cells,
-        int direction,
-        int capacity)
-    {
-        const ffcore::PortalDirection portal_direction = static_cast<ffcore::PortalDirection>(
-            std::clamp(direction, 0, 2));
-        return encode_portal_handle(world.areas().create_portal(
-            decode_area_handle(area_handle),
-            convert_cells(boundary_cells),
-            convert_cells(outside_cells),
-            portal_direction,
-            static_cast<std::uint32_t>(std::max(1, capacity))));
-    }
-
-    bool NavigationWorld2D::remove_area(std::int64_t area_handle)
-    { return world.areas().remove_area(decode_area_handle(area_handle)); }
-
-    Ref<NavigationRoute2D> NavigationWorld2D::plan_enter_area(
-        std::int64_t area_handle,
-        Vector2i world_start,
-        Vector2i area_destination) const
-    {
-        Ref<NavigationRoute2D> route;
-        route.instantiate();
-        route->set_core_route(world.plan_enter_area(
-            decode_area_handle(area_handle),
-            {world_start.x, world_start.y},
-            {area_destination.x, area_destination.y}));
-        return route;
-    }
-
-    Ref<NavigationRoute2D> NavigationWorld2D::plan_exit_area(
-        std::int64_t area_handle,
-        Vector2i area_start,
-        Vector2i world_destination) const
-    {
-        Ref<NavigationRoute2D> route;
-        route.instantiate();
-        route->set_core_route(world.plan_exit_area(
-            decode_area_handle(area_handle),
-            {area_start.x, area_start.y},
-            {world_destination.x, world_destination.y}));
-        return route;
-    }
-
-    bool NavigationWorld2D::is_route_current(const Ref<NavigationRoute2D> &route) const
-    {
-        return route.is_valid() && world.is_route_current(route->core_route());
     }
 
     bool NavigationWorld2D::copy_latest_flow(ffcore::FlowField &destination) const

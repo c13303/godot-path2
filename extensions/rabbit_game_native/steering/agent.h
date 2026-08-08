@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CPathLib/core/types.h"
+#include "../core/nav_config.h"
 #include "CPathLib/steering/external_velocity_accumulator.h"
 #include "CPathLib/steering/terrain_speed_grid.h"
 #include <cstdint>

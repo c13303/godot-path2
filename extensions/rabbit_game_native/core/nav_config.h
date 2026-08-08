@@ -3,6 +3,11 @@
 
 namespace ffcore
 {
+    using FlowFieldID = std::uint32_t;
+    using GroupID = std::uint32_t;
+    constexpr FlowFieldID INVALID_FLOWFIELD = 0;
+    constexpr GroupID INVALID_GROUP = 0;
+
     // Route groups should own at most one pooled flow field. Keeping these equal
     // makes pool pressure expose lifecycle bugs instead of masking leaked groups
     // with excess memory-heavy field slots.

@@ -36,6 +36,8 @@ namespace ffcore
         slot->occupied = false;
         slot->value = NavigationArea();
         ++slot->generation;
+        if (slot->generation == 0)
+            slot->generation = 1;
         return true;
     }
 
@@ -45,6 +47,52 @@ namespace ffcore
             return nullptr;
         const AreaSlot &slot = areas[handle.index];
         return slot.occupied && slot.generation == handle.generation ? &slot.value : nullptr;
+    }
+
+    bool NavigationAreaStore::set_area_interior_cells(
+        AreaHandle handle,
+        const std::vector<Vec2i> &cells)
+    {
+        if (cells.empty() || get_area(handle) == nullptr)
+            return false;
+        AreaSlot &slot = areas[handle.index];
+        if (slot.value.interior_cells == cells)
+            return false;
+        slot.value.interior_cells = cells;
+        ++slot.value.revision;
+        return true;
+    }
+
+    bool NavigationAreaStore::set_area_target_cells(
+        AreaHandle handle,
+        const std::vector<Vec2i> &cells)
+    {
+        if (get_area(handle) == nullptr)
+            return false;
+        AreaSlot &slot = areas[handle.index];
+        if (slot.value.target_cells == cells)
+            return false;
+        slot.value.target_cells = cells;
+        ++slot.value.revision;
+        return true;
+    }
+
+    std::vector<AreaHandle> NavigationAreaStore::active_areas() const
+    {
+        std::vector<AreaHandle> handles;
+        handles.reserve(area_count());
+        for (std::size_t index = 1; index < areas.size(); ++index)
+        {
+            if (areas[index].occupied)
+                handles.push_back(areas[index].value.id);
+        }
+        return handles;
+    }
+
+    std::size_t NavigationAreaStore::area_count() const
+    {
+        return static_cast<std::size_t>(std::count_if(
+            areas.begin(), areas.end(), [](const AreaSlot &slot) { return slot.occupied; }));
     }
 
     PortalHandle NavigationAreaStore::create_portal(
@@ -94,6 +142,8 @@ namespace ffcore
         slot->occupied = false;
         slot->value = AreaPortal();
         ++slot->generation;
+        if (slot->generation == 0)
+            slot->generation = 1;
         return true;
     }
 
@@ -103,5 +153,23 @@ namespace ffcore
             return nullptr;
         const PortalSlot &slot = portals[handle.index];
         return slot.occupied && slot.generation == handle.generation ? &slot.value : nullptr;
+    }
+
+    std::vector<PortalHandle> NavigationAreaStore::active_portals() const
+    {
+        std::vector<PortalHandle> handles;
+        handles.reserve(portal_count());
+        for (std::size_t index = 1; index < portals.size(); ++index)
+        {
+            if (portals[index].occupied)
+                handles.push_back(portals[index].value.id);
+        }
+        return handles;
+    }
+
+    std::size_t NavigationAreaStore::portal_count() const
+    {
+        return static_cast<std::size_t>(std::count_if(
+            portals.begin(), portals.end(), [](const PortalSlot &slot) { return slot.occupied; }));
     }
 } // namespace ffcore

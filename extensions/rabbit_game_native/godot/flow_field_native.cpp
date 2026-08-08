@@ -215,8 +215,6 @@ bool FlowFieldNative::prepare_layers(Vector2 goal, Rect2i &used, Vector2i &goal_
     field.resize(used.size.x, used.size.y);
     field.set_tile_size(tile_size);
     field.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
-    field.first_is_arrived = false;
-    field.arrived_count = 0;
 
     Vector2 goal_local = floor_layer->to_local(goal_world);
     goal_cell = floor_layer->local_to_map(goal_local);
@@ -1028,8 +1026,8 @@ Dictionary FlowFieldNative::get_flow_pool_debug_snapshot() const
             const ffcore::FlowField *ff = fm->get(id);
             Dictionary field_info;
             field_info["field_id"] = (int)id;
-            field_info["refcount"] = ff ? ff->refcount : 0;
-            if (ff && ff->refcount <= 0)
+            field_info["refcount"] = fm->refcount(ff);
+            if (ff && fm->refcount(ff) <= 0)
                 ++zero_ref_occupied;
             occupied_fields.append(field_info);
         }
@@ -1050,10 +1048,10 @@ Dictionary FlowFieldNative::get_flow_pool_debug_snapshot() const
             ++active_group_count;
             Dictionary group_info;
             group_info["group_id"] = (int)group;
-            group_info["field_id"] = g.flow ? (int)g.flow->id : 0;
+            group_info["field_id"] = g.flow && fm ? (int)fm->id_for(g.flow) : 0;
             group_info["flow_wait"] = g.flow_wait;
             group_info["has_order"] = g.has_order;
-            group_info["field_refcount"] = g.flow ? g.flow->refcount : 0;
+            group_info["field_refcount"] = g.flow && fm ? fm->refcount(g.flow) : 0;
             group_info["member_count"] = mgr->count_group_members(group);
             group_info["generation"] = (int64_t)g.lifecycle_generation;
             bool suspicious = (g.flow == nullptr && (g.flow_wait != ffcore::GROUP_FLOW_WAIT_NONE || g.has_order));
@@ -1146,6 +1144,7 @@ bool FlowFieldNative::install_computed_flow_to_group(int group_id, uint64_t grou
         mgr->get_group_generation((ffcore::GroupID)group_id) != group_generation)
         return false;
 
+    ffcore::FlowFieldManager *fm = ffcore::flowfields();
     ffcore::FlowField *target_flow = mgr->get_group_flow((ffcore::GroupID)group_id);
     if (target_flow && mgr->count_groups_referencing_flow(target_flow) <= 1)
     {
@@ -1153,7 +1152,6 @@ bool FlowFieldNative::install_computed_flow_to_group(int group_id, uint64_t grou
     }
     else
     {
-        auto *fm = ffcore::flowfields();
         ffcore::FlowFieldID fid = fm ? fm->register_copy(computed_field) : ffcore::INVALID_FLOWFIELD;
         target_flow = fm ? fm->get(fid) : nullptr;
         if (fid == ffcore::INVALID_FLOWFIELD || !target_flow)
@@ -1176,7 +1174,8 @@ bool FlowFieldNative::install_computed_flow_to_group(int group_id, uint64_t grou
         target_radius = std::ceil(std::sqrt(denominator / FLOWFIELD_TARGET_RADIUS_PI));
     }
     double world_radius = (target_radius + 1) * target_flow->tile_size();
-    target_flow->set_ff_target_radius(world_radius);
+    if (fm)
+        fm->set_target_radius(target_flow, world_radius);
     mgr->set_group_flow((ffcore::GroupID)group_id, target_flow);
     mgr->set_group_flow_wait((ffcore::GroupID)group_id, ffcore::GROUP_FLOW_WAIT_NONE);
     return true;

@@ -216,7 +216,10 @@ int SteeringSystem::register_agent(const Vec2 &pos, double max_speed, FlowField 
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow ? flow : default_flow;
     if (a.flow)
-        a.flow->refcount++;
+    {
+        if (FlowFieldManager *manager = flowfields())
+            manager->retain(a.flow);
+    }
     a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);
     agents.push_back(a);
@@ -254,7 +257,8 @@ void SteeringSystem::unregister_agent(int id) // Supprime un agent
     FlowField *old_flow = agents[idx].flow;
     if (old_flow)
     {
-        old_flow->refcount--;
+        if (FlowFieldManager *manager = flowfields())
+            manager->release(old_flow);
         ffcore::cleanup_flow_if_unused(old_flow);
     }
 
@@ -381,7 +385,10 @@ int SteeringSystem::register_agent_with_id(int fixed_id, const Vec2 &pos, double
     a.max_speed = globalconfig().agent_max_speed;
     a.flow = flow;
     if (a.flow)
-        a.flow->refcount++;
+    {
+        if (FlowFieldManager *manager = flowfields())
+            manager->retain(a.flow);
+    }
     a.active = flow != nullptr; // ✅ Inactif si pas de flow
     a.profile = sanitize_agent_profile(a.profile);
     a.debug_color = hashed_color(a.id);
@@ -1371,14 +1378,18 @@ void SteeringSystem::set_agent_flow_ptr(int id, FlowField *ff)
 
     if (old)
     {
-        old->refcount--;
+        if (FlowFieldManager *manager = flowfields())
+            manager->release(old);
         ffcore::cleanup_flow_if_unused(old);
     }
 
     a.flow = ff;
 
     if (ff)
-        ff->refcount++; // incrément nouveau FF
+    {
+        if (FlowFieldManager *manager = flowfields())
+            manager->retain(ff);
+    }
 
     a.active = (ff != nullptr);
     a.was_in_t2 = false;
@@ -2637,7 +2648,9 @@ void SteeringSystem::update_all(double delta)
         Vec2 goal_pos = ff->goal_center_world();
         Vec2 to_goal = goal_pos - (a.position + offset);
         double dist_to_target = safe_len(to_goal);
-        double target_radius = ff->get_ff_target_radius();
+        double target_radius = 0.0;
+        if (FlowFieldManager *manager = flowfields())
+            target_radius = manager->target_radius(ff);
         if (target_radius > 0.0 && !a.never_rest)
         {
             int group_size = 0;

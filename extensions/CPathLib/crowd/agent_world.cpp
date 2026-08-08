@@ -60,6 +60,11 @@ namespace ffcore
         return handles;
     }
 
+    std::uint32_t AgentWorld::generation_at(std::uint32_t index) const
+    {
+        return index < slots.size() ? slots[index].generation : 0;
+    }
+
     std::size_t AgentWorld::size() const
     {
         return static_cast<std::size_t>(std::count_if(

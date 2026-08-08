@@ -24,7 +24,17 @@ in pass 8.
 - Pass 2 complete: CPathLib owns instance configuration, generational flow/profile/agent/cohort
   handles, simultaneous flow records, asynchronous flow status, and cohort-to-flow assignment.
   Existing single-flow adapter calls are backed by the same stores.
-- Passes 3-8 remain required; the temporary legacy extension is still active.
+- Pass 3 complete: CPathLib owns numbered navigation/physics blocker channels, directional
+  traversal channels, per-request masks, flow diagnostics, static bottleneck results, explicit and
+  seeded gardens, multi-cell portals, typed enter/exit routes, and generational area/portal
+  lifetime. Garden and area names are aliases over one store. Legacy-only flow IDs, reference
+  counts, target radii, and formation metadata no longer live in the generic flow model.
+- Pass 4 complete: CPathLib owns explicit flow/path/manual/directional motion sources, per-agent
+  motion limits and pause state, terrain-speed channel edits, generational static obstacles with
+  avoidance/depenetration, generational sparse directional-motion fields, filtered spatial queries,
+  navigation-cell queries, and neutral diagnostics. Deterministic fixtures cover flow, manual,
+  path arrival, physical walls, separation, pause, terrain speed, obstacles, and directional motion.
+- Passes 5-8 remain required; the temporary legacy extension is still active.
 
 ## Source-file disposition
 

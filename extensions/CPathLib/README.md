@@ -8,12 +8,17 @@ Features include:
 - weighted eight-direction A* with corner-cut prevention;
 - synchronous and asynchronous shared flow fields;
 - generational flow handles for multiple simultaneous destinations;
+- independent blocker channels with per-request 64-bit masks;
+- independent directional-traversal channels;
 - wall clearance and static bottleneck analysis;
 - optional explicit or seeded navigation areas with directional portals;
 - typed routes across world, portal, and local-area segments;
 - capacity, priority, timeout, direction, and fairness controls for bottlenecks;
 - optional crowd agents, reusable profiles, cohorts, per-agent flows, separation, terrain speed,
   impulses, control suppression, and external velocities;
+- generational static circular obstacles with avoidance and hard depenetration;
+- per-agent sparse directional-motion fields with exact and radius-fallback sampling;
+- filtered circle and navigation-cell agent queries plus neutral per-agent diagnostics;
 - arbitrary rectangular grids, cell sizes, cell origins, and world origins.
 
 ## Ownership and dependencies
@@ -70,6 +75,15 @@ handle remains valid until `release_flow()` and rejects stale generations after 
 `get_flow_status()` returns pending, ready, unreachable, stale, or cancelled; grid/configuration
 changes mark every existing flow stale. Sample a ready flow with `sample_flow()`.
 
+Dynamic topology is uploaded through numbered blocker channels. Each blocker channel declares
+whether it affects navigation, physics, or both. Pass a 64-bit channel mask to
+`find_path_cells_with_options()`, `create_flow_to_cell_with_options()`, or
+`request_flow_handle_to_cell_with_options()` to select the channels for that request. Directional
+traversal rules are uploaded independently and selected by channel ID. Editing either kind of
+channel invalidates existing flows so stale results cannot silently survive a topology change.
+Use `get_flow_diagnostics()` and `get_flow_bottlenecks()` for data-only inspection; presentation
+and debug drawing remain the consumer's responsibility.
+
 Crowd profiles and cohorts are also instance-owned generational handles. Create a profile with
 `create_profile()`, spawn agents through `add_agent_with_profile()`, and group them using
 `create_cohort()` plus `assign_agent_to_cohort()`. Install a navigation flow once with
@@ -77,10 +91,20 @@ Crowd profiles and cohorts are also instance-owned generational handles. Create 
 members with `assign_cohort_flow()`. Profiles are copied into agents only on creation or an
 explicit `set_agent_profile()` call, so editing a profile has no hidden effect on active agents.
 
-Areas and bottlenecks are optional. Create areas with `create_area()` or the seeded-area API, add
-directional portals with `create_portal()`, and request typed enter/exit routes. A crowd can consume
-the current compatibility flow through `use_navigation_flow()` or use flow handles, per-agent
-paths, and manual directions. The compatibility calls use the same stores and algorithms.
+Crowd environment data is instance-owned as well. Terrain speed channels support individual,
+batched, replacement, and clear operations. Static obstacles use generational handles and may be
+moved or resized. Directional-motion fields also use generational handles and are assigned directly
+to agents; they are distinct from navigation directional-traversal channels. The former supplies a
+velocity target during motion, while the latter constrains which grid edges a path or flow may use.
+Use `query_agents_in_circle()`, `get_agents_in_navigation_cell()`, and
+`get_agent_diagnostics()` for neutral, data-only inspection.
+
+Gardens are the friendly Godot API name for optional navigation areas. Create one explicitly with
+`create_garden()` or flood-fill it from a seed with `create_garden_from_seed()`, add directional
+multi-cell portals with `create_garden_portal()`, and request typed enter/exit routes. The neutral
+`create_area()` names remain aliases over the same store, not a duplicate implementation. A crowd
+can consume the current default flow through `use_navigation_flow()` or use flow handles,
+per-agent paths, and manual directions.
 
 ## Verification and demo
 
