@@ -69,6 +69,33 @@ namespace
         require(path.size() == 1 && path[0] == Vec2i(-2, 4),
                 "identical open endpoints should return one cell");
     }
+
+    void test_weighted_and_bounded_queries()
+    {
+        ffcore::AStarSolver solver;
+        solver.set_walkable_cells(rectangle(3, 2));
+        solver.set_traversal_costs({{1, 0}}, {20.0});
+        const ffcore::AStarPathResult weighted = solver.find_path_detailed({0, 0}, {2, 0});
+        require(weighted.status == ffcore::AStarPathStatus::Found,
+                "weighted path query should succeed");
+        require(weighted.cells.size() >= 3 && weighted.cells[1] != Vec2i(1, 0),
+                "weighted path should avoid an expensive cell");
+        require(weighted.total_cost < 20.0,
+                "weighted result should expose the selected route cost");
+
+        ffcore::AStarQueryOptions cardinal_only;
+        cardinal_only.allow_diagonals = false;
+        const ffcore::AStarPathResult cardinal = solver.find_path_detailed(
+            {0, 0}, {2, 1}, cardinal_only);
+        require(cardinal.status == ffcore::AStarPathStatus::Found && cardinal.cells.size() >= 4,
+                "cardinal-only option should disable diagonal steps");
+
+        ffcore::AStarQueryOptions bounded;
+        bounded.maximum_expansions = 1;
+        require(solver.find_path_detailed({0, 0}, {2, 1}, bounded).status ==
+                    ffcore::AStarPathStatus::LimitReached,
+                "query expansion limit should return an explicit status");
+    }
 }
 
 int main()
@@ -77,6 +104,7 @@ int main()
     test_no_corner_cutting();
     test_blockers_and_replacement();
     test_invalid_and_identical_endpoints();
+    test_weighted_and_bounded_queries();
     std::cout << "AStarSolver tests passed\n";
     return EXIT_SUCCESS;
 }

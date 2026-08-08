@@ -50,6 +50,19 @@ namespace ffcore
         blockers.insert(cells.begin(), cells.end());
     }
 
+    void AStarSolver::set_traversal_costs(
+        const std::vector<Vec2i> &cells,
+        const std::vector<double> &costs)
+    {
+        traversal_costs.clear();
+        const std::size_t count = std::min(cells.size(), costs.size());
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            if (std::isfinite(costs[index]) && costs[index] > 0.0)
+                traversal_costs[cells[index]] = costs[index];
+        }
+    }
+
     bool AStarSolver::is_open(const Vec2i &cell) const
     {
         return walkable.count(cell) != 0 && blockers.count(cell) == 0;
@@ -57,11 +70,24 @@ namespace ffcore
 
     std::vector<Vec2i> AStarSolver::find_path(const Vec2i &from_cell, const Vec2i &to_cell) const
     {
+        return find_path_detailed(from_cell, to_cell).cells;
+    }
+
+    AStarPathResult AStarSolver::find_path_detailed(
+        const Vec2i &from_cell,
+        const Vec2i &to_cell,
+        const AStarQueryOptions &options) const
+    {
+        AStarPathResult result;
         if (!is_open(from_cell) || !is_open(to_cell))
-            return {};
+            return result;
 
         if (from_cell == to_cell)
-            return {from_cell};
+        {
+            result.status = AStarPathStatus::Found;
+            result.cells = {from_cell};
+            return result;
+        }
 
         const Vec2i directions[8] = {
             {1, 0}, {-1, 0}, {0, 1}, {0, -1},
@@ -71,13 +97,25 @@ namespace ffcore
         std::unordered_map<Vec2i, double, AStarCellHash> g_score;
         std::unordered_map<Vec2i, Vec2i, AStarCellHash> came_from;
 
+        double minimum_multiplier = 1.0;
+        for (const auto &entry : traversal_costs)
+            minimum_multiplier = std::min(minimum_multiplier, entry.second);
+
         g_score[from_cell] = 0.0;
-        open.push({octile_heuristic(from_cell, to_cell), from_cell});
+        open.push({octile_heuristic(from_cell, to_cell) * minimum_multiplier, from_cell});
 
         while (!open.empty())
         {
             const AStarNode current = open.top();
             open.pop();
+
+            ++result.expanded_nodes;
+            if (options.maximum_expansions != 0 &&
+                result.expanded_nodes > options.maximum_expansions)
+            {
+                result.status = AStarPathStatus::LimitReached;
+                return result;
+            }
 
             if (current.cell == to_cell)
                 break;
@@ -89,6 +127,11 @@ namespace ffcore
             for (int direction_index = 0; direction_index < 8; ++direction_index)
             {
                 const Vec2i direction = directions[direction_index];
+                if (!options.allow_diagonals && direction_index >= 4)
+                    continue;
+                const auto edge = options.directional_edges.find(current.cell);
+                if (edge != options.directional_edges.end() && edge->second != direction)
+                    continue;
                 const Vec2i neighbor = {
                     current.cell.x + direction.x,
                     current.cell.y + direction.y};
@@ -96,7 +139,7 @@ namespace ffcore
                     continue;
 
                 const bool is_diagonal = std::abs(direction.x) + std::abs(direction.y) == 2;
-                if (is_diagonal)
+                if (is_diagonal && !options.allow_corner_cutting)
                 {
                     const Vec2i horizontal = {current.cell.x + direction.x, current.cell.y};
                     const Vec2i vertical = {current.cell.x, current.cell.y + direction.y};
@@ -104,20 +147,25 @@ namespace ffcore
                         continue;
                 }
 
-                const double step_cost = direction_index < 4 ? 1.0 : SQRT2;
+                const auto multiplier = traversal_costs.find(neighbor);
+                const double cell_multiplier = multiplier == traversal_costs.end() ? 1.0 : multiplier->second;
+                const double step_cost = (direction_index < 4 ? 1.0 : SQRT2) * cell_multiplier;
                 const double tentative_score = current_score->second + step_cost;
                 const auto neighbor_score = g_score.find(neighbor);
                 if (neighbor_score == g_score.end() || tentative_score < neighbor_score->second)
                 {
                     g_score[neighbor] = tentative_score;
                     came_from[neighbor] = current.cell;
-                    open.push({tentative_score + octile_heuristic(neighbor, to_cell), neighbor});
+                    open.push({tentative_score + octile_heuristic(neighbor, to_cell) * minimum_multiplier, neighbor});
                 }
             }
         }
 
         if (came_from.count(to_cell) == 0)
-            return {};
+        {
+            result.status = AStarPathStatus::Unreachable;
+            return result;
+        }
 
         std::vector<Vec2i> reversed_path;
         Vec2i cell = to_cell;
@@ -126,11 +174,17 @@ namespace ffcore
         {
             const auto previous = came_from.find(cell);
             if (previous == came_from.end())
-                return {};
+            {
+                result.status = AStarPathStatus::Unreachable;
+                return result;
+            }
             cell = previous->second;
             reversed_path.push_back(cell);
         }
 
-        return std::vector<Vec2i>(reversed_path.rbegin(), reversed_path.rend());
+        result.cells = std::vector<Vec2i>(reversed_path.rbegin(), reversed_path.rend());
+        result.total_cost = g_score.at(to_cell);
+        result.status = AStarPathStatus::Found;
+        return result;
     }
 } // namespace ffcore

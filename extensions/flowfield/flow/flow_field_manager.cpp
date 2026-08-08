@@ -1,7 +1,6 @@
 #include "flow_field_manager.h"
 #include "../core/nav_services.h"
 #include "../agent_manager/agent_manager.h"
-#include <godot_cpp/variant/utility_functions.hpp>
 #include <algorithm>
 
 namespace ffcore

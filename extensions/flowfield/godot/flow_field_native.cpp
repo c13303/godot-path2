@@ -2,6 +2,8 @@
 #include "../core/nav_config.h"
 #include "flow_field_native.h"
 #include "../flow/flow_field_algorithms.h"
+#include "../flow/flow_field_builder.h"
+#include "../bottleneck/bottleneck_analyzer.h"
 #include "../steering/steering_system.h"
 #include "../agent_manager/agent_manager.h"
 #include <godot_cpp/classes/node.hpp>
@@ -31,31 +33,6 @@ static inline double clamp01(double v)
 }
 
 using DirectionalTraversalConstraints = std::unordered_map<Vector2i, Vector2i, godot::Vector2iHash>;
-
-static bool can_traverse(const Vector2i &from_cell,
-                         const Vector2i &to_cell,
-                         const std::unordered_set<Vector2i, godot::Vector2iHash> &walkable_set,
-                         const DirectionalTraversalConstraints *traversal_constraints)
-{
-    if (!walkable_set.count(from_cell) || !walkable_set.count(to_cell))
-        return false;
-    const Vector2i delta = to_cell - from_cell;
-    if (std::abs(delta.x) > 1 || std::abs(delta.y) > 1 || (delta.x == 0 && delta.y == 0))
-        return false;
-    if (traversal_constraints)
-    {
-        const auto constraint = traversal_constraints->find(from_cell);
-        if (constraint != traversal_constraints->end() && constraint->second != delta)
-            return false;
-    }
-    if (std::abs(delta.x) + std::abs(delta.y) == 2)
-    {
-        if (!walkable_set.count(from_cell + Vector2i(delta.x, 0)) ||
-            !walkable_set.count(from_cell + Vector2i(0, delta.y)))
-            return false;
-    }
-    return true;
-}
 
 static double tile_size_from_layer(TileMapLayer *layer)
 {
@@ -459,36 +436,6 @@ void FlowFieldNative::apply_physics_passability(ffcore::FlowField &target_field,
     }
 }
 
-void FlowFieldNative::compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                                    const Vector2i &goal_cell,
-                                    std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                    const DirectionalTraversalConstraints *traversal_constraints)
-{
-    ffcore::CellSet core_walkable;
-    core_walkable.reserve(walkable_set.size());
-    for (const Vector2i &cell : walkable_set)
-        core_walkable.insert({cell.x, cell.y});
-
-    ffcore::DirectionalTraversalConstraints core_constraints;
-    const ffcore::DirectionalTraversalConstraints *core_constraints_ptr = nullptr;
-    if (traversal_constraints != nullptr)
-    {
-        core_constraints.reserve(traversal_constraints->size());
-        for (const auto &entry : *traversal_constraints)
-            core_constraints[{entry.first.x, entry.first.y}] = {entry.second.x, entry.second.y};
-        core_constraints_ptr = &core_constraints;
-    }
-
-    const ffcore::IntegrationCosts core_costs = ffcore::FlowFieldAlgorithms::compute_integration_costs(
-        core_walkable,
-        {goal_cell.x, goal_cell.y},
-        core_constraints_ptr);
-    costs.clear();
-    costs.reserve(core_costs.size());
-    for (const auto &entry : core_costs)
-        costs[Vector2i(entry.first.x, entry.first.y)] = entry.second;
-}
-
 /// DISTANCE FIELD = la distance de chaque case de chaque mur. On trouve avec ça la case la plus "centrale" d'un couloir pour trouver son centre. = Très utile pour une foule.
 void FlowFieldNative::compute_distance_field_global()
 {
@@ -549,95 +496,30 @@ void FlowFieldNative::compute_bottlenecks(const Rect2i &used,
     field.clear_bottlenecks();
     if (ffcore::globalconfig().effective_debug_disable_bottlenecks())
         return;
-    if (costs.empty())
-        return;
-
-    const int zone_radius = std::clamp(ffcore::globalconfig().bottleneck_zone_radius_tiles, 0, 2);
-    const Vector2i east(1, 0);
-    const Vector2i west(-1, 0);
-    const Vector2i south(0, 1);
-    const Vector2i north(0, -1);
-
-    auto is_walkable = [&](const Vector2i &cell) -> bool
-    {
-        return walkable_set.count(cell) > 0;
-    };
-
-    auto cost_at = [&](const Vector2i &cell) -> double
-    {
-        auto it = costs.find(cell);
-        return it == costs.end() ? std::numeric_limits<double>::infinity() : it->second;
-    };
-
-    auto is_narrow = [&](const Vector2i &cell, int *out_axis = nullptr) -> bool
-    {
-        const bool e = is_walkable(cell + east);
-        const bool w = is_walkable(cell + west);
-        const bool s = is_walkable(cell + south);
-        const bool n = is_walkable(cell + north);
-        const int neighbor_count = int(e) + int(w) + int(s) + int(n);
-        int axis = 0;
-        if (neighbor_count == 2 && e && w)
-            axis = 1;
-        else if (neighbor_count == 2 && n && s)
-            axis = 2;
-
-        if (out_axis)
-            *out_axis = axis;
-        return axis != 0;
-    };
-
-    std::unordered_set<Vector2i, Vector2iHash> added_doors;
-    const Vector2i cardinal_dirs[4] = {east, west, south, north};
-
+    ffcore::CellSet core_walkable;
+    core_walkable.reserve(walkable_set.size());
     for (const Vector2i &cell : walkable_set)
+        core_walkable.insert({cell.x, cell.y});
+    ffcore::IntegrationCosts core_costs;
+    core_costs.reserve(costs.size());
+    for (const auto &entry : costs)
+        core_costs[{entry.first.x, entry.first.y}] = entry.second;
+
+    const std::vector<ffcore::DetectedBottleneck> bottlenecks = ffcore::BottleneckAnalyzer::analyze(
+        core_walkable,
+        core_costs,
+        ffcore::globalconfig().bottleneck_zone_radius_tiles);
+    for (const ffcore::DetectedBottleneck &bottleneck : bottlenecks)
     {
-        int axis = 0;
-        if (!is_narrow(cell, &axis))
-            continue;
-
-        const double cell_cost = cost_at(cell);
-        if (!std::isfinite(cell_cost))
-            continue;
-
-        bool is_route_entry = false;
-        for (const Vector2i &d : cardinal_dirs)
+        const ffcore::Vec2i relative(
+            bottleneck.cell.x - used.position.x,
+            bottleneck.cell.y - used.position.y);
+        const int index = field.add_bottleneck(relative, bottleneck.axis, bottleneck.route_cost);
+        for (const ffcore::Vec2i &zone_cell : bottleneck.zone_cells)
         {
-            Vector2i neighbor = cell + d;
-            if (!is_walkable(neighbor) || is_narrow(neighbor))
-                continue;
-
-            double neighbor_cost = cost_at(neighbor);
-            if (std::isfinite(neighbor_cost) && neighbor_cost > cell_cost)
-            {
-                is_route_entry = true;
-                break;
-            }
-        }
-
-        if (!is_route_entry || added_doors.count(cell) != 0)
-            continue;
-        added_doors.insert(cell);
-
-        Vector2i rel(cell.x - used.position.x, cell.y - used.position.y);
-        int bottleneck_index = field.add_bottleneck(ffcore::Vec2i(rel.x, rel.y), axis, cell_cost);
-        if (bottleneck_index < 0)
-            continue;
-
-        for (int dy = -zone_radius; dy <= zone_radius; ++dy)
-        {
-            for (int dx = -zone_radius; dx <= zone_radius; ++dx)
-            {
-                if (std::abs(dx) + std::abs(dy) > zone_radius)
-                    continue;
-
-                Vector2i zone_cell = cell + Vector2i(dx, dy);
-                if (!is_walkable(zone_cell))
-                    continue;
-
-                Vector2i zone_rel(zone_cell.x - used.position.x, zone_cell.y - used.position.y);
-                field.add_bottleneck_zone_cell(bottleneck_index, ffcore::Vec2i(zone_rel.x, zone_rel.y));
-            }
+            field.add_bottleneck_zone_cell(index, {
+                zone_cell.x - used.position.x,
+                zone_cell.y - used.position.y});
         }
     }
 }
@@ -683,148 +565,10 @@ int FlowFieldNative::group_size_for_draw() const
     return std::max(1, count);
 }
 
-void FlowFieldNative::compute_directions(const Rect2i &used,
-                                         const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                                         const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                         const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
-                                         const DirectionalTraversalConstraints *traversal_constraints)
-{
-    auto cost_at = [&](const Vector2i &p) -> double
-    {
-        auto it = costs.find(p);
-        return (it == costs.end()) ? std::numeric_limits<double>::infinity() : it->second;
-    };
-
-    auto is_walkable = [&](const Vector2i &p) -> bool
-    { return walkable_set.count(p) != 0; };
-
-    auto diagonal_ok = [&](const Vector2i &c, const Vector2i &d) -> bool
-    {
-        if ((std::abs(d.x) + std::abs(d.y)) != 2)
-            return true;
-        // Disallow diagonals that would "cut" between two blocked cells.
-        return is_walkable(c + Vector2i(d.x, 0)) && is_walkable(c + Vector2i(0, d.y));
-    };
-
-    const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    for (int y = 0; y < field.height(); ++y)
-    {
-        for (int x = 0; x < field.width(); ++x)
-        {
-            Vector2i c = used.position + Vector2i(x, y);
-            double cc = cost_at(c);
-            if (!is_walkable(c) || !std::isfinite(cc))
-            {
-                field.set_dir(x, y, {0.0, 0.0});
-                continue;
-            }
-
-            // Base direction: steepest-descent to the best neighboring cell.
-            Vector2i best_step(0, 0);
-            double best_cost = cc;
-            for (const Vector2i &d : dirs8)
-            {
-                Vector2i n = c + d;
-                if (!can_traverse(c, n, walkable_set, traversal_constraints))
-                    continue;
-                double nc = cost_at(n);
-                if (!std::isfinite(nc))
-                    continue;
-
-                if (nc < best_cost)
-                {
-                    best_cost = nc;
-                    best_step = d;
-                }
-            }
-
-            if (best_step == Vector2i(0, 0))
-            {
-                field.set_dir(x, y, {0.0, 0.0});
-                continue;
-            }
-
-            //// COMPUTING DU MEILLEUR PASSAGE GOULOT COULOIR GRACE A DISTANCE_FIELD
-            ffcore::Vec2 dir((double)best_step.x, (double)best_step.y);
-            dir = dir.normalized();
-
-            float dfc = distance_field[y * field.width() + x];
-
-            auto df_at = [&](int px, int py)
-            {
-                if (px < 0 || py < 0 || px >= field.width() || py >= field.height())
-                    return dfc;
-                return distance_field[py * field.width() + px];
-            };
-
-            float gx_df = df_at(x + 1, y) - df_at(x - 1, y);
-            float gy_df = df_at(x, y + 1) - df_at(x, y - 1);
-
-            ffcore::Vec2 grad_df(gx_df, gy_df);
-            if (grad_df.length() > 1e-6)
-                grad_df = grad_df.normalized();
-
-            const double k = ffcore::globalconfig().flow_field_wall_clearance;
-
-            dir = (dir + grad_df * k).normalized();
-            //// END OF PASSAGE GOULOT
-
-            // QUANTIFICATION : divider (8 = 45°, 16 = 22.5°)
-            const double q = 16.0;
-            double angle = std::atan2(dir.y, dir.x);
-            double step = 2.0 * 3.141592653589793 / q;
-            angle = std::round(angle / step) * step;
-            dir.x = std::cos(angle);
-            dir.y = std::sin(angle);
-
-            // Ensure the final direction still picks the best downhill neighbor.
-            // Clearance smoothing can only break cost ties, not override path cost.
-            Vector2i final_step(0, 0);
-            double final_cost = std::numeric_limits<double>::infinity();
-            double best_score = -1.0;
-            const double cost_eps = 1e-9;
-            for (const Vector2i &d : dirs8)
-            {
-                Vector2i n = c + d;
-                if (!can_traverse(c, n, walkable_set, traversal_constraints))
-                    continue;
-                double nc = cost_at(n);
-                if (!std::isfinite(nc) || nc > cc)
-                    continue;
-
-                const double inv_len = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.70710678118 : 1.0;
-                const double score = (dir.x * (double)d.x + dir.y * (double)d.y) * inv_len;
-                if (nc + cost_eps < final_cost)
-                {
-                    final_cost = nc;
-                    best_score = score;
-                    final_step = d;
-                }
-                else if (std::abs(nc - final_cost) <= cost_eps && score > best_score)
-                {
-                    best_score = score;
-                    final_step = d;
-                }
-            }
-
-            if (final_step == Vector2i(0, 0))
-                final_step = best_step;
-
-            ffcore::Vec2 final_dir((double)final_step.x, (double)final_step.y);
-            field.set_dir(x, y, final_dir.normalized());
-        }
-    }
-}
-
 void FlowFieldNative::adjust_wall_tangents(const Rect2i &used,
                                            const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
                                            int radius)
 {
-    const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
     for (int y = 0; y < field.height(); ++y)
     {
         for (int x = 0; x < field.width(); ++x)
@@ -874,17 +618,6 @@ void FlowFieldNative::adjust_wall_tangents(const Rect2i &used,
     }
 }
 
-void FlowFieldNative::finalize_field(const Rect2i &used, const Vector2i &goal_cell)
-{
-    ffcore::Vec2i rel_goal(goal_cell.x - used.position.x, goal_cell.y - used.position.y);
-    if (rel_goal.x >= 0 && rel_goal.y >= 0 &&
-        rel_goal.x < field.width() && rel_goal.y < field.height())
-        field.set_dir(rel_goal.x, rel_goal.y, ffcore::Vec2(0.0, 0.0));
-
-    field.set_goal_cell(rel_goal);
-    queue_redraw();
-}
-
 bool FlowFieldNative::rebuild_async(Vector2 goal)
 {
     Rect2i used;
@@ -903,43 +636,36 @@ bool FlowFieldNative::rebuild_async(Vector2 goal)
     std::unordered_set<Vector2i, Vector2iHash> walkable_set;
     build_sets(wall_set, walkable_set);
 
-    if (!walkable_set.count(goal_cell))
+    ffcore::FlowFieldBuildRequest request;
+    request.width = used.size.x;
+    request.height = used.size.y;
+    request.tile_size = field.tile_size();
+    request.cell_origin = {used.position.x, used.position.y};
+    request.goal_cell = {goal_cell.x, goal_cell.y};
+    request.wall_clearance_weight = ffcore::globalconfig().flow_field_wall_clearance;
+    request.detect_bottlenecks = !ffcore::globalconfig().effective_debug_disable_bottlenecks();
+    request.bottleneck_zone_radius = ffcore::globalconfig().bottleneck_zone_radius_tiles;
+    request.derive_navigability_from_directions = true;
+    for (const Vector2i &cell : walkable_set)
+        request.walkable_cells.insert({cell.x, cell.y});
+    for (const Vector2i &cell : wall_set)
+        request.physical_wall_cells.insert({cell.x, cell.y});
+
+    ffcore::FlowFieldBuildResult build_result = ffcore::FlowFieldBuilder::build(request);
+    if (!build_result.ok)
     {
         field.resize(0, 0);
         return false;
     }
-
-    // Precompute physical-wall clearance so flow directions can blend in distance gradients.
-    // Navigation-only blockers are omitted here: they affect routes, not collision/bounce.
-    apply_physics_passability(field, used, wall_set);
-    compute_distance_field(used, wall_set);
-
-    std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    compute_costs(walkable_set, goal_cell, costs);
-    std::vector<double> route_costs(field.width() * field.height(), std::numeric_limits<double>::infinity());
+    field.copy_from(build_result.field);
+    distance_field.clear();
+    distance_field.reserve(static_cast<std::size_t>(field.width() * field.height()));
     for (int y = 0; y < field.height(); ++y)
     {
         for (int x = 0; x < field.width(); ++x)
-        {
-            Vector2i cell = used.position + Vector2i(x, y);
-            auto it = costs.find(cell);
-            if (it != costs.end())
-                route_costs[y * field.width() + x] = it->second;
-        }
+            distance_field.push_back(field.distance_at_cell({x, y}));
     }
-    field.set_route_cost_field(route_costs);
-
-    if (!ffcore::globalconfig().effective_debug_disable_bottlenecks())
-        compute_bottlenecks(used, walkable_set, costs);
-    else
-        field.clear_bottlenecks();
-    compute_directions(used, walkable_set, costs, wall_set);
-    finalize_field(used, goal_cell);
-    ffcore::FormationFootprint fp;
-    if (auto *mgr = ffcore::get_global_agent_manager())
-        fp = mgr->compute_group_footprint(current_group_id);
-
-    /* retrait de flow_id : plus d'enregistrement dans FlowFieldManager */
+    queue_redraw();
     return true;
 }
 
@@ -1120,19 +846,10 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
     if (width <= 0 || height <= 0)
         return result;
 
-    ffcore::FlowField computed;
-    computed.resize(width, height);
-    computed.set_tile_size(snapshot.tile_size);
-    computed.set_cell_origin(ffcore::Vec2i(used.position.x, used.position.y));
-    computed.first_is_arrived = false;
-    computed.arrived_count = 0;
-
     std::unordered_set<Vector2i, Vector2iHash> wall_set;
     wall_set.reserve(snapshot.walls.size());
     for (const Vector2i &cell : snapshot.walls)
         wall_set.insert(cell);
-
-    apply_physics_passability(computed, used, wall_set);
 
     // snapshot.walkables are pre-coverage candidates; the navigation-coverage filter
     // runs here on the worker thread (see build_async_snapshot for why).
@@ -1156,262 +873,30 @@ FlowFieldNative::AsyncFlowResult FlowFieldNative::compute_async_request(const As
             walkable_set.insert(cell);
     }
 
-    if (!walkable_set.count(snapshot.goal_cell))
-        return result;
-
-    ffcore::CellSet core_walls;
-    core_walls.reserve(wall_set.size());
-    for (const Vector2i &cell : wall_set)
-        core_walls.insert({cell.x, cell.y});
-    const std::vector<float> local_distance_field = ffcore::FlowFieldAlgorithms::compute_wall_distance_field(
-        width,
-        height,
-        {used.position.x, used.position.y},
-        core_walls);
-    computed.set_distance_field(local_distance_field);
-
-    ffcore::CellSet core_walkable;
-    core_walkable.reserve(walkable_set.size());
+    ffcore::FlowFieldBuildRequest build_request;
+    build_request.width = width;
+    build_request.height = height;
+    build_request.tile_size = snapshot.tile_size;
+    build_request.cell_origin = {used.position.x, used.position.y};
+    build_request.goal_cell = {snapshot.goal_cell.x, snapshot.goal_cell.y};
+    build_request.wall_clearance_weight = snapshot.flow_field_wall_clearance;
+    build_request.detect_bottlenecks = !snapshot.debug_disable_bottlenecks;
+    build_request.bottleneck_zone_radius = snapshot.bottleneck_zone_radius_tiles;
+    build_request.derive_navigability_from_directions = true;
     for (const Vector2i &cell : walkable_set)
-        core_walkable.insert({cell.x, cell.y});
-    ffcore::DirectionalTraversalConstraints core_constraints;
-    core_constraints.reserve(snapshot.traversal_constraints.size());
+        build_request.walkable_cells.insert({cell.x, cell.y});
+    for (const Vector2i &cell : wall_set)
+        build_request.physical_wall_cells.insert({cell.x, cell.y});
     for (const auto &entry : snapshot.traversal_constraints)
-        core_constraints[{entry.first.x, entry.first.y}] = {entry.second.x, entry.second.y};
-    const ffcore::IntegrationCosts core_costs = ffcore::FlowFieldAlgorithms::compute_integration_costs(
-        core_walkable,
-        {snapshot.goal_cell.x, snapshot.goal_cell.y},
-        &core_constraints);
-    std::unordered_map<Vector2i, double, Vector2iHash> costs;
-    costs.reserve(core_costs.size());
-    for (const auto &entry : core_costs)
-        costs[Vector2i(entry.first.x, entry.first.y)] = entry.second;
-
-    const Vector2i dirs8[8] = {
-        {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
-
-    std::vector<double> route_costs(width * height, std::numeric_limits<double>::infinity());
-    for (int y = 0; y < height; ++y)
     {
-        for (int x = 0; x < width; ++x)
-        {
-            Vector2i cell = used.position + Vector2i(x, y);
-            auto it = costs.find(cell);
-            if (it != costs.end())
-                route_costs[y * width + x] = it->second;
-        }
-    }
-    computed.set_route_cost_field(route_costs);
-
-    if (!snapshot.debug_disable_bottlenecks && !costs.empty())
-    {
-        const int zone_radius = std::clamp(snapshot.bottleneck_zone_radius_tiles, 0, 2);
-        const Vector2i east(1, 0);
-        const Vector2i west(-1, 0);
-        const Vector2i south(0, 1);
-        const Vector2i north(0, -1);
-        const Vector2i cardinal_dirs[4] = {east, west, south, north};
-        std::unordered_set<Vector2i, Vector2iHash> added_doors;
-
-        auto is_walkable = [&](const Vector2i &cell) -> bool
-        { return walkable_set.count(cell) > 0; };
-
-        auto cost_at = [&](const Vector2i &cell) -> double
-        {
-            auto it = costs.find(cell);
-            return it == costs.end() ? std::numeric_limits<double>::infinity() : it->second;
-        };
-
-        auto is_narrow = [&](const Vector2i &cell, int *out_axis = nullptr) -> bool
-        {
-            const bool e = is_walkable(cell + east);
-            const bool w = is_walkable(cell + west);
-            const bool s = is_walkable(cell + south);
-            const bool n = is_walkable(cell + north);
-            const int neighbor_count = int(e) + int(w) + int(s) + int(n);
-            int axis = 0;
-            if (neighbor_count == 2 && e && w)
-                axis = 1;
-            else if (neighbor_count == 2 && n && s)
-                axis = 2;
-            if (out_axis)
-                *out_axis = axis;
-            return axis != 0;
-        };
-
-        for (const Vector2i &cell : walkable_set)
-        {
-            int axis = 0;
-            if (!is_narrow(cell, &axis))
-                continue;
-
-            const double cell_cost = cost_at(cell);
-            if (!std::isfinite(cell_cost))
-                continue;
-
-            bool is_route_entry = false;
-            for (const Vector2i &d : cardinal_dirs)
-            {
-                Vector2i neighbor = cell + d;
-                if (!is_walkable(neighbor) || is_narrow(neighbor))
-                    continue;
-
-                double neighbor_cost = cost_at(neighbor);
-                if (std::isfinite(neighbor_cost) && neighbor_cost > cell_cost)
-                {
-                    is_route_entry = true;
-                    break;
-                }
-            }
-
-            if (!is_route_entry || added_doors.count(cell) != 0)
-                continue;
-            added_doors.insert(cell);
-
-            Vector2i rel(cell.x - used.position.x, cell.y - used.position.y);
-            int bottleneck_index = computed.add_bottleneck(ffcore::Vec2i(rel.x, rel.y), axis, cell_cost);
-            if (bottleneck_index < 0)
-                continue;
-
-            for (int dy = -zone_radius; dy <= zone_radius; ++dy)
-            {
-                for (int dx = -zone_radius; dx <= zone_radius; ++dx)
-                {
-                    if (std::abs(dx) + std::abs(dy) > zone_radius)
-                        continue;
-
-                    Vector2i zone_cell = cell + Vector2i(dx, dy);
-                    if (!is_walkable(zone_cell))
-                        continue;
-
-                    Vector2i zone_rel(zone_cell.x - used.position.x, zone_cell.y - used.position.y);
-                    computed.add_bottleneck_zone_cell(bottleneck_index, ffcore::Vec2i(zone_rel.x, zone_rel.y));
-                }
-            }
-        }
-    }
-    else
-    {
-        computed.clear_bottlenecks();
+        build_request.traversal_constraints[{entry.first.x, entry.first.y}] = {
+            entry.second.x, entry.second.y};
     }
 
-    auto cost_at = [&](const Vector2i &cell) -> double
-    {
-        auto it = costs.find(cell);
-        return it == costs.end() ? std::numeric_limits<double>::infinity() : it->second;
-    };
-
-    auto is_walkable = [&](const Vector2i &cell) -> bool
-    { return walkable_set.count(cell) != 0; };
-
-    auto diagonal_ok = [&](const Vector2i &cell, const Vector2i &d) -> bool
-    {
-        if ((std::abs(d.x) + std::abs(d.y)) != 2)
-            return true;
-        return is_walkable(cell + Vector2i(d.x, 0)) && is_walkable(cell + Vector2i(0, d.y));
-    };
-
-    for (int y = 0; y < height; ++y)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            Vector2i cell = used.position + Vector2i(x, y);
-            double cc = cost_at(cell);
-            if (!is_walkable(cell) || !std::isfinite(cc))
-            {
-                computed.set_dir(x, y, {0.0, 0.0});
-                continue;
-            }
-
-            Vector2i best_step(0, 0);
-            double best_cost = cc;
-            for (const Vector2i &d : dirs8)
-            {
-                Vector2i n = cell + d;
-                if (!can_traverse(cell, n, walkable_set, &snapshot.traversal_constraints))
-                    continue;
-                double nc = cost_at(n);
-                if (std::isfinite(nc) && nc < best_cost)
-                {
-                    best_cost = nc;
-                    best_step = d;
-                }
-            }
-
-            if (best_step == Vector2i(0, 0))
-            {
-                computed.set_dir(x, y, {0.0, 0.0});
-                continue;
-            }
-
-            ffcore::Vec2 dir((double)best_step.x, (double)best_step.y);
-            dir = dir.normalized();
-
-            float dfc = local_distance_field[y * width + x];
-            auto df_at = [&](int px, int py)
-            {
-                if (px < 0 || py < 0 || px >= width || py >= height)
-                    return dfc;
-                return local_distance_field[py * width + px];
-            };
-
-            float gx_df = df_at(x + 1, y) - df_at(x - 1, y);
-            float gy_df = df_at(x, y + 1) - df_at(x, y - 1);
-            ffcore::Vec2 grad_df(gx_df, gy_df);
-            if (grad_df.length() > 1e-6)
-                grad_df = grad_df.normalized();
-
-            dir = (dir + grad_df * snapshot.flow_field_wall_clearance).normalized();
-
-            const double q = 16.0;
-            double angle = std::atan2(dir.y, dir.x);
-            double step = 2.0 * 3.141592653589793 / q;
-            angle = std::round(angle / step) * step;
-            dir.x = std::cos(angle);
-            dir.y = std::sin(angle);
-
-            Vector2i final_step(0, 0);
-            double final_cost = std::numeric_limits<double>::infinity();
-            double best_score = -1.0;
-            const double cost_eps = 1e-9;
-            for (const Vector2i &d : dirs8)
-            {
-                Vector2i n = cell + d;
-                if (!can_traverse(cell, n, walkable_set, &snapshot.traversal_constraints))
-                    continue;
-                double nc = cost_at(n);
-                if (!std::isfinite(nc) || nc > cc)
-                    continue;
-
-                const double inv_len = ((std::abs(d.x) + std::abs(d.y)) == 2) ? 0.70710678118 : 1.0;
-                const double score = (dir.x * (double)d.x + dir.y * (double)d.y) * inv_len;
-                if (nc + cost_eps < final_cost)
-                {
-                    final_cost = nc;
-                    best_score = score;
-                    final_step = d;
-                }
-                else if (std::abs(nc - final_cost) <= cost_eps && score > best_score)
-                {
-                    best_score = score;
-                    final_step = d;
-                }
-            }
-
-            if (final_step == Vector2i(0, 0))
-                final_step = best_step;
-
-            ffcore::Vec2 final_dir((double)final_step.x, (double)final_step.y);
-            computed.set_dir(x, y, final_dir.normalized());
-        }
-    }
-
-    ffcore::Vec2i rel_goal(snapshot.goal_cell.x - used.position.x, snapshot.goal_cell.y - used.position.y);
-    if (rel_goal.x >= 0 && rel_goal.y >= 0 && rel_goal.x < width && rel_goal.y < height)
-        computed.set_dir(rel_goal.x, rel_goal.y, ffcore::Vec2(0.0, 0.0));
-    computed.set_goal_cell(rel_goal);
-
-    result.field.copy_from(computed);
+    ffcore::FlowFieldBuildResult build_result = ffcore::FlowFieldBuilder::build(build_request);
+    if (!build_result.ok)
+        return result;
+    result.field.copy_from(build_result.field);
     result.ok = true;
     return result;
 }

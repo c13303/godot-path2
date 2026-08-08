@@ -158,4 +158,128 @@ namespace ffcore
         }
         return distances;
     }
+
+    std::vector<Vec2> FlowFieldAlgorithms::generate_directions(
+        int width,
+        int height,
+        const Vec2i &cell_origin,
+        const CellSet &walkable_cells,
+        const IntegrationCosts &integration_costs,
+        const std::vector<float> &wall_distances,
+        double wall_clearance_weight,
+        const DirectionalTraversalConstraints *traversal_constraints)
+    {
+        if (width <= 0 || height <= 0 ||
+            wall_distances.size() != static_cast<std::size_t>(width * height))
+            return {};
+
+        std::vector<Vec2> directions(static_cast<std::size_t>(width * height), Vec2());
+        const Vec2i neighbor_directions[8] = {
+            {1, 0}, {-1, 0}, {0, 1}, {0, -1},
+            {1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
+
+        const auto cost_at = [&](const Vec2i &cell) -> double
+        {
+            const auto cost = integration_costs.find(cell);
+            return cost == integration_costs.end() ? std::numeric_limits<double>::infinity() : cost->second;
+        };
+
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                const Vec2i cell(cell_origin.x + x, cell_origin.y + y);
+                const double cell_cost = cost_at(cell);
+                if (walkable_cells.count(cell) == 0 || !std::isfinite(cell_cost))
+                    continue;
+
+                Vec2i best_step;
+                double best_cost = cell_cost;
+                for (const Vec2i &direction : neighbor_directions)
+                {
+                    const Vec2i neighbor(cell.x + direction.x, cell.y + direction.y);
+                    if (!can_traverse(cell, neighbor, walkable_cells, traversal_constraints))
+                        continue;
+                    const double neighbor_cost = cost_at(neighbor);
+                    if (std::isfinite(neighbor_cost) && neighbor_cost < best_cost)
+                    {
+                        best_cost = neighbor_cost;
+                        best_step = direction;
+                    }
+                }
+
+                if (best_step == Vec2i())
+                    continue;
+
+                Vec2 preferred_direction(
+                    static_cast<double>(best_step.x),
+                    static_cast<double>(best_step.y));
+                preferred_direction = preferred_direction.normalized();
+
+                const float cell_distance = wall_distances[y * width + x];
+                const auto distance_at = [&](int sample_x, int sample_y) -> float
+                {
+                    if (sample_x < 0 || sample_y < 0 || sample_x >= width || sample_y >= height)
+                        return cell_distance;
+                    return wall_distances[sample_y * width + sample_x];
+                };
+
+                Vec2 distance_gradient(
+                    distance_at(x + 1, y) - distance_at(x - 1, y),
+                    distance_at(x, y + 1) - distance_at(x, y - 1));
+                if (distance_gradient.length() > 1e-6)
+                    distance_gradient = distance_gradient.normalized();
+
+                preferred_direction =
+                    (preferred_direction + distance_gradient * wall_clearance_weight).normalized();
+
+                constexpr double QUANTIZATION_DIVISIONS = 16.0;
+                constexpr double PI = 3.141592653589793;
+                const double angle_step = 2.0 * PI / QUANTIZATION_DIVISIONS;
+                double angle = std::atan2(preferred_direction.y, preferred_direction.x);
+                angle = std::round(angle / angle_step) * angle_step;
+                preferred_direction.x = std::cos(angle);
+                preferred_direction.y = std::sin(angle);
+
+                Vec2i final_step;
+                double final_cost = std::numeric_limits<double>::infinity();
+                double best_score = -1.0;
+                constexpr double COST_EPSILON = 1e-9;
+                for (const Vec2i &direction : neighbor_directions)
+                {
+                    const Vec2i neighbor(cell.x + direction.x, cell.y + direction.y);
+                    if (!can_traverse(cell, neighbor, walkable_cells, traversal_constraints))
+                        continue;
+                    const double neighbor_cost = cost_at(neighbor);
+                    if (!std::isfinite(neighbor_cost) || neighbor_cost > cell_cost)
+                        continue;
+
+                    const double inverse_length =
+                        std::abs(direction.x) + std::abs(direction.y) == 2 ? 0.70710678118 : 1.0;
+                    const double score =
+                        (preferred_direction.x * static_cast<double>(direction.x) +
+                         preferred_direction.y * static_cast<double>(direction.y)) *
+                        inverse_length;
+                    if (neighbor_cost + COST_EPSILON < final_cost)
+                    {
+                        final_cost = neighbor_cost;
+                        best_score = score;
+                        final_step = direction;
+                    }
+                    else if (std::abs(neighbor_cost - final_cost) <= COST_EPSILON && score > best_score)
+                    {
+                        best_score = score;
+                        final_step = direction;
+                    }
+                }
+
+                if (final_step == Vec2i())
+                    final_step = best_step;
+                directions[y * width + x] = Vec2(
+                    static_cast<double>(final_step.x),
+                    static_cast<double>(final_step.y)).normalized();
+            }
+        }
+        return directions;
+    }
 } // namespace ffcore

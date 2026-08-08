@@ -9,14 +9,19 @@ been migrated deliberately.
 | Class | Current ownership classification | Migration direction |
 |---|---|---|
 | `PathfinderNative` | compatibility adapter | wrap portable `ffcore::AStarSolver` |
-| `FlowFieldNative` | mixed | generic core plus Rabbit adapter |
-| `SpatialGridNative` | generic adapter | generic spatial index adapter |
-| `SteeringSystemNative` | mixed | generic crowd/motion core plus Rabbit adapter |
-| `AgentManagerNative` | mixed | generic agent storage plus Rabbit orchestration |
+| `NavigationWorld2D` | reusable generic adapter | stable generic navigation boundary |
+| `NavigationRoute2D` | reusable generic result | typed area-route segments |
+| `CrowdWorld2D` | reusable generic adapter | stable generic crowd/motion boundary |
+| `FlowFieldNative` | Rabbit compatibility | keep current TileMap/group/debug behavior |
+| `SpatialGridNative` | Rabbit compatibility | keep existing scene/API wiring |
+| `SteeringSystemNative` | Rabbit compatibility/gameplay | keep current numerical update and gameplay APIs |
+| `AgentManagerNative` | Rabbit compatibility/gameplay | keep current IDs, groups, and orchestration |
 | `GlobalConfigNative` | compatibility adapter | instance-owned generic configuration |
 | `ProjectileSystemNative` | Rabbit-owned gameplay | keep outside reusable navigation API |
 
-The extension entry point remains `flowfield_library_init` during the in-project migration.
+The extension entry point remains `flowfield_library_init`. The default build defines
+`REFINED_NAV_RABBIT_COMPAT` and registers every old class. A reusable-only build omits these seven
+compatibility/gameplay registrations while retaining the three generic classes.
 
 ## A* compatibility contract
 
@@ -97,15 +102,49 @@ Behavior locked by portable regression tests:
 The following behavior intentionally remains in `FlowFieldNative` for later focused extraction:
 
 - TileMap/layer interpretation and coverage sampling;
-- flow-direction selection, clearance blending, and direction quantization;
 - bottleneck detection and zone annotation;
 - async queue ownership, request serials, group generations, and result installation;
 - group pools, debug drawing, and Rabbit Game compatibility methods.
 
-## Remaining inventory
+## Flow-field extraction: slice 2
 
-Before extracting each later subsystem, extend this manifest with its complete bound methods,
-properties, signals, defaults, dynamic calls, lifecycle, threading, update order, and representative
-before/after behavior fixtures. Flow fields and steering are the highest-risk areas because they
-currently combine algorithms, asynchronous state, Godot lifecycle, global configuration, and Rabbit
-Game behavior.
+Portable `FlowFieldAlgorithms` now also owns direction generation for synchronous and asynchronous
+builds. The shared algorithm preserves:
+
+- fixed eight-neighbor enumeration and steepest-downhill base selection;
+- zero directions for blocked, unreachable, and goal cells;
+- wall-distance gradient sampling with the current edge fallback;
+- configurable wall-clearance blending;
+- 16-division angular quantization before neighbor selection;
+- cost-safe final selection, where clearance may break equal-cost ties but cannot select a more
+  expensive route;
+- cardinal/diagonal score normalization and the existing floating-point constants;
+- directional traversal constraints during both base and final selection.
+
+Both synchronous and worker builds now create a portable `FlowFieldBuildRequest` and call the same
+`FlowFieldBuilder`. No public method or lifecycle behavior changed.
+
+## Completed generic boundary
+
+The reusable-only source selection contains no Godot dependency below its adapter and no Rabbit
+gameplay state. It provides instance-owned worlds, immutable async request data, stale-result
+rejection, areas and portals, route plans, static bottleneck analysis, runtime bottleneck traffic,
+generic crowd movement, terrain speeds, impulses, and persistent external velocity.
+
+Rabbit Game continues to use its original nodes in `mainRun.tscn`. Their registered names, NodePaths,
+methods, signals, defaults, group/agent lifecycle, TileMap interpretation, numerical steering order,
+debug queries, projectile behavior, damage events, and gameplay phases were intentionally retained.
+They are compiled only when `rabbit_compat=yes`, which remains the default.
+
+The old singletons and large steering controller are deliberately retained rather than rewritten in
+place: Rabbit Game still calls them extensively, and replacing them with the new generic crowd API
+would be a separate gameplay migration with movement-parity risk. They are not part of the reusable
+build and cannot leak into a different game.
+
+## Deliberately deferred host migration
+
+Moving `mainRun.tscn` and its GDScript callers from the compatibility classes to the generic classes
+is not required for reuse and would risk changing this game's behavior. The compatibility layer can
+be removed class by class only after those callers and their manual gameplay scenarios are migrated.
+The future repository split and dependency pin are also deferred by owner decision; [REUSE.md](REUSE.md)
+documents that mechanical next step.

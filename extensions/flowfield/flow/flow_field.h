@@ -43,8 +43,6 @@ namespace ffcore
         void clear();
         void set_dir(int x, int y, const Vec2 &dir);
 
-        void compute(const Vec2i &goal_cell, const std::vector<Vec2i> &walkables, bool allow_diagonals);
-
         int width() const { return w; }
         int height() const { return h; }
         Vec2 dir(int x, int y) const
@@ -56,6 +54,8 @@ namespace ffcore
 
         void set_cell_origin(const Vec2i &c) { cell_origin = c; }
         const Vec2i &get_cell_origin() const { return cell_origin; }
+        void set_world_origin(const Vec2 &origin) { world_origin = origin; }
+        const Vec2 &get_world_origin() const { return world_origin; }
 
         void set_goal_cell(const Vec2i &c) { goal_cell = c; }
         Vec2i get_goal_cell() const { return goal_cell; }
@@ -100,6 +100,7 @@ namespace ffcore
         bool ready = false;
 
         Vec2i cell_origin = Vec2i(0, 0);
+        Vec2 world_origin;
         std::vector<Vec2> dirs;
         // Distance-only fields have no flow directions, so direction == zero cannot
         // be used to distinguish floors from walls. Goal-based fields keep the

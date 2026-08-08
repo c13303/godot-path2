@@ -36,5 +36,15 @@ namespace ffcore
             int height,
             const Vec2i &cell_origin,
             const CellSet &wall_cells);
+
+        static std::vector<Vec2> generate_directions(
+            int width,
+            int height,
+            const Vec2i &cell_origin,
+            const CellSet &walkable_cells,
+            const IntegrationCosts &integration_costs,
+            const std::vector<float> &wall_distances,
+            double wall_clearance_weight,
+            const DirectionalTraversalConstraints *traversal_constraints = nullptr);
     };
 } // namespace ffcore

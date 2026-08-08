@@ -141,17 +141,6 @@ namespace godot
         void apply_physics_passability(ffcore::FlowField &target_field,
                                        const Rect2i &used,
                                        const std::unordered_set<Vector2i, Vector2iHash> &physical_wall_set) const;
-        void compute_costs(const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                           const Vector2i &goal_cell,
-                           std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                           const DirectionalTraversalConstraints *traversal_constraints = nullptr);
-        void compute_directions(const Rect2i &used,
-                                const std::unordered_set<Vector2i, Vector2iHash> &walkable_set,
-                                const std::unordered_map<Vector2i, double, Vector2iHash> &costs,
-                                const std::unordered_set<Vector2i, Vector2iHash> &wall_set,
-                                const DirectionalTraversalConstraints *traversal_constraints = nullptr);
-
-        void finalize_field(const Rect2i &used, const Vector2i &goal_cell);
         void compute_distance_field(const Rect2i &used,
                                     const std::unordered_set<Vector2i, Vector2iHash> &wall_set);
         void compute_bottlenecks(const Rect2i &used,

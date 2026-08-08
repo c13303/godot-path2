@@ -1,11 +1,6 @@
 #include "flow_field.h"
 #include <algorithm>
 #include <cmath>
-#include <queue>
-#include <unordered_set>
-#include <sstream>
-#include "../core/global_config.h"
-#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace ffcore;
 
@@ -46,52 +41,25 @@ Vec2 FlowField::sample_dir_cell(int x, int y) const
 Vec2 FlowField::compute_flow_dir(const Vec2 &world_pos) const
 {
     if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y))
-    {
-        godot::UtilityFunctions::printerr(
-            "compute_flow_dir: non-finite world_pos (", world_pos.x, ",", world_pos.y, ")");
         return Vec2();
-    }
 
     if (!ready)
-    {
-        godot::UtilityFunctions::print("compute_flow_dir: FlowField NOT READY");
         return Vec2();
-    }
 
     Vec2i cell = world_to_cell(world_pos);
 
-    // ✅ Vérifier que la cellule est valide
     if (cell.x < 0 || cell.x >= w || cell.y < 0 || cell.y >= h)
-    {
-        // size used w/h (the real members); the old log printed width/height — the
-        // accessor METHODS — which always stringify as "true". Print w/h plus the
-        // inputs so we can tell apart a garbage world_pos vs a garbage cell_origin.
-        godot::UtilityFunctions::print(
-            "compute_flow_dir: cell OUT OF BOUNDS rel=(", cell.x, ",", cell.y, ")",
-            " size=(", w, ",", h, ")",
-            " world_pos=(", world_pos.x, ",", world_pos.y, ")",
-            " tile=", tile,
-            " cell_origin=(", cell_origin.x, ",", cell_origin.y, ")",
-            " ready=", ready);
         return Vec2();
-    }
-
-    Vec2 dir = sample_dir_cell(cell.x, cell.y);
-
-    return dir;
+    return sample_dir_cell(cell.x, cell.y);
 }
 
 Vec2i FlowField::world_to_cell(const Vec2 &world_pos) const
 {
     if (!std::isfinite(world_pos.x) || !std::isfinite(world_pos.y) || tile <= 0.0)
-    {
-        godot::UtilityFunctions::printerr(
-            "world_to_cell: invalid input world_pos=(", world_pos.x, ",", world_pos.y, ") tile=", tile);
         return Vec2i(-1, -1);
-    }
 
-    int gx = static_cast<int>(std::floor(world_pos.x / tile));
-    int gy = static_cast<int>(std::floor(world_pos.y / tile));
+    int gx = static_cast<int>(std::floor((world_pos.x - world_origin.x) / tile));
+    int gy = static_cast<int>(std::floor((world_pos.y - world_origin.y) / tile));
     return Vec2i(gx - cell_origin.x, gy - cell_origin.y);
 }
 
@@ -99,7 +67,9 @@ Vec2 FlowField::cell_to_world(const Vec2i &cell) const
 {
     int gx = cell_origin.x + cell.x;
     int gy = cell_origin.y + cell.y;
-    return Vec2((gx + 0.5) * tile, (gy + 0.5) * tile);
+    return Vec2(
+        world_origin.x + (gx + 0.5) * tile,
+        world_origin.y + (gy + 0.5) * tile);
 }
 
 void FlowField::clear()
@@ -123,22 +93,6 @@ void FlowField::set_dir(int x, int y, const Vec2 &dir)
         return;
     dirs[y * w + x] = dir;
     ready = true;
-}
-
-namespace
-{
-    struct FFNode
-    {
-        ffcore::Vec2i c;
-        int32_t d;
-        bool operator<(const FFNode &o) const { return d > o.d; }
-    };
-
-    inline int step_cost(const ffcore::Vec2i &a, const ffcore::Vec2i &b)
-    {
-        bool diag = (a.x != b.x) && (a.y != b.y);
-        return diag ? 141 : 100;
-    }
 }
 
 bool FlowField::is_cell_navigable(const Vec2i &cell) const
@@ -364,6 +318,7 @@ void FlowField::copy_from(const FlowField &src)
     h = src.h;
     tile = src.tile;
     cell_origin = src.cell_origin;
+    world_origin = src.world_origin;
     goal_cell = src.goal_cell;
     ready = src.ready;
     dirs = src.dirs;

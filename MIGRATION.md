@@ -2,10 +2,27 @@
 
 ## Review status and governing constraints
 
-This plan is directionally sound, but the current extension is **not ready to be copied into a
-different game as a supported library**. Useful portable algorithms already exist, while important
-flow-building, lifecycle, configuration, debug, combat, and Rabbit Game behavior are still coupled
-inside one GDExtension binary.
+### In-project refactor outcome
+
+The reusable boundary described by this plan is now implemented inside `extensions/flowfield`.
+`rabbit_compat=no` builds only the portable core and the generic `NavigationWorld2D`,
+`NavigationRoute2D`, and `CrowdWorld2D` adapters. The default `rabbit_compat=yes` build preserves all
+existing Rabbit Game native classes and scene wiring.
+
+Completed reusable modules include A*, one synchronous/asynchronous flow builder, wall clearance,
+static bottleneck detection, bottleneck traffic reservations, explicit and seeded areas, multi-cell
+directional portals, typed enter/exit route segments, instance-owned agents, separation, terrain
+speed, motion integration, impulses, control suppression, and persistent external velocities. The
+portable build has no `godot-cpp`, Rabbit phase, damage, projectile, or global-singleton dependency.
+
+The separate repository, dependency pin, licensing decision, and migration of Rabbit Game callers
+to the generic API remain deliberately outside this refactor, per the owner. Instructions for that
+later mechanical split are checked in at `extensions/flowfield/REUSE.md`.
+
+The original review found that the extension was not ready to be copied into another game because
+portable algorithms and Rabbit gameplay shared one source/build boundary. The implemented
+`rabbit_compat` source selection now resolves that issue without forcing Rabbit Game to migrate its
+existing scene API at the same time.
 
 The migration has two equally important outcomes:
 
@@ -157,9 +174,8 @@ This review found several concrete reasons to perform a staged extraction:
   compiler runtime DLLs;
 - generated object files, binaries, temporary DLLs, and SCons state are present under the source
   tree and must not become source contents of the new repository;
-- the current native code does not yet contain the proposed generic area/portal subsystem. Garden
-  terminology appears in Rabbit-specific agent phases, so Stage 5 is partly new library work rather
-  than a direct extraction.
+- the original native code did not contain a generic area/portal subsystem. The new subsystem was
+  therefore added independently of the garden terminology retained in Rabbit compatibility phases.
 
 These findings do not mean the algorithms are unsuitable. They mean the reusable boundary does not
 yet coincide with the current folder or binary boundary.
@@ -227,7 +243,8 @@ The core should build as a normal static library with CMake so tests can run wit
 
 ## What can be salvaged from the current C++ code
 
-The current extension contains useful pieces, but they are not yet arranged behind a stable library boundary.
+The reusable pieces are now arranged behind the stable source boundary listed in
+`extensions/flowfield/README.md`; the notes below explain the original extraction choices.
 
 Good extraction candidates include:
 
