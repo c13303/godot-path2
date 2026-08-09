@@ -33,8 +33,9 @@ namespace ffcore
         static Vec2 navigation_direction(CrowdAgentState &agent, const FlowField *flow);
         /// Unit-direction push away from crowding neighbours, scaled to exactly
         /// `separation_weight`. The magnitude is deliberately independent of how many
-        /// neighbours are pressing so crowd depth cannot drown out the other steering
-        /// inputs; only the direction reflects the crowd.
+        /// neighbours are pressing so crowd depth cannot overwhelm the other steering
+        /// inputs; only the direction reflects the crowd. Neighbours push from
+        /// `separation_radius` inward, ramping quadratically to full strength.
         static Vec2 separation(
             const CrowdAgentState &agent,
             const AgentWorld &agents,

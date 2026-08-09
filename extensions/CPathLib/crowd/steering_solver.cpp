@@ -47,20 +47,20 @@ namespace ffcore
         const std::unordered_map<int, AgentHandle> &handles_by_index,
         const SeparationSettings &settings)
     {
-        if (agent.profile.separation_radius <= 0.0 || agent.profile.separation_weight <= 0.0)
+        // separation_radius is the distance at which crowding starts to push, and the
+        // push ramps quadratically from zero there to full strength at contact.
+        const double interaction_distance = agent.profile.separation_radius;
+        if (interaction_distance <= 0.0 || agent.profile.separation_weight <= 0.0)
             return {};
-        // separation_radius only decides who is considered. The push itself ramps over
-        // the two radii actually touching, so agent size drives the response.
         const std::vector<int> neighbors = spatial.query_neighbors(
             agent.position,
             agent.profile.radius + std::max(
-                agent.profile.separation_radius, settings.maximum_agent_radius));
+                interaction_distance, settings.maximum_agent_radius));
 
         struct Candidate
         {
             const CrowdAgentState *other;
             double distance;
-            double contact_distance;
         };
         std::vector<Candidate> candidates;
         candidates.reserve(neighbors.size());
@@ -73,12 +73,9 @@ namespace ffcore
             if (other == nullptr)
                 continue;
             const double distance = (agent.position - other->position).length();
-            if (distance > agent.profile.separation_radius)
+            if (distance <= 1e-8 || distance >= interaction_distance)
                 continue;
-            const double contact_distance = agent.profile.radius + other->profile.radius;
-            if (contact_distance <= 0.0 || distance <= 1e-8 || distance >= contact_distance)
-                continue;
-            candidates.push_back({other, distance, contact_distance});
+            candidates.push_back({other, distance});
         }
         if (candidates.empty())
             return {};
@@ -102,7 +99,7 @@ namespace ffcore
         for (const Candidate &candidate : candidates)
         {
             const double overlap = std::max(
-                0.0, 1.0 - candidate.distance / candidate.contact_distance);
+                0.0, 1.0 - candidate.distance / interaction_distance);
             const double falloff = overlap * overlap;
             const double pressure = std::max(
                 0.0, candidate.other->profile.avoidance_push_strength) /

@@ -12,3 +12,6 @@ extensions/rabbit_game_native/bin/
 extensions/**/.sconsign.dblite
 *.TMP
 *~RF*.TMP
+
+# check.sh output
+check.log

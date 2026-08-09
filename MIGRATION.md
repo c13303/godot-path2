@@ -1,93 +1,89 @@
 # CPathLib migration status
 
-Last reviewed: 2026-08-08.
+Last reviewed: 2026-08-09.
 
 ## Goal
 
 One reusable navigation/crowd extension that can be dropped into another Godot project, while this
-game keeps behaving exactly as it does today.
-
-Nothing below changes gameplay. If a step would change behavior, it is out of scope.
+game keeps behaving exactly as it did before the migration.
 
 ## Where it stands
 
-The native conversion is done. CPathLib is generic, self-contained, and fully bound. The remaining
-work is packaging: as of today the extension cannot be copied into another project unmodified,
-because its descriptor hardcodes this project's folder layout.
+The native conversion is structurally done: CPathLib is generic, self-contained and fully bound, no
+portable module includes `godot_cpp`, no gameplay terminology appears anywhere in it, and there is
+one descriptor, one entry point and one build file.
 
-Verified directly against the tree, not just carried over from the pass notes:
+**The parity claim this document used to make was wrong.** An earlier revision asserted that nothing
+in the conversion changed gameplay. Six behavior regressions were later found by reading the
+pre-migration C++ (`56ae851`) against the new code, and several of them sat inside this document's
+own "behavior that must not change" list. All are fixed; they are recorded below because the way
+they were introduced is the main risk in the remaining work.
 
-- no file in the portable modules (`area/ bottleneck/ core/ crowd/ flow/ grid/ jobs/ pathfinding/
-  projectile/ steering/`) includes `godot_cpp`;
-- no gameplay terminology from this project appears anywhere in CPathLib;
-- one descriptor, one entry point, four registered classes;
-- 163 methods bound, covering every public method of the three node classes. The only unbound
-  declarations (`copy_flow`, `copy_latest_flow`, `grid_definition`, `core_world`) are intentional
-  C++-to-C++ accessors;
-- no TODO/FIXME/stub markers;
-- build artifacts gitignored, and the committed DLL matches the current sources;
-- the only remaining legacy native class names are in `.godot/` editor caches and archived notes.
+| Regression | Cause | Fixed in |
+| --- | --- | --- |
+| Sprayed enemy never recovered | `ImpulseSystem` kept only exponential decay — no lifetime, no residual-speed floor, no launch cap — and added impulse velocity on top of navigation instead of sharing one budget with it | `ImpulseResponseConfig`, `blend_impulse_with_navigation` |
+| Sprayed enemy stayed stuck ~8s | `preserve_navigation` was derived from `smash_detach_flow`; it is the successor of the old `smash_preserves_control`, and `detach_flow` was inert before the migration too | `crowd_runtime.gd` weapon paths pass `false` |
+| Agent debug state unusable | Debug visuals were drawn in C++ by the old native nodes; CPathLib's nodes are plain `Node` and every `set_debug_*` wrote into a dictionary nothing read | `AgentDebugLabelController` + real setters |
+| Crowd overrode obstacles and flow | Separation became a raw sum over uncapped neighbours instead of a unit direction scaled to `separation_weight`; the priority yield and 16-neighbour cap were dropped | `SteeringSolver::separation` restored |
+| Agents ejected from chokepoints | The bottleneck forward/lateral clamp on avoidance was not ported, and the navigation weight (authored 5.0) was implicitly 1.0 | `CrowdWorld::steer_direction` |
+| Debug speed multiplier player-only | Agents copy max speed into their profile at registration; nothing re-pushed it | `AgentHandleRegistry.refresh_agent_speeds()` |
+
+Every one of these was a **project↔library boundary** fault, not a library fault. The decisive
+example: `crowd_world_2d_smoke.gd` already asserts that an impulse opposing navigation cancels once
+control returns, and it passed the entire time spray was broken — the library was correct and the
+project handed it the wrong field.
 
 `NATIVE_MIGRATION_CONTRACT.md` is the historical inventory. `extensions/CPathLib/REUSE.md` is the
 standalone-repository checklist.
 
-## What blocks reuse
+## Done
 
-**1. The descriptor is not relocatable.** `cpathlib.gdextension` points at
-`res://extensions/CPathLib/bin/...` for the library and the three MinGW runtime DLLs. Copy the
-folder to `addons/cpathlib/` in another project and it cannot find its own binary. Godot resolves a
-non-`res://` library path relative to the `.gdextension` file, so the fix is to write
-`bin/cpathlib.dll` instead. This is the only thing standing between the current state and a
-drop-in addon.
+1. **Relocatable descriptor.** `cpathlib.gdextension` resolves `bin/cpathlib.dll` and the three
+   MinGW runtime DLLs relative to itself, so the folder can be dropped anywhere.
+2. **One build file.** `run.sh` builds through `extensions/CPathLib/SConstruct` — the file a
+   standalone copy ships — so the daily build and the packaged build are the same. The duplicate
+   `extensions/Sconstruct` and the unused `extensions/config.py` are gone.
+3. **Runnable checks.** `scons ... tests` builds the two portable unit tests via an alias, and
+   `check.sh` builds everything and runs the unit tests, the three CPathLib smokes and the four
+   project smokes, reporting pass/fail per check. Commands are documented in the README.
+4. **Boundary regression tests.** `scripts/native/migration_parity_smoke.gd` asserts one contract
+   per regression above: authored configuration actually reaches the world, a weapon impulse
+   releases the agent once control returns, an impulse always ends within its lifetime, separation
+   magnitude does not scale with crowd size, and the debug toggles reach something.
+5. **Honest docs.** README states Godot 4.5.1 and Windows/MinGW-only, documents the verification
+   commands, and notes that library self-tests cannot catch consumer mapping faults.
 
-`demo/navigation_demo.tscn` has the same issue in its script `ext_resource`. Scene files cannot use
-relative paths, so that one stays a known one-line edit when the folder moves.
+## Remaining
 
-**2. The build path used daily is the wrong one.** `run.sh` runs `scons -C extensions`, which uses
-`extensions/Sconstruct`. That file duplicates `extensions/CPathLib/SConstruct`, which is the one a
-standalone repository would ship — and which is therefore never exercised. Point `run.sh` at
-`scons -C extensions/CPathLib target=template_debug use_mingw=yes godot_cpp_dir=../../../godot-cpp`
-and delete `extensions/Sconstruct` and the unused `extensions/config.py`. After this the library's
-own build file is the one proven working every day.
+0. **Verify.** Nothing since the parity work has been compiled or run — including the SConstruct
+   that `run.sh` now depends on. `./check.sh` is the gate for everything below.
+1. **Add a LICENSE.**
+2. **Extract.** Copy `extensions/CPathLib` to its own private repository and consume it back here as
+   a pinned submodule at the same path. `demo/navigation_demo.tscn` hardcodes its script path in an
+   `ext_resource`; scene files cannot use relative paths, so that stays a known one-line edit when
+   the folder moves. Confirm with `check.sh` plus a normal day/night pass.
 
-**3. The verification steps cannot be run.** `SConstruct` excludes `tests/`, and nothing builds
-`tests/test_a_star_solver.cpp` or `tests/test_flow_field_algorithms.cpp` — the executables in `bin/`
-were compiled by hand. The command to run the three Godot smoke scripts is documented nowhere
-either. `REUSE.md` step 6 requires both before advancing a pinned revision.
+Done since the last review: the `godot-cpp` revision is recorded in the README, and the
+navigation-area API no longer requires a consumer to say "garden" (the `garden_*` names remain a
+complete alias set, checked by the parity smoke).
 
-**4. The docs disagree with reality.** `README.md` says the supported workflow is Godot 4.6.1, but
-`run.sh` launches 4.5.1 and the descriptor declares `compatibility_minimum = "4.5"`. The README is
-the wrong one. There is also no LICENSE and no record of which `godot-cpp` revision the committed
-DLL was built against, though `REUSE.md` step 2 makes pinning it a rule.
+## Known divergences, accepted
 
-## Plan
+Found during the audit, judged not worth reverting. Listed so nobody rediscovers them as bugs.
 
-1. **Make the descriptor relative.** One edit to `cpathlib.gdextension`. Verify with `run.sh`: the
-   game must launch and behave identically. If the extension fails to load, revert — that single
-   result settles whether relative paths resolve on this Godot version.
-2. **Consolidate the build.** Update `run.sh` to build via `extensions/CPathLib/SConstruct`, then
-   delete `extensions/Sconstruct` and `extensions/config.py`. Verify with `run.sh`.
-3. **Make the tests runnable.** Add a SCons alias that builds the two portable test executables, and
-   write the exact commands for them and for the three headless smoke scripts into `README.md`.
-4. **Fix the docs.** Correct the Godot version in `README.md`, state that the supported platform is
-   Windows/MinGW only, and record the pinned `godot-cpp` revision.
-5. **Extract.** Copy `extensions/CPathLib` to its own private repository, add a LICENSE, and consume
-   it back here as a pinned submodule at the same path. Confirm with `run.sh` plus a normal
-   day/night gameplay pass.
-
-Steps 1 and 2 are the ones that matter; each is verified by launching the game and seeing no change.
-Step 5 becomes a copy rather than a rewrite once 1 through 4 are done.
-
-## Explicitly out of scope
-
-- **Splitting `CrowdWorld`.** It is large (`crowd_world.cpp` 982 lines, plus a 308-line second
-  partial), but the work is already delegated to focused subsystems and the ownership is correct.
-  Splitting it further is not needed for reuse, cannot be verified by the existing tests, and risks
-  changing the parity-sensitive update order. Leave it alone.
-- **Separating the debug and release DLL names.** `SConstruct` writes `bin/cpathlib.dll` for either
-  target, so a release build overwrites a debug one. Real, but it does not block reuse and it forces
-  a rebuild to fix. Revisit only if you start shipping release exports of the addon.
-- **Linux and macOS support.** Not needed; just say so in the README rather than implying otherwise.
+- **Soft wall avoidance is gone.** The old steering fed a `wall_repel` force (strength 12, radius
+  `tile * 1.3`) into the desired direction. CPathLib has only hard collision resolution with
+  sliding. The flow field's `wall_clearance_weight` biases the field away from walls, which covers
+  flow agents; path-following and manual agents scrape where they used to steer off.
+- **Flow-agent acceleration is a redesign.** The old code used a frame-rate-dependent
+  `velocity.lerp(target, 0.02)`; the new one uses 900/1200 px/s². Agents accelerate and turn
+  noticeably faster.
+- **Hitbox, bottleneck-zone and flow-field debug overlays have no owner.** They were drawn in C++.
+  `CppDebugOptions` still exports the flags and `_call_if_available` skips them. Agent state labels
+  are the only restored visual.
+- **Write-only config remains:** `NativeSimulationConfig.impulse_decay`, `radial_falloff_exponent`,
+  `SimulationConfigService.draw_flow_field`. `detach_flow` is still an authored weapon field that
+  does nothing — as it did before the migration.
 
 ## Ownership boundary
 
@@ -100,15 +96,17 @@ spatial queries, effect volumes, and pooled swept projectiles. It never calls in
 This project owns the meaning: `AgentHandleRegistry` (node mapping, selection cohorts, presentation
 events), `NavigationFlowCoordinator` (routing requests, flow/cohort lifetimes),
 `NavigationGridUploadService` (authored map data to neutral cells/channels), `NativeSimulationConfig`
-(numeric defaults), `CrowdRuntime` (phases, damage, combat forces, effect events), and
-`ProjectileRuntime` (weapon resources, impact interpretation).
+(numeric defaults), `CrowdRuntime` (phases, damage, combat forces, effect events), `ProjectileRuntime`
+(weapon resources, impact interpretation), and `AgentDebugLabelController` (debug presentation).
 
-Player, monster, drowning, damage, weapon, and selection never cross into CPathLib. Category masks,
-query shapes, caller tokens, and traffic group tokens are opaque values the game assigns meaning to.
+Day/night phases, monsters, clients, villagers, gardens-as-gameplay, tantrums, buildings, weapons,
+drowning, damage, and selection never cross into CPathLib. Category masks, query shapes, caller
+tokens, and traffic group tokens are opaque values the game assigns meaning to.
 
 ## Behavior that must not change
 
-These are the conversion-sensitive contracts. Any packaging step that alters one of them is wrong:
+These are the conversion-sensitive contracts. The starred ones now have an automated check; the rest
+are still manual-only, which is why the audit above was needed.
 
 - manual movement speed in every direction, and the established wall-slide behavior;
 - flow-driven agents freeze while an async cohort flow is pending, and resume when it installs;
@@ -117,8 +115,12 @@ These are the conversion-sensitive contracts. Any packaging step that alters one
 - agents with no flow direction wait, then recover toward the nearest navigable cell at the reduced
   speed, without swallowing impulse- or external-owned motion;
 - flow agents blocked by geometry brake, but manual player movement never does;
-- bottlenecks feed both flow steering and occupancy gating;
-- crowd pressure and gameplay impulses respect authored per-agent resistances;
+- bottlenecks feed both flow steering and occupancy gating, and crowd pressure cannot eject a
+  queueing agent backwards out of a chokepoint;
+- crowd pressure and gameplay impulses respect authored per-agent resistances, and separation
+  strength does not scale with crowd depth *;
+- gameplay impulses end — by opposition cancel, lifetime, or speed floor — and share one speed
+  budget with navigation rather than stacking on it *;
 - paused agents stop moving but may still be displaced when the project allows it;
 - force-isolated agents reject impulses, effect ticks, damage, and projectile hits, while directional
   drift stays independently controllable;
@@ -126,18 +128,17 @@ These are the conversion-sensitive contracts. Any packaging step that alters one
 - budgeted projectile force is allocated once, direct-hit first then front-to-back, while damage
   still applies to every eligible target;
 - propelled/control-impaired visuals are driven from native impulse state;
+- authored configuration reaches the native world rather than being silently skipped *;
 - empty non-current selection cohorts are released rather than accumulating.
 
 ## Checks before calling it done
 
-- `run.sh` builds and launches with no parser, binding, or scene-load errors;
+- `check.sh` passes end to end;
 - the descriptor loads from a path other than `extensions/CPathLib` and all four classes register;
-- `test_a_star_solver` and `test_flow_field_algorithms` pass;
-- the three CPathLib smoke scripts and the project's native-boundary smokes pass;
 - a normal day and night: multiple spawners, garden enter/target/exit, building edits, combat,
-  save/load, debug overlays;
+  a client tantrum against two adjacent buildings, save/load, debug overlays;
 - a source scan under `extensions/CPathLib` still finds no gameplay terminology;
 - the project contains one descriptor and one build file.
 
-Final gameplay acceptance is yours. The automated checks only establish that nothing structural
-regressed.
+Final gameplay acceptance is yours. The automated checks establish that the contracts marked above
+still hold; everything else in the list is still only as good as the manual pass.

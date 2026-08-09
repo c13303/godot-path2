@@ -1,7 +1,7 @@
 import glob
 import os
 
-from SCons.Script import ARGUMENTS, Dir, Environment
+from SCons.Script import ARGUMENTS, Alias, Default, Dir, Environment
 
 
 def norm(path):
@@ -13,13 +13,19 @@ godot_cpp_path = os.path.abspath(ARGUMENTS.get("godot_cpp_dir", "../godot-cpp"))
 target = ARGUMENTS.get("target", "template_debug")
 use_mingw = ARGUMENTS.get("use_mingw", "yes")
 
-if use_mingw == "yes":
-    env = Environment(tools=["mingw"], CXX="/mingw64/bin/g++", CC="/mingw64/bin/gcc")
-    env.Append(CXXFLAGS=["-std=c++17"])
-else:
-    env = Environment(tools=["default", "msvc"])
-    env.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
 
+def make_environment():
+    if use_mingw == "yes":
+        environment = Environment(
+            tools=["mingw"], CXX="/mingw64/bin/g++", CC="/mingw64/bin/gcc")
+        environment.Append(CXXFLAGS=["-std=c++17"])
+    else:
+        environment = Environment(tools=["default", "msvc"])
+        environment.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
+    return environment
+
+
+env = make_environment()
 env.Append(
     CPPPATH=[
         norm(os.path.join(godot_cpp_path, "include")),
@@ -36,12 +42,47 @@ if target == "template_debug":
 else:
     env.Append(LIBS=["godot-cpp.windows.template_release.x86_64"])
 
-sources = [
-    source
-    for source in glob.glob("**/*.cpp", recursive=True)
-    if not norm(source).startswith("tests/")
-]
+all_sources = [norm(source) for source in glob.glob("**/*.cpp", recursive=True)]
+library_sources = [
+    source for source in all_sources if not source.startswith("tests/")]
 
 output_dir = norm(os.path.join(root, "bin"))
 os.makedirs(output_dir, exist_ok=True)
-env.SharedLibrary(target=os.path.join(output_dir, "cpathlib"), source=sources)
+library = env.SharedLibrary(
+    target=os.path.join(output_dir, "cpathlib"), source=library_sources)
+
+# The simulation modules never include godot_cpp, so the unit tests link against
+# them directly and need no engine, no editor and no GDExtension entry point. Only
+# godot/ is excluded: that is the binding layer.
+portable_sources = [
+    source
+    for source in library_sources
+    if not source.startswith("godot/") and source != "register_types.cpp"
+]
+
+# Each object is given an explicit path under build/tests so the test build and the
+# library build never claim the same object file with two different environments.
+# Deliberately not VariantDir: its variant directory would sit inside its own source
+# directory here, which SCons handles badly.
+test_env = make_environment()
+test_env.Append(CPPPATH=[norm(root)], CPPDEFINES=["NOMINMAX"])
+
+
+def test_object(source):
+    return test_env.Object(
+        target="build/tests/" + source[:-len(".cpp")] + ".o", source=source)
+
+
+test_objects = [test_object(source) for source in portable_sources]
+
+test_programs = []
+for test_source in sorted(norm(path) for path in glob.glob("tests/test_*.cpp")):
+    name = os.path.splitext(os.path.basename(test_source))[0]
+    test_programs.append(test_env.Program(
+        target=os.path.join(output_dir, name),
+        source=[test_object(test_source)] + test_objects,
+    ))
+
+Alias("tests", test_programs)
+# A bare `scons` builds only the library; `scons tests` adds the executables.
+Default(library)

@@ -36,9 +36,13 @@ channels to CPathLib. Blocker masks use bits 0 through 63; a request mask choose
 blocker channels participate in that path or flow. Directional channels are selected separately by
 integer ID. Channel edits invalidate installed flows, so consumers must rebuild flows after edits.
 
-The `garden` and `area` method families are aliases backed by one navigation-area store. New Godot
-consumers may use the garden terminology without creating another area abstraction. Portals,
-routes, revisions, and handle lifetime are identical through both method families.
+The `area` method family is the navigation-area API and carries every operation. The `garden`
+family is a complete alias set over the same store, named for the first consuming project; each
+alias is a one-line forwarder with no behavior of its own. Portals, routes, revisions, and handle
+lifetime are identical through both. New consumers should use the `area` names — the aliases exist
+for backward compatibility and are candidates for removal in a future major version. Any operation
+added to one family must be added to the other, and the `area` name is the one that carries the
+implementation.
 
 Directional traversal and directional motion are deliberately separate. Traversal channels belong
 to `NavigationWorld2D` and constrain path construction. Directional-motion fields belong to

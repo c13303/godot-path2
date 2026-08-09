@@ -54,25 +54,36 @@ namespace godot
         ClassDB::bind_method(D_METHOD("sample_latest_flow", "world_position"), &NavigationWorld2D::sample_latest_flow);
         ClassDB::bind_method(D_METHOD("get_topology_revision"), &NavigationWorld2D::get_topology_revision);
         ClassDB::bind_method(D_METHOD("get_cost_revision"), &NavigationWorld2D::get_cost_revision);
+        // Area API. The garden_* aliases registered below forward to these.
         ClassDB::bind_method(D_METHOD("create_area", "interior_cells", "target_cells"), &NavigationWorld2D::create_area);
-        ClassDB::bind_method(D_METHOD("create_garden", "interior_cells", "target_cells"), &NavigationWorld2D::create_garden);
-        ClassDB::bind_method(D_METHOD("create_garden_from_seed", "seed", "maximum_cells", "blocker_channel_mask"), &NavigationWorld2D::create_garden_from_seed);
+        ClassDB::bind_method(D_METHOD("create_area_from_seed", "seed", "maximum_cells", "blocker_channel_mask"), &NavigationWorld2D::create_area_from_seed);
         ClassDB::bind_method(D_METHOD("create_portal", "area_handle", "boundary_cells", "outside_cells", "direction", "capacity"), &NavigationWorld2D::create_portal);
-        ClassDB::bind_method(D_METHOD("create_garden_portal", "garden_handle", "boundary_cells", "outside_cells", "direction", "capacity"), &NavigationWorld2D::create_garden_portal);
         ClassDB::bind_method(D_METHOD("remove_area", "area_handle"), &NavigationWorld2D::remove_area);
-        ClassDB::bind_method(D_METHOD("remove_garden", "garden_handle"), &NavigationWorld2D::remove_garden);
-        ClassDB::bind_method(D_METHOD("set_garden_cells", "garden_handle", "interior_cells"), &NavigationWorld2D::set_garden_cells);
-        ClassDB::bind_method(D_METHOD("set_garden_target_cells", "garden_handle", "target_cells"), &NavigationWorld2D::set_garden_target_cells);
+        ClassDB::bind_method(D_METHOD("set_area_cells", "area_handle", "interior_cells"), &NavigationWorld2D::set_area_cells);
+        ClassDB::bind_method(D_METHOD("set_area_target_cells", "area_handle", "target_cells"), &NavigationWorld2D::set_area_target_cells);
         ClassDB::bind_method(D_METHOD("remove_portal", "portal_handle"), &NavigationWorld2D::remove_portal);
-        ClassDB::bind_method(D_METHOD("get_garden_info", "garden_handle"), &NavigationWorld2D::get_garden_info);
+        ClassDB::bind_method(D_METHOD("get_area_info", "area_handle"), &NavigationWorld2D::get_area_info);
         ClassDB::bind_method(D_METHOD("get_portal_info", "portal_handle"), &NavigationWorld2D::get_portal_info);
-        ClassDB::bind_method(D_METHOD("get_garden_handles"), &NavigationWorld2D::get_garden_handles);
+        ClassDB::bind_method(D_METHOD("get_area_handles"), &NavigationWorld2D::get_area_handles);
         ClassDB::bind_method(D_METHOD("get_portal_handles"), &NavigationWorld2D::get_portal_handles);
         ClassDB::bind_method(D_METHOD("plan_enter_area", "area_handle", "world_start", "area_destination"), &NavigationWorld2D::plan_enter_area);
         ClassDB::bind_method(D_METHOD("plan_exit_area", "area_handle", "area_start", "world_destination"), &NavigationWorld2D::plan_exit_area);
+        ClassDB::bind_method(D_METHOD("plan_enter_area_with_options", "area_handle", "world_start", "area_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_enter_area_with_options);
+        ClassDB::bind_method(D_METHOD("plan_exit_area_with_options", "area_handle", "area_start", "world_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_exit_area_with_options);
+        ClassDB::bind_method(D_METHOD("is_route_current", "route"), &NavigationWorld2D::is_route_current);
+
+        // Garden aliases: a consumer's vocabulary, kept so existing callers keep
+        // working. Each forwards to the area method of the same shape.
+        ClassDB::bind_method(D_METHOD("create_garden", "interior_cells", "target_cells"), &NavigationWorld2D::create_garden);
+        ClassDB::bind_method(D_METHOD("create_garden_from_seed", "seed", "maximum_cells", "blocker_channel_mask"), &NavigationWorld2D::create_garden_from_seed);
+        ClassDB::bind_method(D_METHOD("create_garden_portal", "garden_handle", "boundary_cells", "outside_cells", "direction", "capacity"), &NavigationWorld2D::create_garden_portal);
+        ClassDB::bind_method(D_METHOD("remove_garden", "garden_handle"), &NavigationWorld2D::remove_garden);
+        ClassDB::bind_method(D_METHOD("set_garden_cells", "garden_handle", "interior_cells"), &NavigationWorld2D::set_garden_cells);
+        ClassDB::bind_method(D_METHOD("set_garden_target_cells", "garden_handle", "target_cells"), &NavigationWorld2D::set_garden_target_cells);
+        ClassDB::bind_method(D_METHOD("get_garden_info", "garden_handle"), &NavigationWorld2D::get_garden_info);
+        ClassDB::bind_method(D_METHOD("get_garden_handles"), &NavigationWorld2D::get_garden_handles);
         ClassDB::bind_method(D_METHOD("plan_enter_garden", "garden_handle", "world_start", "garden_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_enter_garden);
         ClassDB::bind_method(D_METHOD("plan_exit_garden", "garden_handle", "garden_start", "world_destination", "blocker_channel_mask"), &NavigationWorld2D::plan_exit_garden);
-        ClassDB::bind_method(D_METHOD("is_route_current", "route"), &NavigationWorld2D::is_route_current);
         ADD_SIGNAL(MethodInfo("flow_ready",
                               PropertyInfo(Variant::INT, "request_id"),
                               PropertyInfo(Variant::INT, "status"),

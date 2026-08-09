@@ -9,23 +9,24 @@ const FLASH_SHADER: Shader = preload("res://scripts/entities/enemy_flash.gdshade
 
 static var _shared_flash_material: ShaderMaterial
 
-# Mission phase codes — must match ffcore::AgentPhase in agent.h.
-const PHASE_NONE: int = 0
-const PHASE_FLOW_IN: int = 1
-const PHASE_ASTAR_IN: int = 2
-const PHASE_EATING: int = 3
+# Mission phase codes. Defined once in AgentPhase so the debug label controller can
+# read them without importing this script (and with it the whole gameplay graph).
+const PHASE_NONE: int = AgentPhase.NONE
+const PHASE_FLOW_IN: int = AgentPhase.FLOW_IN
+const PHASE_ASTAR_IN: int = AgentPhase.ASTAR_IN
+const PHASE_EATING: int = AgentPhase.EATING
 # Retained only to keep the enum numbering aligned with ffcore::AgentPhase in
 # agent.h (FlowOut=5, WaitingNewStatus=6 depend on it). The old plant→garden-exit
 # A*-out phase is gone — finished eaters attach straight to the wall-exit FF — so
 # nothing in GDScript sets this phase anymore.
-const PHASE_ASTAR_OUT: int = 4
-const PHASE_FLOW_OUT: int = 5
+const PHASE_ASTAR_OUT: int = AgentPhase.ASTAR_OUT
+const PHASE_FLOW_OUT: int = AgentPhase.FLOW_OUT
 # Temporary holding phase: the agent's garden assignment became invalid (garden
 # deleted/rebuilt) and building_manager queued it for budgeted retargeting. Not
 # gameplay behavior — just a visible debug label while the agent waits a few
 # frames for a new navigation state. Mirrors ffcore::AgentPhase::WaitingNewStatus.
-const PHASE_WAITING_NEW_STATUS: int = 6
-const PHASE_DROWNING: int = 7
+const PHASE_WAITING_NEW_STATUS: int = AgentPhase.WAITING_NEW_STATUS
+const PHASE_DROWNING: int = AgentPhase.DROWNING
 
 var _is_propelled: bool = false
 var _controls_impaired: bool = false

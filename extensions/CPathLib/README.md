@@ -42,7 +42,10 @@ The public Godot classes are:
 
 ## Local Windows build
 
-The current supported workflow uses Godot 4.6.1, its matching `godot-cpp` checkout, and MinGW-w64.
+Windows with MinGW-w64 is the only supported platform. There is no Linux or macOS build, and no
+MSVC build is exercised. The workflow is Godot 4.5.1 with a matching `godot-cpp` checkout; the
+descriptor declares `compatibility_minimum = "4.5"`.
+
 In this project, run from `extensions/CPathLib/` in an MSYS2 MinGW64 shell:
 
 ```sh
@@ -50,7 +53,20 @@ scons target=template_debug use_mingw=yes godot_cpp_dir=../../../godot-cpp
 ```
 
 In a standalone checkout with `godot-cpp` beside CPathLib, omit `godot_cpp_dir`. The build writes
-`bin/cpathlib.dll`. The descriptor expects the MinGW runtime DLLs beside it.
+`bin/cpathlib.dll` for either target, so a release build overwrites a debug one. The descriptor
+resolves its library and the three MinGW runtime DLLs relative to itself, so the folder can be
+dropped anywhere in a project.
+
+### Pinned `godot-cpp`
+
+| | |
+| --- | --- |
+| revision | `b262298503e4a768caed4b8277beb6b972334f28` |
+| branch | `4.5` |
+| dated | 2026-04-28 |
+
+Rebuild against this revision when reproducing a released binary. Update this table in the same
+commit that changes the checkout, so the recorded revision and the committed DLL never disagree.
 
 ## Minimal use
 
@@ -122,18 +138,53 @@ lifetime-expiry records. Agent sweeps use the profile's optional query AABB, fal
 world radius. Force-isolated agents are omitted from projectile targeting. The consuming project
 decides what each impact means.
 
-Gardens are the friendly Godot API name for optional navigation areas. Create one explicitly with
-`create_garden()` or flood-fill it from a seed with `create_garden_from_seed()`, add directional
-multi-cell portals with `create_garden_portal()`, and request typed enter/exit routes. The neutral
-`create_area()` names remain aliases over the same store, not a duplicate implementation. A crowd
-can consume the current default flow through `use_navigation_flow()` or use flow handles,
-per-agent paths, and manual directions.
+Navigation areas are optional sub-regions with their own local routing. Create one explicitly with
+`create_area()` or flood-fill it from a seed with `create_area_from_seed()`, edit it with
+`set_area_cells()` / `set_area_target_cells()`, add directional multi-cell portals with
+`create_portal()`, inspect it with `get_area_info()` / `get_area_handles()`, and request typed
+enter/exit routes with `plan_enter_area()` / `plan_exit_area()` — or the `*_with_options()` forms to
+select blocker channels for that request. A crowd can consume the current default flow through
+`use_navigation_flow()` or use flow handles, per-agent paths, and manual directions.
+
+`garden_*` is a complete alias set over the same API, named for the first consuming project. Every
+alias is a one-line forwarder with no behavior of its own, kept so that project keeps working.
+**Prefer the area names in new code**; the aliases may be dropped in a future major version.
 
 ## Verification and demo
 
-Portable test sources are in `tests/`. The Godot smoke scripts exercise navigation, routes,
-asynchronous work, crowd motion, bottleneck reservations, forces, effect volumes, and projectiles.
-`demo/navigation_demo.tscn`
-shows the same features without requiring a TileMap, autoload, or prescribed scene hierarchy.
+Build the library and the portable unit tests:
+
+```sh
+scons target=template_debug use_mingw=yes godot_cpp_dir=../../../godot-cpp tests
+```
+
+`tests` is an alias, not the default target, so a bare `scons` still builds only the library. The
+unit tests link the simulation modules directly and need no engine:
+
+```sh
+bin/test_a_star_solver.exe
+bin/test_flow_field_algorithms.exe
+```
+
+The Godot smoke scripts are `SceneTree` programs. Each exits 0 on success, 1 on the first failure,
+and must be run one per process:
+
+```sh
+godot --headless --path <project> --script res://<addon-path>/tests/navigation_world_2d_smoke.gd
+godot --headless --path <project> --script res://<addon-path>/tests/crowd_world_2d_smoke.gd
+godot --headless --path <project> --script res://<addon-path>/tests/projectile_world_2d_smoke.gd
+```
+
+They exercise navigation, routes, asynchronous work, crowd motion, bottleneck reservations, forces,
+effect volumes, and projectiles. `demo/navigation_demo.tscn` shows the same features without
+requiring a TileMap, autoload, or prescribed scene hierarchy.
+
+In this project, `../../check.sh` builds everything and runs all of the above plus the project's own
+boundary smokes in one command.
+
+**These checks verify the library against itself.** They cannot see a consuming project mapping one
+of its values onto the wrong field — that failure mode belongs to the consumer, and a consumer
+should keep its own boundary tests. See `scripts/native/migration_parity_smoke.gd` in this project
+for a worked example.
 
 See [REUSE.md](REUSE.md) for the standalone-repository checklist and API stability rules.

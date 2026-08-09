@@ -112,21 +112,22 @@ func compose_label(snapshot: Dictionary) -> String:
 	return "%s\n%s" % [phase_text, motion_text]
 
 
+## Reads AgentPhase rather than FlowAgent on purpose: see agent_phase.gd.
 func _phase_text(snapshot: Dictionary) -> String:
-	var phase: int = int(snapshot.get("phase", FlowAgent.PHASE_NONE))
-	if phase == FlowAgent.PHASE_FLOW_IN:
+	var phase: int = int(snapshot.get("phase", AgentPhase.NONE))
+	if phase == AgentPhase.FLOW_IN:
 		return "flow in"
-	if phase == FlowAgent.PHASE_ASTAR_IN:
+	if phase == AgentPhase.ASTAR_IN:
 		return "path in"
-	if phase == FlowAgent.PHASE_EATING:
+	if phase == AgentPhase.EATING:
 		return "eating %ds" % int(snapshot.get("eating_seconds", 0.0))
-	if phase == FlowAgent.PHASE_ASTAR_OUT:
+	if phase == AgentPhase.ASTAR_OUT:
 		return "path out"
-	if phase == FlowAgent.PHASE_FLOW_OUT:
+	if phase == AgentPhase.FLOW_OUT:
 		return "flow out"
-	if phase == FlowAgent.PHASE_WAITING_NEW_STATUS:
+	if phase == AgentPhase.WAITING_NEW_STATUS:
 		return "waiting new status"
-	if phase == FlowAgent.PHASE_DROWNING:
+	if phase == AgentPhase.DROWNING:
 		return "drowning"
 	return ""
 

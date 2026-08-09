@@ -168,6 +168,8 @@ namespace godot
         result["valid"] = true;
         result["position"] = Vector2(agent->position.x, agent->position.y);
         result["velocity"] = Vector2(agent->velocity.x, agent->velocity.y);
+        result["desired_direction"] = Vector2(
+            agent->desired_direction.x, agent->desired_direction.y);
         result["navigation_source"] = static_cast<int>(agent->navigation_source);
         result["route_progress"] = static_cast<int>(agent->route_progress);
         result["paused"] = agent->paused;

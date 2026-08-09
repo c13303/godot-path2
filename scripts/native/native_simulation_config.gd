@@ -24,7 +24,11 @@ class_name NativeSimulationConfig
 @export_range(0.0, 5000.0, 1.0) var agent_acceleration: float = 900.0
 @export_range(0.0, 5000.0, 1.0) var agent_deceleration: float = 1200.0
 @export_range(0.0, 2.0, 0.01) var agent_diameter_tile_ratio: float = 0.9
-@export_range(0.0, 256.0, 1.0) var separation_radius: float = 32.0
+## Distance at which crowding starts to push. Pre-migration this was not authored at
+## all: agents pushed from the sum of the two radii inward, and every agent here is
+## one size, so agent_diameter() reproduces that exactly. Authoring a value overrides
+## it; see separation_radius_override.
+@export_range(0.0, 256.0, 1.0) var separation_radius_override: float = 0.0
 @export_range(0.0, 1000.0, 1.0) var separation_weight: float = 600.0
 ## Only the closest N crowding neighbours push. Uncapped, a dense pack costs more
 ## every frame and pushes harder the deeper it gets.
@@ -68,13 +72,21 @@ func agent_radius() -> float:
 	return tile_size * agent_diameter_tile_ratio * 0.5
 
 
+## Interaction distance for crowd separation. Defaults to the agent diameter, which is
+## the sum of two agent radii and therefore reproduces the pre-migration behavior.
+func separation_radius() -> float:
+	if separation_radius_override > 0.0:
+		return separation_radius_override
+	return agent_radius() * 2.0
+
+
 func default_agent_profile() -> Dictionary:
 	return {
 		"radius": agent_radius(),
 		"maximum_speed": agent_maximum_speed,
 		"acceleration": agent_acceleration,
 		"deceleration": agent_deceleration,
-		"separation_radius": separation_radius,
+		"separation_radius": separation_radius(),
 		"separation_weight": separation_weight,
 		"arrival_radius": arrival_radius,
 	}
@@ -95,7 +107,7 @@ func apply_to_crowd(crowd_world: Node) -> bool:
 		return false
 	crowd_world.call(
 		&"configure_default_profile", agent_radius(), agent_maximum_speed,
-		agent_acceleration, agent_deceleration, separation_radius,
+		agent_acceleration, agent_deceleration, separation_radius(),
 		separation_weight, arrival_radius, 0, -1
 	)
 	crowd_world.call(

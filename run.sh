@@ -2,7 +2,10 @@
 
 cd /c/CHARLES/DEV/GODOTPROJS/RABBITGAME/dagodot-rabbitgame
 echo "=== Compilation ==="
-if ! scons -C extensions target=template_debug use_mingw=yes; then
+# Builds through the library's own SConstruct - the one a standalone copy of
+# CPathLib ships - so the daily build and the packaged build are the same file.
+if ! scons -C extensions/CPathLib target=template_debug use_mingw=yes \
+    godot_cpp_dir=../../../godot-cpp; then
     echo "=== Compilation échouée ==="
     read -p "Appuyer pour quitter..."
     exit 1

@@ -95,33 +95,27 @@ namespace godot
         std::int64_t get_topology_revision() const;
         std::int64_t get_cost_revision() const;
 
+        // Areas are the library's own vocabulary and carry the full API. The garden_*
+        // names below are a complete alias set kept for consumers that adopted them;
+        // every one delegates here and adds no behavior of its own.
         std::int64_t create_area(const PackedVector2Array &interior_cells,
                                  const PackedVector2Array &target_cells);
-        std::int64_t create_garden(const PackedVector2Array &interior_cells,
-                                   const PackedVector2Array &target_cells);
-        std::int64_t create_garden_from_seed(
+        std::int64_t create_area_from_seed(
             Vector2i seed, int maximum_cells, std::int64_t blocker_channel_mask);
         std::int64_t create_portal(std::int64_t area_handle,
                                    const PackedVector2Array &boundary_cells,
                                    const PackedVector2Array &outside_cells,
                                    int direction,
                                    int capacity);
-        std::int64_t create_garden_portal(
-            std::int64_t garden_handle,
-            const PackedVector2Array &boundary_cells,
-            const PackedVector2Array &outside_cells,
-            int direction,
-            int capacity);
         bool remove_area(std::int64_t area_handle);
-        bool remove_garden(std::int64_t garden_handle);
-        bool set_garden_cells(std::int64_t garden_handle,
-                              const PackedVector2Array &interior_cells);
-        bool set_garden_target_cells(std::int64_t garden_handle,
-                                     const PackedVector2Array &target_cells);
+        bool set_area_cells(std::int64_t area_handle,
+                            const PackedVector2Array &interior_cells);
+        bool set_area_target_cells(std::int64_t area_handle,
+                                   const PackedVector2Array &target_cells);
         bool remove_portal(std::int64_t portal_handle);
-        Dictionary get_garden_info(std::int64_t garden_handle) const;
+        Dictionary get_area_info(std::int64_t area_handle) const;
         Dictionary get_portal_info(std::int64_t portal_handle) const;
-        PackedInt64Array get_garden_handles() const;
+        PackedInt64Array get_area_handles() const;
         PackedInt64Array get_portal_handles() const;
         Ref<NavigationRoute2D> plan_enter_area(std::int64_t area_handle,
                                                Vector2i world_start,
@@ -129,6 +123,31 @@ namespace godot
         Ref<NavigationRoute2D> plan_exit_area(std::int64_t area_handle,
                                               Vector2i area_start,
                                               Vector2i world_destination) const;
+        Ref<NavigationRoute2D> plan_enter_area_with_options(
+            std::int64_t area_handle, Vector2i world_start,
+            Vector2i area_destination, std::int64_t blocker_channel_mask) const;
+        Ref<NavigationRoute2D> plan_exit_area_with_options(
+            std::int64_t area_handle, Vector2i area_start,
+            Vector2i world_destination, std::int64_t blocker_channel_mask) const;
+
+        // Garden aliases. Thin forwarders, no logic.
+        std::int64_t create_garden(const PackedVector2Array &interior_cells,
+                                   const PackedVector2Array &target_cells);
+        std::int64_t create_garden_from_seed(
+            Vector2i seed, int maximum_cells, std::int64_t blocker_channel_mask);
+        std::int64_t create_garden_portal(
+            std::int64_t garden_handle,
+            const PackedVector2Array &boundary_cells,
+            const PackedVector2Array &outside_cells,
+            int direction,
+            int capacity);
+        bool remove_garden(std::int64_t garden_handle);
+        bool set_garden_cells(std::int64_t garden_handle,
+                              const PackedVector2Array &interior_cells);
+        bool set_garden_target_cells(std::int64_t garden_handle,
+                                     const PackedVector2Array &target_cells);
+        Dictionary get_garden_info(std::int64_t garden_handle) const;
+        PackedInt64Array get_garden_handles() const;
         Ref<NavigationRoute2D> plan_enter_garden(
             std::int64_t garden_handle, Vector2i world_start,
             Vector2i garden_destination, std::int64_t blocker_channel_mask) const;

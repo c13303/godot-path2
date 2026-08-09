@@ -30,14 +30,7 @@ namespace godot
             convert_cells(interior_cells), convert_cells(target_cells)));
     }
 
-    std::int64_t NavigationWorld2D::create_garden(
-        const PackedVector2Array &interior_cells,
-        const PackedVector2Array &target_cells)
-    {
-        return create_area(interior_cells, target_cells);
-    }
-
-    std::int64_t NavigationWorld2D::create_garden_from_seed(
+    std::int64_t NavigationWorld2D::create_area_from_seed(
         Vector2i seed,
         int maximum_cells,
         std::int64_t blocker_channel_mask)
@@ -65,68 +58,54 @@ namespace godot
             static_cast<std::uint32_t>(std::max(1, capacity))));
     }
 
-    std::int64_t NavigationWorld2D::create_garden_portal(
-        std::int64_t garden_handle,
-        const PackedVector2Array &boundary_cells,
-        const PackedVector2Array &outside_cells,
-        int direction,
-        int capacity)
-    {
-        return create_portal(
-            garden_handle, boundary_cells, outside_cells, direction, capacity);
-    }
-
     bool NavigationWorld2D::remove_area(std::int64_t area_handle)
     { return world.areas().remove_area(decode_area_handle(area_handle)); }
 
-    bool NavigationWorld2D::remove_garden(std::int64_t garden_handle)
-    { return remove_area(garden_handle); }
-
-    bool NavigationWorld2D::set_garden_cells(
-        std::int64_t garden_handle,
+    bool NavigationWorld2D::set_area_cells(
+        std::int64_t area_handle,
         const PackedVector2Array &interior_cells)
     {
         return world.areas().set_area_interior_cells(
-            decode_area_handle(garden_handle), convert_cells(interior_cells));
+            decode_area_handle(area_handle), convert_cells(interior_cells));
     }
 
-    bool NavigationWorld2D::set_garden_target_cells(
-        std::int64_t garden_handle,
+    bool NavigationWorld2D::set_area_target_cells(
+        std::int64_t area_handle,
         const PackedVector2Array &target_cells)
     {
         return world.areas().set_area_target_cells(
-            decode_area_handle(garden_handle), convert_cells(target_cells));
+            decode_area_handle(area_handle), convert_cells(target_cells));
     }
 
     bool NavigationWorld2D::remove_portal(std::int64_t portal_handle)
     { return world.areas().remove_portal(decode_portal_handle(portal_handle)); }
 
-    Dictionary NavigationWorld2D::get_garden_info(std::int64_t garden_handle) const
+    Dictionary NavigationWorld2D::get_area_info(std::int64_t area_handle) const
     {
         Dictionary info;
-        const ffcore::NavigationArea *garden = world.areas().get_area(
-            decode_area_handle(garden_handle));
-        if (garden == nullptr)
+        const ffcore::NavigationArea *area = world.areas().get_area(
+            decode_area_handle(area_handle));
+        if (area == nullptr)
         {
             info["valid"] = false;
             return info;
         }
         info["valid"] = true;
-        info["revision"] = static_cast<std::int64_t>(garden->revision);
+        info["revision"] = static_cast<std::int64_t>(area->revision);
         PackedVector2Array interior;
-        interior.resize(static_cast<int>(garden->interior_cells.size()));
-        for (int index = 0; index < static_cast<int>(garden->interior_cells.size()); ++index)
-            interior.set(index, Vector2(garden->interior_cells[index].x, garden->interior_cells[index].y));
+        interior.resize(static_cast<int>(area->interior_cells.size()));
+        for (int index = 0; index < static_cast<int>(area->interior_cells.size()); ++index)
+            interior.set(index, Vector2(area->interior_cells[index].x, area->interior_cells[index].y));
         info["interior_cells"] = interior;
         PackedVector2Array targets;
-        targets.resize(static_cast<int>(garden->target_cells.size()));
-        for (int index = 0; index < static_cast<int>(garden->target_cells.size()); ++index)
-            targets.set(index, Vector2(garden->target_cells[index].x, garden->target_cells[index].y));
+        targets.resize(static_cast<int>(area->target_cells.size()));
+        for (int index = 0; index < static_cast<int>(area->target_cells.size()); ++index)
+            targets.set(index, Vector2(area->target_cells[index].x, area->target_cells[index].y));
         info["target_cells"] = targets;
         PackedInt64Array portals;
-        portals.resize(static_cast<int>(garden->portals.size()));
-        for (int index = 0; index < static_cast<int>(garden->portals.size()); ++index)
-            portals.set(index, encode_portal_handle(garden->portals[index]));
+        portals.resize(static_cast<int>(area->portals.size()));
+        for (int index = 0; index < static_cast<int>(area->portals.size()); ++index)
+            portals.set(index, encode_portal_handle(area->portals[index]));
         info["portal_handles"] = portals;
         return info;
     }
@@ -142,7 +121,7 @@ namespace godot
             return info;
         }
         info["valid"] = true;
-        info["garden_handle"] = encode_area_handle(portal->area);
+        info["area_handle"] = encode_area_handle(portal->area);
         info["direction"] = static_cast<int>(portal->direction);
         info["capacity"] = static_cast<int>(portal->capacity);
         PackedVector2Array boundary;
@@ -158,7 +137,7 @@ namespace godot
         return info;
     }
 
-    PackedInt64Array NavigationWorld2D::get_garden_handles() const
+    PackedInt64Array NavigationWorld2D::get_area_handles() const
     {
         const std::vector<ffcore::AreaHandle> handles = world.areas().active_areas();
         PackedInt64Array result;
@@ -206,33 +185,33 @@ namespace godot
         return route;
     }
 
-    Ref<NavigationRoute2D> NavigationWorld2D::plan_enter_garden(
-        std::int64_t garden_handle,
+    Ref<NavigationRoute2D> NavigationWorld2D::plan_enter_area_with_options(
+        std::int64_t area_handle,
         Vector2i world_start,
-        Vector2i garden_destination,
+        Vector2i area_destination,
         std::int64_t blocker_channel_mask) const
     {
         Ref<NavigationRoute2D> route;
         route.instantiate();
         route->set_core_route(world.plan_enter_area(
-            decode_area_handle(garden_handle),
+            decode_area_handle(area_handle),
             {world_start.x, world_start.y},
-            {garden_destination.x, garden_destination.y},
+            {area_destination.x, area_destination.y},
             static_cast<std::uint64_t>(blocker_channel_mask)));
         return route;
     }
 
-    Ref<NavigationRoute2D> NavigationWorld2D::plan_exit_garden(
-        std::int64_t garden_handle,
-        Vector2i garden_start,
+    Ref<NavigationRoute2D> NavigationWorld2D::plan_exit_area_with_options(
+        std::int64_t area_handle,
+        Vector2i area_start,
         Vector2i world_destination,
         std::int64_t blocker_channel_mask) const
     {
         Ref<NavigationRoute2D> route;
         route.instantiate();
         route->set_core_route(world.plan_exit_area(
-            decode_area_handle(garden_handle),
-            {garden_start.x, garden_start.y},
+            decode_area_handle(area_handle),
+            {area_start.x, area_start.y},
             {world_destination.x, world_destination.y},
             static_cast<std::uint64_t>(blocker_channel_mask)));
         return route;
@@ -241,5 +220,69 @@ namespace godot
     bool NavigationWorld2D::is_route_current(const Ref<NavigationRoute2D> &route) const
     {
         return route.is_valid() && world.is_route_current(route->core_route());
+    }
+
+    // -----------------------------------------------------------------------
+    // Garden aliases.
+    //
+    // "Garden" is a consumer's word, not the library's. These exist only so a
+    // project that adopted them keeps working; each one forwards to the area API
+    // above and holds no logic. Prefer the area names in new code.
+    // -----------------------------------------------------------------------
+    std::int64_t NavigationWorld2D::create_garden(
+        const PackedVector2Array &interior_cells,
+        const PackedVector2Array &target_cells)
+    { return create_area(interior_cells, target_cells); }
+
+    std::int64_t NavigationWorld2D::create_garden_from_seed(
+        Vector2i seed, int maximum_cells, std::int64_t blocker_channel_mask)
+    { return create_area_from_seed(seed, maximum_cells, blocker_channel_mask); }
+
+    std::int64_t NavigationWorld2D::create_garden_portal(
+        std::int64_t garden_handle,
+        const PackedVector2Array &boundary_cells,
+        const PackedVector2Array &outside_cells,
+        int direction,
+        int capacity)
+    {
+        return create_portal(
+            garden_handle, boundary_cells, outside_cells, direction, capacity);
+    }
+
+    bool NavigationWorld2D::remove_garden(std::int64_t garden_handle)
+    { return remove_area(garden_handle); }
+
+    bool NavigationWorld2D::set_garden_cells(
+        std::int64_t garden_handle, const PackedVector2Array &interior_cells)
+    { return set_area_cells(garden_handle, interior_cells); }
+
+    bool NavigationWorld2D::set_garden_target_cells(
+        std::int64_t garden_handle, const PackedVector2Array &target_cells)
+    { return set_area_target_cells(garden_handle, target_cells); }
+
+    Dictionary NavigationWorld2D::get_garden_info(std::int64_t garden_handle) const
+    { return get_area_info(garden_handle); }
+
+    PackedInt64Array NavigationWorld2D::get_garden_handles() const
+    { return get_area_handles(); }
+
+    Ref<NavigationRoute2D> NavigationWorld2D::plan_enter_garden(
+        std::int64_t garden_handle,
+        Vector2i world_start,
+        Vector2i garden_destination,
+        std::int64_t blocker_channel_mask) const
+    {
+        return plan_enter_area_with_options(
+            garden_handle, world_start, garden_destination, blocker_channel_mask);
+    }
+
+    Ref<NavigationRoute2D> NavigationWorld2D::plan_exit_garden(
+        std::int64_t garden_handle,
+        Vector2i garden_start,
+        Vector2i world_destination,
+        std::int64_t blocker_channel_mask) const
+    {
+        return plan_exit_area_with_options(
+            garden_handle, garden_start, world_destination, blocker_channel_mask);
     }
 } // namespace godot

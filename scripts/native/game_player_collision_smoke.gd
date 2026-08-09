@@ -1,5 +1,9 @@
 extends SceneTree
 
+## Frames allowed for the async baseline-collision flow to be rebuilt and, if the old
+## goal became unreachable, for the synchronous rescan to install a new one.
+const BASELINE_RECOVERY_FRAMES: int = 120
+
 
 func _initialize() -> void:
 	call_deferred(&"_run")
@@ -27,7 +31,15 @@ func _run() -> void:
 	controller.set_process(false)
 	var original_baseline_goal: Vector2i = navigation_runtime.get("_baseline_goal_cell") as Vector2i
 	navigation_runtime.call(&"set_cell_blocked", original_baseline_goal, true)
-	var replacement_baseline_goal: Vector2i = navigation_runtime.get("_baseline_goal_cell") as Vector2i
+	# Blocking the goal only queues an async flow request; NavigationRuntime polls its
+	# status each frame and falls back to a synchronous rescan when it comes back
+	# unreachable. Reading the goal cell on the next line can never see that.
+	var replacement_baseline_goal: Vector2i = original_baseline_goal
+	for _index: int in range(BASELINE_RECOVERY_FRAMES):
+		await process_frame
+		replacement_baseline_goal = navigation_runtime.get("_baseline_goal_cell") as Vector2i
+		if replacement_baseline_goal != original_baseline_goal:
+			break
 	if replacement_baseline_goal == original_baseline_goal:
 		_fail("collision baseline did not recover after its goal cell was blocked")
 		return
