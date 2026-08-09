@@ -39,6 +39,9 @@ namespace ffcore
             double active_decay = 0.0;
             double active_remaining = 0.0;
             double suppression_remaining = 0.0;
+            /// Whether this impulse ever took control away. Only an impulse that did
+            /// can meaningfully "hand control back"; a plain nudge never had it.
+            bool had_control_suppression = false;
             bool preserve_navigation = false;
             bool stop_on_control_restore = false;
             bool feedback_enabled = true;
@@ -58,8 +61,8 @@ namespace ffcore
         void update(double delta);
         Vec2 velocity(AgentHandle handle) const;
         double navigation_control(AgentHandle handle) const;
-        bool cancel_if_navigation_opposes(AgentHandle handle,
-                                          const Vec2 &navigation_velocity);
+        bool cancel_unless_navigation_agrees(AgentHandle handle,
+                                             const Vec2 &navigation_velocity);
         bool active(AgentHandle handle) const;
         double suppression_remaining(AgentHandle handle) const;
         bool feedback_enabled(AgentHandle handle) const;

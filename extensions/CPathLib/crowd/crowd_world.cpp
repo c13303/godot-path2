@@ -1007,7 +1007,7 @@ namespace ffcore
                 navigation_speed_scale;
             const Vec2 desired_velocity = desired_direction *
                 (navigation_speed * impulses.navigation_control(handle));
-            impulses.cancel_if_navigation_opposes(handle, desired_velocity);
+            impulses.cancel_unless_navigation_agrees(handle, desired_velocity);
             const double rate = desired_velocity.length_squared() > agent->velocity.length_squared()
                 ? agent->profile.acceleration : agent->profile.deceleration;
             agent->velocity = approach(agent->velocity, desired_velocity, rate * delta);

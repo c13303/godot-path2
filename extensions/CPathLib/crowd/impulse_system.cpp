@@ -26,6 +26,7 @@ namespace ffcore
         state.active_decay = 0.0;
         state.active_remaining = 0.0;
         state.suppression_remaining = 0.0;
+        state.had_control_suppression = false;
         state.preserve_navigation = false;
         state.stop_on_control_restore = false;
         state.feedback_enabled = true;
@@ -75,6 +76,7 @@ namespace ffcore
                     state.active_decay = state.pending.decay_per_second;
                     state.active_remaining = response.maximum_duration;
                     state.suppression_remaining = state.pending.control_suppression_seconds;
+                    state.had_control_suppression = state.suppression_remaining > 0.0;
                     state.preserve_navigation = state.pending.preserve_navigation;
                     state.stop_on_control_restore = state.pending.stop_on_control_restore;
                     state.feedback_enabled = state.pending.feedback_enabled;
@@ -128,16 +130,25 @@ namespace ffcore
         return state->second.suppression_remaining > 0.0 ? 0.0 : 1.0;
     }
 
-    bool ImpulseSystem::cancel_if_navigation_opposes(
+    bool ImpulseSystem::cancel_unless_navigation_agrees(
         AgentHandle handle, const Vec2 &navigation_velocity)
     {
         const auto state = states.find(key(handle));
         if (state == states.end() || state->second.preserve_navigation ||
             state->second.suppression_remaining > 0.0 ||
             state->second.active_velocity.is_zero() ||
-            navigation_velocity.is_zero() ||
             state->second.active_velocity.dot(navigation_velocity) > 0.0)
             return false;
+        // Only an impulse that actually suppressed control can hand it back. A
+        // nudge submitted without a suppression window never took control away, so
+        // it is left to decay instead of being cancelled before it has moved anything.
+        if (navigation_velocity.is_zero() && !state->second.had_control_suppression)
+            return false;
+        // A zero navigation velocity counts as disagreement, not as an exemption. An
+        // agent with no intent is not being helped by the shove either, so it ends the
+        // same way it would for a walking agent. Without this an idle or parked agent
+        // keeps sliding for the whole impulse lifetime while a walking one recovers
+        // the instant control returns - the same hit reading as two different rules.
         states.erase(state);
         return true;
     }
