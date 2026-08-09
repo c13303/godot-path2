@@ -41,10 +41,11 @@ func _ready() -> void:
 			setup(candidate, true)
 
 
-func setup(crowd_world: Node, automatic_step: bool = true) -> bool:
-	if crowd_world == null or not crowd_world.has_method(&"add_agent"):
+## Parameter is not named crowd_world: that is this class's own getter below.
+func setup(crowd_node: Node, automatic_step: bool = true) -> bool:
+	if crowd_node == null or not crowd_node.has_method(&"add_agent"):
 		return false
-	_crowd = crowd_world
+	_crowd = crowd_node
 	_automatic_step = automatic_step
 	_crowd.set(&"automatic_step", false)
 	# The original project movement owner stepped and synchronized agents during

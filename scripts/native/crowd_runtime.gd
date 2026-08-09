@@ -359,10 +359,11 @@ func release_agent_external_velocity(agent_handle: int, source_handle: int) -> v
 		_crowd.call(&"release_external_velocity", agent_handle, source_handle)
 
 
-## detach_flow is accepted and ignored, exactly as the pre-migration native
-## queue_smash_impulse did with it. See _apply_gameplay_effect for why it must not
-## drive preserve_navigation.
-func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, force: float, friction: float, falloff: float, detach_flow: bool, control_suppression: float, control_suppression_duration: float, ignored_agent_handle: int, category_mask: int, follow_offset: Vector2, damage: int) -> int:
+## _detach_flow is accepted and ignored, exactly as the pre-migration native
+## queue_smash_impulse did with it. Kept in the signature because FightSystem passes
+## it positionally from authored weapon data. See _apply_gameplay_effect for why it
+## must not drive preserve_navigation.
+func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, force: float, friction: float, falloff: float, _detach_flow: bool, control_suppression: float, control_suppression_duration: float, ignored_agent_handle: int, category_mask: int, follow_offset: Vector2, damage: int) -> int:
 	if _crowd == null:
 		return INVALID_HANDLE
 	var config: Dictionary = {

@@ -1403,7 +1403,12 @@ class ProjectileDrawer:
 		var n: int = tids.size()
 		# Pass 1: shadows (always on the floor, drawn first so sprites sit on top).
 		for i in range(n):
-			var v: Dictionary = visuals[tids[i]]
+			# Buckets are separate CanvasItems that redraw on their own schedule, so a
+			# type id can still outlive the cache entry it was gathered against. Skip
+			# rather than fault: a stale projectile simply misses one frame.
+			var v: Dictionary = visuals.get(tids[i], {}) as Dictionary
+			if v.is_empty():
+				continue
 			if not bool(v["shadow_enabled"]):
 				continue
 			var ground: Vector2 = grounds[i]
@@ -1419,7 +1424,9 @@ class ProjectileDrawer:
 		# Pass 2: sprites, lifted by altitude. Ordering comes from the CanvasItem's
 		# z band (ground Y), not this lifted position.
 		for i in range(n):
-			var v2: Dictionary = visuals[tids[i]]
+			var v2: Dictionary = visuals.get(tids[i], {}) as Dictionary
+			if v2.is_empty():
+				continue
 			var tex: Texture2D = v2["tex"] as Texture2D
 			if not tex:
 				continue
@@ -1452,6 +1459,13 @@ class ProjectileDrawer:
 	# Rebuild cached visual/shadow params per projectile type. Call only when gun
 	# definitions change (registration time), never per frame.
 	func rebuild_visual_cache() -> void:
+		# Re-registering guns mints brand-new projectile type ids, so every id already
+		# buffered for this frame's draw is now stale. Drop those lists here or the
+		# pending _draw looks them up in a cache that no longer has them.
+		_flat_tids.clear()
+		_flat_grounds.clear()
+		for band_key in _buckets_by_band.keys():
+			(_buckets_by_band[band_key] as Bucket).clear_items()
 		_visual_by_type.clear()
 		for gun_id in _gun_type_ids.keys():
 			var gun: GunData = _guns_by_id[gun_id] as GunData
