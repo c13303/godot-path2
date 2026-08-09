@@ -1368,15 +1368,20 @@ class ProjectileDrawer:
 	var _free_buckets: Array = []
 
 	# Flat fast-path scratch (z_order_enabled == false): reused, never reallocated.
-	var _flat_tids: PackedInt32Array = PackedInt32Array()
+	#
+	# These MUST stay 64-bit. CPathLib projectile type ids are generational handles
+	# encoded as (generation << 32) | index, so the very first one is 4294967297. A
+	# PackedInt32Array silently truncates that to the index alone, every _visual_by_type
+	# lookup then misses, and projectiles simulate correctly but never draw.
+	var _flat_tids: PackedInt64Array = PackedInt64Array()
 	var _flat_grounds: PackedVector2Array = PackedVector2Array()
 
 	class Bucket:
 		extends Node2D
 		# Parallel draw lists for this z band, refilled each frame. Using packed
 		# arrays (cleared, not reallocated) means the gather/draw loops perform no
-		# per-projectile heap allocation.
-		var tids: PackedInt32Array = PackedInt32Array()
+		# per-projectile heap allocation. 64-bit for the same reason as _flat_tids.
+		var tids: PackedInt64Array = PackedInt64Array()
 		var grounds: PackedVector2Array = PackedVector2Array()
 		var drawer_ref: Node  # back-ref to drawer for cached params
 
@@ -1399,13 +1404,17 @@ class ProjectileDrawer:
 
 	# Shared batched paint for one CanvasItem: shadows first (floor), then sprites
 	# lifted by altitude. Used by both the per-Y buckets and the flat fast path.
-	static func paint_batch(ci: CanvasItem, visuals: Dictionary, tids: PackedInt32Array, grounds: PackedVector2Array) -> void:
+	static func paint_batch(ci: CanvasItem, visuals: Dictionary, tids: PackedInt64Array, grounds: PackedVector2Array) -> void:
 		var n: int = tids.size()
 		# Pass 1: shadows (always on the floor, drawn first so sprites sit on top).
 		for i in range(n):
 			# Buckets are separate CanvasItems that redraw on their own schedule, so a
 			# type id can still outlive the cache entry it was gathered against. Skip
 			# rather than fault: a stale projectile simply misses one frame.
+			#
+			# This only covers that one-frame race. If a type id misses *persistently*
+			# the projectiles are invisible rather than erroring, so suspect the
+			# registration or the id's storage width before trusting this guard.
 			var v: Dictionary = visuals.get(tids[i], {}) as Dictionary
 			if v.is_empty():
 				continue

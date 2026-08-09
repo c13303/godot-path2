@@ -1012,18 +1012,22 @@ namespace ffcore
                 ? agent->profile.acceleration : agent->profile.deceleration;
             agent->velocity = approach(agent->velocity, desired_velocity, rate * delta);
 
+            // Freezing and pausing suppress the agent's *own* navigation. They must not
+            // swallow force-owned motion: an agent waiting on a flow, or parked by the
+            // consumer, is still a physical body and stays shovable. Only force
+            // isolation (forces_enabled) or an explicit pause policy stops that.
+            const bool navigation_owned_motion = !hard_freeze && !agent->paused;
+            const bool force_owned_motion = agent->forces_enabled &&
+                (!agent->paused || agent->allow_impulses_while_paused);
             Vec2 total_velocity;
-            if (!hard_freeze && (!agent->paused || agent->allow_impulses_while_paused))
+            if (navigation_owned_motion)
+                total_velocity = agent->velocity;
+            if (force_owned_motion)
             {
-                if (!agent->paused)
-                    total_velocity = agent->velocity;
-                if (agent->forces_enabled)
-                {
-                    total_velocity = blend_impulse_with_navigation(
-                        impulses.velocity(handle), total_velocity);
-                    if (!agent->paused)
-                        total_velocity += agent->external_velocity.current_velocity();
-                }
+                total_velocity = blend_impulse_with_navigation(
+                    impulses.velocity(handle), total_velocity);
+                if (navigation_owned_motion)
+                    total_velocity += agent->external_velocity.current_velocity();
             }
             const Vec2 resolved = resolve_motion(
                 *agent,

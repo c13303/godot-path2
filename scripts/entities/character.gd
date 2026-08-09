@@ -273,6 +273,12 @@ func _update_directional_facing(delta: float) -> void:
 	)
 	if not needs_facing:
 		return
+	# Facing follows intent, not displacement. While an impulse owns the motion the
+	# agent is being thrown, not walking, so hold the last chosen facing instead of
+	# turning to look along the shove. It resumes facing normally the moment it gets
+	# control back and walks off under its own power.
+	if _is_propelled:
+		return
 	var direction: Vector2 = global_position - _last_facing_position
 	if not _facing_state.face_direction(direction, delta):
 		return
