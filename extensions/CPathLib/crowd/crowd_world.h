@@ -22,6 +22,7 @@ namespace ffcore
     {
         CrowdAgentProfile default_agent_profile;
         CrowdInteractionConfig interactions;
+        ImpulseResponseConfig impulse_response;
         double static_obstacle_query_padding = 0.0;
         double static_obstacle_repulsion_strength = 1.0;
         bool automatic_bottleneck_gating = true;
@@ -57,6 +58,7 @@ namespace ffcore
         double maximum_query_shape_radius = 0.0;
 
         static Vec2 approach(const Vec2 &current, const Vec2 &target, double maximum_change);
+        static Vec2 blend_impulse_with_navigation(const Vec2 &impulse, const Vec2 &navigation);
         static std::uint64_t key(AgentHandle handle);
         static std::uint64_t key(FlowHandle handle);
         const FlowField *flow_for(const CrowdAgentState &agent) const;
@@ -145,7 +147,10 @@ namespace ffcore
         bool set_forces_enabled(AgentHandle handle, bool enabled);
         bool set_continue_at_flow_goal(AgentHandle handle, bool enabled);
         void clear_agent_forces(AgentHandle handle);
+        bool agent_has_flow(AgentHandle handle) const;
+        bool agent_flow_ready(AgentHandle handle) const;
         bool is_impulse_active(AgentHandle handle) const { return impulses.active(handle); }
+        Vec2 impulse_velocity(AgentHandle handle) const { return impulses.velocity(handle); }
         double impulse_suppression_remaining(AgentHandle handle) const
         { return impulses.suppression_remaining(handle); }
         bool impulse_feedback_enabled(AgentHandle handle) const

@@ -36,6 +36,16 @@ namespace godot
         crowd.set_config(config);
     }
 
+    void CrowdWorld2D::configure_impulse_response(
+        double speed_cap, double maximum_duration, double minimum_speed)
+    {
+        ffcore::CrowdWorldConfig config = crowd.get_config();
+        config.impulse_response.speed_cap = speed_cap;
+        config.impulse_response.maximum_duration = maximum_duration;
+        config.impulse_response.minimum_speed = minimum_speed;
+        crowd.set_config(config);
+    }
+
     void CrowdWorld2D::apply_impulse(
         std::int64_t agent_handle, Vector2 velocity, double delay,
         double decay_per_second, double control_suppression_seconds,

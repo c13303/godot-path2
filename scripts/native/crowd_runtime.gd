@@ -11,24 +11,35 @@ const GAMEPLAY_IMPULSE_PRIORITY: int = 100
 @export var crowd_path: NodePath = NodePath("../CrowdWorld")
 @export var registry_path: NodePath = NodePath("../AgentRegistry")
 @export var navigation_path: NodePath = NodePath("../NavigationRuntime/World")
+@export var debug_labels_path: NodePath = NodePath("../AgentDebugLabels")
 
 var _crowd: Node
 var _registry: AgentHandleRegistry
 var _navigation: Node
+var _debug_labels: AgentDebugLabelController
+var _config: NativeSimulationConfig
 var _obstacle_handles: Dictionary = {}
 var _directional_handles: Dictionary = {}
 var _directional_field_by_phase: Dictionary = {}
 var _effect_configs: Dictionary = {}
 var _damage_events: Array = []
-var _debug_values: Dictionary = {}
+var _debug_enabled: bool = false
+var _debug_agent_labels: bool = false
+var _debug_disable_bottlenecks: bool = false
+var _debug_redraw_interval: float = 0.2
 
 
 func _ready() -> void:
 	_crowd = get_node_or_null(crowd_path)
 	_registry = get_node_or_null(registry_path) as AgentHandleRegistry
 	_navigation = get_node_or_null(navigation_path)
-	var config: NativeSimulationConfig = NativeSimulationConfig.new()
-	config.apply_to_crowd(_crowd)
+	_debug_labels = get_node_or_null(debug_labels_path) as AgentDebugLabelController
+	_config = NativeSimulationConfig.new()
+	_config.apply_to_crowd(_crowd)
+	# CppDebugOptions may push its flags before this node resolves its references,
+	# so replay whatever was recorded instead of losing it.
+	_apply_bottleneck_gating()
+	_apply_debug_labels()
 	set_process(true)
 
 
@@ -340,6 +351,9 @@ func release_agent_external_velocity(agent_handle: int, source_handle: int) -> v
 		_crowd.call(&"release_external_velocity", agent_handle, source_handle)
 
 
+## detach_flow is accepted and ignored, exactly as the pre-migration native
+## queue_smash_impulse did with it. See _apply_gameplay_effect for why it must not
+## drive preserve_navigation.
 func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_degrees: float, duration: float, force: float, friction: float, falloff: float, detach_flow: bool, control_suppression: float, control_suppression_duration: float, ignored_agent_handle: int, category_mask: int, follow_offset: Vector2, damage: int) -> int:
 	if _crowd == null:
 		return INVALID_HANDLE
@@ -366,7 +380,7 @@ func spawn_aoe_zone(position: Vector2, direction: Vector2, radius: float, angle_
 			"direction": direction.normalized(),
 			"radial": angle_degrees >= 359.9,
 			"force": force, "decay": maxf(friction, 0.0),
-			"falloff": falloff, "preserve_navigation": not detach_flow,
+			"falloff": falloff, "preserve_navigation": false,
 			"control_suppression": control_suppression_duration if control_suppression > 0.0 else 0.0,
 			"damage": damage,
 		}
@@ -390,7 +404,7 @@ func apply_projectile_effect(impact: Dictionary, config: Dictionary) -> void:
 			"force": float(config.get("smash_force", 0.0)),
 			"decay": float(config.get("smash_friction_loss", 0.0)),
 			"falloff": float(config.get("smash_falloff", 0.0)),
-			"preserve_navigation": not bool(config.get("smash_detach_flow", false)),
+			"preserve_navigation": false,
 			"control_suppression": float(config.get("smash_control_suppression_duration", 0.0)) if float(config.get("smash_control_suppression", 0.0)) > 0.0 else 0.0,
 			"damage": int(config.get("damage", 0)),
 			"radius": radius,
@@ -500,13 +514,29 @@ func get_agent_debug_snapshot(agent_handle: int) -> Dictionary:
 		return {}
 	var state: Dictionary = _registry.get_project_state(agent_handle) if _registry != null else {}
 	result.merge(state, true)
-	result["group"] = _registry.cohort_for_agent(agent_handle) if _registry != null else 0
-	result["waiting_flow_group"] = int(state.get("waiting_flow_cohort", 0))
+	var cohort: int = _registry.cohort_for_agent(agent_handle) if _registry != null else 0
+	var waiting_cohort: int = int(state.get("waiting_flow_cohort", 0))
+	result["group"] = cohort
+	result["waiting_flow_group"] = waiting_cohort
+	# Whether the agent's routing flow is still being built. The cohort it is waiting
+	# on wins over its current one, matching how NavigationFlowCoordinator reassigns.
+	var flow_wait_cohort: int = waiting_cohort if waiting_cohort != 0 else cohort
+	result["flow_wait"] = _registry.get_group_flow_wait(flow_wait_cohort) \
+		if _registry != null else 0
 	result["path_active"] = int(result.get("navigation_source", 0)) == 2
 	result["path_arrived"] = int(result.get("route_progress", 0)) == 2
 	return result
 
 
+## preserve_navigation defaults to false and every weapon path passes false.
+##
+## It is the successor of the old smash_preserves_control, not of detach_flow: it
+## turns off BOTH the control-suppression window and the rule that cancels an impulse
+## once the agent regains control and its route opposes the shove. A weapon smash
+## needs both. Mapping it from detach_flow left sprayed agents shoved for the whole
+## impulse lifetime instead of recovering the moment they got control back.
+## Only navigation-preserving nudges (contact push, right of way — all native) may
+## set it, and those already do.
 func _apply_gameplay_effect(agent_handle: int, origin: Vector2, config: Dictionary) -> void:
 	if agent_handle == INVALID_HANDLE or _crowd == null:
 		return
@@ -526,7 +556,7 @@ func _apply_gameplay_effect(agent_handle: int, origin: Vector2, config: Dictiona
 	var attenuation: float = pow(maxf(0.0, 1.0 - distance / radius), maxf(float(config.get("falloff", 0.0)), 0.0))
 	var force: float = maxf(float(config.get("force", 0.0)), 0.0) * attenuation
 	if force > 0.0:
-		_crowd.call(&"apply_impulse", agent_handle, direction * force, 0.0, maxf(float(config.get("decay", 0.0)), 0.0), maxf(float(config.get("control_suppression", 0.0)), 0.0), bool(config.get("preserve_navigation", true)), GAMEPLAY_IMPULSE_PRIORITY, true)
+		_crowd.call(&"apply_impulse", agent_handle, direction * force, 0.0, maxf(float(config.get("decay", 0.0)), 0.0), maxf(float(config.get("control_suppression", 0.0)), 0.0), bool(config.get("preserve_navigation", false)), GAMEPLAY_IMPULSE_PRIORITY, true)
 	var damage: int = int(config.get("damage", 0))
 	if damage > 0:
 		_damage_events.append({"agent_id": agent_handle, "damage": damage, "position": position})
@@ -563,15 +593,50 @@ func _category_for_node(node: Node2D) -> int:
 	return 2
 
 
-func _set_debug_value(key: StringName, value: Variant) -> void:
-	_debug_values[key] = value
+# Debug toggles pushed by CppDebugOptions. CPathLib reports state but never draws,
+# so the visuals it used to render in C++ are project-owned now:
+# agent state labels live in AgentDebugLabelController. Hitbox, bottleneck-zone and
+# flow-field overlays have no owner yet — CppDebugOptions still exports those flags,
+# and _call_if_available simply skips them until an overlay claims them.
+
+func set_debug_disable_all_debug(value: bool) -> void:
+	_debug_enabled = not value
+	_apply_debug_labels()
 
 
-func set_debug_disable_all_debug(value: bool) -> void: _set_debug_value(&"disable_all", value)
-func set_debug_draw_world_hitbox(value: bool) -> void: _set_debug_value(&"world_hitbox", value)
-func set_debug_draw_fight_hitbox(value: bool) -> void: _set_debug_value(&"fight_hitbox", value)
-func set_debug_draw_bottleneck_zones(value: bool) -> void: _set_debug_value(&"bottleneck_zones", value)
-func set_debug_disable_bottlenecks(value: bool) -> void: _set_debug_value(&"disable_bottlenecks", value)
-func set_debug_show_agent_state_labels(value: bool) -> void: _set_debug_value(&"agent_labels", value)
-func set_debug_redraw_interval(value: float) -> void: _set_debug_value(&"redraw_interval", value)
-func set_debug_static_obstacles(value: bool) -> void: _set_debug_value(&"static_obstacles", value)
+func set_debug_show_agent_state_labels(value: bool) -> void:
+	_debug_agent_labels = value
+	_apply_debug_labels()
+
+
+func set_debug_redraw_interval(value: float) -> void:
+	_debug_redraw_interval = value
+	if _debug_labels != null:
+		_debug_labels.set_refresh_interval(value)
+
+
+func set_debug_disable_bottlenecks(value: bool) -> void:
+	if value == _debug_disable_bottlenecks:
+		return
+	_debug_disable_bottlenecks = value
+	_apply_bottleneck_gating()
+
+
+func _apply_debug_labels() -> void:
+	if _debug_labels == null:
+		return
+	_debug_labels.set_refresh_interval(_debug_redraw_interval)
+	_debug_labels.set_enabled(_debug_enabled and _debug_agent_labels)
+
+
+func _apply_bottleneck_gating() -> void:
+	if _crowd == null or _config == null:
+		return
+	_crowd.call(
+		&"configure_navigation_behavior",
+		_config.automatic_bottleneck_gating and not _debug_disable_bottlenecks,
+		_config.bottleneck_wait_speed_ratio, _config.flow_goal_stop_delay,
+		_config.flow_goal_group_delay, _config.flow_goal_slow_speed_ratio,
+		_config.zero_flow_retry_seconds, _config.zero_flow_recovery_speed_ratio,
+		_config.blocked_motion_retry_seconds
+	)

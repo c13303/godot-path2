@@ -19,6 +19,15 @@ namespace ffcore
         int priority = 0;
     };
 
+    /// Bounds every active impulse so a slow decay rate cannot leave an agent
+    /// permanently displaced. Zero disables the corresponding bound.
+    struct ImpulseResponseConfig
+    {
+        double speed_cap = 0.0;        // maximum magnitude accepted by apply()
+        double maximum_duration = 0.0; // seconds an impulse may stay active
+        double minimum_speed = 0.0;    // below this the impulse ends immediately
+    };
+
     class ImpulseSystem
     {
     private:
@@ -28,6 +37,7 @@ namespace ffcore
             bool has_pending = false;
             Vec2 active_velocity;
             double active_decay = 0.0;
+            double active_remaining = 0.0;
             double suppression_remaining = 0.0;
             bool preserve_navigation = false;
             bool stop_on_control_restore = false;
@@ -36,9 +46,13 @@ namespace ffcore
         };
 
         std::unordered_map<std::uint64_t, State> states;
+        ImpulseResponseConfig response;
         static std::uint64_t key(AgentHandle handle);
+        void end_active_impulse(State &state) const;
 
     public:
+        void set_response_config(const ImpulseResponseConfig &config);
+        const ImpulseResponseConfig &get_response_config() const { return response; }
         void apply(AgentHandle handle, const ImpulseRequest &request);
         void remove(AgentHandle handle);
         void update(double delta);

@@ -141,6 +141,13 @@ func find_node(agent_handle: int) -> Node2D:
 	return value as Node2D
 
 
+func registered_handles() -> PackedInt64Array:
+	var handles: PackedInt64Array = PackedInt64Array()
+	for raw_handle: Variant in _nodes_by_handle:
+		handles.append(int(raw_handle))
+	return handles
+
+
 func handle_for_node(node: Node) -> int:
 	if node == null:
 		return INVALID_HANDLE

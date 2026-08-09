@@ -100,6 +100,8 @@ namespace godot
             bool contact_push_enabled, bool right_of_way_enabled,
             double right_of_way_push_speed, double right_of_way_cooldown,
             double right_of_way_control_suppression);
+        void configure_impulse_response(
+            double speed_cap, double maximum_duration, double minimum_speed);
         std::int64_t create_cohort();
         bool remove_cohort(std::int64_t cohort_handle);
         bool assign_agent_to_cohort(std::int64_t agent_handle, std::int64_t cohort_handle);

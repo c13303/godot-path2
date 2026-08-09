@@ -35,6 +35,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_agent_contact_profile", "agent_handle", "push_strength", "resistance", "cooldown", "impulse_decay", "control_suppression", "feedback_enabled"), &CrowdWorld2D::set_agent_contact_profile, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("set_agent_traffic_state", "agent_handle", "group_token", "priority"), &CrowdWorld2D::set_agent_traffic_state);
         ClassDB::bind_method(D_METHOD("configure_agent_interactions", "contact_push_enabled", "right_of_way_enabled", "right_of_way_push_speed", "right_of_way_cooldown", "right_of_way_control_suppression"), &CrowdWorld2D::configure_agent_interactions);
+        ClassDB::bind_method(D_METHOD("configure_impulse_response", "speed_cap", "maximum_duration", "minimum_speed"), &CrowdWorld2D::configure_impulse_response);
         ClassDB::bind_method(D_METHOD("create_cohort"), &CrowdWorld2D::create_cohort);
         ClassDB::bind_method(D_METHOD("remove_cohort", "cohort_handle"), &CrowdWorld2D::remove_cohort);
         ClassDB::bind_method(D_METHOD("assign_agent_to_cohort", "agent_handle", "cohort_handle"), &CrowdWorld2D::assign_agent_to_cohort);

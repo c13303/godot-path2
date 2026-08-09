@@ -51,6 +51,23 @@ namespace ffcore
             ? std::clamp(config.zero_flow_recovery_speed_ratio, 0.0, 1.0) : 0.25;
         config.blocked_motion_retry_seconds = std::isfinite(config.blocked_motion_retry_seconds)
             ? std::max(0.0, config.blocked_motion_retry_seconds) : 0.6;
+        impulses.set_response_config(config.impulse_response);
+        config.impulse_response = impulses.get_response_config();
+    }
+
+    Vec2 CrowdWorld::blend_impulse_with_navigation(const Vec2 &impulse, const Vec2 &navigation)
+    {
+        if (impulse.is_zero())
+            return navigation;
+        // Impulse and navigation share one speed budget rather than stacking. A knockback
+        // therefore overrides movement while it is strong and fades back into it as it
+        // decays, instead of adding a residual drift the agent can never walk off.
+        const Vec2 combined = impulse + navigation;
+        const double combined_speed = combined.length();
+        const double budget = std::max(impulse.length(), navigation.length());
+        if (combined_speed <= budget || combined_speed <= 1e-6)
+            return combined;
+        return combined * (budget / combined_speed);
     }
 
     ProfileHandle CrowdWorld::create_profile(const CrowdAgentProfile &profile)
@@ -556,6 +573,21 @@ namespace ffcore
         return existing == installed_flows.end() ? nullptr : &existing->second;
     }
 
+    bool CrowdWorld::agent_has_flow(AgentHandle handle) const
+    {
+        const CrowdAgentState *agent = agents.get(handle);
+        return agent != nullptr && flow_for(*agent) != nullptr;
+    }
+
+    bool CrowdWorld::agent_flow_ready(AgentHandle handle) const
+    {
+        const CrowdAgentState *agent = agents.get(handle);
+        if (agent == nullptr)
+            return false;
+        const FlowField *flow = flow_for(*agent);
+        return flow != nullptr && flow->is_ready();
+    }
+
     bool CrowdWorld::is_collision_shape_passable(
         const CrowdAgentState &agent, const Vec2 &position,
         const FlowField *flow) const
@@ -946,7 +978,8 @@ namespace ffcore
                     total_velocity = agent->velocity;
                 if (agent->forces_enabled)
                 {
-                    total_velocity += impulses.velocity(handle);
+                    total_velocity = blend_impulse_with_navigation(
+                        impulses.velocity(handle), total_velocity);
                     if (!agent->paused)
                         total_velocity += agent->external_velocity.current_velocity();
                 }

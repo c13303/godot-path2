@@ -64,6 +64,7 @@
 [ext_resource type="Script" path="res://scripts/native/navigation_runtime.gd" id="67_navigation_runtime"]
 [ext_resource type="Script" path="res://scripts/native/crowd_runtime.gd" id="68_crowd_runtime"]
 [ext_resource type="Script" path="res://scripts/native/projectile_runtime.gd" id="69_projectile_runtime"]
+[ext_resource type="Script" path="res://scripts/native/agent_debug_label_controller.gd" id="70_agent_debug_labels"]
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_wateranim"]
 texture = ExtResource("47_wateranim")
@@ -764,6 +765,9 @@ center_pull = 5.0
 
 [node name="CrowdRuntime" type="Node" parent="CPP" unique_id=1185593092]
 script = ExtResource("68_crowd_runtime")
+
+[node name="AgentDebugLabels" type="Node" parent="CPP" unique_id=1185593095]
+script = ExtResource("70_agent_debug_labels")
 
 [node name="AgentRegistry" type="Node" parent="CPP" unique_id=1027504485]
 script = ExtResource("66_agent_registry")

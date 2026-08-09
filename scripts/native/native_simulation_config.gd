@@ -39,7 +39,11 @@ class_name NativeSimulationConfig
 @export_group("Gameplay Forces")
 @export_range(0.0, 5000.0, 1.0) var impulse_speed_cap: float = 500.0
 @export_range(0.0, 1.0, 0.01) var impulse_decay: float = 0.91
-@export_range(0.0, 20.0, 0.1) var impulse_feedback_duration: float = 8.0
+## Hard lifetime of an active impulse. Together with impulse_minimum_speed this is what
+## returns a knocked-back agent to its own navigation; decay alone can trail on for
+## minutes at a gentle loss rate.
+@export_range(0.0, 20.0, 0.1) var impulse_maximum_duration: float = 8.0
+@export_range(0.0, 100.0, 0.01) var impulse_minimum_speed: float = 0.2
 @export_range(0.0, 10.0, 0.05) var radial_falloff_exponent: float = 0.1
 
 @export_group("Diagnostics")
@@ -92,6 +96,11 @@ func apply_to_crowd(crowd_world: Node) -> bool:
 		right_of_way_enabled, right_of_way_push_speed,
 		right_of_way_cooldown, right_of_way_control_suppression
 	)
+	if crowd_world.has_method(&"configure_impulse_response"):
+		crowd_world.call(
+			&"configure_impulse_response", impulse_speed_cap,
+			impulse_maximum_duration, impulse_minimum_speed
+		)
 	crowd_world.call(
 		&"configure_navigation_behavior", automatic_bottleneck_gating,
 		bottleneck_wait_speed_ratio, flow_goal_stop_delay,

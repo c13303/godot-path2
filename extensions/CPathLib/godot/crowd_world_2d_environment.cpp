@@ -175,7 +175,22 @@ namespace godot
         result["forces_enabled"] = agent->forces_enabled;
         result["continue_at_flow_goal"] = agent->continue_at_flow_goal;
         result["bottleneck_waiting"] = agent->bottleneck_waiting;
+        result["completed_bottleneck"] = agent->completed_bottleneck;
+        result["manual_direction"] = Vector2(
+            agent->manual_direction.x, agent->manual_direction.y);
+        result["path_index"] = static_cast<std::int64_t>(agent->path_index);
+        result["path_length"] = static_cast<std::int64_t>(agent->path.size());
+        // Transients the motion loop uses to decide whether an agent is travelling,
+        // waiting or recovering. Without them a caller cannot tell those apart.
+        result["has_flow"] = crowd.agent_has_flow(decode_handle(agent_handle));
+        result["flow_ready"] = crowd.agent_flow_ready(decode_handle(agent_handle));
+        result["flow_goal_timer"] = agent->flow_goal_timer;
+        result["zero_flow_recovery_active"] = agent->zero_flow_retry_started;
+        result["zero_flow_recovery_remaining"] = agent->zero_flow_retry_remaining;
+        result["blocked_motion_seconds"] = agent->blocked_motion_seconds;
         result["impulse_active"] = crowd.is_impulse_active(decode_handle(agent_handle));
+        const ffcore::Vec2 impulse = crowd.impulse_velocity(decode_handle(agent_handle));
+        result["impulse_velocity"] = Vector2(impulse.x, impulse.y);
         result["impulse_control_suppression_remaining"] =
             crowd.impulse_suppression_remaining(decode_handle(agent_handle));
         result["radius"] = agent->profile.radius;

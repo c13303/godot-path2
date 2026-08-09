@@ -10,6 +10,27 @@ namespace ffcore
         return (static_cast<std::uint64_t>(handle.generation) << 32) | handle.index;
     }
 
+    void ImpulseSystem::set_response_config(const ImpulseResponseConfig &config)
+    {
+        response.speed_cap = std::isfinite(config.speed_cap)
+            ? std::max(0.0, config.speed_cap) : 0.0;
+        response.maximum_duration = std::isfinite(config.maximum_duration)
+            ? std::max(0.0, config.maximum_duration) : 0.0;
+        response.minimum_speed = std::isfinite(config.minimum_speed)
+            ? std::max(0.0, config.minimum_speed) : 0.0;
+    }
+
+    void ImpulseSystem::end_active_impulse(State &state) const
+    {
+        state.active_velocity = {};
+        state.active_decay = 0.0;
+        state.active_remaining = 0.0;
+        state.suppression_remaining = 0.0;
+        state.preserve_navigation = false;
+        state.stop_on_control_restore = false;
+        state.feedback_enabled = true;
+    }
+
     void ImpulseSystem::apply(AgentHandle handle, const ImpulseRequest &requested)
     {
         if (!handle.is_valid() || !std::isfinite(requested.velocity.x) || !std::isfinite(requested.velocity.y))
@@ -18,6 +39,11 @@ namespace ffcore
         if ((state.has_pending || !state.active_velocity.is_zero()) && requested.priority < state.priority)
             return;
         state.pending = requested;
+        // A single impulse may not exceed the configured launch speed, so one heavy hit
+        // and a burst of light ones settle into the same recovery window.
+        const double requested_speed = state.pending.velocity.length();
+        if (response.speed_cap > 0.0 && requested_speed > response.speed_cap)
+            state.pending.velocity = state.pending.velocity * (response.speed_cap / requested_speed);
         state.pending.delay = std::isfinite(requested.delay) ? std::max(0.0, requested.delay) : 0.0;
         state.pending.decay_per_second = std::isfinite(requested.decay_per_second)
             ? std::max(0.0, requested.decay_per_second) : 4.0;
@@ -47,6 +73,7 @@ namespace ffcore
                 {
                     state.active_velocity = state.pending.velocity;
                     state.active_decay = state.pending.decay_per_second;
+                    state.active_remaining = response.maximum_duration;
                     state.suppression_remaining = state.pending.control_suppression_seconds;
                     state.preserve_navigation = state.pending.preserve_navigation;
                     state.stop_on_control_restore = state.pending.stop_on_control_restore;
@@ -59,13 +86,24 @@ namespace ffcore
             state.suppression_remaining = std::max(0.0, state.suppression_remaining - delta);
             if (state.stop_on_control_restore && previous_suppression > 0.0 &&
                 state.suppression_remaining <= 0.0)
-                state.active_velocity = {};
-            if (!activated_this_update)
+                end_active_impulse(state);
+            if (!activated_this_update && !state.active_velocity.is_zero())
             {
                 const double loss = std::clamp(state.active_decay, 0.0, 1.0);
                 const double multiplier = loss >= 1.0
                     ? 0.0 : std::pow(1.0 - loss, delta);
                 state.active_velocity = state.active_velocity * multiplier;
+                // Decay alone can trail on for minutes at a gentle loss rate. The
+                // lifetime and the residual-speed floor are what actually hand the
+                // agent back to its own navigation.
+                if (response.maximum_duration > 0.0)
+                {
+                    state.active_remaining = std::max(0.0, state.active_remaining - delta);
+                    if (state.active_remaining <= 0.0)
+                        end_active_impulse(state);
+                }
+                if (state.active_velocity.length() < response.minimum_speed)
+                    end_active_impulse(state);
             }
             if (state.active_velocity.length_squared() < 1e-8)
                 state.active_velocity = {};
