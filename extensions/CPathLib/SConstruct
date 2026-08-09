@@ -14,11 +14,44 @@ target = ARGUMENTS.get("target", "template_debug")
 use_mingw = ARGUMENTS.get("use_mingw", "yes")
 
 
+def find_mingw_tool(name):
+    """Locate a MinGW tool without assuming an MSYS2 shell.
+
+    `/mingw64/...` only resolves inside an MSYS2 shell, so hardcoding it breaks the
+    build from Git Bash, cmd, or CI. Prefer an explicit `mingw_bin=` argument, then
+    the usual install locations, and fall back to PATH.
+    """
+    explicit = ARGUMENTS.get("mingw_bin", "")
+    candidates = []
+    if explicit:
+        candidates.append(os.path.join(explicit, name + ".exe"))
+        candidates.append(os.path.join(explicit, name))
+    candidates += [
+        "/mingw64/bin/" + name,
+        "C:/msys64/mingw64/bin/" + name + ".exe",
+        "C:/mingw64/bin/" + name + ".exe",
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return norm(candidate)
+    return name
+
+
 def make_environment():
     if use_mingw == "yes":
+        compiler = find_mingw_tool("g++")
         environment = Environment(
-            tools=["mingw"], CXX="/mingw64/bin/g++", CC="/mingw64/bin/gcc")
+            tools=["mingw"],
+            CXX=compiler,
+            CC=find_mingw_tool("gcc"))
         environment.Append(CXXFLAGS=["-std=c++17"])
+        # g++.exe loads its runtime DLLs from its own directory. SCons runs commands
+        # with a minimal environment, so without this the compiler starts and dies
+        # with no diagnostic unless the caller's shell already had it on PATH.
+        compiler_dir = os.path.dirname(compiler)
+        if compiler_dir:
+            environment["ENV"]["PATH"] = (
+                norm(compiler_dir) + os.pathsep + environment["ENV"].get("PATH", ""))
     else:
         environment = Environment(tools=["default", "msvc"])
         environment.Append(CXXFLAGS=["/std:c++17", "/Zc:__cplusplus"])
@@ -69,8 +102,11 @@ test_env.Append(CPPPATH=[norm(root)], CPPDEFINES=["NOMINMAX"])
 
 
 def test_object(source):
-    return test_env.Object(
-        target="build/tests/" + source[:-len(".cpp")] + ".o", source=source)
+    target = "build/tests/" + source[:-len(".cpp")] + ".o"
+    # g++ will not create the output directory, and SCons does not do it for an
+    # explicitly named Object target, so make it here.
+    os.makedirs(os.path.dirname(os.path.join(root, target)), exist_ok=True)
+    return test_env.Object(target=target, source=source)
 
 
 test_objects = [test_object(source) for source in portable_sources]

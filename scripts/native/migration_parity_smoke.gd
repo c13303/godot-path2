@@ -57,10 +57,10 @@ var _failed: bool = false
 
 func _initialize() -> void:
 	_check_configuration_reaches_the_world()
-	_check_weapon_impulse_releases_the_agent()
-	_check_impulse_respects_its_lifetime()
-	_check_separation_does_not_scale_with_crowd_size()
-	_check_debug_flags_are_wired()
+	await _check_weapon_impulse_releases_the_agent()
+	await _check_impulse_respects_its_lifetime()
+	await _check_separation_does_not_scale_with_crowd_size()
+	await _check_debug_flags_are_wired()
 	if _failed:
 		quit(1)
 		return
@@ -111,7 +111,7 @@ func _check_configuration_reaches_the_world() -> void:
 # stayed shoved for the whole impulse lifetime instead of walking it off.
 # ---------------------------------------------------------------------------
 func _check_weapon_impulse_releases_the_agent() -> void:
-	var fixture: Dictionary = _make_runtime_fixture()
+	var fixture: Dictionary = await _make_runtime_fixture()
 	if fixture.is_empty():
 		return
 	var crowd: Node = fixture["crowd"] as Node
@@ -159,7 +159,7 @@ func _check_weapon_impulse_releases_the_agent() -> void:
 # residual-speed floor - so a gentle decay rate left an agent drifting for minutes.
 # ---------------------------------------------------------------------------
 func _check_impulse_respects_its_lifetime() -> void:
-	var fixture: Dictionary = _make_runtime_fixture()
+	var fixture: Dictionary = await _make_runtime_fixture()
 	if fixture.is_empty():
 		return
 	var crowd: Node = fixture["crowd"] as Node
@@ -202,8 +202,8 @@ func _check_impulse_respects_its_lifetime() -> void:
 # geometry cannot drift and make the comparison noisy.
 # ---------------------------------------------------------------------------
 func _check_separation_does_not_scale_with_crowd_size() -> void:
-	var few: Variant = _steering_angle_under_crowd_pressure(2)
-	var many: Variant = _steering_angle_under_crowd_pressure(6)
+	var few: Variant = await _steering_angle_under_crowd_pressure(2)
+	var many: Variant = await _steering_angle_under_crowd_pressure(6)
 	if few == null or many == null:
 		return
 	var difference: float = absf(float(few) - float(many))
@@ -213,7 +213,7 @@ func _check_separation_does_not_scale_with_crowd_size() -> void:
 
 
 func _steering_angle_under_crowd_pressure(neighbor_count: int) -> Variant:
-	var fixture: Dictionary = _make_runtime_fixture()
+	var fixture: Dictionary = await _make_runtime_fixture()
 	if fixture.is_empty():
 		return null
 	var crowd: Node = fixture["crowd"] as Node
@@ -253,7 +253,7 @@ func _steering_angle_under_crowd_pressure(neighbor_count: int) -> Variant:
 # read, so the whole debug layer was inert while still looking wired.
 # ---------------------------------------------------------------------------
 func _check_debug_flags_are_wired() -> void:
-	var fixture: Dictionary = _make_runtime_fixture()
+	var fixture: Dictionary = await _make_runtime_fixture()
 	if fixture.is_empty():
 		return
 	var runtime: Node = fixture["runtime"] as Node
@@ -321,6 +321,11 @@ func _make_runtime_fixture() -> Dictionary:
 	host.add_child(actor)
 
 	root.add_child(host)
+	# _ready does not fire for nodes attached during SceneTree._initialize; the tree
+	# runs it on the first frame. CrowdRuntime resolves its crowd, registry and label
+	# controller there, so without this wait its references are all null and every
+	# check that goes through it reports a false failure.
+	await process_frame
 	if not registry.setup(crowd, false):
 		_fail("registry setup failed")
 		host.queue_free()

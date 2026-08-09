@@ -55,17 +55,42 @@ standalone-repository checklist.
 
 ## Remaining
 
-0. **Verify.** Nothing since the parity work has been compiled or run — including the SConstruct
-   that `run.sh` now depends on. `./check.sh` is the gate for everything below.
 1. **Add a LICENSE.**
 2. **Extract.** Copy `extensions/CPathLib` to its own private repository and consume it back here as
    a pinned submodule at the same path. `demo/navigation_demo.tscn` hardcodes its script path in an
    `ext_resource`; scene files cannot use relative paths, so that stays a known one-line edit when
    the folder moves. Confirm with `check.sh` plus a normal day/night pass.
 
-Done since the last review: the `godot-cpp` revision is recorded in the README, and the
-navigation-area API no longer requires a consumer to say "garden" (the `garden_*` names remain a
-complete alias set, checked by the parity smoke).
+Done since the last review: the `godot-cpp` revision is recorded in the README; the navigation-area
+API no longer requires a consumer to say "garden" (the `garden_*` names remain a complete alias set,
+checked by the parity smoke); and **`check.sh` passes end to end**, verified over three consecutive
+runs. That run also turned up four defects, listed below, all fixed.
+
+### Found by the first real run of the checks
+
+| Defect | Cause |
+| --- | --- |
+| Test objects would not compile | `g++` will not create its output directory and SCons does not do it for an explicitly named `Object()` target |
+| Build worked only from an MSYS2 shell | `SConstruct` hardcoded `/mingw64/bin/g++`, a path that exists only inside that shell |
+| Compiler started and died silently | SCons runs commands with a minimal environment, so `g++.exe` could not find its own runtime DLLs |
+| Every headless smoke touching `CrowdRuntime` failed to compile | `AgentDebugLabelController` read `FlowAgent.PHASE_*`, pulling `character.gd` → `agent_definition_service.gd` → `building_manager.gd` → the `GameState` autoload, and autoloads do not exist under `--script` |
+| The game would not start at all, though every check passed | `agent_phase.gd` used `class_name`, which only exists once the editor has imported the file. Consumed via `preload()` instead, so a fresh clone cannot hit it |
+| Agent debug labels errored every frame | `z_index = 4097` exceeds `RenderingServer::CANVAS_ITEM_Z_MAX` (4096) |
+
+The first three were only reachable from outside the author's own shell — exactly what "the build a
+standalone consumer runs" means. The fourth is the same class of fault as the migration regressions:
+a boundary the library never sees.
+
+The `class_name` one is worth remembering: **the checks all passed while the game was completely
+unable to start.** A global class name resolves during a `--script` run but does not exist until the
+editor imports the file, so the suite is not a substitute for launching the game. `check.sh` covers
+contracts; only `run.sh` covers "it boots".
+
+`game_player_collision_smoke.gd` also had two latent bugs of its own, both pre-existing and both
+invisible until there was a runner: it read `_baseline_goal_cell` on the line after `set_cell_blocked`
+though that recovery is asynchronous, and it drove the player into a freshly uploaded runtime blocker
+without waiting for the collision flow to be rebuilt. Both now wait on the real signal rather than a
+frame count.
 
 ## Known divergences, accepted
 

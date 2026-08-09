@@ -9,7 +9,8 @@ class_name AgentDebugLabelVisual
 
 const LABEL_NAME: StringName = &"DebugStateLabel"
 const LOCAL_POSITION: Vector2 = Vector2(-40.0, -72.0)
-const FIXED_Z_INDEX: int = 4097
+# RenderingServer::CANVAS_ITEM_Z_MAX. Anything above it is rejected with an error.
+const FIXED_Z_INDEX: int = 4096
 const FONT_SIZE: int = 14
 const TEXT_COLOR: Color = Color(1.0, 1.0, 1.0, 0.95)
 const SHADOW_COLOR: Color = Color(0.0, 0.0, 0.0, 0.8)

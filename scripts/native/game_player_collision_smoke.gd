@@ -116,6 +116,10 @@ func _run() -> void:
 	direction_i = dynamic_fixture["direction"] as Vector2i
 	direction = Vector2(direction_i)
 	navigation_runtime.call(&"set_cell_blocked", blocked_cell, true)
+	# Uploading a blocker only queues a flow rebuild, and the crowd collides against
+	# the installed flow. Drive the player only once that rebuild has settled,
+	# otherwise this measures the race rather than the collision response.
+	await _await_baseline_flow_settled(navigation_runtime)
 	start_center = floor_layer.to_global(floor_layer.map_to_local(start_cell))
 	runtime.call(&"set_agent_position", nav_handle, start_center - collision_offset, true)
 	runtime.call(&"set_agent_input", nav_handle, direction)
@@ -209,6 +213,16 @@ func _find_wall_slide_approach(
 					"tangent": tangent,
 				}
 	return {}
+
+
+## Waits for NavigationRuntime's pending baseline-collision flow request to resolve,
+## so callers can tell "the rebuild has happened" apart from "collision works".
+func _await_baseline_flow_settled(navigation_runtime: Node) -> void:
+	for _index: int in range(BASELINE_RECOVERY_FRAMES):
+		await process_frame
+		await physics_frame
+		if int(navigation_runtime.get("_baseline_pending_flow_handle")) == 0:
+			return
 
 
 func _fail(message: String) -> void:

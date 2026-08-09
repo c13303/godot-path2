@@ -38,7 +38,11 @@ say() {
 hold() {
     echo
     echo "Full output: $LOG"
-    read -r -p "Press enter to close..."
+    # Only pause for a human. Without this the script blocks when run from a tool
+    # or CI, where stdin is not a terminal.
+    if [ -t 0 ]; then
+        read -r -p "Press enter to close..."
+    fi
 }
 
 # Runs one check, keeping its output out of the console but in the log. On failure

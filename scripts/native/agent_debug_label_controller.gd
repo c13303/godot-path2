@@ -13,6 +13,9 @@ class_name AgentDebugLabelController
 ## on screen between refreshes and only the text needs rebuilding — a floor here
 ## keeps a 0 authored interval from re-querying diagnostics for the whole crowd
 ## every frame for no visible gain.
+## Preloaded rather than referenced by class_name: see agent_phase.gd.
+const AgentPhase = preload("res://scripts/native/agent_phase.gd")
+
 const REFRESH_INTERVAL_MINIMUM: float = 0.05
 
 # ffcore::NavigationSource

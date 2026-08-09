@@ -1,8 +1,12 @@
 extends RefCounted
-class_name AgentPhase
 
 ## Mission phase codes, shared between FlowAgent (which sets them) and
 ## AgentDebugLabelController (which renders them).
+##
+## Consumed with `const AgentPhase = preload(...)`, deliberately not `class_name`.
+## A global class name only exists once the editor has imported the file, so a fresh
+## clone - or any run before that import - would fail to parse every dependent
+## script. A preload path is resolved directly and always works.
 ##
 ## Deliberately dependency-free. The label controller used to read these from
 ## FlowAgent, which pulled character.gd -> agent_definition_service.gd ->

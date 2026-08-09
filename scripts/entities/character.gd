@@ -9,8 +9,9 @@ const FLASH_SHADER: Shader = preload("res://scripts/entities/enemy_flash.gdshade
 
 static var _shared_flash_material: ShaderMaterial
 
-# Mission phase codes. Defined once in AgentPhase so the debug label controller can
-# read them without importing this script (and with it the whole gameplay graph).
+# Mission phase codes. Defined once in agent_phase.gd so the debug label controller
+# can read them without importing this script (and with it the whole gameplay graph).
+const AgentPhase = preload("res://scripts/native/agent_phase.gd")
 const PHASE_NONE: int = AgentPhase.NONE
 const PHASE_FLOW_IN: int = AgentPhase.FLOW_IN
 const PHASE_ASTAR_IN: int = AgentPhase.ASTAR_IN
