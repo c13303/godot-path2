@@ -45,6 +45,9 @@ namespace ffcore
         Vec2 position;
         Vec2 velocity;
         Vec2 manual_direction;
+        /// Last frame's steering direction. Read by separation to tell which agents are
+        /// already making progress; written at the end of each update.
+        Vec2 desired_direction;
         NavigationSource navigation_source = NavigationSource::None;
         FlowHandle flow_handle;
         DirectionalMotionFieldHandle directional_field_handle;

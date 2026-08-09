@@ -25,8 +25,20 @@ namespace ffcore
         ImpulseResponseConfig impulse_response;
         double static_obstacle_query_padding = 0.0;
         double static_obstacle_repulsion_strength = 1.0;
+        /// Weight of the navigation direction against the combined avoidance forces.
+        /// Raising it makes agents hold their route harder in a crowd.
+        double navigation_weight = 1.0;
+        int separation_maximum_neighbors = 0;
+        double separation_priority_bias = 0.0;
         bool automatic_bottleneck_gating = true;
         double bottleneck_wait_speed_ratio = 0.05;
+        /// Inside a bottleneck, avoidance is decomposed against the navigation
+        /// direction and clamped: it may push an agent back no more than
+        /// navigation_weight * backward ratio, and sideways no more than
+        /// navigation_weight * lateral ratio. Without this, crowd pressure ejects
+        /// agents from the chokepoint they are queueing for.
+        double bottleneck_backward_push_ratio = 0.15;
+        double bottleneck_lateral_push_ratio = 1.25;
         double flow_goal_stop_delay = 1.0;
         double flow_goal_group_delay = 0.005;
         double flow_goal_slow_speed_ratio = 0.6;
@@ -59,6 +71,8 @@ namespace ffcore
 
         static Vec2 approach(const Vec2 &current, const Vec2 &target, double maximum_change);
         static Vec2 blend_impulse_with_navigation(const Vec2 &impulse, const Vec2 &navigation);
+        Vec2 steer_direction(const Vec2 &navigation, const Vec2 &avoidance,
+                             bool in_bottleneck) const;
         static std::uint64_t key(AgentHandle handle);
         static std::uint64_t key(FlowHandle handle);
         const FlowField *flow_for(const CrowdAgentState &agent) const;

@@ -6,11 +6,18 @@ class_name NativeSimulationConfig
 
 @export_group("Navigation")
 @export_range(1.0, 256.0, 1.0) var tile_size: float = 32.0
+## Weight of the navigation direction against crowd and obstacle avoidance. Authored
+## on the SimulationConfig node as flow_weight; CrowdRuntime copies it in.
+@export_range(0.0, 100.0, 0.1) var navigation_weight: float = 5.0
 @export_range(0.0, 10.0, 0.05) var flow_wall_clearance_weight: float = 0.5
 @export_range(0, 2, 1) var bottleneck_zone_radius_tiles: int = 2
 @export_range(0.0, 10.0, 0.05) var bottleneck_reservation_seconds: float = 1.0
 @export var automatic_bottleneck_gating: bool = true
 @export_range(0.0, 1.0, 0.01) var bottleneck_wait_speed_ratio: float = 0.05
+## How far crowd pressure may push a queueing agent backwards out of a chokepoint,
+## and sideways across it, both as a fraction of navigation_weight.
+@export_range(0.0, 1.0, 0.01) var bottleneck_backward_push_ratio: float = 0.15
+@export_range(0.0, 4.0, 0.01) var bottleneck_lateral_push_ratio: float = 1.25
 
 @export_group("Agent Profile")
 @export_range(0.0, 1000.0, 1.0) var agent_maximum_speed: float = 150.0
@@ -19,6 +26,10 @@ class_name NativeSimulationConfig
 @export_range(0.0, 2.0, 0.01) var agent_diameter_tile_ratio: float = 0.9
 @export_range(0.0, 256.0, 1.0) var separation_radius: float = 32.0
 @export_range(0.0, 1000.0, 1.0) var separation_weight: float = 600.0
+## Only the closest N crowding neighbours push. Uncapped, a dense pack costs more
+## every frame and pushes harder the deeper it gets.
+@export_range(0, 64, 1) var separation_maximum_neighbors: int = 16
+@export_range(0.0, 1.0, 0.01) var separation_priority_bias: float = 0.30
 @export_range(0.0, 256.0, 1.0) var arrival_radius: float = 16.0
 @export_range(0.0, 10.0, 0.05) var flow_goal_stop_delay: float = 1.0
 @export_range(0.0, 1.0, 0.001) var flow_goal_group_delay: float = 0.005
@@ -96,6 +107,12 @@ func apply_to_crowd(crowd_world: Node) -> bool:
 		right_of_way_enabled, right_of_way_push_speed,
 		right_of_way_cooldown, right_of_way_control_suppression
 	)
+	if crowd_world.has_method(&"configure_crowd_steering"):
+		crowd_world.call(
+			&"configure_crowd_steering", navigation_weight,
+			separation_maximum_neighbors, separation_priority_bias,
+			bottleneck_backward_push_ratio, bottleneck_lateral_push_ratio
+		)
 	if crowd_world.has_method(&"configure_impulse_response"):
 		crowd_world.call(
 			&"configure_impulse_response", impulse_speed_cap,

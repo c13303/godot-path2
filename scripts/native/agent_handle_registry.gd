@@ -477,6 +477,42 @@ func _apply_profile(agent_handle: int, profile: Dictionary) -> void:
 	)
 
 
+func _maximum_speed_for_node(node: Node2D) -> float:
+	var config: SimulationConfigService = get_node_or_null(
+		simulation_config_path
+	) as SimulationConfigService
+	var maximum_speed: float = config.get_agent_max_speed() if config != null else 150.0
+	if node.is_in_group(&"player") and "max_speed" in node:
+		var requested_speed: float = float(node.get("max_speed"))
+		if requested_speed > 0.0:
+			maximum_speed = requested_speed
+	return maximum_speed * maxf(float(node.get_meta("monster_speed_scale", 1.0)), 0.001)
+
+
+## Re-pushes every live agent's maximum speed from SimulationConfigService. The debug
+## speed multiplier writes that value, and without this only agents registered after
+## the change would pick it up.
+func refresh_agent_speeds() -> void:
+	if _crowd == null:
+		return
+	for raw_handle: Variant in _nodes_by_handle:
+		var agent_handle: int = int(raw_handle)
+		var node: Node2D = find_node(agent_handle)
+		if node == null:
+			continue
+		var diagnostics: Dictionary = _crowd.call(
+			&"get_agent_diagnostics", agent_handle
+		) as Dictionary
+		if not bool(diagnostics.get("valid", false)):
+			continue
+		_crowd.call(
+			&"set_agent_motion_limits", agent_handle,
+			_maximum_speed_for_node(node),
+			float(diagnostics.get("acceleration", 900.0)),
+			float(diagnostics.get("deceleration", 1200.0))
+		)
+
+
 func _profile_for_scene_node(node: Node2D) -> Dictionary:
 	var category_mask: int = CATEGORY_MAIN_CHARACTER
 	if node.is_in_group(&"player"):
@@ -485,16 +521,10 @@ func _profile_for_scene_node(node: Node2D) -> Dictionary:
 			or node.is_in_group(&"villagers"):
 		category_mask = CATEGORY_HOSTILE
 	var config: SimulationConfigService = get_node_or_null(simulation_config_path) as SimulationConfigService
-	var maximum_speed: float = config.get_agent_max_speed() if config != null else 150.0
-	if node.is_in_group(&"player") and "max_speed" in node:
-		var requested_speed: float = float(node.get("max_speed"))
-		if requested_speed > 0.0:
-			maximum_speed = requested_speed
-	maximum_speed *= maxf(float(node.get_meta("monster_speed_scale", 1.0)), 0.001)
 	var query_shape: Dictionary = _query_shape_for_scene_node(node)
 	return {
 		"radius": config.get_agent_world_radius() if config != null else 14.4,
-		"maximum_speed": maximum_speed,
+		"maximum_speed": _maximum_speed_for_node(node),
 		"acceleration": 900.0,
 		"deceleration": 1200.0,
 		"separation_radius": 32.0,

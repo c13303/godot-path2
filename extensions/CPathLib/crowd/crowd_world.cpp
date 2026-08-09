@@ -51,8 +51,41 @@ namespace ffcore
             ? std::clamp(config.zero_flow_recovery_speed_ratio, 0.0, 1.0) : 0.25;
         config.blocked_motion_retry_seconds = std::isfinite(config.blocked_motion_retry_seconds)
             ? std::max(0.0, config.blocked_motion_retry_seconds) : 0.6;
+        config.navigation_weight = std::isfinite(config.navigation_weight)
+            ? std::max(0.0, config.navigation_weight) : 1.0;
+        config.separation_maximum_neighbors = std::max(0, config.separation_maximum_neighbors);
+        config.separation_priority_bias = std::isfinite(config.separation_priority_bias)
+            ? std::clamp(config.separation_priority_bias, 0.0, 1.0) : 0.0;
+        config.bottleneck_backward_push_ratio =
+            std::isfinite(config.bottleneck_backward_push_ratio)
+            ? std::clamp(config.bottleneck_backward_push_ratio, 0.0, 1.0) : 0.15;
+        config.bottleneck_lateral_push_ratio =
+            std::isfinite(config.bottleneck_lateral_push_ratio)
+            ? std::max(0.0, config.bottleneck_lateral_push_ratio) : 1.25;
         impulses.set_response_config(config.impulse_response);
         config.impulse_response = impulses.get_response_config();
+    }
+
+    Vec2 CrowdWorld::steer_direction(
+        const Vec2 &navigation, const Vec2 &avoidance, bool in_bottleneck) const
+    {
+        if (navigation.is_zero())
+            return avoidance;
+        if (!in_bottleneck)
+            return avoidance + navigation * config.navigation_weight;
+        // Split avoidance into "along the route" and "across it", then bound each.
+        // A queueing agent may be nudged aside or slowed, but crowd pressure must not
+        // push it back out of the chokepoint it is waiting to pass.
+        const double weight = config.navigation_weight;
+        const double along_route = avoidance.dot(navigation);
+        const double forward = std::clamp(
+            along_route, -weight * config.bottleneck_backward_push_ratio, weight);
+        Vec2 lateral = avoidance - navigation * along_route;
+        const double maximum_lateral = weight * config.bottleneck_lateral_push_ratio;
+        const double lateral_length = lateral.length();
+        if (lateral_length > maximum_lateral && lateral_length > 1e-6)
+            lateral = lateral * (maximum_lateral / lateral_length);
+        return navigation * (weight + forward) + lateral;
     }
 
     Vec2 CrowdWorld::blend_impulse_with_navigation(const Vec2 &impulse, const Vec2 &navigation)
@@ -809,6 +842,7 @@ namespace ffcore
                 : SteeringSolver::navigation_direction(*agent, flow);
             bool hard_freeze = agent->navigation_suspended;
             bool autonomous_stop = false;
+            bool in_bottleneck = false;
             double navigation_speed_scale = 1.0;
 
             if (agent->blocked_motion_seconds < 0.0)
@@ -902,6 +936,7 @@ namespace ffcore
                 {
                     const int core = flow->bottleneck_core_at_cell(cell);
                     const int zone = flow->bottleneck_zone_at_cell(cell);
+                    in_bottleneck = core >= 0 || zone >= 0;
                     if (core >= 0)
                         agent->completed_bottleneck = core;
                     else if (agent->completed_bottleneck >= 0 &&
@@ -938,14 +973,20 @@ namespace ffcore
 
             if (hard_freeze || agent->paused)
                 navigation = {};
+            SeparationSettings separation_settings;
+            separation_settings.maximum_neighbors = config.separation_maximum_neighbors;
+            separation_settings.priority_bias = config.separation_priority_bias;
+            separation_settings.maximum_agent_radius = maximum_agent_radius;
             const Vec2 separation = hard_freeze || agent->paused || autonomous_stop
                 ? Vec2() : SteeringSolver::separation(
-                    *agent, agents, spatial, handles_by_index);
+                    *agent, agents, spatial, handles_by_index, separation_settings);
             const Vec2 obstacle_repulsion = hard_freeze || agent->paused || autonomous_stop
                 ? Vec2() : static_obstacle_repulsion(*agent);
-            Vec2 desired_direction = navigation + separation + obstacle_repulsion;
+            Vec2 desired_direction = steer_direction(
+                navigation, separation + obstacle_repulsion, in_bottleneck);
             if (!desired_direction.is_zero())
                 desired_direction = desired_direction.normalized();
+            agent->desired_direction = desired_direction;
 
             double terrain_multiplier = 1.0;
             if (flow != nullptr)

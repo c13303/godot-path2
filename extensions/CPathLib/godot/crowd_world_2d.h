@@ -124,6 +124,10 @@ namespace godot
             double flow_goal_stop_delay, double flow_goal_group_delay,
             double flow_goal_slow_speed_ratio, double zero_flow_retry_seconds,
             double zero_flow_recovery_speed_ratio, double blocked_motion_retry_seconds);
+        void configure_crowd_steering(
+            double navigation_weight, int separation_maximum_neighbors,
+            double separation_priority_bias, double bottleneck_backward_push_ratio,
+            double bottleneck_lateral_push_ratio);
         void configure_static_obstacle_avoidance(double strength, double query_padding);
         std::int64_t create_static_obstacle(Vector2 position, double radius,
                                             double push_strength = 1.0);

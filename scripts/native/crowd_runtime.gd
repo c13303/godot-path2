@@ -12,6 +12,7 @@ const GAMEPLAY_IMPULSE_PRIORITY: int = 100
 @export var registry_path: NodePath = NodePath("../AgentRegistry")
 @export var navigation_path: NodePath = NodePath("../NavigationRuntime/World")
 @export var debug_labels_path: NodePath = NodePath("../AgentDebugLabels")
+@export var simulation_config_path: NodePath = NodePath("../SimulationConfig")
 
 var _crowd: Node
 var _registry: AgentHandleRegistry
@@ -35,6 +36,13 @@ func _ready() -> void:
 	_navigation = get_node_or_null(navigation_path)
 	_debug_labels = get_node_or_null(debug_labels_path) as AgentDebugLabelController
 	_config = NativeSimulationConfig.new()
+	# flow_weight is authored on the SimulationConfig node, so honour it here instead
+	# of letting the scene value and the code default drift apart.
+	var simulation_config: SimulationConfigService = get_node_or_null(
+		simulation_config_path
+	) as SimulationConfigService
+	if simulation_config != null:
+		_config.navigation_weight = simulation_config.flow_weight
 	_config.apply_to_crowd(_crowd)
 	# CppDebugOptions may push its flags before this node resolves its references,
 	# so replay whatever was recorded instead of losing it.

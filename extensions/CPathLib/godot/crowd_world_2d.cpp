@@ -54,6 +54,7 @@ namespace godot
         ClassDB::bind_method(D_METHOD("set_agent_continue_at_flow_goal", "agent_handle", "enabled"), &CrowdWorld2D::set_agent_continue_at_flow_goal);
         ClassDB::bind_method(D_METHOD("clear_agent_forces", "agent_handle"), &CrowdWorld2D::clear_agent_forces);
         ClassDB::bind_method(D_METHOD("configure_navigation_behavior", "automatic_bottleneck_gating", "bottleneck_wait_speed_ratio", "flow_goal_stop_delay", "flow_goal_group_delay", "flow_goal_slow_speed_ratio", "zero_flow_retry_seconds", "zero_flow_recovery_speed_ratio", "blocked_motion_retry_seconds"), &CrowdWorld2D::configure_navigation_behavior);
+        ClassDB::bind_method(D_METHOD("configure_crowd_steering", "navigation_weight", "separation_maximum_neighbors", "separation_priority_bias", "bottleneck_backward_push_ratio", "bottleneck_lateral_push_ratio"), &CrowdWorld2D::configure_crowd_steering);
         ClassDB::bind_method(D_METHOD("configure_static_obstacle_avoidance", "strength", "query_padding"), &CrowdWorld2D::configure_static_obstacle_avoidance);
         ClassDB::bind_method(D_METHOD("create_static_obstacle", "position", "radius", "push_strength"), &CrowdWorld2D::create_static_obstacle, DEFVAL(1.0));
         ClassDB::bind_method(D_METHOD("update_static_obstacle", "obstacle_handle", "position", "radius", "push_strength"), &CrowdWorld2D::update_static_obstacle, DEFVAL(1.0));
@@ -538,6 +539,20 @@ namespace godot
         config.zero_flow_retry_seconds = zero_flow_retry_seconds;
         config.zero_flow_recovery_speed_ratio = zero_flow_recovery_speed_ratio;
         config.blocked_motion_retry_seconds = blocked_motion_retry_seconds;
+        crowd.set_config(config);
+    }
+
+    void CrowdWorld2D::configure_crowd_steering(
+        double navigation_weight, int separation_maximum_neighbors,
+        double separation_priority_bias, double bottleneck_backward_push_ratio,
+        double bottleneck_lateral_push_ratio)
+    {
+        ffcore::CrowdWorldConfig config = crowd.get_config();
+        config.navigation_weight = navigation_weight;
+        config.separation_maximum_neighbors = separation_maximum_neighbors;
+        config.separation_priority_bias = separation_priority_bias;
+        config.bottleneck_backward_push_ratio = bottleneck_backward_push_ratio;
+        config.bottleneck_lateral_push_ratio = bottleneck_lateral_push_ratio;
         crowd.set_config(config);
     }
 

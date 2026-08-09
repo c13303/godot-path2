@@ -787,6 +787,12 @@ func _apply_speed_multiplier(global_config: Node) -> void:
 	if _base_agent_max_speed < 0.0:
 		_base_agent_max_speed = float(global_config.call("get_agent_max_speed"))
 	global_config.call("set_agent_max_speed", _base_agent_max_speed * maxf(0.0001, speed_multiplier))
+	# Agents copy that speed into their profile when they register, so agents already
+	# on the map need it pushed to them or the multiplier would only affect the player
+	# and anything spawned later.
+	var registry: Node = get_node_or_null("AgentRegistry")
+	if registry != null and registry.has_method("refresh_agent_speeds"):
+		registry.call("refresh_agent_speeds")
 
 
 ## Effective speed multiplier, read by other systems (e.g. the player) so they
